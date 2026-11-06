@@ -33,7 +33,8 @@ import type { SessionNotification } from "@agentclientprotocol/sdk";
 import { createDevinAcpTurnState, mapDevinAcpSessionNotification } from "../../../../../../../packages/providers/src/private/devin/devin-acp-event-mapper.js";
 import { z } from "zod";
 import { createCopilotProvider, type CopilotProviderBoundary, type ProviderEventBatch, type ProviderHostPorts } from "@mcode/providers";
-import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { providerRuntimeEvent, ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { CanonicalLiveEventPublisher } from "../../../../../../../packages/providers/src/private/canonical-live-event-publisher.js";
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { SessionEvent } from "../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js";
 import { ThoughtSegmentStore } from "../../conversation/narrative/persistence/thought-segment-store.js";
@@ -196,6 +197,47 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
       .run(threadId, "workspace", "Thread", "main", "codex", NOW, NOW);
   }
+  it("saves 200 Claude text and 200 reasoning pieces as one checkpoint instead of rows per piece", async () => {
+    // Inserts are counted by trigger because acknowledgement cleanup deletes receipt rows after a save.
+    const tables = ["canonical_agent_events", "canonical_agent_items", "canonical_agent_item_content_appends",
+      "canonical_writer_operation_receipts", "canonical_writer_thread_operation_receipts"];
+    db.run("CREATE TABLE stream_write_counts (table_name TEXT PRIMARY KEY, writes INTEGER NOT NULL DEFAULT 0)");
+    for (const table of tables) {
+      db.prepare("INSERT INTO stream_write_counts (table_name) VALUES (?)").run(table);
+      db.run(`CREATE TRIGGER count_stream_${table} AFTER INSERT ON ${table} BEGIN UPDATE stream_write_counts SET writes = writes + 1 WHERE table_name = '${table}'; END`);
+    }
+    const writes = () => Object.fromEntries((db.prepare("SELECT table_name, writes FROM stream_write_counts").all() as
+      { table_name: string; writes: number }[]).map((row) => [row.table_name, row.writes]));
+    await send(1, start("claude"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 1, "textDelta", { delta: "prefix", isFinalResponse: true })] });
+    await progress.waitForSaved(execution.threadId);
+    const before = writes();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    for (let index = 0; index < 200; index++) {
+      await send(index + 3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [{ ...draft("claude", index + 2, "textDelta", { delta: "x", isFinalResponse: true }), delivery: "live" }] });
+    }
+    for (let index = 0; index < 200; index++) {
+      await send(index + 203, { kind: "event", phase: "running", nativeCursor: null,
+        events: [{ ...draft("claude", index + 202, "reasoningDelta", { delta: "r", reasoningItemId: "reasoning-block" }), delivery: "live" }] });
+    }
+    expect(writes()).toEqual(before);
+    await progress.waitForSaved(execution.threadId);
+    const after = writes();
+    expect(Object.fromEntries(tables.map((table) => [table, (after[table] ?? 0) - (before[table] ?? 0)]))).toEqual({
+      canonical_agent_events: 2, canonical_agent_items: 1, canonical_agent_item_content_appends: 1,
+      canonical_writer_operation_receipts: 1, canonical_writer_thread_operation_receipts: 0,
+    });
+    const cut = recovery();
+    if (cut.durable.mode !== "snapshot") throw new Error("Expected saved snapshot");
+    expect(cut.durable.snapshot.state.items[`assistant-response-text:${execution.executionId}`]?.payload.content)
+      .toBe(`prefix${"x".repeat(200)}`);
+    const thoughts = Object.values(cut.durable.snapshot.state.items).filter((item) => item.payload.projection === "narrativeRecovery");
+    expect(thoughts.map((item) => item.payload.narrative)).toEqual([
+      expect.objectContaining({ kind: "narrationSegment", record: expect.objectContaining({ text: "r".repeat(200) }) }),
+    ]);
+  });
   const send = (ordinal: number, command: ExecutionWorkCommand, identity = execution, activeLease = lease) =>
     handler.handle({ requestId: ordinal, execution: identity, lease: activeLease, ordinal, command });
   function holdWrites(onAppend?: () => void) {
@@ -215,6 +257,184 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   function acceptedEvents() {
     return frames().flatMap((frame) => frame.phase === "accepted" ? frame.events : []);
   }
+
+  describe("Claude live checkpoint barriers", () => {
+    let ordinal: number;
+    async function piece(text: string, provider = "claude", live = true) {
+      ordinal++;
+      const value = draft(provider, ordinal - 1, "textDelta", { delta: text, isFinalResponse: true });
+      return send(ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [{ ...value, ...(live ? { delivery: "live" as const } : {}) }] });
+    }
+    async function begin(provider = "claude") {
+      ordinal = 1;
+      await send(1, start(provider));
+      await piece("prefix", provider);
+      await progress.waitForSaved(execution.threadId);
+    }
+    function savedText() {
+      const boundary = new CanonicalAgentStore(db, () => {});
+      const cut = boundary.recoverThread(execution.threadId, { conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
+      if (cut.mode !== "snapshot") throw new Error("Expected saved snapshot");
+      return cut.snapshot.state.items[`assistant-response-text:${execution.executionId}`]?.payload.content;
+    }
+
+    /** Waits for queued saves without the flush that `waitForSaved` performs, so only timers and thresholds save. */
+    async function drainSaves() {
+      while (progress.depth().pending > 0) await new Promise((resolve) => setImmediate(resolve));
+    }
+    function liveFrames() {
+      return frames().filter((frame) => frame.phase === "live");
+    }
+    function rowCount(table: string, where = "") {
+      return (db.prepare(`SELECT COUNT(*) AS count FROM ${table} ${where}`).get() as { count: number }).count;
+    }
+
+    it("saves a stalled stream one second after its first unsaved piece", async () => {
+      await begin();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await piece("idle");
+      await vi.advanceTimersByTimeAsync(999);
+      await drainSaves();
+      expect(savedText()).toBe("prefix");
+      await vi.advanceTimersByTimeAsync(1);
+      await drainSaves();
+      expect(savedText()).toBe("prefixidle");
+    });
+
+    it("saves at 16 KiB of pending text without waiting for the timer", async () => {
+      await begin();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const below = "x".repeat(16 * 1024 - 1);
+      await piece(below);
+      await drainSaves();
+      expect(savedText()).toBe("prefix");
+      await piece("y");
+      await drainSaves();
+      expect(savedText()).toBe(`prefix${below}y`);
+    });
+
+    it("flushes before a saved tool and publishes dense positions in that order", async () => {
+      await begin();
+      pushes.frames.length = 0;
+      await piece("before tool");
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal - 1, "toolUse", { toolCallId: "tool", toolName: "Read", toolInput: {} })] });
+      const accepted = frames().filter((frame) => frame.phase === "accepted");
+      expect(accepted[0]?.events.map((event) => event.payload.type)).toEqual(["item.content-appended"]);
+      expect(accepted[1]?.from).toBe(accepted[0]?.through);
+      expect(frames()[0]?.phase).toBe("live");
+      await progress.waitForSaved(execution.threadId);
+      expect(savedText()).toBe("prefixbefore tool");
+    });
+
+    it("saves a tool after live tool input that left nothing to checkpoint", async () => {
+      await begin();
+      const rows = rowCount("canonical_agent_events");
+      for (const partialJson of ["{\"path\":", "\"file.txt\"}"]) {
+        await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+          events: [{ ...draft("claude", ordinal - 1, "toolInputDelta", { partialJson }), delivery: "live" as const }] });
+      }
+      expect(liveFrames().flatMap((frame) => frame.events.map((event) => event.type))).toEqual(["toolInputDelta", "toolInputDelta"]);
+      await progress.waitForSaved(execution.threadId);
+      expect(rowCount("canonical_agent_events")).toBe(rows);
+      const tool = await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal - 1, "toolUse", { toolCallId: "tool", toolName: "Read", toolInput: { path: "file.txt" } })] });
+      expect(tool.result.kind).toBe("accepted");
+      await progress.waitForSaved(execution.threadId);
+      expect(rowCount("canonical_agent_events")).toBeGreaterThan(rows);
+    });
+
+    it("makes pending text available to reconnect and durable command barriers", async () => {
+      await begin();
+      await piece("reconnect");
+      const cut = recovery();
+      expect(cut.retained.map((event) => event.payload.type)).toContain("item.content-appended");
+      await progress.beforeDurableCommand(execution.threadId);
+      progress.cancelDurableCommand(execution.threadId);
+      expect(savedText()).toBe("prefixreconnect");
+    });
+
+    it("loses at most the last unsaved second when the owner disappears", async () => {
+      await begin();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      // One piece every 100 ms: the timer saves pieces 1-10 and 11-20; 21-25 are still pending at the crash.
+      for (let index = 0; index < 25; index++) {
+        await piece("x");
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      await drainSaves();
+      const abandoned = progress;
+      progress = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
+      const cut = recovery();
+      if (cut.durable.mode !== "snapshot") throw new Error("Expected crash recovery snapshot");
+      expect(cut.durable.snapshot.state.items[`assistant-response-text:${execution.executionId}`]?.payload.content)
+        .toBe(`prefix${"x".repeat(20)}`);
+      await abandoned.close();
+    });
+
+    it("answers a resent live piece with its first receipt and refuses different content under its identity", async () => {
+      await begin();
+      const accept = vi.spyOn(progress, "acceptWhenReady");
+      await piece("once");
+      const operation = accept.mock.calls[0]?.[0];
+      if (!operation || operation.mutation.kind !== "append-events") throw new Error("Expected the live operation");
+      const first = await accept.mock.results[0]?.value;
+      await progress.waitForSaved(execution.threadId);
+      expect(progress.accept(operation)).toEqual(first);
+      const changed = { ...operation, mutation: { ...operation.mutation,
+        events: [{ ...draft("claude", ordinal - 1, "textDelta", { delta: "twice", isFinalResponse: true }), delivery: "live" as const }] } };
+      expect(() => progress.accept(changed)).toThrow(expect.objectContaining({ admissionReason: "identity-conflict" }));
+      await progress.waitForSaved(execution.threadId);
+      expect(savedText()).toBe("prefixonce");
+    });
+
+    it("retries a busy checkpoint save under one identity and saves its text once", async () => {
+      await begin();
+      await piece("retried");
+      const appends = rowCount("canonical_agent_item_content_appends");
+      const append = vi.spyOn(writer, "appendAccepted")
+        .mockRejectedValueOnce(Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" }));
+      await progress.waitForSaved(execution.threadId);
+      const checkpoints = append.mock.calls.map(([operationId]) => operationId).filter((id) => id.startsWith("live:"));
+      expect(checkpoints).toHaveLength(2);
+      expect(new Set(checkpoints).size).toBe(1);
+      expect(savedText()).toBe("prefixretried");
+      expect(rowCount("canonical_agent_item_content_appends")).toBe(appends + 1);
+    });
+
+    it.each([
+      { provider: "claude", live: 2, publications: 0 },
+      { provider: "cursor", live: 0, publications: 2 },
+    ] as const)("routes $provider pieces from the shared publisher end to end", async ({ provider, live, publications }) => {
+      await begin(provider);
+      const routing = { ...execution, deliveryAttempt: 1 };
+      const publisher = new CanonicalLiveEventPublisher("unbounded", provider, { submit: async (batch) => {
+        let accepted;
+        for (const value of batch.events) {
+          const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null, events: [value] });
+          if (reply.result.kind !== "accepted") throw new Error(`Provider piece was not accepted: ${JSON.stringify(reply.result)}`);
+          accepted = reply.result;
+        }
+        if (!accepted) throw new Error("Empty provider batch");
+        return { commit: { outcome: "accepted", acceptedThrough: accepted.acceptedThrough,
+          eventCount: batch.events.length, progressPosition: accepted.progressPosition }, delivery: { ingress: "not-required" } };
+      } });
+      const publicationRows = () => rowCount("canonical_agent_events", "WHERE json_extract(envelope_json, '$.payload.type') = 'publication.recorded'");
+      const before = publicationRows();
+      pushes.frames.length = 0;
+      for (const delta of [" one", " two"]) {
+        publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
+          turnExecutionId: execution.executionId, delta, isFinalResponse: true }), []);
+      }
+      await publisher.waitForExecution(routing);
+      await drainSaves();
+      expect(liveFrames()).toHaveLength(live);
+      expect(publicationRows() - before).toBe(publications);
+      await progress.waitForSaved(execution.threadId);
+      expect(savedText()).toBe("prefix one two");
+    });
+  });
 
   function conversationPage() {
     return loadConversationPage({ messageRepo: new MessageStore(reader),

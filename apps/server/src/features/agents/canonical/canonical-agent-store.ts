@@ -103,6 +103,8 @@ export interface CanonicalAgentEventDraft {
   providerTimestamp?: string;
   /** Volatile drafts can be truncated so structural and terminal drafts always retain capacity. */
   ingestClass?: "volatile";
+  /** A provider fragment the runtime may show without saving; stripped before any envelope is stored. */
+  delivery?: "live";
   payload: CanonicalAgentEvent;
 }
 

@@ -187,6 +187,19 @@ discarded from retained progress. See
 [`CanonicalAcceptedProgress`](../../../apps/server/src/features/agents/canonical/canonical-accepted-progress.ts)
 and the [progress frame contract](../../../packages/contracts/src/models/canonical-agent-progress.ts).
 
+Text, reasoning, and tool-input pieces from providers on the live allow-list
+are the exception: they show at once in a `live` frame that holds no progress
+position, and the owner gathers them into one checkpoint operation. The
+checkpoint is accepted after one second, at 16 KiB of text, or before anything
+that must observe it: a saved operation, a control or durable command, a
+lost-worker interruption, steer, a plan answer, a save wait, reconnect
+recovery, or close. Live pieces still take
+worker ordinals, so a saved operation names the saved ordinal it follows
+rather than assuming the previous one. Because the client's position never
+moves for live pieces, a restart that drops an unsaved second of them reports
+no loss. See
+[`accepted-live-delivery`](../../../apps/server/src/features/agents/canonical/accepted-live-delivery.ts).
+
 Retention limits apply to unsaved work, not the whole tool history. Completion
 binds previously accepted narrative to the response and carries only changed
 records into the write intent. Re-emitting the entire history at completion

@@ -10,6 +10,8 @@ export interface AcceptedExecutionState {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   readonly ordinal: number;
+  /** The ordinal the saved semantic head reaches once queued saves land; live fragments leave it behind. */
+  readonly savedOrdinal: number;
   readonly providerId: string;
   readonly assistant: Message;
   readonly nativeCursor: unknown | null;
@@ -30,7 +32,7 @@ export function seedAcceptedExecution(operation: ExecutionSemanticOperation, sta
     cost_usd: null, tokens_used: null, timestamp: new Date().toISOString(), sequence: preceding.sequence + 1,
     model: null, attachments: null };
   return { execution: operation.execution, lease: operation.lease, ordinal: operation.ordinal,
-    providerId: operation.mutation.providerId, assistant, nativeCursor: null, phase: "running" };
+    savedOrdinal: operation.ordinal, providerId: operation.mutation.providerId, assistant, nativeCursor: null, phase: "running" };
 }
 
 /** Derive a candidate from immutable accepted intents, installing it only after admission. */
@@ -40,7 +42,13 @@ export function advanceAcceptedExecution(head: AcceptedExecutionState, operation
   const effects = mutation.kind === "live-event" ? mutation : mutation.kind === "append-events" ? mutation.parentLive : undefined;
   const assistant = terminalMessage ?? advanceAssistant(head.assistant, effects);
   const cursor = "nativeCursor" in mutation && mutation.nativeCursor !== null ? mutation.nativeCursor : head.nativeCursor;
-  return { ...head, ordinal: operation.ordinal, assistant, nativeCursor: cursor, phase: phaseAfter(head.phase, mutation) };
+  return { ...head, ordinal: operation.ordinal, savedOrdinal: operation.ordinal, assistant, nativeCursor: cursor,
+    phase: phaseAfter(head.phase, mutation) };
+}
+
+/** A live fragment takes its ordinal without a save, so the saved ordinal stays where it was. */
+export function advanceLiveExecution(head: AcceptedExecutionState, operation: ExecutionSemanticOperation): AcceptedExecutionState {
+  return { ...advanceAcceptedExecution(head, operation), savedOrdinal: head.savedOrdinal };
 }
 
 /** Restore complete accepted narrative records for worker-loss terminal presentation. */

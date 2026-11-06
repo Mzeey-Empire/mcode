@@ -28,7 +28,7 @@ import { AcceptedSaveScheduler } from "./accepted-save-scheduler.js";
 import { classifySaveFailure, contentRejectionReason } from "./accepted-save-failure.js";
 import { SavingStatusPublisher, type SavingStatusTimer } from "./saving-status-publisher.js";
 import { prepareAcceptedParentEvents } from "./accepted-parent-events.js";
-import { acceptedNarrative, advanceAcceptedExecution, seedAcceptedExecution, type AcceptedExecutionState } from "./accepted-execution-state.js";
+import { acceptedNarrative, advanceAcceptedExecution, advanceLiveExecution, seedAcceptedExecution, type AcceptedExecutionState } from "./accepted-execution-state.js";
 import type { ContentReplacedOperation, LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 import { sameExecution, sameLease } from "../execution/execution-mailbox-protocol.js";
 import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
@@ -46,9 +46,13 @@ import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js"
 import type { StoredTask } from "../orchestration/persistence/task-repo.js";
 
 import { mergePlanVersions } from "../planning/merge-plan-versions.js";
+import { acceptsLive, LIVE_CHECKPOINT_BYTES, LIVE_CHECKPOINT_INTERVAL_MS, liveCheckpointOperation, mergeLiveDelivery,
+  type LiveDeliveryReceipt, type PendingLiveDelivery } from "./accepted-live-delivery.js";
 import type { PlanFileWriter } from "../planning/plan-file-writer.js";
 
 type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly operation: ExecutionSemanticOperation;
+    /** The saved ordinal this save follows; live fragments between them were shown and checkpointed, not saved. */
+    readonly afterOrdinal: number;
     readonly terminal?: ExecutionTerminalPersistenceReceipt }
   | { readonly kind: "plan-answer"; readonly assistant: Message }
   | { readonly kind: "steer"; readonly message: Message }
@@ -84,6 +88,11 @@ type AppliedOwnedBatch = Extract<OwnedBatchReduction, { outcome: "applied" }>;
 type AcceptedOwner = ThreadProgressOwner<AcceptedExecutionWriteIntent, ExecutionAcceptedReceipt>;
 
 interface ProgressThread {
+  /** Live pieces shown since the last checkpoint; saved as one control batch by `flushLive`. */
+  live?: PendingLiveDelivery;
+  lastLiveReceipt?: LiveDeliveryReceipt;
+  /** Identifies live frames within the epoch; live frames take no progress position. */
+  liveSequence?: number;
   owner: AcceptedOwner;
   head?: AcceptedExecutionState;
   /**
@@ -136,7 +145,11 @@ export class CanonicalAcceptedProgress {
 
   constructor(private readonly canonical: CanonicalAgentBoundary, private readonly writer: CanonicalAgentWriterClient,
     private readonly planFiles?: PlanFileWriter, private readonly completedTurns?: CompletedTurnWatermark,
-    savingStatusTimer?: SavingStatusTimer) {
+    savingStatusTimer?: SavingStatusTimer,
+    private readonly liveTimer: SavingStatusTimer = { schedule(callback, delayMs) {
+      const timer = setTimeout(callback, delayMs);
+      return () => clearTimeout(timer);
+    } }) {
     this.savingPublisher = new SavingStatusPublisher((status) => broadcast("turn.savingStatus", status), savingStatusTimer);
     this.saves = new AcceptedSaveScheduler({ writer: { append: (batch, replacing) => this.save(batch, replacing) },
       maxAttempts: 6, retryDelayMs: 1_000, classify: classifySaveFailure,
@@ -152,6 +165,7 @@ export class CanonicalAcceptedProgress {
     this.assertOpen();
     const thread = this.thread(threadId);
     if (thread.commandPending) throw new Error("A durable thread command is already pending");
+    this.flushLive(thread);
     thread.commandPending = true;
     const saving = thread.owner.savingState();
     if (saving.kind === "failed") { thread.commandPending = false; throw saving.error; }
@@ -239,9 +253,7 @@ export class CanonicalAcceptedProgress {
     if (replay.kind === "duplicate") return replay.receipt;
     const { head, inputHash } = replay;
     const collaboration = prepareAcceptedCollaboration(thread.state, operation, thread.collaboration);
-    const modelThread = thread.state.threads[operation.execution.threadId];
-    const turn = thread.state.turns[operation.execution.turnId];
-    if (!modelThread || !turn) throw new Error("Accepted parent execution has no admitted model");
+    const { modelThread, turn } = admittedModel(thread, operation.execution, "Accepted parent execution has no admitted model");
     const acceptedAt = new Date().toISOString();
     const features = prepareAcceptedFeatureObservations({ operation: collaboration.operation, thread: modelThread, turn,
       items: thread.state.items, acceptedAt, messageSequence: thread.messageSequence,
@@ -249,6 +261,10 @@ export class CanonicalAcceptedProgress {
       persistedPlans: thread.features.plans, persistedTasks: thread.features.tasks,
       childPublicationOwners: acceptedChildPublicationOwners(collaboration) });
     const preparedOperation = { ...collaboration.operation, livePublication: features.publications };
+    if (acceptsLive(operation, turn.providerStartedAt, collaboration.events.length + features.events.length, features.publications)) {
+      return this.acceptLive(thread, operation, head, inputHash);
+    }
+    this.flushLive(thread);
     const publications = features.publications;
     const publicationIds = publications.map((_, index) => String(thread.publicationSequence + index + 1));
     const prepared = prepareAcceptedParentEvents({ operation: preparedOperation, thread: modelThread, turn, items: thread.state.items,
@@ -258,7 +274,7 @@ export class CanonicalAcceptedProgress {
     const terminal = acceptedTerminalPersistence(operation, prepared.terminalMessage);
     const admission = acceptIntoOwnedState(thread, { operationId: operation.operationId, execution: operation.execution,
       events: prepared.events, write: { kind: "execution", operation: prepared.storageOperation ?? operation,
-        phase: nextHead.phase, nativeCursor: nextHead.nativeCursor, features: featureWriteMetadata(features),
+        afterOrdinal: head.savedOrdinal, phase: nextHead.phase, nativeCursor: nextHead.nativeCursor, features: featureWriteMetadata(features),
         ...(terminal ? { terminal } : {}) },
       admission: isControl(operation) ? "control" : "progress" }, { inputHash, receipt: (batch) => this.acceptedReceipt(operation, batch) },
     () => operation.ordinal === head.ordinal + 1);
@@ -342,11 +358,72 @@ export class CanonicalAcceptedProgress {
     }
   }
 
+  private acceptLive(thread: ProgressThread, operation: ExecutionSemanticOperation,
+    head: AcceptedExecutionState, inputHash: string): ExecutionAcceptedReceipt {
+    const cut = thread.owner.recoveryCut();
+    const receipt: ExecutionAcceptedReceipt = { kind: "accepted", operationId: operation.operationId,
+      progressPosition: cut.accepted, acceptedThrough: thread.state.lastAcceptedSequenceByExecution[operation.execution.executionId] ?? 0,
+      eventCount: 0 };
+    if (!thread.live) {
+      thread.live = { operation, text: [], narrative: new Map(), bytes: 0, cancelTimer: this.scheduleLiveFlush(thread) };
+    }
+    mergeLiveDelivery(thread.live, operation);
+    thread.head = advanceLiveExecution(head, operation);
+    thread.lastLiveReceipt = { operationId: operation.operationId, inputHash, receipt };
+    thread.liveSequence = (thread.liveSequence ?? 0) + 1;
+    this.publishFamily({ phase: "live", threadId: operation.execution.threadId, epoch: thread.epoch,
+      after: cut.accepted.sequence, liveSequence: thread.liveSequence,
+      events: (operation.livePublication ?? []).map((publication) => publication.event) });
+    if (thread.live.bytes >= LIVE_CHECKPOINT_BYTES) this.flushLive(thread);
+    return receipt;
+  }
+
+  /** A timer has no caller to fail, so a failed checkpoint keeps its pieces and tries again next interval. */
+  private scheduleLiveFlush(thread: ProgressThread): () => void {
+    return this.liveTimer.schedule(() => {
+      try {
+        this.flushLive(thread);
+      } catch (error) {
+        logger.warn("Live checkpoint failed; it stays pending", { threadId: thread.live?.operation.execution.threadId,
+          errorType: error instanceof Error ? error.name : "unknown" });
+        if (thread.live && !this.closing) thread.live.cancelTimer = this.scheduleLiveFlush(thread);
+      }
+    }, LIVE_CHECKPOINT_INTERVAL_MS);
+  }
+
+  /** Save pending live pieces before anything that must follow them: a saved piece, a control, a cut, or shutdown. */
+  private flushLive(thread: ProgressThread): void {
+    const pending = thread.live;
+    if (!pending) return;
+    const checkpoint = liveCheckpointOperation(pending);
+    thread.live = undefined;
+    try {
+      if (checkpoint) this.admitLiveCheckpoint(thread, checkpoint);
+    } catch (error) {
+      thread.live = pending;
+      throw error;
+    }
+    pending.cancelTimer();
+  }
+
+  private admitLiveCheckpoint(thread: ProgressThread, operation: ExecutionSemanticOperation): void {
+    const { execution } = operation;
+    const { modelThread, turn } = admittedModel(thread, execution, "Live checkpoint lost its admitted turn");
+    const prepared = prepareAcceptedParentEvents({ operation, thread: modelThread, turn, items: thread.state.items,
+      publicationIds: [], messageSequence: thread.messageSequence, acceptedAt: new Date().toISOString() });
+    this.admitControl(thread, operation.operationId, execution, prepared.events,
+      thread.head?.phase ?? "running", thread.head?.nativeCursor ?? null);
+  }
+
   private operationAdmission(thread: ProgressThread, operation: ExecutionSemanticOperation):
     { readonly kind: "duplicate"; readonly receipt: ExecutionAcceptedReceipt }
     | { readonly kind: "new"; readonly head: AcceptedExecutionState; readonly inputHash: string } {
     const head = requireExecutionHead(thread, operation);
     const inputHash = operationInputHash(operation);
+    if (thread.lastLiveReceipt?.operationId === operation.operationId) {
+      if (thread.lastLiveReceipt.inputHash !== inputHash) throw new ProgressAdmissionError("identity-conflict");
+      return { kind: "duplicate", receipt: thread.lastLiveReceipt.receipt };
+    }
     const replay = thread.owner.replay(operation.operationId, inputHash);
     if (replay.kind === "duplicate") return replay;
     if (replay.kind === "conflict") throw new ProgressAdmissionError("identity-conflict");
@@ -449,6 +526,7 @@ export class CanonicalAcceptedProgress {
   private admitControl(thread: ProgressThread, operationId: string, execution: ExecutionIdentity,
     events: readonly import("./canonical-agent-boundary.js").CanonicalAgentEventDraft[], phase: string,
     nativeCursor: unknown | null, features?: AcceptedFeatureWriteMetadata): readonly AcceptedCanonicalAgentEventEnvelope[] {
+    this.flushLive(thread);
     const admission = acceptIntoOwnedState(thread, { operationId, execution, admission: "control", events,
       write: { kind: "control", phase, nativeCursor, features } });
     if (admission.kind === "rejected") throw new ProgressAdmissionError(admission.reason);
@@ -557,6 +635,7 @@ export class CanonicalAcceptedProgress {
     const head = thread?.head;
     if (!thread || !head || head.assistant.id !== messageId) return false;
     if (thread.answeredPlanMessages.has(messageId)) return true;
+    this.flushLive(thread);
     const operationId = `plan-answer:${NodeCrypto.randomUUID()}`;
     const acceptedAt = new Date().toISOString();
     const itemId = `message:${messageId}`;
@@ -586,6 +665,7 @@ export class CanonicalAcceptedProgress {
     this.assertOpen();
     const thread = this.thread(input.threadId);
     this.assertAdmission(thread);
+    this.flushLive(thread);
     const head = thread.head;
     if (!head || head.execution.executionId !== input.turnExecutionId) {
       throw new Error("Steered message has no matching accepted execution");
@@ -643,6 +723,7 @@ export class CanonicalAcceptedProgress {
     const thread = this.threads.get(input.execution.threadId);
     const head = thread?.head;
     if (!thread || !head) return { kind: "conflict" as const, operationId, recoveryState: "not-started" as const };
+    this.flushLive(thread);
     if (!sameExecution(head.execution, input.execution) || !sameLease(head.lease, input.lease)) {
       return { kind: "conflict" as const, operationId };
     }
@@ -689,6 +770,7 @@ export class CanonicalAcceptedProgress {
       const saved = this.recoverSaved(ownerId, cursor);
       return ownerId === threadId ? saved : { ...saved, threadId, ownerThreadId: ownerId };
     }
+    this.flushLive(thread);
     const cut = thread.owner.recoveryCut();
     return { phase: "recovery", threadId, ...(ownerId !== threadId ? { ownerThreadId: ownerId } : {}), epoch: thread.epoch, acceptedThrough: cut.accepted.sequence,
       savedThrough: cut.saved.sequence, durable: { mode: "snapshot", threadId: ownerId,
@@ -755,6 +837,7 @@ export class CanonicalAcceptedProgress {
   async waitForSaved(threadId: string): Promise<void> {
     const thread = this.threads.get(threadId);
     if (!thread) return;
+    this.flushLive(thread);
     const saving = thread.owner.savingState();
     if (saving.kind === "failed") throw saving.error;
     if (thread.owner.recoveryCut().retained.length === 0) return;
@@ -804,6 +887,8 @@ export class CanonicalAcceptedProgress {
     const thread = this.threads.get(ownerId);
     if (!thread) return;
     thread.commandPending = true;
+    thread.live?.cancelTimer();
+    thread.live = undefined;
     for (const waiter of thread.waiters) waiter.reject(new Error("Accepted conversation was deleted"));
     this.rejectSteerSaves(new Error("Accepted conversation was deleted"), threadId);
     thread.waiters.clear();
@@ -830,6 +915,7 @@ export class CanonicalAcceptedProgress {
 
   /** Stop admission, then write every accepted save still queued, starting no attempt at or after `attemptsUntil`. */
   async close(options: { readonly attemptsUntil?: number } = {}): Promise<void> {
+    for (const thread of this.threads.values()) this.flushLive(thread);
     this.closing = true;
     const error = new Error("Accepted progress is closing before the durable command completed");
     for (const thread of this.threads.values()) {
@@ -1155,6 +1241,7 @@ export class CanonicalAcceptedProgress {
 }
 
 function describeCanonicalPush(frame: CanonicalAgentProgressFrame, children: number) {
+  if (frame.phase === "live") return { phase: frame.phase, after: frame.after, events: frame.events.length, children };
   if (frame.phase === "recovery") {
     return {
       phase: frame.phase,
@@ -1191,7 +1278,7 @@ function inAcceptedFamily(state: AgentModelState, threadId: string, ownerId: str
 
 function acceptedEnvelopes<WriteIntent>(batch: AcceptedProgressBatch<WriteIntent>): AcceptedCanonicalAgentEventEnvelope[] {
   return batch.events.map(({ draft, acceptedSequence, position, acceptedAt }) => {
-    const { ingestClass: _ingestClass, ...event } = draft;
+    const { ingestClass: _ingestClass, delivery: _delivery, ...event } = draft;
     return AcceptedCanonicalAgentEventEnvelopeSchema.parse({ ...event, acceptedSequence,
       progressPosition: position, serverTimestamps: { acceptedAt } });
   });
@@ -1222,6 +1309,13 @@ function acceptIntoOwnedState(thread: ProgressThread, input: Parameters<Accepted
   return admission;
 }
 
+function admittedModel(thread: ProgressThread, execution: ExecutionIdentity, missing: string) {
+  const modelThread = thread.state.threads[execution.threadId];
+  const turn = thread.state.turns[execution.turnId];
+  if (!modelThread || !turn) throw new Error(missing);
+  return { modelThread, turn };
+}
+
 function nextMessageSequence(state: AgentModelState): number {
   let sequence = 0;
   for (const item of Object.values(state.items)) {
@@ -1247,8 +1341,9 @@ function compatibilityFields(write: AcceptedExecutionWriteIntent, final: boolean
   if (write.kind === "steer") return { steerMessage: write.message };
   if (write.kind === "plan-answer") return { planAnswer: write.assistant };
   const operation = write.operation;
-  return isTerminal(operation) ? { compatibility: operation, terminalOutcome: operation.mutation.outcome, features: write.features }
-    : { compatibility: operation, features: write.features };
+  const compatibility = { ...operation, afterOrdinal: write.afterOrdinal };
+  return isTerminal(operation) ? { compatibility, terminalOutcome: operation.mutation.outcome, features: write.features }
+    : { compatibility, features: write.features };
 }
 
 /** Keep the ordinal and, for a finish, the turn end; drop the publication, narrative, features, and messages. */
@@ -1258,7 +1353,8 @@ function replacementFields(write: AcceptedExecutionWriteIntent, reason: string):
   const { operationId, execution, lease, ordinal, mutation } = write.operation;
   const finish = mutation.kind === "finish-live-event" ? { outcome: mutation.outcome, input: mutation.input,
     projection: { ...mutation.projection, narrative: [] } } : undefined;
-  const compatibility: ContentReplacedOperation = { operationId, execution, lease, ordinal, mutation: { kind: "content-replaced", reason,
+  const compatibility: ContentReplacedOperation & { readonly afterOrdinal: number } = { operationId, execution, lease, ordinal,
+    afterOrdinal: write.afterOrdinal, mutation: { kind: "content-replaced", reason,
     ...(mutation.kind === "post-terminal-event" ? { postTerminal: true as const } : {}), ...(finish ? { finish } : {}) } };
   return finish ? { compatibility, terminalOutcome: finish.outcome } : { compatibility };
 }
