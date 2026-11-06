@@ -72,8 +72,12 @@ describe("ClaudeProvider shutdown", () => {
         if (result?.type !== "return") throw new Error("Expected the real spawned session");
         const { state } = await result.value;
         provider[action](state);
-        await vi.waitFor(() => expect(tailRead).toBe(true), { timeout: 10000 });
-        expect(finishedWriting).toBe(true);
+        // The child writes its stderr marker before the stdout result, but the two pipes reach this process
+        // independently, so the marker can arrive after the result has been read.
+        await vi.waitFor(() => {
+          expect(tailRead).toBe(true);
+          expect(finishedWriting).toBe(true);
+        }, { timeout: 10000 });
       }
       held.resolve();
       await vi.waitFor(() => expect(saved).toBe(20000), { timeout: 15000 });
