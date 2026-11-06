@@ -308,6 +308,40 @@ describe("CursorProvider session continuity", () => {
     }
   });
 
+  it("hides history Cursor replays while resuming and streams the new prompt's text live", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("unused", 101);
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
+    const chunk = (text: string): SessionNotification => ({ sessionId: "cursor-session-1",
+      update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } });
+    const opening = vi.mocked(fake.runtime.openSession).getMockImplementation()!;
+    vi.mocked(fake.runtime.openSession).mockImplementation(async (options) => {
+      // session/load streams the saved history before the runtime records the session id.
+      await start.mock.calls[0]![0].callbacks.onSessionUpdate?.(chunk("OLD"));
+      return opening(options);
+    });
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await start.mock.calls[0]![0].callbacks.onSessionUpdate?.(chunk("NEW"));
+      return { stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } };
+    });
+    const provider = new CursorProvider(host, { settings: { get: () => getDefaultSettings() }, skills: { list: () => [] } }, 60_000);
+
+    try {
+      await provider.sendTurn(turn("prompt", "execution-1", "cursor-session-1"));
+
+      const drafts = vi.mocked(host.events.submit).mock.calls.flatMap(([batch]) => batch.events);
+      const textDrafts = drafts.flatMap((draft) => {
+        const event = (draft.payload as { item: { payload: { runtimeEvent: { event: { type: string; delta?: string } } } } })
+          .item.payload.runtimeEvent.event;
+        return event.type === "textDelta" ? [{ delta: event.delta, delivery: draft.delivery }] : [];
+      });
+      expect(textDrafts).toEqual([{ delta: "NEW", delivery: "live" }]);
+    } finally {
+      start.mockRestore();
+      await provider.shutdown();
+    }
+  });
+
   it("retries a transient prompt on a replacement ACP connection and rejects late updates from the failed connection", async () => {
     const host = createHost();
     const first = createFakeRuntime("cursor-session-1", 101);
