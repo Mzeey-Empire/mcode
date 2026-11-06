@@ -98,8 +98,9 @@ function readOwnRecording(segments: readonly string[], run: string): DiagRecord[
   const records: DiagRecord[] = [];
   const keptLines: string[] = [];
   let newest = -Infinity;
-  // Built only once a number repeats or goes backwards, which only a rewrite causes, so a file
-  // without one reads at the cost of a shared file.
+  // Built the first time a number repeats or goes backwards. A rewrite causes that, and so does a
+  // thread's first event: it is numbered before the run marker written ahead of it. `keptLines`
+  // holds every kept line either way, so this read costs more memory than a shared file's.
   let seen: Set<string> | undefined;
   for (const file of segments) {
     for (const line of linesOf(file)) {
