@@ -12,7 +12,9 @@ import {
   patchThreadRecord,
   type ThreadRecord,
 } from "@/stores/thread-record";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createAgentModelState, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { useThreadStore, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
 import { getThreadRecord } from "@/stores/thread-record";
 import { clearRecordCache, getCachedRecord } from "@/features/conversation/hydration/record-cache";
@@ -35,6 +37,162 @@ const fakeMessages = [
     content: "hello",
   }),
 ];
+
+const CACHE_EXECUTION = "00000000-0000-4000-8000-000000000001";
+const CACHE_NOW = "2026-11-06T12:00:00.000Z";
+
+function startHiddenConversation(threadId: string) {
+  const state = createAgentModelState();
+  state.threads[threadId] = { id: threadId, workspaceId: "workspace", rootThreadId: threadId,
+    providerId: "codex", providerIdentities: [], activityState: "Active", conversationRevision: 0,
+    rosterRevision: 0, createdAt: CACHE_NOW, updatedAt: CACHE_NOW };
+  state.turns[threadId] = { id: threadId, threadId, executionId: CACHE_EXECUTION,
+    status: "Running", trigger: { kind: "user" }, permissionMode: "full", approvalReviewMode: "manual",
+    approvalReviewReason: "manual-requested", attemptOf: null, providerIdentities: [],
+    startedAt: CACHE_NOW, providerStartedAt: null, ending: null, endedAt: null,
+    createdAt: CACHE_NOW, updatedAt: CACHE_NOW };
+  const message = createMockMessage({ id: `${threadId}-answer`, thread_id: threadId,
+    role: "assistant", content: `Answer for ${threadId}`, sequence: 10 });
+  state.items[message.id] = { id: message.id, threadId, turnId: threadId, kind: "message",
+    providerIdentities: [], createdAt: CACHE_NOW, updatedAt: CACHE_NOW,
+    payload: { projection: "message", message } };
+  useThreadStore.setState((current) => ({
+    records: patchThreadRecord(current.records, threadId, {
+      ...createEmptyThreadRecord(), turnExecutionId: CACHE_EXECUTION, runtimePhase: "running",
+      messages: [message], oldestLoadedSequence: 10, newestLoadedSequence: 10, hasMoreMessages: true,
+    }),
+    runningThreadIds: new Set([...current.runningThreadIds, threadId]),
+  }));
+  useThreadStore.getState().handleCanonicalProgress({ phase: "recovery", threadId,
+    epoch: threadId, acceptedThrough: 0, savedThrough: 0, retained: [], loss: "none",
+    durable: { mode: "snapshot", threadId, snapshot: {
+      revision: { conversationRevision: 0, rosterRevision: 0 }, state,
+    } },
+  });
+  const terminal: AcceptedCanonicalAgentEventEnvelope = {
+    eventId: `${threadId}-complete`, routing: { threadId, turnId: threadId, executionId: CACHE_EXECUTION },
+    sourceProviderId: "codex", sourceIdentities: [], acceptedSequence: 1,
+    progressPosition: { epoch: threadId, sequence: 1 },
+    serverTimestamps: { acceptedAt: CACHE_NOW, persistedAt: CACHE_NOW },
+    payload: { type: "turn.completed", endedAt: CACHE_NOW },
+  };
+  return {
+    complete: () => useThreadStore.getState().handleCanonicalProgress({ phase: "accepted", threadId,
+      epoch: threadId, from: 0, through: 1, events: [terminal] }),
+    save: () => useThreadStore.getState().handleCanonicalProgress({ phase: "saved", threadId,
+      epoch: threadId, through: 1, revision: { conversationRevision: 1, rosterRevision: 0 },
+      events: [{ ...terminal, durableRevision: 1 }] }),
+  };
+}
+
+describe("hidden completion residency", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetThreadStoreTestState();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("retires five durably completed hidden records and restores their warm transcript", async () => {
+    for (let index = 0; index < 5; index += 1) {
+      const execution = startHiddenConversation(`hidden-${index}`);
+      execution.complete();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(useThreadStore.getState().records.has(`hidden-${index}`)).toBe(true);
+      useThreadStore.getState().handleTurnPersisted({ threadId: `hidden-${index}`,
+        messageId: `hidden-${index}-answer`, executionId: CACHE_EXECUTION,
+        settledMessage: { id: `hidden-${index}-answer`, sequence: 10 },
+        outcome: "completed", toolCallCount: 0, filesChanged: [] });
+      execution.save();
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    const records = [...useThreadStore.getState().records.values()];
+    const canonicalItems = records.reduce((count, record) => count + Object.keys(record.canonicalAgent.state.items).length, 0);
+    console.log(`Hidden completions: live records=${records.length}, canonical items=${canonicalItems}`);
+    expect({ liveRecords: records.length, canonicalItems }).toEqual({ liveRecords: 0, canonicalItems: 0 });
+    useThreadStore.getState().handleTurnPersisted({ threadId: "hidden-0", messageId: "hidden-0-answer",
+      settledMessage: { id: "hidden-0-answer", sequence: 10 },
+      executionId: CACHE_EXECUTION, outcome: "completed", toolCallCount: 0, filesChanged: [] });
+    expect(useThreadStore.getState().records.has("hidden-0")).toBe(false);
+    const cached = getCachedRecord("hidden-0");
+    expect(cached?.messages.map((message) => message.content)).toEqual(["Answer for hidden-0"]);
+    expect(cached?.oldestLoadedSequence).toBe(10);
+    expect(cached?.hasMoreMessages).toBe(true);
+    const restoration = activateTestConversation("hidden-0");
+    expect(getTestActiveMessages().map((message) => message.content)).toEqual(["Answer for hidden-0"]);
+    expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+    await restoration;
+  });
+
+  it.each(["selected", "leased"])("keeps a %s completed conversation resident", async (display) => {
+    const execution = startHiddenConversation("displayed");
+    if (display === "selected") useThreadStore.setState({ currentThreadId: "displayed" });
+    else await getConversationResidency().mountDisplayConversation("displayed");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({ threadId: "displayed", messageId: "displayed-answer",
+      settledMessage: { id: "displayed-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
+      outcome: "completed", toolCallCount: 0, filesChanged: [] });
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.get("displayed")?.runtimePhase).toBe("completed");
+    expect(Object.keys(useThreadStore.getState().records.get("displayed")?.canonicalAgent.state.items ?? {})).toEqual(["displayed-answer"]);
+    if (display === "leased") getConversationResidency().unmountDisplayConversation("displayed");
+  });
+
+  it("keeps a replacement execution when the old saved receipt arrives", async () => {
+    const execution = startHiddenConversation("replacement");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleAgentEvent({ type: "turnStarted", threadId: "replacement",
+      turnExecutionId: "00000000-0000-4000-8000-000000000002" });
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.get("replacement")?.turnExecutionId).toBe("00000000-0000-4000-8000-000000000002");
+    expect(useThreadStore.getState().runningThreadIds.has("replacement")).toBe(true);
+  });
+
+  it("keeps running hidden conversations", async () => {
+    startHiddenConversation("running");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.get("running")?.runtimePhase).toBe("running");
+    expect(Object.keys(useThreadStore.getState().records.get("running")?.canonicalAgent.state.items ?? {})).toEqual(["running-answer"]);
+  });
+
+  it("waits for response persistence before retiring a saved hidden execution", async () => {
+    const execution = startHiddenConversation("pending");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.setState((state) => ({ records: patchThreadRecord(state.records, "pending", {
+      pendingTurnPersistMessageIds: ["pending-answer"],
+    }) }));
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.has("pending")).toBe(true);
+    useThreadStore.getState().handleTurnPersisted({ threadId: "pending", messageId: "pending-answer",
+      settledMessage: { id: "pending-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
+      outcome: "completed", toolCallCount: 0, filesChanged: [] });
+    expect(useThreadStore.getState().records.has("pending")).toBe(false);
+    expect(getCachedRecord("pending")?.messages.map((message) => message.content)).toEqual(["Answer for pending"]);
+  });
+
+  it("keeps a saved hidden execution while a background tool owes a late result", async () => {
+    const execution = startHiddenConversation("background");
+    useThreadStore.getState().handleAgentEvent({ type: "toolUse", threadId: "background",
+      turnExecutionId: CACHE_EXECUTION, toolCallId: "background-tool", toolName: "Bash", toolInput: { command: "work" } });
+    useThreadStore.getState().handleAgentEvent({ type: "toolBackgrounded", threadId: "background",
+      turnExecutionId: CACHE_EXECUTION, toolCallId: "background-tool" });
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({ threadId: "background", messageId: "background-answer",
+      settledMessage: { id: "background-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
+      outcome: "completed", toolCallCount: 1, filesChanged: [] });
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(useThreadStore.getState().records.get("background")?.toolCalls.map((tool) => ({
+      id: tool.id, complete: tool.isComplete,
+    }))).toEqual([{ id: "background-tool", complete: false }]);
+  });
+});
 
 /**
  * Reset thread store and message cache to a clean state for tests.

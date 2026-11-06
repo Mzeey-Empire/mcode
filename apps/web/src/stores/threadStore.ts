@@ -951,6 +951,23 @@ function drainedSavingEpoch(frame: CanonicalAgentProgressFrame, previous: Thread
   return frame.phase === "recovery" && frame.loss === "none" && previousEpoch !== frame.epoch ? previousEpoch : undefined;
 }
 
+function hasDurablySettledExecution(threadId: string, record: ThreadRecord, executionId: string): boolean {
+  const turn = getCanonicalRuntimeTurn(threadId, record);
+  if (!turn || turn.executionId !== executionId || turn.status === "Pending" || turn.status === "Running") return false;
+  const replica = record.canonicalAgent;
+  const progress = replica.progress;
+  return !replica.recoveryRequired && progress !== null && progress.savedThrough === progress.acceptedThrough;
+}
+
+function hasPendingConversationResults(record: ThreadRecord): boolean {
+  return record.optimisticUserMessageId !== null
+    || record.pendingTurnPersistMessageIds.length > 0
+    || record.savingStatus !== null
+    || record.savingStatuses.length > 0
+    || record.pendingSavingStatuses.length > 0
+    || record.toolCalls.some((tool) => !tool.isComplete);
+}
+
 /**
  * Resolve the client-side message id that should receive a `turn.persisted`
  * payload. Never uses {@link ThreadRecord.currentTurnMessageId} alone because
@@ -1541,7 +1558,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       if (current) invalidateDeferredNarrativeEvents(current);
       threadHydrator.deactivate();
     },
-    retainInactiveConversation: (threadId) => threadHydrator.retainInactiveConversation(threadId),
+    retainInactiveConversation: (threadId, executionId) => threadHydrator.retainInactiveConversation(threadId, executionId),
     invalidateConversation: (threadId) => threadHydrator.invalidateConversation(threadId),
     synchronizeConversation: (threadId) => threadHydrator.synchronizeConversation(threadId),
     mergeCachedFileChanges: (threadId, filesChanged) =>
@@ -3411,6 +3428,17 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     };
   };
 
+  const retireSettledConversation = (threadId: string, executionId: string | null | undefined): void => {
+    const record = get().records.get(threadId);
+    if (!record || !executionId || record.turnExecutionId !== executionId) return;
+    if (conversationResidency.isConversationVisible(threadId)) return;
+    if (!hasDurablySettledExecution(threadId, record, executionId)) return;
+    // Background tools and a lost provider can still deliver a result after terminal progress.
+    if (hasPendingConversationResults(record) || lostExecutionAwaitingEndingByThread.has(threadId)) return;
+    invalidateDeferredNarrativeEvents(threadId);
+    conversationResidency.retainInactiveConversation(threadId, executionId);
+  };
+
   return {
     records: new Map<string, ThreadRecord>(),
     currentThreadId: null,
@@ -3499,6 +3527,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       });
       return visibleChanged ? reconcileCanonicalRuntime(records, state.runningThreadIds, frame.threadId) : { records };
     });
+    retireSettledConversation(frame.threadId, previous.turnExecutionId);
   },
 
   handleCanonicalAgentEvents: (threadId, events) => {
@@ -4565,6 +4594,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   },
 
   handleTurnPersisted: (payload) => {
+    if (!canReceiveCanonicalProgress(get(), payload.threadId,
+      (threadId) => conversationResidency.isDisplayConversationLeased(threadId))) return;
     flushPendingTextDeltas();
     conversationResidency.invalidateConversation(payload.threadId);
     const terminalPhase = persistedTerminalPhase(getRec(payload.threadId), payload);
@@ -4586,6 +4617,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
 
     if (terminalPhase) cleanupTerminalRuntime(payload.threadId, terminalPhase);
+    retireSettledConversation(payload.threadId, payload.executionId);
 
     if (payload.filesChanged.length > 0) {
       useWorkspaceStore.setState((ws) => ({

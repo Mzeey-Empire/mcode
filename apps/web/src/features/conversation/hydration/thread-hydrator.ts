@@ -569,10 +569,16 @@ export class ThreadHydrator {
   }
 
   /** Retain an inactive resident transcript through the bounded conversation cache. */
-  retainInactiveConversation(threadId: string): void {
+  retainInactiveConversation(threadId: string, settledExecutionId?: string): void {
     const state = this.deps.getState();
     if (state.currentThreadId === threadId) return;
-    cacheRecord(threadId, projectConversationCacheState(getThreadRecord(state.records, threadId)));
+    const record = state.records.get(threadId);
+    if (!record) return;
+    cacheRecord(threadId, projectConversationCacheState(record));
+    if (settledExecutionId && record.turnExecutionId === settledExecutionId
+      && !state.runningThreadIds.has(threadId)) {
+      this.retireInactiveRecord(threadId, false);
+    }
   }
 
   /** Apply cache pressure and project a critically trimmed active window into live state. */
