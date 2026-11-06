@@ -3446,6 +3446,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (persistedExecutionByThread.get(threadId) !== executionId) return;
     // Background tools and a lost provider can still deliver a result after terminal progress.
     if (hasPendingConversationResults(record) || lostExecutionAwaitingEndingByThread.has(threadId)) return;
+    // Queued input starts the next turn here, and sending it clears the cached copy retirement relies on.
+    if (hasQueuedInput(threadId)) return;
     invalidateDeferredNarrativeEvents(threadId);
     conversationResidency.retainInactiveConversation(threadId, executionId);
   };

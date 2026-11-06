@@ -124,6 +124,32 @@ describe("hidden completion residency", () => {
     expect(useThreadStore.getState().records.get("plan")?.planQuestionsStatus).toBe("pending");
   });
 
+  it("keeps the earlier transcript when a queued follow-up sends after a hidden finish", async () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "queued" })] });
+    useQueueStore.setState({ queues: {}, autoDrainSuppressedThreadIds: new Set<string>(), inFlightQueuedMessages: {} });
+    const execution = startHiddenConversation("queued");
+    useQueueStore.getState().enqueue("queued", {
+      content: "follow-up", displayContent: "follow-up", attachments: [],
+      model: "claude-sonnet-4-6", permissionMode: "full",
+    });
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "queued", messageId: "queued-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "queued-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    scheduleDrainAfterEdit("queued");
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mockTransport.sendMessage).toHaveBeenCalled();
+    await activateTestConversation("queued");
+    expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+    expect(useThreadStore.getState().records.get("queued")?.messages.map((message) => message.content))
+      .toContain("Answer for queued");
+  });
+
   it("shows the settled file-effect summary immediately after restoring a retired turn", async () => {
     const execution = startHiddenConversation("effects");
     useThreadStore.setState((state) => ({ records: patchThreadRecord(state.records, "effects", {
