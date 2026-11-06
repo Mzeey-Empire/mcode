@@ -138,8 +138,8 @@ function completedTool(index: number): ParentNarrativeRecoveryItem {
 }
 
 function familyDraft(sequence: number, type: AgentEvent["type"], fields: Record<string, unknown>,
-  extension: Omit<ProviderRuntimeExtension, "kind" | "providerId">) {
-  const value = draft("codex", sequence, type, fields);
+  extension: Omit<ProviderRuntimeExtension, "kind" | "providerId">, identity = execution) {
+  const value = draft("codex", sequence, type, fields, identity);
   return { ...value, payload: { ...value.payload, item: { ...value.payload.item,
     payload: { ...value.payload.item.payload, runtimeEvent: { ...value.payload.item.payload.runtimeEvent,
       extension: ProviderRuntimeExtensionSchema().parse({ kind: "codex-collaboration", providerId: "codex", ...extension }) } } } } };
@@ -1749,6 +1749,166 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
 
     expect(durableState()).toEqual(reduceSaved(base, savedEvents(savedFrom)));
     expect(Object.keys(durableState().items)).not.toHaveLength(0);
+  });
+
+  it("releases each turn's owner on a long thread once its worker releases and reconnects with full history", async () => {
+    const turnIds: string[] = [];
+    for (let index = 0; index < 12; index += 1) {
+      const identity = { ...execution, turnId: `history-turn-${index}`,
+        executionId: `00000000-0000-4000-8000-${String(index + 1000).padStart(12, "0")}` };
+      const activeLease = { ...lease, leaseId: `history-lease-${index}` };
+      turnIds.push(identity.turnId);
+      await send(1, start("codex", identity), identity, activeLease);
+      expect(progress.depth().owners).toBe(1);
+      holdWrites();
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "textDelta", { delta: `Answer ${index}`, isFinalResponse: true }, identity)] }, identity, activeLease);
+      await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 2, "turnComplete", {}, identity)], terminalInput: { ...identity, providerId: "codex",
+          providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }, identity, activeLease);
+      const unsaved = recovery();
+      expect(unsaved.retained.some((event) => event.payload.type === "turn.completed")).toBe(true);
+      release?.();
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(progress.depth().owners).toBe(1);
+      const restored = progress.recover(identity.threadId, { conversationRevision: 0, rosterRevision: 0 },
+        { epoch: unsaved.epoch, sequence: unsaved.acceptedThrough });
+      expect(restored.loss).toBe("none");
+      expect(restored.savedThrough).toBe(unsaved.acceptedThrough);
+      expect(restored.retained).toEqual([]);
+      if (restored.durable.mode !== "snapshot") throw new Error("Expected full durable history");
+      expect(Object.keys(restored.durable.snapshot.state.turns).sort()).toEqual([...turnIds].sort());
+      expect(Object.values(restored.durable.snapshot.state.items).filter((item) => item.payload.projection === "message"
+        && item.payload.message && typeof item.payload.message === "object" && "role" in item.payload.message
+        && item.payload.message.role === "assistant")).toHaveLength(index + 1);
+      await send(4, { kind: "release" }, identity, activeLease);
+      expect(progress.depth()).toMatchObject({ owners: 0, ownedTurns: 0 });
+      vi.mocked(writer.appendAccepted).mockRestore();
+    }
+  });
+
+  it("accepts a post-terminal event after the terminal save until the worker releases the execution", async () => {
+    await send(1, start("codex"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "Answer", isFinalResponse: true })] });
+    await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 2, "turnComplete")],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
+
+    const late = await send(4, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 3, "ended", { outcome: "completed" })] });
+    expect(late.result.kind).toBe("accepted");
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(db.prepare("SELECT count(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get(`${execution.executionId}:raw:3`)).toEqual({ count: 1 });
+    expect(progress.depth().owners).toBe(1);
+    expect((await send(5, { kind: "release" })).result.kind).toBe("released");
+    expect(progress.depth().owners).toBe(0);
+  });
+
+  describe("after a released turn", () => {
+    const retry = { ...execution, turnId: "retry-turn", executionId: "00000000-0000-4000-8000-000000000127" };
+    const retryLease = { ...lease, ownerEpoch: 2, leaseId: "retry-lease" };
+
+    async function finishReleasedTurn(answer?: string) {
+      await send(1, start("codex"));
+      let ordinal = 2;
+      if (answer) {
+        expect((await send(ordinal++, { kind: "event", phase: "running", nativeCursor: null,
+          events: [draft("codex", 1, "textDelta", { delta: answer, isFinalResponse: true })] })).result.kind).toBe("accepted");
+      }
+      expect((await send(ordinal++, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", ordinal - 1, "turnComplete")],
+        terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }))
+        .result.kind).toBe("accepted");
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      await send(ordinal, { kind: "release" });
+      expect(progress.depth().owners).toBe(0);
+    }
+
+    function startReusingPrompt() {
+      const fresh = start("codex", retry);
+      return send(1, { ...fresh, parentLive: { ...fresh.parentLive, precedingMessageId: `${execution.turnId}:user` },
+        input: { ...fresh.input, userMessage: { kind: "existing", messageId: `${execution.turnId}:user` } } }, retry, retryLease);
+    }
+
+    it("starts a retry that reuses the user message of the finished turn", async () => {
+      await finishReleasedTurn();
+      expect((await startReusingPrompt()).result.kind).toBe("committed");
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "textDelta", { delta: "Fresh answer", isFinalResponse: true }, retry)] }, retry, retryLease);
+      await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 2, "turnComplete", {}, retry)],
+        terminalInput: { ...retry, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }, retry, retryLease);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(retry.turnId)).toEqual({ status: "Completed" });
+      expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant' ORDER BY sequence DESC")
+        .get(execution.threadId)).toEqual({ content: "Fresh answer" });
+    });
+
+    it("attaches a late hook to the finished turn's answer while a retry reuses its prompt", async () => {
+      await finishReleasedTurn("Earlier answer");
+      expect((await startReusingPrompt()).result.kind).toBe("committed");
+      progress.acceptLateHook(execution.threadId, execution.executionId, { id: "late-hook", hookName: "Stop", toolName: null,
+        phase: "stop", payload: "{}", durationMs: 10, didBlock: false, startedAt: NOW, endedAt: NOW, sortOrder: 1 });
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      const answer = db.prepare("SELECT id FROM messages WHERE thread_id = ? AND role = 'assistant' AND content = 'Earlier answer'")
+        .get(execution.threadId);
+      expect(db.prepare("SELECT message_id FROM hook_executions WHERE id = 'late-hook'").get())
+        .toEqual({ message_id: (answer as { id: string }).id });
+    });
+  });
+
+  describe("after an earlier turn ran a subagent", () => {
+    const evidence = { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn" };
+    const childMessage = { child: { ...evidence, nativeItemId: "child-message", itemEventKey: "delta" } };
+    const next = { ...execution, turnId: "next-turn", executionId: "00000000-0000-4000-8000-000000000126" };
+    const nextLease = { ...lease, ownerEpoch: 2, leaseId: "next-lease" };
+    const event = (events: ReturnType<typeof draft>[]) => ({ kind: "event", phase: "running", nativeCursor: null, events }) as const;
+
+    async function finishSubagentTurn() {
+      await send(1, start("codex"));
+      await send(2, event([familyDraft(1, "toolUse", { toolCallId: "spawn", toolName: "Agent", toolInput: {} },
+        { collaboration: { kind: "spawnAgent", receiverThreadIds: ["native-child"], prompt: "Child task" } })]));
+      await send(3, event([familyDraft(2, "turnStarted", {}, { child: evidence })]));
+      await send(4, event([familyDraft(3, "textDelta", { delta: "Child answer" }, childMessage)]));
+      await send(5, event([familyDraft(4, "turnComplete", {}, { child: evidence })]));
+      await send(6, event([draft("codex", 5, "toolResult", { toolCallId: "spawn", output: "Child answer", isError: false })]));
+      await send(7, event([draft("codex", 6, "textDelta", { delta: "Parent answer one", isFinalResponse: true })]));
+      await send(8, { ...event([draft("codex", 7, "turnComplete")]),
+        terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      await send(9, { kind: "release" });
+      expect(progress.depth().owners).toBe(0);
+    }
+
+    it("recovers every saved item mid-turn", async () => {
+      await finishSubagentTurn();
+      const saved = new CanonicalAgentStore(db, () => {}).recoverThread(execution.threadId,
+        { conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
+      if (saved.mode !== "snapshot") throw new Error("Expected saved history");
+      const savedItems = Object.keys(saved.snapshot.state.items);
+      expect(savedItems.length).toBeGreaterThan(1);
+
+      await send(1, start("codex", next), next, nextLease);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(progress.depth().owners).toBe(1);
+      const restored = recovery(next);
+      if (restored.durable.mode !== "snapshot") throw new Error("Expected recovery snapshot");
+      const restoredItems = restored.durable.snapshot.state.items;
+      expect(savedItems.filter((id) => !(id in restoredItems))).toEqual([]);
+    });
+
+    it("accepts an identical replay of the saved child message during a later parent turn", async () => {
+      await finishSubagentTurn();
+      await send(1, start("codex", next), next, nextLease);
+      const replayed = familyDraft(1, "textDelta", { delta: "Child answer" }, childMessage, next);
+      expect((await send(2, event([replayed]), next, nextLease)).result.kind).toBe("accepted");
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(db.prepare("SELECT count(*) AS count FROM canonical_agent_items WHERE id = ?").get(replayed.eventId)).toEqual({ count: 1 });
+      // A rejected replay would save an action-required child routing failure on the later turn.
+      expect(db.prepare("SELECT count(*) AS count FROM canonical_agent_items WHERE turn_id = ? AND kind = 'error'")
+        .get(next.turnId)).toEqual({ count: 0 });
+    });
   });
 
   it("does not allocate live owners for completed history or report loss after same-runtime saved rehydration", async () => {

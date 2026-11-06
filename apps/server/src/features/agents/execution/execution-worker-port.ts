@@ -30,6 +30,7 @@ export type ExecutionWorkerInbound =
 export type ExecutionWorkerOutbound =
   | { readonly kind: "ready" }
   | { readonly kind: "writer-request"; readonly rpcId: number; readonly operation: ExecutionSemanticOperation }
+  | { readonly kind: "writer-released"; readonly execution: Request["execution"]; readonly lease: Request["lease"] }
   | { readonly kind: "command-reply"; readonly reply: Reply }
   | { readonly kind: "fatal" }
   | { readonly kind: "closed" };
@@ -108,6 +109,9 @@ export class ExecutionThreadWorkerPort implements ExecutionWorkerPort<Command, E
       case "writer-request":
         void this.write(message.rpcId, message.operation);
         break;
+      case "writer-released":
+        this.released(message.execution, message.lease);
+        break;
       case "command-reply":
         this.reply(message.reply);
         break;
@@ -157,6 +161,16 @@ export class ExecutionThreadWorkerPort implements ExecutionWorkerPort<Command, E
   private canWrite(operation: ExecutionSemanticOperation): boolean {
     return this.state === "ready" && !this.writerRpcPending && matchesOperation(this.inFlight, operation)
       && (!this.writerCalled || this.rejectedObservationCheckpointAllowed && operation.mutation.kind === "checkpoint");
+  }
+
+  private released(execution: Request["execution"], lease: Request["lease"]): void {
+    const request = this.inFlight;
+    if (this.state !== "ready" || request?.command.kind !== "release"
+      || !sameExecution(request.execution, execution) || !sameLease(request.lease, lease)) {
+      this.fail(new ErrorEvent("error"));
+      return;
+    }
+    this.writer.released?.(execution, lease);
   }
 
   private reply(reply: Reply): void {

@@ -188,6 +188,8 @@ export interface ExecutionAcceptedReceipt {
  */
 export interface ExecutionSemanticWriter {
   transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt>;
+  /** The worker sends no further operation for this execution and lease. */
+  released?(execution: ExecutionIdentity, lease: ExecutionLease): void;
 }
 
 /** Execution runtime effects returned only after their associated parent write commits. */
@@ -580,6 +582,7 @@ export class ExecutionWorkerHandler {
     }
     if (state.fileAttempt !== undefined) this.files.retire(state.execution, state.fileAttempt);
     this.states.delete(request.execution.threadId);
+    this.writer.released?.(request.execution, request.lease);
     return { kind: "released" };
   }
 }

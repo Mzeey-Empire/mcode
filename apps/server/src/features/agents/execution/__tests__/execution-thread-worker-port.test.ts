@@ -67,10 +67,15 @@ const LIMITS: ExecutionMailboxLimits = {
 
 class AcknowledgingWriter implements ExecutionSemanticWriter {
   readonly operations: ExecutionSemanticOperation[] = [];
+  readonly releases: { execution: ExecutionIdentity; lease: ExecutionLease }[] = [];
 
   async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
     this.operations.push(operation);
     return { kind: "committed", operationId: operation.operationId, durableRevision: this.operations.length };
+  }
+
+  released(execution: ExecutionIdentity, lease: ExecutionLease): void {
+    this.releases.push({ execution, lease });
   }
 }
 
@@ -176,8 +181,10 @@ describe("ExecutionThreadWorkerPort", () => {
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 4 } });
       await expect(submit(scheduler, lease, FINISH_COMMAND))
         .resolves.toMatchObject({ kind: "reply", result: { kind: "committed", durableRevision: 5 } });
+      expect(writer.releases).toEqual([]);
       await expect(submit(scheduler, lease, { kind: "release" }))
         .resolves.toEqual({ kind: "reply", result: { kind: "released" } });
+      expect(writer.releases).toEqual([{ execution: EXECUTION, lease }]);
       expect(scheduler.release(EXECUTION, lease)).toBe(true);
       expect(writer.operations.map((operation) => operation.mutation.kind))
         .toEqual(["begin", "append-events", "stop-requested", "checkpoint", "finish-live-event"]);

@@ -90,6 +90,25 @@ async function processSnapshot(paths) {
   return { ...memory, pid, cpuMs, cpuGap: cpuMs === null ? "Server process CPU time unavailable" : null };
 }
 
+function serverRssSampler(paths, receipt) {
+  const samples = [];
+  const sample = async () => {
+    const memory = await readMemorySnapshot(paths);
+    samples.push({ at: memory.at, serverRssBytes: memory.serverWorkingSetBytes });
+  };
+  let pending = Promise.resolve();
+  const timer = setInterval(() => { pending = pending.then(sample); }, 5000);
+  return { async stop() {
+    clearInterval(timer);
+    await pending;
+    await sample();
+    const values = [receipt.processBefore?.serverWorkingSetBytes, ...samples.map((entry) => entry.serverRssBytes)]
+      .filter(Number.isFinite);
+    receipt.serverRss = { intervalMs: 5000, samples, peakBytes: values.length ? Math.max(...values) : null,
+      afterDrainBytes: receipt.processAfter?.serverWorkingSetBytes ?? null };
+  } };
+}
+
 function diagnosticCollector(paths, threadId, since, state) {
   const records = new Map();
   const offsets = new Map();
@@ -149,6 +168,7 @@ export async function runHeavyStream(options) {
   let changed = false;
   let sampler;
   let diagnostics;
+  let rssSampler;
   const onSignal = createInterruptHandler(state);
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
@@ -172,6 +192,7 @@ export async function runHeavyStream(options) {
     receipt.logOffset = NodeFS.statSync(NodePath.join(paths.logsDir, "server.log")).size;
     receipt.databaseBefore = databaseBytes(dbPath);
     receipt.processBefore = await processSnapshot(paths);
+    rssSampler = serverRssSampler(paths, receipt);
     diagnostics = diagnosticCollector(paths, thread.id, since, state);
     sampler = new HealthSampler(ports.healthUrl, receipt.health, receipt.workerQueue);
     sampler.start();
@@ -187,6 +208,7 @@ export async function runHeavyStream(options) {
   } catch (error) { receipt.error = error.message; receipt.outcome = "errored"; }
   finally {
     try {
+      await rssSampler?.stop();
       await finishMeasurements(sampler, diagnostics, directory, receipt, state.progress);
       receipt.serverDropLogLines = await countDropLines(NodePath.join(paths.logsDir, "server.log"), receipt.logOffset ?? 0, receipt.threadId);
       finalizeOutcome(receipt, state.interrupted);
