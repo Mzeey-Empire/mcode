@@ -271,6 +271,7 @@ describe("AgentService.createAndSend defaults", () => {
     providerCompletion.resolve();
   });
 
+  // This exercises real worker startup and SQLite commits through two Turn dispatches and a stop.
   it("dispatches a follow-up Turn queued behind automatic Setup after the first Turn is dispatched", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-drain-"));
     roots.push(root);
@@ -338,7 +339,7 @@ describe("AgentService.createAndSend defaults", () => {
       expect.objectContaining({ state: "dispatched" }),
       expect.objectContaining({ state: "dispatched" }),
     ]);
-  });
+  }, 15_000);
 
   it("dispatches a new turn on a kept thread after setup cancellation without replaying the first prompt", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-kept-cancelled-startup-"));
@@ -719,6 +720,7 @@ describe("AgentService.createAndSend defaults", () => {
     expect(attachmentService.removeStoredAttachments).toHaveBeenCalledWith(managed.id, [stored]);
   });
 
+  // The fixture starts four real execution workers and commits through a SQLite writer worker.
   it("removes newly persisted attachments when Thread deletion rejects automatic admission", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-turn-deletion-"));
     roots.push(root);
@@ -776,7 +778,7 @@ describe("AgentService.createAndSend defaults", () => {
 
     expect(attachmentService.removeStoredAttachments).toHaveBeenCalledWith(managed.id, [stored]);
     releaseDeletion();
-  });
+  }, 15_000);
 
   it("cleans released-gate attachments when a native command handles the send without persisting a Turn", async () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-turn-handled-"));
