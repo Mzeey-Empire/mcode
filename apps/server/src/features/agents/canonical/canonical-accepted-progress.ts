@@ -31,7 +31,7 @@ import { prepareAcceptedParentEvents } from "./accepted-parent-events.js";
 import { acceptedNarrative, advanceAcceptedExecution, seedAcceptedExecution, type AcceptedExecutionState } from "./accepted-execution-state.js";
 import type { ContentReplacedOperation, LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
 import { sameExecution, sameLease } from "../execution/execution-mailbox-protocol.js";
-import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import { ProgressAdmissionError, RejectedProviderObservationError } from "../execution/execution-writer-failure.js";
 import { prepareAcceptedCollaboration } from "./accepted-collaboration-preparation.js";
 import { AcceptedCodexCollaboration } from "./accepted-codex-collaboration.js";
@@ -86,6 +86,8 @@ type AcceptedOwner = ThreadProgressOwner<AcceptedExecutionWriteIntent, Execution
 interface ProgressThread {
   owner: AcceptedOwner;
   head?: AcceptedExecutionState;
+  /** The head execution whose worker released it, so no further operation for it can arrive. */
+  releasedExecutionId?: string;
   /**
    * Owned by this thread and mutated in place by each admission, because copying the whole family's maps per
    * batch made every save cost grow with thread history. Never hand it out: readers that outlive a call get a copy.
@@ -98,6 +100,8 @@ interface ProgressThread {
   readonly statuses: Map<string, TurnSavingStatus>;
   epoch: string;
   commandPending: boolean;
+  /** A saved batch is still running its completion callbacks, which read this owner. */
+  completingSave: boolean;
   messageSequence: number;
   readonly waiters: Set<{ resolve(): void; reject(error: Error): void }>;
   readonly answeredPlanMessages: Set<string>;
@@ -364,13 +368,16 @@ export class CanonicalAcceptedProgress {
   /** Resolve plan and late-effect identities from accepted state before storage catches up. */
   latestAssistantMessage(threadId: string): Message | undefined {
     const message = this.threads.get(threadId)?.head?.assistant;
-    return message?.content ? structuredClone(message) : undefined;
+    if (message?.content) return structuredClone(message);
+    // A released owner's turn is fully saved, so storage holds its answer.
+    const turn = this.canonical.loadLatestTurn(threadId);
+    return turn ? this.canonical.loadTerminalProjection(turn.id).message ?? undefined : undefined;
   }
 
   /** Roster reads use accepted child identities while the family save stream is pending. */
   loadSubagentRoster(request: CanonicalChildRosterRequest) {
     const thread = this.threads.get(request.owningParentThreadId);
-    return thread ? this.canonical.projectAcceptedSubagentRoster(request, thread.state) : undefined;
+    return thread ? this.canonical.projectAcceptedSubagentRoster(request, thread.state) : this.canonical.loadSubagentRoster(request);
   }
 
   /** Resolve the exact child native turn from this parent's accepted family. */
@@ -717,7 +724,8 @@ export class CanonicalAcceptedProgress {
   }
 
   /** Queue depth is content-free and includes failed and in-flight work. */
-  depth() { return { ...this.saves.depth(), retained: this.budget.depth() }; }
+  depth() { return { ...this.saves.depth(), retained: this.budget.depth(), owners: this.threads.size,
+    ownedTurns: [...this.threads.values()].reduce((count, thread) => count + Object.keys(thread.state.turns).length, 0) }; }
 
   /** Native child detail views support Stop while managed conversations retain ordinary deletion. */
   assertThreadDeletionSupported(threadId: string): void {
@@ -874,7 +882,7 @@ export class CanonicalAcceptedProgress {
     const features = { ...this.canonical.loadAcceptedFeatureSeed(threadId), compacting: false };
     const thread: ProgressThread = { owner: this.makeOwner(threadId, epoch, state, revision, head?.epoch === epoch ? head : undefined),
       state, durableState: copyAgentModelState(state), revision, publicationSequence: features.publicationSequence, statuses: new Map(), epoch, features,
-      commandPending: false, messageSequence: nextMessageSequence(state), waiters: new Set(), answeredPlanMessages: new Set() };
+      commandPending: false, completingSave: false, messageSequence: nextMessageSequence(state), waiters: new Set(), answeredPlanMessages: new Set() };
     this.threads.set(threadId, thread);
     return thread;
   }
@@ -882,7 +890,7 @@ export class CanonicalAcceptedProgress {
   private evictSavedThread(): void {
     if (this.threads.size < MAX_OWNERS) return;
     for (const [id, thread] of this.threads) {
-      if (!thread.commandPending && thread.owner.recoveryCut().retained.length === 0
+      if (!thread.commandPending && !thread.completingSave && thread.owner.recoveryCut().retained.length === 0
         && !Object.values(thread.state.turns).some((turn) => turn.status === "Running" || turn.status === "Pending")) {
         this.savingPublisher.flushThread(id);
         this.threads.delete(id); return;
@@ -961,6 +969,7 @@ export class CanonicalAcceptedProgress {
 
   private async saved(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>, receipt: SavedProgressReceipt): Promise<void> {
     const thread = this.saveThread(batch.execution.threadId);
+    thread.completingSave = true;
     const applied: AppliedOwnedBatch[] = [];
     const undoApplied = () => { for (const page of applied.reverse()) page.rollback(); };
     for (const saved of this.pendingSaved) {
@@ -995,6 +1004,28 @@ export class CanonicalAcceptedProgress {
     await this.projectSavedPlans(batch);
     await this.recordSavedCoverage(batch);
     await this.retireSavedReceipts(batch, completed, thread);
+    thread.completingSave = false;
+    this.releaseSavedThread(batch.execution.threadId, thread);
+  }
+
+  /** Drop the owner of a released execution once everything it accepted is saved. */
+  releaseExecution(execution: ExecutionIdentity, lease: ExecutionLease): void {
+    const thread = this.threads.get(execution.threadId);
+    const head = thread?.head;
+    if (!thread || !head || !sameExecution(head.execution, execution) || !sameLease(head.lease, lease)) return;
+    thread.releasedExecutionId = execution.executionId;
+    this.releaseSavedThread(execution.threadId, thread);
+  }
+
+  private releaseSavedThread(threadId: string, thread: ProgressThread): void {
+    // A saved terminal does not end the execution: its worker can still send post-terminal events, and they
+    // need this owner's head. Only the worker's release proves that nothing more can arrive for the head.
+    const headLive = thread.head !== undefined && thread.releasedExecutionId !== thread.head.execution.executionId;
+    if (headLive || this.threads.get(threadId) !== thread || thread.commandPending || thread.completingSave
+      || thread.owner.recoveryCut().retained.length > 0
+      || Object.values(thread.state.turns).some((turn) => turn.status === "Running" || turn.status === "Pending")) return;
+    this.savingPublisher.flushThread(threadId);
+    this.threads.delete(threadId);
   }
 
   /**

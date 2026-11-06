@@ -3,6 +3,7 @@ import type {
   ExecutionSemanticWriter,
   ExecutionWriteReceipt,
 } from "../execution/execution-worker-handler.js";
+import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
 import type { LostExecutionInterruption } from "./canonical-execution-semantic-writer.js";
@@ -28,6 +29,11 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
     const receipt = await this.transactDurable(operation);
     this.releaseDurable(operation, receipt);
     return receipt;
+  }
+
+  /** Let accepted progress drop the execution's owner once its saves finish. */
+  released(execution: ExecutionIdentity, lease: ExecutionLease): void {
+    this.progress?.releaseExecution(execution, lease);
   }
 
   private async transactDurable(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {

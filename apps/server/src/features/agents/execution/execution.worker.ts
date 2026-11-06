@@ -41,6 +41,7 @@ const writer: ExecutionSemanticWriter = {
       post({ kind: "writer-request", rpcId, operation });
     });
   },
+  released: (execution, lease) => { if (!closed) post({ kind: "writer-released", execution, lease }); },
 };
 
 const handler = new ExecutionWorkerHandler(writer);
