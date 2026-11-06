@@ -1,4 +1,8 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
@@ -34,6 +38,7 @@ import type { ProviderAvailabilityService } from "../../../providers/availabilit
  * EventEmitter bus BEFORE provider.sendMessage() completes.
  */
 describe("AgentService.sendMessage emits TurnStarted", () => {
+  const roots: string[] = [];
   let db: Database;
   let threadRepo: ThreadRepo;
   let workspaceRepo: WorkspaceRepo;
@@ -93,9 +98,11 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     };
 
     const gitServiceStub = {
-      // process.cwd() is guaranteed to be a real absolute directory, satisfying
-      // AgentService's isAbsolute/existsSync/statSync validation.
-      resolveWorkingDir: vi.fn(() => process.cwd()),
+      resolveWorkingDir: vi.fn(() => {
+        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
+        roots.push(root);
+        return root;
+      }),
     } as unknown as GitService;
 
     const attachmentServiceStub = {
@@ -163,6 +170,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
   afterEach(async () => {
     try { await svc?.stopAll(); }
     finally { await closeAgentStorageTestDatabases(); }
+    await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
   });
 
   it("emits turnStarted through the provider before provider.sendMessage resolves", async () => {

@@ -1,4 +1,8 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { createMockThread } from "@mcode/contracts/testing";
 import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts/models/canonical-agent-progress";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -41,6 +45,7 @@ function publishedEvents() {
 
 
 const THREAD_ID = "thread-abc";
+const roots: string[] = [];
 const ownedFixtures: Array<{ database: OwnedTestDatabase; service: AgentService }> = [];
 
 afterEach(async () => {
@@ -48,6 +53,7 @@ afterEach(async () => {
     try { await drainAgentServicePersistenceForTest(fixture.service); }
     finally { await fixture.database.close(); }
   }
+  await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
 });
 type PersistedThreadStatus = Thread["status"] | "failed" | "idle" | "stopped";
 type PersistedThread = Omit<Thread, "status"> & { status: PersistedThreadStatus };
@@ -103,7 +109,11 @@ async function buildService({
   const messageRepo = new MessageRepo(db, writer);
 
   const gitService = {
-    resolveWorkingDir: vi.fn(() => process.cwd()),
+    resolveWorkingDir: vi.fn(() => {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
+      roots.push(root);
+      return root;
+    }),
     listWorktrees: vi.fn(() => []),
   } as unknown as GitService;
 

@@ -1,4 +1,8 @@
 import "reflect-metadata";
+import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { container } from "tsyringe";
 import type { Database } from "bun:sqlite";
@@ -48,7 +52,11 @@ async function buildService(db: Database) {
   const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 
   const gitService = {
-    resolveWorkingDir: vi.fn(() => process.cwd()),
+    resolveWorkingDir: vi.fn(() => {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
+      roots.push(root);
+      return root;
+    }),
     listWorktrees: vi.fn(() => []),
   } as unknown as GitService;
 
@@ -140,7 +148,12 @@ async function buildService(db: Database) {
   return { svc, plans, threadRepo, workspaceRepo, messageRepo, planQuestionAnswersRepo };
 }
 
-afterEach(closeAgentStorageTestDatabases);
+const roots: string[] = [];
+
+afterEach(async () => {
+  await closeAgentStorageTestDatabases();
+  await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+});
 
 describe("AgentService.sendMessage — plan-questions answered marker", () => {
   let db: Database;
