@@ -1,3 +1,6 @@
+import { logger } from "@mcode/shared";
+
+import { workerLossIncidentId } from "../execution/execution-worker-loss-coordinator.js";
 import type {
   ExecutionSemanticOperation,
   ExecutionSemanticWriter,
@@ -26,9 +29,31 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
     if (this.progress && operation.mutation.kind !== "begin") {
       return await this.progress.acceptWhenReady(operation);
     }
-    const receipt = await this.transactDurable(operation);
-    this.releaseDurable(operation, receipt);
-    return receipt;
+    let committed = false;
+    try {
+      const receipt = await this.transactDurable(operation, () => { committed = true; });
+      this.releaseDurable(operation, receipt);
+      return receipt;
+    } catch (error) {
+      if (committed && operation.mutation.kind === "begin") await this.abandonCommittedBegin(operation);
+      throw error;
+    }
+  }
+
+  /**
+   * A begin that committed but failed before its worker saw the receipt leaves a Running turn that no worker holds,
+   * so no ending or release would ever arrive for it. End it the way a lost worker's turn ends.
+   */
+  private async abandonCommittedBegin(operation: ExecutionSemanticOperation): Promise<void> {
+    const { execution, lease } = operation;
+    try {
+      await this.interruptWorkerLoss({ execution, lease,
+        reason: "The turn start failed after it was saved.", recoveryIncidentId: workerLossIncidentId({ execution, lease }) });
+    } catch (error) {
+      logger.error("Failed turn start could not be interrupted", { threadId: execution.threadId,
+        executionId: execution.executionId, error: error instanceof Error ? error.message : String(error) });
+    }
+    this.released(execution, lease);
   }
 
   /** Let accepted progress drop the execution's owner once its saves finish. */
@@ -36,12 +61,15 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
     this.progress?.releaseExecution(execution, lease);
   }
 
-  private async transactDurable(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
+  private async transactDurable(operation: ExecutionSemanticOperation, onCommitted: () => void): Promise<ExecutionWriteReceipt> {
     await this.progress?.beforeDurableCommand(operation.execution.threadId);
     let receipt: ExecutionWriteReceipt;
     try {
-      receipt = await this.writer.transactSemantic(operation,
-        this.progress ? (events) => this.progress?.observeCommitted(events, operation) : this.publish);
+      receipt = await this.writer.transactSemantic(operation, (events) => {
+        onCommitted();
+        if (this.progress) this.progress.observeCommitted(events, operation);
+        else this.publish(events);
+      });
     } finally {
       this.progress?.cancelDurableCommand(operation.execution.threadId);
     }

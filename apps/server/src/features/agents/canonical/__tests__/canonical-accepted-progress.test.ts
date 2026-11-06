@@ -1838,6 +1838,21 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(progress.depth().owners).toBe(8);
   });
 
+  it("interrupts and releases a start whose reply fails after its durable begin committed", async () => {
+    const transact = writer.transactSemantic.bind(writer);
+    vi.spyOn(writer, "transactSemantic").mockImplementationOnce(async (...args) => {
+      await transact(...args);
+      throw new Error("reply lost after durable begin");
+    });
+    await expect(send(1, start("codex"))).rejects.toThrow("reply lost after durable begin");
+
+    await expect.poll(() => progress.depth().owners).toBe(0);
+    expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Interrupted" });
+    const next = { ...execution, turnId: "after-failed-begin", executionId: "00000000-0000-4000-8000-000000000301" };
+    const nextLease = { ...lease, ownerEpoch: 2, leaseId: "after-failed-begin-lease" };
+    expect((await send(1, start("codex", next), next, nextLease)).result.kind).toBe("committed");
+  });
+
   describe("after a released turn", () => {
     const retry = { ...execution, turnId: "retry-turn", executionId: "00000000-0000-4000-8000-000000000127" };
     const retryLease = { ...lease, ownerEpoch: 2, leaseId: "retry-lease" };
