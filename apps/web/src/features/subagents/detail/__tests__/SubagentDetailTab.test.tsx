@@ -101,6 +101,8 @@ describe("SubagentDetailTab", () => {
   });
 
   it("shows a steps-tier entry's steps, truncation, and its report as the reply", async () => {
+    // Keep the lazy module's cold load outside findByRole's render wait.
+    await import("@/components/chat/MarkdownContent");
     transport.loadSubagentDetail.mockResolvedValue(detail({
       totalSteps: 12,
       steps: [
