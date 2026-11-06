@@ -45,8 +45,11 @@ function accepted(events: AcceptedCanonicalAgentEventEnvelope[]): CanonicalAgent
     through: last.progressPosition.sequence, events };
 }
 
-function live(after: number, delta: string, epoch = EPOCH): CanonicalAgentProgressFrame {
-  return { phase: "live", threadId: THREAD_ID, epoch, after, liveSequence: 1, events: [textDelta(delta)] };
+/** The server numbers live frames in send order, so each new frame here takes the next number. */
+let lastLiveSequence = 0;
+
+function live(after: number, delta: string, epoch = EPOCH, liveSequence = ++lastLiveSequence): CanonicalAgentProgressFrame {
+  return { phase: "live", threadId: THREAD_ID, epoch, after, liveSequence, events: [textDelta(delta)] };
 }
 
 /** The server's checkpoint for live text: the saved text item, with no publication to dispatch again. */
@@ -73,6 +76,7 @@ describe("canonical live progress", () => {
       queueMicrotask(() => callback(0));
       return 1;
     });
+    lastLiveSequence = 0;
     clearRecordCache();
     resetThreadStoreForTests({ currentThreadId: THREAD_ID });
     useThreadStore.setState({
@@ -95,6 +99,23 @@ describe("canonical live progress", () => {
     expect(replica()).toBe(before);
     expect(replica().progress).toMatchObject({ acceptedThrough: 1 });
     expect(replica().recoveryRequired).toBe(false);
+  });
+
+  it("shows a resent live frame once", async () => {
+    const frame = live(1, " world");
+    useThreadStore.getState().handleCanonicalProgress(frame);
+    useThreadStore.getState().handleCanonicalProgress(frame);
+    await flushFrames();
+    expect(getTestThreadStreaming(THREAD_ID)).toBe("Hello world");
+  });
+
+  it("drops a live frame that arrives behind a newer one in the same epoch", async () => {
+    const store = useThreadStore.getState();
+    store.handleCanonicalProgress(live(1, " world", EPOCH, 5));
+    store.handleCanonicalProgress(live(1, " late", EPOCH, 4));
+    store.handleCanonicalProgress(live(1, "!", EPOCH, 6));
+    await flushFrames();
+    expect(getTestThreadStreaming(THREAD_ID)).toBe("Hello world!");
   });
 
   it.each([
