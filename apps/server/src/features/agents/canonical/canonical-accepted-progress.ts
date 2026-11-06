@@ -168,7 +168,7 @@ export class CanonicalAcceptedProgress {
     });
   }
 
-  /** Reserve owner capacity and fence new admission before a durable turn command mutates SQLite. */
+  /** Seed the thread's owner and fence new admission before a durable turn command mutates SQLite. */
   async beforeDurableCommand(threadId: string): Promise<void> {
     this.assertOpen();
     const thread = this.thread(threadId);
@@ -961,8 +961,7 @@ export class CanonicalAcceptedProgress {
     if (this.deletingThreads.has(threadId)) throw new Error("Accepted conversation deletion is in progress");
     const existing = this.threads.get(threadId);
     if (existing) return existing;
-    this.evictSavedThread();
-    if (this.threads.size >= MAX_OWNERS) throw new Error("Live progress owner capacity is full");
+    this.evictIdleOwners();
     const recovery = this.canonical.recoverThread(threadId, {
       conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
     if (recovery.mode !== "snapshot") throw new Error("Canonical progress seed requires a snapshot");
@@ -977,13 +976,18 @@ export class CanonicalAcceptedProgress {
     return thread;
   }
 
-  private evictSavedThread(): void {
-    if (this.threads.size < MAX_OWNERS) return;
+  /**
+   * Make room for a new owner by dropping idle ones. The limit is soft: a send must never fail on it, so when every
+   * owner still has live work the new owner is admitted over the limit. Owners with an execution leave on release;
+   * this sweep bounds the ones nothing releases, such as owners seeded by a durable command that started no turn.
+   * Memory for unsaved progress is bounded separately by the shared retention budget.
+   */
+  private evictIdleOwners(): void {
     for (const [id, thread] of this.threads) {
-      if (ownerIdle(thread)) {
-        this.savingPublisher.flushThread(id);
-        this.threads.delete(id); return;
-      }
+      if (this.threads.size < MAX_OWNERS) return;
+      if (!ownerIdle(thread)) continue;
+      this.savingPublisher.flushThread(id);
+      this.threads.delete(id);
     }
   }
 

@@ -1800,26 +1800,42 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(progress.depth().owners).toBe(0);
   });
 
-  it("keeps a finished turn's owner through owner eviction until its worker releases the execution", async () => {
-    await send(1, start("codex"));
-    await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete")],
-      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
-    await expect.poll(() => progress.depth().pending).toBe(0);
-    const busy = Array.from({ length: 8 }, (_, index) => ({ threadId: `busy-thread-${index}`, turnId: `busy-turn-${index}`,
-      executionId: `00000000-0000-4000-8000-${String(index + 2000).padStart(12, "0")}` }));
-    for (const [index, other] of busy.entries()) {
-      insertThread(other.threadId);
-      const started = send(1, start("codex", other), other, { ...lease, leaseId: `busy-lease-${index}` });
-      if (index < 7) expect((await started).result.kind).toBe("committed");
-      else await expect(started).rejects.toThrow("Live progress owner capacity is full");
+  it("starts a ninth thread while eight finished turns wait for release, and keeps their owners until release", async () => {
+    const finished = Array.from({ length: 8 }, (_, index) => ({
+      identity: { threadId: `finished-thread-${index}`, turnId: `finished-turn-${index}`,
+        executionId: `00000000-0000-4000-8000-${String(index + 2000).padStart(12, "0")}` },
+      lease: { ...lease, leaseId: `finished-lease-${index}` } }));
+    for (const turn of finished) {
+      insertThread(turn.identity.threadId);
+      await send(1, start("codex", turn.identity), turn.identity, turn.lease);
+      await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete", {}, turn.identity)],
+        terminalInput: { ...turn.identity, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } },
+      turn.identity, turn.lease);
     }
-
-    const late = await send(3, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("codex", 2, "ended", { outcome: "completed" })] });
-    expect(late.result.kind).toBe("accepted");
     await expect.poll(() => progress.depth().pending).toBe(0);
-    expect((await send(4, { kind: "release" })).result.kind).toBe("released");
-    expect(progress.depth().owners).toBe(7);
+    expect(progress.depth().owners).toBe(8);
+
+    expect((await send(1, start("codex"))).result.kind).toBe("committed");
+    expect(progress.depth().owners).toBe(9);
+
+    for (const turn of finished) {
+      const late = await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 2, "ended", { outcome: "completed" }, turn.identity)] }, turn.identity, turn.lease);
+      expect(late.result.kind).toBe("accepted");
+    }
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    for (const turn of finished) expect((await send(4, { kind: "release" }, turn.identity, turn.lease)).result.kind).toBe("released");
+    expect(progress.depth().owners).toBe(1);
+  });
+
+  it("caps owners that no execution will release at the owner limit", async () => {
+    for (let index = 0; index < 12; index += 1) {
+      const threadId = `command-thread-${index}`;
+      insertThread(threadId);
+      await progress.beforeDurableCommand(threadId);
+      progress.cancelDurableCommand(threadId);
+    }
+    expect(progress.depth().owners).toBe(8);
   });
 
   describe("after a released turn", () => {
