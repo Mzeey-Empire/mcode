@@ -187,8 +187,10 @@ discarded from retained progress. See
 [`CanonicalAcceptedProgress`](../../../apps/server/src/features/agents/canonical/canonical-accepted-progress.ts)
 and the [progress frame contract](../../../packages/contracts/src/models/canonical-agent-progress.ts).
 
-Text, reasoning, and tool-input pieces from providers on the live allow-list
-are the exception: they show at once in a `live` frame that holds no progress
+Text, reasoning, and tool-input pieces labelled `delivery: "live"` are the
+exception. The shared publisher labels them for providers on its live
+allow-list; Codex has its own publisher and labels its parent pieces, not its
+child pieces. They show at once in a `live` frame that holds no progress
 position, and the owner gathers them into one checkpoint operation. The
 checkpoint is accepted after one second, at 16 KiB of text, or before anything
 that must observe it: a saved operation, a control or durable command, a
