@@ -15,7 +15,8 @@ import {
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { createAgentModelState, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
-import { useThreadStore, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
+import { useThreadStore, MESSAGE_FETCH_SIZE, scheduleDrainAfterEdit } from "@/stores/threadStore";
+import { useQueueStore } from "@/stores/queueStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getThreadRecord } from "@/stores/thread-record";
 import { clearRecordCache, getCachedRecord } from "@/features/conversation/hydration/record-cache";
@@ -92,6 +93,91 @@ describe("hidden completion residency", () => {
     resetThreadStoreTestState();
   });
   afterEach(() => vi.useRealTimers());
+
+  it("holds a queued follow-up while hidden plan questions are pending", async () => {
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: "plan" })] });
+    useQueueStore.setState({ queues: {}, autoDrainSuppressedThreadIds: new Set<string>(), inFlightQueuedMessages: {} });
+    const execution = startHiddenConversation("plan");
+    useThreadStore.getState().setPlanQuestions("plan", [{
+      id: "q1", category: "CHOICE", question: "Which?", options: [
+        { id: "a", title: "A", description: "First choice" },
+        { id: "b", title: "B", description: "Second choice" },
+      ],
+    }]);
+    useQueueStore.getState().enqueue("plan", {
+      content: "follow-up", displayContent: "follow-up", attachments: [],
+      model: "claude-sonnet-4-6", permissionMode: "full",
+    });
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "plan", messageId: "plan-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "plan-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    scheduleDrainAfterEdit("plan");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(mockTransport.sendMessage).not.toHaveBeenCalled();
+    expect(useQueueStore.getState().queues.plan?.map((message) => message.content)).toEqual(["follow-up"]);
+    expect(useThreadStore.getState().records.get("plan")?.planQuestionsStatus).toBe("pending");
+  });
+
+  it("shows the settled file-effect summary immediately after restoring a retired turn", async () => {
+    const execution = startHiddenConversation("effects");
+    useThreadStore.setState((state) => ({ records: patchThreadRecord(state.records, "effects", {
+      fileEffectTurnId: "effects",
+      fileEffectSummary: { revision: 2, fileCount: 1, additions: 3, deletions: 1, effects: [] },
+    }) }));
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "effects", messageId: "effects-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "effects-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 1, filesChanged: ["src/a.ts"],
+    });
+    expect(useThreadStore.getState().records.has("effects")).toBe(false);
+    const restoration = activateTestConversation("effects");
+    expect(useThreadStore.getState().records.get("effects")?.fileEffectSummary).toEqual({
+      revision: 2, fileCount: 1, additions: 3, deletions: 1, effects: [],
+    });
+    await restoration;
+  });
+
+  it("does not cache a replacement execution when an old persistence receipt arrives", async () => {
+    const execution = startHiddenConversation("replaced");
+    execution.complete();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "replaced", messageId: "replaced-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "replaced-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    useThreadStore.getState().handleAgentEvent({
+      type: "turnStarted", threadId: "replaced",
+      turnExecutionId: "00000000-0000-4000-8000-000000000002",
+    });
+    useThreadStore.getState().handleAgentEvent({
+      type: "toolUse", threadId: "replaced",
+      turnExecutionId: "00000000-0000-4000-8000-000000000002",
+      toolCallId: "replacement-tool", toolName: "Bash", toolInput: { command: "work" },
+    });
+    execution.save();
+    await vi.advanceTimersByTimeAsync(100);
+    useThreadStore.getState().handleTurnPersisted({
+      threadId: "replaced", messageId: "replaced-answer", executionId: CACHE_EXECUTION,
+      settledMessage: { id: "replaced-answer", sequence: 10 },
+      outcome: "completed", toolCallCount: 0, filesChanged: [],
+    });
+    expect(getCachedRecord("replaced")).toBeUndefined();
+    expect(useThreadStore.getState().records.get("replaced")).toMatchObject({
+      turnExecutionId: "00000000-0000-4000-8000-000000000002", runtimePhase: "running",
+      toolCalls: [{ id: "replacement-tool", isComplete: false }],
+    });
+  });
 
   it("keeps persisted file changes when the hidden turn's saved frame lands first", async () => {
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "late", has_file_changes: false })] });

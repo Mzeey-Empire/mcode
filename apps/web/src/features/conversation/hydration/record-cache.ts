@@ -79,7 +79,11 @@ export function projectConversationCacheState(record: ThreadRecord): Conversatio
     answeredPlanMessageIds: record.answeredPlanMessageIds,
     assistantResponseKeys: record.assistantResponseKeys,
     lastHydratedAt: record.lastHydratedAt,
-    settledFileEffectSummary: record.fileEffectTurnId.length === 0
+    settledFileEffectSummary: (record.fileEffectTurnId.length === 0
+      || record.runtimePhase === "completed"
+      || record.runtimePhase === "cancelled"
+      || record.runtimePhase === "errored"
+      || record.runtimePhase === "interrupted")
       ? record.fileEffectSummary
       : null,
   };

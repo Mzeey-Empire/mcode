@@ -965,6 +965,7 @@ function hasDurablySettledExecution(threadId: string, record: ThreadRecord, exec
 
 function hasPendingConversationResults(record: ThreadRecord): boolean {
   return record.optimisticUserMessageId !== null
+    || record.planQuestionsStatus === "pending"
     || record.pendingTurnPersistMessageIds.length > 0
     || record.savingStatus !== null
     || record.savingStatuses.length > 0
