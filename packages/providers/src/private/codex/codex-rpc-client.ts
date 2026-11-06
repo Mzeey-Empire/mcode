@@ -57,7 +57,12 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   private readonly pending = new Map<number, PendingRequest>();
   private nextId = 1;
   private disposed = false;
-  private lineBuffer = "";
+  /**
+   * Pieces of the line still waiting for its newline. They are joined once that newline arrives,
+   * because rescanning a growing buffer on every chunk is quadratic and an app-server line can
+   * reach tens of megabytes. A partial line left when stdout ends is never dispatched.
+   */
+  private partialLine: string[] = [];
   /** Complete lines already read from stdout but not yet dispatched, kept in arrival order. */
   private unprocessedLines: string[] = [];
   private readPaused = false;
@@ -91,11 +96,7 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
     this.stdout = stdout;
 
     this.onData = (chunk: string) => {
-      this.lineBuffer += chunk;
-      const lines = this.lineBuffer.split("\n");
-      // Keep the last (potentially incomplete) segment in the buffer
-      this.lineBuffer = lines.pop() ?? "";
-      this.unprocessedLines.push(...lines);
+      this.frameLines(chunk);
       this.dispatchUnprocessedLines();
     };
 
@@ -297,6 +298,20 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  /** Queues the lines that `chunk` completes, reading each character of the chunk once. */
+  private frameLines(chunk: string): void {
+    let lineStart = 0;
+    let newline = chunk.indexOf("\n");
+    while (newline !== -1) {
+      this.partialLine.push(chunk.slice(lineStart, newline));
+      this.unprocessedLines.push(this.partialLine.join(""));
+      this.partialLine = [];
+      lineStart = newline + 1;
+      newline = chunk.indexOf("\n", lineStart);
+    }
+    if (lineStart < chunk.length) this.partialLine.push(chunk.slice(lineStart));
+  }
 
   private releaseBackpressure(): void {
     this.backpressureReleased = true;
