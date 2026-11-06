@@ -1,12 +1,13 @@
 import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import type { ParentNarrativeRecoveryCommit } from "./parent-turn-durability.js";
-import { assertActiveTurnRecoveryRetention } from "./active-turn-recovery-retention-policy.js";
+import { fitsActiveTurnRecoveryRetention } from "./active-turn-recovery-retention-policy.js";
 import type { NarrativeRecoveryChanges } from "../conversation/narrative/narrative-turn-state.js";
 
 /** One narrative difference awaiting acknowledgement by its persistence or acceptance owner. */
 export interface PreparedNarrativeRecoveryDelta {
   readonly items: readonly ParentNarrativeRecoveryItem[];
+  readonly droppedEventCount?: number;
   readonly discardedItemIds: readonly string[];
   acknowledge(): void;
 }
@@ -17,6 +18,7 @@ export class NarrativeRecoveryDelta {
   private retainedBytes = 0;
   private retainedRecords = 0;
   private revision = 0;
+  private overflowed = false;
 
   /** Share fingerprints until acknowledgement replaces the map; saving belongs to the progress owner. */
   fork(): NarrativeRecoveryDelta {
@@ -25,11 +27,15 @@ export class NarrativeRecoveryDelta {
     copy.retainedBytes = this.retainedBytes;
     copy.retainedRecords = this.retainedRecords;
     copy.revision = this.revision;
+    copy.overflowed = this.overflowed;
     return copy;
   }
 
   /** Compare a complete snapshot to the last acknowledged one. */
   prepare(snapshot: readonly ParentNarrativeRecoveryItem[]): PreparedNarrativeRecoveryDelta | null {
+    if (this.overflowed) return this.loss();
+    const snapshotBytes = snapshot.reduce((bytes, item) => bytes + Buffer.byteLength(JSON.stringify(item), "utf8"), 0);
+    if (!fitsActiveTurnRecoveryRetention(snapshot.length, snapshotBytes)) return this.loss();
     const next = new Map<string, string>();
     const items: ParentNarrativeRecoveryItem[] = [];
     let retainedBytes = 0;
@@ -65,14 +71,14 @@ export class NarrativeRecoveryDelta {
   /** Update one already checkpointed tool without treating unrelated records as deleted. */
   prepareToolUpdate(item: Extract<ParentNarrativeRecoveryItem, { kind: "toolCall" }> | null): PreparedNarrativeRecoveryDelta | null {
     if (!item) return null;
+    if (this.overflowed) return this.loss();
     const id = `${item.kind}:${item.record.id}`;
     const previous = this.fingerprints.get(id);
     if (previous === undefined) throw new Error("Tool recovery update requires an acknowledged full checkpoint");
     const fingerprint = JSON.stringify(item);
     const bytes = Buffer.byteLength(fingerprint, "utf8");
-    if (bytes > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes) throw new Error("Parent narrative recovery item exceeds the active-turn byte limit");
     const retainedBytes = this.retainedBytes + bytes - Buffer.byteLength(previous, "utf8");
-    assertActiveTurnRecoveryRetention(this.retainedRecords, retainedBytes);
+    if (!fitsActiveTurnRecoveryRetention(this.retainedRecords, retainedBytes)) return this.loss();
     if (previous === fingerprint) return null;
     const preparedAt = this.revision;
     return {
@@ -89,13 +95,11 @@ export class NarrativeRecoveryDelta {
 
   /** Compare only an event's changed records; accepted history is not unsaved retention. */
   prepareChanges(changes: NarrativeRecoveryChanges): PreparedNarrativeRecoveryDelta | null {
+    if (this.overflowed) return this.loss();
     const updates = new Map<string, string>();
     const items = changes.items.filter((item) => {
       const id = `${item.kind}:${item.record.id}`;
       const fingerprint = JSON.stringify(item);
-      if (Buffer.byteLength(fingerprint, "utf8") > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes) {
-        throw new Error("Parent narrative recovery item exceeds the active-turn byte limit");
-      }
       updates.set(id, fingerprint);
       return this.fingerprints.get(id) !== fingerprint;
     });
@@ -104,11 +108,20 @@ export class NarrativeRecoveryDelta {
     if (items.length === 0 && discardedItemIds.length === 0) return null;
     const changedBytes = items.reduce((bytes, item) => bytes + Buffer.byteLength(JSON.stringify(item), "utf8"), 0)
       + discardedItemIds.reduce((bytes, id) => bytes + Buffer.byteLength(id, "utf8"), 0);
-    assertActiveTurnRecoveryRetention(items.length + discardedItemIds.length, changedBytes);
+    if (!fitsActiveTurnRecoveryRetention(items.length + discardedItemIds.length, changedBytes)) return this.loss();
     const preparedAt = this.revision;
     return { items, discardedItemIds, acknowledge: () => {
       if (this.revision !== preparedAt) throw new Error("Narrative recovery delta was already superseded");
       this.acknowledgeChanges(updates, discardedItemIds);
+    } };
+  }
+
+  private loss(): PreparedNarrativeRecoveryDelta {
+    const preparedAt = this.revision;
+    return { items: [], discardedItemIds: [], droppedEventCount: 1, acknowledge: () => {
+      if (this.revision !== preparedAt) throw new Error("Narrative recovery delta was already superseded");
+      this.overflowed = true;
+      this.revision += 1;
     } };
   }
 
@@ -163,6 +176,7 @@ export function splitNarrativeRecoveryDelta(
     discardedItemIds.push(itemId);
   }
   flush();
+  if (prepared.droppedEventCount) chunks.push({ executionId, items: [], droppedEventCount: prepared.droppedEventCount });
   return chunks;
 }
 

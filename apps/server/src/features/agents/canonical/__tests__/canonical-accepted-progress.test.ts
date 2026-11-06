@@ -46,6 +46,8 @@ import { persistTurnFailure } from "../turn-ending.js";
 import { TurnSteerStore } from "../../steering/persistence/turn-steer-store.js";
 import { TurnSavingStatusSchema, type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
+import { AcceptedContentRejected } from "../accepted-save-failure.js";
+import { ParentAssistantTextCheckpointStore } from "../../turns/parent-assistant-text-checkpoint-store.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -327,6 +329,17 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(savedText()).toBe("prefixidle");
     });
 
+    it("keeps checkpoint text when rejected contents are replaced before the next append", async () => {
+      await begin();
+      vi.spyOn(writer, "appendAccepted").mockRejectedValueOnce(new AcceptedContentRejected("fixture payload rejected"));
+      await piece(" first");
+      await progress.waitForSaved(execution.threadId);
+      await piece(" second");
+      await progress.waitForSaved(execution.threadId);
+      expect(new ParentAssistantTextCheckpointStore(db).restore(execution.executionId)).toBe("prefix first second");
+      expect(savedText()).toBe("prefix first second");
+    });
+
     it.each(["claude", "devin", "codex"])("completes a %s turn containing only live text", async (provider) => {
       await begin(provider);
       await piece(" answer", provider);
@@ -340,8 +353,14 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
         .toEqual(["prefix answer"]);
     });
 
-    it("reclassifies live text between two model loops through the shared publisher", async () => {
+    it.each([false, true])("reclassifies live text between two model loops with overflow %s", async (overflow) => {
       await begin("copilot");
+      if (overflow) {
+        for (let index = 0; index < 20; index++) {
+          await piece("x".repeat(15360), "copilot");
+          await progress.waitForSaved(execution.threadId);
+        }
+      }
       const routing = { ...execution, deliveryAttempt: 1 };
       const publisher = new CanonicalLiveEventPublisher("unbounded", "copilot", { submit: async (batch) => {
         const events = batch.events.map((event) => {
@@ -361,7 +380,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
         turnExecutionId: execution.executionId, delta: " searching", isFinalResponse: true }), []);
       await publisher.waitForExecution(routing);
-      expect(liveFrames()).toHaveLength(1);
+      expect(liveFrames()).toHaveLength(overflow ? 21 : 1);
       await progress.waitForSaved(execution.threadId);
       publisher.publish(routing, providerRuntimeEvent({ type: "assistantMessageBoundary", threadId: execution.threadId,
         turnExecutionId: execution.executionId, isFinalResponse: false }), []);
@@ -376,8 +395,26 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
       expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
         .toEqual(["Final answer"]);
+      if (overflow) expect(savedEventKinds()).toContain("ingest.volatile-truncated");
       expect(new ThoughtSegmentStore(reader).listByMessage(deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`)))
-        .toEqual(expect.arrayContaining([expect.objectContaining({ text: "prefix searching" })]));
+        .toEqual(expect.arrayContaining([expect.objectContaining({ text: `prefix${overflow ? "x".repeat(307200) : ""} searching` })]));
+    });
+
+    it.each([true, false])("completes 300 KiB assistant text with live delivery %s", async (live) => {
+      await begin();
+      for (let index = 0; index < 20; index++) {
+        expect((await piece("x".repeat(index === 0 ? 15354 : 15360), "claude", live)).result.kind).toBe("accepted");
+        await progress.waitForSaved(execution.threadId);
+      }
+      expect(db.prepare("SELECT retained_chunks FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
+        .get(execution.executionId)).toEqual({ retained_chunks: -1 });
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual([`prefix${"x".repeat(307194)}`]);
+      expect(pushes.saving.filter((status) => status.mode === "saving-failed" || status.mode === "save-retrying")).toEqual([]);
     });
 
     it("saves at 16 KiB of pending text without waiting for the timer", async () => {

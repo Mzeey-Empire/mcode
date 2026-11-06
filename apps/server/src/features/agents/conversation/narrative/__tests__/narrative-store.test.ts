@@ -7,6 +7,7 @@ import { ToolCallRecordRepo } from "../../../tools/persistence/tool-call-record-
 import { ThoughtSegmentRepo } from "../persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../../events/persistence/hook-execution-repo.js";
 import { NarrativeStore } from "../narrative-store.js";
+import { NarrativeRecoveryDelta } from "../../../turns/narrative-recovery-delta.js";
 import { NarrativeTurnState } from "../narrative-turn-state.js";
 import { ApprovalReceiptStore } from "../../../approvals/approval-receipt-store.js";
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../../runtime/persistence/sqlite/bounded-write-batches.js";
@@ -762,6 +763,22 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     return { toolCallId, toolName, toolInput: {}, parentToolCallId };
   }
 
+  it("retains clean long commentary while marking optional recovery lossy", () => {
+    const state = new NarrativeTurnState({ threadId: THREAD, turnId: "turn", executionId: "execution" });
+    state.beginTurn(THREAD);
+    const text = "x".repeat(307200);
+    const staged = state.stageNarrationSegment(THREAD, text);
+    if (!staged) throw new Error("Expected staged commentary");
+    const snapshot = state.recoverySnapshotWithStagedNarration(THREAD, staged);
+    const delta = new NarrativeRecoveryDelta();
+    const recovery = delta.prepare(snapshot);
+    expect(recovery).toMatchObject({ items: [], droppedEventCount: 1 });
+    recovery?.acknowledge();
+    state.applyStagedNarrationSegment(THREAD, staged);
+    expect(state.prepareNarrativePersistence(THREAD, "assistant", "Final answer", "completed").thoughts)
+      .toEqual([expect.objectContaining({ text, messageId: "assistant" })]);
+  });
+
   it("emits late Agent identity as data without a repository", () => {
     const state = new NarrativeTurnState(THREAD);
     state.beginTurn(THREAD);
@@ -926,7 +943,8 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     store.resetTurnCounters(THREAD);
     store.openOrExtendThought(THREAD, "x".repeat(ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes));
 
-    expect(() => store.recoverySnapshot(THREAD)).toThrow("active-turn byte limit");
+    expect(new NarrativeRecoveryDelta().prepare(store.recoverySnapshot(THREAD)))
+      .toMatchObject({ items: [], droppedEventCount: 1 });
   });
 
   it("keeps mixed live recovery and persisted narrative in the same order", async () => {
@@ -968,7 +986,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     ]);
   });
 
-  it("rejects individually valid recovery records that exceed the retained byte budget together", () => {
+  it("keeps clean history when optional recovery exceeds its byte budget", () => {
     store.beginTurn(THREAD);
     store.resetTurnCounters(THREAD);
     store.bufferToolCall(THREAD, {
@@ -989,7 +1007,9 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       });
     }
 
-    expect(() => store.recoverySnapshot(THREAD)).toThrow("retained byte capacity");
+    const recovery = new NarrativeRecoveryDelta().prepare(store.recoverySnapshot(THREAD));
+    expect(recovery).toMatchObject({ items: [], droppedEventCount: 1 });
+    expect(store.terminalSnapshot(THREAD)).toHaveLength(recordCount);
   });
 
   it("drains a hook that arrives while a bounded narrative write yields", async () => {

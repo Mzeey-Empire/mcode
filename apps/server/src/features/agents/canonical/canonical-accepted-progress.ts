@@ -1386,7 +1386,8 @@ function compatibilityFields(write: AcceptedExecutionWriteIntent, final: boolean
 
 /** Keep the ordinal and, for a finish, the turn end; drop the publication, narrative, features, and messages. */
 function replacementFields(write: AcceptedExecutionWriteIntent, reason: string):
-  Pick<CanonicalAcceptedWriteInput, "compatibility" | "terminalOutcome"> {
+  Pick<CanonicalAcceptedWriteInput, "compatibility" | "terminalOutcome" | "assistantTextCheckpoint"> {
+  if (write.kind === "control") return { assistantTextCheckpoint: write.assistantTextCheckpoint };
   if (write.kind !== "execution") return {};
   const { operationId, execution, lease, ordinal, mutation } = write.operation;
   const finish = mutation.kind === "finish-live-event" ? { outcome: mutation.outcome, input: mutation.input,

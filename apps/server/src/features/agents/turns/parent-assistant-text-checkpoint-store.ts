@@ -125,10 +125,7 @@ export class ParentAssistantTextCheckpointStore {
   /** Import every fsynced journal before startup recovery reads provisional text. */
   importRecoveryJournals(): string[] {
     return this.recoveryJournal.drainAll((input) => {
-      const result = this.appendRecoveredChunk(input);
-      if (result.outcome === "overflow") {
-        throw new Error("Assistant text recovery journal exceeds the retained checkpoint capacity");
-      }
+      this.appendRecoveredChunk(input);
     });
   }
 
@@ -144,6 +141,9 @@ export class ParentAssistantTextCheckpointStore {
     const checkpoint = this.loadCheckpoint(prepared.executionId);
     this.verifyCheckpointRouting(checkpoint, prepared);
     const durableThrough = checkpoint?.lastSequence ?? 0;
+    if (checkpoint?.retainedChunks === -1) {
+      return { outcome: "overflow", durableThrough, committedItems: 0, committedBytes: 0 };
+    }
     const duplicate = this.duplicateCheckpointResult(prepared, durableThrough);
     if (duplicate) return duplicate;
     this.verifyNextSequence(prepared, durableThrough);
@@ -211,6 +211,13 @@ export class ParentAssistantTextCheckpointStore {
     const retainedBytes = (checkpoint?.retainedBytes ?? 0) + prepared.byteLength;
     const retainedChunks = (checkpoint?.retainedChunks ?? 0) + 1;
     if (retainedBytes <= this.limits.maxBytes && retainedChunks <= this.limits.maxChunks) return undefined;
+    // A negative chunk count marks a sealed prefix without changing the existing database format.
+    this.orm.insert(parentAssistantTextCheckpoints).values({
+      executionId: prepared.executionId, threadId: prepared.threadId, turnId: prepared.turnId,
+      lastSequence: durableThrough, retainedBytes: checkpoint?.retainedBytes ?? 0,
+      retainedChunks: -1, updatedAt: new Date().toISOString(),
+    }).onConflictDoUpdate({ target: parentAssistantTextCheckpoints.executionId,
+      set: { retainedChunks: -1, updatedAt: new Date().toISOString() } }).run();
     return { outcome: "overflow", durableThrough, committedItems: 0, committedBytes: 0 };
   }
 
@@ -255,6 +262,11 @@ export class ParentAssistantTextCheckpointStore {
   /** Restore the exact durable text prefix in accepted order. */
   restore(executionId: string): string {
     return this.restoreChunks(executionId).map((chunk) => chunk.text).join("");
+  }
+
+  /** Whether retention sealed this execution's recovery prefix. */
+  isOverflowed(executionId: string): boolean {
+    return this.loadCheckpoint(executionId)?.retainedChunks === -1;
   }
 
   /** Restore durable chunks in accepted order for recovery and diagnostics. */

@@ -126,9 +126,10 @@ export class CodexLiveEventEffects {
   }
 
   private narrativeEffects(intent: Extract<CodexLiveWriterIntent, { kind: "narrative-recovery" }>, effects: ParentLiveEffects): ParentLiveEffects {
-    if (intent.items.length === 0 && intent.discardedItemIds.length === 0) return effects;
+    if (intent.items.length === 0 && intent.discardedItemIds.length === 0 && !intent.droppedEventCount) return effects;
     return { ...effects, narrative: { executionId: this.execution.executionId,
-      items: intent.items, discardedItemIds: intent.discardedItemIds } };
+      items: intent.items, discardedItemIds: intent.discardedItemIds,
+      ...(intent.droppedEventCount ? { droppedEventCount: intent.droppedEventCount } : {}) } };
   }
 
   private featureEffects(

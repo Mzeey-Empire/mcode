@@ -35,7 +35,6 @@ import {
   type RunBoundedWriteBatchesInput,
   type WriteBatchResult,
 } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
-import { assertActiveTurnRecoveryRetention } from "../turns/active-turn-recovery-retention-policy.js";
 import {
   CanonicalAgentDiagnostics,
   type CanonicalDiagnosticExport,
@@ -301,17 +300,6 @@ function narrativeItemKind(entryKind: Exclude<NarrativeEntry["kind"], "assistant
 function narrativeParentItem(entry: NarrativeEntry): { parentItemId?: string } {
   if (entry.kind !== "toolCall" || !("parent_tool_call_id" in entry.record)) return {};
   return entry.record.parent_tool_call_id ? { parentItemId: `toolCall:${entry.record.parent_tool_call_id}` } : {};
-}
-
-/** Byte size of the retained narrative content: persisted items plus the ids retained for discarded ones. */
-function retainedNarrativeRecoveryBytes(input: ParentNarrativeRecoveryCommitInput): number {
-  const persistedBytes = input.items.reduce((total, item) => (
-    total + Buffer.byteLength(JSON.stringify(item), "utf8")
-  ), 0);
-  const discardedBytes = (input.discardedItemIds ?? []).reduce((total, itemId) => (
-    total + Buffer.byteLength(itemId, "utf8")
-  ), 0);
-  return persistedBytes + discardedBytes;
 }
 
 function parentTerminalPayload(
@@ -1994,13 +1982,11 @@ export class CanonicalAgentStore {
     if (!turn) return undefined;
     const thread = this.loadThread(turn.threadId);
     if (!thread) throw new Error(`Canonical parent thread not found: ${turn.threadId}`);
-    if (input.items.length === 0 && (input.discardedItemIds?.length ?? 0) === 0) return null;
     const checkpoint = this.loadCheckpoint(input.executionId);
     if (!checkpoint) throw new Error(`Canonical parent checkpoint was not found: ${input.executionId}`);
     if (checkpoint.terminalOutcome) return null;
     const drafts = this.parentNarrativeRecoveryDrafts(input, thread, turn);
-    // Retention bounds the retained narrative, not the envelope transport overhead.
-    assertActiveTurnRecoveryRetention(drafts.length, retainedNarrativeRecoveryBytes(input));
+    if (drafts.length === 0) return null;
     return {
       commit: {
         threadId: thread.id,

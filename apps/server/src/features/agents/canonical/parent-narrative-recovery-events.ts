@@ -4,6 +4,8 @@ import { type AgentItem, type AgentThread, type AgentTurn } from "@mcode/contrac
 import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import type { CanonicalAgentEventDraft, ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 
+import { fitsActiveTurnRecoveryRetention } from "../turns/active-turn-recovery-retention-policy.js";
+
 /** Builds recovery events from hydrated items before any storage work. */
 export function prepareParentNarrativeRecoveryEvents(input: {
   readonly recovery: ParentNarrativeRecoveryCommitInput;
@@ -12,6 +14,14 @@ export function prepareParentNarrativeRecoveryEvents(input: {
   readonly findItem: (id: string) => AgentItem | null | undefined;
 }): CanonicalAgentEventDraft[] {
   const { recovery, thread, turn, findItem } = input;
+  const bytes = Buffer.byteLength(JSON.stringify(recovery), "utf8");
+  const records = recovery.items.length + (recovery.discardedItemIds?.length ?? 0);
+  if (recovery.droppedEventCount || !fitsActiveTurnRecoveryRetention(records, bytes)) {
+    return [{ eventId: `narrative-recovery-loss:${recovery.executionId}`,
+      routing: { threadId: thread.id, turnId: turn.id, executionId: recovery.executionId },
+      sourceProviderId: thread.providerId, sourceIdentities: [],
+      payload: { type: "ingest.volatile-truncated", droppedEventCount: recovery.droppedEventCount ?? 1 } }];
+  }
   const persisted = recovery.items.map((entry): CanonicalAgentEventDraft => {
     const itemId = narrativeItemId(entry);
     const item: AgentItem = {
