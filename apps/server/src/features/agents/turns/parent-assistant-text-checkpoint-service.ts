@@ -33,8 +33,7 @@ export class ParentAssistantTextCheckpointService {
   /** Remove recovery journals only after their complete records have committed. */
   importRecoveryJournals(): Promise<string[]> {
     return this.recoveryJournal.drainAllAsync(async (input) => {
-      const result = await this.appendRecoveredChunk(input);
-      if (result.outcome === "overflow") throw new Error("Assistant text recovery journal exceeds the retained checkpoint capacity");
+      await this.appendRecoveredChunk(input);
     });
   }
 

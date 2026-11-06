@@ -142,7 +142,8 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     return claim.lease;
   }
 
-  it.each(["claude", "devin", "codex"])("recovers checkpointed %s live text after its worker dies", async (providerId) => {
+  it.each(["claude", "devin", "codex", "overflow"])("recovers checkpointed %s live text after its worker dies", async (scenario) => {
+    const providerId = scenario === "overflow" ? "claude" : scenario;
     coordinator.scheduler.shutdown();
     const progress = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, owner, writer, () => {}), writer);
     const port = new CanonicalExecutionWriterPort(writer, () => {}, undefined, undefined, progress);
@@ -167,7 +168,8 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
         input: { thread: { id: execution.threadId, workspaceId: "lost-worker-workspace", providerId, createdAt: NOW },
           turnId: execution.turnId, executionId: execution.executionId, permissionMode: "supervised", providerIdentities: [],
           userMessage: { kind: "create", messageId: `${execution.threadId}-user`, content: "Question", sequence: 1 } } });
-      for (const [index, delta] of ["Partial ", "answer"].entries()) {
+      const deltas = scenario === "overflow" ? Array.from({ length: 20 }, () => "x".repeat(15360)) : ["Partial ", "answer"];
+      for (const [index, delta] of deltas.entries()) {
         const id = `live-text-${index}`;
         await send({ kind: "event", phase: "running", nativeCursor: null, events: [{
           eventId: id, routing: { ...execution, itemId: id }, sourceProviderId: providerId, sourceIdentities: [], delivery: "live",
@@ -175,13 +177,15 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
             kind: "system", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
             payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: { type: "textDelta",
               threadId: execution.threadId, turnExecutionId: execution.executionId, delta, isFinalResponse: true } } } } } }] });
+        if (scenario === "overflow") await progress.waitForSaved(execution.threadId);
       }
       await progress.waitForSaved(execution.threadId);
+      const prefix = scenario === "overflow" ? "x".repeat(261120) : "Partial answer";
       workers.at(-1)?.crash();
       expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
       await progress.waitForSaved(execution.threadId);
       expect(new MessageRepo(db, owner).listIncludingInternal(execution.threadId)
-        .filter((message) => message.role === "assistant").map((message) => message.content)).toEqual(["Partial answer"]);
+        .filter((message) => message.role === "assistant").map((message) => message.content)).toEqual([prefix]);
     } finally {
       await progress.close();
     }

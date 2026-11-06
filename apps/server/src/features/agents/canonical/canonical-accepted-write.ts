@@ -108,8 +108,7 @@ export class CanonicalAcceptedEventWrite {
     const store = new ParentAssistantTextCheckpointStore(this.db);
     const chunkSize = ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 1;
     for (let offset = 0; offset < chunks.length; offset += chunkSize) {
-      const result = store.appendChunk(chunks.slice(offset, offset + chunkSize));
-      if (result.outcome !== "committed") throw new Error("Live assistant text checkpoint exceeded retention");
+      store.appendChunk(chunks.slice(offset, offset + chunkSize));
     }
   }
 

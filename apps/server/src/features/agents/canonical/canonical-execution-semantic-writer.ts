@@ -154,10 +154,10 @@ const storedReceiptSchema = z.object({
   }).optional(),
   providerEvents: z.array(projectedProviderEventSchema).optional(),
   assistantTextCheckpoint: z.object({
-    outcome: z.literal("committed"),
+    outcome: z.enum(["committed", "overflow"]),
     durableThrough: z.number().int().nonnegative(),
-    committedItems: z.number().int().positive(),
-    committedBytes: z.number().int().positive(),
+    committedItems: z.number().int().nonnegative(),
+    committedBytes: z.number().int().nonnegative(),
   }).optional(),
   planQuestions: z.object({
     publicationId: z.string(), threadId: z.string(),
@@ -743,18 +743,21 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   ): ParentAssistantTextCheckpointResult | undefined {
     if (text.kind === "unchanged") return undefined;
     if (text.kind === "reclassify") {
-      if (this.assistantText.restore(executionId) !== (text.retainedText ?? "") + text.expectedText) throw new SemanticConflict();
+      const stored = this.assistantText.restore(executionId);
+      const expected = (text.retainedText ?? "") + text.expectedText;
+      const matches = this.assistantText.isOverflowed(executionId) ? expected.startsWith(stored) : expected === stored;
+      if (!matches) throw new SemanticConflict();
       return undefined;
     }
     const result = this.assistantText.appendChunk(text.kind === "append" ? text.inputs : [text.input]);
-    if (result.outcome !== "committed") throw new SemanticConflict();
+    if (result.outcome === "duplicate") throw new SemanticConflict();
     return result;
   }
 
   private resetReclassifiedText(text: Extract<ParentLiveEffects["text"], { kind: "reclassify" }>, execution: ExecutionIdentity): void {
     if (!this.assistantText.resetInTransaction(execution.executionId)) throw new SemanticConflict();
-    if (text.retainedText && this.assistantText.appendChunk([{ ...execution, sequence: 1, text: text.retainedText }]).outcome !== "committed") {
-      throw new SemanticConflict();
+    if (text.retainedText) {
+      this.assistantText.appendChunk([{ ...execution, sequence: 1, text: text.retainedText }]);
     }
   }
 
