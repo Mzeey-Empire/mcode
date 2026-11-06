@@ -1,8 +1,8 @@
 import "reflect-metadata";
+import { createTurnWorkingDirForTest } from "./turn-working-dir-test-helper.js";
 import { startupEnvironmentFixture } from "../../../projects/environment/testing/startup-environment-fixture.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as NodeEvents from "node:events";
-import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -121,7 +121,7 @@ async function setupEnvironmentForTest(enabled: boolean, db: Database, cwd: stri
  * produced them, exercising the handler registered in `init()`.
  */
 async function buildService(
-  cwd = process.cwd(),
+  cwd = createTurnWorkingDirForTest(roots),
   mutationReservations = new ThreadControlMutationReservationService(),
   providers?: IAgentProvider[],
   canonicalTurns = false,
@@ -159,11 +159,7 @@ async function buildService(
   (providerEmitter as any).stopSession = vi.fn(() => Promise.resolve());
 
   const gitService = {
-    resolveWorkingDir: vi.fn(() => {
-      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
-      roots.push(root);
-      return root;
-    }),
+    resolveWorkingDir: vi.fn(() => cwd),
     listWorktrees: vi.fn(() => []),
   } as unknown as GitService;
 
@@ -1021,11 +1017,7 @@ describe("AgentService Ended finalization through the production execution worke
       shutdown: vi.fn(),
     } as unknown as IProviderRegistry;
     const gitService = {
-      resolveWorkingDir: vi.fn(() => {
-        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
-        roots.push(root);
-        return root;
-      }),
+      resolveWorkingDir: vi.fn(() => createTurnWorkingDirForTest(roots)),
       listWorktrees: vi.fn(() => []),
     } as unknown as GitService;
     const attachmentService = {

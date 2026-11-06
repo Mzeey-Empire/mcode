@@ -1,8 +1,6 @@
 import "reflect-metadata";
-import * as NodeFS from "node:fs";
+import { createTurnWorkingDirForTest } from "./turn-working-dir-test-helper.js";
 import * as NodeFSPromises from "node:fs/promises";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
 import { createMockThread } from "@mcode/contracts/testing";
 import { CanonicalAgentProgressFrameSchema } from "@mcode/contracts/models/canonical-agent-progress";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -109,11 +107,7 @@ async function buildService({
   const messageRepo = new MessageRepo(db, writer);
 
   const gitService = {
-    resolveWorkingDir: vi.fn(() => {
-      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-agent-turn-"));
-      roots.push(root);
-      return root;
-    }),
+    resolveWorkingDir: vi.fn(() => createTurnWorkingDirForTest(roots)),
     listWorktrees: vi.fn(() => []),
   } as unknown as GitService;
 
