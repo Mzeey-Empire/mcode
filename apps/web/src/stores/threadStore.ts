@@ -93,6 +93,7 @@ import {
 import {
   applyCanonicalPushEvents,
   applyCanonicalReconnectRecovery,
+  type CanonicalAgentReplica,
 } from "./canonical-agent-replica";
 import { applyCanonicalProgressFrame, type CanonicalProgressUpdate } from "./canonical-agent-progress";
 import { CanonicalProgressBuffer } from "./canonical-progress-buffer";
@@ -1258,6 +1259,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const deferredNarrativeGenerations = new Map<string, number>();
   const lostExecutionAwaitingEndingByThread = new Map<string, string>();
   const MAX_DEFERRED_NARRATIVE_BYTES = 256 * 1024;
+
+  /** Live pieces stream like provider events; they move no saved position, so nothing is projected or reloaded. */
+  const showLiveCanonicalProgress = (threadId: string, previous: CanonicalAgentReplica, update: CanonicalProgressUpdate): void => {
+    if (update.replica !== previous) {
+      set((state) => ({ records: patchThreadRecord(state.records, threadId, { canonicalAgent: update.replica }) }));
+    }
+    for (const event of update.liveEvents ?? []) get().handleAgentEvent(event);
+  };
 
   const getRec = (threadId: string) => getThreadRecord(get().records, threadId);
 
@@ -3478,6 +3487,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!canReceiveCanonicalProgress(current, frame.threadId, (threadId) => conversationResidency.isDisplayConversationLeased(threadId))) return;
     const previous = getThreadRecord(current.records, frame.threadId);
     const update = applyCanonicalProgressFrame(previous.canonicalAgent, frame);
+    if (update.liveEvents) {
+      showLiveCanonicalProgress(frame.threadId, previous.canonicalAgent, update);
+      return;
+    }
     if (update.replica === previous.canonicalAgent) return;
     set((state) => ({ records: patchThreadRecord(state.records, frame.threadId, { canonicalAgent: update.replica }) }));
     if (update.outcome !== "applied") return;

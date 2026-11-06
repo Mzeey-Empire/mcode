@@ -1,4 +1,5 @@
 import { CANONICAL_AGENT_PROGRESS_RECOVERY_MAX, CanonicalAgentProgressFrameSchema, type CanonicalAgentProgressFrame, type CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { reduceAgentEventBatch, type AgentModelState, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import {
   applyCanonicalPushEvents,
@@ -9,6 +10,8 @@ import {
 
 /** A progress update separates first live effects from state-only save and recovery updates. */
 export interface CanonicalProgressUpdate extends CanonicalAgentReplicaUpdate {
+  /** Provider pieces to show now; present only for an applied live frame, which changes no saved state. */
+  liveEvents?: readonly AgentEvent[];
   publications: readonly AcceptedCanonicalAgentEventEnvelope[];
 }
 
@@ -153,14 +156,31 @@ function interruptedTurns(current: CanonicalAgentReplica, frame: CanonicalAgentP
   return [...new Set([...current.interruptedTurnIds, ...interrupted])].slice(-128);
 }
 
+function ownedReplica(current: CanonicalAgentReplica, ownerThreadId: string): CanonicalAgentReplica | undefined {
+  if (current.ownerThreadId === ownerThreadId) return current;
+  return current.ownerThreadId ? undefined : { ...current, ownerThreadId };
+}
+
+/**
+ * Live pieces have no position, so they are shown only right after the accepted position the server sent them at.
+ * One that misses is dropped, not a gap: the next saved checkpoint carries its text. Positions never move here.
+ */
+function live(current: CanonicalAgentReplica, frame: Extract<CanonicalAgentProgressFrame, { phase: "live" }>): CanonicalProgressUpdate {
+  const progress = current.progress;
+  if (current.recoveryRequired || progress?.epoch !== frame.epoch || progress.acceptedThrough !== frame.after) {
+    return result(current, "ignored");
+  }
+  return { ...result(current, "applied"), liveEvents: frame.events };
+}
+
 /** Apply the unified progress protocol without dispatching save receipts or recovery effects. */
 export function applyCanonicalProgressFrame(current: CanonicalAgentReplica, frame: CanonicalAgentProgressFrame): CanonicalProgressUpdate {
   if (!CanonicalAgentProgressFrameSchema().safeParse(frame).success) return gap(current);
   if (current.retiredEpochs.includes(frame.epoch)) return result(current, "ignored");
-  const ownerThreadId = frame.ownerThreadId ?? frame.threadId;
-  if (current.ownerThreadId && current.ownerThreadId !== ownerThreadId) return gap(current);
-  const owned = current.ownerThreadId === ownerThreadId ? current : { ...current, ownerThreadId };
+  const owned = ownedReplica(current, frame.ownerThreadId ?? frame.threadId);
+  if (!owned) return gap(current);
   switch (frame.phase) {
+    case "live": return live(owned, frame);
     case "accepted": return accepted(owned, frame);
     case "saved": return saved(owned, frame);
     case "recovery": return recovery(owned, frame);

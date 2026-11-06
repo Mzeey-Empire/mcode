@@ -27,7 +27,7 @@ function capturedPrompt(frame: Extract<CanonicalAgentProgressFrame, { phase: "sa
 
 function replayLiveFrames(frames: readonly CanonicalAgentProgressFrame[], epoch: string): void {
   for (const frame of frames) {
-    if (frame.epoch === epoch && frame.phase !== "recovery" && frame.through > 0) useThreadStore.getState().handleCanonicalProgress(frame);
+    if (frame.epoch === epoch && (frame.phase === "accepted" || frame.phase === "saved") && frame.through > 0) useThreadStore.getState().handleCanonicalProgress(frame);
   }
 }
 
