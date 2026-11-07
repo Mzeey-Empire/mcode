@@ -16,6 +16,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
 import { useNavigationHistoryStore } from "@/stores/navigationHistoryStore";
 import { executeCommand, getAllCommands } from "@/lib/command-registry";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class ResizeObserverMock {
@@ -136,6 +137,30 @@ describe("App", () => {
         within(sidebar).getByRole("img", { name: "Mcode" }),
       ).toBeInTheDocument();
     });
+  });
+
+  it("keeps the caption reserve in sync when the panel opens and closes", async () => {
+    const workspace = createMockWorkspace({ id: "caption-workspace" });
+    vi.mocked(mockTransport.listWorkspaces).mockResolvedValue([workspace]);
+    useWorkspaceStore.setState({ workspaces: [workspace], activeWorkspaceId: workspace.id, activeThreadId: null });
+    render(<App />);
+
+    const panel = await screen.findByTestId("right-panel");
+    const row = screen.getByTestId("content-row");
+    act(() => executeCommand("rightPanel.toggle"));
+    await waitFor(() => expect(panel).toHaveAttribute("data-visible", "true"));
+    expect(row).toHaveAttribute("data-right-panel-visible", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    expect(panel).toHaveAttribute("data-visible", "false");
+    expect(row).toHaveAttribute("data-right-panel-visible", "false");
+
+    act(() => executeCommand("rightPanel.toggle"));
+    expect(panel).toHaveAttribute("data-visible", "true");
+    expect(row).toHaveAttribute("data-right-panel-visible", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.queryByTestId("right-panel")).not.toBeInTheDocument();
+    expect(row).toHaveAttribute("data-right-panel-visible", "false");
   });
 
   it("renders the landing screen when no workspace is active", async () => {

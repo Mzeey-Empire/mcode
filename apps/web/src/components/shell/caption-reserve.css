@@ -25,7 +25,7 @@
 }
 
 /* A visible right panel owns the top-right corner, so it carries the reserve instead. */
-[data-content-row]:has([data-right-panel-root][data-visible="true"]) [data-canvas-header] {
+[data-content-row][data-right-panel-visible="true"] [data-canvas-header] {
   padding-right: 0.8rem;
 }
 

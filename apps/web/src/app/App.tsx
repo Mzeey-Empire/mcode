@@ -344,12 +344,16 @@ function AppMainSurface(props: Pick<
   );
 }
 
-function RightPanelSlot({
+function isRightPanelMounted({
   settingsOpen,
   showProjectlessCanvas,
   showPullRequests,
 }: Pick<AppLayoutProps, "settingsOpen" | "showProjectlessCanvas" | "showPullRequests">) {
-  if (settingsOpen || showProjectlessCanvas || showPullRequests) return null;
+  return !settingsOpen && !showProjectlessCanvas && !showPullRequests;
+}
+
+function RightPanelSlot(props: Pick<AppLayoutProps, "settingsOpen" | "showProjectlessCanvas" | "showPullRequests">) {
+  if (!isRightPanelMounted(props)) return null;
   return (
     <Suspense fallback={null}>
       <LazyRightPanel />
@@ -366,7 +370,8 @@ function AppLayout(props: AppLayoutProps) {
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const overviewClosed = useOverviewStore((s) => activeThreadId !== null && s.closedSubjects.has(threadOverviewKey(activeThreadId)));
   const rightPanelVisible = useDiffStore((s) =>
-    activeThreadId && activeWorkspaceId ? s.getRightPanelVisible(activeWorkspaceId, activeThreadId) : false);
+    activeWorkspaceId ? s.getRightPanelVisible(activeWorkspaceId, activeThreadId) : false);
+  const rightPanelMounted = isRightPanelMounted(props);
   // The toast lane applies the canvas-width half of the dock rule once it measures the canvas.
   const overviewReserved = activeThreadId !== null && !overviewClosed && !rightPanelVisible;
   const chatVisible = !props.settingsOpen && !props.showPullRequests && !props.showNewThreadCanvas;
@@ -401,7 +406,13 @@ function AppLayout(props: AppLayoutProps) {
                 closeSettings={props.closeSettings}
               />
             )}
-            <div ref={props.contentRowRef} data-testid="content-row" data-content-row="" className="flex min-w-0 flex-1 overflow-hidden">
+            <div
+              ref={props.contentRowRef}
+              data-testid="content-row"
+              data-content-row=""
+              data-right-panel-visible={rightPanelMounted && rightPanelVisible}
+              className="flex min-w-0 flex-1 overflow-hidden"
+            >
               <AppMainSurface {...props} mainRef={setMainElement} />
               <RightPanelSlot {...props} />
             </div>
