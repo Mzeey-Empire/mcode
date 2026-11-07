@@ -1,5 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, render, renderHook, waitFor } from "@testing-library/react";
+import { Suspense, startTransition, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
@@ -627,6 +628,34 @@ describe("useThreadRecap", () => {
       await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
 
       expect(mockTransport.generateRecap).not.toHaveBeenCalled();
+    });
+
+    it("keeps a pending switch recap when an Overview open is rendered but never shown", async () => {
+      const messages = hookMessages();
+      const neverResolves = new Promise<void>(() => {});
+      type ProbeProps = { threadId: string; overviewOpen: boolean; suspend: boolean };
+      let update: (props: ProbeProps) => void = () => {};
+      function Probe({ threadId, overviewOpen, suspend }: ProbeProps) {
+        useThreadRecap({ threadId, messages, overviewOpen });
+        if (suspend) throw neverResolves;
+        return <span>{threadId}: {overviewOpen ? "open" : "closed"}</span>;
+      }
+      function App() {
+        const [props, setProps] = useState<ProbeProps>({ threadId: "thread-a", overviewOpen: false, suspend: false });
+        update = setProps;
+        return <Suspense fallback={<span>loading</span>}><Probe {...props} /></Suspense>;
+      }
+      const screen = render(<App />);
+
+      await act(async () => { update({ threadId: "thread-b", overviewOpen: false, suspend: false }); });
+      await act(async () => {
+        startTransition(() => { update({ threadId: "thread-b", overviewOpen: true, suspend: true }); });
+      });
+      expect(screen.getByText("thread-b: closed")).toBeVisible();
+      await act(async () => { update({ threadId: "thread-b", overviewOpen: false, suspend: false }); });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
+
+      expect(vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId)).toEqual(["thread-b"]);
     });
 
     function renderWithDockedOverview(threadId: string) {

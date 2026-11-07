@@ -474,11 +474,14 @@ export function useThreadRecap({
   }, [cached, filteredMessages, generate, overviewOpen, signature, threadId]);
 
   // The switch and focus timers outlive an Overview close, so each one checks whether the
-  // user closed the Overview while it waited and drops the recap if they did.
+  // user closed the Overview while it waited and drops the recap if they did. Only committed
+  // closes count, because a render React discards never reached the screen.
   const overviewCloseCountRef = useRef(0);
   const wasOverviewOpenRef = useRef(overviewOpen);
-  if (wasOverviewOpenRef.current && !overviewOpen) overviewCloseCountRef.current += 1;
-  wasOverviewOpenRef.current = overviewOpen;
+  useEffect(() => {
+    if (wasOverviewOpenRef.current && !overviewOpen) overviewCloseCountRef.current += 1;
+    wasOverviewOpenRef.current = overviewOpen;
+  }, [overviewOpen]);
 
   const startRecapOnceSettled = useCallback((settledThreadId: string) => {
     const closesWhenScheduled = overviewCloseCountRef.current;
