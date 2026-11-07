@@ -75,14 +75,14 @@ describe("NarrativeRecoveryDelta", () => {
     }));
     for (const item of history) delta.prepareChanges({ items: [item], discardedItemIds: [] })?.acknowledge();
     expect(Buffer.byteLength(JSON.stringify(history), "utf8")).toBeGreaterThan(256 * 1024);
-    expect(delta.prepare(history)).toBeNull();
+    expect(delta.prepare(history)).toMatchObject({ items: [], droppedEventCount: 1 });
     const last = history.at(-1);
     if (!last) throw new Error("Expected long history");
     const updated = { ...last, record: { ...last.record, text: "updated" } };
     const change = delta.prepareChanges({ items: [updated], discardedItemIds: [] });
     expect(change).toMatchObject({ items: [updated], discardedItemIds: [] });
     change?.acknowledge();
-    expect(delta.prepare([...history.slice(0, -1), updated])).toBeNull();
+    expect(delta.prepare([...history.slice(0, -1), updated])).toMatchObject({ items: [], droppedEventCount: 1 });
   });
 
   it("keeps rejected fork acknowledgement separate from the accepted checkpoint", () => {
@@ -96,16 +96,19 @@ describe("NarrativeRecoveryDelta", () => {
     expect(rejected.prepare([revisedThought])).toBeNull();
   });
 
-  it("keeps per-item and changed-event byte limits instead of increasing the recovery caps", () => {
+  it("seals recovery on oversized records and changes without rejecting clean writes", () => {
     const delta = new NarrativeRecoveryDelta();
-    expect(() => delta.prepareChanges({ items: [{ ...thought, record: {
+    expect(delta.prepareChanges({ items: [{ ...thought, record: {
       ...thought.record, text: "x".repeat(300_000),
-    } }], discardedItemIds: [] })).toThrow("active-turn byte limit");
+    } }], discardedItemIds: [] })).toMatchObject({ items: [], droppedEventCount: 1 });
     const changed = ["first", "second"].map((id) => ({ ...thought,
       record: { ...thought.record, id, text: "x".repeat(150_000) } }));
-    expect(() => delta.prepareChanges({ items: changed, discardedItemIds: [] }))
-      .toThrow("retained byte capacity");
-    expect(delta.prepare([])).toBeNull();
+    const loss = delta.prepareChanges({ items: changed, discardedItemIds: [] });
+    expect(loss).toMatchObject({ items: [], droppedEventCount: 1 });
+    loss?.acknowledge();
+    expect(delta.prepareChanges({ items: [thought], discardedItemIds: [] }))
+      .toMatchObject({ items: [], droppedEventCount: 1 });
+    expect(delta.prepare([])).toMatchObject({ items: [], droppedEventCount: 1 });
   });
 
   it("splits a large delta without acknowledging any chunk early", () => {
@@ -127,18 +130,13 @@ describe("NarrativeRecoveryDelta", () => {
   });
 
   it("splits by serialized bytes and rejects an item larger than one command", () => {
-    const delta = new NarrativeRecoveryDelta();
     const snapshot = ["first", "second"].map((id) => ({
       ...thought,
       record: { ...thought.record, id, text: "x".repeat(150_000) },
     }));
-    const prepared = delta.prepare(snapshot);
-    expect(prepared).not.toBeNull();
-    if (!prepared) return;
+    const prepared = { items: snapshot, discardedItemIds: [], acknowledge: () => {} };
     expect(splitNarrativeRecoveryDelta("execution-1", prepared).map((chunk) => chunk.items.length)).toEqual([1, 1]);
-    const oversized = delta.prepare([{ ...thought, record: { ...thought.record, text: "x".repeat(300_000) } }]);
-    expect(oversized).not.toBeNull();
-    if (!oversized) return;
+    const oversized = { ...prepared, items: [{ ...thought, record: { ...thought.record, text: "x".repeat(300_000) } }] };
     expect(() => splitNarrativeRecoveryDelta("execution-1", oversized)).toThrow("exceeds one writer command");
   });
 });

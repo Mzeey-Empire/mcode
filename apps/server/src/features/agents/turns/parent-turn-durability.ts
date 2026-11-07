@@ -64,6 +64,7 @@ export interface ParentTurnTerminalProjection {
 export interface ParentNarrativeRecoveryCommit {
   executionId: string;
   items: readonly ParentNarrativeRecoveryItem[];
+  droppedEventCount?: number;
   discardedItemIds?: readonly string[];
 }
 

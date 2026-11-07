@@ -408,7 +408,7 @@ describe("CanonicalAgentStore", () => {
       .toEqual({ projection: "narrativeRecovery", narrative: parentNarrativeToolCall(0) });
   });
 
-  it("rejects aggregate parent recovery overflow before it writes", () => {
+  it("marks aggregate parent recovery overflow as lossy without rejecting the write", () => {
     startCanonicalParent(sink, db);
     const recordCount = Math.floor(PARENT_ASSISTANT_TEXT_RETAINED_LIMITS.maxBytes / 4_000) + 2;
     const items = Array.from({ length: recordCount }, (_, index) => {
@@ -422,8 +422,9 @@ describe("CanonicalAgentStore", () => {
 
     expect(items.every((item) => Buffer.byteLength(JSON.stringify(item), "utf8")
       < ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes)).toBe(true);
-    expect(() => sink.recordParentNarrativeRecovery({ executionId: EXECUTION_ID, items }))
-      .toThrow("retained byte capacity");
+    expect(sink.recordParentNarrativeRecovery({ executionId: EXECUTION_ID, items })).toBe(true);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE json_extract(envelope_json, '$.payload.type') = 'ingest.volatile-truncated'")
+      .get()).toEqual({ count: 1 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items").get()).toEqual(before);
   });
 
