@@ -1,5 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
+import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../turns/active-turn-recovery-retention-policy.js";
 import { MessageSchema, type Message } from "@mcode/contracts/models/message";
 import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
 import { type AgentEvent } from "@mcode/contracts/events/agent-event";
@@ -80,7 +81,17 @@ function liveEffectEvents(input: PreparationInput, effects: ParentLiveEffects | 
     events.push(messageEvent(input, message));
   }
   events.push(...assistantTextEvents(input, effects));
+  if (assistantRecoveryOverflows(input, effects.text)) {
+    events.push(...recoveryEvents(input, { executionId: input.operation.execution.executionId, items: [], droppedEventCount: 1 }));
+  }
   return events;
+}
+
+function assistantRecoveryOverflows(input: PreparationInput, text: ParentLiveEffects["text"]): boolean {
+  if (text.kind !== "append") return false;
+  const previous = input.items[`assistant-response-text:${input.operation.execution.executionId}`]?.payload.content;
+  const content = nextAssistantText(typeof previous === "string" ? previous : "", text);
+  return Buffer.byteLength(content, "utf8") > PARENT_ASSISTANT_TEXT_RETAINED_LIMITS.maxBytes;
 }
 
 function assistantTextEvents(input: PreparationInput, effects: ParentLiveEffects): CanonicalAgentEventDraft[] {
@@ -157,7 +168,9 @@ function terminalEvents(
   const events: CanonicalAgentEventDraft[] = [...raw];
   const messageId = projection.assistant.messageId
     ?? deriveTurnAssistantMessageId(input.thread.id, `execution:${input.operation.execution.executionId}`);
-  events.push(...recoveryEvents(input, { executionId: input.operation.execution.executionId, items: narrative }));
+  // Terminal history must bypass the optional recovery budget before response binding materializes it.
+  events.push(...prepareParentNarrativeRecoveryEvents({ recovery: { executionId: input.operation.execution.executionId, items: narrative },
+    thread: input.thread, turn: input.turn, findItem: (id) => input.items[id], terminal: true }));
   const terminalMessage = hasMessage ? {
     ...assistantMessage(input, messageId, projection.assistant),
     sequence: sequenceAfterTurnVisuals(input, messageId),

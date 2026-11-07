@@ -86,6 +86,8 @@ describe("ParentAssistantTextCheckpointService", () => {
     const byteLimited = new ParentAssistantTextCheckpointService(db, { maxBytes: 4, maxChunks: 4 });
     expect(byteLimited.appendChunk([input(1, "12345")])).toMatchObject({ outcome: "overflow" });
     expect(byteLimited.restore(EXECUTION_ID)).toBe("");
+    expect(byteLimited.appendChunk([input(1, "ok")])).toMatchObject({ outcome: "overflow" });
+    expect(byteLimited.reset(EXECUTION_ID)).toBe(true);
 
     const chunkLimited = new ParentAssistantTextCheckpointService(db, { maxBytes: 100, maxChunks: 1 });
     expect(chunkLimited.appendChunk([input(1, "one")])).toMatchObject({ outcome: "committed" });
@@ -164,7 +166,7 @@ describe("ParentAssistantTextCheckpointService", () => {
     }
   });
 
-  it("keeps a recovery journal when SQLite has no retained capacity for its next chunk", () => {
+  it("drains a recovery journal and seals its retained prefix on overflow", async () => {
     const journalDirectory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-parent-text-overflow-"));
     const journalService = new ParentAssistantTextCheckpointService(
       db,
@@ -176,14 +178,13 @@ describe("ParentAssistantTextCheckpointService", () => {
       expect(journalService.appendChunk([input(1, "full")]).outcome).toBe("committed");
       journalService.recoveryJournal.append([input(2, "tail")]);
 
-      expect(() => journalService.importRecoveryJournals())
-        .toThrow("Assistant text recovery journal exceeds the retained checkpoint capacity");
+      expect(await journalService.importRecoveryJournals()).toEqual([EXECUTION_ID]);
+      expect(db.prepare("SELECT retained_chunks FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
+        .get(EXECUTION_ID)).toEqual({ retained_chunks: -1 });
       expect(journalService.restore(EXECUTION_ID)).toBe("full");
 
       journalService.recoveryJournal.drain(EXECUTION_ID, (record) => recovered.push(record));
-      expect(recovered).toEqual([
-        expect.objectContaining({ firstSequence: 2, lastSequence: 2, text: "tail" }),
-      ]);
+      expect(recovered).toEqual([]);
     } finally {
       NodeFS.rmSync(journalDirectory, { recursive: true, force: true });
     }

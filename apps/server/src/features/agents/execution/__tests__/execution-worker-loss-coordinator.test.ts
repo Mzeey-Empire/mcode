@@ -12,11 +12,12 @@ import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
 import { CanonicalExecutionWriterPort } from "../../canonical/canonical-execution-writer-port.js";
+import { CanonicalAcceptedProgress } from "../../canonical/canonical-accepted-progress.js";
+import { CanonicalAgentStore as CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { ExecutionLivePublicationRelease } from "../../canonical/execution-live-publication-release.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
-import { CanonicalAcceptedProgress } from "../../canonical/canonical-accepted-progress.js";
 import { CanonicalAgentStore } from "../../canonical/canonical-agent-boundary.js";
 import type { ExecutionIdentity, ExecutionLease, ExecutionWorkerPort, ExecutionWorkerReply, ExecutionWorkerRequest } from "../execution-mailbox-protocol.js";
 import type { ExecutionLostAssignment, ExecutionMailboxCommand } from "../execution-mailbox-scheduler.js";
@@ -143,6 +144,56 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     expect(await admitted.completion).toMatchObject({ kind: "reply", result: { kind: "committed" } });
     return claim.lease;
   }
+
+  it.each(["claude", "devin", "codex", "overflow"].flatMap((scenario) =>
+    [true, false].map((ownerAlive) => ({ scenario, ownerAlive }))))("recovers checkpointed $scenario live text after its worker dies (owner alive $ownerAlive)", async ({ scenario, ownerAlive }) => {
+    const providerId = scenario === "overflow" ? "claude" : scenario;
+    coordinator.scheduler.shutdown();
+    const progress = new CanonicalAcceptedProgress(new CanonicalAgentBoundary(db, owner, writer, () => {}), writer);
+    const port = new CanonicalExecutionWriterPort(writer, () => {}, undefined, undefined, progress);
+    // Recovery after losing the progress owner must read the committed checkpoint, not its in-memory answer.
+    const recoveryPort = ownerAlive ? port : new CanonicalExecutionWriterPort(writer, () => {});
+    coordinator = new ExecutionWorkerLossCoordinator(recoveryPort, { workerCount: 1, limits, createWorker: () => {
+      const worker = new CrashingPort(port);
+      workers.push(worker);
+      return worker;
+    } });
+    try {
+      const claim = coordinator.scheduler.claim(execution, 1);
+      if (claim.kind !== "claimed") throw new Error(`Claim failed: ${claim.kind}`);
+      const send = async (command: ExecutionWorkCommand) => {
+        const admission = coordinator.scheduler.submit({ execution, lease: claim.lease, command, byteLength: 1_000 });
+        if (admission.kind !== "admitted") throw new Error(`Not admitted: ${admission.kind}`);
+        const reply = await admission.completion;
+        expect(reply).toMatchObject({ kind: "reply" });
+      };
+      await send({ kind: "start", providerId, publishParentStart: true,
+        parentLive: { planFeature: "none", precedingMessageId: `${execution.threadId}-user` },
+        input: { thread: { id: execution.threadId, workspaceId: "lost-worker-workspace", providerId, createdAt: NOW },
+          turnId: execution.turnId, executionId: execution.executionId, permissionMode: "supervised", providerIdentities: [],
+          userMessage: { kind: "create", messageId: `${execution.threadId}-user`, content: "Question", sequence: 1 } } });
+      const deltas = scenario === "overflow" ? Array.from({ length: 20 }, () => "x".repeat(15360)) : ["Partial ", "answer"];
+      for (const [index, delta] of deltas.entries()) {
+        const id = `live-text-${index}`;
+        await send({ kind: "event", phase: "running", nativeCursor: null, events: [{
+          eventId: id, routing: { ...execution, itemId: id }, sourceProviderId: providerId, sourceIdentities: [], delivery: "live",
+          payload: { type: "item.recorded", item: { id, threadId: execution.threadId, turnId: execution.turnId,
+            kind: "system", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+            payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: { type: "textDelta",
+              threadId: execution.threadId, turnExecutionId: execution.executionId, delta, isFinalResponse: true } } } } } }] });
+        if (scenario === "overflow") await progress.waitForSaved(execution.threadId);
+      }
+      await progress.waitForSaved(execution.threadId);
+      const prefix = scenario === "overflow" ? "x".repeat(ownerAlive ? 307200 : 261120) : "Partial answer";
+      workers.at(-1)?.crash();
+      expect(await coordinator.waitForRecovery(0)).toEqual({ kind: "recovered", workerIndex: 0 });
+      await progress.waitForSaved(execution.threadId);
+      expect(new MessageRepo(db, owner).listIncludingInternal(execution.threadId)
+        .filter((message) => message.role === "assistant").map((message) => message.content)).toEqual([prefix]);
+    } finally {
+      await progress.close();
+    }
+  });
 
   it("carries committed start, tool narrative, live publication, and finish through both workers", async () => {
     const claim = coordinator.scheduler.claim(execution, 1);

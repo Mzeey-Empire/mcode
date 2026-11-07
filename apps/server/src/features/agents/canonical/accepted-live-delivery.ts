@@ -19,6 +19,7 @@ export interface PendingLiveDelivery {
   operation: ExecutionSemanticOperation;
   text: AppendedText[];
   narrative: Map<string, ParentNarrativeRecoveryItem>;
+  droppedEventCount?: number;
   bytes: number;
   cancelTimer(): void;
 }
@@ -54,6 +55,7 @@ export function mergeLiveDelivery(pending: PendingLiveDelivery, operation: Execu
   const effects = liveEffects(operation);
   pending.operation = operation;
   if (effects.text.kind === "append") pending.text.push(...effects.text.inputs);
+  if (effects.narrative?.droppedEventCount) pending.droppedEventCount = (pending.droppedEventCount ?? 0) + effects.narrative.droppedEventCount;
   for (const item of effects.narrative?.items ?? []) pending.narrative.set(`${item.kind}:${item.record.id}`, item);
   pending.bytes += liveBytes(operation);
 }
@@ -63,12 +65,13 @@ export function mergeLiveDelivery(pending: PendingLiveDelivery, operation: Execu
  * leave nothing to save, because the tool's own saved event carries its full input.
  */
 export function liveCheckpointOperation(pending: PendingLiveDelivery): ExecutionSemanticOperation | undefined {
-  if (pending.text.length === 0 && pending.narrative.size === 0) return undefined;
+  if (pending.text.length === 0 && pending.narrative.size === 0 && !pending.droppedEventCount) return undefined;
   const { delivery: _delivery, ...operation } = pending.operation;
   const executionId = operation.execution.executionId;
   return { ...operation, operationId: `live:${executionId}:${NodeCrypto.randomUUID()}`, livePublication: [],
     mutation: { kind: "live-event", text: pending.text.length ? { kind: "append", inputs: pending.text } : { kind: "unchanged" },
-      ...(pending.narrative.size ? { narrative: { executionId, items: [...pending.narrative.values()] } } : {}) } };
+      ...(pending.narrative.size || pending.droppedEventCount ? { narrative: { executionId, items: [...pending.narrative.values()],
+        ...(pending.droppedEventCount ? { droppedEventCount: pending.droppedEventCount } : {}) } } : {}) } };
 }
 
 function hasOnlyReplaceableEffects(effects: ParentLiveEffects): boolean {

@@ -121,13 +121,14 @@ describe("targeted tool recovery", () => {
     const delta = new NarrativeRecoveryDelta();
     delta.prepare([retainedThought, tool])?.acknowledge();
     const enlarged = { ...tool, record: { ...tool.record, output_summary: "x".repeat(100) } };
-    expect(() => delta.prepareToolUpdate(enlarged)).toThrow("retained byte capacity");
+    expect(delta.prepareToolUpdate(enlarged)).toMatchObject({ items: [], droppedEventCount: 1 });
     delta.prepare([thought, tool])?.acknowledge();
     delta.prepareToolUpdate(enlarged)?.acknowledge();
     delta.prepareToolUpdate(tool)?.acknowledge();
     expect(delta.prepare([thought, tool])).toBeNull();
-    expect(() => delta.prepareToolUpdate({ ...tool, record: { ...tool.record,
-      output_summary: "x".repeat(ACTIVE_TURN_RECOVERY_RETAINED_LIMITS.maxBytes) } })).toThrow("active-turn byte limit");
+    expect(delta.prepareToolUpdate({ ...tool, record: { ...tool.record,
+      output_summary: "x".repeat(ACTIVE_TURN_RECOVERY_RETAINED_LIMITS.maxBytes) } }))
+      .toMatchObject({ items: [], droppedEventCount: 1 });
   });
 
   it("checks the retained record count even when only one tool changes", () => {
@@ -137,8 +138,8 @@ describe("targeted tool recovery", () => {
       ...thought, record: { ...thought.record, id: `thought-${index}` },
     }));
     delta.prepare([...thoughts, tool])?.acknowledge();
-    expect(() => delta.prepareToolUpdate({ ...tool, record: { ...tool.record, output_summary: "done" } }))
-      .toThrow("retained record capacity");
+    expect(delta.prepareToolUpdate({ ...tool, record: { ...tool.record, output_summary: "done" } }))
+      .toMatchObject({ items: [], droppedEventCount: 1 });
   });
 
   it("counts duplicate snapshot identities even when their full checkpoint has no changes", () => {
@@ -150,15 +151,19 @@ describe("targeted tool recovery", () => {
     if (!hook) throw new Error("Expected hook recovery item");
     const repeated = { ...hook, record: { ...hook.record, payload: "x".repeat(130_900) } };
     delta.prepare([repeated, tool])?.acknowledge();
-    expect(delta.prepare([repeated, repeated, tool])).toBeNull();
-    expect(() => delta.prepareToolUpdate({ ...tool, record: { ...tool.record, output_summary: "done" } }))
-      .toThrow("retained byte capacity");
-    expect(delta.prepare([repeated, tool])).toBeNull();
+    const loss = delta.prepare([repeated, repeated, tool]);
+    expect(loss).toMatchObject({ items: [], droppedEventCount: 1 });
+    loss?.acknowledge();
+    expect(delta.prepareToolUpdate({ ...tool, record: { ...tool.record, output_summary: "done" } }))
+      .toMatchObject({ items: [], droppedEventCount: 1 });
+    expect(delta.prepare([repeated, tool])).toMatchObject({ items: [], droppedEventCount: 1 });
     expect(delta.prepareToolUpdate({ ...tool, record: { ...tool.record, output_summary: "done" } })).not.toBeNull();
 
     const repeatedIds = new NarrativeRecoveryDelta();
     repeatedIds.prepare([thought, tool])?.acknowledge();
-    expect(repeatedIds.prepare([...Array.from({ length: ACTIVE_TURN_RECOVERY_RETAINED_LIMITS.maxRecords }, () => thought), tool])).toBeNull();
-    expect(() => repeatedIds.prepareToolUpdate(tool)).toThrow("retained record capacity");
+    const countLoss = repeatedIds.prepare([...Array.from({ length: ACTIVE_TURN_RECOVERY_RETAINED_LIMITS.maxRecords }, () => thought), tool]);
+    expect(countLoss).toMatchObject({ items: [], droppedEventCount: 1 });
+    countLoss?.acknowledge();
+    expect(repeatedIds.prepareToolUpdate(tool)).toMatchObject({ items: [], droppedEventCount: 1 });
   });
 });

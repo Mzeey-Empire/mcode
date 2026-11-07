@@ -13,8 +13,6 @@ import type { CreateToolCallRecordInput } from "../../tools/persistence/tool-cal
 import type { CreateThoughtSegmentInput } from "./persistence/thought-segment-repo.js";
 import type { CreateHookExecutionInput } from "../../events/persistence/hook-execution-repo.js";
 import type { TurnOutcome } from "../../turns/turn-outcome.js";
-import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
-import { assertActiveTurnRecoveryRetention } from "../../turns/active-turn-recovery-retention-policy.js";
 import type { ExecutionIdentity } from "../../execution/execution-mailbox-protocol.js";
 import { backgroundHeldToolIds } from "../../tools/background-held-tools.js";
 
@@ -857,19 +855,19 @@ export class NarrativeTurnState {
   }
 
   /**
-   * Snapshot the visible structured narrative for an unfinished turn without
+   * Materialize narrative for recovery admission by its retention owner without
    * retaining provider protocol traffic or private raw tool input.
    */
   recoverySnapshot(threadId: string): ParentNarrativeRecoveryItem[] {
-    return this.createRecoverySnapshot(threadId, true);
+    return this.createRecoverySnapshot(threadId);
   }
 
   /** Materialize terminal history; its whole-operation admission belongs to the progress owner. */
   terminalSnapshot(threadId: string): ParentNarrativeRecoveryItem[] {
-    return this.createRecoverySnapshot(threadId, false);
+    return this.createRecoverySnapshot(threadId);
   }
 
-  private createRecoverySnapshot(threadId: string, enforceRetention: boolean): ParentNarrativeRecoveryItem[] {
+  private createRecoverySnapshot(threadId: string): ParentNarrativeRecoveryItem[] {
     this.assertThread(threadId);
     const snapshot = [
       ...this.approvals.values(),
@@ -879,13 +877,6 @@ export class NarrativeTurnState {
       ...this.turnHooks.map((hook) => this.hookRecoveryItem(hook)),
       ...Array.from(this.turnOpenHooks.values(), (hook) => this.openHookRecoveryItem(hook)),
     ];
-    let bytes = 0;
-    for (const [index, item] of snapshot.entries()) {
-      const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
-      this.assertRecoveryItemFitsWriteBatch(itemBytes, threadId);
-      bytes += itemBytes;
-      if (enforceRetention) assertActiveTurnRecoveryRetention(index + 1, bytes);
-    }
     return this.sortRecoverySnapshot(snapshot);
   }
 
@@ -901,7 +892,6 @@ export class NarrativeTurnState {
 
   private recordRecoveryChange(item: ParentNarrativeRecoveryItem): void {
     if (!this.execution) return;
-    this.assertRecoveryItemFitsWriteBatch(Buffer.byteLength(JSON.stringify(item), "utf8"), this.threadId);
     const id = `${item.kind}:${item.record.id}`;
     this.recoveryChanges.set(id, item);
     this.recoveryDiscards.delete(id);
@@ -1103,10 +1093,9 @@ export class NarrativeTurnState {
   recoverySnapshotWithStagedNarration(
     threadId: string,
     staged: StagedNarrationSegment,
-    enforceRetention = true,
   ): ParentNarrativeRecoveryItem[] {
     this.assertThread(threadId);
-    const snapshot = this.createRecoverySnapshot(threadId, enforceRetention).filter((item) => (
+    const snapshot = this.createRecoverySnapshot(threadId).filter((item) => (
       item.kind !== "narrationSegment" || item.record.id !== staged.id
     ));
     snapshot.push({
@@ -1120,13 +1109,6 @@ export class NarrativeTurnState {
         sort_order: staged.sortOrder,
       },
     });
-    let bytes = 0;
-    for (const [index, item] of snapshot.entries()) {
-      const itemBytes = Buffer.byteLength(JSON.stringify(item), "utf8");
-      this.assertRecoveryItemFitsWriteBatch(itemBytes, threadId);
-      bytes += itemBytes;
-      if (enforceRetention) assertActiveTurnRecoveryRetention(index + 1, bytes);
-    }
     return snapshot.sort((left, right) => (
       left.record.sort_order - right.record.sort_order || left.record.id.localeCompare(right.record.id)
     ));
@@ -1164,12 +1146,6 @@ export class NarrativeTurnState {
   private requireRecoveryString(value: string | undefined, field: string): string {
     if (value === undefined) throw new Error(`Narrative recovery is missing ${field}`);
     return value;
-  }
-
-  private assertRecoveryItemFitsWriteBatch(byteLength: number, threadId: string): void {
-    if (byteLength > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes) {
-      throw new Error(`Parent narrative recovery item exceeds the active-turn byte limit: ${threadId}`);
-    }
   }
 
   /**
