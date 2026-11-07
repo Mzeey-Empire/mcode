@@ -1,4 +1,4 @@
-import { createMockThread } from "@mcode/contracts/testing";
+import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
@@ -90,7 +90,7 @@ describe("PlanPanel", () => {
     implementPlan.mockReset();
     getReviewState.mockReset();
     getReviewState.mockResolvedValue(reviewState(0));
-    useWorkspaceStore.setState({ threads: [], activeThreadId: null });
+    useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null });
     usePlanImplementStore.setState({ notices: {}, busy: {} });
     useConnectionStore.setState({ status: "connected" });
   });
@@ -354,8 +354,9 @@ describe("PlanPanel", () => {
       const SOURCE = "thread-worktree-source";
       const TARGET = "thread-worktree-target";
 
-      function seedThreads(): void {
+      function seedThreads(isGitRepo = true): void {
         useWorkspaceStore.setState({
+          workspaces: [createMockWorkspace({ id: "workspace-1", is_git_repo: isGitRepo })],
           threads: [
             createMockThread({ id: SOURCE, workspace_id: "workspace-1" }),
             createMockThread({ id: TARGET, workspace_id: "workspace-1", mode: "worktree", worktree_path: "F:\\repo\\.mcode\\worktrees\\main-4f3a2b1c" }),
@@ -411,7 +412,7 @@ describe("PlanPanel", () => {
 
       it("offers neither the item nor the command outside a git repository", async () => {
         startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
-        seedThreads();
+        seedThreads(false);
         getReviewState.mockResolvedValue({ isGitRepo: false });
         const hook = renderHook(() => usePlanCommands(SOURCE));
         render(<PlanPanel threadId={SOURCE} />);
@@ -437,15 +438,14 @@ describe("PlanPanel", () => {
       });
 
       // The hook runs for every selected thread, so a read here spawns git on
-      // every switch even though only an implementable plan needs the answer.
-      it("reads the checkout only once a version becomes implementable", async () => {
+      // every switch, and waiting for one would show the command late.
+      it("registers the worktree command as the plan becomes implementable, without reading the checkout", () => {
         seedThreads();
         const hook = renderHook(() => usePlanCommands(SOURCE));
-        expect(getReviewState).not.toHaveBeenCalled();
 
         act(() => startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]));
-        await waitFor(() => expect(getCommand("plan.implementInNewWorktree")?.title).toBe("Implement v2 in a new worktree"));
-        expect(getReviewState).toHaveBeenCalledTimes(1);
+        expect(getCommand("plan.implementInNewWorktree")?.title).toBe("Implement v2 in a new worktree");
+        expect(getReviewState).not.toHaveBeenCalled();
         hook.unmount();
       });
 

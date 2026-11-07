@@ -4,7 +4,7 @@ import { getTransport } from "@/transport";
 import { useDiffStore } from "@/stores/diffStore";
 
 // A selection mounts several readers of the same checkout at once (Review
-// header, commit button, plan commands). Each server probe spawns about six
+// header, commit button, Plan panel). Each server probe spawns about six
 // git processes, and on Windows each spawn blocks the server's event loop
 // ahead of the transcript the user is opening. Readers that ask with the same
 // key while a probe is in flight share it. The key carries the diff revision,

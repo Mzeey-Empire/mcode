@@ -2,10 +2,10 @@ import { useEffect } from "react";
 import type { PlanVersion } from "@mcode/contracts/models/plan";
 import { registerCommand } from "@/lib/command-registry";
 import { setContext } from "@/lib/context-tracker";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { usePlanStore } from "@/stores/planStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { implementPlan, selectImplementTarget, usePlanImplementStore } from "./plan-implement";
-import { useSourceCheckout } from "./use-source-checkout";
 import { useWaitingForSetup } from "./use-waiting-for-setup";
 
 const EMPTY_PLANS: readonly PlanVersion[] = [];
@@ -25,9 +25,14 @@ export function usePlanCommands(threadId: string | null): void {
   const waiting = useWaitingForSetup(threadId ?? "") !== null;
   const executing = running || waiting;
   const version = threadId && !executing ? (selectImplementTarget(versions, activeVersion, onScreen)?.version ?? null) : null;
-  // Only the worktree command needs the checkout, and this hook runs for every
-  // selected thread, so skip the git-backed read until there is a plan to implement.
-  const { isGitRepo } = useSourceCheckout(version === null ? null : threadId);
+  // The server answers `isGitRepo` in a review-state probe from this same
+  // workspace flag. Reading the flag here keeps a git probe off every thread
+  // selection and still registers the worktree command in the render that
+  // makes the plan implementable.
+  const isGitRepo = useWorkspaceStore((s) => {
+    const workspaceId = threadId ? s.threads.find((thread) => thread.id === threadId)?.workspace_id : undefined;
+    return workspaceId !== undefined && s.workspaces.find((workspace) => workspace.id === workspaceId)?.is_git_repo === true;
+  });
 
   useEffect(() => {
     if (threadId === null || version === null) return;
