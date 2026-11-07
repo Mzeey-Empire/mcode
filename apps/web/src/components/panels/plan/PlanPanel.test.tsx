@@ -452,8 +452,8 @@ describe("PlanPanel", () => {
       });
 
       // The hook runs for every selected thread, so a read here spawns git on
-      // every switch even though only an implementable plan needs the answer.
-      it("reads the checkout only once a version becomes implementable", async () => {
+      // every switch even though only a thread with a plan needs the answer.
+      it("reads the checkout only once the thread has a plan", async () => {
         seedThreads();
         const hook = renderHook(() => usePlanCommands(SOURCE));
         expect(getReviewState).not.toHaveBeenCalled();
@@ -461,6 +461,25 @@ describe("PlanPanel", () => {
         act(() => startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]));
         await waitFor(() => expect(getCommand("plan.implementInNewWorktree")?.title).toBe("Implement v2 in a new worktree"));
         expect(getReviewState).toHaveBeenCalledTimes(1);
+        hook.unmount();
+      });
+
+      // When every selection read the checkout, the command appeared in the
+      // render where the plan's turn ended, and it still must.
+      it("registers the command as the plan's turn ends, with the read already done", async () => {
+        seedThreads();
+        const hook = renderHook(() => usePlanCommands(SOURCE));
+        act(() => {
+          startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+          useThreadStore.setState({ runningThreadIds: new Set([SOURCE]) });
+        });
+        await waitFor(() => expect(getReviewState).toHaveBeenCalledTimes(1));
+        await act(async () => {});
+        expect(getCommand("plan.implement")).toBeUndefined();
+        expect(getCommand("plan.implementInNewWorktree")).toBeUndefined();
+
+        act(() => useThreadStore.setState({ runningThreadIds: new Set() }));
+        expect(getCommand("plan.implementInNewWorktree")?.title).toBe("Implement v2 in a new worktree");
         hook.unmount();
       });
 
