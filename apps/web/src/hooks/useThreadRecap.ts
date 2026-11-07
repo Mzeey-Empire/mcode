@@ -4,6 +4,9 @@ import type { Message } from "@/transport";
 import { useThreadStore, type ThreadRecapCacheEntry } from "@/stores/threadStore";
 
 const STALE_RECAP_MS = 5 * 60 * 1000;
+
+/** How long the user must stay on a thread before an automatic Recap starts for it. */
+export const RECAP_SETTLE_DELAY_MS = 2_000;
 const MIN_FILTERED_MESSAGES = 3;
 const FIRST_RECAP_MESSAGE_LIMIT = 6;
 const DELTA_RECAP_MESSAGE_LIMIT = 4;
@@ -449,6 +452,10 @@ export function useThreadRecap({
     await promise;
   }, []);
 
+  // Every automatic recap starts a provider CLI on the server, which holds its event loop
+  // while the process is created. Starting one for a thread the user is about to leave
+  // delays the thread they open next, so each automatic path waits until the user stays
+  // on the thread and drops the recap if they leave first.
   const overviewOpenAutoAttemptedRef = useRef(false);
   useEffect(() => {
     if (!overviewOpen) {
@@ -459,26 +466,52 @@ export function useThreadRecap({
 
     if (!shouldGenerateRecapOnOverviewOpen(threadId, filteredMessages, cached, signature)) return;
 
-    overviewOpenAutoAttemptedRef.current = true;
-    void generate("automatic");
+    const timer = setTimeout(() => {
+      overviewOpenAutoAttemptedRef.current = true;
+      void generate("automatic");
+    }, RECAP_SETTLE_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [cached, filteredMessages, generate, overviewOpen, signature, threadId]);
 
+  // The switch and focus timers outlive an Overview close, so each one checks whether the
+  // user closed the Overview while it waited and drops the recap if they did. Only committed
+  // closes count, because a render React discards never reached the screen.
+  const overviewCloseCountRef = useRef(0);
+  const wasOverviewOpenRef = useRef(overviewOpen);
   useEffect(() => {
-    const onFocus = () => {
-      const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
+    if (wasOverviewOpenRef.current && !overviewOpen) overviewCloseCountRef.current += 1;
+    wasOverviewOpenRef.current = overviewOpen;
+  }, [overviewOpen]);
+
+  const startRecapOnceSettled = useCallback((settledThreadId: string) => {
+    const closesWhenScheduled = overviewCloseCountRef.current;
+    return setTimeout(() => {
+      if (overviewCloseCountRef.current !== closesWhenScheduled) return;
+      const latestMessages = getThreadStoreState()?.records.get(settledThreadId)?.messages ?? [];
       void generate("automatic", latestMessages);
+    }, RECAP_SETTLE_DELAY_MS);
+  }, [generate]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onFocus = () => {
+      clearTimeout(timer);
+      timer = startRecapOnceSettled(threadId);
     };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [generate, threadId]);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      clearTimeout(timer);
+    };
+  }, [startRecapOnceSettled, threadId]);
 
   const previousThreadIdRef = useRef(threadId);
   useEffect(() => {
     if (previousThreadIdRef.current === threadId) return;
     previousThreadIdRef.current = threadId;
-    const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
-    void generate("automatic", latestMessages);
-  }, [generate, threadId]);
+    const timer = startRecapOnceSettled(threadId);
+    return () => clearTimeout(timer);
+  }, [startRecapOnceSettled, threadId]);
 
   return {
     recapText: cached?.text ?? null,

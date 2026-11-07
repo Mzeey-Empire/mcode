@@ -1,5 +1,5 @@
 /**
- * One buffered git process run, expressed as plain data so it can run on the
+ * One git process run, expressed as plain data so it can run on the
  * calling thread or cross into the git process worker unchanged.
  */
 
@@ -9,7 +9,7 @@ import type { GitExecResult } from "./types.js";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
-/** Everything needed to start one buffered git process. */
+/** Everything needed to start one git process. */
 export interface GitProcessRequest {
   /** Arguments after `git`. */
   readonly args: readonly string[];
@@ -19,10 +19,21 @@ export interface GitProcessRequest {
   readonly env?: NodeJS.ProcessEnv;
   /** Kill git after this many milliseconds. */
   readonly timeout: number;
+  /** When observed, false drops stdout from the result after handing each chunk to the observer. */
+  readonly retainStdout?: boolean;
 }
 
-/** Starts one buffered git process and resolves its output, or rejects with execFile's failure fields. */
-export type GitProcessRunner = (request: GitProcessRequest) => Promise<GitExecResult>;
+/** Receives git output while the process runs. */
+export interface GitOutputObserver {
+  readonly onStdout?: (chunk: string) => void;
+  readonly onStderr?: (chunk: string) => void;
+}
+
+/**
+ * Starts one git process and resolves its output, or rejects with execFile's failure fields.
+ * With an observer, output streams to it as it arrives instead of only buffering.
+ */
+export type GitProcessRunner = (request: GitProcessRequest, observer?: GitOutputObserver) => Promise<GitExecResult>;
 
 /** The execFile failure fields git callers read, as structured-clone-safe data. */
 export interface GitProcessFailure {
@@ -36,7 +47,10 @@ export interface GitProcessFailure {
 }
 
 /** Runs git on the calling thread. Process creation blocks this thread until the OS returns. */
-export const runGitProcess: GitProcessRunner = async (request) => {
+export const runGitProcess: GitProcessRunner = (request, observer) =>
+  observer ? runObservedGitProcess(request, observer) : runBufferedGitProcess(request);
+
+async function runBufferedGitProcess(request: GitProcessRequest): Promise<GitExecResult> {
   const result = await execFile("git", [...request.args], {
     timeout: request.timeout,
     windowsHide: true,
@@ -48,7 +62,71 @@ export const runGitProcess: GitProcessRunner = async (request) => {
     stdout: typeof result.stdout === "string" ? result.stdout : String(result.stdout),
     stderr: typeof result.stderr === "string" ? result.stderr : String(result.stderr),
   };
-};
+}
+
+/** Runs git with streamed output while preserving the buffered result and execFile's error fields. */
+function runObservedGitProcess(request: GitProcessRequest, observer: GitOutputObserver): Promise<GitExecResult> {
+  const { timeout } = request;
+  return new Promise<GitExecResult>((resolve, reject) => {
+    const child = NodeChildProcess.spawn("git", [...request.args], {
+      windowsHide: true,
+      ...(request.env ? { env: request.env } : {}),
+      ...(request.cwd ? { cwd: request.cwd } : {}),
+    });
+    let stdout = "";
+    let stderr = "";
+    const stdoutDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
+    let settled = false;
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeout);
+    const finish = (result: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      result();
+    };
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      const text = stdoutDecoder.decode(chunk, { stream: true });
+      if (request.retainStdout !== false) stdout += text;
+      observer.onStdout?.(text);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      stderr += text;
+      observer.onStderr?.(text);
+    });
+    child.once("error", (error) => finish(() => reject(error)));
+    child.once("close", (code, signal) => finish(() => {
+      const tail = stdoutDecoder.decode();
+      if (request.retainStdout !== false) stdout += tail;
+      if (tail) observer.onStdout?.(tail);
+      if (timedOut) {
+        reject(Object.assign(new Error(`Git command timed out after ${timeout} ms`), {
+          code: null,
+          signal,
+          stdout,
+          stderr,
+          killed: true,
+        }));
+        return;
+      }
+      if (code !== 0) {
+        reject(Object.assign(new Error(`Git exited with code ${code ?? "unknown"}`), {
+          code,
+          signal,
+          stdout,
+          stderr,
+        }));
+        return;
+      }
+      resolve({ stdout, stderr });
+    }));
+  });
+}
 
 /** Copies the fields of an execFile rejection that survive a worker boundary. */
 export function describeGitProcessFailure(error: unknown): GitProcessFailure {
