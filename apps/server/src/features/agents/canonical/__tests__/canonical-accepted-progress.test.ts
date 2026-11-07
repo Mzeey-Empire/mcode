@@ -634,7 +634,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
 
     it.each([
       { provider: "claude", live: 2, publications: 0 },
-      { provider: "cursor", live: 0, publications: 2 },
+      { provider: "copilot", live: 0, publications: 2 },
     ] as const)("routes $provider pieces from the shared publisher end to end", async ({ provider, live, publications }) => {
       await begin(provider);
       const routing = { ...execution, deliveryAttempt: 1 };
@@ -664,12 +664,12 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(savedText()).toBe("prefix one two");
     });
 
-    it("checkpoints a Devin burst and stores every piece when the turn completes", async () => {
-      await begin("devin");
+    it.each(["devin", "cursor", "opencode"] as const)("checkpoints a %s burst and stores every piece when the turn completes", async (provider) => {
+      await begin(provider);
       const routing = { ...execution, deliveryAttempt: 1 };
-      const publisher = new CanonicalLiveEventPublisher("unbounded", "devin", { submit: async (batch) => {
+      const publisher = new CanonicalLiveEventPublisher("unbounded", provider, { submit: async (batch) => {
         const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: null, events: batch.events });
-        if (reply.result.kind !== "accepted") throw new Error(`Devin piece was not accepted: ${JSON.stringify(reply.result)}`);
+        if (reply.result.kind !== "accepted") throw new Error(`${provider} piece was not accepted: ${JSON.stringify(reply.result)}`);
         return { commit: { outcome: "accepted", acceptedThrough: reply.result.acceptedThrough,
           eventCount: batch.events.length, progressPosition: reply.result.progressPosition }, delivery: { ingress: "not-required" } };
       } });
@@ -688,11 +688,11 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       await publisher.waitForExecution(routing);
       await progress.waitForSaved(execution.threadId);
       const burstRows = inserts().canonical_agent_events;
-      console.log(`Devin burst: 400 pieces, ${burstRows} event rows`);
+      console.log(`${provider} burst: 400 pieces, ${burstRows} event rows`);
       expect(burstRows).toBe(2);
       await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
-        events: [draft("devin", 1000, "turnComplete")], terminalInput: { ...execution,
-          providerId: "devin", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+        events: [draft(provider, 1000, "turnComplete")], terminalInput: { ...execution,
+          providerId: provider, providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
       await progress.waitForSaved(execution.threadId);
       const canonical = new CanonicalAgentStore(db, () => {});
       expect(canonical.loadTurn(execution.turnId)?.status).toBe("Completed");

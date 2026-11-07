@@ -290,10 +290,9 @@ export class CursorAcpClientBridge {
     params: SessionNotification,
   ): Promise<void> {
     if (!entry.acpSessionId || params.sessionId !== entry.acpSessionId || !entry.activeTurnState) return;
-    const turnState = entry.acpRuntime.state.sessionId
-      ? entry.activeTurnState
-      : (entry.replayTurnState ??= createCursorAcpTurnState());
-    if (entry.acpRuntime.state.sessionId) this.deps.publishNativeTurnDiff(entry, params.update);
+    const opening = !entry.acpRuntime.state.sessionId;
+    const turnState = opening ? (entry.replayTurnState ??= createCursorAcpTurnState()) : entry.activeTurnState;
+    if (!opening) this.deps.publishNativeTurnDiff(entry, params.update);
     const mapped = mapCursorAcpSessionNotification(
       params,
       entry.threadId,
@@ -306,6 +305,9 @@ export class CursorAcpClientBridge {
         mapped: summarizeEmittedAgentEventsForTrace(mapped),
       }));
     }
+    // session/load and resume replay saved history before the session id is set. Mapping it keeps the replay
+    // and todo state current; publishing it would show old output as progress in the new turn.
+    if (opening) return;
     for (const event of mapped) {
       this.deps.publishEvent(entry, event);
     }

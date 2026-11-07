@@ -763,7 +763,7 @@ describe("mapCursorAcpSessionNotification", () => {
 });
 
 describe("Cursor ACP client-factory session-update seam", () => {
-  it("projects matching load replay without contaminating the continuation accumulator", async () => {
+  it("absorbs matching load replay without publishing it or contaminating the continuation accumulator", async () => {
     const child = fakeChild();
     const state = createCursorAcpTurnState();
     const events: unknown[] = [];
@@ -837,9 +837,8 @@ describe("Cursor ACP client-factory session-update seam", () => {
       sessionId: "other",
       update: { sessionUpdate: "session_info_update" },
     } as SessionNotification);
-    expect(events).toEqual([
-      { type: AgentEventType.TextDelta, threadId: "cursor-thread", delta: "historical" },
-    ]);
+    expect(events).toEqual([]);
+    expect(resolveCursorAssistantMessageContent(entry.replayTurnState.accumulator)).toBe("historical");
     expect(resolveCursorAssistantMessageContent(state.accumulator)).toBe("");
 
     finishLoad();
@@ -852,7 +851,6 @@ describe("Cursor ACP client-factory session-update seam", () => {
       },
     } as SessionNotification);
     expect(events).toEqual([
-      { type: AgentEventType.TextDelta, threadId: "cursor-thread", delta: "historical" },
       { type: AgentEventType.TextDelta, threadId: "cursor-thread", delta: "live" },
     ]);
     expect(resolveCursorAssistantMessageContent(state.accumulator)).toBe("live");
