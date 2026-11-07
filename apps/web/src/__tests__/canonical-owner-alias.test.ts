@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState } from "@mcode/contracts/compat/agent-model";
 import { type CanonicalAgentProgressFrame, type CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
 import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
+import { createMockMessage } from "@mcode/contracts/testing";
 import { createCanonicalAgentReplica } from "@/stores/canonical-agent-replica";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { readThreadField, resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
+import { projectCanonicalMessageList } from "@/features/conversation/messages/canonical-message-projection";
 import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({ ...(await vi.importActual("@/transport")), getTransport: () => mockTransport }));
@@ -86,6 +88,84 @@ function childTerminal(sequence: number): AcceptedCanonicalAgentEventEnvelope {
     turn: { ...turn, status: "Completed", endedAt: NOW },
   }] });
 }
+
+const CHILD_MESSAGE = "item:codex-child:message";
+
+/** The owner's saved record of the child's streaming answer, holding all of its text so far. */
+function childMessage(sequence: number, content: string): AcceptedCanonicalAgentEventEnvelope {
+  return event(sequence, { type: "collaboration.observed", changes: [{ kind: "item-recorded",
+    sourceExecution: { threadId: CHILD, turnId: CHILD_TURN, executionId: CHILD_EXECUTION },
+    parentExecution: { threadId: OWNER, turnId: OWNER_TURN, executionId: OWNER_EXECUTION },
+    item: { id: CHILD_MESSAGE, threadId: CHILD, turnId: CHILD_TURN, kind: "message", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+      payload: { projection: "message", nativeItemId: "native-message", eventKey: "stream",
+        message: createMockMessage({ id: "child-answer", thread_id: CHILD, role: "assistant", content, sequence: 0 }) } },
+  }] });
+}
+
+let liveSequence = 0;
+function childText(after: number, at: number, delta: string): Extract<CanonicalAgentProgressFrame, { phase: "live" }> {
+  return { phase: "live", threadId: CHILD, ownerThreadId: OWNER, epoch: EPOCH, after, liveSequence: ++liveSequence, events: [],
+    childText: [{ threadId: CHILD, itemId: CHILD_MESSAGE, at, delta }] };
+}
+
+/** The answers the child's transcript tab renders. */
+function childAnswers(): string[] {
+  const record = useThreadStore.getState().records.get(CHILD);
+  if (!record) throw new Error("missing child transcript");
+  return (projectCanonicalMessageList({ threadId: CHILD, state: record.canonicalAgent.state, messages: record.messages,
+    toolCalls: [], thoughtSegments: [] })?.messages ?? []).filter((message) => message.role === "assistant").map((message) => message.content);
+}
+
+describe("child text streamed live through its owner", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+  beforeEach(() => {
+    // The store paces accepted frames per thread in a wall-clock window; a fixed past clock keeps these frames
+    // out of the window the next suite's frames for the same child fall in.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(NOW));
+    clearRecordCache();
+    resetThreadStoreForTests({ currentThreadId: CHILD });
+    sessionStorage.removeItem(`mcode-agent-publication-v2:${CHILD}`);
+    sessionStorage.removeItem(`mcode-agent-publication-v2:${OWNER}`);
+    seedTarget(CHILD);
+    useThreadStore.getState().handleCanonicalProgress(accepted([childMessage(1, "first")]));
+  });
+
+  it("shows child text when its live frame arrives and keeps one copy through its checkpoint and save", () => {
+    const store = useThreadStore.getState();
+    store.handleCanonicalProgress(childText(1, 5, " more"));
+    expect(childAnswers()).toEqual(["first more"]);
+    store.handleCanonicalProgress(accepted([childMessage(2, "first more")]));
+    expect(childAnswers()).toEqual(["first more"]);
+    store.handleCanonicalProgress(childText(2, 10, "!"));
+    store.handleCanonicalProgress(saved([childMessage(1, "first"), childMessage(2, "first more")]));
+    expect(childAnswers()).toEqual(["first more!"]);
+    expect(readThreadField(CHILD, (record) => record.canonicalAgent.recoveryRequired)).toBe(false);
+  });
+
+  it("leaves text that does not follow the shown copy for the next checkpoint", () => {
+    const store = useThreadStore.getState();
+    const piece = childText(1, 5, " more");
+    store.handleCanonicalProgress(piece);
+    store.handleCanonicalProgress({ ...piece, liveSequence: ++liveSequence });
+    store.handleCanonicalProgress(childText(1, 20, " later"));
+    expect(childAnswers()).toEqual(["first more"]);
+  });
+
+  it("re-hydrates the child's text from the reconnect cut instead of the live copy it missed", () => {
+    const store = useThreadStore.getState();
+    store.handleCanonicalProgress(childText(1, 5, " more"));
+    store.handleCanonicalProgress(recovery([childMessage(1, "first"), childMessage(2, "first more and the rest")]));
+    expect(childAnswers()).toEqual(["first more and the rest"]);
+    const saved = reduceAgentEventBatch(familyState(), [childMessage(1, "first")]);
+    if (saved.outcome === "rejected") throw new Error("invalid saved child fixture");
+    store.handleCanonicalProgress({ ...recovery([], saved.state, 1), epoch: "owner-restarted", loss: "runtime-restarted" });
+    expect(childAnswers()).toEqual(["first"]);
+  });
+});
 
 describe("parent-owned child progress aliases", () => {
   afterEach(() => vi.restoreAllMocks());
