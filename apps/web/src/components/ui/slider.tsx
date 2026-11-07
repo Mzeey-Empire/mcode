@@ -85,7 +85,7 @@ export function SteppedSlider({
           </span>
           <SliderPrimitive.Thumb
             aria-label={ariaLabel}
-            onFocus={(event) => setFocusVisible(event.currentTarget.matches(":focus-visible"))}
+            onFocus={(event) => setFocusVisible(event.target.matches(":focus-visible"))}
             onBlur={() => setFocusVisible(false)}
             // Base UI clamps an unmatched -1 to the first stop; the controlled value keeps the real label.
             getAriaValueText={() => getStopLabel(value)}
