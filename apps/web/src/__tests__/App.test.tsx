@@ -108,12 +108,15 @@ vi.mock("@/components/ui/scroll-area", () => ({
 
 // Keep cold transform time outside the test timeout; this suite verifies navigation, not chunk loading.
 await import("@/features/pull-requests");
+await import("@/components/panels/RightPanel");
 
 describe("App", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     useConnectionStore.setState({ status: "connecting" });
+    useUiStore.setState({ rightPanelMaximized: false });
+    useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null, activeThreadId: null });
     delete (window as unknown as Record<string, unknown>).desktopBridge;
   });
 
@@ -143,7 +146,7 @@ describe("App", () => {
     const workspace = createMockWorkspace({ id: "caption-workspace" });
     vi.mocked(mockTransport.listWorkspaces).mockResolvedValue([workspace]);
     useWorkspaceStore.setState({ workspaces: [workspace], activeWorkspaceId: workspace.id, activeThreadId: null });
-    const { unmount } = render(<App />);
+    render(<App />);
 
     const panel = await screen.findByTestId("right-panel");
     const row = screen.getByTestId("content-row");
@@ -161,11 +164,6 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     expect(screen.queryByTestId("right-panel")).not.toBeInTheDocument();
     expect(row).toHaveAttribute("data-right-panel-visible", "false");
-    unmount();
-    act(() => {
-      useUiStore.setState({ rightPanelMaximized: false });
-      useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null, activeThreadId: null });
-    });
   });
 
   it("renders the landing screen when no workspace is active", async () => {
