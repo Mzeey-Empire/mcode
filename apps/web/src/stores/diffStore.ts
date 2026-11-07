@@ -844,6 +844,8 @@ interface DiffState {
   getCachedInlineDiff: (threadId: string, source: string, id: string, filePath: string, cacheVersion: string | number) => string | undefined;
   /** Bump a mutable diff scope so mounted file rows refetch against the latest checkout. */
   bumpDiffRevision: (scopeId: string) => void;
+  /** Bump several scopes in one update, for a change every scope of one checkout shares. */
+  bumpDiffRevisions: (scopeIds: readonly string[]) => void;
   /** Persist the omnibox URL for a thread's embedded preview. */
   setPreviewUrlForThread: (threadId: string, url: string) => void;
   clearThread: (threadId: string) => void;
@@ -1142,14 +1144,17 @@ export const useDiffStore = create<DiffState>((set, get) => ({
     })),
   getCachedInlineDiff: (threadId, source, id, filePath, cacheVersion) =>
     get().inlineDiffCache[inlineDiffCacheKey(threadId, source, id, filePath, cacheVersion)],
-  bumpDiffRevision: (scopeId) =>
-    set((s) => ({
-      diffRevisionByScope: {
-        ...s.diffRevisionByScope,
-        [scopeId]: (s.diffRevisionByScope[scopeId] ?? 0) + 1,
-      },
-      inlineDiffCache: omitInlineDiffCacheByPrefix(s.inlineDiffCache, `${scopeId}:`),
-    })),
+  bumpDiffRevision: (scopeId) => get().bumpDiffRevisions([scopeId]),
+  bumpDiffRevisions: (scopeIds) =>
+    set((s) => {
+      const diffRevisionByScope = { ...s.diffRevisionByScope };
+      let inlineDiffCache = s.inlineDiffCache;
+      for (const scopeId of scopeIds) {
+        diffRevisionByScope[scopeId] = (diffRevisionByScope[scopeId] ?? 0) + 1;
+        inlineDiffCache = omitInlineDiffCacheByPrefix(inlineDiffCache, `${scopeId}:`);
+      }
+      return { diffRevisionByScope, inlineDiffCache };
+    }),
   setPreviewUrlForThread: (threadId, url) => {
     if (get().previewUrlByThread[threadId] === url) return;
     set((s) => ({
