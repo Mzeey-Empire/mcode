@@ -634,7 +634,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
 
     it.each([
       { provider: "claude", live: 2, publications: 0 },
-      { provider: "copilot", live: 0, publications: 2 },
+      { provider: "copilot", live: 2, publications: 0 },
     ] as const)("routes $provider pieces from the shared publisher end to end", async ({ provider, live, publications }) => {
       await begin(provider);
       const routing = { ...execution, deliveryAttempt: 1 };
@@ -652,6 +652,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       const publicationRows = () => rowCount("canonical_agent_events", "WHERE json_extract(envelope_json, '$.payload.type') = 'publication.recorded'");
       const before = publicationRows();
       pushes.frames.length = 0;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
       for (const delta of [" one", " two"]) {
         publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
           turnExecutionId: execution.executionId, delta, isFinalResponse: true }), []);
@@ -660,11 +661,18 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       await drainSaves();
       expect(liveFrames()).toHaveLength(live);
       expect(publicationRows() - before).toBe(publications);
+      expect(savedText()).toBe("prefix");
+      await vi.advanceTimersByTimeAsync(999);
+      await drainSaves();
+      expect(savedText()).toBe("prefix");
+      await vi.advanceTimersByTimeAsync(1);
+      await drainSaves();
+      expect(savedText()).toBe("prefix one two");
       await progress.waitForSaved(execution.threadId);
       expect(savedText()).toBe("prefix one two");
     });
 
-    it.each(["devin", "cursor", "opencode"] as const)("checkpoints a %s burst and stores every piece when the turn completes", async (provider) => {
+    it.each(["devin", "cursor", "opencode", "copilot"] as const)("checkpoints a %s burst and stores every piece when the turn completes", async (provider) => {
       await begin(provider);
       const routing = { ...execution, deliveryAttempt: 1 };
       const publisher = new CanonicalLiveEventPublisher("unbounded", provider, { submit: async (batch) => {
@@ -685,11 +693,27 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
         publisher.publish(routing, providerRuntimeEvent({ type: "reasoningDelta", threadId: execution.threadId,
           turnExecutionId: execution.executionId, delta, reasoningItemId: "reasoning-block" }), []);
       }
+      const toolInput = ['{"path":', ...Array.from({ length: 198 }, () => " "), '"file.txt"}'];
+      for (const partialJson of toolInput) {
+        publisher.publish(routing, providerRuntimeEvent({ type: "toolInputDelta", threadId: execution.threadId,
+          turnExecutionId: execution.executionId, toolCallId: "tool", partialJson }), []);
+      }
       await publisher.waitForExecution(routing);
+      expect(liveFrames().flatMap((frame) => frame.events).filter((event) => event.type === "textDelta")).toHaveLength(200);
+      expect(liveFrames().flatMap((frame) => frame.events).filter((event) => event.type === "reasoningDelta")).toHaveLength(200);
+      expect(liveFrames().flatMap((frame) => frame.events).filter((event) => event.type === "toolInputDelta").map((event) => event.partialJson).join("")).toBe(toolInput.join(""));
       await progress.waitForSaved(execution.threadId);
       const burstRows = inserts().canonical_agent_events;
-      console.log(`${provider} burst: 400 pieces, ${burstRows} event rows`);
+      console.log(`${provider} burst: 600 pieces, ${burstRows} event rows`);
       expect(burstRows).toBe(2);
+      if (provider === "copilot") {
+        publisher.publish(routing, providerRuntimeEvent({ type: "toolUse", threadId: execution.threadId,
+          turnExecutionId: execution.executionId, toolCallId: "tool", toolName: "Read", toolInput: { path: "file.txt" } }), []);
+        await publisher.waitForExecution(routing);
+        await progress.waitForSaved(execution.threadId);
+        expect(db.prepare("SELECT json_extract(envelope_json, '$.payload.event.toolInput.path') AS path FROM canonical_agent_events WHERE json_extract(envelope_json, '$.payload.event.type') = 'toolUse'").all())
+          .toEqual([{ path: "file.txt" }]);
+      }
       await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
         events: [draft(provider, 1000, "turnComplete")], terminalInput: { ...execution,
           providerId: provider, providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
@@ -697,10 +721,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       const canonical = new CanonicalAgentStore(db, () => {});
       expect(canonical.loadTurn(execution.turnId)?.status).toBe("Completed");
       expect(savedText()).toBe(`prefix${text.join("")}`);
-      const thought = db.prepare(`SELECT json_extract(envelope_json, '$.payload.item.payload.narrative.record.text') AS text
-        FROM canonical_agent_events WHERE thread_id = ?
-        AND json_extract(envelope_json, '$.payload.item.payload.projection') = 'narrativeRecovery'`).all(execution.threadId);
-      expect(thought).toEqual([{ text: reasoning.join("") }]);
+      const thoughts = new ThoughtSegmentStore(reader).listByMessage(deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`));
+      expect(thoughts.filter((thought) => !thought.is_final_response).map((thought) => thought.text)).toEqual([reasoning.join("")]);
     });
 
     it("saves a Codex stream per checkpoint, then its completion suffix and the next tool in order", async () => {
@@ -983,6 +1005,12 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     const session = new CopilotPersistenceSession(); copilotSdk.session = session;
     const provider = createCopilotProvider({ configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host,
       copilot: { launch: { resolve: async () => ({ cliPath: "/copilot", env: {} }) } } });
+    function assertSavedChild(canonical: CanonicalAgentStore) {
+      const childId = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 })?.done[0]?.id;
+      if (!childId) throw new Error("Expected saved Copilot child");
+      expect(canonical.loadConversationProjection(childId, 20).messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual([Array.from({ length: 20 }, (_, index) => `child-${index} `).join("")]);
+    }
     try {
       await provider.sendTurn({ threadId: execution.threadId, turnId: execution.turnId, turnExecutionId: execution.executionId,
         sessionId: "mcode-session", workspaceId: "workspace", cwd: directory, message: "Task", model: "model",
@@ -992,18 +1020,34 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       session.emit({ type: "assistant.turn_start", data: { turnId: "loop-2" } });
       session.emit({ type: "assistant.message", data: { messageId: "commentary-2", content: "Waiting for native child." } });
       session.emit({ type: "assistant.turn_start", data: { turnId: "loop-3" } });
+      session.emit({ type: "subagent.started", data: { toolCallId: "child-task", agentName: "worker", agentDisplayName: "Worker", agentDescription: "Explore" } });
+      for (let index = 0; index < 20; index++) {
+        const fragment = { type: "assistant.message_delta", data: { messageId: "child-answer", deltaContent: `child-${index} `, parentToolCallId: "child-task" } } as const;
+        session.emit(fragment, `child-piece-${index}`);
+        session.emit(fragment, `child-piece-${index}`);
+      }
+      session.emit({ type: "subagent.completed", data: { toolCallId: "child-task", agentName: "worker", agentDisplayName: "Worker" } });
+      const reasoning = "0123456789".repeat(7_000);
+      session.emit({ type: "assistant.reasoning", data: { reasoningId: "large-thought", content: reasoning } }, "large-thought");
+      session.emit({ type: "assistant.reasoning", data: { reasoningId: "large-thought", content: reasoning } }, "large-thought");
       session.emit({ type: "assistant.message_delta", ephemeral: true, data: { messageId: "answer", deltaContent: expected.delta } });
       if (expected.snapshot) session.emit({ type: "assistant.message", data: { messageId: "answer", content: "Final answer" } }, "original-final-snapshot");
       await finishCopilotNativeTurn(provider, session, ending);
       const canonical = new CanonicalAgentStore(db, () => {});
       await expect.poll(() => canonical.loadTurn(execution.turnId)?.status).toBe(expected.status);
       await expect.poll(() => progress.depth().pending).toBe(0);
+      assertSavedChild(canonical);
       const terminal = canonical.loadTerminalProjection(execution.turnId);
       expect(terminal.message).toMatchObject({ id: deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`),
         content: expected.content, is_internal: false, outcome: expected.outcome });
       if (!terminal.message) throw new Error("Expected saved assistant response");
       expect(new ThoughtSegmentStore(db).listByMessage(terminal.message.id)
-        .filter((item) => !item.is_final_response).map((item) => item.text)).toEqual(["Looking up the result.", "Waiting for native child."]);
+        .filter((item) => !item.is_final_response).map((item) => item.text)).toEqual(["Looking up the result.", "Waiting for native child.", reasoning]);
+      expect(batches.flatMap((batch) => batch.events).filter((event) => event.delivery === "live").flatMap((draft) => {
+        if (draft.payload.type !== "item.recorded") return [];
+        const event = ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent).event;
+        return event.type === "reasoningDelta" ? [event.delta] : [];
+      }).join("")).toBe(reasoning);
       const finalMessages = batches.flatMap((batch) => batch.events).filter((value) => value.payload.type === "item.recorded"
         && ProviderRuntimeEventSchema().parse(value.payload.item.payload.runtimeEvent).event.type === "message");
       expect(finalMessages).toHaveLength(expected.finalMessages);

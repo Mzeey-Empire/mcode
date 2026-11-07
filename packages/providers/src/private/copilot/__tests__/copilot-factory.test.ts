@@ -1043,6 +1043,34 @@ describe("Copilot public factory", () => {
     expect(projections(sink).flatMap((event) => event.type === "textDelta" ? [event.delta] : []).join("")).toBe("Hello");
   });
 
+  it.each(["resume", "reconnect", "next-turn"] as const)("deduplicates native fragments on %s", async (mode) => {
+    const submit = vi.spyOn(sink, "submit");
+    if (mode === "reconnect") {
+      await provider.sendTurn(request());
+      await finish();
+      await provider.discardSession("mcode-thread-1");
+      session = new FakeSession();
+      sdk.resume.mockResolvedValueOnce(session);
+    }
+    await provider.sendTurn(request(mode === "next-turn" ? {} : { resumeFrom: session.sessionId }));
+    const emitFragments = () => {
+      session.emit({ type: "assistant.message_delta", data: { messageId: "reply", deltaContent: "Hello" } }, "replayed-text");
+      session.emit({ type: "assistant.reasoning_delta", data: { reasoningId: "thought", deltaContent: "Think" } }, "replayed-thought");
+    };
+    emitFragments();
+    emitFragments();
+    await finish();
+    if (mode === "next-turn") {
+      await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002" }));
+      emitFragments();
+      session.emit({ type: "assistant.message_delta", data: { messageId: "new-reply", deltaContent: "Next" } });
+      await finish();
+    }
+    expect(projections(sink).flatMap((event) => event.type === "textDelta" ? [event.delta] : []).join("")).toBe(mode === "next-turn" ? "HelloNext" : "Hello");
+    expect(projections(sink).flatMap((event) => event.type === "reasoningDelta" ? [event.delta] : []).join("")).toBe("Think");
+    expect(submit.mock.calls.flatMap(([batch]) => batch.events).filter((event) => event.delivery === "live")).toHaveLength(mode === "next-turn" ? 3 : 2);
+  });
+
   it("preserves nested native agent identity without copying notification prompts", async () => {
     await provider.sendTurn(request());
     session.emit({ type: "system.notification", data: { content: "private notification", kind: { type: "agent_completed", agentId: "native-background-agent", agentType: "task", status: "completed", description: "private task", prompt: "private prompt" } } }, "agent-notification");
