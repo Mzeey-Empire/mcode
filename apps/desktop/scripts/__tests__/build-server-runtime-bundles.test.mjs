@@ -75,20 +75,32 @@ describe("buildServerRuntimeBundles", () => {
       "execution",
       "execution.worker.js",
     );
+    const gitProcessWorkerEntry = NodePath.join(
+      serverRoot,
+      "dist-tsc",
+      "features",
+      "projects",
+      "git",
+      "execution",
+      "git-process.worker.js",
+    );
     const serverOutFile = NodePath.join(fixtureRoot, "dist", "server.cjs");
     const ptyHostOutFile = NodePath.join(fixtureRoot, "dist", "pty-host.cjs");
     const canonicalWriterWorkerOutFile = NodePath.join(fixtureRoot, "dist", "canonical-agent-writer.worker.cjs");
     const executionWorkerOutFile = NodePath.join(fixtureRoot, "dist", "execution.worker.cjs");
+    const gitProcessWorkerOutFile = NodePath.join(fixtureRoot, "dist", "git-process.worker.cjs");
 
     await Promise.all([
       NodeFSPromises.mkdir(NodePath.dirname(ptyHostEntry), { recursive: true }),
       NodeFSPromises.mkdir(NodePath.dirname(canonicalWriterWorkerEntry), { recursive: true }),
       NodeFSPromises.mkdir(NodePath.dirname(executionWorkerEntry), { recursive: true }),
+      NodeFSPromises.mkdir(NodePath.dirname(gitProcessWorkerEntry), { recursive: true }),
     ]);
     await NodeFSPromises.writeFile(serverEntry, 'console.log("server-entry");\n');
     await NodeFSPromises.writeFile(ptyHostEntry, 'console.log("pty-host-entry");\n');
     await NodeFSPromises.writeFile(canonicalWriterWorkerEntry, 'console.log("canonical-writer-worker");\n');
     await NodeFSPromises.writeFile(executionWorkerEntry, 'console.log("execution-worker");\n');
+    await NodeFSPromises.writeFile(gitProcessWorkerEntry, 'console.log("git-process-worker");\n');
 
     await buildServerRuntimeBundles({
       serverRoot,
@@ -105,6 +117,7 @@ describe("buildServerRuntimeBundles", () => {
     expect(await NodeFSPromises.readFile(ptyHostOutFile, "utf8")).toContain("pty-host-entry");
     expect(await NodeFSPromises.readFile(canonicalWriterWorkerOutFile, "utf8")).toContain("canonical-writer-worker");
     expect(await NodeFSPromises.readFile(executionWorkerOutFile, "utf8")).toContain("execution-worker");
+    expect(await NodeFSPromises.readFile(gitProcessWorkerOutFile, "utf8")).toContain("git-process-worker");
   }, 30_000);
 });
 
