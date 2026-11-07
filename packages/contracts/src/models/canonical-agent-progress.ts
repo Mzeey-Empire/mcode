@@ -27,6 +27,17 @@ const liveEvent = lazySchema(() => z.unknown().superRefine((event, context) => {
 }).pipe(AgentEventSchema()).refine((event) => agentEventDelivery(event) === AgentEventDelivery.Live,
   { message: "Only text, reasoning and tool-input fragments can be live" }));
 
+/**
+ * Text appended to a child thread's streaming message. `at` is the message length the text follows, so a client
+ * whose copy has another length (a missed or repeated piece) ignores it and waits for the next checkpoint.
+ */
+const liveChildText = lazySchema(() => z.object({
+  threadId: z.string().min(1).max(256),
+  itemId: z.string().min(1).max(512),
+  at: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  delta: z.string().min(1),
+}).strict());
+
 const recoveryObject = lazySchema(() => z.object({
   phase: z.literal("recovery"),
   ...identity,
@@ -48,7 +59,8 @@ const frameSchema = lazySchema(() => z.discriminatedUnion("phase", [
     ...identity,
     after: sequence,
     liveSequence: sequence,
-    events: z.array(liveEvent()).min(1).max(CANONICAL_AGENT_PROGRESS_BATCH_MAX),
+    events: z.array(liveEvent()).max(CANONICAL_AGENT_PROGRESS_BATCH_MAX),
+    childText: z.array(liveChildText()).min(1).max(CANONICAL_AGENT_PROGRESS_BATCH_MAX).optional(),
   }).strict(),
   z.object({
     phase: z.literal("accepted"),
@@ -67,7 +79,10 @@ const frameSchema = lazySchema(() => z.discriminatedUnion("phase", [
   recoveryObject(),
 ]).superRefine((frame, context) => {
   if (frame.phase === "recovery") { validateRecovery(frame, context); return; }
-  if (frame.phase === "live") return;
+  if (frame.phase === "live") {
+    if (frame.events.length === 0 && !frame.childText) context.addIssue({ code: z.ZodIssueCode.custom, message: "A live frame must show something" });
+    return;
+  }
   if (frame.events.some((event) => event.routing.threadId !== (frame.ownerThreadId ?? frame.threadId))) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Progress event belongs to another thread" });
   }

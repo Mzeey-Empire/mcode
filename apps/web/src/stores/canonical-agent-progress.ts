@@ -1,6 +1,6 @@
 import { CANONICAL_AGENT_PROGRESS_RECOVERY_MAX, CanonicalAgentProgressFrameSchema, type CanonicalAgentProgressFrame, type CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
-import { reduceAgentEventBatch, type AgentModelState, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import { reduceAgentEventBatch, type AgentItem, type AgentModelState, type AcceptedCanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import {
   applyCanonicalPushEvents,
   applyCanonicalReconnectRecovery,
@@ -14,6 +14,8 @@ export interface CanonicalProgressUpdate extends CanonicalAgentReplicaUpdate {
   liveEvents?: readonly AgentEvent[];
   publications: readonly AcceptedCanonicalAgentEventEnvelope[];
 }
+
+type LiveChildTextPiece = NonNullable<Extract<CanonicalAgentProgressFrame, { phase: "live" }>["childText"]>[number];
 
 function result(replica: CanonicalAgentReplica, outcome: CanonicalProgressUpdate["outcome"], publications: readonly AcceptedCanonicalAgentEventEnvelope[] = [], installedSnapshot = false): CanonicalProgressUpdate {
   return { replica, outcome, publications, installedSnapshot };
@@ -170,7 +172,32 @@ function live(current: CanonicalAgentReplica, frame: Extract<CanonicalAgentProgr
   if (current.recoveryRequired || progress?.epoch !== frame.epoch || progress.acceptedThrough !== frame.after) {
     return result(current, "ignored");
   }
-  return { ...result(current, "applied"), liveEvents: frame.events };
+  const state = frame.childText ? withLiveChildText(current.state, frame.childText) : current.state;
+  return { ...result(state === current.state ? current : { ...current, state }, "applied"), liveEvents: frame.events };
+}
+
+/**
+ * Child text grows the shown copy of its child message in place, and the next checkpoint replaces that message with
+ * its saved record. Text that does not follow the shown copy exactly is left for that checkpoint, never guessed at.
+ */
+function withLiveChildText(state: AgentModelState, pieces: readonly LiveChildTextPiece[]): AgentModelState {
+  let items = state.items;
+  for (const piece of pieces) {
+    const grown = grownMessage(items[piece.itemId], piece);
+    if (!grown) continue;
+    if (items === state.items) items = { ...items };
+    items[piece.itemId] = grown;
+  }
+  return items === state.items ? state : { ...state, items };
+}
+
+function grownMessage(item: AgentItem | undefined, piece: LiveChildTextPiece): AgentItem | undefined {
+  if (item?.threadId !== piece.threadId || item.payload.projection !== "message") return undefined;
+  const message = item.payload.message;
+  if (typeof message !== "object" || message === null || !("content" in message)) return undefined;
+  const content = message.content;
+  return typeof content === "string" && content.length === piece.at
+    ? { ...item, payload: { ...item.payload, message: { ...message, content: content + piece.delta } } } : undefined;
 }
 
 /** Apply the unified progress protocol without dispatching save receipts or recovery effects. */

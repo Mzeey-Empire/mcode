@@ -191,7 +191,12 @@ Text, reasoning, and tool-input pieces labelled `delivery: "live"` are the
 exception. The shared publisher labels them for providers on its live
 allow-list; Codex has its own publisher and labels its parent pieces, not its
 child pieces. They show at once in a `live` frame that holds no progress
-position, and the owner gathers them into one checkpoint operation. The
+position, and the owner gathers them into one checkpoint operation. Child
+pieces arrive as saved observations, but when one only grows a streaming child
+message the owner already holds, it shows as `childText` in a `live` frame and
+the checkpoint saves the latest record of each such message instead. The
+client grows a message only at its current length, so a resent piece cannot
+double the text. The
 checkpoint is accepted after one second, at 16 KiB of text, or before anything
 that must observe it: a saved operation, a control or durable command, a
 lost-worker interruption, steer, a plan answer, a save wait, reconnect

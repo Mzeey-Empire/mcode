@@ -581,6 +581,26 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(savedText()).toBe("prefixonce");
     });
 
+    it("answers a resent earlier live piece with its first receipt after a later piece", async () => {
+      await begin();
+      const accept = vi.spyOn(progress, "acceptWhenReady");
+      pushes.frames.length = 0;
+      await piece("one");
+      await piece("two");
+      const operation = accept.mock.calls[0]?.[0];
+      if (!operation || operation.mutation.kind !== "append-events") throw new Error("Expected the live operation");
+      const first = await accept.mock.results[0]?.value;
+      expect(progress.accept(operation)).toEqual(first);
+      expect(liveFrames()).toHaveLength(2);
+      const changed = { ...operation, mutation: { ...operation.mutation,
+        events: [{ ...draft("claude", operation.ordinal - 1, "textDelta", { delta: "other", isFinalResponse: true }), delivery: "live" as const }] } };
+      expect(() => progress.accept(changed)).toThrow(expect.objectContaining({ admissionReason: "identity-conflict" }));
+      await progress.waitForSaved(execution.threadId);
+      expect(progress.accept(operation)).toEqual(first);
+      await progress.waitForSaved(execution.threadId);
+      expect(savedText()).toBe("prefixonetwo");
+    });
+
     it("saves a non-fragment event whose draft is labelled live", async () => {
       await begin();
       pushes.frames.length = 0;
@@ -769,6 +789,164 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
         canonical_agent_item_content_appends: 13, canonical_writer_operation_receipts: 16 });
       expect(savedText()).toBe(`${"x".repeat(120)} done`);
     });
+  });
+
+  describe.each(["copilot", "codex"] as const)("%s child live text", (provider) => {
+    let ordinal: number;
+    let childId: string;
+    const nativeChild = { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn" };
+
+    function childDraft(type: AgentEvent["type"], fields: Record<string, unknown>, nativeItemId?: string) {
+      if (provider === "codex") {
+        return familyDraft(ordinal, type, fields, { child: { ...nativeChild, ...(nativeItemId ? { nativeItemId, itemEventKey: "stream" } : {}) } });
+      }
+      const value = draft("copilot", ordinal, type, fields);
+      const extension = ProviderRuntimeExtensionSchema().parse({ kind: "child-thread", providerId: "copilot",
+        childThread: type === "toolUse" ? { role: "delegate", path: ["spawn"], prompt: "Child task" }
+          : { role: "child", path: ["spawn"], ...(nativeItemId ? { nativeItemId } : {}) } });
+      return { ...value, payload: { ...value.payload, item: { ...value.payload.item, payload: { ...value.payload.item.payload,
+        runtimeEvent: { ...value.payload.item.payload.runtimeEvent, extension } } } } };
+    }
+    async function event(events: Extract<ExecutionWorkCommand, { kind: "event" }>["events"]) {
+      ordinal++;
+      const reply = await send(ordinal, { kind: "event", phase: "running", nativeCursor: null, events });
+      expect(reply.result.kind, JSON.stringify(reply.result)).toBe("accepted");
+    }
+    const parentPiece = (text: string) => event([{ ...draft(provider, ordinal, "textDelta", { delta: text, isFinalResponse: true }),
+      delivery: "live" as const }]);
+    const childPiece = (text: string) => event([childDraft("textDelta", { delta: text }, "child-message")]);
+    async function beginChild() {
+      ordinal = 1;
+      await send(1, start(provider));
+      await parentPiece("prefix");
+      if (provider === "codex") {
+        await event([familyDraft(ordinal, "toolUse", { toolCallId: "spawn", toolName: "Agent", toolInput: {} },
+          { collaboration: { kind: "spawnAgent", receiverThreadIds: ["native-child"], prompt: "Child task" } })]);
+        await event([childDraft("turnStarted", {})]);
+      } else {
+        await event([childDraft("toolUse", { toolCallId: "spawn", toolName: "Agent", toolInput: { prompt: "Child task" } })]);
+      }
+      await childPiece("first");
+      await progress.waitForSaved(execution.threadId);
+      const id = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 })?.active[0]?.id;
+      if (!id) throw new Error("Expected a running child");
+      childId = id;
+    }
+    function savedState() {
+      const cut = new CanonicalAgentStore(db, () => {}).recoverThread(execution.threadId,
+        { conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
+      if (cut.mode !== "snapshot") throw new Error("Expected saved snapshot");
+      return cut.snapshot.state;
+    }
+    function childAnswer(state: AgentModelState = savedState()) {
+      const answers = Object.values(state.items).flatMap((item) => item.threadId === childId && item.payload.projection === "message"
+        ? [MessageSchema().parse(item.payload.message)] : []).filter((message) => message.role === "assistant");
+      return answers.map((message) => message.content);
+    }
+    function parentText() {
+      return savedState().items[`assistant-response-text:${execution.executionId}`]?.payload.content;
+    }
+    function insertedEvents() {
+      db.run("CREATE TABLE child_event_inserts (inserts INTEGER NOT NULL)");
+      db.run("INSERT INTO child_event_inserts VALUES (0)");
+      db.run("CREATE TRIGGER count_child_event_inserts AFTER INSERT ON canonical_agent_events BEGIN UPDATE child_event_inserts SET inserts = inserts + 1; END");
+      return () => (db.prepare("SELECT inserts FROM child_event_inserts").get() as { inserts: number }).inserts;
+    }
+    function childLiveFrames() {
+      return frames().flatMap((frame) => frame.phase === "live" ? frame.childText ?? [] : []);
+    }
+
+    it("saves a 600-piece child burst as one checkpoint, apart from the parent text streaming beside it", async () => {
+      await beginChild();
+      const inserts = insertedEvents();
+      pushes.frames.length = 0;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      for (let index = 0; index < 600; index++) {
+        await childPiece("c");
+        if (index % 3 === 0) await parentPiece("p");
+      }
+      expect(inserts()).toBe(0);
+      expect(childLiveFrames()).toHaveLength(600);
+      expect(childLiveFrames()[1]).toEqual({ threadId: childId, itemId: expect.any(String), at: "first".length + 1, delta: "c" });
+      await progress.waitForSaved(execution.threadId);
+      // One checkpoint: the parent's text append and one collaboration row with the child's latest message.
+      expect(inserts()).toBe(2);
+      expect(childAnswer()).toEqual([`first${"c".repeat(600)}`]);
+      expect(parentText()).toBe(`prefix${"p".repeat(200)}`);
+      await event([childDraft("turnComplete", {})]);
+      await progress.waitForSaved(execution.threadId);
+      expect(childAnswer()).toEqual([`first${"c".repeat(600)}`]);
+      expect(savedState().turns[Object.values(savedState().turns).find((turn) => turn.threadId === childId)?.id ?? ""]?.status).toBe("Completed");
+    });
+
+    it("recovers child text to its last checkpoint after the owner disappears mid-burst", async () => {
+      await beginChild();
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      // One piece every 100 ms: the timer saves pieces 1-10 and 11-20; 21-25 are still pending at the crash.
+      for (let index = 0; index < 25; index++) {
+        await childPiece("c");
+        await vi.advanceTimersByTimeAsync(100);
+      }
+      await drainSaves();
+      const abandoned = progress;
+      progress = new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
+      const cut = recovery();
+      if (cut.durable.mode !== "snapshot") throw new Error("Expected crash recovery snapshot");
+      expect(childAnswer(cut.durable.snapshot.state)).toEqual([`first${"c".repeat(20)}`]);
+      await abandoned.close();
+    });
+
+    it("answers a resent child piece with its first receipt and saves its text once", async () => {
+      await beginChild();
+      const accept = vi.spyOn(progress, "acceptWhenReady");
+      pushes.frames.length = 0;
+      await childPiece(" once");
+      const operation = accept.mock.calls[0]?.[0];
+      if (!operation) throw new Error("Expected the child operation");
+      const first = await accept.mock.results[0]?.value;
+      expect(progress.accept(operation)).toEqual(first);
+      expect(childLiveFrames()).toHaveLength(1);
+      await progress.waitForSaved(execution.threadId);
+      expect(progress.accept(operation)).toEqual(first);
+      await progress.waitForSaved(execution.threadId);
+      expect(childAnswer()).toEqual(["first once"]);
+    });
+
+    it("answers a resent earlier child piece with its first receipt after a later piece", async () => {
+      await beginChild();
+      const accept = vi.spyOn(progress, "acceptWhenReady");
+      pushes.frames.length = 0;
+      await childPiece(" one");
+      await childPiece(" two");
+      const operation = accept.mock.calls[0]?.[0];
+      if (!operation || operation.mutation.kind !== "append-events") throw new Error("Expected the child operation");
+      const first = await accept.mock.results[0]?.value;
+      expect(progress.accept(operation)).toEqual(first);
+      expect(childLiveFrames()).toHaveLength(2);
+      const changed = { ...operation, mutation: { ...operation.mutation,
+        events: [childDraft("textDelta", { delta: " other" }, "child-message")] } };
+      expect(() => progress.accept(changed)).toThrow(expect.objectContaining({ admissionReason: "identity-conflict" }));
+      await progress.waitForSaved(execution.threadId);
+      expect(progress.accept(operation)).toEqual(first);
+      await progress.waitForSaved(execution.threadId);
+      expect(childAnswer()).toEqual(["first one two"]);
+    });
+
+    it("keeps pending child text when the child is stopped mid-burst", async () => {
+      await beginChild();
+      await childPiece(" more");
+      if (provider === "codex") {
+        progress.finishSubagentTurn({ childThreadId: childId, nativeTurnId: "native-turn", outcome: "interrupted", error: "Stopped" });
+      } else {
+        expect(progress.interruptSubagentTurns([childId], "Stopped")).toBe(true);
+      }
+      await progress.waitForSaved(execution.threadId);
+      expect(childAnswer()).toEqual(["first more"]);
+    });
+
+    async function drainSaves() {
+      while (progress.depth().pending > 0) await new Promise((resolve) => setImmediate(resolve));
+    }
   });
 
   function conversationPage() {
