@@ -25,6 +25,8 @@ import {
   getCachedRecord,
   hasPrefetchedHistoryPage,
   projectConversationCacheState,
+  getConversationCacheUsage,
+  CONVERSATION_MEMORY_BUDGETS,
 } from "../record-cache";
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import {
@@ -835,7 +837,7 @@ describe("ThreadHydrator", () => {
     expect(readActiveThreadField((record) => record.hasNewerMessages)).toBe(false);
   });
 
-  it("compacts cached history for restore and keeps its older rows warm", async () => {
+  it("keeps the loaded window unchanged on a warm return at the end", async () => {
     const history = Array.from({ length: 100 }, (_, index) => createMockMessage({
       id: `cached-a-${index + 1}`,
       thread_id: THREAD_A,
@@ -845,15 +847,42 @@ describe("ThreadHydrator", () => {
       ...makeCachedRecord(history.slice(88)),
       hasMoreMessages: true,
     });
+    rememberScrollTop(THREAD_A, 5_214, true);
+    const lengths: number[] = [];
+    const unsubscribe = useThreadStore.subscribe((state) => {
+      if (state.currentThreadId === THREAD_A) {
+        lengths.push(state.records.get(THREAD_A)?.messages.length ?? 0);
+      }
+    });
+    onTestFinished(unsubscribe);
     await hydrator.hydrate(THREAD_A, "active");
-
-    expect(getTestActiveMessages()).toEqual(history.slice(-MESSAGE_FETCH_SIZE));
-    expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
-
-    await useThreadStore.getState().loadOlderMessages(THREAD_A);
 
     expect(getTestActiveMessages()).toEqual(history.slice(88));
     expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+
+    await hydrator.hydrate(THREAD_B, "active");
+    await hydrator.hydrate(THREAD_A, "active");
+    expect(getTestActiveMessages()).toEqual(history.slice(88));
+    expect([...new Set(lengths)]).toEqual([12]);
+  });
+
+  it("bounds retained history across warm restores by messages and bytes", async () => {
+    for (let index = 0; index < 30; index++) {
+      const threadId = `memory-${index}`;
+      const messages = Array.from({ length: 120 }, (_, row) => createMockMessage({
+        id: `${threadId}-${row}`, thread_id: threadId, sequence: row + 1,
+        content: "x".repeat(8_000),
+      }));
+      cacheRecord(threadId, makeCachedRecord(messages));
+      await hydrator.hydrate(threadId, "active");
+      expect(getTestActiveMessages().length).toBeLessThanOrEqual(RECORD_MESSAGE_CACHE_SIZE);
+      expect(getTestActiveMessages().at(-1)?.id).toBe(`${threadId}-119`);
+    }
+    const usage = getConversationCacheUsage();
+    expect(usage.inactiveBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.inactiveBytes);
+    expect(usage.prefetchedBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.prefetchedBytes);
+    expect(usage.narrativeBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.narrativeBytes);
+    console.log("warm restore retained bytes", usage);
   });
 
   it("keeps a newer resident row through compact cache restore, pagination, and refresh", async () => {
@@ -887,8 +916,7 @@ describe("ThreadHydrator", () => {
 
     await hydrator.hydrate(THREAD_A, "active");
 
-    expect(getTestActiveMessages()).toEqual([persistedTail[3], resident]);
-    await useThreadStore.getState().loadOlderMessages(THREAD_A);
+    expect(getTestActiveMessages()).toEqual([...persistedTail, resident]);
     expect(getTestActiveMessages()).toEqual([...persistedTail, resident]);
 
     (mockTransport.loadConversationPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -1220,8 +1248,8 @@ describe("ThreadHydrator", () => {
     await vi.advanceTimersByTimeAsync(20);
 
     expect(useThreadStore.getState().records.has(THREAD_A)).toBe(false);
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual(history.slice(-MESSAGE_FETCH_SIZE));
-    expect(hasPrefetchedHistoryPage(THREAD_A, 119)).toBe(true);
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual(history.slice(-RECORD_MESSAGE_CACHE_SIZE));
+    expect(hasPrefetchedHistoryPage(THREAD_A, 119)).toBe(false);
   });
 
   it("retires a completed empty transcript into the bounded cache", async () => {
@@ -1839,14 +1867,9 @@ describe("ThreadHydrator", () => {
     }
 
     expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
-    expect(getTestActiveMessages()).toEqual(tailB.slice(-MESSAGE_FETCH_SIZE));
-    expect(hasPrefetchedHistoryPage(THREAD_B, 99)).toBe(true);
-
-    await useThreadStore.getState().loadOlderMessages(THREAD_B);
-
     expect(getTestActiveMessages()).toEqual(tailB);
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual(tailA.slice(-MESSAGE_FETCH_SIZE));
-    expect(hasPrefetchedHistoryPage(THREAD_A, 99)).toBe(true);
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual(tailA);
+    expect(hasPrefetchedHistoryPage(THREAD_A, 99)).toBe(false);
   });
 
   it("background mode populates cache without touching the live store", async () => {

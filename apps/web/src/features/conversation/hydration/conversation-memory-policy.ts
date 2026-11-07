@@ -9,8 +9,8 @@ export const ACTIVE_CONVERSATION_BYTES = 13 * 1024 * 1024;
 /** Message bytes retained for the visible conversation during critical pressure. */
 export const CRITICAL_ACTIVE_CONVERSATION_MESSAGE_BYTES = 4 * 1024 * 1024;
 
-/** Total bytes retained for inactive conversation records. */
-export const INACTIVE_CONVERSATION_BYTES = 16 * 1024 * 1024;
+/** Keep whole inactive windows within the former warm-history byte allowance. */
+export const INACTIVE_CONVERSATION_BYTES = 4 * 1024 * 1024;
 
 /** Total bytes retained for speculative history pages. */
 export const PREFETCHED_CONVERSATION_BYTES = 4 * 1024 * 1024;
