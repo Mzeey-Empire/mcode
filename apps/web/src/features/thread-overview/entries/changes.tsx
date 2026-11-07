@@ -4,7 +4,7 @@ import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { executeCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
-import { useDiffStore } from "@/stores/diffStore";
+import { selectDiffRevision, useDiffStore } from "@/stores/diffStore";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import { useThreadStore } from "@/stores/threadStore";
 import { getTransport, type McodeTransport, type Thread } from "@/transport";
@@ -254,7 +254,7 @@ function useChangesState(thread: Thread) {
   const stayedOpenRef = useRef(false);
   const cachedSnapshots = useDiffStore((s) => s.snapshotsByThread[thread.id]);
   const setSnapshots = useDiffStore((s) => s.setSnapshots);
-  const diffRevision = useDiffStore((s) => s.diffRevisionByScope[thread.id] ?? 0);
+  const diffRevision = useDiffStore((s) => selectDiffRevision(s, thread.id));
   const cachedSnapshotKey = useMemo(() => snapshotKey(cachedSnapshots), [cachedSnapshots]);
   const fallbackChangeSummary = useMemo(
     () => {

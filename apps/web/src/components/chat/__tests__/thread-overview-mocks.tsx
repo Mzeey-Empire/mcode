@@ -49,6 +49,7 @@ export function mockDiffStoreModule(actual: typeof import("@/stores/diffStore"))
   const mockState = {
     snapshotsByThread: {},
     diffRevisionByScope: {},
+    checkoutEpoch: 0,
     getRightPanelVisible: mockGetRightPanelVisible,
     getRightPanel: vi.fn().mockReturnValue({ width: 380 }),
     setSnapshots: vi.fn(),

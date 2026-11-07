@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import type { ReviewState } from "@mcode/contracts/models/review-comparison";
 import { getTransport } from "@/transport";
-import { useDiffStore } from "@/stores/diffStore";
+import { selectDiffRevision, useDiffStore } from "@/stores/diffStore";
 
 // A selection mounts several readers of the same checkout at once (Review
-// header, commit button, Plan panel). Each server probe spawns about six
+// header, commit button, plan commands). Each server probe spawns about six
 // git processes, and on Windows each spawn blocks the server's event loop
 // ahead of the transcript the user is opening. Readers that ask with the same
 // key while a probe is in flight share it. The key carries the diff revision,
@@ -24,9 +24,17 @@ function probeReviewState(key: string, workspaceId: string, threadId: string | u
   return probe;
 }
 
+/**
+ * Stop sharing probes that started before HEAD moved. A reader that mounts
+ * from now on starts its own probe, so it never answers for the old HEAD.
+ */
+export function forgetInFlightReviewProbes(): void {
+  inFlightProbes.clear();
+}
+
 /** Refresh Review availability and dirty state on checkout revisions and menu opens. */
 export function useReviewState(workspaceId: string | null, threadId?: string | null, refresh = 0) {
-  const revision = useDiffStore((store) => store.diffRevisionByScope[threadId ?? workspaceId ?? ""] ?? 0);
+  const revision = useDiffStore((store) => selectDiffRevision(store, threadId ?? workspaceId ?? ""));
   const key = JSON.stringify([workspaceId, threadId, revision, refresh]);
   const [result, setResult] = useState<{ key: string; state: ReviewState | null; error: unknown } | null>(null);
   useEffect(() => {

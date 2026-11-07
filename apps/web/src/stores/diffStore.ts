@@ -462,6 +462,16 @@ export function inlineDiffCacheKey(
   return `${threadId}:${source}:${id}:${cacheVersion}:${filePath}`;
 }
 
+/**
+ * The revision git views of `scopeId` key their reads by. It moves on the
+ * scope's own changes and on a HEAD move anywhere. The client cannot tell
+ * which scopes a HEAD move touched: events name a workspace or a thread, and
+ * matching checkout paths in the client misses aliases such as junctions.
+ */
+export function selectDiffRevision(state: Pick<DiffState, "diffRevisionByScope" | "checkoutEpoch">, scopeId: string): number {
+  return (state.diffRevisionByScope[scopeId] ?? 0) + state.checkoutEpoch;
+}
+
 /** Drop inline diff cache entries matching a stable key prefix. */
 function omitInlineDiffCacheByPrefix(
   cache: Record<string, string>,
@@ -719,6 +729,11 @@ interface DiffState {
    */
   diffRevisionByScope: Record<string, number>;
   /**
+   * Counts HEAD moves the server reported on any checkout. Read it through
+   * `selectDiffRevision`, never on its own.
+   */
+  checkoutEpoch: number;
+  /**
    * Effective panel record for a scope: the thread's own record when it has
    * diverged, otherwise the workspace fallback (ADR-0012 copy-on-write read).
    */
@@ -844,8 +859,8 @@ interface DiffState {
   getCachedInlineDiff: (threadId: string, source: string, id: string, filePath: string, cacheVersion: string | number) => string | undefined;
   /** Bump a mutable diff scope so mounted file rows refetch against the latest checkout. */
   bumpDiffRevision: (scopeId: string) => void;
-  /** Bump several scopes in one update, for a change every scope of one checkout shares. */
-  bumpDiffRevisions: (scopeIds: readonly string[]) => void;
+  /** Move the revision of every scope at once, after a HEAD move on some checkout. */
+  bumpCheckoutEpoch: () => void;
   /** Persist the omnibox URL for a thread's embedded preview. */
   setPreviewUrlForThread: (threadId: string, url: string) => void;
   clearThread: (threadId: string) => void;
@@ -881,6 +896,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   reviewViewMenuOpen: false,
   inlineDiffCache: {},
   diffRevisionByScope: {},
+  checkoutEpoch: 0,
 
   getRightPanel: (workspaceId, threadId) =>
     effectiveRightPanel(get(), workspaceId, threadId),
@@ -1144,17 +1160,17 @@ export const useDiffStore = create<DiffState>((set, get) => ({
     })),
   getCachedInlineDiff: (threadId, source, id, filePath, cacheVersion) =>
     get().inlineDiffCache[inlineDiffCacheKey(threadId, source, id, filePath, cacheVersion)],
-  bumpDiffRevision: (scopeId) => get().bumpDiffRevisions([scopeId]),
-  bumpDiffRevisions: (scopeIds) =>
-    set((s) => {
-      const diffRevisionByScope = { ...s.diffRevisionByScope };
-      let inlineDiffCache = s.inlineDiffCache;
-      for (const scopeId of scopeIds) {
-        diffRevisionByScope[scopeId] = (diffRevisionByScope[scopeId] ?? 0) + 1;
-        inlineDiffCache = omitInlineDiffCacheByPrefix(inlineDiffCache, `${scopeId}:`);
-      }
-      return { diffRevisionByScope, inlineDiffCache };
-    }),
+  // Every versioned mutable entry becomes unreachable, so dropping the whole
+  // cache costs only refetches of turn patches, on an event that is rare.
+  bumpCheckoutEpoch: () => set((s) => ({ checkoutEpoch: s.checkoutEpoch + 1, inlineDiffCache: {} })),
+  bumpDiffRevision: (scopeId) =>
+    set((s) => ({
+      diffRevisionByScope: {
+        ...s.diffRevisionByScope,
+        [scopeId]: (s.diffRevisionByScope[scopeId] ?? 0) + 1,
+      },
+      inlineDiffCache: omitInlineDiffCacheByPrefix(s.inlineDiffCache, `${scopeId}:`),
+    })),
   setPreviewUrlForThread: (threadId, url) => {
     if (get().previewUrlByThread[threadId] === url) return;
     set((s) => ({

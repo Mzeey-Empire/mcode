@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReviewComparisonResult, ReviewFileChange } from "@mcode/contracts/models/review-comparison";
 import { getTransport } from "@/transport";
-import { useDiffStore } from "@/stores/diffStore";
+import { selectDiffRevision, useDiffStore } from "@/stores/diffStore";
 
 /** Every uncommitted file in a checkout, or why the list could not be read. */
 export type UncommittedFiles =
@@ -21,7 +21,7 @@ function describeUnavailable(result: Exclude<ReviewComparisonResult, { status: "
  * flight so choices do not flicker.
  */
 export function useUncommittedFiles(workspaceId: string, threadId: string | null): UncommittedFiles {
-  const revision = useDiffStore((store) => store.diffRevisionByScope[threadId ?? workspaceId] ?? 0);
+  const revision = useDiffStore((store) => selectDiffRevision(store, threadId ?? workspaceId));
   const [result, setResult] = useState<UncommittedFiles>({ status: "loading" });
   useEffect(() => {
     let cancelled = false;
