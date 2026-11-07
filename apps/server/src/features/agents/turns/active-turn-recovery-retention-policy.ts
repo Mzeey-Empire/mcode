@@ -10,12 +10,8 @@ export const ACTIVE_TURN_RECOVERY_RETAINED_LIMITS = {
   maxRecords: PARENT_ASSISTANT_TEXT_RETAINED_LIMITS.maxChunks,
 } as const;
 
-/** Reject active-turn recovery data that exceeds its semantic retention budget. */
-export function assertActiveTurnRecoveryRetention(recordCount: number, byteLength: number): void {
-  if (recordCount > ACTIVE_TURN_RECOVERY_RETAINED_LIMITS.maxRecords) {
-    throw new Error("Active-turn recovery retained record capacity reached");
-  }
-  if (byteLength > ACTIVE_TURN_RECOVERY_RETAINED_LIMITS.maxBytes) {
-    throw new Error("Active-turn recovery retained byte capacity reached");
-  }
+/** Whether optional recovery data fits without limiting clean conversation history. */
+export function fitsActiveTurnRecoveryRetention(recordCount: number, byteLength: number): boolean {
+  return recordCount <= ACTIVE_TURN_RECOVERY_RETAINED_LIMITS.maxRecords
+    && byteLength <= ACTIVE_TURN_RECOVERY_RETAINED_LIMITS.maxBytes;
 }

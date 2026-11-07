@@ -77,7 +77,7 @@ export class WorkerOwnedTurnRuntime {
       this.onRecovered?.(assignment.execution);
     });
     this.scheduler = this.workerLoss.scheduler;
-    this.owner = new ExecutionMailboxOwner(this.scheduler);
+    this.owner = new ExecutionMailboxOwner(this.scheduler, (execution, lease) => this.writerPort.abandonStart(execution, lease));
     this.providerEvents = new ExecutionProviderEventOwnership(this.owner);
     this.progress?.bindPermanentFailure(async (execution) => this.recoverRejected(execution));
   }

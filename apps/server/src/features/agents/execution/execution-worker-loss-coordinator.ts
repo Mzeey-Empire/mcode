@@ -32,7 +32,7 @@ export class ExecutionWorkerLossCoordinator {
   private readonly slots = new Map<number, LostSlot>();
 
   constructor(
-    private readonly writer: Pick<CanonicalExecutionWriterPort, "interruptWorkerLoss">,
+    private readonly writer: Pick<CanonicalExecutionWriterPort, "interruptWorkerLoss" | "released">,
     options: SchedulerOptions,
     private readonly onRecovered?: (assignment: ExecutionLostAssignment) => void,
   ) {
@@ -93,6 +93,8 @@ export class ExecutionWorkerLossCoordinator {
         if (!evidence || !this.scheduler.reconcileLost(assignment.execution, assignment.lease, evidence)) {
           throw new Error(`Lost execution has no matching durable recovery evidence: ${assignment.execution.executionId}`);
         }
+        // A dead worker never sends writer-released, so its revoked lease stands in for that release.
+        this.writer.released(assignment.execution, assignment.lease);
         this.onRecovered?.(assignment);
         slot.unresolved.shift();
       }

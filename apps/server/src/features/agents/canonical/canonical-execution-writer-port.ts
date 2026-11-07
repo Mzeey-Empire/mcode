@@ -1,3 +1,6 @@
+import { logger } from "@mcode/shared";
+
+import { workerLossIncidentId } from "../execution/execution-worker-loss-coordinator.js";
 import type {
   ExecutionSemanticOperation,
   ExecutionSemanticWriter,
@@ -29,6 +32,25 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
     const receipt = await this.transactDurable(operation);
     this.releaseDurable(operation, receipt);
     return receipt;
+  }
+
+  /**
+   * End the turn a start's lease may have saved, after its owner gave that lease up without a committed start.
+   *
+   * A begin can commit and still fail its reply, which leaves a Running turn that no worker holds, so no ending or
+   * release would ever arrive for it. The reply failure alone cannot decide this: a retry of the same begin replays
+   * its receipt and keeps the turn, and a duplicate begin's failure says nothing about the worker already running it.
+   * Only the released lease proves no retry can follow, and the interruption acts only on a head carrying that lease.
+   */
+  async abandonStart(execution: ExecutionIdentity, lease: ExecutionLease): Promise<void> {
+    try {
+      await this.interruptWorkerLoss({ execution, lease,
+        reason: "The turn start failed after it was saved.", recoveryIncidentId: workerLossIncidentId({ execution, lease }) });
+    } catch (error) {
+      logger.error("Failed turn start could not be interrupted", { threadId: execution.threadId,
+        executionId: execution.executionId, error: error instanceof Error ? error.message : String(error) });
+    }
+    this.released(execution, lease);
   }
 
   /** Let accepted progress drop the execution's owner once its saves finish. */

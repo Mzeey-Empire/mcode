@@ -338,6 +338,94 @@ describe("CodexRpcClient", () => {
   });
 });
 
+describe("CodexRpcClient stdout framing", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("scans each character of a long line once, however many chunks deliver it", () => {
+    const { stdout, client } = makeClient();
+    const texts: string[] = [];
+    client.on("notification", (message: { params: { text: string } }) => texts.push(message.params.text));
+    const text = "x".repeat(100_000);
+    const line = `${JSON.stringify({ jsonrpc: "2.0", method: "item/delta", params: { text } })}\n`;
+    const chunks = Array.from({ length: Math.ceil(line.length / 200) }, (_, index) => line.slice(index * 200, (index + 1) * 200));
+
+    const scanned = countCharactersScannedForNewlines(() => {
+      for (const chunk of chunks) stdout.emit("data", chunk);
+    });
+
+    expect(texts).toEqual([text]);
+    // Re-splitting the whole partial line on every chunk scans about 25 million characters here.
+    expect(scanned).toBeLessThanOrEqual(line.length);
+    client.dispose();
+  });
+
+  it("keeps lines intact and in order across chunk boundaries", () => {
+    const { stdout, client } = makeClient();
+    const received: string[] = [];
+    client.on("notification", (message: { method: string }) => received.push(message.method));
+    const split = notificationLine("split/across/many");
+
+    for (let start = 0; start < split.length; start += 7) stdout.emit("data", split.slice(start, start + 7));
+    stdout.emit("data", notificationLine("one/chunk/a") + "\n\n" + notificationLine("one/chunk/b"));
+    stdout.emit("data", notificationLine("ends/on/newline"));
+    stdout.emit("data", notificationLine("next/chunk").slice(0, 10));
+    stdout.emit("data", notificationLine("next/chunk").slice(10));
+
+    expect(received).toEqual(["split/across/many", "one/chunk/a", "one/chunk/b", "ends/on/newline", "next/chunk"]);
+    client.dispose();
+  });
+
+  it("keeps a multi-byte character whole when its bytes arrive in different chunks", async () => {
+    const { stdout, client } = makeClient();
+    const texts: string[] = [];
+    client.on("notification", (message: { params: { text: string } }) => texts.push(message.params.text));
+    const bytes = Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", method: "item/delta", params: { text: "a€b" } })}\n`, "utf8");
+    const euroStart = bytes.indexOf(Buffer.from("€", "utf8"));
+
+    stdout.write(bytes.subarray(0, euroStart + 1));
+    stdout.write(bytes.subarray(euroStart + 1));
+
+    await vi.waitFor(() => expect(texts).toEqual(["a€b"]));
+    client.dispose();
+  });
+
+  it("drops a partial line still unterminated when stdout ends", async () => {
+    const { stdout, client } = makeClient();
+    const received: string[] = [];
+    client.on("notification", (message: { method: string }) => received.push(message.method));
+
+    stdout.write(notificationLine("complete") + notificationLine("unterminated").trimEnd());
+    stdout.end();
+    await client.readRemainingOutput(1_000);
+
+    expect(received).toEqual(["complete"]);
+  });
+});
+
+/**
+ * Counts the characters `split` and `indexOf` read while `deliver` runs, which is how the client
+ * looks for line breaks. A fresh search from the start of a growing buffer counts that buffer again.
+ */
+function countCharactersScannedForNewlines(deliver: () => void): number {
+  const split = vi.spyOn(String.prototype, "split");
+  const indexOf = vi.spyOn(String.prototype, "indexOf");
+  try {
+    deliver();
+    // Read the counts before restoring, because restoring a spy clears what it recorded.
+    const splitScanned = split.mock.contexts.reduce((sum, value) => sum + String(value).length, 0);
+    const indexOfScanned = indexOf.mock.contexts.reduce((sum, value, call) => {
+      const fromIndex = Number(indexOf.mock.calls[call]?.[1] ?? 0);
+      return sum + String(value).length - fromIndex;
+    }, 0);
+    return splitScanned + indexOfScanned;
+  } finally {
+    split.mockRestore();
+    indexOf.mockRestore();
+  }
+}
+
 function notificationLine(method: string): string {
   return `${JSON.stringify({ jsonrpc: "2.0", method, params: {} })}\n`;
 }
