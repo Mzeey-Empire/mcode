@@ -59,6 +59,38 @@ describe("transcript viewport", () => {
     vi.unstubAllGlobals();
   });
 
+  it("avoids unchanged scroll writes while opening, appending and resizing at the end", async () => {
+    view.destroy();
+    const setter = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")?.set;
+    if (!setter) throw new Error("Missing native scroll setter");
+    const writes: { from: number; to: number; unchanged: boolean }[] = [];
+    vi.spyOn(Element.prototype, "scrollTop", "set").mockImplementation(function (this: Element, top: number) {
+      writes.push({ from: this.scrollTop, to: top, unchanged: this.scrollTop === top });
+      setter.call(this, top);
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    view = new TranscriptViewport(container, (next) => { hosts = next; }, (next) => { position = next; });
+    view.setRows(rows);
+    view.moveTo({ kind: "end" });
+    const coldWrites = [...writes];
+    writes.length = 0;
+
+    await nextFrame();
+    view.setRows([...rows, { id: "20", height: 100 }]);
+    const appendWrites = [...writes];
+    writes.length = 0;
+
+    await nextFrame();
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(300);
+    LayoutObserver.resize(view.viewport, 300);
+    await nextFrame();
+    expect(view.viewport.scrollTop).toBe(1800);
+    expect(coldWrites).toEqual([{ from: 0, to: 1800, unchanged: false }]);
+    expect(appendWrites).toEqual([{ from: 1800, to: 1900, unchanged: false }]);
+    expect(writes).toEqual([{ from: 1900, to: 1800, unchanged: false }]);
+  });
+
   it("supports a non-chat list without initial or automatic end following", () => {
     view.destroy();
     const container = document.createElement("div");

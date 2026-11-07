@@ -18,7 +18,7 @@ import { cacheRecord, clearRecordCache, projectConversationCacheState } from "..
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 
-it.each([false, true])("returns to a retained viewport without shrinking or remounting, positioning it once at the saved offset (pressure: %s)", async (pressure) => {
+it.each([false, true])("returns to a retained viewport without shrinking, remounting or rewriting its saved offset (pressure: %s)", async (pressure) => {
   vi.useFakeTimers();
   clearRecordCache();
   clearScrollMemory();
@@ -88,7 +88,7 @@ it.each([false, true])("returns to a retained viewport without shrinking or remo
     await hydrator.hydrate("warm", "active");
   });
   expect({ lengths: [...new Set(lengths)], removed: originalHosts.filter(host => !host.isConnected).length,
-    scrollWrites: writes.mock.calls }).toEqual({ lengths: [12], removed: 0, scrollWrites: [[originalTop]] });
+    scrollWrites: writes.mock.calls }).toEqual({ lengths: [12], removed: 0, scrollWrites: [] });
   for (const host of originalHosts) expect(container.contains(host)).toBe(true);
   expect(viewport.scrollTop).toBe(originalTop);
 });
