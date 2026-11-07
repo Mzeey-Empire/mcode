@@ -58,16 +58,19 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
     this.progress?.releaseExecution(execution, lease);
   }
 
-  private async transactDurable(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
-    await this.progress?.beforeDurableCommand(operation.execution.threadId);
-    let receipt: ExecutionWriteReceipt;
+  private transactDurable(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
+    return this.fenced(operation.execution.threadId, () => this.writer.transactSemantic(operation,
+      this.progress ? (events) => this.progress?.observeCommitted(events, operation) : this.publish));
+  }
+
+  /** Hold accepted progress's admission fence around a write that goes straight to SQLite. */
+  private async fenced(threadId: string, write: () => Promise<ExecutionWriteReceipt>): Promise<ExecutionWriteReceipt> {
+    await this.progress?.beforeDurableCommand(threadId);
     try {
-      receipt = await this.writer.transactSemantic(operation,
-        this.progress ? (events) => this.progress?.observeCommitted(events, operation) : this.publish);
+      return await write();
     } finally {
-      this.progress?.cancelDurableCommand(operation.execution.threadId);
+      this.progress?.cancelDurableCommand(threadId);
     }
-    return receipt;
   }
 
   private releaseDurable(operation: ExecutionSemanticOperation, receipt: ExecutionWriteReceipt): void {
@@ -79,9 +82,16 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
     this.planQuestions?.release(operation, receipt);
   }
 
-  /** Admit a lost-worker interruption as live progress, with the durable writer as a compatibility fallback. */
+  /**
+   * Admit a lost-worker interruption as live progress. When accepted progress holds no head for the execution, SQLite
+   * decides: a begin can commit while its publication to accepted progress is lost, and its turn would stay Running.
+   */
   async interruptWorkerLoss(input: LostExecutionInterruption): Promise<ExecutionWriteReceipt> {
-    if (this.progress) return this.progress.interruptWorkerLoss(input);
-    return this.writer.interruptWorkerLoss(input, this.publish);
+    const progress = this.progress;
+    if (!progress) return this.writer.interruptWorkerLoss(input, this.publish);
+    const accepted = progress.interruptWorkerLoss(input);
+    if (accepted.kind !== "conflict" || accepted.recoveryState !== "not-started") return accepted;
+    return this.fenced(input.execution.threadId,
+      () => this.writer.interruptWorkerLoss(input, (events) => progress.observeCommitted(events)));
   }
 }

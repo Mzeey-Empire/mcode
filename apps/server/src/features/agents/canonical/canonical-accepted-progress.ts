@@ -202,12 +202,17 @@ export class CanonicalAcceptedProgress {
     if (thread) thread.commandPending = false;
   }
 
-  /** Durable starts form a barrier and seed a new thread stream generation. */
+  /**
+   * Durable commands write SQLite behind this owner's back, so their publication reloads the thread from SQLite and
+   * starts a new stream generation that clients recover from. A begin replayed after its execution moved on writes
+   * nothing, so it changes nothing.
+   */
   observeCommitted(events: readonly CanonicalAgentEventEnvelope[], operation?: ExecutionSemanticOperation): void {
     this.assertOpen();
     const threadId = events[0]?.routing.threadId;
     if (!threadId) return;
     const thread = this.thread(threadId);
+    if (operation && replaysPastBegin(thread.head, operation)) return;
     if (thread.owner.recoveryCut().retained.length > 0) throw new Error("A durable command overtook accepted progress");
     const recovery = this.canonical.recoverThread(threadId, {
       conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
@@ -739,11 +744,14 @@ export class CanonicalAcceptedProgress {
     this.onPermanentFailure = callback;
   }
 
-  /** A lost worker's terminal observation enters the same owner without awaiting unavailable storage. */
+  /**
+   * A lost worker's terminal observation enters the same owner without awaiting unavailable storage. With no live
+   * head for the execution this owner knows nothing about it and answers `not-started`; only SQLite can say more.
+   */
   interruptWorkerLoss(input: LostExecutionInterruption) {
     const operationId = `${input.lease.leaseId}:worker-lost`;
     const thread = this.threads.get(input.execution.threadId);
-    const head = thread?.head;
+    const head = thread && claimingHead(thread, input.execution);
     if (!thread || !head) return { kind: "conflict" as const, operationId, recoveryState: "not-started" as const };
     this.flushLive(thread);
     if (!sameExecution(head.execution, input.execution) || !sameLease(head.lease, input.lease)) {
@@ -1113,12 +1121,18 @@ export class CanonicalAcceptedProgress {
     this.releaseSavedThread(batch.execution.threadId, thread);
   }
 
-  /** Drop the owner of a released execution once everything it accepted is saved. */
+  /**
+   * Drop the thread's owner once everything it accepted is saved and no other execution is live on it. The owner may
+   * have no head for this execution at all: a start whose begin publication never arrived leaves it headless, and
+   * nothing else would release it.
+   */
   releaseExecution(execution: ExecutionIdentity, lease: ExecutionLease): void {
     const thread = this.threads.get(execution.threadId);
-    const head = thread?.head;
-    if (!thread || !head || !sameExecution(head.execution, execution) || !sameLease(head.lease, lease)) return;
-    thread.releasedExecutionId = execution.executionId;
+    if (!thread) return;
+    const head = thread.head;
+    if (head && sameExecution(head.execution, execution) && sameLease(head.lease, lease)) {
+      thread.releasedExecutionId = execution.executionId;
+    }
     this.releaseSavedThread(execution.threadId, thread);
   }
 
@@ -1492,16 +1506,37 @@ function operationInputHash(operation: ExecutionSemanticOperation): string {
 
 /** Nothing accepted, saving, or still to arrive needs this owner, so release and eviction may drop it. */
 function ownerIdle(thread: ProgressThread): boolean {
-  // A saved terminal does not end the execution: its worker can still send post-terminal events, and they
-  // need this owner's head. Only the worker's release proves that nothing more can arrive for the head.
-  const headLive = thread.head !== undefined && thread.releasedExecutionId !== thread.head.execution.executionId;
-  return !headLive && ownerSettled(thread);
+  return !headLive(thread) && ownerSettled(thread);
+}
+
+/**
+ * A saved terminal does not end the execution: its worker can still send post-terminal events, and they need this
+ * owner's head. Only the worker's release proves that nothing more can arrive for the head.
+ */
+function headLive(thread: ProgressThread): boolean {
+  return thread.head !== undefined && thread.releasedExecutionId !== thread.head.execution.executionId;
+}
+
+/** The head that may own `execution`'s outcome. A released head of another execution is leftover, not a claim. */
+function claimingHead(thread: ProgressThread, execution: ExecutionIdentity): AcceptedExecutionState | undefined {
+  const head = thread.head;
+  return head && (sameExecution(head.execution, execution) || headLive(thread)) ? head : undefined;
 }
 
 /** Everything this owner accepted is saved and no turn is running; only a worker release may still be missing. */
 function ownerSettled(thread: ProgressThread): boolean {
   return !thread.commandPending && !thread.completingSave && thread.owner.recoveryCut().retained.length === 0
     && !Object.values(thread.state.turns).some((turn) => turn.status === "Running" || turn.status === "Pending");
+}
+
+/**
+ * A begin's stored receipt republishes its events when the same begin is retried or sent again by a duplicate
+ * worker. Once its head accepted anything after the begin, reseeding would rewind the head to the begin's ordinal
+ * and reject the running worker's next save. Each page of a fresh begin still reseeds, as its head is still at it.
+ */
+function replaysPastBegin(head: AcceptedExecutionState | undefined, operation: ExecutionSemanticOperation): boolean {
+  return operation.mutation.kind === "begin" && head !== undefined && sameExecution(head.execution, operation.execution)
+    && sameLease(head.lease, operation.lease) && head.ordinal > operation.ordinal;
 }
 
 function requireExecutionHead(thread: ProgressThread, operation: ExecutionSemanticOperation): AcceptedExecutionState {
