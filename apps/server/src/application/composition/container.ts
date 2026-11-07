@@ -153,11 +153,7 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
 
   registerProviderAdapters(container);
   // GitExecutor — registered before services that depend on it
-  container.register(
-    RealGitExecutor,
-    { useClass: RealGitExecutor },
-    { lifecycle: Lifecycle.Singleton },
-  );
+  container.registerInstance(RealGitExecutor, new RealGitExecutor());
   container.register("GitExecutor", {
     useFactory: (c) => c.resolve(RealGitExecutor),
   });

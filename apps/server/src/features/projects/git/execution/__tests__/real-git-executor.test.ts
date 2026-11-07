@@ -12,6 +12,7 @@ vi.mock("child_process", () => ({
   spawn: (...args: unknown[]) => spawnMock(...args),
 }));
 
+import { runGitProcess } from "../git-process.js";
 import { RealGitExecutor } from "../real-git-executor.js";
 
 describe("RealGitExecutor", () => {
@@ -20,7 +21,7 @@ describe("RealGitExecutor", () => {
   beforeEach(() => {
     execFileMock.mockReset();
     spawnMock.mockReset();
-    executor = new RealGitExecutor();
+    executor = new RealGitExecutor(runGitProcess);
   });
 
   it("serialises concurrent mutating calls for the same cwd", async () => {

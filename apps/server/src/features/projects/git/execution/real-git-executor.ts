@@ -1,16 +1,15 @@
 /**
  * Production git executor.
- * Wraps promisified execFile with per-repo serialisation for mutating
- * commands, a configurable default timeout, and a transparent result cache
- * for cheap rev-parse calls. Read-only commands bypass the queue.
+ * Runs git with per-repo serialisation for mutating commands, a configurable
+ * default timeout, and a transparent result cache for cheap rev-parse calls.
+ * Read-only commands bypass the queue.
  */
 
-import { injectable } from "tsyringe";
 import * as NodeChildProcess from "node:child_process";
-import * as NodeUtil from "node:util";
+import * as NodeWorkerThreads from "node:worker_threads";
+import { runGitProcess, type GitProcessRunner } from "./git-process.js";
+import { sharedGitProcessWorkerClient } from "./git-process-worker-client.js";
 import type { GitExecutor, GitExecOptions, GitExecResult } from "./types.js";
-
-const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
 /** Noop used to suppress unhandled-rejection warnings on queue chains. */
 const noop = () => {};
@@ -107,7 +106,6 @@ function gitSubcommandIndex(args: readonly string[]): number {
  *   `rev-parse --show-toplevel` results keyed by cwd.
  * - Default timeout of 10 s, overridable per call.
  */
-@injectable()
 export class RealGitExecutor implements GitExecutor {
   /** Default timeout in milliseconds for all git invocations. */
   static readonly DEFAULT_TIMEOUT = 10_000;
@@ -120,6 +118,17 @@ export class RealGitExecutor implements GitExecutor {
    * Key format: `"git-dir:<cwd>"` or `"show-toplevel:<cwd>"`.
    */
   private readonly revParseCache = new Map<string, GitExecResult>();
+
+  /**
+   * @param runProcess Starts buffered git runs. The main thread answers every
+   * client request, so by default it hands process starts to the git process
+   * worker; worker threads, such as the execution worker, start them inline.
+   */
+  constructor(
+    private readonly runProcess: GitProcessRunner = NodeWorkerThreads.isMainThread
+      ? sharedGitProcessWorkerClient().run
+      : runGitProcess,
+  ) {}
 
   /**
    * Run `git` with the given arguments. Mutating commands are serialised per
@@ -176,18 +185,12 @@ export class RealGitExecutor implements GitExecutor {
     opts: GitExecOptions,
   ): Promise<GitExecResult> {
     if (opts.onStdout || opts.onStderr) return await this.runObservedGit(args, opts);
-    const timeout = opts.timeout ?? RealGitExecutor.DEFAULT_TIMEOUT;
-    const result = await execFile("git", args, {
-      timeout,
-      windowsHide: true,
-      encoding: "utf8",
+    return await this.runProcess({
+      args,
+      timeout: opts.timeout ?? RealGitExecutor.DEFAULT_TIMEOUT,
       ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
     });
-    return {
-      stdout: typeof result.stdout === "string" ? result.stdout : String(result.stdout),
-      stderr: typeof result.stderr === "string" ? result.stderr : String(result.stderr),
-    };
   }
 
   /** Run Git with streamed output while preserving the buffered result and error contract. */
