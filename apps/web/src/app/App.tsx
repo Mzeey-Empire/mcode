@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useReducer,
   useState,
   useRef,
@@ -352,11 +353,25 @@ function isRightPanelMounted({
   return !settingsOpen && !showProjectlessCanvas && !showPullRequests;
 }
 
-function RightPanelSlot(props: Pick<AppLayoutProps, "settingsOpen" | "showProjectlessCanvas" | "showPullRequests">) {
+/** Reports whether the lazy right panel's DOM is committed; Suspense commits it only once the chunk loads. */
+function RightPanelCommitted({ onChange }: { onChange: (committed: boolean) => void }) {
+  useLayoutEffect(() => {
+    onChange(true);
+    return () => onChange(false);
+  }, [onChange]);
+  return null;
+}
+
+interface RightPanelSlotProps extends Pick<AppLayoutProps, "settingsOpen" | "showProjectlessCanvas" | "showPullRequests"> {
+  onCommittedChange: (committed: boolean) => void;
+}
+
+function RightPanelSlot(props: RightPanelSlotProps) {
   if (!isRightPanelMounted(props)) return null;
   return (
     <Suspense fallback={null}>
       <LazyRightPanel />
+      <RightPanelCommitted onChange={props.onCommittedChange} />
     </Suspense>
   );
 }
@@ -371,7 +386,8 @@ function AppLayout(props: AppLayoutProps) {
   const overviewClosed = useOverviewStore((s) => activeThreadId !== null && s.closedSubjects.has(threadOverviewKey(activeThreadId)));
   const rightPanelVisible = useDiffStore((s) =>
     activeWorkspaceId ? s.getRightPanelVisible(activeWorkspaceId, activeThreadId) : false);
-  const rightPanelMounted = isRightPanelMounted(props);
+  // The header gives up its caption reserve only once the panel is on screen to carry it.
+  const [rightPanelCommitted, setRightPanelCommitted] = useState(false);
   // The toast lane applies the canvas-width half of the dock rule once it measures the canvas.
   const overviewReserved = activeThreadId !== null && !overviewClosed && !rightPanelVisible;
   const chatVisible = !props.settingsOpen && !props.showPullRequests && !props.showNewThreadCanvas;
@@ -410,11 +426,11 @@ function AppLayout(props: AppLayoutProps) {
               ref={props.contentRowRef}
               data-testid="content-row"
               data-content-row=""
-              data-right-panel-visible={rightPanelMounted && rightPanelVisible}
+              data-right-panel-visible={rightPanelCommitted && rightPanelVisible}
               className="flex min-w-0 flex-1 overflow-hidden"
             >
               <AppMainSurface {...props} mainRef={setMainElement} />
-              <RightPanelSlot {...props} />
+              <RightPanelSlot {...props} onCommittedChange={setRightPanelCommitted} />
             </div>
           </div>
         </div>

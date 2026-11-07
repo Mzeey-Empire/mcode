@@ -1,5 +1,4 @@
 import { Slider as SliderPrimitive } from "@base-ui/react/slider";
-import { useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -39,7 +38,6 @@ export function SteppedSlider({
   className,
 }: SteppedSliderProps) {
   const thumbStartFraction = Math.max(0, stopPercent(value, stops)) / 100;
-  const [focusVisible, setFocusVisible] = useState(false);
 
   return (
     <SliderPrimitive.Root
@@ -85,8 +83,6 @@ export function SteppedSlider({
           </span>
           <SliderPrimitive.Thumb
             aria-label={ariaLabel}
-            onFocus={(event) => setFocusVisible(event.target.matches(":focus-visible"))}
-            onBlur={() => setFocusVisible(false)}
             // Base UI clamps an unmatched -1 to the first stop; the controlled value keeps the real label.
             getAriaValueText={() => getStopLabel(value)}
             className={cn("group/thumb size-(--slider-thumb-size) rounded-full outline-none", SNAP_MOTION_CLASS)}
@@ -97,8 +93,7 @@ export function SteppedSlider({
                 too, because `outline-none` on the Thumb sets the outline style every later outline width reads. */}
             <span
               aria-hidden="true"
-              data-focus-visible={focusVisible || undefined}
-              className="m-[3px] block size-3.5 rounded-full bg-primary transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 data-focus-visible:outline-2 data-focus-visible:outline-offset-2 data-focus-visible:outline-focus motion-reduce:transition-none"
+              className="m-[3px] block size-3.5 rounded-full bg-primary transition-transform duration-(--duration-fast) ease-(--ease-standard) group-active/slider:scale-105 group-has-focus-visible/thumb:outline-2 group-has-focus-visible/thumb:outline-offset-2 group-has-focus-visible/thumb:outline-focus motion-reduce:transition-none"
             />
           </SliderPrimitive.Thumb>
         </SliderPrimitive.Track>
