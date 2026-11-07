@@ -83,7 +83,8 @@ const copilotTerminalCases = {
   abort: { status: "Interrupted", content: "Final answer", outcome: "interrupted", finalMessages: 0, delta: "Final ", snapshot: true },
   error: { status: "Errored", content: "Final answer", outcome: "errored", finalMessages: 0, delta: "Final ", snapshot: true },
 };
-function copilotTerminalOutcome(event: AgentEvent): TurnOutcome | undefined {
+function copilotTerminalOutcome(event: AgentEvent, extension?: ProviderRuntimeExtension): TurnOutcome | undefined {
+  if (extension?.kind === "child-thread") return undefined;
   if (event.type === "turnComplete") return "completed";
   if (event.type === "error") return "errored";
   if (event.type === "ended") return event.outcome === "cancelled" ? "interrupted" : event.outcome;
@@ -970,9 +971,15 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     ]);
   });
 
-  it.each(["snapshot", "delta-only", "abort", "error"] as const)("persists Copilot model loops and their %s terminal through the public factory", async (ending) => {
+  it.each([
+    ["snapshot", false], ["delta-only", false], ["abort", false], ["error", false], ["snapshot", true],
+  ] as const)("persists Copilot model loops and their %s terminal (rows=%s) through the public factory", async (ending, rows) => {
     const expected = copilotTerminalCases[ending];
-    await send(1, start("copilot"));
+    // Without parent live effects the worker saves provider-marked live drafts as rows.
+    await send(1, copilotStart());
+    function copilotStart() {
+      return { ...start("copilot"), ...(rows ? { parentLive: undefined, publishParentStart: false } : {}) };
+    }
     let ordinal = 1;
     const batches: ProviderEventBatch[] = [];
     const submit: ProviderHostPorts["events"]["submit"] = async (batch) => {
@@ -980,9 +987,14 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       let accepted;
       for (const value of batch.events) {
         if (value.payload.type !== "item.recorded") throw new Error("Expected provider runtime draft");
-        const event = ProviderRuntimeEventSchema().parse(value.payload.item.payload.runtimeEvent).event;
-        const outcome = copilotTerminalOutcome(event);
-        const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null,
+        const runtime = ProviderRuntimeEventSchema().parse(value.payload.item.payload.runtimeEvent);
+        const event = runtime.event;
+        const outcome = copilotTerminalOutcome(event, runtime.extension);
+        const reply = await send(++ordinal, rows && outcome ? {
+          kind: "finish-live-event", outcome, projection: { ...execution, outcome, endedAt: NOW,
+            assistant: { content: "Final answer", model: "fixture", attachments: [] }, narrative: [] },
+          input: { ...execution, providerId: "copilot", providerIdentities: [], outcome, projection: { kind: "writer-staged" } },
+        } : { kind: "event", phase: batch.phase, nativeCursor: batch.nativeCursor ?? null,
           events: [value], ...(outcome ? { terminalInput: { ...execution, providerId: "copilot", providerIdentities: [], outcome,
             ...(event.type === "error" ? { ending: { failure: persistTurnFailure({ failure: event.failure, provider: "copilot",
               message: event.error, acceptedAt: Date.now() }) } } : {}),
@@ -1027,7 +1039,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
         session.emit(fragment, `child-piece-${index}`);
       }
       session.emit({ type: "subagent.completed", data: { toolCallId: "child-task", agentName: "worker", agentDisplayName: "Worker" } });
-      const reasoning = "0123456789".repeat(7_000);
+      const reasoning = "0123456789".repeat(14_000);
       session.emit({ type: "assistant.reasoning", data: { reasoningId: "large-thought", content: reasoning } }, "large-thought");
       session.emit({ type: "assistant.reasoning", data: { reasoningId: "large-thought", content: reasoning } }, "large-thought");
       session.emit({ type: "assistant.message_delta", ephemeral: true, data: { messageId: "answer", deltaContent: expected.delta } });
@@ -1036,6 +1048,13 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       const canonical = new CanonicalAgentStore(db, () => {});
       await expect.poll(() => canonical.loadTurn(execution.turnId)?.status).toBe(expected.status);
       await expect.poll(() => progress.depth().pending).toBe(0);
+      if (rows) {
+        const rows = db.prepare("SELECT json_extract(envelope_json, '$.payload.item.payload.runtimeEvent.event.delta') AS delta FROM canonical_agent_events WHERE event_id LIKE 'copilot:native:large-thought:reasoningDelta%' ORDER BY rowid").all();
+        expect(rows).toEqual([{ delta: reasoning.slice(0, 65_536) }, { delta: reasoning.slice(65_536, 131_072) }, { delta: reasoning.slice(131_072) }]);
+        expect(batches.flatMap((batch) => batch.events).filter((event) => event.eventId.startsWith("copilot:native:large-thought:")).map((event) => event.delivery))
+          .toEqual(["live", "live", "live"]);
+        return;
+      }
       assertSavedChild(canonical);
       const terminal = canonical.loadTerminalProjection(execution.turnId);
       expect(terminal.message).toMatchObject({ id: deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`),

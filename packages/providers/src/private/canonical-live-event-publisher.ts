@@ -39,6 +39,8 @@ interface ProviderExecutionQueue {
 
 /** Source evidence supplied by a native protocol event. */
 export interface NativeLiveEventEvidence {
+  /** Zero-based ordinal among drafts of this type from the same native event. */
+  draftIndex?: number;
   id: string;
   timestamp: string;
   predecessorEventId: string | null;
@@ -278,8 +280,10 @@ export class CanonicalLiveEventPublisher {
     sourceSequence: number,
     native?: NativeLiveEventEvidence,
   ): ProviderEventBatch["events"][number] {
-    const eventId = native ? `${this.providerId}:native:${native.id}:${runtimeEvent.event.type}` : `${this.providerId}:${routing.executionId}:attempt:${routing.deliveryAttempt}:event:${sourceSequence}`;
-    const itemId = native ? `${this.providerId}:native-item:${native.id}:${runtimeEvent.event.type}` : `${this.providerId}:${routing.executionId}:attempt:${routing.deliveryAttempt}:item:${sourceSequence}`;
+    // Keep the first draft compatible with saved identities; later drafts must survive row persistence too.
+    const suffix = nativeDraftSuffix(native);
+    const eventId = native ? `${this.providerId}:native:${native.id}:${runtimeEvent.event.type}${suffix}` : `${this.providerId}:${routing.executionId}:attempt:${routing.deliveryAttempt}:event:${sourceSequence}`;
+    const itemId = native ? `${this.providerId}:native-item:${native.id}:${runtimeEvent.event.type}${suffix}` : `${this.providerId}:${routing.executionId}:attempt:${routing.deliveryAttempt}:item:${sourceSequence}`;
     const timestamp = native?.timestamp ?? new Date().toISOString();
     return {
       eventId,
@@ -313,6 +317,10 @@ export class CanonicalLiveEventPublisher {
       },
     };
   }
+}
+
+function nativeDraftSuffix(native: NativeLiveEventEvidence | undefined): string {
+  return native?.draftIndex ? `:chunk:${native.draftIndex}` : "";
 }
 
 function toError(error: unknown): Error {

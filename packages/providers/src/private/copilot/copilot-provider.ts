@@ -335,7 +335,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
       rememberNativeEvent(state, liveNativeEventIds, event, events);
       this.runtime.recordUsage(state.sessionId);
       if (event.type === "session.idle" && state.request.interactionMode !== "plan") this.publishCompletedAssistantMessage(state, turn);
-      for (const mapped of events) this.publishMapped(state, mapped, event);
+      this.publishMappedEvents(state, events, event);
     } catch (error) {
       turn.settle("failed", toError(error));
       this.publishTurnError(state, turn, toError(error).message);
@@ -385,9 +385,18 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     this.publishCompletedAssistantMessage(state, turn);
   }
 
-  private publishMapped(state: CopilotSessionState, mapped: CopilotMappedEvent, native?: SessionEvent): void {
+  private publishMappedEvents(state: CopilotSessionState, events: readonly CopilotMappedEvent[], native: SessionEvent): void {
+    const draftCounts = new Map<AgentEvent["type"], number>();
+    for (const mapped of events) {
+      const index = draftCounts.get(mapped.event.type) ?? 0;
+      draftCounts.set(mapped.event.type, index + 1);
+      this.publishMapped(state, mapped, native, index);
+    }
+  }
+
+  private publishMapped(state: CopilotSessionState, mapped: CopilotMappedEvent, native?: SessionEvent, draftIndex?: number): void {
     if (mapped.event.type === "error" && !mapped.childThread) this.cancelPermissions(state, "turn_ended");
-    this.publish(state, mapped.event, native, mapped.childThread);
+    this.publish(state, mapped.event, native, mapped.childThread, draftIndex);
   }
 
   private publishOpenChildEndings(state: CopilotSessionState, turn: CopilotTurnState): void {
@@ -419,9 +428,9 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
     if (content) this.publish(state, { type: "assistantMessageBoundary", threadId: state.request.threadId, isFinalResponse: true });
   }
 
-  private publish(state: CopilotSessionState, event: AgentEvent, native?: SessionEvent, childThread?: ChildThreadEvidence): void {
+  private publish(state: CopilotSessionState, event: AgentEvent, native?: SessionEvent, childThread?: ChildThreadEvidence, draftIndex?: number): void {
     this.endOpenChildrenBeforeParentError(state, event, childThread);
-    this.publisher.publish(routingFor(state.request), providerRuntimeEvent({ ...event, turnExecutionId: state.request.turnExecutionId }, childThread ? { providerId: "copilot", kind: "child-thread", childThread } : undefined), nativeIdentities(state.session.sessionId, native), native ? { id: native.id, timestamp: native.timestamp, predecessorEventId: native.parentId, type: native.type, data: nativeEvidence(native) } : undefined);
+    this.publisher.publish(routingFor(state.request), providerRuntimeEvent({ ...event, turnExecutionId: state.request.turnExecutionId }, childThread ? { providerId: "copilot", kind: "child-thread", childThread } : undefined), nativeIdentities(state.session.sessionId, native), native ? { id: native.id, timestamp: native.timestamp, predecessorEventId: native.parentId, type: native.type, data: nativeEvidence(native), ...(draftIndex ? { draftIndex } : {}) } : undefined);
   }
 
   private endOpenChildrenBeforeParentError(state: CopilotSessionState, event: AgentEvent, childThread?: ChildThreadEvidence): void {

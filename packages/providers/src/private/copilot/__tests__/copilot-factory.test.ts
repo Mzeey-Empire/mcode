@@ -1055,7 +1055,7 @@ describe("Copilot public factory", () => {
     await provider.sendTurn(request(mode === "next-turn" ? {} : { resumeFrom: session.sessionId }));
     const emitFragments = () => {
       session.emit({ type: "assistant.message_delta", data: { messageId: "reply", deltaContent: "Hello" } }, "replayed-text");
-      session.emit({ type: "assistant.reasoning_delta", data: { reasoningId: "thought", deltaContent: "Think" } }, "replayed-thought");
+      session.emit({ type: "assistant.reasoning_delta", data: { reasoningId: "thought", deltaContent: "Think".repeat(28_000) } }, "replayed-thought");
     };
     emitFragments();
     emitFragments();
@@ -1067,8 +1067,16 @@ describe("Copilot public factory", () => {
       await finish();
     }
     expect(projections(sink).flatMap((event) => event.type === "textDelta" ? [event.delta] : []).join("")).toBe(mode === "next-turn" ? "HelloNext" : "Hello");
-    expect(projections(sink).flatMap((event) => event.type === "reasoningDelta" ? [event.delta] : []).join("")).toBe("Think");
-    expect(submit.mock.calls.flatMap(([batch]) => batch.events).filter((event) => event.delivery === "live")).toHaveLength(mode === "next-turn" ? 3 : 2);
+    expect(projections(sink).flatMap((event) => event.type === "reasoningDelta" ? [event.delta] : []).join("")).toBe("Think".repeat(28_000));
+    const drafts = submit.mock.calls.flatMap(([batch]) => batch.events);
+    const reasoning = drafts.filter((event) => event.eventId.startsWith("copilot:native:replayed-thought:"));
+    expect(reasoning.map((event) => event.eventId)).toEqual([
+      "copilot:native:replayed-thought:reasoningDelta",
+      "copilot:native:replayed-thought:reasoningDelta:chunk:1",
+      "copilot:native:replayed-thought:reasoningDelta:chunk:2",
+    ]);
+    expect(new Set(reasoning.map((event) => event.routing.itemId)).size).toBe(3);
+    expect(drafts.filter((event) => event.delivery === "live")).toHaveLength(mode === "next-turn" ? 5 : 4);
   });
 
   it("preserves nested native agent identity without copying notification prompts", async () => {
