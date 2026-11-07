@@ -5,8 +5,8 @@ import { useThreadStore, type ThreadRecapCacheEntry } from "@/stores/threadStore
 
 const STALE_RECAP_MS = 5 * 60 * 1000;
 
-/** How long the user must stay on a newly opened thread before its automatic Recap starts. */
-export const RECAP_AFTER_SWITCH_DELAY_MS = 2_000;
+/** How long the user must stay on a thread before an automatic Recap starts for it. */
+export const RECAP_SETTLE_DELAY_MS = 2_000;
 const MIN_FILTERED_MESSAGES = 3;
 const FIRST_RECAP_MESSAGE_LIMIT = 6;
 const DELTA_RECAP_MESSAGE_LIMIT = 4;
@@ -452,6 +452,10 @@ export function useThreadRecap({
     await promise;
   }, []);
 
+  // Every automatic recap starts a provider CLI on the server, which holds its event loop
+  // while the process is created. Starting one for a thread the user is about to leave
+  // delays the thread they open next, so each automatic path waits until the user stays
+  // on the thread and drops the recap if they leave first.
   const overviewOpenAutoAttemptedRef = useRef(false);
   useEffect(() => {
     if (!overviewOpen) {
@@ -462,30 +466,37 @@ export function useThreadRecap({
 
     if (!shouldGenerateRecapOnOverviewOpen(threadId, filteredMessages, cached, signature)) return;
 
-    overviewOpenAutoAttemptedRef.current = true;
-    void generate("automatic");
+    const timer = setTimeout(() => {
+      overviewOpenAutoAttemptedRef.current = true;
+      void generate("automatic");
+    }, RECAP_SETTLE_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [cached, filteredMessages, generate, overviewOpen, signature, threadId]);
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const onFocus = () => {
-      const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
-      void generate("automatic", latestMessages);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
+        void generate("automatic", latestMessages);
+      }, RECAP_SETTLE_DELAY_MS);
     };
     window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      clearTimeout(timer);
+    };
   }, [generate, threadId]);
 
   const previousThreadIdRef = useRef(threadId);
   useEffect(() => {
     if (previousThreadIdRef.current === threadId) return;
     previousThreadIdRef.current = threadId;
-    // A recap starts a provider CLI on the server, which holds its event loop while the
-    // process is created. Starting one per thread the user skims past would delay the
-    // thread they open next, so wait until they stay, and drop the recap if they leave.
     const timer = setTimeout(() => {
       const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
       void generate("automatic", latestMessages);
-    }, RECAP_AFTER_SWITCH_DELAY_MS);
+    }, RECAP_SETTLE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [generate, threadId]);
 

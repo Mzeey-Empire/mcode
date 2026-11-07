@@ -9,7 +9,7 @@ import {
   createThreadRecapSignature,
   filterThreadRecapMessages,
   getThreadRecapCoverageGap,
-  RECAP_AFTER_SWITCH_DELAY_MS,
+  RECAP_SETTLE_DELAY_MS,
   resetThreadRecapRequestStateForTest,
   shouldScheduleThreadRecapGeneration,
   useThreadRecap,
@@ -422,95 +422,140 @@ describe("useThreadRecap", () => {
     expect(result.current.latestActivityAt).toBeNull();
   });
 
-  it("runs automatic generation when the Overview opens from closed and gates pass", async () => {
-    const messages = hookMessages();
-    const { rerender } = renderHook(
-      ({ overviewOpen }) =>
-        useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen }),
-      { initialProps: { overviewOpen: false } },
-    );
+  describe("automatic recaps", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
 
-    rerender({ overviewOpen: true });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-    await waitFor(() => {
+    async function stayOnThread() {
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
+    }
+
+    it("runs once the user stays after the Overview opens from closed and gates pass", async () => {
+      const messages = hookMessages();
+      const { rerender } = renderHook(
+        ({ overviewOpen }) =>
+          useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen }),
+        { initialProps: { overviewOpen: false } },
+      );
+
+      rerender({ overviewOpen: true });
+      await stayOnThread();
+
       expect(mockTransport.generateRecap).toHaveBeenCalledTimes(1);
     });
-  });
 
-  it("runs automatic generation on initial mount when the Overview is already open", async () => {
-    renderHook(() =>
-      useThreadRecap({ threadId: THREAD_ID, messages: hookMessages(), overviewOpen: true }),
-    );
+    it("drops the Overview recap when the Overview closes before the user stays", async () => {
+      const messages = hookMessages();
+      const { rerender } = renderHook(
+        ({ overviewOpen }) =>
+          useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen }),
+        { initialProps: { overviewOpen: true } },
+      );
 
-    await waitFor(() => {
+      rerender({ overviewOpen: false });
+      await stayOnThread();
+
+      expect(mockTransport.generateRecap).not.toHaveBeenCalled();
+    });
+
+    it("runs once the user stays when the Overview is already open on mount", async () => {
+      renderHook(() =>
+        useThreadRecap({ threadId: THREAD_ID, messages: hookMessages(), overviewOpen: true }),
+      );
+
+      await stayOnThread();
+
       expect(mockTransport.generateRecap).toHaveBeenCalledTimes(1);
     });
-  });
 
-  it("waits for eligible messages after initial mount when the Overview is already open", async () => {
-    const messages = hookMessages();
-    const noMessages: ReturnType<typeof hookMessages> = [];
-    const { rerender } = renderHook(
-      ({ messages }) =>
-        useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen: true }),
-      { initialProps: { messages: noMessages } },
-    );
+    it("waits for eligible messages after initial mount when the Overview is already open", async () => {
+      const messages = hookMessages();
+      const noMessages: ReturnType<typeof hookMessages> = [];
+      const { rerender } = renderHook(
+        ({ messages }) =>
+          useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen: true }),
+        { initialProps: { messages: noMessages } },
+      );
 
-    rerender({ messages });
+      await stayOnThread();
+      expect(mockTransport.generateRecap).not.toHaveBeenCalled();
 
-    await waitFor(() => {
+      rerender({ messages });
+      await stayOnThread();
+
       expect(mockTransport.generateRecap).toHaveBeenCalledTimes(1);
     });
-  });
 
-  it("does not run automatic generation for same-thread message rerenders while Overview stays open", async () => {
-    const initialMessages = hookMessages();
-    const { rerender } = renderHook(
-      ({ messages, overviewOpen }) =>
-        useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen }),
-      { initialProps: { messages: initialMessages, overviewOpen: false } },
-    );
+    it("does not run for same-thread message rerenders while Overview stays open", async () => {
+      const initialMessages = hookMessages();
+      const { rerender } = renderHook(
+        ({ messages, overviewOpen }) =>
+          useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen }),
+        { initialProps: { messages: initialMessages, overviewOpen: false } },
+      );
 
-    rerender({ messages: initialMessages, overviewOpen: true });
-    await waitFor(() => {
+      rerender({ messages: initialMessages, overviewOpen: true });
+      await stayOnThread();
+      expect(mockTransport.generateRecap).toHaveBeenCalledTimes(1);
+      vi.mocked(mockTransport.generateRecap).mockClear();
+
+      const staleChangedMessages = [
+        ...hookMessages(),
+        createMockMessage({
+          id: "a4",
+          thread_id: THREAD_ID,
+          role: "assistant",
+          content: "A stale appended message should not be a trigger.",
+          sequence: 4,
+          timestamp: OLD,
+        }),
+      ];
+
+      rerender({ messages: staleChangedMessages, overviewOpen: true });
+      await stayOnThread();
+
+      expect(mockTransport.generateRecap).not.toHaveBeenCalled();
+    });
+
+    it("runs once the user stays after focus returns and gates pass", async () => {
+      const messages = hookMessages();
+      useThreadStore.setState({
+        records: new Map([[THREAD_ID, { ...createEmptyThreadRecord(), messages }]]),
+      });
+
+      renderHook(() =>
+        useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen: false }),
+      );
+
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(mockTransport.generateRecap).not.toHaveBeenCalled();
+      await stayOnThread();
+
       expect(mockTransport.generateRecap).toHaveBeenCalledTimes(1);
     });
-    vi.mocked(mockTransport.generateRecap).mockClear();
 
-    const staleChangedMessages = [
-      ...hookMessages(),
-      createMockMessage({
-        id: "a4",
-        thread_id: THREAD_ID,
-        role: "assistant",
-        content: "A stale appended message should not be a trigger.",
-        sequence: 4,
-        timestamp: OLD,
-      }),
-    ];
+    it("drops the focus recap when the user leaves the thread before staying", async () => {
+      useThreadStore.setState({
+        records: new Map([[THREAD_ID, { ...createEmptyThreadRecord(), messages: hookMessages() }]]),
+      });
+      const { unmount } = renderHook(() =>
+        useThreadRecap({ threadId: THREAD_ID, messages: hookMessages(), overviewOpen: false }),
+      );
 
-    rerender({ messages: staleChangedMessages, overviewOpen: true });
-    await act(async () => {});
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      unmount();
+      await stayOnThread();
 
-    expect(mockTransport.generateRecap).not.toHaveBeenCalled();
-  });
-
-  it("runs automatic generation when focus returns and gates pass", async () => {
-    const messages = hookMessages();
-    useThreadStore.setState({
-      records: new Map([[THREAD_ID, { ...createEmptyThreadRecord(), messages }]]),
-    });
-
-    renderHook(() =>
-      useThreadRecap({ threadId: THREAD_ID, messages, overviewOpen: false }),
-    );
-
-    await act(async () => {
-      window.dispatchEvent(new Event("focus"));
-    });
-
-    await waitFor(() => {
-      expect(mockTransport.generateRecap).toHaveBeenCalledTimes(1);
+      expect(mockTransport.generateRecap).not.toHaveBeenCalled();
     });
   });
 
@@ -539,9 +584,9 @@ describe("useThreadRecap", () => {
       const { rerender } = renderOnThread("thread-a");
 
       rerender({ threadId: "thread-b" });
-      await act(async () => { vi.advanceTimersByTime(RECAP_AFTER_SWITCH_DELAY_MS - 1); });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS - 1); });
       rerender({ threadId: "thread-c" });
-      await act(async () => { vi.advanceTimersByTime(RECAP_AFTER_SWITCH_DELAY_MS); });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
 
       const recappedThreads = vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId);
       expect(recappedThreads).not.toContain("thread-b");
@@ -551,9 +596,50 @@ describe("useThreadRecap", () => {
       const { rerender } = renderOnThread("thread-a");
 
       rerender({ threadId: "thread-c" });
-      await act(async () => { vi.advanceTimersByTime(RECAP_AFTER_SWITCH_DELAY_MS); });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
 
       expect(vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId)).toEqual(["thread-c"]);
+    });
+
+    function renderWithDockedOverview(threadId: string) {
+      return renderHook(
+        ({ threadId: current }) => useThreadRecap({ threadId: current, messages: hookMessages(), overviewOpen: true }),
+        { initialProps: { threadId } },
+      );
+    }
+
+    it("starts no recap for the thread shown on load when the user leaves it before staying", async () => {
+      const { rerender } = renderWithDockedOverview("thread-a");
+
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS - 1); });
+      rerender({ threadId: "thread-b" });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
+
+      const recappedThreads = vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId);
+      expect(recappedThreads).not.toContain("thread-a");
+    });
+
+    it("starts no recap for a thread whose Overview docks after load when the user leaves it before staying", async () => {
+      const { rerender } = renderHook(
+        ({ threadId, overviewOpen }) => useThreadRecap({ threadId, messages: hookMessages(), overviewOpen }),
+        { initialProps: { threadId: "thread-a", overviewOpen: false } },
+      );
+
+      rerender({ threadId: "thread-a", overviewOpen: true });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS - 1); });
+      rerender({ threadId: "thread-b", overviewOpen: true });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
+
+      const recappedThreads = vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId);
+      expect(recappedThreads).not.toContain("thread-a");
+    });
+
+    it("recaps the thread shown on load once the user stays on it", async () => {
+      renderWithDockedOverview("thread-a");
+
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
+
+      expect(vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId)).toEqual(["thread-a"]);
     });
   });
 });
