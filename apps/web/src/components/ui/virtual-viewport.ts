@@ -163,7 +163,8 @@ export class VirtualViewport {
           (top) => {
             const viewport = context.dom.viewport;
             const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
-            viewport.scrollTop = Math.min(maximum, Math.max(0, top));
+            const target = Math.min(maximum, Math.max(0, top));
+            if (target !== viewport.scrollTop) viewport.scrollTop = target;
             // Native scroll events arrive after the synchronous row calculation.
             context.getState().scrollPosition = viewport.scrollTop;
             this.expectedScrollTop = viewport.scrollTop;
