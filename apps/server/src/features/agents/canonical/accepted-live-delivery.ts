@@ -41,11 +41,31 @@ export interface LiveChildText {
   readonly text: { readonly threadId: string; readonly itemId: string; readonly at: number; readonly delta: string };
 }
 
-/** Last live receipt survives checkpoints so a producer retry cannot duplicate text. */
-export interface LiveDeliveryReceipt {
-  operationId: string;
-  inputHash: string;
-  receipt: ExecutionAcceptedReceipt;
+/** Matches the owner's duplicate window for saved operations, so a live piece is retryable as long as a saved one. */
+const LIVE_RECEIPTS_MAX = 128;
+
+/**
+ * Receipts of the latest live operations, parent and child alike. A checkpoint saves live pieces under its own
+ * identity, so they never enter the owner's receipt history; without this window a producer retry of any piece but
+ * the newest would fail its ordinal check. Entries survive checkpoints, so a retry cannot duplicate saved text.
+ */
+export class LiveReceipts {
+  private readonly byOperation = new Map<string, { readonly inputHash: string; readonly receipt: ExecutionAcceptedReceipt }>();
+
+  remember(operationId: string, inputHash: string, receipt: ExecutionAcceptedReceipt): void {
+    this.byOperation.set(operationId, { inputHash, receipt });
+    if (this.byOperation.size <= LIVE_RECEIPTS_MAX) return;
+    const [oldest] = this.byOperation.keys();
+    if (oldest !== undefined) this.byOperation.delete(oldest);
+  }
+
+  /** The original receipt for the same input, a conflict for different input under that identity, or unknown. */
+  replay(operationId: string, inputHash: string): { readonly kind: "unknown" } | { readonly kind: "conflict" }
+    | { readonly kind: "duplicate"; readonly receipt: ExecutionAcceptedReceipt } {
+    const original = this.byOperation.get(operationId);
+    if (!original) return { kind: "unknown" };
+    return original.inputHash === inputHash ? { kind: "duplicate", receipt: structuredClone(original.receipt) } : { kind: "conflict" };
+  }
 }
 
 /** Admit only parent fragments with effects that can be replaced by a checkpoint. */

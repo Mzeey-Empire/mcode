@@ -581,6 +581,26 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(savedText()).toBe("prefixonce");
     });
 
+    it("answers a resent earlier live piece with its first receipt after a later piece", async () => {
+      await begin();
+      const accept = vi.spyOn(progress, "acceptWhenReady");
+      pushes.frames.length = 0;
+      await piece("one");
+      await piece("two");
+      const operation = accept.mock.calls[0]?.[0];
+      if (!operation || operation.mutation.kind !== "append-events") throw new Error("Expected the live operation");
+      const first = await accept.mock.results[0]?.value;
+      expect(progress.accept(operation)).toEqual(first);
+      expect(liveFrames()).toHaveLength(2);
+      const changed = { ...operation, mutation: { ...operation.mutation,
+        events: [{ ...draft("claude", operation.ordinal - 1, "textDelta", { delta: "other", isFinalResponse: true }), delivery: "live" as const }] } };
+      expect(() => progress.accept(changed)).toThrow(expect.objectContaining({ admissionReason: "identity-conflict" }));
+      await progress.waitForSaved(execution.threadId);
+      expect(progress.accept(operation)).toEqual(first);
+      await progress.waitForSaved(execution.threadId);
+      expect(savedText()).toBe("prefixonetwo");
+    });
+
     it("saves a non-fragment event whose draft is labelled live", async () => {
       await begin();
       pushes.frames.length = 0;
@@ -890,6 +910,26 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(progress.accept(operation)).toEqual(first);
       await progress.waitForSaved(execution.threadId);
       expect(childAnswer()).toEqual(["first once"]);
+    });
+
+    it("answers a resent earlier child piece with its first receipt after a later piece", async () => {
+      await beginChild();
+      const accept = vi.spyOn(progress, "acceptWhenReady");
+      pushes.frames.length = 0;
+      await childPiece(" one");
+      await childPiece(" two");
+      const operation = accept.mock.calls[0]?.[0];
+      if (!operation || operation.mutation.kind !== "append-events") throw new Error("Expected the child operation");
+      const first = await accept.mock.results[0]?.value;
+      expect(progress.accept(operation)).toEqual(first);
+      expect(childLiveFrames()).toHaveLength(2);
+      const changed = { ...operation, mutation: { ...operation.mutation,
+        events: [childDraft("textDelta", { delta: " other" }, "child-message")] } };
+      expect(() => progress.accept(changed)).toThrow(expect.objectContaining({ admissionReason: "identity-conflict" }));
+      await progress.waitForSaved(execution.threadId);
+      expect(progress.accept(operation)).toEqual(first);
+      await progress.waitForSaved(execution.threadId);
+      expect(childAnswer()).toEqual(["first one two"]);
     });
 
     it("keeps pending child text when the child is stopped mid-burst", async () => {

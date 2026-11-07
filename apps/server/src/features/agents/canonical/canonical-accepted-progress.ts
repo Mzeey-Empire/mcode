@@ -47,7 +47,7 @@ import type { StoredTask } from "../orchestration/persistence/task-repo.js";
 
 import { mergePlanVersions } from "../planning/merge-plan-versions.js";
 import { acceptsLive, LIVE_CHECKPOINT_INTERVAL_MS, liveCheckpointDue, liveCheckpointId, liveCheckpointOperation, liveChildCheckpoint,
-  liveChildText, mergeLiveChildText, mergeLiveDelivery, type LiveChildText, type LiveDeliveryReceipt, type PendingLiveDelivery } from "./accepted-live-delivery.js";
+  liveChildText, LiveReceipts, mergeLiveChildText, mergeLiveDelivery, type LiveChildText, type PendingLiveDelivery } from "./accepted-live-delivery.js";
 import type { PlanFileWriter } from "../planning/plan-file-writer.js";
 
 type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly operation: ExecutionSemanticOperation;
@@ -98,7 +98,7 @@ type AcceptedOwner = ThreadProgressOwner<AcceptedExecutionWriteIntent, Execution
 interface ProgressThread {
   /** Live pieces shown since the last checkpoint; saved as one control batch by `flushLive`. */
   live?: PendingLiveDelivery;
-  lastLiveReceipt?: LiveDeliveryReceipt;
+  readonly liveReceipts: LiveReceipts;
   owner: AcceptedOwner;
   head?: AcceptedExecutionState;
   /** The head execution whose worker released it, so no further operation for it can arrive. */
@@ -401,7 +401,7 @@ export class CanonicalAcceptedProgress {
       mergeLiveDelivery(thread.live, operation);
     }
     thread.head = advanceLiveExecution(head, operation);
-    thread.lastLiveReceipt = { operationId: operation.operationId, inputHash, receipt };
+    thread.liveReceipts.remember(operation.operationId, inputHash, receipt);
     this.liveSequence += 1;
     this.publishFamily({ phase: "live", threadId: operation.execution.threadId, epoch: thread.epoch,
       after: cut.accepted.sequence, liveSequence: this.liveSequence,
@@ -455,11 +455,8 @@ export class CanonicalAcceptedProgress {
     | { readonly kind: "new"; readonly head: AcceptedExecutionState; readonly inputHash: string } {
     const head = requireExecutionHead(thread, operation);
     const inputHash = operationInputHash(operation);
-    if (thread.lastLiveReceipt?.operationId === operation.operationId) {
-      if (thread.lastLiveReceipt.inputHash !== inputHash) throw new ProgressAdmissionError("identity-conflict");
-      return { kind: "duplicate", receipt: thread.lastLiveReceipt.receipt };
-    }
-    const replay = thread.owner.replay(operation.operationId, inputHash);
+    const live = thread.liveReceipts.replay(operation.operationId, inputHash);
+    const replay = live.kind === "unknown" ? thread.owner.replay(operation.operationId, inputHash) : live;
     if (replay.kind === "duplicate") return replay;
     if (replay.kind === "conflict") throw new ProgressAdmissionError("identity-conflict");
     if (operation.ordinal !== head.ordinal + 1) throw new ProgressAdmissionError("routing-conflict");
@@ -1005,7 +1002,8 @@ export class CanonicalAcceptedProgress {
     const features = { ...this.canonical.loadAcceptedFeatureSeed(threadId), compacting: false };
     const thread: ProgressThread = { owner: this.makeOwner(threadId, epoch, state, revision, head?.epoch === epoch ? head : undefined),
       state, durableState: copyAgentModelState(state), revision, publicationSequence: features.publicationSequence, statuses: new Map(), epoch, features,
-      commandPending: false, completingSave: false, messageSequence: nextMessageSequence(state), waiters: new Set(), answeredPlanMessages: new Set() };
+      commandPending: false, completingSave: false, messageSequence: nextMessageSequence(state), waiters: new Set(), answeredPlanMessages: new Set(),
+      liveReceipts: new LiveReceipts() };
     this.threads.set(threadId, thread);
     return thread;
   }
