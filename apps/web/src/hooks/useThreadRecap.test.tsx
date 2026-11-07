@@ -1,6 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
@@ -9,6 +9,7 @@ import {
   createThreadRecapSignature,
   filterThreadRecapMessages,
   getThreadRecapCoverageGap,
+  RECAP_AFTER_SWITCH_DELAY_MS,
   resetThreadRecapRequestStateForTest,
   shouldScheduleThreadRecapGeneration,
   useThreadRecap,
@@ -510,6 +511,49 @@ describe("useThreadRecap", () => {
 
     await waitFor(() => {
       expect(mockTransport.generateRecap).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("after a thread switch", () => {
+    const threads = ["thread-a", "thread-b", "thread-c"];
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      useThreadStore.setState({
+        records: new Map(threads.map((id) => [id, { ...createEmptyThreadRecord(), messages: hookMessages() }])),
+      });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function renderOnThread(threadId: string) {
+      return renderHook(
+        ({ threadId: current }) => useThreadRecap({ threadId: current, messages: hookMessages(), overviewOpen: false }),
+        { initialProps: { threadId } },
+      );
+    }
+
+    it("starts no recap for a stale thread the user leaves before staying on it", async () => {
+      const { rerender } = renderOnThread("thread-a");
+
+      rerender({ threadId: "thread-b" });
+      await act(async () => { vi.advanceTimersByTime(RECAP_AFTER_SWITCH_DELAY_MS - 1); });
+      rerender({ threadId: "thread-c" });
+      await act(async () => { vi.advanceTimersByTime(RECAP_AFTER_SWITCH_DELAY_MS); });
+
+      const recappedThreads = vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId);
+      expect(recappedThreads).not.toContain("thread-b");
+    });
+
+    it("recaps a stale thread once the user stays on it", async () => {
+      const { rerender } = renderOnThread("thread-a");
+
+      rerender({ threadId: "thread-c" });
+      await act(async () => { vi.advanceTimersByTime(RECAP_AFTER_SWITCH_DELAY_MS); });
+
+      expect(vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId)).toEqual(["thread-c"]);
     });
   });
 });

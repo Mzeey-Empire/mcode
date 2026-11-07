@@ -4,6 +4,9 @@ import type { Message } from "@/transport";
 import { useThreadStore, type ThreadRecapCacheEntry } from "@/stores/threadStore";
 
 const STALE_RECAP_MS = 5 * 60 * 1000;
+
+/** How long the user must stay on a newly opened thread before its automatic Recap starts. */
+export const RECAP_AFTER_SWITCH_DELAY_MS = 2_000;
 const MIN_FILTERED_MESSAGES = 3;
 const FIRST_RECAP_MESSAGE_LIMIT = 6;
 const DELTA_RECAP_MESSAGE_LIMIT = 4;
@@ -476,8 +479,14 @@ export function useThreadRecap({
   useEffect(() => {
     if (previousThreadIdRef.current === threadId) return;
     previousThreadIdRef.current = threadId;
-    const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
-    void generate("automatic", latestMessages);
+    // A recap starts a provider CLI on the server, which holds its event loop while the
+    // process is created. Starting one per thread the user skims past would delay the
+    // thread they open next, so wait until they stay, and drop the recap if they leave.
+    const timer = setTimeout(() => {
+      const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
+      void generate("automatic", latestMessages);
+    }, RECAP_AFTER_SWITCH_DELAY_MS);
+    return () => clearTimeout(timer);
   }, [generate, threadId]);
 
   return {
