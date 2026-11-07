@@ -46,8 +46,8 @@ import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js"
 import type { StoredTask } from "../orchestration/persistence/task-repo.js";
 
 import { mergePlanVersions } from "../planning/merge-plan-versions.js";
-import { acceptsLive, LIVE_CHECKPOINT_BYTES, LIVE_CHECKPOINT_INTERVAL_MS, liveCheckpointOperation, mergeLiveDelivery,
-  type LiveDeliveryReceipt, type PendingLiveDelivery } from "./accepted-live-delivery.js";
+import { acceptsLive, LIVE_CHECKPOINT_INTERVAL_MS, liveCheckpointDue, liveCheckpointId, liveCheckpointOperation, liveChildCheckpoint,
+  liveChildText, LiveReceipts, mergeLiveChildText, mergeLiveDelivery, type LiveChildText, type PendingLiveDelivery } from "./accepted-live-delivery.js";
 import type { PlanFileWriter } from "../planning/plan-file-writer.js";
 
 type AcceptedExecutionWriteIntent = ({ readonly kind: "execution"; readonly operation: ExecutionSemanticOperation;
@@ -98,7 +98,7 @@ type AcceptedOwner = ThreadProgressOwner<AcceptedExecutionWriteIntent, Execution
 interface ProgressThread {
   /** Live pieces shown since the last checkpoint; saved as one control batch by `flushLive`. */
   live?: PendingLiveDelivery;
-  lastLiveReceipt?: LiveDeliveryReceipt;
+  readonly liveReceipts: LiveReceipts;
   owner: AcceptedOwner;
   head?: AcceptedExecutionState;
   /** The head execution whose worker released it, so no further operation for it can arrive. */
@@ -285,6 +285,8 @@ export class CanonicalAcceptedProgress {
     if (acceptsLive(operation, turn.providerStartedAt, collaboration.events.length + features.events.length, features.publications)) {
       return this.acceptLive(thread, operation, head, inputHash);
     }
+    const child = liveChild(thread, operation, turn.providerStartedAt, collaboration, features);
+    if (child) return this.acceptLive(thread, operation, head, inputHash, child);
     this.flushLive(thread);
     const publications = features.publications;
     const publicationIds = publications.map((_, index) => String(thread.publicationSequence + index + 1));
@@ -379,23 +381,33 @@ export class CanonicalAcceptedProgress {
     }
   }
 
-  private acceptLive(thread: ProgressThread, operation: ExecutionSemanticOperation,
-    head: AcceptedExecutionState, inputHash: string): ExecutionAcceptedReceipt {
+  /**
+   * Show a parent fragment or a child message piece now and save it with the next checkpoint. A child piece's
+   * collaboration candidate becomes current unadmitted, so the next child piece prepares on top of its record.
+   */
+  private acceptLive(thread: ProgressThread, operation: ExecutionSemanticOperation, head: AcceptedExecutionState,
+    inputHash: string, child?: { readonly candidate: AcceptedCodexCollaboration; readonly text: LiveChildText }): ExecutionAcceptedReceipt {
     const cut = thread.owner.recoveryCut();
     const receipt: ExecutionAcceptedReceipt = { kind: "accepted", operationId: operation.operationId,
       progressPosition: cut.accepted, acceptedThrough: thread.state.lastAcceptedSequenceByExecution[operation.execution.executionId] ?? 0,
       eventCount: 0 };
     if (!thread.live) {
-      thread.live = { operation, text: [], narrative: new Map(), bytes: 0, cancelTimer: this.scheduleLiveFlush(thread) };
+      thread.live = { operation, text: [], narrative: new Map(), children: new Map(), bytes: 0, cancelTimer: this.scheduleLiveFlush(thread) };
     }
-    mergeLiveDelivery(thread.live, operation);
+    if (child) {
+      mergeLiveChildText(thread.live, operation, child.text);
+      thread.collaboration = child.candidate;
+    } else {
+      mergeLiveDelivery(thread.live, operation);
+    }
     thread.head = advanceLiveExecution(head, operation);
-    thread.lastLiveReceipt = { operationId: operation.operationId, inputHash, receipt };
+    thread.liveReceipts.remember(operation.operationId, inputHash, receipt);
     this.liveSequence += 1;
     this.publishFamily({ phase: "live", threadId: operation.execution.threadId, epoch: thread.epoch,
       after: cut.accepted.sequence, liveSequence: this.liveSequence,
-      events: (operation.livePublication ?? []).map((publication) => publication.event) });
-    if (thread.live.bytes >= LIVE_CHECKPOINT_BYTES) this.flushLive(thread);
+      events: child ? [] : (operation.livePublication ?? []).map((publication) => publication.event),
+      ...(child ? { childText: [child.text.text] } : {}) });
+    if (liveCheckpointDue(thread.live)) this.flushLive(thread);
     return receipt;
   }
 
@@ -416,10 +428,9 @@ export class CanonicalAcceptedProgress {
   private flushLive(thread: ProgressThread): void {
     const pending = thread.live;
     if (!pending) return;
-    const checkpoint = liveCheckpointOperation(pending);
     thread.live = undefined;
     try {
-      if (checkpoint) this.admitLiveCheckpoint(thread, checkpoint);
+      this.admitLiveCheckpoint(thread, pending);
     } catch (error) {
       thread.live = pending;
       throw error;
@@ -427,15 +438,16 @@ export class CanonicalAcceptedProgress {
     pending.cancelTimer();
   }
 
-  private admitLiveCheckpoint(thread: ProgressThread, operation: ExecutionSemanticOperation): void {
-    const { execution } = operation;
-    const { modelThread, turn } = admittedModel(thread, execution, "Live checkpoint lost its admitted turn");
-    const prepared = prepareAcceptedParentEvents({ operation, thread: modelThread, turn, items: thread.state.items,
-      publicationIds: [], messageSequence: thread.messageSequence, acceptedAt: new Date().toISOString() });
-    this.admitControl(thread, operation.operationId, execution, prepared.events,
-      thread.head?.phase ?? "running", thread.head?.nativeCursor ?? null, undefined,
-      operation.mutation.kind === "live-event" && operation.mutation.text.kind === "append"
-        ? [...operation.mutation.text.inputs] : undefined);
+  /** One control batch saves the parent's pending text and narrative beside the latest child message records. */
+  private admitLiveCheckpoint(thread: ProgressThread, pending: PendingLiveDelivery): void {
+    const operationId = liveCheckpointId(pending);
+    const parent = liveCheckpointOperation(pending, operationId);
+    const children = liveChildCheckpoint(pending, operationId);
+    if (!parent && !children) return;
+    const { execution } = pending.operation;
+    const events = [...(children ? [children] : []), ...(parent ? liveParentEvents(thread, parent) : [])];
+    this.admitControl(thread, operationId, execution, events,
+      thread.head?.phase ?? "running", thread.head?.nativeCursor ?? null, undefined, appendedText(parent));
   }
 
   private operationAdmission(thread: ProgressThread, operation: ExecutionSemanticOperation):
@@ -443,11 +455,8 @@ export class CanonicalAcceptedProgress {
     | { readonly kind: "new"; readonly head: AcceptedExecutionState; readonly inputHash: string } {
     const head = requireExecutionHead(thread, operation);
     const inputHash = operationInputHash(operation);
-    if (thread.lastLiveReceipt?.operationId === operation.operationId) {
-      if (thread.lastLiveReceipt.inputHash !== inputHash) throw new ProgressAdmissionError("identity-conflict");
-      return { kind: "duplicate", receipt: thread.lastLiveReceipt.receipt };
-    }
-    const replay = thread.owner.replay(operation.operationId, inputHash);
+    const live = thread.liveReceipts.replay(operation.operationId, inputHash);
+    const replay = live.kind === "unknown" ? thread.owner.replay(operation.operationId, inputHash) : live;
     if (replay.kind === "duplicate") return replay;
     if (replay.kind === "conflict") throw new ProgressAdmissionError("identity-conflict");
     if (operation.ordinal !== head.ordinal + 1) throw new ProgressAdmissionError("routing-conflict");
@@ -520,6 +529,8 @@ export class CanonicalAcceptedProgress {
     this.assertAdmission(thread);
     const head = thread.head;
     if (!head) throw new Error("Accepted child Stop has no parent execution owner");
+    // The Stop's own records are prepared from accepted state, so pending child text must be admitted first.
+    this.flushLive(thread);
     const candidate = thread.collaboration?.fork(thread.state) ?? new AcceptedCodexCollaboration(thread.state);
     const prepared = candidate.prepareChildInterruption({ childThreadId: childId, error,
       ...(nativeTurnId ? { nativeTurnId } : {}) });
@@ -991,7 +1002,8 @@ export class CanonicalAcceptedProgress {
     const features = { ...this.canonical.loadAcceptedFeatureSeed(threadId), compacting: false };
     const thread: ProgressThread = { owner: this.makeOwner(threadId, epoch, state, revision, head?.epoch === epoch ? head : undefined),
       state, durableState: copyAgentModelState(state), revision, publicationSequence: features.publicationSequence, statuses: new Map(), epoch, features,
-      commandPending: false, completingSave: false, messageSequence: nextMessageSequence(state), waiters: new Set(), answeredPlanMessages: new Set() };
+      commandPending: false, completingSave: false, messageSequence: nextMessageSequence(state), waiters: new Set(), answeredPlanMessages: new Set(),
+      liveReceipts: new LiveReceipts() };
     this.threads.set(threadId, thread);
     return thread;
   }
@@ -1297,6 +1309,28 @@ export class CanonicalAcceptedProgress {
       broadcast("agent.canonical", { ...frame, threadId: childId, ownerThreadId: frame.threadId });
     }
   }
+}
+
+/** A child piece the owner can show live, with the collaboration candidate that holds its latest record. */
+function liveChild(thread: ProgressThread, operation: ExecutionSemanticOperation, providerStartedAt: string | null | undefined,
+  collaboration: ReturnType<typeof prepareAcceptedCollaboration>, features: ReturnType<typeof prepareAcceptedFeatureObservations>,
+): { readonly candidate: AcceptedCodexCollaboration; readonly text: LiveChildText } | undefined {
+  const { candidate } = collaboration;
+  const text = candidate && liveChildText({ operation, providerStartedAt, observations: collaboration.events,
+    preparedEvents: features.events.length, publications: features.publications,
+    previous: (itemId) => thread.live?.children.get(itemId)?.item ?? thread.state.items[itemId] });
+  return candidate && text ? { candidate, text } : undefined;
+}
+
+function liveParentEvents(thread: ProgressThread, operation: ExecutionSemanticOperation) {
+  const { modelThread, turn } = admittedModel(thread, operation.execution, "Live checkpoint lost its admitted turn");
+  return prepareAcceptedParentEvents({ operation, thread: modelThread, turn, items: thread.state.items,
+    publicationIds: [], messageSequence: thread.messageSequence, acceptedAt: new Date().toISOString() }).events;
+}
+
+function appendedText(operation: ExecutionSemanticOperation | undefined): CanonicalAcceptedWriteInput["assistantTextCheckpoint"] {
+  return operation?.mutation.kind === "live-event" && operation.mutation.text.kind === "append"
+    ? [...operation.mutation.text.inputs] : undefined;
 }
 
 function describeCanonicalPush(frame: CanonicalAgentProgressFrame, children: number) {

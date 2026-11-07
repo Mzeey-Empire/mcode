@@ -33,6 +33,14 @@ describe("canonical accepted/saved progress contract", () => {
       expect(CanonicalAgentProgressFrameSchema().safeParse(live([fragments[0], value])).success).toBe(false);
     }
   });
+  it("carries child text in a live frame and refuses a live frame that shows nothing", () => {
+    const piece = { threadId: "child", itemId: "item:child", at: 5, delta: " more" };
+    const live = { phase: "live", threadId: "thread", epoch: "epoch", after: 2, liveSequence: 1, events: [] };
+    expect(CanonicalAgentProgressFrameSchema().safeParse({ ...live, childText: [piece] }).success).toBe(true);
+    expect(CanonicalAgentProgressFrameSchema().safeParse(live).success).toBe(false);
+    expect(CanonicalAgentProgressFrameSchema().safeParse({ ...live, childText: [{ ...piece, delta: "" }] }).success).toBe(false);
+    expect(CanonicalAgentProgressFrameSchema().safeParse({ ...live, childText: [{ ...piece, at: -1 }] }).success).toBe(false);
+  });
   it("accepts progress with no fabricated durable revision and rejects a durable field", () => {
     expect(AcceptedCanonicalAgentEventEnvelopeSchema.safeParse(event()).success).toBe(true);
     expect(AcceptedCanonicalAgentEventEnvelopeSchema.safeParse({ ...event(), durableRevision: 0 }).success).toBe(false);

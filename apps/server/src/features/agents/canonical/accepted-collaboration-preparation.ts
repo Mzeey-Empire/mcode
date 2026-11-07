@@ -16,7 +16,9 @@ export function prepareAcceptedCollaboration(state: AgentModelState, operation: 
     readonly candidate?: AcceptedCodexCollaboration } {
   const runtime = singleAcceptedRuntime(acceptedRuntimeEvents(operation));
   if (!runtime) return { operation, events: [] };
-  const adapter = previous ? previous.fork(state) : new AcceptedCodexCollaboration(state);
+  // A live child piece leaves its records in the previous overlay until the next checkpoint admits them; while the
+  // accepted state is unchanged, keep that overlay so the next piece grows the latest record, not the saved one.
+  const adapter = previous ? previous.fork(previous.lends(state) ? undefined : state) : new AcceptedCodexCollaboration(state);
   const prepared = prepareRuntimeObservation(adapter, runtime, operation.livePublication);
   return { operation: { ...operation, livePublication: prepared.publications },
     events: collaborationEvents(operation, prepared.changes, runtime.sourceProviderId), candidate: adapter };

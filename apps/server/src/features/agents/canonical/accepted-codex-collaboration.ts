@@ -106,6 +106,11 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     return candidate;
   }
 
+  /** Whether this collaboration reads exactly this state, unchanged since it was lent. */
+  lends(state: AgentModelState): boolean {
+    return this.lent.state === state && ownedStateChangeCount(state) === this.lent.changes;
+  }
+
   // Every record read passes here. The accepted progress owner reduces into its state in place instead of copying
   // it per event, so a kept reference would otherwise silently show records admitted after this fork.
   private assertCurrent(): AcceptedRecordMaps {
