@@ -38,7 +38,7 @@ import {
   type ReviewView,
   type ReviewViewAvailabilityMap,
 } from "@/lib/review-views";
-import { useDiffStore, type DiffRenderMode, type DiffViewMode } from "@/stores/diffStore";
+import { selectDiffRevision, useDiffStore, type DiffRenderMode, type DiffViewMode } from "@/stores/diffStore";
 import { BranchOperandPickers } from "./BranchOperandPickers";
 import { CommitOperandPicker } from "./CommitOperandPicker";
 import { DiffStat } from "./DiffStat";
@@ -331,7 +331,7 @@ function ReviewOperand({ operand }: { readonly operand: ReviewView["operand"] })
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const diffScopeRevision = useDiffStore((s) =>
-    activeWorkspaceId ? (s.diffRevisionByScope[activeThreadId ?? activeWorkspaceId] ?? 0) : 0,
+    activeWorkspaceId ? selectDiffRevision(s, activeThreadId ?? activeWorkspaceId) : 0,
   );
   const picker = operandPicker(operand, activeThreadId, activeWorkspaceId, diffScopeRevision);
   if (!picker) return null;

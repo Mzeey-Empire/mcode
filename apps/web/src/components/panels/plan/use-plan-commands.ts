@@ -24,8 +24,14 @@ export function usePlanCommands(threadId: string | null): void {
   const running = useThreadStore((s) => threadId !== null && isThreadExecuting(threadId, s));
   const waiting = useWaitingForSetup(threadId ?? "") !== null;
   const executing = running || waiting;
-  const { isGitRepo } = useSourceCheckout(threadId);
   const version = threadId && !executing ? (selectImplementTarget(versions, activeVersion, onScreen)?.version ?? null) : null;
+  // Only the worktree command needs the checkout, and this hook runs for every
+  // selected thread, so threads without a plan skip the git-backed read. A
+  // thread with a plan reads it before the plan becomes implementable, so the
+  // command appears with the plan, as when every selection read it. Only a
+  // successful read shows it: a missing worktree folder fails the read while
+  // the workspace stays flagged as git.
+  const { isGitRepo } = useSourceCheckout(versions.length === 0 ? null : threadId);
 
   useEffect(() => {
     if (threadId === null || version === null) return;

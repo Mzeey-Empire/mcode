@@ -3,7 +3,7 @@ import type { ReviewComparison, ReviewFileChange, ReviewTurn } from "@mcode/cont
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { sinceLookedBaseline, threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
-import { branchScopeKey, effectiveBranchOperands, useDiffStore, type BranchOperands, type BranchSelection, type ReviewTurnSelection } from "@/stores/diffStore";
+import { branchScopeKey, effectiveBranchOperands, selectDiffRevision, useDiffStore, type BranchOperands, type BranchSelection, type ReviewTurnSelection } from "@/stores/diffStore";
 import { getTransport } from "@/transport";
 import { ReviewHeader } from "./ReviewHeader";
 import { FileList } from "./FileList";
@@ -334,7 +334,7 @@ function useDiffPanelStore(): DiffPanelStore {
     diffScopeId ? (state.reviewFilesVisibleByScope[diffScopeId] ?? false) : false,
   );
   const diffRevision = useDiffStore((state) =>
-    diffScopeId ? (state.diffRevisionByScope[diffScopeId] ?? 0) : 0,
+    diffScopeId ? selectDiffRevision(state, diffScopeId) : 0,
   );
 
   return {

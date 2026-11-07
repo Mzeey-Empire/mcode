@@ -14,6 +14,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useCompletionStore } from "@/features/projects/sidebar/completion-store";
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
 import { useDiffStore } from "@/stores/diffStore";
+import { forgetInFlightReviewProbes } from "@/hooks/useReviewState";
 import { refreshTurnSnapshotsAfterPersist } from "@/lib/turn-snapshot-refresh";
 import { appendServerNoticeOnceLoaded, useThreadStore } from "@/stores/threadStore";
 import { getThreadRecord, patchThreadRecord } from "@/stores/thread-record";
@@ -38,6 +39,27 @@ import { openActionPreview } from "@/features/preview/navigation/open-url-in-pre
 let unsubs: (() => void)[] = [];
 let skillsInvalidationTimer: ReturnType<typeof setTimeout> | null = null;
 const SKILLS_INVALIDATION_DEBOUNCE_MS = 100;
+let checkoutEpochTimer: ReturnType<typeof setTimeout> | null = null;
+// A rebase, or HEAD moving in a worktree several threads share, reaches the
+// client as one event per server HEAD watcher, each in its own message. One
+// frame gathers them into a single re-read per mounted view.
+const CHECKOUT_EPOCH_COALESCE_MS = 16;
+
+/**
+ * HEAD moved on some checkout. Readers that mount from now on start fresh
+ * reads, and within one frame every mounted git view re-reads. Events name
+ * only a workspace or a thread, and checkout paths can reach one directory
+ * through aliases such as junctions, so the client does not work out which
+ * views the move touched. HEAD moves are rare, and a re-read is one probe per
+ * mounted scope.
+ */
+function noteCheckoutMoved(): void {
+  forgetInFlightReviewProbes();
+  checkoutEpochTimer ??= setTimeout(() => {
+    checkoutEpochTimer = null;
+    useDiffStore.getState().bumpCheckoutEpoch();
+  }, CHECKOUT_EPOCH_COALESCE_MS);
+}
 
 /** Encoder reused across all legacy JSON terminal.data frames. */
 const _legacyEncoder = new TextEncoder();
@@ -163,7 +185,8 @@ function handleTerminalData(data: unknown): void {
  * - `provider.modelsChanged` -- replaces one provider's cached model list after a server refresh diff
  * - `turn.persisted` -- tool call persistence confirmation forwarded to threadStore
  * - `settings.changed` -- server-pushed settings updates forwarded to settingsStore
- * - `branch.changed` -- refetches the workspace's branch target lists, which moves an unpicked default branch
+ * - `branch.changed` -- refetches the workspace's branch target lists, which moves an unpicked default branch,
+ *   and like `thread.checkoutChanged` moves every git view to a new revision
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
  * - `plan.versionUpserted` -- merges the version into planStore
@@ -391,6 +414,7 @@ export function startPushListeners(): void {
       const parsed = WS_CHANNELS["thread.checkoutChanged"].safeParse(data);
       if (!parsed.success) return;
       const { threadId, branch, checkoutState, baseBranch, headSha } = parsed.data;
+      noteCheckoutMoved();
       useWorkspaceStore.setState((ws) => {
         const prUrlsByThreadId = { ...ws.prUrlsByThreadId };
         const checksById = { ...ws.checksById };
@@ -528,6 +552,7 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("branch.changed", (data) => {
       const { workspaceId } = data as { workspaceId: string };
+      noteCheckoutMoved();
       invalidateBranchTargets(workspaceId);
       invalidateReviewOperandLists(workspaceId);
     }),
@@ -696,6 +721,10 @@ export function stopPushListeners(): void {
   if (skillsInvalidationTimer !== null) {
     clearTimeout(skillsInvalidationTimer);
     skillsInvalidationTimer = null;
+  }
+  if (checkoutEpochTimer !== null) {
+    clearTimeout(checkoutEpochTimer);
+    checkoutEpochTimer = null;
   }
   for (const unsub of unsubs) {
     unsub();
