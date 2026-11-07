@@ -212,7 +212,6 @@ describe("routeMessage provider.catalog", () => {
       listPlugins: vi.fn(async () => ({
         marketplaces: [],
         marketplaceLoadErrors: [],
-        featuredPluginIds: [],
       })),
       readPlugin: vi.fn(async () => ({ plugin: {} })),
       readConfig: vi.fn(async (configCwd?: string) => ({
@@ -306,7 +305,6 @@ describe("routeMessage provider.catalog", () => {
       listPlugins: vi.fn(async () => ({
         marketplaces: [],
         marketplaceLoadErrors: [],
-        featuredPluginIds: [],
       })),
       readPlugin: vi.fn(async () => ({ plugin: {} })),
       readConfig: vi.fn(async () => ({ config: {} })),
@@ -455,7 +453,6 @@ describe("routeMessage provider.catalog", () => {
               message: "invalid metadata",
             }]
           : [],
-        featuredPluginIds: [],
       })),
       readPlugin: vi.fn(async () => ({ plugin: { description: "Plugin details" } })),
     });

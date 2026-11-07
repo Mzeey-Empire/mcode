@@ -97,7 +97,6 @@ class ControlledCatalogClient extends NodeEvents.EventEmitter {
       ],
     }],
     marketplaceLoadErrors: [],
-    featuredPluginIds: [],
   }));
   readonly readPlugin = vi.fn(async (): Promise<CodexCatalogPluginReadResult> => ({
     plugin: { description: "Detailed plugin description" },
@@ -139,6 +138,49 @@ describe("CodexCatalogService", () => {
       (directory) => NodeFSPromises.rm(directory, { recursive: true, force: true }),
     ));
     vi.useRealTimers();
+  });
+
+  it("fetches external plugin changes on every routine refresh", async () => {
+    const client = new ControlledCatalogClient();
+    const service = createService(client);
+    const first = await service.refresh("C:/workspaces/one");
+    client.listPlugins.mockResolvedValueOnce({ marketplaces: [], marketplaceLoadErrors: [] });
+    const repeated = await service.refresh("C:/workspaces/one");
+    await service.refresh("C:/workspaces/one");
+    expect(first.plugins.map((plugin) => plugin.name)).toEqual(["Review"]);
+    expect(repeated.plugins).toEqual([]);
+    expect(client.listPlugins).toHaveBeenCalledTimes(3);
+    expect(client.listSkills).toHaveBeenCalledTimes(3);
+    const other = await service.refresh("C:/workspaces/two");
+    expect(client.listPlugins).toHaveBeenCalledTimes(4);
+    expect(other.plugins[0]?.description).toBe("Review plugin for C:/workspaces/two");
+  });
+
+  it("force reloads plugins after skills/changed and fetches again on refresh", async () => {
+    const client = new ControlledCatalogClient();
+    const service = createService(client);
+    const cwd = "C:/workspaces/one";
+    await service.refresh(cwd);
+    client.listPlugins.mockResolvedValueOnce({ marketplaces: [], marketplaceLoadErrors: [] });
+    const changed = new Promise<void>((resolve) => {
+      service.onSkillsChanged(() => resolve());
+    });
+    client.emit("notification", { method: "skills/changed", params: { cwd } });
+    await changed;
+    expect(client.listPlugins).toHaveBeenCalledTimes(2);
+    expect(service.currentSnapshot(cwd)?.plugins).toEqual([]);
+    expect((await service.refresh(cwd)).plugins.map((plugin) => plugin.name)).toEqual(["Review"]);
+    expect(client.listPlugins).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries plugin discovery after a failed initial refresh", async () => {
+    const client = new ControlledCatalogClient();
+    const service = createService(client);
+    client.listPlugins.mockRejectedValueOnce(new Error("catalog unavailable"));
+    expect((await service.refresh("C:/workspaces/one")).skillsAvailable).toBe(false);
+    const recovered = await service.refresh("C:/workspaces/one");
+    expect(recovered.plugins.map((plugin) => plugin.name)).toEqual(["Review"]);
+    expect(client.listPlugins).toHaveBeenCalledTimes(2);
   });
 
   it("reuses the catalog process for model reads and propagates discovery failure", async () => {
@@ -329,7 +371,6 @@ describe("CodexCatalogService", () => {
         }],
       }],
       marketplaceLoadErrors: [],
-      featuredPluginIds: [],
     });
     const service = createService(client);
 
@@ -369,7 +410,6 @@ describe("CodexCatalogService", () => {
         })),
       }],
       marketplaceLoadErrors: [],
-      featuredPluginIds: [],
     });
     const service = createService(client);
 
@@ -389,7 +429,7 @@ describe("CodexCatalogService", () => {
 
   it("keeps valid plugins when a marketplace reports a scoped load error", async () => {
     const client = new ControlledCatalogClient();
-    client.listPlugins.mockResolvedValueOnce({
+    client.listPlugins.mockResolvedValue({
       ...(await client.listPlugins()),
       marketplaceLoadErrors: [{
         marketplacePath: "C:/marketplaces/broken.json",
@@ -408,6 +448,9 @@ describe("CodexCatalogService", () => {
       code: "discovery-error",
       message: "Codex could not load one plugin marketplace source.",
     });
+    const repeated = await service.refresh("C:/workspaces/one");
+    expect(repeated.plugins).toEqual(result.plugins);
+    expect(repeated.diagnostics).toEqual(result.diagnostics);
   });
 
   it("does not expose path-shaped plugin ids when detail reads fail", async () => {
@@ -428,7 +471,6 @@ describe("CodexCatalogService", () => {
         }],
       }],
       marketplaceLoadErrors: [],
-      featuredPluginIds: [],
     });
     client.readPlugin.mockRejectedValueOnce(new Error("details unavailable"));
     const service = createService(client);
@@ -517,13 +559,18 @@ describe("CodexCatalogService", () => {
     const cwd = "C:/workspaces/one";
     const first = await service.refresh(cwd);
 
+    await service.refresh("C:/workspaces/two");
     await vi.advanceTimersByTimeAsync(60_001);
     const restarted = await service.refresh(cwd);
 
     expect(firstClient.kill).toHaveBeenCalledTimes(1);
     expect(secondClient.start).toHaveBeenCalledTimes(1);
     expect(secondClient.listSkills).toHaveBeenCalledWith([cwd], false);
+    expect(secondClient.listPlugins).toHaveBeenCalledTimes(1);
     expect(restarted.skills).toEqual(first.skills);
+    const other = await service.refresh("C:/workspaces/two");
+    expect(secondClient.listPlugins).toHaveBeenCalledTimes(2);
+    expect(other.plugins[0]?.description).toBe("Review plugin for C:/workspaces/two");
   });
 
   it("does not extend the request idle deadline for provider change signals", async () => {

@@ -73,7 +73,6 @@ export interface CodexCatalogMarketplace {
 export interface CodexCatalogPluginsResult {
   marketplaces: CodexCatalogMarketplace[];
   marketplaceLoadErrors: Array<{ marketplacePath: string; message: string }>;
-  featuredPluginIds: string[];
 }
 
 /** Parameters for reading one provider plugin's detail. */

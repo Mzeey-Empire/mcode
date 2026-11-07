@@ -319,8 +319,8 @@ export interface SkillsListResult {
 
 // Plugin RPCs
 
-/** Parameters for the `plugin/list` RPC method. */
-export interface PluginListParams {
+/** Parameters for the `plugin/installed` RPC method. */
+export interface PluginInstalledParams {
   cwds?: string[];
 }
 
@@ -354,11 +354,10 @@ export interface CodexPluginMarketplace {
   [key: string]: unknown;
 }
 
-/** Result returned by the `plugin/list` RPC method. */
-export interface PluginListResult {
+/** Result returned by the `plugin/installed` RPC method. */
+export interface PluginInstalledResult {
   marketplaces: CodexPluginMarketplace[];
   marketplaceLoadErrors: Array<{ marketplacePath: string; message: string }>;
-  featuredPluginIds: string[];
 }
 
 /** Parameters for the `plugin/read` RPC method. */

@@ -353,10 +353,10 @@ function addPluginReconciliationDiagnostics(
   invalidMetadata: boolean,
 ): void {
   if (candidateCount > PROVIDER_CATALOG_MAX_ENTRIES) {
-    diagnostics.push(sourceDiagnostic("appServerPlugins", "plugin/list", "partial-result", `Codex plugins were capped at ${PROVIDER_CATALOG_MAX_ENTRIES} entries.`));
+    diagnostics.push(sourceDiagnostic("appServerPlugins", "plugin/installed", "partial-result", `Codex plugins were capped at ${PROVIDER_CATALOG_MAX_ENTRIES} entries.`));
   }
   if (invalidMetadata) {
-    diagnostics.push(sourceDiagnostic("appServerPlugins", "plugin/list", "partial-result", "Some Codex plugins were omitted because their metadata was invalid."));
+    diagnostics.push(sourceDiagnostic("appServerPlugins", "plugin/installed", "partial-result", "Some Codex plugins were omitted because their metadata was invalid."));
   }
 }
 
@@ -580,15 +580,14 @@ export class CodexCatalogService {
     const [{ client }, standalone, customPrompts] = await Promise.all([
       this.acquireClient(cwd, environment), standalonePromise, promptRefresh,
     ]);
-    const [skillsResult, pluginsResult, configResult] = await Promise.all([
+    const [skillsResult, reconciledPlugins, configResult] = await Promise.all([
       client.listSkills(cwd ? [cwd] : undefined, forceReload),
-      client.listPlugins(cwd ? [cwd] : undefined),
+      client.listPlugins(cwd ? [cwd] : undefined).then((result) => reconcilePlugins(client, result)),
       client.readConfig(cwd).then((value) => ({ value }), () => ({ value: undefined })),
     ]);
     const data = this.requestedSkillContext(skillsResult, cwd);
     if (!data) throw new Error("Codex skills/list omitted the requested catalog context.");
     const reconciled = reconcileSkills(data.skills);
-    const reconciledPlugins = await reconcilePlugins(client, pluginsResult);
     const registrations = configuredAgents(configResult.value?.config);
     const diagnostics = this.availableDiagnostics(data, standalone, reconciled, reconciledPlugins, registrations, configResult.value === undefined);
     const fetchedAt = new Date().toISOString();
