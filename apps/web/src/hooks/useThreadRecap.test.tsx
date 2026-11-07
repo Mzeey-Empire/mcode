@@ -601,6 +601,34 @@ describe("useThreadRecap", () => {
       expect(vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId)).toEqual(["thread-c"]);
     });
 
+    it("drops a pending switch recap when the Overview closes before the user stays", async () => {
+      const { rerender } = renderHook(
+        ({ threadId, overviewOpen }) => useThreadRecap({ threadId, messages: hookMessages(), overviewOpen }),
+        { initialProps: { threadId: "thread-a", overviewOpen: true } },
+      );
+
+      rerender({ threadId: "thread-b", overviewOpen: true });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS / 2); });
+      rerender({ threadId: "thread-b", overviewOpen: false });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
+
+      const recappedThreads = vi.mocked(mockTransport.generateRecap).mock.calls.map(([threadId]) => threadId);
+      expect(recappedThreads).not.toContain("thread-b");
+    });
+
+    it("drops a pending focus recap when the Overview closes before the user stays", async () => {
+      const { rerender } = renderHook(
+        ({ overviewOpen }) => useThreadRecap({ threadId: "thread-a", messages: hookMessages(), overviewOpen }),
+        { initialProps: { overviewOpen: false } },
+      );
+      rerender({ overviewOpen: true });
+      await act(async () => { window.dispatchEvent(new Event("focus")); });
+      rerender({ overviewOpen: false });
+      await act(async () => { vi.advanceTimersByTime(RECAP_SETTLE_DELAY_MS); });
+
+      expect(mockTransport.generateRecap).not.toHaveBeenCalled();
+    });
+
     function renderWithDockedOverview(threadId: string) {
       return renderHook(
         ({ threadId: current }) => useThreadRecap({ threadId: current, messages: hookMessages(), overviewOpen: true }),

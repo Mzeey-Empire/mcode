@@ -473,32 +473,42 @@ export function useThreadRecap({
     return () => clearTimeout(timer);
   }, [cached, filteredMessages, generate, overviewOpen, signature, threadId]);
 
+  // The switch and focus timers outlive an Overview close, so each one checks whether the
+  // user closed the Overview while it waited and drops the recap if they did.
+  const overviewCloseCountRef = useRef(0);
+  const wasOverviewOpenRef = useRef(overviewOpen);
+  if (wasOverviewOpenRef.current && !overviewOpen) overviewCloseCountRef.current += 1;
+  wasOverviewOpenRef.current = overviewOpen;
+
+  const startRecapOnceSettled = useCallback((settledThreadId: string) => {
+    const closesWhenScheduled = overviewCloseCountRef.current;
+    return setTimeout(() => {
+      if (overviewCloseCountRef.current !== closesWhenScheduled) return;
+      const latestMessages = getThreadStoreState()?.records.get(settledThreadId)?.messages ?? [];
+      void generate("automatic", latestMessages);
+    }, RECAP_SETTLE_DELAY_MS);
+  }, [generate]);
+
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onFocus = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => {
-        const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
-        void generate("automatic", latestMessages);
-      }, RECAP_SETTLE_DELAY_MS);
+      timer = startRecapOnceSettled(threadId);
     };
     window.addEventListener("focus", onFocus);
     return () => {
       window.removeEventListener("focus", onFocus);
       clearTimeout(timer);
     };
-  }, [generate, threadId]);
+  }, [startRecapOnceSettled, threadId]);
 
   const previousThreadIdRef = useRef(threadId);
   useEffect(() => {
     if (previousThreadIdRef.current === threadId) return;
     previousThreadIdRef.current = threadId;
-    const timer = setTimeout(() => {
-      const latestMessages = getThreadStoreState()?.records.get(threadId)?.messages ?? [];
-      void generate("automatic", latestMessages);
-    }, RECAP_SETTLE_DELAY_MS);
+    const timer = startRecapOnceSettled(threadId);
     return () => clearTimeout(timer);
-  }, [generate, threadId]);
+  }, [startRecapOnceSettled, threadId]);
 
   return {
     recapText: cached?.text ?? null,
