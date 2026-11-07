@@ -2,8 +2,8 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeUtil from "node:util";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../turns/active-turn-recovery-retention-policy.js";
 import { MessageSchema, type Message } from "@mcode/contracts/models/message";
-import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
-import { type AgentEvent } from "@mcode/contracts/events/agent-event";
+import { isChildRoutedRuntimeEvent, ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { agentEventDelivery, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { type AgentItem, type AgentThread, type AgentTurn, type CanonicalAgentEvent } from "@mcode/contracts/compat/agent-model";
 import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
@@ -64,13 +64,22 @@ function mutationEvents(input: PreparationInput): PreparedEvents {
   switch (mutation.kind) {
     case "append-events":
       assertEventCount(mutation.events.length);
-      return { events: [...mutation.events, ...liveEffectEvents(input, mutation.parentLive)] };
+      return { events: [...mutation.events.filter((draft) => keepsRawEvent(draft, mutation.parentLive)),
+        ...liveEffectEvents(input, mutation.parentLive)] };
     case "live-event": return { events: liveEffectEvents(input, mutation) };
     case "narrative-delta": return { events: recoveryEvents(input, mutation.input) };
     case "finish-live-event": return terminalEvents(input, mutation);
     case "post-terminal-event": return { events: postTerminalEvents(input, mutation) };
     default: return { events: [] };
   }
+}
+
+function keepsRawEvent(draft: CanonicalAgentEventDraft, parentLive: ParentLiveEffects | undefined): boolean {
+  if (draft.payload.type !== "item.recorded") return true;
+  const runtime = ProviderRuntimeEventSchema().safeParse(draft.payload.item.payload.runtimeEvent);
+  if (!runtime.success || agentEventDelivery(runtime.data.event) !== "live") return true;
+  // Child observations and parent checkpoints already retain the projection; raw pieces cannot help recovery.
+  return !(draft.delivery === "live" && parentLive) && !isChildRoutedRuntimeEvent(runtime.data.extension);
 }
 
 function liveEffectEvents(input: PreparationInput, effects: ParentLiveEffects | undefined): CanonicalAgentEventDraft[] {

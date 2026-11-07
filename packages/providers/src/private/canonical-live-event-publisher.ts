@@ -4,16 +4,10 @@ import { AgentEventType, agentEventDelivery } from "@mcode/contracts/events/agen
 import { isChildRoutedRuntimeEvent, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { type ProviderId } from "@mcode/contracts/providers/interfaces";
-import { volatileIngestClass, type ProviderEventBatch, type ProviderEventSinkPort } from "../host-ports.js";
+import { type ProviderEventBatch, type ProviderEventSinkPort } from "../host-ports.js";
 
 const PAUSE_AT = 256;
 const RESUME_BELOW = 128;
-/**
- * Providers whose text, reasoning and tool-input fragments are shown live and checkpointed instead of saved
- * one by one. Live delivery rolls out one provider at a time so each provider's save cost and crash bound are
- * measured alone. Copilot guards native fragment replays before mapping them.
- */
-const LIVE_DELIVERY_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "devin", "cursor", "opencode", "copilot"]);
 /**
  * Native replays arrive close to their original, so dedupe needs only recent identities.
  * A long Claude turn streams one identity per thinking or text delta, far past this window.
@@ -297,9 +291,7 @@ export class CanonicalLiveEventPublisher {
       sourceIdentities,
       ...(native ? {} : { sourceSequence }),
       providerTimestamp: timestamp,
-      ...volatileIngestClass(runtimeEvent.event),
-      ...(LIVE_DELIVERY_PROVIDERS.has(this.providerId) && !isChildRoutedRuntimeEvent(runtimeEvent.extension)
-        && agentEventDelivery(runtimeEvent.event) === "live" ? { delivery: "live" as const } : {}),
+      ...(agentEventDelivery(runtimeEvent.event) === "live" ? { delivery: "live" as const } : {}),
       payload: {
         type: "item.recorded",
         item: {

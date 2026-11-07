@@ -60,9 +60,8 @@ export class DeterministicCanonicalSink implements ProviderEventSinkPort {
   }
 
   private acceptEnvelope(draft: ProviderEventBatch["events"][number]): void {
-    const { ingestClass, delivery, ...canonicalDraft } = draft;
+    const { delivery, ...canonicalDraft } = draft;
     // Ingest class and live delivery steer admission, as on the server; neither is a durable envelope field.
-    void ingestClass;
     void delivery;
     const acceptedSequence = this.accepted.length + 1;
     const timestamp = new Date(acceptedSequence * 1_000).toISOString();

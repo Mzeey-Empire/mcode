@@ -318,6 +318,33 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       });
     }
 
+    it.each(["claude", "codex", "copilot", "cursor", "opencode", "devin"])("delivers the first %s text frame without saving fragment rows", async (provider) => {
+      ordinal = 1;
+      await send(1, start(provider));
+      const before = rowCount("canonical_agent_events");
+      await piece("first", provider);
+      await drainSaves();
+      expect(liveFrames().flatMap((frame) => frame.events).map((event) => event.type)).toEqual(["textDelta"]);
+      expect(rowCount("canonical_agent_events") - before).toBe(1);
+      expect(savedEventKinds().filter((kind) => kind.endsWith(":textDelta"))).toEqual([]);
+      await progress.waitForSaved(execution.threadId);
+      expect(savedText()).toBe("first");
+      expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.providerStartedAt).toEqual(expect.any(String));
+    });
+
+    it("keeps a provider fragment live when the operation requires a structural save", async () => {
+      ordinal = 1;
+      await send(1, start("claude"));
+      vi.spyOn(progress, "acceptWhenReady").mockImplementationOnce(async (operation) =>
+        progress.accept({ ...operation, delivery: undefined }));
+      await piece("first");
+      await progress.waitForSaved(execution.threadId);
+      expect(liveFrames().flatMap((frame) => frame.events).map((event) => event.type)).toEqual(["textDelta"]);
+      expect(savedEventKinds().filter((kind) => kind.endsWith(":textDelta"))).toEqual([]);
+      expect(savedText()).toBe("first");
+      expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.providerStartedAt).toEqual(expect.any(String));
+    });
+
     it("saves a stalled stream one second after its first unsaved piece", async () => {
       await begin();
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
@@ -381,7 +408,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
         turnExecutionId: execution.executionId, delta: " searching", isFinalResponse: true }), []);
       await publisher.waitForExecution(routing);
-      expect(liveFrames()).toHaveLength(overflow ? 21 : 1);
+      expect(liveFrames()).toHaveLength(overflow ? 22 : 2);
       await progress.waitForSaved(execution.threadId);
       publisher.publish(routing, providerRuntimeEvent({ type: "assistantMessageBoundary", threadId: execution.threadId,
         turnExecutionId: execution.executionId, isFinalResponse: false }), []);
@@ -524,7 +551,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
         await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
           events: [{ ...draft("claude", ordinal - 1, "toolInputDelta", { partialJson }), delivery: "live" as const }] });
       }
-      expect(liveFrames().flatMap((frame) => frame.events.map((event) => event.type))).toEqual(["toolInputDelta", "toolInputDelta"]);
+      expect(liveFrames().flatMap((frame) => frame.events.map((event) => event.type))).toEqual(["textDelta", "toolInputDelta", "toolInputDelta"]);
       await progress.waitForSaved(execution.threadId);
       expect(rowCount("canonical_agent_events")).toBe(rows);
       const tool = await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
@@ -720,7 +747,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
           turnExecutionId: execution.executionId, toolCallId: "tool", partialJson }), []);
       }
       await publisher.waitForExecution(routing);
-      expect(liveFrames().flatMap((frame) => frame.events).filter((event) => event.type === "textDelta")).toHaveLength(200);
+      expect(liveFrames().flatMap((frame) => frame.events).filter((event) => event.type === "textDelta")).toHaveLength(201);
       expect(liveFrames().flatMap((frame) => frame.events).filter((event) => event.type === "reasoningDelta")).toHaveLength(200);
       expect(liveFrames().flatMap((frame) => frame.events).filter((event) => event.type === "toolInputDelta").map((event) => event.partialJson).join("")).toBe(toolInput.join(""));
       await progress.waitForSaved(execution.threadId);
@@ -894,6 +921,16 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       if (cut.durable.mode !== "snapshot") throw new Error("Expected crash recovery snapshot");
       expect(childAnswer(cut.durable.snapshot.state)).toEqual([`first${"c".repeat(20)}`]);
       await abandoned.close();
+    });
+
+    it.runIf(provider === "codex")("does not save consumed child reasoning or tool-input fragments as raw rows", async () => {
+      await beginChild();
+      await event([childDraft("reasoningDelta", { delta: "private thought", reasoningItemId: "reason" }, "reason")]);
+      await event([childDraft("toolInputDelta", { partialJson: "{}", toolCallId: "tool" }, "tool")]);
+      await progress.waitForSaved(execution.threadId);
+      expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_events WHERE json_extract(envelope_json, '$.payload.item.payload.runtimeEvent.event.type') IN ('reasoningDelta', 'toolInputDelta')").get())
+        .toEqual({ count: 0 });
+      expect(childAnswer()).toEqual(["first"]);
     });
 
     it("answers a resent child piece with its first receipt and saves its text once", async () => {
@@ -2595,7 +2632,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       const replayed = familyDraft(1, "textDelta", { delta: "Child answer" }, childMessage, next);
       expect((await send(2, event([replayed]), next, nextLease)).result.kind).toBe("accepted");
       await expect.poll(() => progress.depth().pending).toBe(0);
-      expect(db.prepare("SELECT count(*) AS count FROM canonical_agent_items WHERE id = ?").get(replayed.eventId)).toEqual({ count: 1 });
+      expect(db.prepare("SELECT count(*) AS count FROM canonical_agent_items WHERE id = ?").get(replayed.eventId)).toEqual({ count: 0 });
       // A rejected replay would save an action-required child routing failure on the later turn.
       expect(db.prepare("SELECT count(*) AS count FROM canonical_agent_items WHERE turn_id = ? AND kind = 'error'")
         .get(next.turnId)).toEqual({ count: 0 });

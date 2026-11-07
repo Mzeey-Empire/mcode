@@ -1,7 +1,7 @@
 import { AgentEventType, agentEventDelivery } from "@mcode/contracts/events/agent-event";
-import { isChildRoutedRuntimeEvent, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
+import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { logger } from "@mcode/shared";
-import { volatileIngestClass, type ProviderEventDraft, type ProviderEventSinkPort } from "../../host-ports.js";
+import { type ProviderEventDraft, type ProviderEventSinkPort } from "../../host-ports.js";
 
 /**
  * Pending events for one thread at which its Codex stream is paused. The sink saves one event at a
@@ -224,8 +224,7 @@ export class CodexCanonicalEventPublisher {
       sourceIdentities: [],
       sourceSequence,
       providerTimestamp: timestamp,
-      ...volatileIngestClass(runtimeEvent.event),
-      ...(isLiveParentFragment(runtimeEvent) ? { delivery: "live" as const } : {}),
+      ...(agentEventDelivery(runtimeEvent.event) === "live" ? { delivery: "live" as const } : {}),
       payload: {
         type: "item.recorded",
         item: {
@@ -241,14 +240,6 @@ export class CodexCanonicalEventPublisher {
       },
     };
   }
-}
-
-/**
- * Parent text, reasoning and tool-input fragments are shown live and saved as checkpoints. Child fragments
- * stay saved one by one, because the collaboration coordinator, not the parent checkpoint, owns their records.
- */
-function isLiveParentFragment(runtimeEvent: ProviderRuntimeEvent): boolean {
-  return !isChildRoutedRuntimeEvent(runtimeEvent.extension) && agentEventDelivery(runtimeEvent.event) === "live";
 }
 
 function isTerminalEvent(event: ProviderRuntimeEvent["event"]): boolean {

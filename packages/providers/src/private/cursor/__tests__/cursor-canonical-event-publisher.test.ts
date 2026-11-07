@@ -87,7 +87,6 @@ describe("CursorCanonicalEventPublisher", () => {
       events: [{
         eventId: `cursor:${routing.executionId}:attempt:1:event:1`,
         sourceSequence: 1,
-        ingestClass: "volatile",
         routing: { itemId: `cursor:${routing.executionId}:attempt:1:item:1` },
         payload: { type: "item.recorded" },
       }],

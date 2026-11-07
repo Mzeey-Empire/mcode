@@ -69,7 +69,7 @@ function recoveryItem(entry: ParentNarrativeRecoveryItem, metadata: Record<strin
 function rawDraft(): CanonicalAgentEventDraft {
   return { eventId: "provider:exact-event", routing: { ...execution, itemId: "native-item" },
     sourceProviderId: "codex", sourceIdentities: [], sourceSequence: 11, providerTimestamp: STARTED_AT,
-    ingestClass: "volatile", payload: { type: "item.recorded", item: {
+    payload: { type: "item.recorded", item: {
       id: "native-item", threadId: thread.id, turnId: turn.id, kind: "system", providerIdentities: [],
       payload: { projection: "providerRuntimeEvent", event: { type: "toolUse" } },
       createdAt: STARTED_AT, updatedAt: STARTED_AT,
