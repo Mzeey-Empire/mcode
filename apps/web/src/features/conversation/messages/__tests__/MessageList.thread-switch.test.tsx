@@ -194,7 +194,6 @@ import {
   recallScrollPosition,
   recallScrollTop,
   clearScrollMemory,
-  hasRememberedHistoryPosition,
 } from "@/components/chat/scrollPositionMemory";
 
 const rangeClientRectsDescriptor = Object.getOwnPropertyDescriptor(Range.prototype, "getClientRects");
@@ -1274,7 +1273,7 @@ describe("MessageList thread switch", () => {
     messagesValue = messagesValue.slice(1);
     act(() => rerender(<MessageList />));
     expect(viewport.scrollTop).toBe(125);
-    expect(hasRememberedHistoryPosition("thread-A")).toBe(true);
+    expect(recallScrollPosition("thread-A")?.atTail).toBe(false);
   });
 
   it("keeps the reading position when a comment editor opens on text already on screen", async () => {

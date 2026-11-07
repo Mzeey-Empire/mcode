@@ -284,7 +284,8 @@ A mounted hidden transcript holds a display lease through
 An open [transcript-tier subagent tab](../../../apps/web/src/features/subagents/detail/SubagentDetailTab.tsx)
 uses the same lease mechanism. Leases are reference counted, so closing one
 view cannot release a conversation that another view still displays. Selection
-and display leases both protect resident content. A non-selected transcript can
+and display leases both protect resident content from pressure compaction. Pressure
+compacts unselected running stores only when they have no display lease. A non-selected transcript can
 still have a mounted view.
 
 Subscriptions prioritize the selected thread, then leased conversations, then
@@ -314,7 +315,10 @@ prefetched history, narrative metadata, and process memory diagnostics.
 
 The active conversation budget is 13 MiB: message rows may use 8 MiB, while
 narrative metadata has 4 MiB and the remainder covers record metadata. The
-inactive record budget is 16 MiB and prefetched history is limited to 4 MiB.
+inactive record budget is 4 MiB and prefetched history is limited to 4 MiB.
+Automatic budgeting strips inactive narrative first, then compacts the oldest
+windows to two-message tails before evicting whole records. Inactive running
+store records retain only a tail; memory pressure also clears their narrative.
 Under pressure, remove prefetched history first, then inactive records. Reduce
 active message rows to 4 MiB only after those classes are empty, while keeping
 the visible message anchor and both page boundaries.

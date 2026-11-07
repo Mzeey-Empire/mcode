@@ -25,6 +25,9 @@ import {
   getCachedRecord,
   hasPrefetchedHistoryPage,
   projectConversationCacheState,
+  getConversationCacheUsage,
+  CONVERSATION_MEMORY_BUDGETS,
+  setActiveConversation,
 } from "../record-cache";
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import {
@@ -87,8 +90,9 @@ function cacheRecord(threadId: string, record: ThreadRecord): void {
 }
 
 /** Build a hydrator wired to the live threadStore for integration-style tests. */
-function createStoreHydrator(): ThreadHydrator {
+function createStoreHydrator(isDisplayConversationVisible = (_threadId: string) => false): ThreadHydrator {
   return createThreadHydrator({
+    isDisplayConversationVisible,
     getTransport: () => getTransport(),
     getState: () => useThreadStore.getState(),
     setState: (partial) => useThreadStore.setState(partial as never),
@@ -211,6 +215,139 @@ describe("ThreadHydrator", () => {
     fakeTimeouts();
     resetStores();
     hydrator = createStoreHydrator();
+  });
+
+  it.each([30_000, 70_000])("keeps heavy threads warm with %i narrative bytes per assistant row", async (narrativeBytes) => {
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(async (threadId, limit = 2, before) => {
+      const all = Array.from({ length: 400 }, (_, row) => createMockMessage({
+        id: `${threadId}-${row + 1}`, thread_id: threadId, sequence: row + 1,
+        role: row % 2 === 0 ? "user" : "assistant", content: "x".repeat(8_000),
+      }));
+      const eligible = before === undefined ? all : all.filter(message => message.sequence < before);
+      const messages = eligible.slice(-limit);
+      return { messages, hasMore: eligible.length > messages.length, narrativeByMessage: Object.fromEntries(
+        messages.filter(message => message.role === "assistant").map(message => [message.id, {
+          tools: [], hooks: [], approvals: [], thoughts: [{
+            id: `${message.id}-thought`, message_id: message.id, text: "n".repeat(narrativeBytes),
+            started_at: message.timestamp, ended_at: null, sort_order: 0,
+          }],
+        }]),
+      ) };
+    });
+    for (const id of ["A", "B", "C", "D"]) {
+      await hydrator.hydrate(id, "active");
+      await vi.advanceTimersByTimeAsync(500);
+      if (id !== "D") {
+        for (let page = 0; page < 4; page++) await useThreadStore.getState().loadOlderMessages(id);
+        rememberScrollTop(id, 50_000, true);
+      }
+    }
+    for (const id of ["C", "A"]) {
+      expect(getCachedRecord(id)?.messages.at(-1)?.id).toBe(`${id}-400`);
+      vi.mocked(mockTransport.loadConversationPage).mockClear();
+      await hydrator.hydrate(id, "active");
+      expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+      expect(getTestActiveMessages().at(-1)?.id).toBe(`${id}-400`);
+      await hydrator.hydrate("D", "active");
+      await vi.advanceTimersByTimeAsync(40);
+    }
+  });
+
+  it.each(["warning", "critical"] as const)("preserves a displayed subagent's rows and narrative under %s pressure", async (level) => {
+    hydrator = createStoreHydrator(id => id === "child");
+    const messages = Array.from({ length: 100 }, (_, row) => createMockMessage({
+      id: `child-${row}`, thread_id: "child", sequence: row + 1,
+    }));
+    const narrativeByMessage = Object.fromEntries(messages.slice(50).map(message => [message.id, {
+      tools: [], hooks: [], approvals: [], thoughts: [{
+        id: `${message.id}-thought`, message_id: message.id, text: "resident thought",
+        started_at: message.timestamp, ended_at: null, sort_order: 0,
+      }],
+    }]));
+    resetThreadStoreForTests({ currentThreadId: "parent", runningThreadIds: new Set(["child"]), records: new Map([
+      ["child", { ...makeCachedRecord(messages), narrativeByMessage }],
+    ]) });
+    hydrator.applyMemoryPressure(level);
+    expect(useThreadStore.getState().records.get("child")?.messages).toEqual(messages);
+    expect(useThreadStore.getState().records.get("child")?.narrativeByMessage).toEqual(narrativeByMessage);
+  });
+
+  it("keeps all four hidden recent transcripts warm after idle warning pressure", async () => {
+    const kept = new Set<string>();
+    hydrator = createStoreHydrator(id => kept.has(id));
+    const ids = ["K1", "K2", "K3", "K4", "K5"];
+    const server = new Map<string, Message[]>();
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(async (id, limit = 2, before) => {
+      const eligible = (server.get(id) ?? []).filter(message => before === undefined || message.sequence < before);
+      const messages = eligible.slice(-limit);
+      return { messages, hasMore: eligible.length > messages.length, narrativeByMessage: {} };
+    });
+    for (const id of ids) {
+      const messages = Array.from({ length: 100 }, (_, row) => createMockMessage({
+        id: `${id}-${row + 1}`, thread_id: id, sequence: row + 1, content: "x".repeat(8_000),
+      }));
+      server.set(id, messages);
+      cacheRecord(id, makeCachedRecord(messages));
+      setActiveConversation(id);
+      await hydrator.hydrate(id, "active");
+      kept.add(id);
+      rememberScrollTop(id, 50_000, true);
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    hydrator.applyMemoryPressure("warning");
+    for (const id of ["K4", "K3", "K2", "K1"]) {
+      vi.mocked(mockTransport.loadConversationPage).mockClear();
+      const lengths: number[] = [];
+      const unsubscribe = useThreadStore.subscribe(state => {
+        if (state.currentThreadId === id) lengths.push(state.records.get(id)?.messages.length ?? 0);
+      });
+      setActiveConversation(id);
+      await hydrator.hydrate(id, "active");
+      unsubscribe();
+      expect(lengths[0]).toBe(100);
+      expect(getTestActiveMessages().map(message => message.id)).toEqual(
+        Array.from({ length: 100 }, (_, row) => `${id}-${row + 1}`),
+      );
+      expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+    }
+  });
+
+  it("compacts inactive running stores even after cache eviction and memory pressure", async () => {
+    for (const id of ["A", "B", "C"]) {
+      const messages = Array.from({ length: 100 }, (_, row) => createMockMessage({
+        id: `${id}-${row + 1}`, thread_id: id, sequence: row + 1, content: "x".repeat(8_000),
+        role: row % 2 === 0 ? "user" : "assistant",
+      }));
+      cacheRecord(id, {
+        ...makeCachedRecord(messages),
+        narrativeByMessage: Object.fromEntries(messages.filter(message => message.role === "assistant").map(message => [message.id, {
+          tools: [], hooks: [], approvals: [], thoughts: [{
+            id: `${message.id}-thought`, message_id: message.id, text: "n".repeat(30_000),
+            started_at: message.timestamp, ended_at: null, sort_order: 0,
+          }],
+        }])),
+      });
+      await hydrator.hydrate(id, "active");
+      useThreadStore.setState(state => ({ runningThreadIds: new Set([...state.runningThreadIds, id]) }));
+      await vi.advanceTimersByTimeAsync(40);
+    }
+    await hydrator.hydrate("D", "active");
+    await vi.advanceTimersByTimeAsync(40);
+    for (const id of ["A", "B", "C"]) {
+      expect(useThreadStore.getState().records.get(id)?.messages.map(message => message.id)).toEqual([`${id}-99`, `${id}-100`]);
+    }
+    useThreadStore.setState(state => ({
+      records: patchThreadRecord(state.records, "A", record => ({
+        messages: [createMockMessage({ id: "A-98", thread_id: "A", sequence: 98 }), ...record.messages],
+        narrativeByMessage: { "A-100": { tools: [], thoughts: [], approvals: [], hooks: [] } },
+      })),
+    }));
+    hydrator.applyMemoryPressure("critical");
+    expect(getCachedRecord("A")).toBeUndefined();
+    expect(useThreadStore.getState().records.get("A")?.narrativeByMessage).toEqual({});
+    for (const id of ["A", "B", "C"]) {
+      expect(useThreadStore.getState().records.get(id)?.messages.map(message => message.id)).toEqual([`${id}-99`, `${id}-100`]);
+    }
   });
 
   it.each(["active", "resident", "background"] as const)("keeps a live session notice when a stale %s fetch returns newer transcript rows", async (surface) => {
@@ -835,7 +972,7 @@ describe("ThreadHydrator", () => {
     expect(readActiveThreadField((record) => record.hasNewerMessages)).toBe(false);
   });
 
-  it("compacts cached history for restore and keeps its older rows warm", async () => {
+  it("keeps the loaded window unchanged on a warm return at the end", async () => {
     const history = Array.from({ length: 100 }, (_, index) => createMockMessage({
       id: `cached-a-${index + 1}`,
       thread_id: THREAD_A,
@@ -845,15 +982,42 @@ describe("ThreadHydrator", () => {
       ...makeCachedRecord(history.slice(88)),
       hasMoreMessages: true,
     });
+    rememberScrollTop(THREAD_A, 5_214, true);
+    const lengths: number[] = [];
+    const unsubscribe = useThreadStore.subscribe((state) => {
+      if (state.currentThreadId === THREAD_A) {
+        lengths.push(state.records.get(THREAD_A)?.messages.length ?? 0);
+      }
+    });
+    onTestFinished(unsubscribe);
     await hydrator.hydrate(THREAD_A, "active");
-
-    expect(getTestActiveMessages()).toEqual(history.slice(-MESSAGE_FETCH_SIZE));
-    expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
-
-    await useThreadStore.getState().loadOlderMessages(THREAD_A);
 
     expect(getTestActiveMessages()).toEqual(history.slice(88));
     expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+
+    await hydrator.hydrate(THREAD_B, "active");
+    await hydrator.hydrate(THREAD_A, "active");
+    expect(getTestActiveMessages()).toEqual(history.slice(88));
+    expect([...new Set(lengths)]).toEqual([12]);
+  });
+
+  it("bounds retained history across warm restores by messages and bytes", async () => {
+    for (let index = 0; index < 30; index++) {
+      const threadId = `memory-${index}`;
+      const messages = Array.from({ length: 120 }, (_, row) => createMockMessage({
+        id: `${threadId}-${row}`, thread_id: threadId, sequence: row + 1,
+        content: "x".repeat(8_000),
+      }));
+      cacheRecord(threadId, makeCachedRecord(messages));
+      await hydrator.hydrate(threadId, "active");
+      expect(getTestActiveMessages().length).toBeLessThanOrEqual(RECORD_MESSAGE_CACHE_SIZE);
+      expect(getTestActiveMessages().at(-1)?.id).toBe(`${threadId}-119`);
+    }
+    const usage = getConversationCacheUsage();
+    expect(usage.inactiveBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.inactiveBytes);
+    expect(usage.prefetchedBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.prefetchedBytes);
+    expect(usage.narrativeBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.narrativeBytes);
+    expect(usage.activeBytes + usage.inactiveBytes + usage.prefetchedBytes).toBeLessThanOrEqual(4_449_515);
   });
 
   it("keeps a newer resident row through compact cache restore, pagination, and refresh", async () => {
@@ -887,8 +1051,7 @@ describe("ThreadHydrator", () => {
 
     await hydrator.hydrate(THREAD_A, "active");
 
-    expect(getTestActiveMessages()).toEqual([persistedTail[3], resident]);
-    await useThreadStore.getState().loadOlderMessages(THREAD_A);
+    expect(getTestActiveMessages()).toEqual([...persistedTail, resident]);
     expect(getTestActiveMessages()).toEqual([...persistedTail, resident]);
 
     (mockTransport.loadConversationPage as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -1220,8 +1383,8 @@ describe("ThreadHydrator", () => {
     await vi.advanceTimersByTimeAsync(20);
 
     expect(useThreadStore.getState().records.has(THREAD_A)).toBe(false);
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual(history.slice(-MESSAGE_FETCH_SIZE));
-    expect(hasPrefetchedHistoryPage(THREAD_A, 119)).toBe(true);
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual(history.slice(-RECORD_MESSAGE_CACHE_SIZE));
+    expect(hasPrefetchedHistoryPage(THREAD_A, 119)).toBe(false);
   });
 
   it("retires a completed empty transcript into the bounded cache", async () => {
@@ -1839,14 +2002,9 @@ describe("ThreadHydrator", () => {
     }
 
     expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
-    expect(getTestActiveMessages()).toEqual(tailB.slice(-MESSAGE_FETCH_SIZE));
-    expect(hasPrefetchedHistoryPage(THREAD_B, 99)).toBe(true);
-
-    await useThreadStore.getState().loadOlderMessages(THREAD_B);
-
     expect(getTestActiveMessages()).toEqual(tailB);
-    expect(getCachedRecord(THREAD_A)?.messages).toEqual(tailA.slice(-MESSAGE_FETCH_SIZE));
-    expect(hasPrefetchedHistoryPage(THREAD_A, 99)).toBe(true);
+    expect(getCachedRecord(THREAD_A)?.messages).toEqual(tailA);
+    expect(hasPrefetchedHistoryPage(THREAD_A, 99)).toBe(false);
   });
 
   it("background mode populates cache without touching the live store", async () => {

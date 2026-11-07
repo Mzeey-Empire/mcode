@@ -1,6 +1,7 @@
 import {
   cachePrefetchedHistoryPage,
   cacheRecord,
+  compactConversationTail,
   applyConversationMemoryPressure as applyCacheMemoryPressure,
   evictCachedRecord,
   getCachedRecord,
@@ -33,7 +34,6 @@ import { AuxiliaryHydrator } from "./auxiliary-hydrator";
 import { CONVERSATION_OLDER_PAGE_MAX_BYTES, type ConversationOlderPage, type ConversationOlderPageIdentity } from "@mcode/contracts/models/conversation-older-page";
 import { type ConversationPage } from "@mcode/contracts/models/conversation-page";
 import { type ConversationTail } from "@mcode/contracts/models/conversation-tail";
-import { hasRememberedHistoryPosition } from "@/components/chat/scrollPositionMemory";
 import {
   recordRunningFetchRequired,
   recordRunningResidentHit,
@@ -257,24 +257,6 @@ function mergeResidentConversationCacheState(
     hasNewerMessages: cached.hasNewerMessages || residentCacheState.hasNewerMessages,
     ...metadata,
     latestTurnWithChanges: findLatestTurnWithChanges(messages, metadata.persistedFilesChanged),
-  };
-}
-
-/** Build a conversation page containing only the supplied messages and their metadata. */
-function buildConversationPageSubset(
-  page: ConversationPage,
-  messages: ConversationPage["messages"],
-  hasMore: boolean,
-): ConversationPage {
-  const messageIds = new Set(messages.map((message) => message.id));
-  return {
-    messages,
-    sessionNotices: page.sessionNotices,
-    hasMore,
-    answeredPlanMessageIds: page.answeredPlanMessageIds?.filter((id) => messageIds.has(id)),
-    narrativeByMessage: Object.fromEntries(
-      Object.entries(page.narrativeByMessage).filter(([messageId]) => messageIds.has(messageId)),
-    ),
   };
 }
 
@@ -583,6 +565,16 @@ export class ThreadHydrator {
 
   /** Apply cache pressure and project a critically trimmed active window into live state. */
   applyMemoryPressure(level: "warning" | "critical"): void {
+    const state = this.deps.getState();
+    for (const threadId of state.runningThreadIds) {
+      if (threadId === state.currentThreadId || this.deps.isDisplayConversationVisible?.(threadId)) continue;
+      const record = state.records.get(threadId);
+      if (!record) continue;
+      const tail = compactConversationTail(projectConversationCacheState(record));
+      this.deps.setState(state => ({
+        records: patchThreadRecord(state.records, threadId, { ...tail, narrativeByMessage: {} }),
+      }));
+    }
     const activeThreadId = this.deps.getState().currentThreadId;
     if (activeThreadId) {
       const activeRecord = getThreadRecord(this.deps.getState().records, activeThreadId);
@@ -852,9 +844,14 @@ export class ThreadHydrator {
   }
 
   private restoreActiveCache(threadId: string, opts: ThreadHydratorOptions | undefined): boolean {
-    const cached = getCachedRecord(threadId);
-    if (!cached || opts?.force || !hasCommittedWindow(cached)) return false;
     const resident = this.deps.getState().records.get(threadId);
+    // Pressure may evict the cache copy while a mounted transcript still owns its window.
+    const cached = getCachedRecord(threadId) ?? (
+      resident && this.deps.isDisplayConversationVisible?.(threadId)
+        ? projectConversationCacheState(resident)
+        : undefined
+    );
+    if (!cached || opts?.force || !hasCommittedWindow(cached)) return false;
     this.restoreCachedActive(threadId, resident ? mergeResidentConversationCacheState(resident, cached) : cached, opts);
     return true;
   }
@@ -915,7 +912,7 @@ export class ThreadHydrator {
       if (latest.currentThreadId === threadId) return {};
       if (latest.runningThreadIds.has(threadId)) {
         return {
-          records: patchThreadRecord(latest.records, threadId, cached),
+          records: patchThreadRecord(latest.records, threadId, compactConversationTail(cached)),
         };
       }
       return {
@@ -1013,7 +1010,7 @@ export class ThreadHydrator {
     });
     if (
       renderableCachedRecord.hasMoreMessages &&
-      renderableCachedRecord.messages.length < BACKGROUND_PREFETCH_LIMIT
+      renderableCachedRecord.messages.length <= MESSAGE_FETCH_SIZE
     ) {
       this.scheduleEarlierHistoryPrefetch(threadId, renderableCachedRecord);
     }
@@ -1073,54 +1070,15 @@ export class ThreadHydrator {
     this.deferredWork.set(threadId, handle);
   }
 
-  /** Keep cache-hit reconciliation bounded while retaining loaded history for upward pagination. */
+  /** Preserve the loaded window within the cache's message and byte budgets. */
   private compactCachedRecordForRestore(
     threadId: string,
     cached: ConversationCacheState,
   ): ConversationCacheState {
     cacheRecord(threadId, cached);
-    const bounded = getCachedRecord(threadId) ?? cached;
-    if (
-      bounded.messages.length <= MESSAGE_FETCH_SIZE
-      || hasRememberedHistoryPosition(threadId)
-    ) {
-      return bounded;
-    }
-
-    const tailStart = bounded.messages.length - MESSAGE_FETCH_SIZE;
-    const earlierMessages = bounded.messages.slice(0, tailStart);
-    const retainedEarlierMessages = earlierMessages.slice(-HISTORY_PREFETCH_SIZE);
-    const tailMessages = bounded.messages.slice(tailStart);
-    const narrativeByMessage: ConversationPage["narrativeByMessage"] = {};
-    for (const [messageId, narrative] of Object.entries(bounded.narrativeByMessage)) {
-      if (narrative) narrativeByMessage[messageId] = narrative;
-    }
-    const page: ConversationPage = {
-      messages: bounded.messages,
-      hasMore: bounded.hasMoreMessages,
-      answeredPlanMessageIds: [...bounded.answeredPlanMessageIds],
-      narrativeByMessage,
-    };
-    const tailPage = buildConversationPageSubset(page, tailMessages, true);
-    const compacted = {
-      ...bounded,
-      messages: tailMessages,
-      oldestLoadedSequence: tailMessages[0].sequence,
-      hasMoreMessages: true,
-      narrativeByMessage: tailPage.narrativeByMessage,
-      answeredPlanMessageIds: new Set(tailPage.answeredPlanMessageIds ?? []),
-    };
-    cacheRecord(threadId, compacted);
-    cachePrefetchedHistoryPage(
-      threadId,
-      tailMessages[0].sequence,
-      buildConversationPageSubset(
-        page,
-        retainedEarlierMessages,
-        bounded.hasMoreMessages || retainedEarlierMessages.length < earlierMessages.length,
-      ),
-    );
-    return compacted;
+    // Splitting an already loaded window makes a retained viewport discard and
+    // immediately remount its history when its fill effect consumes the prefetch.
+    return getCachedRecord(threadId) ?? cached;
   }
 
   /** Restore cached conversation data without replacing resident live or auxiliary state. */
