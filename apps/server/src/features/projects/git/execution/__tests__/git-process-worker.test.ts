@@ -53,6 +53,31 @@ describe("git process execution off the main thread", () => {
     expect(mainThreadStarts.count).toBe(0);
   });
 
+  it("streams git output without starting processes on the thread that answers requests", async () => {
+    mainThreadStarts.count = 0;
+    const chunks: string[] = [];
+
+    const result = await new RealGitExecutor().exec(["--version"], { retainStdout: false, onStdout: (chunk) => chunks.push(chunk) });
+
+    expect(chunks.join("")).toMatch(/^git version /);
+    expect(result.stdout).toBe("");
+    expect(mainThreadStarts.count).toBe(0);
+  });
+
+  it("keeps git's exit code and streamed error output on observed failures", async () => {
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "git-process-worker-"));
+    tempDirs.push(dir);
+    const errors: string[] = [];
+
+    const failure = await new RealGitExecutor()
+      .exec(["-C", dir, "status"], { env: { GIT_CEILING_DIRECTORIES: NodePath.dirname(dir) }, onStderr: (chunk) => errors.push(chunk) })
+      .catch((error: unknown) => error);
+
+    expect(gitExitCode(failure)).toBe(128);
+    expect(gitFailureOutput(failure)).toMatch(/not a git repository/i);
+    expect(errors.join("")).toMatch(/not a git repository/i);
+  });
+
   it("applies server environment changes made after the worker started", async () => {
     const executor = new RealGitExecutor();
     await executor.exec(["--version"]);

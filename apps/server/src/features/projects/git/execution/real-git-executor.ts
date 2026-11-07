@@ -5,7 +5,6 @@
  * Read-only commands bypass the queue.
  */
 
-import * as NodeChildProcess from "node:child_process";
 import * as NodeWorkerThreads from "node:worker_threads";
 import { runGitProcess, type GitProcessRunner } from "./git-process.js";
 import { sharedGitProcessWorkerClient } from "./git-process-worker-client.js";
@@ -120,7 +119,7 @@ export class RealGitExecutor implements GitExecutor {
   private readonly revParseCache = new Map<string, GitExecResult>();
 
   /**
-   * @param runProcess Starts buffered git runs. The main thread answers every
+   * @param runProcess Starts git runs, buffered or streamed. The main thread answers every
    * client request, so by default it hands process starts to the git process
    * worker; worker threads, such as the execution worker, start them inline.
    */
@@ -184,77 +183,15 @@ export class RealGitExecutor implements GitExecutor {
     args: string[],
     opts: GitExecOptions,
   ): Promise<GitExecResult> {
-    if (opts.onStdout || opts.onStderr) return await this.runObservedGit(args, opts);
+    const { onStdout, onStderr } = opts;
+    const observed = onStdout || onStderr;
     return await this.runProcess({
       args,
       timeout: opts.timeout ?? RealGitExecutor.DEFAULT_TIMEOUT,
       ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
-    });
-  }
-
-  /** Run Git with streamed output while preserving the buffered result and error contract. */
-  private async runObservedGit(args: string[], opts: GitExecOptions): Promise<GitExecResult> {
-    const timeout = opts.timeout ?? RealGitExecutor.DEFAULT_TIMEOUT;
-    return await new Promise<GitExecResult>((resolve, reject) => {
-      const child = NodeChildProcess.spawn("git", args, {
-        windowsHide: true,
-        ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
-        ...(opts.cwd ? { cwd: opts.cwd } : {}),
-      });
-      let stdout = "";
-      let stderr = "";
-      const stdoutDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
-      let settled = false;
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill();
-      }, timeout);
-      const finish = (result: () => void) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        result();
-      };
-
-      child.stdout.on("data", (chunk: Buffer) => {
-        const text = stdoutDecoder.decode(chunk, { stream: true });
-        if (opts.retainStdout !== false) stdout += text;
-        opts.onStdout?.(text);
-      });
-      child.stderr.on("data", (chunk: Buffer) => {
-        const text = chunk.toString("utf8");
-        stderr += text;
-        opts.onStderr?.(text);
-      });
-      child.once("error", (error) => finish(() => reject(error)));
-      child.once("close", (code, signal) => finish(() => {
-        const tail = stdoutDecoder.decode();
-        if (opts.retainStdout !== false) stdout += tail;
-        if (tail) opts.onStdout?.(tail);
-        if (timedOut) {
-          reject(Object.assign(new Error(`Git command timed out after ${timeout} ms`), {
-            code: null,
-            signal,
-            stdout,
-            stderr,
-            killed: true,
-          }));
-          return;
-        }
-        if (code !== 0) {
-          reject(Object.assign(new Error(`Git exited with code ${code ?? "unknown"}`), {
-            code,
-            signal,
-            stdout,
-            stderr,
-          }));
-          return;
-        }
-        resolve({ stdout, stderr });
-      }));
-    });
+      ...(opts.retainStdout === false ? { retainStdout: false } : {}),
+    }, observed ? { ...(onStdout ? { onStdout } : {}), ...(onStderr ? { onStderr } : {}) } : undefined);
   }
 
   /**
