@@ -353,10 +353,10 @@ function addPluginReconciliationDiagnostics(
   invalidMetadata: boolean,
 ): void {
   if (candidateCount > PROVIDER_CATALOG_MAX_ENTRIES) {
-    diagnostics.push(sourceDiagnostic("appServerPlugins", "plugin/list", "partial-result", `Codex plugins were capped at ${PROVIDER_CATALOG_MAX_ENTRIES} entries.`));
+    diagnostics.push(sourceDiagnostic("appServerPlugins", "plugin/installed", "partial-result", `Codex plugins were capped at ${PROVIDER_CATALOG_MAX_ENTRIES} entries.`));
   }
   if (invalidMetadata) {
-    diagnostics.push(sourceDiagnostic("appServerPlugins", "plugin/list", "partial-result", "Some Codex plugins were omitted because their metadata was invalid."));
+    diagnostics.push(sourceDiagnostic("appServerPlugins", "plugin/installed", "partial-result", "Some Codex plugins were omitted because their metadata was invalid."));
   }
 }
 
