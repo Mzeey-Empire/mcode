@@ -2030,6 +2030,28 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       await progress.waitForSaved(execution.threadId);
       expect(turnStatus()).toEqual({ status: "Running" });
     });
+
+    it("keeps saving the original worker's text when a duplicate start replays after that text is saved", async () => {
+      expect((await send(1, start("codex"))).result.kind).toBe("committed");
+      expect((await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "textDelta", { delta: "first ", isFinalResponse: true })] })).result.kind).toBe("accepted");
+      await progress.waitForSaved(execution.threadId);
+
+      const duplicate = new ExecutionWorkerHandler(port);
+      const replayed = await duplicate.handle({ requestId: 1, execution, lease, ordinal: 1, command: start("codex") });
+      expect(replayed.result.kind).toBe("committed");
+
+      const text = await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 2, "textDelta", { delta: "second", isFinalResponse: true })] });
+      expect(text.result.kind).toBe("accepted");
+      expect((await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 3, "turnComplete")],
+        terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } }))
+        .result.kind).toBe("accepted");
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(turnStatus()).toEqual({ status: "Completed" });
+      expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").get(execution.threadId))
+        .toEqual({ content: "first second" });
+    });
   });
 
   describe("after a released turn", () => {
