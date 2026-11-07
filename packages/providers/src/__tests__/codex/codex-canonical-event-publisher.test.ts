@@ -32,7 +32,7 @@ function sink(submit: ProviderEventSinkPort["submit"]): ProviderEventSinkPort {
 }
 
 describe("CodexCanonicalEventPublisher", () => {
-  it("labels parent text, reasoning and tool input live, leaving boundaries and child text saved", async () => {
+  it("labels parent and child fragments live, leaving boundaries saved", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedReceipt);
     const publisher = new CodexCanonicalEventPublisher(sink(submit));
     const base = { threadId: routing.threadId, turnExecutionId: routing.executionId };
@@ -53,7 +53,7 @@ describe("CodexCanonicalEventPublisher", () => {
 
     await publisher.waitForExecution(routing);
     const deliveries = submit.mock.calls.flatMap(([batch]) => batch.events.map((draft) => draft.delivery));
-    expect(deliveries).toEqual(["live", "live", "live", undefined, undefined, undefined]);
+    expect(deliveries).toEqual(["live", "live", "live", undefined, undefined, "live"]);
   });
 
   it("submits exact ordered drafts with stable batch, item and event IDs", async () => {
@@ -92,7 +92,6 @@ describe("CodexCanonicalEventPublisher", () => {
         eventId: `codex:${routing.executionId}:attempt:1:event:1`,
         sourceProviderId: "codex",
         sourceSequence: 1,
-        ingestClass: "volatile",
       }],
     });
     expect(textBatch.events[0]?.routing.itemId).toBe(`codex:${routing.executionId}:attempt:1:item:1`);
@@ -107,7 +106,7 @@ describe("CodexCanonicalEventPublisher", () => {
     });
   });
 
-  it("marks reasoning deltas volatile like text deltas and keeps structural events durable", async () => {
+  it("delivers reasoning live and keeps system events saved", async () => {
     const submit = vi.fn<(batch: ProviderEventBatch) => Promise<ProviderEventSubmissionReceipt>>().mockResolvedValue(acceptedReceipt);
     const publisher = new CodexCanonicalEventPublisher(sink(submit));
 
@@ -121,8 +120,8 @@ describe("CodexCanonicalEventPublisher", () => {
     await publisher.waitForExecution(routing);
 
     const [reasoningEvent, systemEvent] = submit.mock.calls.flatMap(([batch]) => batch.events);
-    expect(reasoningEvent?.ingestClass).toBe("volatile");
-    expect(systemEvent).not.toHaveProperty("ingestClass");
+    expect(reasoningEvent?.delivery).toBe("live");
+    expect(systemEvent).not.toHaveProperty("delivery");
   });
 
   it("uses a distinct sequence for a retry of the same execution", async () => {

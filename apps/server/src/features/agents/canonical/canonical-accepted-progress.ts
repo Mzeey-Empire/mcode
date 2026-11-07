@@ -7,7 +7,7 @@ import { type CanonicalAgentProgressRecovery, type CanonicalAgentProgressFrame }
 import { type CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
 import { type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { type Message, MessageSchema } from "@mcode/contracts/models/message";
-import { type AgentEvent, AgentEventSchema } from "@mcode/contracts/events/agent-event";
+import { agentEventDelivery, type AgentEvent, AgentEventSchema } from "@mcode/contracts/events/agent-event";
 import { type CanonicalSubagentStopRequest } from "@mcode/contracts/models/canonical-subagent-roster";
 import { HookExecutionRecordSchema } from "@mcode/contracts/models/hook-execution";
 import { type PlanVersion } from "@mcode/contracts/models/plan";
@@ -281,14 +281,17 @@ export class CanonicalAcceptedProgress {
       compaction: { active: thread.features.compacting }, currentNoticeSessionId: thread.features.noticeSessionId,
       persistedPlans: thread.features.plans, persistedTasks: thread.features.tasks,
       childPublicationOwners: acceptedChildPublicationOwners(collaboration) });
-    const preparedOperation = { ...collaboration.operation, livePublication: features.publications };
-    if (acceptsLive(operation, turn.providerStartedAt, collaboration.events.length + features.events.length, features.publications)) {
+    if (acceptsLive(operation, collaboration.events.length + features.events.length, features.publications)) {
+      this.acceptProviderStart(thread, operation, head, modelThread.providerId, turn.providerStartedAt, acceptedAt);
       return this.acceptLive(thread, operation, head, inputHash);
     }
     const child = liveChild(thread, operation, turn.providerStartedAt, collaboration, features);
     if (child) return this.acceptLive(thread, operation, head, inputHash, child);
     this.flushLive(thread);
-    const publications = features.publications;
+    const live = structuralFrameLiveEvents(operation, features.publications);
+    this.acceptProviderStart(thread, operation, head, modelThread.providerId, turn.providerStartedAt, acceptedAt, live);
+    const publications = features.publications.filter(({ event }) => !live.includes(event));
+    const preparedOperation = { ...collaboration.operation, livePublication: publications };
     const publicationIds = publications.map((_, index) => String(thread.publicationSequence + index + 1));
     const prepared = prepareAcceptedParentEvents({ operation: preparedOperation, thread: modelThread, turn, items: thread.state.items,
       publicationIds, messageSequence: thread.messageSequence, acceptedAt });
@@ -309,11 +312,28 @@ export class CanonicalAcceptedProgress {
     thread.head = nextHead;
     thread.publicationSequence += publications.length;
     this.publishAccepted(admission.batch);
+    this.publishLiveEvents(thread, operation, live);
     this.saves.enqueue(admission.batch);
     this.publishAcceptedFeatures(operation, features);
     const original = thread.owner.replay(operation.operationId, inputHash);
     if (original.kind !== "duplicate") throw new Error("Accepted operation lost its producer receipt");
     return original.receipt;
+  }
+
+  private acceptProviderStart(thread: ProgressThread, operation: ExecutionSemanticOperation, head: AcceptedExecutionState,
+    providerId: string, providerStartedAt: string | null | undefined, acceptedAt: string, events?: readonly AgentEvent[]): void {
+    if (providerStartedAt || events?.length === 0) return;
+    const eventId = `${operation.execution.executionId}:provider-started`;
+    this.admitControl(thread, eventId, operation.execution, [{ eventId, routing: operation.execution,
+      sourceProviderId: providerId, sourceIdentities: [],
+      payload: { type: "turn.provider-started", at: acceptedAt } }], head.phase, head.nativeCursor);
+  }
+
+  private publishLiveEvents(thread: ProgressThread, operation: ExecutionSemanticOperation, events: readonly AgentEvent[]): void {
+    if (events.length === 0) return;
+    this.liveSequence += 1;
+    this.publishFamily({ phase: "live", threadId: operation.execution.threadId, epoch: thread.epoch,
+      after: thread.owner.recoveryCut().accepted.sequence, liveSequence: this.liveSequence, events: [...events] });
   }
 
   private publishAcceptedFeatures(operation: ExecutionSemanticOperation, features: ReturnType<typeof prepareAcceptedFeatureObservations>): void {
@@ -1348,6 +1368,13 @@ function describeCanonicalPush(frame: CanonicalAgentProgressFrame, children: num
   return { phase: frame.phase, from, through: frame.through, events: frame.events.length, children };
 }
 
+function structuralFrameLiveEvents(operation: ExecutionSemanticOperation,
+  publications: NonNullable<ExecutionSemanticOperation["livePublication"]>): AgentEvent[] {
+  const mutation = operation.mutation;
+  if (mutation.kind !== "append-events" || !mutation.parentLive || !mutation.events.some((event) => event.delivery === "live")) return [];
+  return publications.map(({ event }) => event).filter((event) => agentEventDelivery(event) === "live");
+}
+
 function changesPlanPhase(write: AcceptedExecutionWriteIntent): boolean {
   if (write.kind === "plan-answer") return true;
   if (write.kind !== "execution") return false;
@@ -1371,7 +1398,7 @@ function inAcceptedFamily(state: AgentModelState, threadId: string, ownerId: str
 
 function acceptedEnvelopes<WriteIntent>(batch: AcceptedProgressBatch<WriteIntent>): AcceptedCanonicalAgentEventEnvelope[] {
   return batch.events.map(({ draft, acceptedSequence, position, acceptedAt }) => {
-    const { ingestClass: _ingestClass, delivery: _delivery, ...event } = draft;
+    const { delivery: _delivery, ...event } = draft;
     return AcceptedCanonicalAgentEventEnvelopeSchema.parse({ ...event, acceptedSequence,
       progressPosition: position, serverTimestamps: { acceptedAt } });
   });

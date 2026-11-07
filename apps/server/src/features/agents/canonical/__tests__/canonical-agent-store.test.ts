@@ -21,7 +21,6 @@ import { ThreadStore as ThreadRepo } from "../../../thread-control/persistence/t
 import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { PARENT_ASSISTANT_TEXT_RETAINED_LIMITS } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import {
-  CANONICAL_AGENT_CONTROL_EVENT_RESERVE,
   CanonicalAgentStore,
   type CanonicalAgentEventDraft,
 } from "../canonical-agent-store.js";
@@ -1579,75 +1578,6 @@ describe("CanonicalAgentStore", () => {
     expect(result.events).toHaveLength(count);
   });
 
-  it("keeps control capacity and records explicit volatile truncation metadata", () => {
-    sink.commit({
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      executionId: EXECUTION_ID,
-      phase: "running",
-      events: initialDrafts(),
-    });
-    const volatileEvents = Array.from(
-      { length: CANONICAL_AGENT_EVENT_BATCH_MAX },
-      (_, index): CanonicalAgentEventDraft => ({
-        eventId: `${EXECUTION_ID}:volatile-${index}`,
-        routing: {
-          threadId: THREAD_ID,
-          turnId: TURN_ID,
-          executionId: EXECUTION_ID,
-          itemId: `volatile-${index}`,
-        },
-        sourceProviderId: "codex",
-        sourceIdentities: [],
-        ingestClass: "volatile",
-        payload: {
-          type: "item.recorded",
-          item: {
-            id: `volatile-${index}`,
-            threadId: THREAD_ID,
-            turnId: TURN_ID,
-            kind: "reasoning",
-            providerIdentities: [],
-            payload: { delta: "x" },
-            createdAt: NOW,
-            updatedAt: NOW,
-          },
-        },
-      }),
-    );
-
-    const result = sink.commit({
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      executionId: EXECUTION_ID,
-      phase: "completed",
-      terminalOutcome: "completed",
-      events: [...volatileEvents, terminalDraft("turn.completed")],
-    });
-
-    expect(result.outcome).toBe("committed");
-    expect(result.events.at(-2)?.payload).toMatchObject({
-      type: "ingest.volatile-truncated",
-      droppedEventCount: CANONICAL_AGENT_CONTROL_EVENT_RESERVE,
-    });
-    expect(result.events.at(-1)?.payload.type).toBe("turn.completed");
-
-    const replay = sink.commit({
-      threadId: THREAD_ID,
-      turnId: TURN_ID,
-      executionId: EXECUTION_ID,
-      phase: "completed",
-      terminalOutcome: "completed",
-      events: [...volatileEvents, terminalDraft("turn.completed")],
-    });
-    expect(replay.outcome).toBe("duplicate");
-    const markers = db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM canonical_agent_events
-      WHERE envelope_json LIKE '%ingest.volatile-truncated%'
-    `).get() as { count: number };
-    expect(markers.count).toBe(1);
-  });
 
   it("rolls back records and publishes nothing when the checkpoint write fails", () => {
     db.exec(`

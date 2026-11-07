@@ -85,9 +85,6 @@ import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js"
 import { interruptionReason, withTurnEnding, type TurnEndingCause } from "./turn-ending.js";
 import { CanonicalItemContentTail, canonicalItemRowSelection, foldItemContentTail, type CanonicalItemContentTailOptions } from "./canonical-item-content-tail.js";
 
-/** Capacity held back so volatile input cannot consume every semantic batch slot. */
-export const CANONICAL_AGENT_CONTROL_EVENT_RESERVE = 16;
-
 const CANONICAL_EXECUTION_DIAGNOSTIC_INDEX_CAPACITY = 128;
 const CANONICAL_DIAGNOSTIC_EXPORT_EVENT_CAPACITY = 1_024;
 
@@ -101,7 +98,6 @@ export interface CanonicalAgentEventDraft {
   rosterRevision?: number;
   providerTimestamp?: string;
   /** Volatile drafts can be truncated so structural and terminal drafts always retain capacity. */
-  ingestClass?: "volatile";
   /** A provider fragment the runtime may show without saving; stripped before any envelope is stored. */
   delivery?: "live";
   payload: CanonicalAgentEvent;
@@ -281,11 +277,6 @@ interface ParentTerminalBatchState {
 interface ParentTerminalBatchEvent {
   event: CanonicalAgentEventEnvelope;
   application: EventApplication | undefined;
-}
-
-interface RetainedVolatileIngestEvents {
-  events: readonly CanonicalAgentEventDraft[];
-  droppedEventCount: number;
 }
 
 function hashCodexKey(value: string): string {
@@ -2776,9 +2767,8 @@ export class CanonicalAgentStore {
           },
         }
       : draft.payload;
-    const { ingestClass: _ingestClass, ...envelopeDraft } = draft;
     return CanonicalAgentEventEnvelopeSchema.parse({
-      ...envelopeDraft,
+      ...draft,
       sourceIdentities: [...draft.sourceIdentities],
       acceptedSequence,
       durableRevision,
@@ -2809,94 +2799,14 @@ export class CanonicalAgentStore {
     events: readonly CanonicalAgentEventDraft[],
     checkpoint: CanonicalAgentCheckpoint | null,
   ): readonly CanonicalAgentEventDraft[] {
-    const structural = events.filter((event) => event.ingestClass !== "volatile");
-    const volatile = events.filter((event) => event.ingestClass === "volatile");
-    if (this.structuralIngestBatchOverflows(structural.length, volatile.length)) {
+    if (events.length > CANONICAL_AGENT_EVENT_BATCH_MAX) {
       throw new StructuralIngestOverflow(
         input,
         checkpoint?.lastAcceptedSequence ?? 0,
         checkpoint?.lastDurableSequence ?? 0,
       );
     }
-    return this.boundVolatileIngestEvents(input, events, structural.length, volatile);
-  }
-
-  private structuralIngestBatchOverflows(structuralCount: number, volatileCount: number): boolean {
-    return structuralCount > CANONICAL_AGENT_EVENT_BATCH_MAX
-      || (structuralCount === CANONICAL_AGENT_EVENT_BATCH_MAX && volatileCount > 0);
-  }
-
-  private boundVolatileIngestEvents(
-    input: CanonicalAgentCommitInput,
-    events: readonly CanonicalAgentEventDraft[],
-    structuralCount: number,
-    volatile: readonly CanonicalAgentEventDraft[],
-  ): readonly CanonicalAgentEventDraft[] {
-    const volatileCapacity = Math.min(
-      CANONICAL_AGENT_EVENT_BATCH_MAX - CANONICAL_AGENT_CONTROL_EVENT_RESERVE,
-      CANONICAL_AGENT_EVENT_BATCH_MAX - structuralCount,
-    );
-    if (volatile.length <= volatileCapacity) return events;
-    const retained = this.retainedVolatileIngestEvents(events, volatile, volatileCapacity, structuralCount);
-    const source = volatile[0];
-    if (!source) return retained.events;
-    const marker = this.volatileTruncationMarker(input, source, retained.droppedEventCount);
-    return this.insertVolatileTruncationMarker(retained.events, marker);
-  }
-
-  private retainedVolatileIngestEvents(
-    events: readonly CanonicalAgentEventDraft[],
-    volatile: readonly CanonicalAgentEventDraft[],
-    volatileCapacity: number,
-    structuralCount: number,
-  ): RetainedVolatileIngestEvents {
-    const markerCapacity = CANONICAL_AGENT_EVENT_BATCH_MAX - structuralCount - 1;
-    const retainedVolatile = new Set(volatile.slice(
-      0,
-      Math.max(0, Math.min(volatileCapacity, markerCapacity)),
-    ));
-    const retained = events.filter(
-      (event) => event.ingestClass !== "volatile" || retainedVolatile.has(event),
-    );
-    return {
-      events: retained,
-      droppedEventCount: volatile.length - retainedVolatile.size,
-    };
-  }
-
-  private volatileTruncationMarker(
-    input: CanonicalAgentCommitInput,
-    source: CanonicalAgentEventDraft,
-    droppedEventCount: number,
-  ): CanonicalAgentEventDraft {
-    return {
-      eventId: `${input.executionId}:volatile-truncated:${source.eventId.slice(-96)}`,
-      routing: {
-        threadId: input.threadId,
-        turnId: input.turnId,
-        executionId: input.executionId,
-      },
-      sourceProviderId: source.sourceProviderId,
-      sourceIdentities: source.sourceIdentities,
-      payload: { type: "ingest.volatile-truncated", droppedEventCount },
-    };
-  }
-
-  private insertVolatileTruncationMarker(
-    retained: readonly CanonicalAgentEventDraft[],
-    marker: CanonicalAgentEventDraft,
-  ): readonly CanonicalAgentEventDraft[] {
-    const terminalIndex = retained.findIndex((event) => this.isTerminalDraft(event));
-    if (terminalIndex < 0) return [...retained, marker];
-    return [
-      ...retained.slice(0, terminalIndex),
-      marker,
-      ...retained.slice(terminalIndex),
-    ];
-  }
-
-  private isTerminalDraft(event: CanonicalAgentEventDraft): boolean {
-    return this.isTerminalPayload(event.payload);
+    return events;
   }
 
   private isTerminalPayload(payload: CanonicalAgentEvent): boolean {
