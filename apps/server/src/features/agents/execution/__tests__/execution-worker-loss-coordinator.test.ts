@@ -18,7 +18,6 @@ import { ExecutionLivePublicationRelease } from "../../canonical/execution-live-
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
-import { CanonicalAcceptedProgress } from "../../canonical/canonical-accepted-progress.js";
 import { CanonicalAgentStore } from "../../canonical/canonical-agent-boundary.js";
 import type { ExecutionIdentity, ExecutionLease, ExecutionWorkerPort, ExecutionWorkerReply, ExecutionWorkerRequest } from "../execution-mailbox-protocol.js";
 import type { ExecutionLostAssignment, ExecutionMailboxCommand } from "../execution-mailbox-scheduler.js";
