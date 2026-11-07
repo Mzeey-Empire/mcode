@@ -46,6 +46,8 @@ import { persistTurnFailure } from "../turn-ending.js";
 import { TurnSteerStore } from "../../steering/persistence/turn-steer-store.js";
 import { TurnSavingStatusSchema, type TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
+import { AcceptedContentRejected } from "../accepted-save-failure.js";
+import { ParentAssistantTextCheckpointStore } from "../../turns/parent-assistant-text-checkpoint-store.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -185,8 +187,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   afterEach(async () => {
     release?.();
     release = undefined;
-    await progress.close();
     vi.useRealTimers();
+    await progress.close({ attemptsUntil: Date.now() + 1_000 });
     await writer.close();
     await databaseWriter.close();
     reader.close(true);
@@ -325,6 +327,167 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       await vi.advanceTimersByTimeAsync(1);
       await drainSaves();
       expect(savedText()).toBe("prefixidle");
+    });
+
+    it("keeps checkpoint text when rejected contents are replaced before the next append", async () => {
+      await begin();
+      vi.spyOn(writer, "appendAccepted").mockRejectedValueOnce(new AcceptedContentRejected("fixture payload rejected"));
+      await piece(" first");
+      await progress.waitForSaved(execution.threadId);
+      await piece(" second");
+      await progress.waitForSaved(execution.threadId);
+      expect(new ParentAssistantTextCheckpointStore(db).restore(execution.executionId)).toBe("prefix first second");
+      expect(savedText()).toBe("prefix first second");
+    });
+
+    it.each(["claude", "devin", "codex"])("completes a %s turn containing only live text", async (provider) => {
+      await begin(provider);
+      await piece(" answer", provider);
+      await progress.waitForSaved(execution.threadId);
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft(provider, ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: provider, providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual(["prefix answer"]);
+    });
+
+    it.each([false, true])("reclassifies live text between two model loops with overflow %s", async (overflow) => {
+      await begin("copilot");
+      if (overflow) {
+        for (let index = 0; index < 20; index++) {
+          await piece("x".repeat(15360), "copilot");
+          await progress.waitForSaved(execution.threadId);
+        }
+      }
+      const routing = { ...execution, deliveryAttempt: 1 };
+      const publisher = new CanonicalLiveEventPublisher("unbounded", "copilot", { submit: async (batch) => {
+        const events = batch.events.map((event) => {
+          const runtime = event.payload.type === "item.recorded"
+            ? ProviderRuntimeEventSchema().parse(event.payload.item.payload.runtimeEvent) : undefined;
+          return runtime?.event.type === "textDelta" ? { ...event, delivery: "live" as const } : event;
+        });
+        const terminal = batch.events.some((event) => event.payload.type === "item.recorded"
+          && ProviderRuntimeEventSchema().parse(event.payload.item.payload.runtimeEvent).event.type === "turnComplete");
+        const reply = await send(++ordinal, { kind: "event", phase: batch.phase, nativeCursor: null, events,
+          ...(terminal ? { terminalInput: { ...execution, providerId: "copilot", providerIdentities: [],
+            outcome: "completed" as const, projection: { kind: "writer-staged" as const } } } : {}) });
+        if (reply.result.kind !== "accepted") throw new Error(`Piece rejected: ${JSON.stringify(reply.result)}`);
+        return { commit: { outcome: "accepted", acceptedThrough: reply.result.acceptedThrough,
+          eventCount: events.length, progressPosition: reply.result.progressPosition }, delivery: { ingress: "not-required" } };
+      } });
+      publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, delta: " searching", isFinalResponse: true }), []);
+      await publisher.waitForExecution(routing);
+      expect(liveFrames()).toHaveLength(overflow ? 21 : 1);
+      await progress.waitForSaved(execution.threadId);
+      publisher.publish(routing, providerRuntimeEvent({ type: "assistantMessageBoundary", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, isFinalResponse: false }), []);
+      await publisher.waitForExecution(routing);
+      await progress.waitForSaved(execution.threadId);
+      publisher.publish(routing, providerRuntimeEvent({ type: "textDelta", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, delta: "Final answer", isFinalResponse: true }), []);
+      publisher.publish(routing, providerRuntimeEvent({ type: "turnComplete", threadId: execution.threadId,
+        turnExecutionId: execution.executionId, reason: "completed", costUsd: 0, tokensIn: 0, tokensOut: 0 }), []);
+      await publisher.waitForExecution(routing);
+      await progress.waitForSaved(execution.threadId);
+      expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual(["Final answer"]);
+      if (overflow) expect(savedEventKinds()).toContain("ingest.volatile-truncated");
+      expect(new ThoughtSegmentStore(reader).listByMessage(deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`)))
+        .toEqual(expect.arrayContaining([expect.objectContaining({ text: `prefix${overflow ? "x".repeat(307200) : ""} searching` })]));
+    });
+
+    it.each([true, false])("completes 300 KiB assistant text with live delivery %s", async (live) => {
+      await begin();
+      for (let index = 0; index < 20; index++) {
+        expect((await piece("x".repeat(index === 0 ? 15354 : 15360), "claude", live)).result.kind).toBe("accepted");
+        await progress.waitForSaved(execution.threadId);
+      }
+      expect(db.prepare("SELECT retained_chunks FROM parent_assistant_text_checkpoints WHERE execution_id = ?")
+        .get(execution.executionId)).toEqual({ retained_chunks: -1 });
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual([`prefix${"x".repeat(307194)}`]);
+      expect(pushes.saving.filter((status) => status.mode === "saving-failed" || status.mode === "save-retrying")).toEqual([]);
+    });
+
+    it.each([true, false].flatMap((live) => ["commentary", "reasoning"].flatMap((kind) =>
+      [153600, 307200].map((bytes) => ({ live, kind, bytes })))))
+    ("round 4 saves complete $kind ($bytes bytes, live $live)", async ({ live, kind, bytes }) => {
+      ordinal = 1;
+      await send(1, start("claude"));
+      const text = "r".repeat(bytes);
+      for (let offset = 0; offset < bytes; offset += 15360) {
+        const event = draft("claude", ordinal, kind === "reasoning" ? "reasoningDelta" : "textDelta",
+          { delta: text.slice(offset, offset + 15360), ...(kind === "reasoning"
+            ? { reasoningItemId: "round4-reasoning" } : { isFinalResponse: false }) });
+        expect((await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+          events: [{ ...event, ...(live ? { delivery: "live" as const } : {}) }] })).result.kind).toBe("accepted");
+        await progress.waitForSaved(execution.threadId);
+      }
+      await piece("Final answer");
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      const thoughts = new ThoughtSegmentStore(reader).listByMessage(deriveTurnAssistantMessageId(execution.threadId, `${execution.turnId}:user`));
+      expect(thoughts.map((thought) => thought.text.length)).toContain(bytes);
+      expect(thoughts.map((thought) => thought.text)).toEqual([text]);
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual(["Final answer"]);
+    });
+
+    it("round 4 saves a single oversized live assistant piece and signals recovery loss", async () => {
+      await begin();
+      expect((await piece("x".repeat(307200))).result.kind).toBe("accepted");
+      await progress.waitForSaved(execution.threadId);
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual([`prefix${"x".repeat(307200)}`]);
+      expect(savedEventKinds()).toContain("ingest.volatile-truncated");
+    });
+
+    it("round 4 saves 700 KiB in 47 ordered live pieces", async () => {
+      await begin();
+      const pieces = Array.from({ length: 47 }, (_, index) => `${index}:`.padEnd(index === 46 ? 10240 : 15360, "x"));
+      for (const text of pieces) {
+        expect((await piece(text)).result.kind).toBe("accepted");
+        await progress.waitForSaved(execution.threadId);
+      }
+      await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal, "turnComplete")], terminalInput: { ...execution,
+          providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(conversationPage().messages.filter((message) => message.role === "assistant").map((message) => message.content))
+        .toEqual([`prefix${pieces.join("")}`]);
+      expect(pushes.saving.filter((status) => status.mode === "saving-failed" || status.mode === "save-retrying")).toEqual([]);
+    });
+
+    it.each(["reasoning", "assistant"])("round 4 signals interrupted live %s recovery overflow", async (kind) => {
+      await begin();
+      for (let index = 0; index < 20; index++) {
+        if (kind === "assistant") await piece("x".repeat(15360));
+        else {
+          const event = draft("claude", ordinal, "reasoningDelta", { delta: "r".repeat(15360), reasoningItemId: "overflow" });
+          await send(++ordinal, { kind: "event", phase: "running", nativeCursor: null, events: [{ ...event, delivery: "live" }] });
+        }
+        await progress.waitForSaved(execution.threadId);
+      }
+      expect(savedEventKinds()).toContain("ingest.volatile-truncated");
+      await send(++ordinal, { kind: "event", phase: "interrupted", nativeCursor: null,
+        events: [draft("claude", ordinal, "ended", { outcome: "interrupted", reason: "provider_lost" })],
+        terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "interrupted", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      expect(savedEventKinds()).toContain("ingest.volatile-truncated");
     });
 
     it("saves at 16 KiB of pending text without waiting for the timer", async () => {
@@ -675,7 +838,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       }
     });
 
-    it.each(["close", "discardThread", "evictSavedThread"])("flushes a final durable on %s", async (action) => {
+    it.each(["close", "discardThread", "release"])("flushes a final durable on %s", async (action) => {
       await send(1, start("codex"));
       await send(2, { kind: "event", phase: "running", nativeCursor: null,
         events: [draft("codex", 1, "turnComplete")], terminalInput: { ...execution, providerId: "codex", providerIdentities: [],
@@ -684,14 +847,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(pushes.saving).toEqual([]);
       if (action === "close") await progress.close();
       else if (action === "discardThread") await progress.discardThread(execution.threadId);
-      else {
-        for (let index = 0; index < 8; index += 1) {
-          const threadId = `extra-thread-${index}`;
-          insertThread(threadId);
-          await progress.beforeDurableCommand(threadId);
-          progress.cancelDurableCommand(threadId);
-        }
-      }
+      else expect((await send(3, { kind: "release" })).result.kind).toBe("released");
       expect(pushes.saving).toEqual([{ threadId: execution.threadId, executionId: execution.executionId, mode: "durable" }]);
       vi.advanceTimersByTime(1_000);
       expect(pushes.saving).toHaveLength(1);
@@ -1913,6 +2069,130 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(progress.depth().owners).toBe(1);
     expect((await send(5, { kind: "release" })).result.kind).toBe("released");
     expect(progress.depth().owners).toBe(0);
+  });
+
+  it("starts a ninth thread while eight finished turns wait for release, and keeps their owners until release", async () => {
+    const finished = Array.from({ length: 8 }, (_, index) => ({
+      identity: { threadId: `finished-thread-${index}`, turnId: `finished-turn-${index}`,
+        executionId: `00000000-0000-4000-8000-${String(index + 2000).padStart(12, "0")}` },
+      lease: { ...lease, leaseId: `finished-lease-${index}` } }));
+    for (const turn of finished) {
+      insertThread(turn.identity.threadId);
+      await send(1, start("codex", turn.identity), turn.identity, turn.lease);
+      await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete", {}, turn.identity)],
+        terminalInput: { ...turn.identity, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } },
+      turn.identity, turn.lease);
+    }
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(progress.depth().owners).toBe(8);
+
+    expect((await send(1, start("codex"))).result.kind).toBe("committed");
+    expect(progress.depth().owners).toBe(9);
+
+    for (const turn of finished) {
+      const late = await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 2, "ended", { outcome: "completed" }, turn.identity)] }, turn.identity, turn.lease);
+      expect(late.result.kind).toBe("accepted");
+    }
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    for (const turn of finished) expect((await send(4, { kind: "release" }, turn.identity, turn.lease)).result.kind).toBe("released");
+    expect(progress.depth().owners).toBe(1);
+  });
+
+  it("caps owners that no execution will release at the owner limit", async () => {
+    for (let index = 0; index < 12; index += 1) {
+      const threadId = `command-thread-${index}`;
+      insertThread(threadId);
+      await progress.beforeDurableCommand(threadId);
+      progress.cancelDurableCommand(threadId);
+    }
+    expect(progress.depth().owners).toBe(8);
+  });
+
+  it("keeps owners at the hard ceiling when 40 saved terminals never get their release, without evicting a running turn", async () => {
+    const turnOf = (index: number) => ({
+      identity: { threadId: `unreleased-thread-${index}`, turnId: `unreleased-turn-${index}`,
+        executionId: `00000000-0000-4000-8000-${String(index + 3000).padStart(12, "0")}` },
+      lease: { ...lease, leaseId: `unreleased-lease-${index}` } });
+    const running = turnOf(0);
+    insertThread(running.identity.threadId);
+    await send(1, start("codex", running.identity), running.identity, running.lease);
+    for (let index = 1; index <= 40; index += 1) {
+      const turn = turnOf(index);
+      insertThread(turn.identity.threadId);
+      await send(1, start("codex", turn.identity), turn.identity, turn.lease);
+      await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete", {}, turn.identity)],
+        terminalInput: { ...turn.identity, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } },
+      turn.identity, turn.lease);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+    }
+
+    expect((await send(1, start("codex"))).result.kind).toBe("committed");
+    expect(progress.depth().owners).toBeLessThanOrEqual(32);
+    const stillRunning = await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "still here", isFinalResponse: true }, running.identity)] },
+    running.identity, running.lease);
+    expect(stillRunning.result.kind).toBe("accepted");
+  });
+
+  describe("when a start's reply is lost after its begin is saved", () => {
+    function loseNextBeginReply() {
+      const transact = writer.transactSemantic.bind(writer);
+      vi.spyOn(writer, "transactSemantic").mockImplementationOnce(async (...args) => {
+        await transact(...args);
+        throw new Error("reply lost after durable begin");
+      });
+    }
+    const turnStatus = () => db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId);
+
+    it("interrupts and releases twelve such starts once their leases are abandoned", async () => {
+      const failed = Array.from({ length: 12 }, (_, index) => ({
+        identity: { threadId: `failed-start-thread-${index}`, turnId: `failed-start-turn-${index}`,
+          executionId: `00000000-0000-4000-8000-${String(index + 4000).padStart(12, "0")}` },
+        lease: { ...lease, leaseId: `failed-start-lease-${index}` } }));
+      for (const turn of failed) {
+        insertThread(turn.identity.threadId);
+        loseNextBeginReply();
+        await expect(send(1, start("codex", turn.identity), turn.identity, turn.lease)).rejects.toThrow("reply lost after durable begin");
+        await port.abandonStart(turn.identity, turn.lease);
+      }
+
+      await expect.poll(() => progress.depth().owners).toBe(0);
+      for (const turn of failed) {
+        expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(turn.identity.turnId)).toEqual({ status: "Interrupted" });
+      }
+      const next = { ...execution, turnId: "after-failed-begin", executionId: "00000000-0000-4000-8000-000000000301" };
+      const nextLease = { ...lease, ownerEpoch: 2, leaseId: "after-failed-begin-lease" };
+      expect((await send(1, start("codex", next), next, nextLease)).result.kind).toBe("committed");
+    });
+
+    it("keeps the turn saving when that exact start is retried", async () => {
+      loseNextBeginReply();
+      await expect(send(1, start("codex"))).rejects.toThrow("reply lost after durable begin");
+
+      expect((await send(1, start("codex"))).result.kind).toBe("committed");
+      const text = await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "textDelta", { delta: "after retry", isFinalResponse: true })] });
+      expect(text.result.kind).toBe("accepted");
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(turnStatus()).toEqual({ status: "Running" });
+    });
+
+    it("keeps a running turn when a duplicate start for it loses its reply", async () => {
+      expect((await send(1, start("codex"))).result.kind).toBe("committed");
+      loseNextBeginReply();
+      const duplicate = new ExecutionWorkerHandler(port);
+      await expect(duplicate.handle({ requestId: 1, execution, lease, ordinal: 1, command: start("codex") }))
+        .rejects.toThrow("reply lost after durable begin");
+
+      await progress.waitForSaved(execution.threadId);
+      expect(turnStatus()).toEqual({ status: "Running" });
+      const text = await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("codex", 1, "textDelta", { delta: "still live", isFinalResponse: true })] });
+      expect(text.result.kind).toBe("accepted");
+      await progress.waitForSaved(execution.threadId);
+      expect(turnStatus()).toEqual({ status: "Running" });
+    });
   });
 
   describe("after a released turn", () => {

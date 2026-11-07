@@ -86,7 +86,7 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "tool-result"; readonly event: ToolResultEvent }
   | { readonly kind: "hook-started"; readonly hookId: string; readonly late: boolean }
   | { readonly kind: "hook-completed"; readonly hookId: string; readonly late: boolean; readonly exitCode: number; readonly durationMs: number; readonly didBlock: boolean }
-  | { readonly kind: "narrative-recovery"; readonly items: readonly ParentNarrativeRecoveryItem[]; readonly discardedItemIds: readonly string[] }
+  | { readonly kind: "narrative-recovery"; readonly droppedEventCount?: number; readonly items: readonly ParentNarrativeRecoveryItem[]; readonly discardedItemIds: readonly string[] }
   | { readonly kind: "narrative-effect"; readonly effect: NarrativeTurnStateEffect }
   | { readonly kind: "feature-event"; readonly feature: "plan-text" | "assistant-message" | "task-tool" | "goal-refresh"; readonly event: AgentEvent }
   | { readonly kind: "plan-questions"; readonly questions: readonly PlanQuestion[] }
@@ -529,7 +529,8 @@ export class CodexLiveEventReducer {
 
   private recoveryIntent(delta: PreparedNarrativeRecoveryDelta | null): CodexLiveWriterIntent {
     delta?.acknowledge();
-    return { kind: "narrative-recovery", items: delta?.items ?? [], discardedItemIds: delta?.discardedItemIds ?? [] };
+    return { kind: "narrative-recovery", items: delta?.items ?? [], discardedItemIds: delta?.discardedItemIds ?? [],
+      ...(delta?.droppedEventCount ? { droppedEventCount: delta.droppedEventCount } : {}) };
   }
 
   private unsupported(event: AgentEvent, reason: string): CodexLiveReduction {
