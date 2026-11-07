@@ -49,12 +49,6 @@ export function recallScrollPosition(threadId: string): ThreadScrollPosition | u
   return positions.get(threadId);
 }
 
-/** Return whether a thread was left while the user was reading older history. */
-export function hasRememberedHistoryPosition(threadId: string): boolean {
-  const position = positions.get(threadId);
-  return position != null && !position.atTail;
-}
-
 /** Drop the saved scroll position for a thread. */
 export function forgetScrollTop(threadId: string): void {
   positions.delete(threadId);

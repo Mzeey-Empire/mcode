@@ -215,6 +215,80 @@ describe("ThreadHydrator", () => {
     hydrator = createStoreHydrator();
   });
 
+  it.each([30_000, 70_000])("keeps heavy threads warm with %i narrative bytes per assistant row", async (narrativeBytes) => {
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(async (threadId, limit = 2, before) => {
+      const all = Array.from({ length: 400 }, (_, row) => createMockMessage({
+        id: `${threadId}-${row + 1}`, thread_id: threadId, sequence: row + 1,
+        role: row % 2 === 0 ? "user" : "assistant", content: "x".repeat(8_000),
+      }));
+      const eligible = before === undefined ? all : all.filter(message => message.sequence < before);
+      const messages = eligible.slice(-limit);
+      return { messages, hasMore: eligible.length > messages.length, narrativeByMessage: Object.fromEntries(
+        messages.filter(message => message.role === "assistant").map(message => [message.id, {
+          tools: [], hooks: [], approvals: [], thoughts: [{
+            id: `${message.id}-thought`, message_id: message.id, text: "n".repeat(narrativeBytes),
+            started_at: message.timestamp, ended_at: null, sort_order: 0,
+          }],
+        }]),
+      ) };
+    });
+    for (const id of ["A", "B", "C", "D"]) {
+      await hydrator.hydrate(id, "active");
+      await vi.advanceTimersByTimeAsync(500);
+      if (id !== "D") {
+        for (let page = 0; page < 4; page++) await useThreadStore.getState().loadOlderMessages(id);
+        rememberScrollTop(id, 50_000, true);
+      }
+    }
+    for (const id of ["C", "A"]) {
+      expect(getCachedRecord(id)?.messages.at(-1)?.id).toBe(`${id}-400`);
+      vi.mocked(mockTransport.loadConversationPage).mockClear();
+      await hydrator.hydrate(id, "active");
+      expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+      expect(getTestActiveMessages().at(-1)?.id).toBe(`${id}-400`);
+      await hydrator.hydrate("D", "active");
+      await vi.advanceTimersByTimeAsync(40);
+    }
+  });
+
+  it("compacts inactive running stores even after cache eviction and memory pressure", async () => {
+    for (const id of ["A", "B", "C"]) {
+      const messages = Array.from({ length: 100 }, (_, row) => createMockMessage({
+        id: `${id}-${row + 1}`, thread_id: id, sequence: row + 1, content: "x".repeat(8_000),
+        role: row % 2 === 0 ? "user" : "assistant",
+      }));
+      cacheRecord(id, {
+        ...makeCachedRecord(messages),
+        narrativeByMessage: Object.fromEntries(messages.filter(message => message.role === "assistant").map(message => [message.id, {
+          tools: [], hooks: [], approvals: [], thoughts: [{
+            id: `${message.id}-thought`, message_id: message.id, text: "n".repeat(30_000),
+            started_at: message.timestamp, ended_at: null, sort_order: 0,
+          }],
+        }])),
+      });
+      await hydrator.hydrate(id, "active");
+      useThreadStore.setState(state => ({ runningThreadIds: new Set([...state.runningThreadIds, id]) }));
+      await vi.advanceTimersByTimeAsync(40);
+    }
+    await hydrator.hydrate("D", "active");
+    await vi.advanceTimersByTimeAsync(40);
+    for (const id of ["A", "B", "C"]) {
+      expect(useThreadStore.getState().records.get(id)?.messages.map(message => message.id)).toEqual([`${id}-99`, `${id}-100`]);
+    }
+    useThreadStore.setState(state => ({
+      records: patchThreadRecord(state.records, "A", record => ({
+        messages: [createMockMessage({ id: "A-98", thread_id: "A", sequence: 98 }), ...record.messages],
+        narrativeByMessage: { "A-100": { tools: [], thoughts: [], approvals: [], hooks: [] } },
+      })),
+    }));
+    hydrator.applyMemoryPressure("critical");
+    expect(getCachedRecord("A")).toBeUndefined();
+    expect(useThreadStore.getState().records.get("A")?.narrativeByMessage).toEqual({});
+    for (const id of ["A", "B", "C"]) {
+      expect(useThreadStore.getState().records.get(id)?.messages.map(message => message.id)).toEqual([`${id}-99`, `${id}-100`]);
+    }
+  });
+
   it.each(["active", "resident", "background"] as const)("keeps a live session notice when a stale %s fetch returns newer transcript rows", async (surface) => {
     let resolvePage!: (page: ConversationPage) => void;
     vi.mocked(mockTransport.loadConversationPage).mockImplementationOnce(() => new Promise((resolve) => { resolvePage = resolve; }));
@@ -882,7 +956,7 @@ describe("ThreadHydrator", () => {
     expect(usage.inactiveBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.inactiveBytes);
     expect(usage.prefetchedBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.prefetchedBytes);
     expect(usage.narrativeBytes).toBeLessThanOrEqual(CONVERSATION_MEMORY_BUDGETS.narrativeBytes);
-    console.log("warm restore retained bytes", usage);
+    expect(usage.activeBytes + usage.inactiveBytes + usage.prefetchedBytes).toBeLessThanOrEqual(4_449_515);
   });
 
   it("keeps a newer resident row through compact cache restore, pagination, and refresh", async () => {

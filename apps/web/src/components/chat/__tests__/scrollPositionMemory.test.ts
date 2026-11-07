@@ -3,7 +3,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   rememberScrollTop,
   recallScrollTop,
-  hasRememberedHistoryPosition,
   forgetScrollTop,
   clearScrollMemory,
 } from "../scrollPositionMemory";
@@ -20,14 +19,6 @@ describe("scrollPositionMemory", () => {
     rememberScrollTop("thread-a", -10);
     rememberScrollTop("thread-a", Number.POSITIVE_INFINITY);
     expect(recallScrollTop("thread-a")).toBeUndefined();
-  });
-
-  it("distinguishes a history position from the transcript tail", () => {
-    rememberScrollTop("thread-history", 1_500, false);
-    rememberScrollTop("thread-tail", 5_600, true);
-
-    expect(hasRememberedHistoryPosition("thread-history")).toBe(true);
-    expect(hasRememberedHistoryPosition("thread-tail")).toBe(false);
   });
 
   it("forgets a single thread", () => {

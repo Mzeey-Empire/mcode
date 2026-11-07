@@ -48,9 +48,7 @@ it("returns to a retained viewport without shrinking or remounting, positioning 
   rememberScrollTop("warm", originalTop, true);
   const setScrollTop = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")?.set;
   if (!setScrollTop) throw new Error("Missing native scroll setter");
-  const writeStacks: string[] = [];
   const writes = vi.spyOn(viewport, "scrollTop", "set").mockImplementation(function (this: HTMLElement, top: number) {
-    writeStacks.push(new Error("scroll positioning").stack ?? "");
     setScrollTop.call(this, top);
   });
   const lengths: number[] = [];
@@ -89,7 +87,6 @@ it("returns to a retained viewport without shrinking or remounting, positioning 
   });
   expect({ lengths: [...new Set(lengths)], removed: originalHosts.filter(host => !host.isConnected).length,
     scrollWrites: writes.mock.calls }).toEqual({ lengths: [12], removed: 0, scrollWrites: [[originalTop]] });
-  console.log("warm return positioning", { savedTop: originalTop, writes: writes.mock.calls, writeStacks });
   for (const host of originalHosts) expect(container.contains(host)).toBe(true);
   expect(viewport.scrollTop).toBe(originalTop);
 });

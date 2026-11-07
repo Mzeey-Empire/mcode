@@ -218,10 +218,46 @@ function enforceAutomaticByteBudgets(): void {
   while (getConversationCacheUsage().prefetchedBytes > PREFETCHED_CONVERSATION_BYTES) {
     if (!evictOldestPrefetch()) break;
   }
+  const order = cache.keys();
+  enforceNarrativeByteBudget();
+  const inactiveOrder = inactiveEntries().sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
+  for (const [threadId, record] of inactiveOrder) {
+    if (getConversationCacheUsage().inactiveBytes <= INACTIVE_CONVERSATION_BYTES) break;
+    const stripped = { ...record, narrativeByMessage: {} };
+    cache.set(threadId, stripped);
+    recordByteSizes.set(threadId, measureRecord(stripped));
+    recordNarrativeByteSizes.set(threadId, 0);
+  }
+  compactInactiveRecords(inactiveOrder);
+  // Budget maintenance must not turn the oldest record into the newest one.
+  const retained = new Map(cache.entries());
+  for (const threadId of order) {
+    const record = retained.get(threadId);
+    if (record) cache.set(threadId, record);
+  }
   while (getConversationCacheUsage().inactiveBytes > INACTIVE_CONVERSATION_BYTES) {
     if (!evictOldestInactive()) break;
   }
-  enforceNarrativeByteBudget();
+}
+
+function compactInactiveRecords(entries: Array<[string, ConversationCacheState]>): void {
+  const strippedRecords = new Map(cache.entries());
+  for (const [threadId] of entries) {
+    if (getConversationCacheUsage().inactiveBytes <= INACTIVE_CONVERSATION_BYTES) break;
+    const record = strippedRecords.get(threadId);
+    if (!record) continue;
+    const tail = compactConversationTail(record);
+    cache.set(threadId, tail);
+    recordByteSizes.set(threadId, measureRecord(tail));
+    recordNarrativeByteSizes.set(threadId, measureConversationValue(tail.narrativeByMessage));
+  }
+}
+
+/** Keep the live tail without retaining an inactive running transcript twice. */
+export function compactConversationTail(record: ConversationCacheState): ConversationCacheState {
+  const messages = record.messages.slice(-2);
+  const window = { messages, evictedOlder: messages.length < record.messages.length, evictedNewer: false };
+  return boundedRecordWithNarrative(record, recordWithoutNarrative(record, messages, window), CONVERSATION_NARRATIVE_BYTES);
 }
 
 function boundHistoryPage(

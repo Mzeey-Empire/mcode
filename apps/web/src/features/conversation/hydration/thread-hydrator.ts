@@ -1,6 +1,7 @@
 import {
   cachePrefetchedHistoryPage,
   cacheRecord,
+  compactConversationTail,
   applyConversationMemoryPressure as applyCacheMemoryPressure,
   evictCachedRecord,
   getCachedRecord,
@@ -564,6 +565,13 @@ export class ThreadHydrator {
 
   /** Apply cache pressure and project a critically trimmed active window into live state. */
   applyMemoryPressure(level: "warning" | "critical"): void {
+    for (const [threadId, record] of this.deps.getState().records) {
+      if (threadId === this.deps.getState().currentThreadId) continue;
+      const tail = compactConversationTail(projectConversationCacheState(record));
+      this.deps.setState(state => ({
+        records: patchThreadRecord(state.records, threadId, { ...tail, narrativeByMessage: {} }),
+      }));
+    }
     const activeThreadId = this.deps.getState().currentThreadId;
     if (activeThreadId) {
       const activeRecord = getThreadRecord(this.deps.getState().records, activeThreadId);
@@ -896,7 +904,7 @@ export class ThreadHydrator {
       if (latest.currentThreadId === threadId) return {};
       if (latest.runningThreadIds.has(threadId)) {
         return {
-          records: patchThreadRecord(latest.records, threadId, cached),
+          records: patchThreadRecord(latest.records, threadId, compactConversationTail(cached)),
         };
       }
       return {
