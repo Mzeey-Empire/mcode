@@ -284,7 +284,8 @@ A mounted hidden transcript holds a display lease through
 An open [transcript-tier subagent tab](../../../apps/web/src/features/subagents/detail/SubagentDetailTab.tsx)
 uses the same lease mechanism. Leases are reference counted, so closing one
 view cannot release a conversation that another view still displays. Selection
-and display leases both protect resident content. A non-selected transcript can
+and display leases both protect resident content from pressure compaction. Pressure
+compacts unselected running stores only when they have no display lease. A non-selected transcript can
 still have a mounted view.
 
 Subscriptions prioritize the selected thread, then leased conversations, then

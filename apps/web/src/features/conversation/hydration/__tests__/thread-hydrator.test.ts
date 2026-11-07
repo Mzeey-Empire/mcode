@@ -27,6 +27,7 @@ import {
   projectConversationCacheState,
   getConversationCacheUsage,
   CONVERSATION_MEMORY_BUDGETS,
+  setActiveConversation,
 } from "../record-cache";
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import {
@@ -89,8 +90,9 @@ function cacheRecord(threadId: string, record: ThreadRecord): void {
 }
 
 /** Build a hydrator wired to the live threadStore for integration-style tests. */
-function createStoreHydrator(): ThreadHydrator {
+function createStoreHydrator(isDisplayConversationVisible = (_threadId: string) => false): ThreadHydrator {
   return createThreadHydrator({
+    isDisplayConversationVisible,
     getTransport: () => getTransport(),
     getState: () => useThreadStore.getState(),
     setState: (partial) => useThreadStore.setState(partial as never),
@@ -248,6 +250,65 @@ describe("ThreadHydrator", () => {
       expect(getTestActiveMessages().at(-1)?.id).toBe(`${id}-400`);
       await hydrator.hydrate("D", "active");
       await vi.advanceTimersByTimeAsync(40);
+    }
+  });
+
+  it.each(["warning", "critical"] as const)("preserves a displayed subagent's rows and narrative under %s pressure", async (level) => {
+    hydrator = createStoreHydrator(id => id === "child");
+    const messages = Array.from({ length: 100 }, (_, row) => createMockMessage({
+      id: `child-${row}`, thread_id: "child", sequence: row + 1,
+    }));
+    const narrativeByMessage = Object.fromEntries(messages.slice(50).map(message => [message.id, {
+      tools: [], hooks: [], approvals: [], thoughts: [{
+        id: `${message.id}-thought`, message_id: message.id, text: "resident thought",
+        started_at: message.timestamp, ended_at: null, sort_order: 0,
+      }],
+    }]));
+    resetThreadStoreForTests({ currentThreadId: "parent", runningThreadIds: new Set(["child"]), records: new Map([
+      ["child", { ...makeCachedRecord(messages), narrativeByMessage }],
+    ]) });
+    hydrator.applyMemoryPressure(level);
+    expect(useThreadStore.getState().records.get("child")?.messages).toEqual(messages);
+    expect(useThreadStore.getState().records.get("child")?.narrativeByMessage).toEqual(narrativeByMessage);
+  });
+
+  it("keeps all four hidden recent transcripts warm after idle warning pressure", async () => {
+    const kept = new Set<string>();
+    hydrator = createStoreHydrator(id => kept.has(id));
+    const ids = ["K1", "K2", "K3", "K4", "K5"];
+    const server = new Map<string, Message[]>();
+    vi.mocked(mockTransport.loadConversationPage).mockImplementation(async (id, limit = 2, before) => {
+      const eligible = (server.get(id) ?? []).filter(message => before === undefined || message.sequence < before);
+      const messages = eligible.slice(-limit);
+      return { messages, hasMore: eligible.length > messages.length, narrativeByMessage: {} };
+    });
+    for (const id of ids) {
+      const messages = Array.from({ length: 100 }, (_, row) => createMockMessage({
+        id: `${id}-${row + 1}`, thread_id: id, sequence: row + 1, content: "x".repeat(8_000),
+      }));
+      server.set(id, messages);
+      cacheRecord(id, makeCachedRecord(messages));
+      setActiveConversation(id);
+      await hydrator.hydrate(id, "active");
+      kept.add(id);
+      rememberScrollTop(id, 50_000, true);
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    hydrator.applyMemoryPressure("warning");
+    for (const id of ["K4", "K3", "K2", "K1"]) {
+      vi.mocked(mockTransport.loadConversationPage).mockClear();
+      const lengths: number[] = [];
+      const unsubscribe = useThreadStore.subscribe(state => {
+        if (state.currentThreadId === id) lengths.push(state.records.get(id)?.messages.length ?? 0);
+      });
+      setActiveConversation(id);
+      await hydrator.hydrate(id, "active");
+      unsubscribe();
+      expect(lengths[0]).toBe(100);
+      expect(getTestActiveMessages().map(message => message.id)).toEqual(
+        Array.from({ length: 100 }, (_, row) => `${id}-${row + 1}`),
+      );
+      expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
     }
   });
 

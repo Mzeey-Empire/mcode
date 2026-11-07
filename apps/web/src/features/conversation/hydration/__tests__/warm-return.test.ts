@@ -18,7 +18,7 @@ import { cacheRecord, clearRecordCache, projectConversationCacheState } from "..
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 
-it("returns to a retained viewport without shrinking or remounting, positioning it once at the saved offset", async () => {
+it.each([false, true])("returns to a retained viewport without shrinking or remounting, positioning it once at the saved offset (pressure: %s)", async (pressure) => {
   vi.useFakeTimers();
   clearRecordCache();
   clearScrollMemory();
@@ -64,6 +64,7 @@ it("returns to a retained viewport without shrinking or remounting, positioning 
   });
   const plans = usePlanStore.getState();
   const hydrator = createThreadHydrator({
+    isDisplayConversationVisible: threadId => threadId === "warm",
     getTransport: () => mockTransport,
     getState: useThreadStore.getState,
     setState: partial => useThreadStore.setState(state => typeof partial === "function" ? partial(state) : partial),
@@ -81,6 +82,7 @@ it("returns to a retained viewport without shrinking or remounting, positioning 
     getWorkspaceThreadSettings: () => ({ permissionMode: "full", interactionMode: "build" }),
   });
   onTestFinished(() => hydrator.invalidateConversation("warm"));
+  if (pressure) await act(async () => { hydrator.applyMemoryPressure("warning"); });
   await act(async () => {
     useWorkspaceStore.setState({ activeThreadId: "warm" });
     await hydrator.hydrate("warm", "active");

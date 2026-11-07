@@ -565,8 +565,11 @@ export class ThreadHydrator {
 
   /** Apply cache pressure and project a critically trimmed active window into live state. */
   applyMemoryPressure(level: "warning" | "critical"): void {
-    for (const [threadId, record] of this.deps.getState().records) {
-      if (threadId === this.deps.getState().currentThreadId) continue;
+    const state = this.deps.getState();
+    for (const threadId of state.runningThreadIds) {
+      if (threadId === state.currentThreadId || this.deps.isDisplayConversationVisible?.(threadId)) continue;
+      const record = state.records.get(threadId);
+      if (!record) continue;
       const tail = compactConversationTail(projectConversationCacheState(record));
       this.deps.setState(state => ({
         records: patchThreadRecord(state.records, threadId, { ...tail, narrativeByMessage: {} }),
@@ -841,9 +844,14 @@ export class ThreadHydrator {
   }
 
   private restoreActiveCache(threadId: string, opts: ThreadHydratorOptions | undefined): boolean {
-    const cached = getCachedRecord(threadId);
-    if (!cached || opts?.force || !hasCommittedWindow(cached)) return false;
     const resident = this.deps.getState().records.get(threadId);
+    // Pressure may evict the cache copy while a mounted transcript still owns its window.
+    const cached = getCachedRecord(threadId) ?? (
+      resident && this.deps.isDisplayConversationVisible?.(threadId)
+        ? projectConversationCacheState(resident)
+        : undefined
+    );
+    if (!cached || opts?.force || !hasCommittedWindow(cached)) return false;
     this.restoreCachedActive(threadId, resident ? mergeResidentConversationCacheState(resident, cached) : cached, opts);
     return true;
   }
