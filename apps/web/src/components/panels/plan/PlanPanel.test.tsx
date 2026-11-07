@@ -354,9 +354,8 @@ describe("PlanPanel", () => {
       const SOURCE = "thread-worktree-source";
       const TARGET = "thread-worktree-target";
 
-      function seedThreads(isGitRepo = true): void {
+      function seedThreads(): void {
         useWorkspaceStore.setState({
-          workspaces: [createMockWorkspace({ id: "workspace-1", is_git_repo: isGitRepo })],
           threads: [
             createMockThread({ id: SOURCE, workspace_id: "workspace-1" }),
             createMockThread({ id: TARGET, workspace_id: "workspace-1", mode: "worktree", worktree_path: "F:\\repo\\.mcode\\worktrees\\main-4f3a2b1c" }),
@@ -412,7 +411,7 @@ describe("PlanPanel", () => {
 
       it("offers neither the item nor the command outside a git repository", async () => {
         startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
-        seedThreads(false);
+        seedThreads();
         getReviewState.mockResolvedValue({ isGitRepo: false });
         const hook = renderHook(() => usePlanCommands(SOURCE));
         render(<PlanPanel threadId={SOURCE} />);
@@ -422,6 +421,21 @@ describe("PlanPanel", () => {
         expect(screen.queryByRole("menuitem", { name: /in a new worktree/ })).toBeNull();
         expect(getCommand("plan.implementInNewWorktree")).toBeUndefined();
         expect(getCommand("plan.implementInNewThread")).toBeDefined();
+        hook.unmount();
+      });
+
+      // A worktree folder deleted outside Mcode leaves the workspace flagged as
+      // git. Only the failed read of the checkout shows the command cannot run.
+      it("leaves the command out when the source checkout cannot be read", async () => {
+        startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]);
+        seedThreads();
+        useWorkspaceStore.setState({ workspaces: [createMockWorkspace({ id: "workspace-1", is_git_repo: true })] });
+        getReviewState.mockRejectedValue(new Error("Worktree folder is missing"));
+        const hook = renderHook(() => usePlanCommands(SOURCE));
+
+        await waitFor(() => expect(getCommand("plan.implementInNewThread")).toBeDefined());
+        await act(async () => {});
+        expect(getCommand("plan.implementInNewWorktree")).toBeUndefined();
         hook.unmount();
       });
 
@@ -438,14 +452,15 @@ describe("PlanPanel", () => {
       });
 
       // The hook runs for every selected thread, so a read here spawns git on
-      // every switch, and waiting for one would show the command late.
-      it("registers the worktree command as the plan becomes implementable, without reading the checkout", () => {
+      // every switch even though only an implementable plan needs the answer.
+      it("reads the checkout only once a version becomes implementable", async () => {
         seedThreads();
         const hook = renderHook(() => usePlanCommands(SOURCE));
+        expect(getReviewState).not.toHaveBeenCalled();
 
         act(() => startInPlan(SOURCE, [makePlan(2, { id: READY_ID })]));
-        expect(getCommand("plan.implementInNewWorktree")?.title).toBe("Implement v2 in a new worktree");
-        expect(getReviewState).not.toHaveBeenCalled();
+        await waitFor(() => expect(getCommand("plan.implementInNewWorktree")?.title).toBe("Implement v2 in a new worktree"));
+        expect(getReviewState).toHaveBeenCalledTimes(1);
         hook.unmount();
       });
 
