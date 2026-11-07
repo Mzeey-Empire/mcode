@@ -11,9 +11,9 @@ const RESUME_BELOW = 128;
 /**
  * Providers whose text, reasoning and tool-input fragments are shown live and checkpointed instead of saved
  * one by one. Live delivery rolls out one provider at a time so each provider's save cost and crash bound are
- * measured alone; Copilot keeps saving every fragment until its replay guard is proven.
+ * measured alone. Copilot guards native fragment replays before mapping them.
  */
-const LIVE_DELIVERY_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "devin", "cursor", "opencode"]);
+const LIVE_DELIVERY_PROVIDERS: ReadonlySet<ProviderId> = new Set(["claude", "devin", "cursor", "opencode", "copilot"]);
 /**
  * Native replays arrive close to their original, so dedupe needs only recent identities.
  * A long Claude turn streams one identity per thinking or text delta, far past this window.
