@@ -1,0 +1,46 @@
+name: Runner Pool
+
+# Rewrites CI_RUNNER_POOL, the runner providers ci.yml rotates PRs across, so
+# Avrea and Blacksmith stay inside their free monthly minutes.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  # Two passes at once would both start from the same saved tally and lose one update.
+  group: runner-pool
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update runner pool
+    runs-on: ubuntu-24.04
+    # The first pass reads every run so far this month (12 minutes on 9 November)
+    # and saves nothing if it times out, so it gets far more time than later
+    # passes, which read only new runs.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/agent
+
+      # The workflow token cannot write repository variables, so mze-bot does.
+      # It needs Actions read on the organization's repositories (to read job
+      # records) and Variables write here. No permission inputs are set,
+      # because the action has none for Variables and setting any would drop it.
+      - name: Generate bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Tally free minutes and write the pool
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        run: node scripts/agent/runner-pool.mjs --repo "${{ github.repository }}" --apply
