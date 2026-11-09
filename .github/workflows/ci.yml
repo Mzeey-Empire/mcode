@@ -6,9 +6,15 @@ on:
   # Nightly Main Tests dispatches this on main when main has moved, to answer
   # whether main passes its tests. A dispatched run runs only the test suites.
   workflow_dispatch:
+    inputs:
+      provider:
+        description: Runner provider for this run (blacksmith, github, avrea, instabox or round-robin); empty uses CI_LINUX_RUNNER
+        type: string
+        default: ""
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The provider is part of the key so dispatches on different providers don't cancel each other.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.provider }}
   cancel-in-progress: true
 
 env:
@@ -53,10 +59,12 @@ jobs:
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "Markdown-only change: $docs_only ($listed of $expected files listed)" >> "$GITHUB_STEP_SUMMARY"
 
-  # Splits PR checks between paid Blacksmith runners and free GitHub-hosted
-  # runners by PR number parity, so each PR stays on one provider and keeps
-  # warm caches. Set the CI_LINUX_RUNNER repository variable to `blacksmith`
-  # or `github` to pin every PR to one provider.
+  # Rotates PR checks by PR number across CI_RUNNER_POOL, the providers that
+  # still have free minutes. runner-pool.yml rewrites the pool every 30 minutes
+  # and always keeps `github` in it, so a PR never waits on an exhausted
+  # provider. Set the CI_LINUX_RUNNER repository variable to `blacksmith`,
+  # `github`, `avrea` or `instabox` to pin every PR to one provider. A
+  # dispatched run can override it with the `provider` input.
   pick-runner:
     name: Pick Runner
     runs-on: ubuntu-24.04
@@ -67,30 +75,47 @@ jobs:
     steps:
       - id: pick
         env:
-          MODE: ${{ vars.CI_LINUX_RUNNER || 'round-robin' }}
+          MODE: ${{ inputs.provider || vars.CI_LINUX_RUNNER || 'round-robin' }}
           # A dispatched run has no PR, so its run number picks the provider.
           PR_NUMBER: ${{ github.event.pull_request.number || github.run_number }}
+          # Unset until runner-pool.yml first runs, and absent for fork PRs; GitHub alone is always safe.
+          POOL: ${{ vars.CI_RUNNER_POOL || 'github' }}
         run: |
           set -euo pipefail
           case "$MODE" in
-            blacksmith) provider=blacksmith ;;
-            github) provider=github ;;
+            blacksmith|github|avrea|instabox) provider=$MODE ;;
             round-robin)
-              if [ $((PR_NUMBER % 2)) -eq 0 ]; then provider=blacksmith; else provider=github; fi ;;
+              IFS=, read -ra pool <<< "$POOL"
+              provider=${pool[$((PR_NUMBER % ${#pool[@]}))]}
+              case "$provider" in
+                blacksmith|github|avrea) ;;
+                *)
+                  echo "::error::CI_RUNNER_POOL holds unknown provider '$provider': '$POOL'"
+                  exit 1 ;;
+              esac ;;
             *)
-              echo "::error::CI_LINUX_RUNNER must be blacksmith, github or round-robin, got '$MODE'"
+              echo "::error::CI_LINUX_RUNNER must be blacksmith, github, avrea, instabox or round-robin, got '$MODE'"
               exit 1 ;;
           esac
-          if [ "$provider" = blacksmith ]; then
-            small=blacksmith-2vcpu-ubuntu-2404
-            large=blacksmith-4vcpu-ubuntu-2404
-          else
-            small=ubuntu-24.04
-            large=ubuntu-24.04
-          fi
+          case "$provider" in
+            blacksmith)
+              small=blacksmith-2vcpu-ubuntu-2404
+              large=blacksmith-4vcpu-ubuntu-2404 ;;
+            avrea)
+              # Larger Avrea runners draw free minutes faster in proportion to their price.
+              small=avrea-ubuntu-latest-2-vcpu
+              large=avrea-ubuntu-latest-4-vcpu ;;
+            instabox)
+              # The free plan runs one 4 vCPU machine at a time, so these jobs queue one after another.
+              small=instabox-medium
+              large=instabox-medium ;;
+            *)
+              small=ubuntu-24.04
+              large=ubuntu-24.04 ;;
+          esac
           echo "small=$small" >> "$GITHUB_OUTPUT"
           echo "large=$large" >> "$GITHUB_OUTPUT"
-          echo "PR #$PR_NUMBER ($MODE) runs on $provider: $small, $large" >> "$GITHUB_STEP_SUMMARY"
+          echo "PR #$PR_NUMBER ($MODE, pool $POOL) runs on $provider: $small, $large" >> "$GITHUB_STEP_SUMMARY"
 
   typecheck:
     name: Typecheck
