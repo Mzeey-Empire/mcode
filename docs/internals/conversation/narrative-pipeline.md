@@ -202,9 +202,16 @@ that must observe it: a saved operation, a control or durable command, a
 lost-worker interruption, steer, a plan answer, a save wait, reconnect
 recovery, or close. Live pieces still take
 worker ordinals, so a saved operation names the saved ordinal it follows
-rather than assuming the previous one. Because the client's position never
-moves for live pieces, a restart that drops an unsaved second of them reports
-no loss. See
+rather than assuming the previous one. A hard server death (crash, kill, out of
+memory) can still drop up to one second of unsaved live text. Live pieces do
+not move the client's position, so the client's reconnect cursor says so
+instead with `liveShown`: it showed live text after its accepted position, which
+the client knows because a live frame is shown only at the position it names.
+The server reports loss only when nothing after that position was saved and
+the turn of the last saved event was ended by restart recovery. The claim can
+raise the loss notice; it never supplies text. This covers a server death while
+the client stays open. If the client dies too, nobody remembers the live text,
+and the loss stays silent. See
 [`accepted-live-delivery`](../../../apps/server/src/features/agents/canonical/accepted-live-delivery.ts).
 
 Retention limits apply to unsaved work, not the whole tool history. Completion
