@@ -197,6 +197,7 @@ vi.mock("@/components/chat/cli-error", () => ({
 
 import { useWorkspaceStore, type QueuedMessageParts } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { shownLiveFrames } from "@/stores/thread-store/shown-live-frames";
 
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { useToastStore } from "@/stores/toastStore";
@@ -1806,6 +1807,27 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledExactlyOnceWith({
       threadIds: ["thread-1"], revisions: { "thread-1": { conversationRevision: 14, rosterRevision: 3 } },
       progressCursors: { "thread-1": { epoch: "parent-epoch", sequence: 40, ownerThreadId: "parent-thread" } },
+    }));
+  });
+
+  it.each([
+    { shownAfter: 40, liveShown: true },
+    { shownAfter: 39, liveShown: false },
+  ])("tells the server about live text shown after its cursor ($shownAfter -> $liveShown)", async ({ shownAfter, liveShown }) => {
+    const setThreadSubscriptions = enableAtomicSubscriptionTransport();
+    onTestFinished(() => shownLiveFrames.reset());
+    shownLiveFrames.remember({ phase: "live", threadId: "thread-1", epoch: "runtime-epoch", after: shownAfter, liveSequence: 1, events: [] });
+    const emptyRecord = createEmptyThreadRecord();
+    const record = { ...emptyRecord, canonicalAgent: { ...emptyRecord.canonicalAgent,
+      revision: { conversationRevision: 14, rosterRevision: 3 },
+      progress: { epoch: "runtime-epoch", acceptedThrough: 40, savedThrough: 40, retained: [] },
+    } };
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1", activeRecord: record,
+      records: new Map([["thread-1", record]]) });
+    render(<ChatView />);
+    await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledExactlyOnceWith({
+      threadIds: ["thread-1"], revisions: { "thread-1": { conversationRevision: 14, rosterRevision: 3 } },
+      progressCursors: { "thread-1": { epoch: "runtime-epoch", sequence: 40, ...(liveShown ? { liveShown: true } : {}) } },
     }));
   });
 

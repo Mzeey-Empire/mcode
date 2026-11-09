@@ -7,7 +7,7 @@ type LiveFrame = Extract<CanonicalAgentProgressFrame, { phase: "live" }>;
  * the replica: keeping it in the replica would cost a store update for every streamed piece.
  */
 export class ShownLiveFrames {
-  private readonly shown = new Map<string, { readonly epoch: string; readonly liveSequence: number }>();
+  private readonly shown = new Map<string, { readonly epoch: string; readonly liveSequence: number; readonly after: number }>();
 
   /** False for a frame resent or reordered behind one already shown for its thread in the same epoch. */
   isNew(frame: LiveFrame): boolean {
@@ -17,7 +17,17 @@ export class ShownLiveFrames {
 
   /** Record a frame once its pieces are shown. */
   remember(frame: LiveFrame): void {
-    this.shown.set(frame.threadId, { epoch: frame.epoch, liveSequence: frame.liveSequence });
+    this.shown.set(frame.threadId, { epoch: frame.epoch, liveSequence: frame.liveSequence, after: frame.after });
+  }
+
+  /**
+   * True when live text shown for the thread still follows the given accepted position. A live frame is shown only
+   * at the position it names, and the checkpoint that saves its text is accepted after it, so once the position
+   * moves on, the text shown before has been replaced by accepted text.
+   */
+  showedAfter(threadId: string, epoch: string, acceptedThrough: number): boolean {
+    const last = this.shown.get(threadId);
+    return last?.epoch === epoch && last.after === acceptedThrough;
   }
 
   /** Drop a cleared thread's watermark. */
