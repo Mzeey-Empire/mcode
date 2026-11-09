@@ -58,14 +58,28 @@ function copyProperties(properties: Properties): Properties {
  * Deep copy of a hast tree: every node, property bag, class list, data bag and position is new,
  * so no edit to the copy can reach the original. About 1 µs for a 1k-character message, against
  * about 40 µs for `structuredClone` and 500 µs for a parse.
+ *
+ * @throws DOMException `DataCloneError` when a plugin left a function or other uncloneable value in `data`.
  */
 export function copyMarkdownTree<T extends Nodes>(node: T): T {
   const copy = { ...node };
   if (node.position) copy.position = { start: { ...node.position.start }, end: { ...node.position.end } };
-  if (node.data) copy.data = { ...node.data };
+  // Plugins may put any value in `data`, including nested objects, Maps and Dates, so only a full
+  // clone keeps a mount's edits out of the stored tree. Most nodes carry no data, so this stays cheap.
+  if (node.data) copy.data = structuredClone(node.data);
   if (copy.type === "element") copy.properties = copyProperties(copy.properties);
   if ("children" in copy) copy.children = copy.children.map((child) => copyMarkdownTree(child));
   return copy;
+}
+
+function copyCacheableTree(tree: Root): Root | null {
+  try {
+    return copyMarkdownTree(tree);
+  } catch (error) {
+    // A tree whose data cannot be copied safely is parsed on every mount instead of being shared.
+    if (error instanceof DOMException && error.name === "DataCloneError") return null;
+    throw error;
+  }
 }
 
 // The cached tree has already been through react-markdown's URL rewrite, so replaying it must
@@ -116,8 +130,8 @@ export class MarkdownTreeCache {
     // stored only once the render has finished. This mount's components have not run yet but will
     // receive `parsed`, so the cache keeps a private copy.
     if (admit && parsed) {
-      const tree = copyMarkdownTree(parsed);
-      this.store(content, { remarkPlugins, tree, bytes: estimateMarkdownTreeBytes(tree, content) });
+      const tree = copyCacheableTree(parsed);
+      if (tree) this.store(content, { remarkPlugins, tree, bytes: estimateMarkdownTreeBytes(tree, content) });
     }
     return element;
   }

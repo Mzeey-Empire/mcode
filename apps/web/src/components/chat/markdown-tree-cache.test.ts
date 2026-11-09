@@ -1,4 +1,5 @@
-import type { Root } from "hast";
+import type { Element, ElementData, Root } from "hast";
+import type { Root as MdastRoot } from "mdast";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import Markdown, { type Components, type UrlTransform } from "react-markdown";
@@ -6,6 +7,13 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { copyMarkdownTree, estimateMarkdownTreeBytes, MarkdownTreeCache, type MarkdownRemarkPlugins } from "./markdown-tree-cache";
+
+declare module "hast" {
+  interface ElementData {
+    review?: unknown;
+    onClick?: unknown;
+  }
+}
 
 let parses = 0;
 const countParses = () => () => {
@@ -153,4 +161,60 @@ describe("MarkdownTreeCache", () => {
     expect(copy).toEqual(original);
     expect(leaked).toEqual([]);
   });
+
+  it("keeps a stored tree's plugin data intact when a later mount edits every nested value", () => {
+    const remarkPlugins: MarkdownRemarkPlugins = [decorateFirstParagraph(pluginData), countParses];
+    const cache = cacheWith();
+    const draw = (edit: boolean) => renderToStaticMarkup(cache.render({
+      content: "plugin data", remarkPlugins, admit: true,
+      components: { span: ({ node, children }) => {
+        expect(node?.data).toEqual(pluginData());
+        if (edit) editEveryValue(node);
+        return createElement("span", null, children);
+      } },
+    }));
+
+    expect(draw(false)).toBe("<p><span>original</span></p>");
+    expect(draw(true)).toBe("<p><span>original</span></p>");
+    expect(draw(false)).toBe("<p><span>original</span></p>");
+    expect(parses).toBe(1);
+  });
+
+  it("parses again instead of storing a tree whose plugin data cannot be copied", () => {
+    const remarkPlugins: MarkdownRemarkPlugins = [decorateFirstParagraph(() => ({ onClick: () => undefined })), countParses];
+    const cache = cacheWith();
+    const draw = () => renderToStaticMarkup(cache.render({ content: "uncloneable", remarkPlugins, admit: true, components }));
+
+    expect(draw()).toBe("<p><span>original</span></p>");
+    expect(draw()).toBe("<p><span>original</span></p>");
+    expect(parses).toBe(2);
+  });
 });
+
+function pluginData(): ElementData {
+  return { review: { tokens: [{ value: "original" }], map: new Map([["token", { value: "original" }]]),
+    set: new Set(["original"]), date: new Date(12345) } };
+}
+
+/** A remark plugin that hands its own hast node, carrying `data`, to the first paragraph. */
+function decorateFirstParagraph(data: () => ElementData) {
+  return () => (tree: MdastRoot) => {
+    const paragraph = tree.children[0];
+    if (!paragraph) throw new Error("missing paragraph");
+    const span: Element = { type: "element", tagName: "span", properties: {}, data: data(),
+      children: [{ type: "text", value: "original" }] };
+    paragraph.data = { hChildren: [span] };
+  };
+}
+
+function editEveryValue(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  for (const child of Object.values(value)) editEveryValue(child);
+  if (value instanceof Map) {
+    for (const child of value.values()) editEveryValue(child);
+    value.set("edited", "edited");
+  }
+  if (value instanceof Set) value.add("edited");
+  if (value instanceof Date) value.setTime(0);
+  Object.defineProperty(value, "edited", { value: true, enumerable: true, configurable: true });
+}
