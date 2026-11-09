@@ -1,6 +1,6 @@
 import { isHiddenPlanFenceLanguage } from "@/lib/plan-fences";
-import { memo, useMemo, lazy, Suspense } from "react";
-import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
+import { memo, useMemo, useState, lazy, Suspense } from "react";
+import { defaultUrlTransform, type Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { Globe } from "lucide-react";
@@ -18,6 +18,7 @@ import {
 } from "@/features/preview/navigation/open-url-in-preview";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { EntityToken, type EntityKind } from "./EntityToken";
+import { MarkdownTreeCache } from "./markdown-tree-cache";
 
 /** Pass through workspace preview URLs; otherwise use react-markdown's default sanitizer. */
 function markdownUrlTransform(value: string): string {
@@ -48,6 +49,10 @@ interface MarkdownContentProps {
 /** GFM for assistant bubbles; user bubbles also enable single-newline line breaks. */
 const ASSISTANT_REMARK_PLUGINS = [remarkGfm];
 const USER_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+
+// Holds the visible messages of recent thread views (about 180 prose messages of 1k characters)
+// in at most 4 MiB of estimated heap.
+const markdownTreeCache = new MarkdownTreeCache(markdownUrlTransform, { maxEntries: 256, maxBytes: 4 * 1024 * 1024 });
 
 /** Lazy-loaded MermaidBlock - only fetched when a mermaid fence is encountered. */
 const LazyMermaidBlock = lazy(() => import("./MermaidBlock"));
@@ -566,12 +571,11 @@ export const MarkdownContent = memo(function MarkdownContent({
   );
 
   const remarkPlugins = variant === "user" ? USER_REMARK_PLUGINS : ASSISTANT_REMARK_PLUGINS;
+  // Only the text a block mounted with is stored: a remount (thread switch, virtual scroll)
+  // repeats it, while each streamed update replaces the last and would only evict settled trees.
+  const [mountedContent] = useState(content);
 
-  return (
-    <ReactMarkdown remarkPlugins={remarkPlugins} components={components} urlTransform={markdownUrlTransform}>
-      {content}
-    </ReactMarkdown>
-  );
+  return markdownTreeCache.render({ content, remarkPlugins, components, admit: content === mountedContent });
 });
 
 export default MarkdownContent;
