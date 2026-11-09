@@ -539,6 +539,24 @@ describe("ClaudeProvider stream mapping", () => {
     ]);
   });
 
+  it("ends normally with every chunk of a thinking delta too long for one reasoning event, saved once on redelivery", async () => {
+    const thought = `${"a".repeat(65_536)}${"b".repeat(4_464)}`;
+    const delta = { ...streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: thought } }),
+      uuid: "00000000-0000-4000-8000-0000000000d1" };
+    const events = await playStream("mcode-long-thinking", [
+      streamEvent({ type: "message_start", message: { id: "msg_long", usage: {} } }),
+      streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }),
+      delta,
+      delta,
+      streamEvent({ type: "content_block_stop", index: 0 }),
+    ]);
+
+    expect(reasoningAndText(events).map((event) => event.delta).join("")).toBe(thought);
+    const ended = events.filter(({ event }) => event.type === AgentEventType.Ended);
+    expect(ended).toHaveLength(1);
+    expect(ended[0]?.event).not.toMatchObject({ outcome: "errored" });
+  });
+
   it("opens and closes a redacted thinking block with no text", async () => {
     const events = await playStream("mcode-redacted", [
       streamEvent({ type: "message_start", message: { id: "msg_redacted", usage: {} } }),

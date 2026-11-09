@@ -791,8 +791,10 @@ export class ClaudeEventMapper {
   private emitThinkingDelta(text: unknown, index: unknown): void {
     const reasoningItemId = typeof index === "number" ? this.reasoningItemByBlock.get(index) : undefined;
     if (!reasoningItemId || typeof text !== "string") return;
-    for (let start = 0; start < text.length; start += MAX_REASONING_DELTA_LENGTH)
-      this.emitReasoningDelta(text.slice(start, start + MAX_REASONING_DELTA_LENGTH), reasoningItemId);
+    for (let start = 0, chunk = 0; start < text.length; start += MAX_REASONING_DELTA_LENGTH, chunk++) {
+      this.emit({ type: AgentEventType.ReasoningDelta, threadId: this.threadId,
+        delta: text.slice(start, start + MAX_REASONING_DELTA_LENGTH), reasoningItemId }, chunk);
+    }
   }
   private emitReasoningDelta(delta: string, reasoningItemId: string, done?: true): void {
     this.emit({
@@ -886,13 +888,14 @@ export class ClaudeEventMapper {
       : { type: AgentEventType.RateLimited, threadId: this.threadId, active: false });
     return "none";
   }
-  private emit(event: AgentEvent): void {
+  /** `chunk` numbers the pieces one native event was split into; each piece needs its own replay identity. */
+  private emit(event: AgentEvent, chunk = 0): void {
     const toolId = "toolCallId" in event ? event.toolCallId : undefined;
     const exactParent = readParentEvidence(this.nativeSource);
     const parent = exactParent.kind === "absent" && toolId
       ? this.toolParents.get(toolId) ?? exactParent : exactParent;
     const sourceIdentities: ProviderIdentity[] = [];
-    const nativeEventId = validIdentity(this.nativeSource.uuid);
+    const nativeEventId = chunkNativeEventId(validIdentity(this.nativeSource.uuid), chunk);
     const nativeItemId = toolId || validIdentity(objectValue(this.nativeSource.message).id);
     if (nativeItemId) sourceIdentities.push({ providerId: "claude", scope: "item", value: nativeItemId, provenance: "native" });
     if (parent.kind === "native") sourceIdentities.push({ providerId: "claude", scope: "parentItem", value: parent.id, provenance: "native" });
@@ -918,6 +921,10 @@ function asyncLaunchId(message: Message, results: readonly Message[]): string | 
 }
 function validIdentity(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 512 ? value : undefined;
+}
+/** The first piece keeps the native id, so events saved before chunking existed keep their replay identity. */
+function chunkNativeEventId(nativeEventId: string | undefined, chunk: number): string | undefined {
+  return nativeEventId && chunk > 0 ? `${nativeEventId}:chunk:${chunk}` : nativeEventId;
 }
 function readParentEvidence(message: Message): ClaudeParentEvidence {
   if (!("parent_tool_use_id" in message)) return { kind: "absent" };
