@@ -981,6 +981,33 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(childAnswer()).toEqual(["first more"]);
     });
 
+    it("saves child text that arrives after its child turn ended on the parent", async () => {
+      await beginChild();
+      await event([childDraft("turnComplete", {})]);
+      await event([childDraft("textDelta", { delta: "late child answer" }, "late-message")]);
+      await progress.waitForSaved(execution.threadId);
+      expect(childAnswer()).toEqual(["first"]);
+      expect(savedParentRuntimeText()).toContain("late child answer");
+    });
+
+    it.runIf(provider === "codex")("saves child text whose delegation is unknown on the parent", async () => {
+      ordinal = 1;
+      await send(1, start(provider));
+      await childPiece("orphaned child answer");
+      await progress.waitForSaved(execution.threadId);
+      expect(Object.values(savedState().items).map((item) => item.payload.projection)).toContain("codexChildRoutingFailure");
+      expect(savedParentRuntimeText()).toContain("orphaned child answer");
+    });
+
+    /** Text deltas saved as raw runtime rows on the parent thread. */
+    function savedParentRuntimeText() {
+      return Object.values(savedState().items).flatMap((item) => {
+        if (item.threadId !== execution.threadId || item.payload.projection !== "providerRuntimeEvent") return [];
+        const { event } = ProviderRuntimeEventSchema().parse(item.payload.runtimeEvent);
+        return event.type === "textDelta" ? [event.delta] : [];
+      });
+    }
+
     async function drainSaves() {
       while (progress.depth().pending > 0) await new Promise((resolve) => setImmediate(resolve));
     }
