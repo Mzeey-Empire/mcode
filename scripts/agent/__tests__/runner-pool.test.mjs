@@ -23,40 +23,37 @@ function createHarness({ runs = [], jobs = new Map(), variables = new Map(), tot
   const stdout = [];
   const stderr = [];
   const notFound = () => Object.assign(new Error("gh failed"), { stderr: "gh: Not Found (HTTP 404)" });
+  const toLines = (rows) => rows.map((row) => JSON.stringify(row)).join("\n");
+
+  const variableCall = (name, method, field) => {
+    if (method === "POST") {
+      variables.set(field("name"), field("value"));
+      writes.push(field("name"));
+      return "";
+    }
+    if (!variables.has(name)) throw notFound();
+    if (method === "GET") return JSON.stringify({ name, value: variables.get(name) });
+    variables.set(name, field("value"));
+    writes.push(name);
+    return "";
+  };
+
+  const listRuns = (endpoint) => {
+    // Every fake run is created on 9 November, so only the 8–9 November window lists them.
+    const from = endpoint.match(/created=([\d-]+)\.\./)[1];
+    return from === "2026-11-08" ? toLines(runs.map((run) => ({ ...run, total: total ?? runs.length }))) : "";
+  };
 
   const gh = (args) => {
     const endpoint = args.find((arg) => /^(repos|orgs)\//.test(arg));
     const method = args.includes("--method") ? args[args.indexOf("--method") + 1] : "GET";
     const field = (key) => args.find((arg) => arg.startsWith(`${key}=`))?.slice(key.length + 1);
-    if (endpoint === "orgs/Mzeey-Empire/repos?per_page=100") {
-      return `${JSON.stringify("mcode")}\n`;
-    }
-    const variable = endpoint.match(/actions\/variables\/(\w+)$/)?.[1];
-    if (variable && method === "GET") {
-      if (!variables.has(variable)) throw notFound();
-      return JSON.stringify({ name: variable, value: variables.get(variable) });
-    }
-    if (variable && method === "PATCH") {
-      if (!variables.has(variable)) throw notFound();
-      variables.set(variable, field("value"));
-      writes.push(variable);
-      return "";
-    }
-    if (endpoint.endsWith("actions/variables") && method === "POST") {
-      variables.set(field("name"), field("value"));
-      writes.push(field("name"));
-      return "";
-    }
-    if (/actions\/runs\?created=/.test(endpoint)) {
-      const from = endpoint.match(/created=([\d-]+)\.\./)[1];
-      // Every fake run is created on 9 November, so only that window lists them.
-      const listed = from <= "2026-11-09" && endpoint.includes("..2026-11-") && from >= "2026-11-08" ? runs : [];
-      return listed.map((run) => JSON.stringify({ ...run, total: total ?? runs.length })).join("\n");
-    }
+    const variable = endpoint.match(/actions\/variables(?:\/(\w+))?$/);
     const runId = endpoint.match(/runs\/(\d+)\/jobs/)?.[1];
-    if (runId) {
-      return (jobs.get(Number(runId)) ?? []).map((entry) => JSON.stringify(entry)).join("\n");
-    }
+    if (endpoint === "orgs/Mzeey-Empire/repos?per_page=100") return toLines(["mcode"]);
+    if (variable) return variableCall(variable[1], method, field);
+    if (/actions\/runs\?created=/.test(endpoint)) return listRuns(endpoint);
+    if (runId) return toLines(jobs.get(Number(runId)) ?? []);
     throw new Error(`Unexpected gh call: ${args.join(" ")}`);
   };
 

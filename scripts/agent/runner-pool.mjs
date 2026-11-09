@@ -194,32 +194,54 @@ export function tallyRepo(gh, org, repo, repoState, used, now) {
 
   for (const run of listRuns(gh, org, repo, now)) {
     nextMaxId = Math.max(nextMaxId, run.id);
-    const counted = attempts[run.id] ?? (pending.has(run.id) || run.id > maxId ? 0 : 1);
+    const counted = countedAttempts(run.id, { maxId, pending, attempts });
     if (run.status !== "completed") {
       if (counted === 0) {
         nextPending.push(run.id);
       }
-      continue;
-    }
-    if (run.run_attempt <= counted) {
-      continue;
-    }
-    const jobs = lines(gh([
-      "api", "--paginate",
-      `repos/${org}/${repo}/actions/runs/${run.id}/jobs?filter=all&per_page=100`,
-      "--jq", ".jobs[] | {labels, run_attempt, runner_name, started_at, completed_at}",
-    ]));
-    for (const job of jobs) {
-      const target = classifyJob(job.labels);
-      if (target && job.run_attempt > counted && job.runner_name && job.started_at && job.completed_at) {
-        used[target.provider] = (used[target.provider] ?? 0) + billedMinutes(job) * target.weight;
+    } else if (run.run_attempt > counted) {
+      addRunMinutes(gh, `repos/${org}/${repo}/actions/runs/${run.id}`, counted, used);
+      if (run.run_attempt > 1) {
+        attempts[run.id] = run.run_attempt;
       }
-    }
-    if (run.run_attempt > 1) {
-      attempts[run.id] = run.run_attempt;
     }
   }
   return { maxId: nextMaxId, pending: nextPending, attempts };
+}
+
+/** How many attempts of a run the tally already holds. */
+function countedAttempts(runId, { maxId, pending, attempts }) {
+  if (attempts[runId] !== undefined) {
+    return attempts[runId];
+  }
+  return pending.has(runId) || runId > maxId ? 0 : 1;
+}
+
+/** Adds the minutes of a run's provider jobs from attempts after `counted`. */
+function addRunMinutes(gh, runEndpoint, counted, used) {
+  const jobs = lines(gh([
+    "api", "--paginate",
+    `${runEndpoint}/jobs?filter=all&per_page=100`,
+    "--jq", ".jobs[] | {labels, run_attempt, runner_name, started_at, completed_at}",
+  ]));
+  for (const job of jobs) {
+    const target = classifyJob(job.labels);
+    if (target && job.run_attempt > counted && ranOnRunner(job)) {
+      used[target.provider] = (used[target.provider] ?? 0) + billedMinutes(job) * target.weight;
+    }
+  }
+}
+
+/** A job that never reached a runner, such as a skipped one, used no minutes. */
+function ranOnRunner(job) {
+  return Boolean(job.runner_name && job.started_at && job.completed_at);
+}
+
+function printTally(io, state, pool) {
+  for (const [provider, allowance] of Object.entries(ALLOWANCE)) {
+    io.stdout(`${provider}: ${state.used[provider] ?? 0} of ${allowance} free minutes used in ${state.month}`);
+  }
+  io.stdout(`${POOL_VARIABLE}=${pool}`);
 }
 
 /** Runs the runner-pool CLI with injectable GitHub, I/O and clock seams. */
@@ -233,11 +255,7 @@ export function main(argv, { gh = defaultGh, io = defaultIo(), now = new Date() 
       state.repos[name] = tallyRepo(gh, org, name, state.repos[name] ?? {}, state.used, now);
     }
     const pool = choosePool(state.used, now).join(",");
-
-    for (const [provider, allowance] of Object.entries(ALLOWANCE)) {
-      io.stdout(`${provider}: ${state.used[provider] ?? 0} of ${allowance} free minutes used in ${state.month}`);
-    }
-    io.stdout(`${POOL_VARIABLE}=${pool}`);
+    printTally(io, state, pool);
     if (!apply) {
       io.stdout("Dry run: no variables were written.");
       return 0;
