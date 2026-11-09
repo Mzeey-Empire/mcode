@@ -728,12 +728,17 @@ export class CanonicalAgentStore {
     return row ? CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelopeJson)).progressPosition : undefined;
   }
 
-  /** Certify the saved watermark of an older generation even after later starts or startup recovery. */
-  savedProgressThrough(threadId: string, epoch: string): number {
-    const row = this.orm.select({ through: sql<number | null>`max(json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.sequence'))` })
+  /**
+   * Certify the saved watermark of an older generation even after later starts or startup recovery, with the turn
+   * of its last saved event. Undefined when the thread saved nothing in that epoch.
+   */
+  savedProgressHead(threadId: string, epoch: string): { readonly sequence: number; readonly turnId: string | null } | undefined {
+    const sequence = sql<number>`json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.sequence')`;
+    const row = this.orm.select({ sequence, turnId: canonicalAgentEvents.turnId })
       .from(canonicalAgentEvents).where(and(eq(canonicalAgentEvents.threadId, threadId),
-        sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.epoch') = ${epoch}`)).get();
-    return row?.through ?? 0;
+        sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.epoch') = ${epoch}`))
+      .orderBy(desc(sequence)).limit(1).get();
+    return row ? { sequence: row.sequence, turnId: row.turnId } : undefined;
   }
 
   /** Hydrate complete already-saved parent history on the writer, without volatile-retention caps. */

@@ -262,9 +262,14 @@ export const SetThreadSubscriptionsSchema = lazySchema(() =>
         context.addIssue({ code: z.ZodIssueCode.custom, message: "threadIds must be unique" });
       }
     }),
-    /** Retained progress cursor from this renderer, including its server epoch. */
+    /**
+     * Retained progress cursor from this renderer, including its server epoch. `liveShown` says the renderer showed
+     * live text after `sequence`; live text has no position of its own, so this is the only way a server that died
+     * before saving it can learn it was lost. It can only raise a loss notice, never supply text.
+     */
     progressCursors: z.record(ThreadSubscriptionIdSchema, AgentProgressPositionSchema.extend({
       ownerThreadId: ThreadSubscriptionIdSchema.optional(),
+      liveShown: z.literal(true).optional(),
     }).strict())
       .superRefine((cursors, context) => {
         if (Object.keys(cursors).length > MAX_THREAD_SUBSCRIPTIONS) {
