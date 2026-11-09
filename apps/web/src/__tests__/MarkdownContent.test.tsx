@@ -590,6 +590,53 @@ describe("MarkdownContent parse reuse", () => {
     expect(markdownParses()).toBe(parsesBefore + 1);
     expect(screen.getByText("Parse reuse draft, revised")).toBeInTheDocument();
   });
+
+  it("keeps a component override's edit to its node out of every later mount", () => {
+    const content = "Parse reuse original paragraph";
+    // The first mount parses and stores the tree; the second replays it. Either one leaking its
+    // node to the store would show that mount's edit in the third.
+    for (const mount of [1, 2]) {
+      const editing = render(
+        <MarkdownContent
+          content={content}
+          componentOverrides={{
+            p: ({ node, children }) => {
+              const text = node?.children[0];
+              if (text?.type === "text") text.value = `edited by mount ${mount}`;
+              return <p>{children}</p>;
+            },
+          }}
+        />,
+      );
+      expect(editing.container.textContent).toBe(content);
+      editing.unmount();
+    }
+
+    const plain = render(<MarkdownContent content={content} />);
+
+    expect(plain.container.textContent).toBe(content);
+  });
+
+  it("renders a link again after an override froze the link node's properties", () => {
+    const content = "[Parse reuse frozen link](https://example.com/frozen)";
+    for (let mount = 0; mount < 2; mount += 1) {
+      render(
+        <MarkdownContent
+          content={content}
+          componentOverrides={{
+            a: ({ node, href, children }) => {
+              if (node) Object.freeze(node.properties);
+              return <a href={href}>{children}</a>;
+            },
+          }}
+        />,
+      ).unmount();
+    }
+
+    render(<MarkdownContent content={content} />);
+
+    expect(screen.getByText("Parse reuse frozen link")).toBeInTheDocument();
+  });
 });
 
 describe("MarkdownContent inline code double-click", () => {

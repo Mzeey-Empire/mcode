@@ -5,7 +5,7 @@ import Markdown, { type Components, type UrlTransform } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { beforeEach, describe, expect, it } from "vitest";
-import { estimateMarkdownTreeBytes, MarkdownTreeCache, type MarkdownRemarkPlugins } from "./markdown-tree-cache";
+import { copyMarkdownTree, estimateMarkdownTreeBytes, MarkdownTreeCache, type MarkdownRemarkPlugins } from "./markdown-tree-cache";
 
 let parses = 0;
 const countParses = () => () => {
@@ -129,5 +129,28 @@ describe("MarkdownTreeCache", () => {
 
     // Retained heap follows node count, so a char-only estimate would let tables overrun the bound.
     expect(tableBytes).toBeGreaterThan(proseBytes * 4);
+  });
+
+  it("copies a tree without sharing any object or array with the original", () => {
+    const original = parse(RICH);
+    const shared = new Set<object>();
+    const collect = (value: unknown): void => {
+      if (typeof value !== "object" || value === null) return;
+      shared.add(value);
+      for (const nested of Object.values(value)) collect(nested);
+    };
+    collect(original);
+    const leaked: unknown[] = [];
+    const check = (value: unknown): void => {
+      if (typeof value !== "object" || value === null) return;
+      if (shared.has(value)) leaked.push(value);
+      for (const nested of Object.values(value)) check(nested);
+    };
+
+    const copy = copyMarkdownTree(original);
+    check(copy);
+
+    expect(copy).toEqual(original);
+    expect(leaked).toEqual([]);
   });
 });
