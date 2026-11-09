@@ -2,6 +2,7 @@ import { createMockWorkspace, createMockThread } from "@mcode/contracts/testing"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import Markdown from "react-markdown";
 import { MarkdownContent } from "../components/chat/MarkdownContent";
 import { CodeBlock } from "../components/chat/CodeBlock";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -37,7 +38,17 @@ vi.mock("../components/chat/CodeBlock", () => ({
   )),
 }));
 
+// Passes through to react-markdown so tests can count the renders that parse Markdown source.
+vi.mock("react-markdown", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-markdown")>();
+  return { ...actual, default: vi.fn(actual.default) };
+});
+
 const mockCodeBlock = vi.mocked(CodeBlock);
+
+function markdownParses(): number {
+  return vi.mocked(Markdown).mock.calls.filter(([options]) => options.children).length;
+}
 
 describe("MarkdownContent link handling", () => {
   let mockOpenExternalUrl: ReturnType<typeof vi.fn>;
@@ -541,6 +552,90 @@ describe("mermaid code blocks", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mermaid-block")).toBeInTheDocument();
     });
+  });
+});
+
+describe("MarkdownContent parse reuse", () => {
+  const settled = [
+    "## Parse reuse findings",
+    "See [the docs](https://example.com/docs), [mail](mailto:a@b.c), [bad](javascript:alert(1)) and [page](docs/page.html).",
+    "Run `$impeccable` or `/review` on `src/app.ts`, then open `https://example.com/raw`.",
+    "> quoted <b>raw html</b>",
+    "| a | b |\n|---|---|\n| one | ~~two~~ |",
+    "```ts\nconst reused = true;\n```",
+    "1. first\n2. second",
+  ].join("\n\n");
+
+  // Tooltip triggers take a React useId, which differs on every mount whether or not the parse is reused.
+  const withoutMountIds = (html: string) => html.replace(/id="base-ui-[^"]*"/g, 'id="base-ui"');
+
+  it("renders a remounted message from its stored parse with identical DOM", () => {
+    const first = render(<MarkdownContent content={settled} />);
+    const firstHtml = withoutMountIds(first.container.innerHTML);
+    first.unmount();
+    const parsesBefore = markdownParses();
+
+    const second = render(<MarkdownContent content={settled} />);
+
+    expect(markdownParses()).toBe(parsesBefore);
+    expect(withoutMountIds(second.container.innerHTML)).toBe(firstHtml);
+  });
+
+  it("parses and shows new text when a mounted message's content changes", () => {
+    const { rerender } = render(<MarkdownContent content={"Parse reuse draft"} />);
+    const parsesBefore = markdownParses();
+
+    rerender(<MarkdownContent content={"Parse reuse draft, revised"} />);
+
+    expect(markdownParses()).toBe(parsesBefore + 1);
+    expect(screen.getByText("Parse reuse draft, revised")).toBeInTheDocument();
+  });
+
+  it("keeps a component override's edit to its node out of every later mount", () => {
+    const content = "Parse reuse original paragraph";
+    // The first mount parses and stores the tree; the second replays it. Either one leaking its
+    // node to the store would show that mount's edit in the third.
+    for (const mount of [1, 2]) {
+      const editing = render(
+        <MarkdownContent
+          content={content}
+          componentOverrides={{
+            p: ({ node, children }) => {
+              const text = node?.children[0];
+              if (text?.type === "text") text.value = `edited by mount ${mount}`;
+              return <p>{children}</p>;
+            },
+          }}
+        />,
+      );
+      expect(editing.container.textContent).toBe(content);
+      editing.unmount();
+    }
+
+    const plain = render(<MarkdownContent content={content} />);
+
+    expect(plain.container.textContent).toBe(content);
+  });
+
+  it("renders a link again after an override froze the link node's properties", () => {
+    const content = "[Parse reuse frozen link](https://example.com/frozen)";
+    for (let mount = 0; mount < 2; mount += 1) {
+      render(
+        <MarkdownContent
+          content={content}
+          componentOverrides={{
+            a: ({ node, href, children }) => {
+              if (node) Object.freeze(node.properties);
+              return <a href={href}>{children}</a>;
+            },
+          }}
+        />,
+      ).unmount();
+    }
+
+    render(<MarkdownContent content={content} />);
+
+    expect(screen.getByText("Parse reuse frozen link")).toBeInTheDocument();
   });
 });
 
