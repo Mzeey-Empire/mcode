@@ -3001,6 +3001,97 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await restarted.close();
   });
 
+  describe("live text shown past the last save when the server dies", () => {
+    const known = { conversationRevision: 0, rosterRevision: 0 };
+    const other = { threadId: "other-thread", turnId: "other-turn", executionId: "00000000-0000-4000-8000-000000000126" };
+
+    async function savedText(identity = execution, ordinal = 2) {
+      await send(ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", ordinal - 1, "textDelta", { delta: "Saved prefix", isFinalResponse: true }, identity)] }, identity);
+      await progress.waitForSaved(identity.threadId);
+    }
+
+    /** Shows one live piece and returns the cursor a renderer holds after showing it; no checkpoint runs. */
+    async function showUnsavedLiveText(ordinal = 3) {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      await send(ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [{ ...draft("claude", ordinal - 1, "textDelta", { delta: " unsaved tail", isFinalResponse: true }), delivery: "live" as const }] });
+      const frame = frames().findLast((candidate) => candidate.phase === "live");
+      if (frame?.phase !== "live") throw new Error("Expected a live frame");
+      return { epoch: frame.epoch, sequence: frame.after };
+    }
+
+    /** What startup recovery does after a hard server death: end each unfinished turn as closed by the app. */
+    function restartServer(...identities: (typeof execution)[]) {
+      const store = new CanonicalAgentStore(db, () => {});
+      for (const identity of identities) {
+        expect(store.interruptUnfinishedExecution(identity.executionId, "Server restarted", "app_closed").outcome).toBe("committed");
+      }
+      return new CanonicalAcceptedProgress(new MainCanonicalAgentBoundary(reader, databaseWriter, writer, () => {}), writer);
+    }
+
+    it("reports the loss when the renderer showed live text past the last save", async () => {
+      await send(1, start("claude"));
+      await savedText();
+      const cursor = await showUnsavedLiveText();
+      const restarted = restartServer(execution);
+      expect(restarted.recover(execution.threadId, known, { ...cursor, liveShown: true }).loss).toBe("runtime-restarted");
+      await restarted.close();
+    });
+
+    it("reports no loss when the renderer showed nothing past the last save", async () => {
+      await send(1, start("claude"));
+      await savedText();
+      const cursor = await showUnsavedLiveText();
+      const restarted = restartServer(execution);
+      expect(restarted.recover(execution.threadId, known, cursor).loss).toBe("none");
+      await restarted.close();
+    });
+
+    it("reports no loss when the live text was saved before the server died", async () => {
+      await send(1, start("claude"));
+      await savedText();
+      const cursor = await showUnsavedLiveText();
+      vi.useRealTimers();
+      await progress.waitForSaved(execution.threadId);
+      const restarted = restartServer(execution);
+      expect(restarted.recover(execution.threadId, known, { ...cursor, liveShown: true }).loss).toBe("none");
+      await restarted.close();
+    });
+
+    it("ignores a live claim for a turn that finished before the server died", async () => {
+      await send(1, start("claude"));
+      await savedText();
+      await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 2, "turnComplete")],
+        terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await progress.waitForSaved(execution.threadId);
+      const finished = recovery();
+      const restarted = restartServer();
+      expect(restarted.recover(execution.threadId, known,
+        { epoch: finished.epoch, sequence: finished.savedThrough, liveShown: true }).loss).toBe("none");
+      await restarted.close();
+    });
+
+    it("keeps one thread's unsaved live text from flagging another thread", async () => {
+      insertThread(other.threadId);
+      await send(1, start("claude", other), other, { ...lease, leaseId: "other-lease" });
+      await savedText(other);
+      await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 2, "turnComplete", {}, other)],
+        terminalInput: { ...other, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } },
+      other, { ...lease, leaseId: "other-lease" });
+      await progress.waitForSaved(other.threadId);
+      const otherCut = recovery(other);
+      await send(1, start("claude"));
+      await savedText();
+      const cursor = await showUnsavedLiveText();
+      const restarted = restartServer(execution);
+      expect(restarted.recover(other.threadId, known,
+        { epoch: otherCut.epoch, sequence: otherCut.savedThrough, liveShown: true }).loss).toBe("none");
+      expect(restarted.recover(execution.threadId, known, { ...cursor, liveShown: true }).loss).toBe("runtime-restarted");
+      await restarted.close();
+    });
+  });
+
   it("rejects existing durable command waiters on close and still writes the queued suffix", async () => {
     await send(1, start("codex"));
     holdWrites();

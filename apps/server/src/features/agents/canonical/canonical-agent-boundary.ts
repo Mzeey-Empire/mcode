@@ -135,9 +135,9 @@ export class CanonicalAgentBoundary {
     return this.reader.savedProgressPosition(...args);
   }
 
-  /** Certify the saved watermark of an older generation even after later starts or startup recovery. */
-  savedProgressThrough(...args: Parameters<CanonicalAgentStore["savedProgressThrough"]>): ReturnType<CanonicalAgentStore["savedProgressThrough"]> {
-    return this.reader.savedProgressThrough(...args);
+  /** Certify the saved watermark of an older generation, and the turn of its last saved event. */
+  savedProgressHead(...args: Parameters<CanonicalAgentStore["savedProgressHead"]>): ReturnType<CanonicalAgentStore["savedProgressHead"]> {
+    return this.reader.savedProgressHead(...args);
   }
 
   /** Hydrate complete already-saved parent history on the writer, without volatile-retention caps. */

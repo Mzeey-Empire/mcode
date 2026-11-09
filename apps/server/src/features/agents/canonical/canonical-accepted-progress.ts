@@ -124,6 +124,12 @@ interface ProgressThread {
   features: ReturnType<CanonicalAgentBoundary["loadAcceptedFeatureSeed"]> & { compacting: boolean };
 }
 
+/**
+ * A renderer's reconnect cursor: the last accepted position it holds and, with `liveShown`, that it showed live
+ * text after that position. Untrusted; it can only raise a loss notice.
+ */
+export type RendererProgressCursor = AgentProgressPosition & { readonly ownerThreadId?: string; readonly liveShown?: true };
+
 /** One bounded live owner retains accepted progress after its execution worker releases. */
 export class CanonicalAcceptedProgress {
   private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
@@ -823,8 +829,7 @@ export class CanonicalAcceptedProgress {
   }
 
   /** Read the acknowledged base and retained suffix without touching a stalled writer. */
-  recover(threadId: string, _known: CanonicalAgentRevision,
-    cursor?: AgentProgressPosition & { readonly ownerThreadId?: string }): CanonicalAgentProgressRecovery {
+  recover(threadId: string, _known: CanonicalAgentRevision, cursor?: RendererProgressCursor): CanonicalAgentProgressRecovery {
     const ownerId = this.ownerThreadId(threadId, cursor?.ownerThreadId);
     const thread = this.threads.get(ownerId);
     if (!thread) {
@@ -1050,7 +1055,7 @@ export class CanonicalAcceptedProgress {
       acceptedSequenceByExecution: new Map(Object.entries(state.lastAcceptedSequenceByExecution)), savedPosition });
   }
 
-  private recoverSaved(threadId: string, cursor?: AgentProgressPosition): CanonicalAgentProgressRecovery {
+  private recoverSaved(threadId: string, cursor?: RendererProgressCursor): CanonicalAgentProgressRecovery {
     const durable = this.canonical.recoverThread(threadId, {
       conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
     const head = this.canonical.savedProgressPosition(threadId);
@@ -1061,9 +1066,19 @@ export class CanonicalAcceptedProgress {
       durable, retained: [], loss: this.lostProgress(threadId, cursor) ? "runtime-restarted" : "none" };
   }
 
-  private lostProgress(threadId: string, cursor?: AgentProgressPosition): boolean {
+  private lostProgress(threadId: string, cursor?: RendererProgressCursor): boolean {
     if (!cursor || cursor.epoch.startsWith(`${this.epoch}:`) || cursor.sequence === 0) return false;
-    return this.canonical.savedProgressThrough(threadId, cursor.epoch) < cursor.sequence;
+    const head = this.canonical.savedProgressHead(threadId, cursor.epoch);
+    const savedThrough = head?.sequence ?? 0;
+    if (savedThrough < cursor.sequence) return true;
+    // Live text is never accepted, so its checkpoint is the first event after the cursor. With nothing saved past
+    // the cursor, the text was lost only if the turn it belongs to was still running when the server died.
+    return cursor.liveShown === true && savedThrough === cursor.sequence && this.endedByRestart(head?.turnId);
+  }
+
+  private endedByRestart(turnId: string | null | undefined): boolean {
+    const turn = turnId ? this.canonical.loadTurn(turnId) : null;
+    return turn?.ending?.outcome === "interrupted" && turn.ending.cause === "app_closed";
   }
 
   private publishAccepted(batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>): void {

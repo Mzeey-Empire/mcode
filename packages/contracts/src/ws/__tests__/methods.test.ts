@@ -88,6 +88,23 @@ describe("thread switching WebSocket contracts", () => {
     }).success).toBe(false);
   });
 
+  it.each([
+    { liveShown: true, valid: true },
+    { liveShown: false, valid: false },
+    { liveShown: "yes", valid: false },
+    { liveShown: 1, valid: false },
+  ])("accepts only a raised live-text claim on a progress cursor ($liveShown)", ({ liveShown, valid }) => {
+    const method = WS_METHODS()["push.setThreadSubscriptions"];
+    expect(method.params.safeParse({ threadIds: ["thread-1"],
+      progressCursors: { "thread-1": { epoch: "runtime-epoch", sequence: 4, liveShown } } }).success).toBe(valid);
+  });
+
+  it("rejects a live-text claim that carries text", () => {
+    const method = WS_METHODS()["push.setThreadSubscriptions"];
+    expect(method.params.safeParse({ threadIds: ["thread-1"],
+      progressCursors: { "thread-1": { epoch: "runtime-epoch", sequence: 4, liveShown: true, text: "unsaved tail" } } }).success).toBe(false);
+  });
+
   it("parses structured canonical recovery results", () => {
     const method = WS_METHODS()["push.setThreadSubscriptions"];
     const result = { canonicalRecoveries: [] };

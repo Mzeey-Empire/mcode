@@ -4,6 +4,7 @@ import type { SetThreadSubscriptionsInput, SetThreadSubscriptionsResult } from "
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { recordSubscriptionSkipped } from "@/lib/thread-switch-telemetry";
 import { useThreadStore } from "@/stores/threadStore";
+import { shownLiveFrames } from "@/stores/thread-store/shown-live-frames";
 import { getTransport } from "@/transport";
 import { getConversationResidency } from "../residency/conversation-residency";
 import { readThreadRecord } from "../state";
@@ -111,6 +112,7 @@ function atomicSubscriptionInput(threadIds: string[]): AtomicSubscriptionInput {
     revisions[threadId] = replica.revision;
     if (replica.progress) progressCursors[threadId] = { epoch: replica.progress.epoch, sequence: replica.progress.acceptedThrough,
       ...(replica.ownerThreadId ? { ownerThreadId: replica.ownerThreadId } : {}),
+      ...(shownLiveFrames.showedAfter(threadId, replica.progress.epoch, replica.progress.acceptedThrough) ? { liveShown: true as const } : {}),
     };
   }
   return { input: { threadIds, revisions, ...(Object.keys(progressCursors).length > 0 ? { progressCursors } : {}) }, revisions };
