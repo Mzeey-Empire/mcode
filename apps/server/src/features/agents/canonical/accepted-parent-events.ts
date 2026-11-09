@@ -29,6 +29,8 @@ export function prepareAcceptedParentEvents(input: {
   readonly publicationIds: readonly string[];
   readonly messageSequence: number;
   readonly acceptedAt: string;
+  /** The child observation was not routed, so its raw piece is the only saved copy of the child's text. */
+  readonly childRoutingRejected?: boolean;
 }): { events: CanonicalAgentEventDraft[]; terminalMessage?: Message; storageOperation?: ExecutionSemanticOperation } {
   validateContext(input);
   const prepared = mutationEvents(input);
@@ -64,7 +66,7 @@ function mutationEvents(input: PreparationInput): PreparedEvents {
   switch (mutation.kind) {
     case "append-events":
       assertEventCount(mutation.events.length);
-      return { events: [...mutation.events.filter((draft) => keepsRawEvent(draft, mutation.parentLive)),
+      return { events: [...mutation.events.filter((draft) => keepsRawEvent(draft, mutation.parentLive, input.childRoutingRejected === true)),
         ...liveEffectEvents(input, mutation.parentLive)] };
     case "live-event": return { events: liveEffectEvents(input, mutation) };
     case "narrative-delta": return { events: recoveryEvents(input, mutation.input) };
@@ -74,12 +76,21 @@ function mutationEvents(input: PreparationInput): PreparedEvents {
   }
 }
 
-function keepsRawEvent(draft: CanonicalAgentEventDraft, parentLive: ParentLiveEffects | undefined): boolean {
+function keepsRawEvent(draft: CanonicalAgentEventDraft, parentLive: ParentLiveEffects | undefined,
+  childRoutingRejected: boolean): boolean {
   if (draft.payload.type !== "item.recorded") return true;
   const runtime = ProviderRuntimeEventSchema().safeParse(draft.payload.item.payload.runtimeEvent);
   if (!runtime.success || agentEventDelivery(runtime.data.event) !== "live") return true;
-  // Child observations and parent checkpoints already retain the projection; raw pieces cannot help recovery.
-  return !(draft.delivery === "live" && parentLive) && !isChildRoutedRuntimeEvent(runtime.data.extension);
+  if (draft.delivery === "live" && parentLive) return false;
+  if (!isChildRoutedRuntimeEvent(runtime.data.extension)) return true;
+  // A routed child observation retains the projection; a rejected one keeps only its reason, so a raw piece with text is
+  // the only copy of it. An empty piece has nothing to recover and would otherwise cost one saved item per chunk.
+  return childRoutingRejected && liveEventText(runtime.data.event) !== "";
+}
+
+function liveEventText(event: AgentEvent): string {
+  if (event.type === "toolInputDelta") return event.partialJson;
+  return event.type === "textDelta" || event.type === "reasoningDelta" ? event.delta : "";
 }
 
 function liveEffectEvents(input: PreparationInput, effects: ParentLiveEffects | undefined): CanonicalAgentEventDraft[] {

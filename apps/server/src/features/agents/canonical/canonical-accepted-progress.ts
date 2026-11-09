@@ -294,7 +294,7 @@ export class CanonicalAcceptedProgress {
     const preparedOperation = { ...collaboration.operation, livePublication: publications };
     const publicationIds = publications.map((_, index) => String(thread.publicationSequence + index + 1));
     const prepared = prepareAcceptedParentEvents({ operation: preparedOperation, thread: modelThread, turn, items: thread.state.items,
-      publicationIds, messageSequence: thread.messageSequence, acceptedAt });
+      publicationIds, messageSequence: thread.messageSequence, acceptedAt, childRoutingRejected: collaboration.childRoutingRejected });
     prependObservationEvents(prepared.events, [...collaboration.events, ...features.events]);
     const nextHead = advanceAcceptedExecution(head, operation, prepared.terminalMessage);
     const terminal = acceptedTerminalPersistence(operation, prepared.terminalMessage);

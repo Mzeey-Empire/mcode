@@ -13,15 +13,16 @@ type AcceptedRuntime = { readonly sourceProviderId: ProviderId; readonly event: 
 export function prepareAcceptedCollaboration(state: AgentModelState, operation: ExecutionSemanticOperation,
   previous?: AcceptedCodexCollaboration):
   { readonly operation: ExecutionSemanticOperation; readonly events: readonly CanonicalAgentEventDraft[];
-    readonly candidate?: AcceptedCodexCollaboration } {
+    readonly candidate?: AcceptedCodexCollaboration; readonly childRoutingRejected: boolean } {
   const runtime = singleAcceptedRuntime(acceptedRuntimeEvents(operation));
-  if (!runtime) return { operation, events: [] };
+  if (!runtime) return { operation, events: [], childRoutingRejected: false };
   // A live child piece leaves its records in the previous overlay until the next checkpoint admits them; while the
   // accepted state is unchanged, keep that overlay so the next piece grows the latest record, not the saved one.
   const adapter = previous ? previous.fork(previous.lends(state) ? undefined : state) : new AcceptedCodexCollaboration(state);
   const prepared = prepareRuntimeObservation(adapter, runtime, operation.livePublication);
   return { operation: { ...operation, livePublication: prepared.publications },
-    events: collaborationEvents(operation, prepared.changes, runtime.sourceProviderId), candidate: adapter };
+    events: collaborationEvents(operation, prepared.changes, runtime.sourceProviderId), candidate: adapter,
+    childRoutingRejected: prepared.rejected };
 }
 
 function acceptedRuntimeEvents(operation: ExecutionSemanticOperation): AcceptedRuntime[] {
@@ -48,13 +49,15 @@ function prepareRuntimeObservation(adapter: AcceptedCodexCollaboration, accepted
   fallbackPublications: ExecutionSemanticOperation["livePublication"]): {
     readonly changes: readonly CollaborationObservationChange[];
     readonly publications: ExecutionSemanticOperation["livePublication"];
+    readonly rejected: boolean;
   } {
   const runtime = accepted.event;
-  if (!runtime.extension) return { changes: [], publications: fallbackPublications };
+  if (!runtime.extension) return { changes: [], publications: fallbackPublications, rejected: false };
   if (runtime.extension.kind === "codex-collaboration" && runtime.extension.continuation) throw new Error("Native provider continuation has no supported producer");
   const prepared = adapter.prepare({ providerId: accepted.sourceProviderId, sourceKind: "provider-runtime", event: runtime.event,
     runtimeExtension: runtime.extension });
-  return { changes: prepared.changes.map(observedChange), publications: collaborationPublications(adapter, prepared.projection) };
+  return { changes: prepared.changes.map(observedChange), publications: collaborationPublications(adapter, prepared.projection),
+    rejected: prepared.projection.status === "rejected" };
 }
 
 function collaborationPublications(adapter: AcceptedCodexCollaboration,
