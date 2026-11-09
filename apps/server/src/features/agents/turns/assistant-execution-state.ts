@@ -88,7 +88,8 @@ export class AssistantExecutionState {
       };
     }
     return {
-      content: this.streamingText.trim(),
+      // Save what the stream showed: trimming turns a leading indented code block into a paragraph.
+      content: this.streamingText.trim() ? this.streamingText : "",
       model: fallbackModel,
       attachments: this.bufferedAttachments,
       fromProvider: false,

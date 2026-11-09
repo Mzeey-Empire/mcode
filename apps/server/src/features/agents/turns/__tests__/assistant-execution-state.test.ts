@@ -10,7 +10,7 @@ describe("AssistantExecutionState", () => {
 
     expect(state.getStreamingText()).toBe("  partial answer  ");
     expect(state.materializationInput("fallback-model")).toEqual({
-      content: "partial answer",
+      content: "  partial answer  ",
       model: "fallback-model",
       attachments: [],
       fromProvider: false,
@@ -19,6 +19,13 @@ describe("AssistantExecutionState", () => {
     state.resetStreamingText();
     expect(state.getStreamingText()).toBe("");
     expect(state.hasBufferedBody()).toBe(false);
+  });
+
+  it("saves a streamed answer that opens with an indented code block as code", () => {
+    const state = new AssistantExecutionState();
+    state.appendStreamingText("    npm install\n");
+
+    expect(state.materializationInput(null).content).toBe("    npm install\n");
   });
 
   it("uses the provider message body and merges generated attachments by id", () => {

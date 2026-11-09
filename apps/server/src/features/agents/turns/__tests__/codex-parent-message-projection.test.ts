@@ -109,7 +109,7 @@ describe("CodexParentMessageProjection", () => {
       precedingMessageId: "user-1", fallbackModel: "codex-fallback", narrative: [] });
     expect(terminal).toMatchObject({ fromProvider: false,
       assistant: { messageId: deriveTurnAssistantMessageId(execution.threadId, "user-1"),
-        content: "partial answer", model: "codex-fallback", attachments: [] } });
+        content: "  partial answer  ", model: "codex-fallback", attachments: [] } });
     expect(() => worker.projectTerminal({ execution: { ...execution, turnId: "later-turn" },
       outcome: "completed", endedAt, precedingMessageId: "user-1", fallbackModel: null, narrative: [] }))
       .toThrow(/Stale Codex/);
