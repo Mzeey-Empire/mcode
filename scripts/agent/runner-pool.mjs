@@ -76,10 +76,11 @@ export function classifyJob(labels) {
     return null;
   }
   const provider = label.slice(0, label.indexOf("-"));
-  if (label.includes("macos")) {
-    return { provider, weight: 20 }; // $0.08/min against $0.004/min
-  }
   const vcpus = Number(label.match(/(\d+)-?vcpu/)?.[1] ?? 2);
+  if (label.includes("macos")) {
+    // $0.08/min for up to 8 vCPU against $0.004/min; Avrea's 16 vCPU is $0.16/min.
+    return { provider, weight: 20 * Math.max(1, vcpus / 8) };
+  }
   let weight = Math.max(1, vcpus / 2);
   if (label.includes("windows")) {
     weight *= 2; // $0.008/min for 2 vCPU Windows

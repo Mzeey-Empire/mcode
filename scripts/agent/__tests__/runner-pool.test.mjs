@@ -80,6 +80,7 @@ NodeTest.default("weights each provider job in 2 vCPU Linux minutes and ignores 
   NodeAssertStrict.deepEqual(classifyJob(["avrea-windows-2025-2-vcpu"]), { provider: "avrea", weight: 2 });
   NodeAssertStrict.deepEqual(classifyJob(["avrea-ubuntu-24.04-arm-2-vcpu"]), { provider: "avrea", weight: 3 });
   NodeAssertStrict.deepEqual(classifyJob(["blacksmith-6vcpu-macos-26"]), { provider: "blacksmith", weight: 20 });
+  NodeAssertStrict.deepEqual(classifyJob(["avrea-macos-26-16-vcpu"]), { provider: "avrea", weight: 40 });
 });
 
 NodeTest.default("keeps a provider in the pool only while it is under today's share and the safety margin", () => {
