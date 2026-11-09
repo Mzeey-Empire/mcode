@@ -990,6 +990,18 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(savedParentRuntimeText()).toContain("late child answer");
     });
 
+    it("saves no item for empty child pieces that arrive after its child turn ended", async () => {
+      await beginChild();
+      await event([childDraft("turnComplete", {})]);
+      await progress.waitForSaved(execution.threadId);
+      const itemsBefore = Object.keys(savedState().items).length;
+      for (let index = 0; index < 50; index++) await event([childDraft("textDelta", { delta: "" }, "late-message")]);
+      await event([childDraft("textDelta", { delta: "late" }, "late-message")]);
+      await progress.waitForSaved(execution.threadId);
+      expect(savedParentRuntimeText()).toEqual(["late"]);
+      expect(Object.keys(savedState().items).length - itemsBefore).toBeLessThan(50);
+    });
+
     it.runIf(provider === "codex")("saves child text whose delegation is unknown on the parent", async () => {
       ordinal = 1;
       await send(1, start(provider));

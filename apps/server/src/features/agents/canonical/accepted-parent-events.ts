@@ -82,8 +82,15 @@ function keepsRawEvent(draft: CanonicalAgentEventDraft, parentLive: ParentLiveEf
   const runtime = ProviderRuntimeEventSchema().safeParse(draft.payload.item.payload.runtimeEvent);
   if (!runtime.success || agentEventDelivery(runtime.data.event) !== "live") return true;
   if (draft.delivery === "live" && parentLive) return false;
-  // A routed child observation retains the projection; a rejected one keeps only its reason, so the raw piece stays.
-  return !isChildRoutedRuntimeEvent(runtime.data.extension) || childRoutingRejected;
+  if (!isChildRoutedRuntimeEvent(runtime.data.extension)) return true;
+  // A routed child observation retains the projection; a rejected one keeps only its reason, so a raw piece with text is
+  // the only copy of it. An empty piece has nothing to recover and would otherwise cost one saved item per chunk.
+  return childRoutingRejected && liveEventText(runtime.data.event) !== "";
+}
+
+function liveEventText(event: AgentEvent): string {
+  if (event.type === "toolInputDelta") return event.partialJson;
+  return event.type === "textDelta" || event.type === "reasoningDelta" ? event.delta : "";
 }
 
 function liveEffectEvents(input: PreparationInput, effects: ParentLiveEffects | undefined): CanonicalAgentEventDraft[] {
