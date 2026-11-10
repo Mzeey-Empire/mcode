@@ -64,7 +64,7 @@ export class TurnFileEvidenceLedger {
       }, 10_000);
     });
     const prepared = this.prepare(frozen, capture, facts);
-    entry.collected = Promise.race([prepared, timeout.then((evidence) => ({ evidence, snapshot: null, diff: null }))]).then((result) => {
+    entry.collected = Promise.race([prepared, timeout.then((evidence) => ({ evidence, snapshot: null, diff: entry.observed?.selectedTurnDiff ?? null }))]).then((result) => {
       clearTimeout(timer);
       entry.write = () => this.persist(execution, entry, result);
       void entry.write();

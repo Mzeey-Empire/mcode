@@ -55,10 +55,12 @@ beforeEach(async () => {
 afterEach(() => { ledger?.close(); db?.close(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe("TurnFileEvidenceLedger", () => {
-  it("bounds a wedged capture and discards its late result", async () => {
+  it("bounds a wedged capture, keeps the agent's own diff, and discards the late result", async () => {
     let complete!: (ref: string) => void;
     snapshots.captureRef.mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }));
-    ledger.expect(execution, frozen); ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution);
+    db.run("INSERT INTO messages (id,thread_id,role,content,timestamp,sequence,outcome_execution_id) VALUES ('assistant','thread','assistant','Done','now',1,?)", [execution.executionId]);
+    const selectedTurnDiff = { thread_id: execution.threadId, source: "native" as const, patch: "diff --git a/a.txt b/a.txt\n", revision: 1 };
+    ledger.expect(execution, frozen); ledger.tracked(execution, { ...facts, selectedTurnDiff }); terminal(); ledger.terminalSaved(execution);
     let released = false;
     void ledger.collected(execution).then(() => { released = true; });
     await vi.advanceTimersByTimeAsync(9_999);
@@ -66,8 +68,11 @@ describe("TurnFileEvidenceLedger", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(released).toBe(true);
     expect(evidence()).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: [] });
+    const kept = [{ message_id: "assistant", source: "native", patch: selectedTurnDiff.patch }];
+    expect(db.query("SELECT message_id, source, patch FROM turn_diff_snapshots").all()).toEqual(kept);
     complete("late"); await flush();
     expect(evidence()).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: [] });
+    expect(db.query("SELECT message_id, source, patch FROM turn_diff_snapshots").all()).toEqual(kept);
   });
 
   it("retains provider paths and the agent's own diff when capture fails", async () => {
