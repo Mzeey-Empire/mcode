@@ -12,7 +12,7 @@ import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { gitExitCode } from "../../git/execution/git-failure.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
-import { isLiteralRepoPath } from "../../git/literal-paths.js";
+import { batchLiteralPaths, isLiteralRepoPath } from "../../git/literal-paths.js";
 import { withIndexCopy } from "../../git/temporary-index.js";
 import { rawGit, rawPath, readRawStates, restoreRaw, type RawPathState, type RawRestoreEntry } from "./snapshot-raw-state.js";
 import { blobIdsAt, planCheckout, pinRecovery, withSnapshotIndex } from "./snapshot-checkout.js";
@@ -259,10 +259,49 @@ export class SnapshotService {
         await this.gitExecutor.exec(["-C", cwd, "read-tree", "HEAD"], { timeout, env });
       }
     }, async (env) => {
+      await this.unflagHiddenEntries(cwd, env, timeout);
       await this.gitExecutor.exec(["-C", cwd, "add", "-A"], { timeout, env });
       const { stdout } = await this.gitExecutor.exec(["-C", cwd, "write-tree"], { timeout, env });
       return stdout.trim();
     });
+  }
+
+  /**
+   * `add -A` never reads assume-unchanged or skip-worktree files, so the copied index would keep
+   * their staged blobs over an agent's edit. Sparse checkout owns skip-worktree bits for the files
+   * it removed from disk, so those stay set.
+   */
+  private async unflagHiddenEntries(cwd: string, env: NodeJS.ProcessEnv, timeout: number): Promise<void> {
+    const { stdout } = await this.gitExecutor.exec(["-C", cwd, "ls-files", "-v", "-z"], { timeout, env });
+    const assumed: string[] = [];
+    const skipped: string[] = [];
+    for (const record of stdout.split("\0")) {
+      if (record.length < 3) continue;
+      const tag = record.charAt(0);
+      const path = record.slice(2);
+      if (tag !== tag.toUpperCase()) assumed.push(path);
+      if (tag === "S" || tag === "s") skipped.push(path);
+    }
+    await this.updateIndexFlags(cwd, env, timeout, "--no-assume-unchanged", assumed);
+    if (skipped.length > 0 && !(await this.usesSparseCheckout(cwd, timeout))) {
+      await this.updateIndexFlags(cwd, env, timeout, "--no-skip-worktree", skipped);
+    }
+  }
+
+  private async updateIndexFlags(cwd: string, env: NodeJS.ProcessEnv, timeout: number, flag: string, paths: string[]): Promise<void> {
+    for (const batch of batchLiteralPaths(paths)) {
+      await this.gitExecutor.exec(["-C", cwd, "update-index", flag, "--", ...batch], { timeout, env });
+    }
+  }
+
+  private async usesSparseCheckout(cwd: string, timeout: number): Promise<boolean> {
+    try {
+      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "config", "--type=bool", "--get", "core.sparseCheckout"], { timeout });
+      return stdout.trim() === "true";
+    } catch (error) {
+      if (gitExitCode(error) === 1) return false;
+      throw error;
+    }
   }
 
   private async hasHead(cwd: string, timeout: number): Promise<boolean> {

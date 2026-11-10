@@ -176,6 +176,40 @@ describe("SnapshotService integration", () => {
     expect(git("ls-files", "-u")).toBe(unmerged);
   }, GIT_OPERATION_TIMEOUT_MS);
 
+  it("captures edits to assume-unchanged and skip-worktree files without clearing their real flags", async () => {
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "hidden.txt"), "committed\n");
+    git("add", "hidden.txt");
+    git("-c", "core.hooksPath=", "commit", "-m", "hidden");
+    git("update-index", "--assume-unchanged", "existing.txt");
+    git("update-index", "--skip-worktree", "hidden.txt");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "assumed edit\n");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "hidden.txt"), "skipped edit\n");
+    const flags = git("ls-files", "-v");
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("show", `${ref}:existing.txt`)).toBe("assumed edit");
+    expect(git("show", `${ref}:hidden.txt`)).toBe("skipped edit");
+    expect(git("ls-files", "-v")).toBe(flags);
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("keeps files that sparse checkout removed from disk", async () => {
+    NodeFS.mkdirSync(NodePath.join(tmpDir, "kept"));
+    NodeFS.mkdirSync(NodePath.join(tmpDir, "outside"));
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "kept", "a.txt"), "kept\n");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "outside", "b.txt"), "outside\n");
+    git("add", ".");
+    git("-c", "core.hooksPath=", "commit", "-m", "folders");
+    git("sparse-checkout", "set", "--cone", "kept");
+    expect(NodeFS.existsSync(NodePath.join(tmpDir, "outside"))).toBe(false);
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "kept", "a.txt"), "edited\n");
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("show", `${ref}:kept/a.txt`)).toBe("edited");
+    expect(git("show", `${ref}:outside/b.txt`)).toBe("outside");
+  }, GIT_OPERATION_TIMEOUT_MS);
+
   it("rejects a non-repository folder", async () => {
     const folder = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-no-git-"));
     try {
