@@ -32,19 +32,20 @@ import { routeAgentRpc, type AgentRouterDeps } from "../../transport/agent-rpc.j
 
 const roots: string[] = [];
 const services: ReturnType<typeof createAgentServiceForTest>[] = [];
-const heldStartups: { readonly creating: Promise<unknown>; readonly release: () => void }[] = [];
-
-async function releaseAndJoinHeldStartups(): Promise<void> {
-  const held = heldStartups.splice(0);
-  for (const startup of held) startup.release();
-  await Promise.allSettled(held.map((startup) => startup.creating));
-}
+const heldStartups: {
+  readonly creating: Promise<unknown>;
+  readonly release?: () => void;
+  readonly disposeBackgroundWork?: () => Promise<void>;
+}[] = [];
 
 afterEach(async () => {
-  await releaseAndJoinHeldStartups();
+  const held = heldStartups.splice(0);
+  for (const startup of held) startup.release?.();
+  await Promise.allSettled(held.map((startup) => startup.creating));
   // Each service owns a pool of execution worker threads. Left open, the pools pile up across the file, slow later
   // pool starts, and keep writing after their database closes.
   await Promise.all(services.splice(0).map((service) => drainAgentServicePersistenceForTest(service)));
+  await Promise.allSettled(held.map(async (startup) => await startup.disposeBackgroundWork?.()));
   await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
 });
 
@@ -54,8 +55,8 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
   return { promise, resolve };
 }
 
-async function startedUnlessCreationRejects(started: Promise<void>, creating: Promise<unknown>): Promise<void> {
-  await Promise.race([started, creating.then(() => started)]);
+async function startedUnlessRejected(started: Promise<void>, ...work: Promise<unknown>[]): Promise<void> {
+  await Promise.race([started, ...work.map(async (pending) => { await pending; await started; })]);
 }
 
 function requireThreadCreationOptions(options: Parameters<ThreadService["create"]>[4]) {
@@ -337,14 +338,13 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    const finishSetup = () => setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
-    heldStartups.push({ creating, release: finishSetup });
-    await startedUnlessCreationRejects(setupStarted.promise, creating);
+    heldStartups.push({ creating });
+    await startedUnlessRejected(setupStarted.promise, creating);
     expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
     await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
     expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
 
-    finishSetup();
+    setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
     await expect(creating).resolves.toMatchObject({ id: managed.id });
     await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
     // Dispatch alone leaves the startup waiting for the provider's first frame.
@@ -409,8 +409,8 @@ describe("AgentService.createAndSend defaults", () => {
     heldStartups.push({ creating, release: () => {
       setupCompletion.resolve({ kind: "exited", exitCode: 1, output: "", outputTruncated: false });
       setupRelease.resolve();
-    } });
-    await startedUnlessCreationRejects(setupStarted.promise, creating);
+    }, disposeBackgroundWork: () => automaticSetup.dispose() });
+    await startedUnlessRejected(setupStarted.promise, creating);
     expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
     await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
       threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
@@ -484,8 +484,8 @@ describe("AgentService.createAndSend defaults", () => {
       startupId,
     });
     const releaseAdmission = () => heldAdmission.resolve({ kind: "passthrough" });
-    heldStartups.push({ creating, release: releaseAdmission });
-    await startedUnlessCreationRejects(admissionStarted.promise, creating);
+    heldStartups.push({ creating, release: releaseAdmission, disposeBackgroundWork: () => environment.dispose() });
+    await startedUnlessRejected(admissionStarted.promise, creating, queuedDispatch.promise.then(({ dispatched }) => dispatched));
     expect(goals.routeCommand).toHaveBeenCalledOnce();
     await threadStartups.cancel(startupId);
 
@@ -530,7 +530,7 @@ describe("AgentService.createAndSend defaults", () => {
     });
     const releaseAttachments = () => heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
     heldStartups.push({ creating, release: releaseAttachments });
-    await startedUnlessCreationRejects(attachmentPersistenceStarted.promise, creating);
+    await startedUnlessRejected(attachmentPersistenceStarted.promise, creating);
     expect(attachmentService.persist).toHaveBeenCalledOnce();
     await threadStartups.cancel(startupId);
     await threadStartups.markCancelled(startupId);
