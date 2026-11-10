@@ -32,8 +32,14 @@ import { routeAgentRpc, type AgentRouterDeps } from "../../transport/agent-rpc.j
 
 const roots: string[] = [];
 const services: ReturnType<typeof createAgentServiceForTest>[] = [];
+const heldStartups: { readonly creating: Promise<unknown>; readonly release: () => void }[] = [];
 
 afterEach(async () => {
+  // A test that fails or times out while holding a startup step never releases it. Join those startups before the
+  // services drain, or they write after the database writer closes.
+  const held = heldStartups.splice(0);
+  for (const startup of held) startup.release();
+  await Promise.allSettled(held.map((startup) => startup.creating));
   // Each service owns a pool of execution worker threads. Left open, the pools pile up across the file, slow later
   // pool starts, and keep writing after their database closes.
   await Promise.all(services.splice(0).map((service) => drainAgentServicePersistenceForTest(service)));
@@ -44,6 +50,11 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((next) => { resolve = next; });
   return { promise, resolve };
+}
+
+/** Waits for a held startup step to begin, failing at once if `createAndSend` rejects first. */
+async function heldStepStarted(started: Promise<void>, creating: Promise<unknown>): Promise<void> {
+  await Promise.race([started, creating.then(() => started)]);
 }
 
 function requireThreadCreationOptions(options: Parameters<ThreadService["create"]>[4]) {
@@ -325,15 +336,15 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    try {
-      await setupStarted.promise;
-      expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
-      await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
-      expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
-    } finally {
-      setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
-      await expect(creating).resolves.toMatchObject({ id: managed.id });
-    }
+    const finishSetup = () => setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
+    heldStartups.push({ creating, release: finishSetup });
+    await heldStepStarted(setupStarted.promise, creating);
+    expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
+    await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
+    expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
+
+    finishSetup();
+    await expect(creating).resolves.toMatchObject({ id: managed.id });
     await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
     // Dispatch alone leaves the startup waiting for the provider's first frame.
     expect(threadStartups.get(startupId)).toMatchObject({ state: "running", phase: "agent" });
@@ -394,18 +405,17 @@ describe("AgentService.createAndSend defaults", () => {
     const startupId = "00000000-0000-4000-8000-000000000024";
     const creating = service.createAndSend({ workspaceId: workspace.id, content: "Cancelled first prompt",
       mode: "worktree", branch: "feature/managed", startupId });
-    try {
-      await setupStarted.promise;
-      expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
-      await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
-        threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
-        threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
-      });
-    } finally {
+    heldStartups.push({ creating, release: () => {
       setupCompletion.resolve({ kind: "exited", exitCode: 1, output: "", outputTruncated: false });
       setupRelease.resolve();
-      await expect(creating).resolves.toMatchObject({ id: managed.id });
-    }
+    } });
+    await heldStepStarted(setupStarted.promise, creating);
+    expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
+    await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
+      threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
+      threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
+    });
+    await expect(creating).resolves.toMatchObject({ id: managed.id });
     expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup" });
     expect(provider.sendTurn).not.toHaveBeenCalled();
 
@@ -452,15 +462,15 @@ describe("AgentService.createAndSend defaults", () => {
     });
     const heldAdmission = deferred<{ kind: "passthrough" }>();
     const admissionStarted = deferred<void>();
-    const dispatchCompleted = deferred<Awaited<ReturnType<typeof service.dispatchQueuedAutomaticTurn>>>();
+    const queuedDispatch = deferred<{ readonly dispatched: ReturnType<typeof service.dispatchQueuedAutomaticTurn> }>();
     goals.routeCommand.mockImplementation(async () => {
       admissionStarted.resolve();
       return await heldAdmission.promise;
     });
     const environment = automaticSetup as WorkspaceEnvironmentService;
-    environment.setAutomaticSetupDispatcher({ dispatch: async (submission) => {
-      const dispatched = await service.dispatchQueuedAutomaticTurn(submission);
-      dispatchCompleted.resolve(dispatched);
+    environment.setAutomaticSetupDispatcher({ dispatch: (submission) => {
+      const dispatched = service.dispatchQueuedAutomaticTurn(submission);
+      queuedDispatch.resolve({ dispatched });
       return dispatched;
     } });
     const startupId = "00000000-0000-4000-8000-000000000022";
@@ -472,15 +482,16 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    try {
-      await admissionStarted.promise;
-      expect(goals.routeCommand).toHaveBeenCalledOnce();
-      await threadStartups.cancel(startupId);
-    } finally {
-      heldAdmission.resolve({ kind: "passthrough" });
-      await expect(creating).resolves.toMatchObject({ id: managed.id });
-      await (await dispatchCompleted.promise).completion;
-    }
+    const releaseAdmission = () => heldAdmission.resolve({ kind: "passthrough" });
+    heldStartups.push({ creating, release: releaseAdmission });
+    await heldStepStarted(admissionStarted.promise, creating);
+    expect(goals.routeCommand).toHaveBeenCalledOnce();
+    await threadStartups.cancel(startupId);
+
+    releaseAdmission();
+    await expect(creating).resolves.toMatchObject({ id: managed.id });
+    const { dispatched } = await queuedDispatch.promise;
+    await (await dispatched).completion;
     expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" });
     expect(provider.sendTurn).not.toHaveBeenCalled();
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(managed.id);
@@ -516,16 +527,14 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    try {
-      await attachmentPersistenceStarted.promise;
-      expect(attachmentService.persist).toHaveBeenCalledOnce();
-      await threadStartups.cancel(startupId);
-      await threadStartups.markCancelled(startupId);
-    } finally {
-      heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
-      await expect(creating).resolves.toMatchObject({ id: managed.id });
-    }
+    const releaseAttachments = () => heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
+    heldStartups.push({ creating, release: releaseAttachments });
+    await heldStepStarted(attachmentPersistenceStarted.promise, creating);
+    expect(attachmentService.persist).toHaveBeenCalledOnce();
+    await threadStartups.cancel(startupId);
+    await threadStartups.markCancelled(startupId);
 
+    releaseAttachments();
     const result = await creating;
 
     expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup" });
