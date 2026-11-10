@@ -272,16 +272,26 @@ export class SnapshotService {
    * it removed from disk, so those stay set.
    */
   private async unflagHiddenEntries(cwd: string, env: NodeJS.ProcessEnv, timeout: number): Promise<void> {
-    const { stdout } = await this.gitExecutor.exec(["-C", cwd, "ls-files", "-v", "-z"], { timeout, env });
     const assumed: string[] = [];
     const skipped: string[] = [];
-    for (const record of stdout.split("\0")) {
-      if (record.length < 3) continue;
+    const collect = (record: string) => {
+      if (record.length < 3) return;
       const tag = record.charAt(0);
       const path = record.slice(2);
       if (tag !== tag.toUpperCase()) assumed.push(path);
       if (tag === "S" || tag === "s") skipped.push(path);
-    }
+    };
+    let pending = "";
+    // The listing names every tracked path, which outgrows a buffered stdout on large repositories.
+    await this.gitExecutor.exec(["-C", cwd, "ls-files", "-v", "-z"], {
+      timeout, env, retainStdout: false,
+      onStdout(chunk) {
+        const records = (pending + chunk).split("\0");
+        pending = records.pop() ?? "";
+        for (const record of records) collect(record);
+      },
+    });
+    collect(pending);
     await this.updateIndexFlags(cwd, env, timeout, "--no-assume-unchanged", assumed);
     if (skipped.length > 0 && !(await this.usesSparseCheckout(cwd, timeout))) {
       await this.updateIndexFlags(cwd, env, timeout, "--no-skip-worktree", skipped);

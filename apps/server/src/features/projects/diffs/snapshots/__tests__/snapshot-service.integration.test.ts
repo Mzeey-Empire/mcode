@@ -193,6 +193,18 @@ describe("SnapshotService integration", () => {
     expect(git("ls-files", "-v")).toBe(flags);
   }, GIT_OPERATION_TIMEOUT_MS);
 
+  it("captures a checkout whose index listing exceeds a buffered stdout", async () => {
+    const blob = git("hash-object", "-w", "existing.txt");
+    const folder = "a-long-directory-name-that-makes-each-index-record-large/".repeat(2);
+    const records = Array.from({ length: 12_000 }, (_, n) => `100644 ${blob}\t${folder}file-${n}.txt\n`).join("");
+    NodeChildProcess.execFileSync("git", ["-C", tmpDir, "update-index", "--index-info"], { input: records });
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "modified\n");
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("show", `${ref}:existing.txt`)).toBe("modified");
+  }, GIT_OPERATION_TIMEOUT_MS);
+
   it("seeds from HEAD when the checkout has no index file", async () => {
     NodeFS.writeFileSync(NodePath.join(tmpDir, "tracked.log"), "tracked\n");
     git("add", "tracked.log");
