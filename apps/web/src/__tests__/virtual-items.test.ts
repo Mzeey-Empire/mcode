@@ -15,6 +15,8 @@ import type { ChatVirtualItem } from "@/features/conversation/messages/virtual-i
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
 import { buildNarrativeItems } from "@/features/conversation/narrative/build-narrative";
 import type { Message, ToolCall, HookExecution, ToolCallRecord, HookExecutionRecord } from "@/transport/types";
+import type { TurnFileEvidence } from "@mcode/contracts/models/turn-file-evidence";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 
 const STREAMING_AGENT = { phase: "streaming" } as const;
 const COMPLETED_AGENT = { phase: "completed" } as const;
@@ -248,7 +250,7 @@ describe("buildStableItems", () => {
     } as const;
     const failed = { style: "filled", icon: "failed", title: "Codex couldn't finish this turn", primary: { action: "retry", label: "Retry" } } as const;
     const endingsFor = (messageId: string, foldLabel: string | null) => ({
-      [messageId]: { turnId: "turn-1", providerId: "codex" as const, view: { foldLabel, notice: failed } },
+      [messageId]: { turnId: "turn-1", providerId: "codex" as const, executionId: "execution-1", view: { foldLabel, notice: failed } },
     });
     const build = (messages: Message[], endings: ReturnType<typeof endingsFor>) =>
       buildStableItems(messages, undefined, undefined, undefined, undefined, summary, undefined, undefined, undefined, endings);
@@ -276,6 +278,42 @@ describe("buildStableItems", () => {
       const items = build([makeMessage({ id: "u1", role: "user" })], endingsFor("u1", null));
 
       expect(items.map((item) => item.key)).toEqual(["u1", "turn-end-notice:u1"]);
+    });
+
+    const withEvidence = (messages: Message[], endings: ReturnType<typeof endingsFor>, evidence: TurnFileEvidence) =>
+      buildStableItems(messages, undefined, undefined, undefined, undefined, summary, undefined, undefined, undefined, endings,
+        undefined, undefined, undefined, { "execution-1": createFileEvidenceEvent(evidence) });
+    const evidenceNotice = (items: ReturnType<typeof buildStableItems>) =>
+      items.find((item) => item.key.startsWith("turn-file-evidence:"));
+
+    it("says changed files are being checked under the prompt of an ended turn with no reply", () => {
+      const items = withEvidence([makeMessage({ id: "u1", role: "user" })], endingsFor("u1", null), { state: "tracking" });
+
+      expect(items.map((item) => item.key)).toEqual(["u1", "turn-end-notice:u1", "turn-file-evidence:u1"]);
+      expect(evidenceNotice(items)).toMatchObject({ type: "turn-end-notice", notice: { title: "Checking changed files", delayed: true } });
+    });
+
+    it("names why changed files are unavailable and how many the agent reported", () => {
+      const items = withEvidence(
+        [makeMessage({ id: "u1", role: "user" }), makeMessage({ id: "a1", role: "assistant" })],
+        endingsFor("a1", "Failed after 5s"),
+        { state: "unavailable", reason: "capture-failed", knownPaths: ["src/a.ts", "src/b.ts"] },
+      );
+
+      expect(evidenceNotice(items)).toMatchObject({ notice: {
+        title: "Changed files unavailable",
+        detail: "Git snapshot failed. The agent reported 2 changed files.",
+      } });
+    });
+
+    it("adds no evidence notice once the files are recorded", () => {
+      const items = withEvidence(
+        [makeMessage({ id: "u1", role: "user" }), makeMessage({ id: "a1", role: "assistant" })],
+        endingsFor("a1", "Failed after 5s"),
+        { state: "recorded", filesChanged: ["src/a.ts"] },
+      );
+
+      expect(evidenceNotice(items)).toBeUndefined();
     });
   });
 

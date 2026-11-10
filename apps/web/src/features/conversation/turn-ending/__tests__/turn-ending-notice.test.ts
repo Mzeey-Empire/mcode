@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure } from "@mcode/contracts/compat/agent-model";
-import { turnEndingView, type TurnEndingInput } from "../turn-ending-notice";
+import { fileEvidenceNotice, turnEndingView, type TurnEndingInput } from "../turn-ending-notice";
 
 const STARTED = "2026-10-11T10:00:00.000Z";
 
@@ -185,5 +185,19 @@ describe("turnEndingView: errored", () => {
     const notice = turnEndingView(input({ ending: errored({ kind: "usage_limit", ...fields }) })).notice;
     expect(notice).toMatchObject({ primary: { action: "retry", label: "Retry" } });
     expect(notice?.detail).toBe(detail);
+  });
+});
+
+describe("fileEvidenceNotice", () => {
+  it("counts a single reported file in the singular and omits the count when none were reported", () => {
+    expect(fileEvidenceNotice({ state: "unavailable", reason: "restarted", knownPaths: ["a.ts"] })?.detail)
+      .toBe("Mcode restarted first. The agent reported 1 changed file.");
+    expect(fileEvidenceNotice({ state: "unavailable", reason: "observation-lost", knownPaths: [] })?.detail)
+      .toBe("File tracking was interrupted.");
+  });
+
+  it("shows nothing for untracked or recorded evidence", () => {
+    expect(fileEvidenceNotice({ state: "untracked" })).toBeNull();
+    expect(fileEvidenceNotice({ state: "recorded", filesChanged: [] })).toBeNull();
   });
 });

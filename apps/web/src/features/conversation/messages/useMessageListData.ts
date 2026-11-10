@@ -214,6 +214,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     }),
   );
   const latestTurnWithChanges = useThreadRecord(renderedThreadId, (record) => record.latestTurnWithChanges);
+  const fileEvidenceByExecutionId = useThreadRecord(renderedThreadId, (record) => record.fileEvidence);
   const hasMore = useThreadRecord(renderedThreadId, (record) => record.hasMoreMessages);
   const hasNewer = useThreadRecord(renderedThreadId, (record) => record.hasNewerMessages);
   const isLoadingMore = useThreadRecord(renderedThreadId, (record) => record.isLoadingMore);
@@ -277,6 +278,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     turnDurationsByMessageId,
     providerContinuationMessageIds,
     turnEndingsByMessageId: turnEndings.endingsByMessageId,
+    fileEvidenceByExecutionId,
   };
 }
 
