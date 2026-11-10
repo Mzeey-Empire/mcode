@@ -276,6 +276,7 @@ describe("AgentService.createAndSend defaults", () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-drain-"));
     roots.push(root);
     const setupCompletion = deferred<TerminalCommandCompletion>();
+    const setupStarted = deferred<void>();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = await createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
       startupEnvironmentFixture({
         mcodeDir: root,
@@ -287,7 +288,10 @@ describe("AgentService.createAndSend defaults", () => {
             kind: "ready" as const,
             command: {
               snapshot: { checkoutPath: "/repo/.worktrees/managed", terminal: { executable: "sh", arguments: ["-c", "bun run setup"] } },
-              start: async () => await setupCompletion.promise,
+              start: async () => {
+                setupStarted.resolve();
+                return await setupCompletion.promise;
+              },
               close: async () => ({ kind: "contained" as const }),
               waitForRelease: async () => await new Promise<never>(() => undefined),
             },
@@ -321,12 +325,15 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
-    await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
-    expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
-
-    setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
-    await creating;
+    try {
+      await setupStarted.promise;
+      expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
+      await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
+      expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
+    } finally {
+      setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
+      await expect(creating).resolves.toMatchObject({ id: managed.id });
+    }
     await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
     // Dispatch alone leaves the startup waiting for the provider's first frame.
     expect(threadStartups.get(startupId)).toMatchObject({ state: "running", phase: "agent" });
@@ -346,6 +353,7 @@ describe("AgentService.createAndSend defaults", () => {
     roots.push(root);
     const setupCompletion = deferred<TerminalCommandCompletion>();
     const setupRelease = deferred<void>();
+    const setupStarted = deferred<void>();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = await createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
       startupEnvironmentFixture({
         mcodeDir: root, database: db, databaseWriter: persistenceRuntime.writer,
@@ -355,7 +363,10 @@ describe("AgentService.createAndSend defaults", () => {
             kind: "ready",
             command: {
               snapshot: { checkoutPath: "/repo/.worktrees/managed", terminal: { executable: "sh", arguments: ["-c", "bun run setup"] } },
-              start: async () => await setupCompletion.promise,
+              start: async () => {
+                setupStarted.resolve();
+                return await setupCompletion.promise;
+              },
               close: async () => {
                 setupCompletion.resolve({ kind: "exited", exitCode: 1, output: "", outputTruncated: false });
                 setupRelease.resolve();
@@ -383,17 +394,26 @@ describe("AgentService.createAndSend defaults", () => {
     const startupId = "00000000-0000-4000-8000-000000000024";
     const creating = service.createAndSend({ workspaceId: workspace.id, content: "Cancelled first prompt",
       mode: "worktree", branch: "feature/managed", startupId });
-    await vi.waitFor(() => expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
-    await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
-      threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
-      threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
-    });
-    await creating;
+    try {
+      await setupStarted.promise;
+      expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
+      await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
+        threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
+        threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
+      });
+    } finally {
+      setupCompletion.resolve({ kind: "exited", exitCode: 1, output: "", outputTruncated: false });
+      setupRelease.resolve();
+      await expect(creating).resolves.toMatchObject({ id: managed.id });
+    }
     expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup" });
     expect(provider.sendTurn).not.toHaveBeenCalled();
 
+    const providerStarted = deferred<void>();
+    provider.sendTurn.mockImplementation(async () => { providerStarted.resolve(); });
     await service.sendMessage({ threadId: managed.id, content: "New prompt after Keep thread" });
-    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    await providerStarted.promise;
+    expect(provider.sendTurn).toHaveBeenCalledOnce();
     expect(provider.sendTurn.mock.calls[0]?.[0]).toMatchObject({ message: "New prompt after Keep thread" });
     expect(automaticSetup.getAutomaticSetup({ threadId: managed.id })).toMatchObject({
       gate: "not-required", queuedTurns: [{ state: "cancelled" }],
@@ -431,9 +451,18 @@ describe("AgentService.createAndSend defaults", () => {
       return managed;
     });
     const heldAdmission = deferred<{ kind: "passthrough" }>();
-    goals.routeCommand.mockImplementation(async () => await heldAdmission.promise);
+    const admissionStarted = deferred<void>();
+    const dispatchCompleted = deferred<Awaited<ReturnType<typeof service.dispatchQueuedAutomaticTurn>>>();
+    goals.routeCommand.mockImplementation(async () => {
+      admissionStarted.resolve();
+      return await heldAdmission.promise;
+    });
     const environment = automaticSetup as WorkspaceEnvironmentService;
-    environment.setAutomaticSetupDispatcher({ dispatch: (submission) => service.dispatchQueuedAutomaticTurn(submission) });
+    environment.setAutomaticSetupDispatcher({ dispatch: async (submission) => {
+      const dispatched = await service.dispatchQueuedAutomaticTurn(submission);
+      dispatchCompleted.resolve(dispatched);
+      return dispatched;
+    } });
     const startupId = "00000000-0000-4000-8000-000000000022";
 
     const creating = service.createAndSend({
@@ -443,13 +472,16 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await vi.waitFor(() => expect(goals.routeCommand).toHaveBeenCalledOnce());
-
-    (await threadStartups.cancel(startupId));
-    heldAdmission.resolve({ kind: "passthrough" });
-
-    await creating;
-    await vi.waitFor(() => expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" }));
+    try {
+      await admissionStarted.promise;
+      expect(goals.routeCommand).toHaveBeenCalledOnce();
+      await threadStartups.cancel(startupId);
+    } finally {
+      heldAdmission.resolve({ kind: "passthrough" });
+      await expect(creating).resolves.toMatchObject({ id: managed.id });
+      await (await dispatchCompleted.promise).completion;
+    }
+    expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" });
     expect(provider.sendTurn).not.toHaveBeenCalled();
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(managed.id);
   });
@@ -470,7 +502,11 @@ describe("AgentService.createAndSend defaults", () => {
       return managed;
     });
     const heldAttachmentPersistence = deferred<{ stored: []; persisted: [] }>();
-    attachmentService.persist.mockImplementation(async () => await heldAttachmentPersistence.promise);
+    const attachmentPersistenceStarted = deferred<void>();
+    attachmentService.persist.mockImplementation(async () => {
+      attachmentPersistenceStarted.resolve();
+      return await heldAttachmentPersistence.promise;
+    });
     const startupId = "00000000-0000-4000-8000-000000000024";
 
     const creating = service.createAndSend({
@@ -480,11 +516,15 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await vi.waitFor(() => expect(attachmentService.persist).toHaveBeenCalledOnce());
-
-    (await threadStartups.cancel(startupId));
-    (await threadStartups.markCancelled(startupId));
-    heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
+    try {
+      await attachmentPersistenceStarted.promise;
+      expect(attachmentService.persist).toHaveBeenCalledOnce();
+      await threadStartups.cancel(startupId);
+      await threadStartups.markCancelled(startupId);
+    } finally {
+      heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
+      await expect(creating).resolves.toMatchObject({ id: managed.id });
+    }
 
     const result = await creating;
 
