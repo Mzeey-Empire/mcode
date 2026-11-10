@@ -9,7 +9,6 @@ export function temporaryIndexEnv(indexFile: string): NodeJS.ProcessEnv {
   const count = Number(process.env.GIT_CONFIG_COUNT);
   const n = Number.isSafeInteger(count) && count >= 0 ? count : 0;
   // Split indexes can write and expire sharedindex files in the user's Git directory.
-  // Optional locks off prevents Git from refreshing the user's real index.
   return {
     GIT_INDEX_FILE: indexFile,
     GIT_OPTIONAL_LOCKS: "0",

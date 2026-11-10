@@ -299,7 +299,6 @@ export class SnapshotService {
     }
   }
 
-  /** One process for any number of paths; `core.ignoreStat` flags every tracked file. */
   private async updateIndexFlags(cwd: string, env: NodeJS.ProcessEnv, timeout: number, flag: string, paths: string[]): Promise<void> {
     if (paths.length === 0) return;
     await this.gitExecutor.exec(["-C", cwd, "update-index", flag, "-z", "--stdin"], {
