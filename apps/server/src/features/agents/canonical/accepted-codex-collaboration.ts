@@ -585,7 +585,9 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
       return existing;
     }
     if (typeof source.content !== "string" || typeof source.id === "string" && source.id !== message.id) throw new Error(`Codex child streamed message identity conflict: ${existing.id}`);
-    if (isTerminal(turn)) return existing;
+    // Child text can arrive after the terminal outcome; the full message supersedes all deltas.
+    if (existing.payload.eventKey === "stream-complete"
+      && (input.eventKey === "stream" || source.content === message.content)) return existing;
     const content = input.eventKey === "stream-complete" ? source.content : message.content + source.content;
     const item = { ...existing, payload: { ...existing.payload, message: { ...message, content },
       nativeItemId: input.nativeItemId, eventKey: input.eventKey }, updatedAt: timestamp() };

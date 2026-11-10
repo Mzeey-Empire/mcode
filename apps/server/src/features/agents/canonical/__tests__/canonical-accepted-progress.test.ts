@@ -1504,6 +1504,49 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(progress.recover(childId, { conversationRevision: 0, rosterRevision: 0 }).retained).toEqual([]);
   });
 
+  it("saves late child text and replays saved operations without appending twice", async () => {
+    await send(1, start("codex"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(1, "toolUse", { toolCallId: "spawn", toolName: "Agent", toolInput: {} },
+        { collaboration: { kind: "spawnAgent", receiverThreadIds: ["native-child"], prompt: "Child task" } })] });
+    const evidence = { nativeThreadId: "native-child", nativeTurnId: "native-turn", parentCollaborationItemId: "spawn" };
+    const message = { ...evidence, nativeItemId: "child-message", itemEventKey: "stream" };
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(2, "turnStarted", {}, { child: evidence })] });
+    const childId = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 })?.active[0]?.id;
+    if (!childId) throw new Error("Expected accepted child roster");
+    await send(4, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(3, "textDelta", { delta: "Partial" }, { child: message })] });
+    await send(5, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(4, "turnComplete", {}, { child: evidence })] });
+    const late: ExecutionSemanticOperation = { operationId: "live-lease:6", execution, lease, ordinal: 6,
+      mutation: { kind: "append-events", phase: "running", nativeCursor: null,
+        events: [familyDraft(5, "textDelta", { delta: " answer" }, { child: message })] } };
+    const first = await port.transact(late);
+    expect(first.kind).toBe("accepted");
+    expect(await port.transact(structuredClone(late))).toEqual(first);
+    await progress.waitForSaved(execution.threadId);
+    expect(await port.transact(structuredClone(late))).toEqual(first);
+    const saved = new CanonicalAgentStore(db, () => {});
+    expect(saved.loadConversationProjection(childId, 20).messages.map((entry) => entry.content))
+      .toEqual(["Child task", "Partial answer"]);
+
+    const full: ExecutionSemanticOperation = { operationId: "live-lease:7", execution, lease, ordinal: 7,
+      mutation: { kind: "append-events", phase: "running", nativeCursor: null,
+        events: [familyDraft(6, "message", { content: "Complete child answer", tokens: null },
+          { child: { ...message, itemEventKey: "stream-complete" } })] } };
+    const completed = await port.transact(full);
+    expect(completed.kind).toBe("accepted");
+    await progress.waitForSaved(execution.threadId);
+    expect(await port.transact(structuredClone(full))).toEqual(completed);
+    expect(saved.loadConversationProjection(childId, 20).messages.map((entry) => entry.content))
+      .toEqual(["Child task", "Complete child answer"]);
+    expect(saved.loadLatestTurn(childId)?.status).toBe("Completed");
+    expect(saved.loadTurn(execution.turnId)?.status).toBe("Running");
+    expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").all(childId))
+      .toEqual([{ content: "Complete child answer" }]);
+  });
+
   it("materializes a native child completion before the parent finishes without a child writer checkpoint", async () => {
     await send(1, start("codex"));
     await send(2, { kind: "event", phase: "running", nativeCursor: null,

@@ -232,6 +232,38 @@ describe("AcceptedCodexCollaboration", () => {
     expect(port.prepare(textDelta("Late bytes")).changes).toEqual([]);
   });
 
+  it.each(["completed", "cancelled", "interrupted", "errored"] as const)("retains the full child message arriving after %s without changing the turn", (outcome) => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    port.prepare(textDelta("Partial"));
+    port.prepare(child({ type: AgentEventType.Ended, threadId: "parent", turnExecutionId: PARENT_EXECUTION, outcome }));
+    const terminal = port.loadTurn(value.turn.id);
+    const full = child({ type: AgentEventType.Message, threadId: "parent", turnExecutionId: PARENT_EXECUTION,
+      content: "Complete child answer", tokens: null }, { nativeItemId: "native-message", itemEventKey: "stream-complete" });
+
+    const result = port.prepare(full);
+
+    expect(result.changes).toMatchObject([{ kind: "item-recorded", item: { threadId: value.childThread.id,
+      payload: { message: { content: "Complete child answer" } } } }]);
+    expect(port.loadTurn(value.turn.id)).toEqual(terminal);
+    expect(port.prepare(textDelta(" stale delta")).changes).toEqual([]);
+    expect(port.prepare(full).changes).toEqual([]);
+  });
+
+  it("appends late child deltas until the authoritative full message arrives", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    port.prepare(textDelta("Partial"));
+    port.prepare(child({ type: AgentEventType.Ended, threadId: "parent", turnExecutionId: PARENT_EXECUTION, outcome: "completed" }));
+    const terminal = port.loadTurn(value.turn.id);
+
+    const result = port.prepare(textDelta(" answer"));
+
+    expect(result.changes).toMatchObject([{ kind: "item-recorded", item: {
+      payload: { message: { content: "Partial answer" } } } }]);
+    expect(port.loadTurn(value.turn.id)).toEqual(terminal);
+  });
+
   it("keeps discarded spawn and text candidates out of accepted indexes and bodies", () => {
     const port = new AcceptedCodexCollaboration(initial());
     const discarded = port.fork();
