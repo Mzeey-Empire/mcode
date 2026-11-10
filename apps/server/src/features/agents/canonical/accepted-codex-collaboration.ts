@@ -585,10 +585,8 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
       return existing;
     }
     if (typeof source.content !== "string" || typeof source.id === "string" && source.id !== message.id) throw new Error(`Codex child streamed message identity conflict: ${existing.id}`);
-    // Child text can arrive after the terminal outcome; the full message supersedes all deltas.
-    if (existing.payload.eventKey === "stream-complete"
-      && (input.eventKey === "stream" || source.content === message.content)) return existing;
-    const content = input.eventKey === "stream-complete" ? source.content : message.content + source.content;
+    const content = streamedChildContent(existing.payload.eventKey, input.eventKey, message.content, source.content);
+    if (content === null) return existing;
     const item = { ...existing, payload: { ...existing.payload, message: { ...message, content },
       nativeItemId: input.nativeItemId, eventKey: input.eventKey }, updatedAt: timestamp() };
     this.recordItem(item, this.context(turn));
@@ -746,6 +744,11 @@ function unique(index: ReadonlyMap<string, ReadonlySet<string>>, key: string, la
   const values = index.get(key);
   if (values && values.size > 1) throw new Error(`${label} identity is ambiguous: ${key}`);
   return values?.values().next().value;
+}
+function streamedChildContent(savedEventKey: unknown, eventKey: string, saved: string, incoming: string): string | null {
+  const fullMessageSaved = savedEventKey === "stream-complete";
+  if (eventKey !== "stream-complete") return fullMessageSaved ? null : saved + incoming;
+  return fullMessageSaved && incoming === saved ? null : incoming;
 }
 function isTerminal(turn: AgentTurn): boolean { return Object.values(TERMINAL_STATUS).some((status) => status === turn.status); }
 function text(value: string | undefined): string | undefined { return value?.trim().slice(0, CANONICAL_SUBAGENT_TASK_MAX_LENGTH) || undefined; }
