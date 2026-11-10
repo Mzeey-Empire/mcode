@@ -34,12 +34,14 @@ const roots: string[] = [];
 const services: ReturnType<typeof createAgentServiceForTest>[] = [];
 const heldStartups: { readonly creating: Promise<unknown>; readonly release: () => void }[] = [];
 
-afterEach(async () => {
-  // A test that fails or times out while holding a startup step never releases it. Join those startups before the
-  // services drain, or they write after the database writer closes.
+async function releaseAndJoinHeldStartups(): Promise<void> {
   const held = heldStartups.splice(0);
   for (const startup of held) startup.release();
   await Promise.allSettled(held.map((startup) => startup.creating));
+}
+
+afterEach(async () => {
+  await releaseAndJoinHeldStartups();
   // Each service owns a pool of execution worker threads. Left open, the pools pile up across the file, slow later
   // pool starts, and keep writing after their database closes.
   await Promise.all(services.splice(0).map((service) => drainAgentServicePersistenceForTest(service)));
@@ -52,8 +54,7 @@ function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value
   return { promise, resolve };
 }
 
-/** Waits for a held startup step to begin, failing at once if `createAndSend` rejects first. */
-async function heldStepStarted(started: Promise<void>, creating: Promise<unknown>): Promise<void> {
+async function startedUnlessCreationRejects(started: Promise<void>, creating: Promise<unknown>): Promise<void> {
   await Promise.race([started, creating.then(() => started)]);
 }
 
@@ -338,7 +339,7 @@ describe("AgentService.createAndSend defaults", () => {
     });
     const finishSetup = () => setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
     heldStartups.push({ creating, release: finishSetup });
-    await heldStepStarted(setupStarted.promise, creating);
+    await startedUnlessCreationRejects(setupStarted.promise, creating);
     expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
     await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
     expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
@@ -409,7 +410,7 @@ describe("AgentService.createAndSend defaults", () => {
       setupCompletion.resolve({ kind: "exited", exitCode: 1, output: "", outputTruncated: false });
       setupRelease.resolve();
     } });
-    await heldStepStarted(setupStarted.promise, creating);
+    await startedUnlessCreationRejects(setupStarted.promise, creating);
     expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
     await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
       threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
@@ -484,7 +485,7 @@ describe("AgentService.createAndSend defaults", () => {
     });
     const releaseAdmission = () => heldAdmission.resolve({ kind: "passthrough" });
     heldStartups.push({ creating, release: releaseAdmission });
-    await heldStepStarted(admissionStarted.promise, creating);
+    await startedUnlessCreationRejects(admissionStarted.promise, creating);
     expect(goals.routeCommand).toHaveBeenCalledOnce();
     await threadStartups.cancel(startupId);
 
@@ -529,7 +530,7 @@ describe("AgentService.createAndSend defaults", () => {
     });
     const releaseAttachments = () => heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
     heldStartups.push({ creating, release: releaseAttachments });
-    await heldStepStarted(attachmentPersistenceStarted.promise, creating);
+    await startedUnlessCreationRejects(attachmentPersistenceStarted.promise, creating);
     expect(attachmentService.persist).toHaveBeenCalledOnce();
     await threadStartups.cancel(startupId);
     await threadStartups.markCancelled(startupId);
