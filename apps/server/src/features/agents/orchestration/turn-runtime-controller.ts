@@ -738,7 +738,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       if (active.terminalOutcome === "completed") this.featureEffects.refreshAfterTurn(execution.threadId);
       this.clearTurnDispatch(execution.threadId);
       this.clearTurnEndedState(execution.threadId);
-      await this.resolveAbandonedEvidence(execution.threadId);
+      void this.resolveAbandonedEvidence(execution.threadId);
       this.settlePinsInBackground(execution);
     } catch (error) {
       active.releaseStarted = false;
@@ -981,16 +981,17 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const { outcome, ending } = providerFailureTerminal(persistTurnFailure({ failure: dispatchFailure(error),
       provider: active.prepared.providerId, message, acceptedAt: Date.now(),
       ...(active.lastRetries ? { lastRetries: active.lastRetries } : {}) }));
-    const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome });
-    if (!frozen) throw new Error("Failed worker dispatch lost its file evidence generation");
+    const frozen = this.sealOptionalFileEvidence(active, outcome);
+    if (!frozen) this.fileEvidence?.expectUnsent(execution, true);
     const result = await this.requireWorkerRuntime().owner.submit(execution, {
-      kind: "finish-from-state", outcome, frozenFileEvidence: frozen,
+      kind: "finish-from-state", outcome, ...(frozen ? { frozenFileEvidence: frozen } : {}),
       input: { ...execution, providerId: active.prepared.providerId,
         providerIdentities: active.prepared.parentStartInput.providerIdentities,
         outcome, error: message, ending,
         deliveryAttempt, projection: { kind: "writer-staged" } },
     });
     if (result.kind !== "committed" && result.kind !== "accepted") throw new Error("Failed worker dispatch terminal did not commit");
+    this.collectWorkerFileEvidence(active);
     this.publishWorkerPersistence(active, result);
     active.terminalCommitted = true;
     active.terminalOutcome = outcome;
@@ -1045,7 +1046,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       const user = prepared.parentStartInput.userMessage;
       this.fileEvidence?.expectUnsent(execution, user.kind === "create" && user.systemNotice?.kind === "provider-turn");
     }
-    await this.finishUnsentWorkerTurn(prepared.lease.threadId, prepared.lease.turnExecutionId);
+    if (!await this.finishUnsentWorkerTurn(prepared.lease.threadId, prepared.lease.turnExecutionId)) this.fileEvidence?.forget(execution);
     this.turnRuntime.terminalize(prepared.lease.threadId, prepared.lease.turnExecutionId, "errored");
     this.clearTurnDispatch(prepared.lease.threadId);
     this.trackSessionEnded(prepared.lease.threadId, prepared.lease.turnExecutionId);

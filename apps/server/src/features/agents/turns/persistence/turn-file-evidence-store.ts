@@ -61,8 +61,8 @@ export function listTurnFileEvidence(db: Database, filter: TurnFileEvidenceFilte
 /** Allowlisted persistence for execution evidence; the application writer owns the transaction. */
 export function turnFileEvidenceWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
   const orm = drizzle(db);
-  const owner = (input: z.infer<typeof identity>) => {
-    const checkpoint = orm.select().from(canonicalAgentIngestCheckpoints).where(eq(canonicalAgentIngestCheckpoints.executionId, input.executionId)).get();
+  const checkpointOf = (executionId: string) => orm.select().from(canonicalAgentIngestCheckpoints).where(eq(canonicalAgentIngestCheckpoints.executionId, executionId)).get();
+  const owner = (input: z.infer<typeof identity>, checkpoint = checkpointOf(input.executionId)) => {
     if (!checkpoint || checkpoint.threadId !== input.threadId || checkpoint.turnId !== input.turnId) throw new Error("File evidence execution ownership mismatch");
     return checkpoint;
   };
@@ -82,7 +82,10 @@ export function turnFileEvidenceWriteHandlers(db: Database): ReadonlyMap<string,
       return null;
     })],
     [recordTurnFileEvidence.name, databaseWriteHandler(recordTurnFileEvidence, (input) => {
-      const checkpoint = owner(input);
+      // A deleted thread cascades its checkpoint and evidence away; retrying could never succeed.
+      const found = checkpointOf(input.executionId);
+      if (!found) return "untracked";
+      const checkpoint = owner(input, found);
       if (!checkpoint.terminalOutcome) return "terminal-not-saved";
       const row = orm.select().from(turnFileEvidence).where(eq(turnFileEvidence.executionId, input.executionId)).get();
       if (!row) return "untracked";

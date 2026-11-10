@@ -113,6 +113,26 @@ describe("TurnFileEvidenceLedger", () => {
       .toEqual(["turn.persisted", "turn.fileEvidence", "turn.fileEvidence"]);
   });
 
+  it("stops retrying once the thread's execution is deleted", async () => {
+    const execute = vi.spyOn(writer, "execute");
+    ledger.expect(execution, frozen); ledger.tracked(execution, facts); terminal(); failures = 1;
+    ledger.terminalSaved(execution); await flush();
+    db.run("DELETE FROM canonical_agent_ingest_checkpoints");
+    await vi.advanceTimersByTimeAsync(1000);
+    const attempts = execute.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(execute.mock.calls.length).toBe(attempts);
+  });
+
+  it("refreshes the diff only once the evidence resolves", async () => {
+    ledger.expect(execution, frozen); ledger.tracked(execution, facts); terminal();
+    const channels = () => vi.mocked(push.broadcast).mock.calls.map(([channel]) => channel).filter((channel) => channel.startsWith("turn."));
+    ledger.terminalSaved(execution);
+    expect(channels()).toEqual(["turn.fileEvidence"]);
+    await flush();
+    expect(channels()).toEqual(["turn.fileEvidence", "turn.fileEvidence", "turn.diffChanged"]);
+  });
+
   it("records tracked paths with no baseline", async () => {
     ledger.expect(execution, { ...frozen, handoff: { ...frozen.handoff, baselineRef: null } });
     ledger.tracked(execution, { ...facts, filesChanged: ["edited.txt"] }); terminal(); ledger.terminalSaved(execution); await flush();

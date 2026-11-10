@@ -669,6 +669,22 @@ describe("AgentService cleanup through production worker composition", { timeout
       });
     }
 
+    it("resolves a failed start's file evidence instead of leaving it checking", async () => {
+      const fixture = await openFixture();
+      const snapshots = container.resolve(SnapshotService);
+      vi.spyOn(snapshots, "captureRef").mockResolvedValue("a".repeat(40));
+      const ledger = new TurnFileEvidenceLedger(fixture.db, fixture.writer, snapshots);
+      container.resolve(TurnRuntimeController).bindFileEvidence(ledger);
+      bindTurnFileEvidenceLedger(ledger);
+      failNextProviderStart(fixture);
+      try {
+        await fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work",
+          provider: "codex", model: "gpt-5", permissionMode: "default" });
+        await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
+        await vi.waitFor(() => expect(listTurnFileEvidence(fixture.db, { threadId: fixture.thread.id })[0]?.evidence).toMatchObject({ state: "recorded" }));
+      } finally { ledger.close(); }
+    });
+
     it("keeps the Errored outcome when Stop arrives while the failure fences provider events", async () => {
       const fixture = await openFixture();
       failNextProviderStart(fixture);

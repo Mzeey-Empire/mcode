@@ -116,6 +116,12 @@ export class TurnFileEvidenceLedger {
     await entry.write?.();
   }
 
+  /** Drop an entry whose ending was never written; startup resolves its row if one exists. */
+  forget(execution: ExecutionIdentity): void {
+    clearTimeout(this.entries.get(execution.executionId)?.retry);
+    this.entries.delete(execution.executionId);
+  }
+
   /** Stop retry timers during server shutdown. */
   close(): void { this.closed = true; for (const entry of this.entries.values()) clearTimeout(entry.retry); }
 
@@ -167,9 +173,8 @@ export class TurnFileEvidenceLedger {
 
   private publish(execution: Pick<ExecutionIdentity, "threadId" | "executionId">): void {
     const [stored] = listTurnFileEvidence(this.db, { threadId: execution.threadId, executionId: execution.executionId });
-    if (stored) {
-      broadcast("turn.fileEvidence", stored);
-      broadcast("turn.diffChanged", { threadId: execution.threadId });
-    }
+    if (!stored) return;
+    broadcast("turn.fileEvidence", stored);
+    if (stored.evidence.state !== "tracking") broadcast("turn.diffChanged", { threadId: execution.threadId });
   }
 }

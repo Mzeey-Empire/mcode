@@ -1168,7 +1168,7 @@ async function bootstrapServer(): Promise<void> {
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
     recordStartupCheckpoint("orphaned background tools settled");
-    // Interrupted attempts get their snapshot rows here; git work must not delay startup.
+    // Pin settlement does git work, which must not delay startup.
     snapshotRefPins.runInBackground(sweepSnapshotPins);
     await threadControlService.recoverApprovals();
     recordStartupCheckpoint("approval recovery completed");
