@@ -1,6 +1,7 @@
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
+import { temporaryIndexEnv } from "../../git/temporary-index.js";
 import { rawGit, rawPath, readRawStates, absentState, type RawPathState } from "./snapshot-raw-state.js";
 import { PIN_COMMIT_ENV, type StoreId } from "./snapshot-store-identity.js";
 
@@ -13,7 +14,7 @@ export async function withSnapshotIndex<T>(cwd: string, work: (env: NodeJS.Proce
   const location = (await rawGit(cwd, ["rev-parse", "--git-path", `mcode-revert-${id}`])).toString().trim();
   const scratch = NodePath.resolve(cwd, location);
   await NodeFSPromises.mkdir(scratch, { recursive: true });
-  try { return await work({ ...process.env, GIT_INDEX_FILE: NodePath.join(scratch, "index") }, scratch); }
+  try { return await work({ ...process.env, ...temporaryIndexEnv(NodePath.join(scratch, "index")) }, scratch); }
   finally { await NodeFSPromises.rm(scratch, { recursive: true, force: true }); }
 }
 

@@ -21,6 +21,8 @@ export interface GitProcessRequest {
   readonly timeout: number;
   /** When observed, false drops stdout from the result after handing each chunk to the observer. */
   readonly retainStdout?: boolean;
+  /** Written to stdin, which is then closed. */
+  readonly input?: string;
 }
 
 /** Receives git output while the process runs. */
@@ -48,7 +50,9 @@ export interface GitProcessFailure {
 
 /** Runs git on the calling thread. Process creation blocks this thread until the OS returns. */
 export const runGitProcess: GitProcessRunner = (request, observer) =>
-  observer ? runObservedGitProcess(request, observer) : runBufferedGitProcess(request);
+  observer || request.input !== undefined
+    ? runObservedGitProcess(request, observer ?? {})
+    : runBufferedGitProcess(request);
 
 async function runBufferedGitProcess(request: GitProcessRequest): Promise<GitExecResult> {
   const result = await execFile("git", [...request.args], {
@@ -99,6 +103,13 @@ function runObservedGitProcess(request: GitProcessRequest, observer: GitOutputOb
       stderr += text;
       observer.onStderr?.(text);
     });
+    if (request.input !== undefined) {
+      // Git may exit before reading all of its input. Its exit code reports that; the broken pipe is not a second failure.
+      child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EPIPE") finish(() => reject(error));
+      });
+      child.stdin.end(request.input);
+    }
     child.once("error", (error) => finish(() => reject(error)));
     child.once("close", (code, signal) => finish(() => {
       const tail = stdoutDecoder.decode();

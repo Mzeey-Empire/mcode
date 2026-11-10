@@ -1,7 +1,6 @@
 import { inject, injectable } from "tsyringe";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import * as NodeCrypto from "node:crypto";
 import { logger, truncateUnifiedDiff } from "@mcode/shared";
 import type { BranchComparison, GitSearchCommitsParams, GitSearchCommitsResult } from "@mcode/contracts/git";
 import type { GitCommit } from "@mcode/contracts/models/git-commit";
@@ -11,6 +10,7 @@ import type { GitExecutor } from "./execution/index.js";
 import { GitRepositoryService } from "./git-repository-service.js";
 import { gitListError } from "./git-list-error.js";
 import { batchLiteralPaths } from "./literal-paths.js";
+import { withIndexCopy } from "./temporary-index.js";
 import { assertReviewWorktree, reviewComparisonFailure, ReviewComparisonLimitError, UnsafeReviewRefError } from "./review-comparison-errors.js";
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -243,22 +243,12 @@ export class GitComparisonService {
     const entries = stdout.split("\0").filter(Boolean);
     assertReviewComparisonFileCount(entries.length);
     const paths = entries.filter((path) => !path.endsWith("/"));
-    const index = await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--git-path", "index"]);
-    const source = NodePath.resolve(cwd, index.stdout.trim());
-    const temporary = NodePath.join(NodePath.dirname(source), `mcode-review-index-${NodeCrypto.randomUUID()}`);
-    const env = { GIT_INDEX_FILE: temporary, GIT_OPTIONAL_LOCKS: "0" };
-    try {
-      await this.copyReviewIndex(cwd, source, temporary, env);
+    return withIndexCopy(this.gitExecutor, cwd, "mcode-review-index", async (env) => {
+      await this.gitExecutor.exec(["-C", cwd, "read-tree", "--empty"], { env, timeout: 10_000 });
+    }, async (env) => {
       if (paths.length) await this.addReviewUntracked(cwd, env, paths, filePath);
       return await run(env, new Set(paths));
-    } finally {
-      for (const path of [temporary, `${temporary}.lock`]) await NodeFSPromises.unlink(path).catch((error: unknown) => {
-        // Cleanup must preserve both successful comparisons and the original Git failure.
-        if (!hasErrorCode(error, "ENOENT")) {
-          logger.warn("[withIntentToAddIndex] Failed to remove temporary index", { path, err: error });
-        }
-      });
-    }
+    });
   }
 
   private async addReviewUntracked(cwd: string, env: NodeJS.ProcessEnv, paths: string[], filePath?: string): Promise<void> {
@@ -276,24 +266,6 @@ export class GitComparisonService {
         if (remaining.length === batch.length) throw error;
         if (remaining.length) await add(remaining);
       }
-    }
-  }
-
-  private async copyReviewIndex(cwd: string, source: string, temporary: string, env: NodeJS.ProcessEnv): Promise<void> {
-    try {
-      const { atime, mtime } = await NodeFSPromises.stat(source);
-      await NodeFSPromises.copyFile(source, temporary);
-      // A newer index timestamp makes Git trust stat data for racily clean files.
-      await NodeFSPromises.utimes(temporary, atime, mtime);
-    } catch (error) {
-      if (!hasErrorCode(error, "ENOENT")) throw error;
-      // ENOENT can also name the destination directory. Only an absent source permits an empty index.
-      const absent = await NodeFSPromises.lstat(source).then(() => false, (failure: unknown) => {
-        if (hasErrorCode(failure, "ENOENT")) return true;
-        throw failure;
-      });
-      if (!absent) throw error;
-      await this.gitExecutor.exec(["-C", cwd, "read-tree", "--empty"], { env, timeout: 10_000 });
     }
   }
 

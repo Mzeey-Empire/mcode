@@ -16,6 +16,8 @@ export interface GitExecOptions {
   retainStdout?: boolean;
   /** Receive stderr chunks while Git runs. Enables the observed execution path. */
   onStderr?: (chunk: string) => void;
+  /** Written to Git's stdin, which is then closed, for commands that read `--stdin`. */
+  input?: string;
 }
 
 /** Stdout/stderr pair returned by a successful git invocation. */

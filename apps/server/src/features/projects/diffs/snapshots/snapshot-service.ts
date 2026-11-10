@@ -6,15 +6,14 @@
 
 import { injectable, inject } from "tsyringe";
 import { truncateUnifiedDiff } from "@mcode/shared";
-import * as NodeFSPromises from "node:fs/promises";
-import * as NodePath from "node:path";
-import * as NodeCrypto from "node:crypto";
 import type { DiffStats } from "@mcode/contracts/models/diff-stats";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
+import { gitExitCode } from "../../git/execution/git-failure.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
 import { isLiteralRepoPath } from "../../git/literal-paths.js";
+import { withIndexCopy } from "../../git/temporary-index.js";
 import { rawGit, rawPath, readRawStates, restoreRaw, type RawPathState, type RawRestoreEntry } from "./snapshot-raw-state.js";
 import { blobIdsAt, planCheckout, pinRecovery, withSnapshotIndex } from "./snapshot-checkout.js";
 import type { StoreId } from "./snapshot-store-identity.js";
@@ -241,9 +240,7 @@ export class SnapshotService {
   /**
    * Capture the current working tree state as a tree object SHA.
    *
-   * Clean trees resolve from HEAD with a cheap status check. Dirty trees use a
-   * temporary git index (via GIT_INDEX_FILE) to stage all working tree changes
-   * including untracked files without touching the real index.
+   * Includes untracked files that are not ignored, and never writes the checkout's index.
    *
    * Identical working trees produce identical tree SHAs (content-addressable),
    * so consecutive calls on a clean tree return the same value.
@@ -257,32 +254,76 @@ export class SnapshotService {
 
   private async captureRefUnlocked(cwd: string): Promise<string> {
     const timeout = RealGitExecutor.DEFAULT_TIMEOUT;
-
-    if (await this.isWorkingTreeClean(cwd, timeout)) {
-      try {
-        const { stdout: treeOut } = await this.gitExecutor.exec(
-          ["-C", cwd, "rev-parse", "HEAD^{tree}"],
-          { timeout },
-        );
-        // Re-check after rev-parse: agent tools can write between status and tree lookup.
-        if (await this.isWorkingTreeClean(cwd, timeout)) {
-          return treeOut.trim();
-        }
-      } catch {
-        // Unborn repo or missing HEAD: fall through to staged capture path.
+    return withIndexCopy(this.gitExecutor, cwd, "mcode-index", async (env) => {
+      if (await this.hasHead(cwd, timeout)) {
+        await this.gitExecutor.exec(["-C", cwd, "read-tree", "HEAD"], { timeout, env });
       }
-    }
-
-    return this.captureStagedTreeRef(cwd, timeout);
+    }, async (env) => {
+      await this.unflagHiddenEntries(cwd, env, timeout);
+      await this.gitExecutor.exec(["-C", cwd, "add", "-A"], { timeout, env });
+      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "write-tree"], { timeout, env });
+      return stdout.trim();
+    });
   }
 
-  /** Return true when git reports no uncommitted changes in the working tree. */
-  private async isWorkingTreeClean(cwd: string, timeout: number): Promise<boolean> {
-    const { stdout } = await this.gitExecutor.exec(
-      ["-C", cwd, "status", "--porcelain"],
-      { timeout },
-    );
-    return stdout.trim() === "";
+  /**
+   * `add -A` never reads assume-unchanged or skip-worktree files, so the copied index would keep
+   * their staged blobs over an agent's edit. Sparse checkout owns skip-worktree bits for the files
+   * it removed from disk, so those stay set.
+   */
+  private async unflagHiddenEntries(cwd: string, env: NodeJS.ProcessEnv, timeout: number): Promise<void> {
+    const assumed: string[] = [];
+    const skipped: string[] = [];
+    const collect = (record: string) => {
+      if (record.length < 3) return;
+      const tag = record.charAt(0);
+      const path = record.slice(2);
+      if (tag !== tag.toUpperCase()) assumed.push(path);
+      if (tag === "S" || tag === "s") skipped.push(path);
+    };
+    let pending = "";
+    // The listing names every tracked path, which outgrows a buffered stdout on large repositories.
+    // `:/` lists the whole repository when the project is a subfolder of it.
+    await this.gitExecutor.exec(["-C", cwd, "ls-files", "-v", "-z", "--", ":/"], {
+      timeout, env, retainStdout: false,
+      onStdout(chunk) {
+        const records = (pending + chunk).split("\0");
+        pending = records.pop() ?? "";
+        for (const record of records) collect(record);
+      },
+    });
+    collect(pending);
+    await this.updateIndexFlags(cwd, env, timeout, "--no-assume-unchanged", assumed);
+    if (skipped.length > 0 && !(await this.usesSparseCheckout(cwd, timeout))) {
+      await this.updateIndexFlags(cwd, env, timeout, "--no-skip-worktree", skipped);
+    }
+  }
+
+  private async updateIndexFlags(cwd: string, env: NodeJS.ProcessEnv, timeout: number, flag: string, paths: string[]): Promise<void> {
+    if (paths.length === 0) return;
+    await this.gitExecutor.exec(["-C", cwd, "update-index", flag, "-z", "--stdin"], {
+      timeout, env, input: `${paths.join("\0")}\0`,
+    });
+  }
+
+  private async usesSparseCheckout(cwd: string, timeout: number): Promise<boolean> {
+    try {
+      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "config", "--type=bool", "--get", "core.sparseCheckout"], { timeout });
+      return stdout.trim() === "true";
+    } catch (error) {
+      if (gitExitCode(error) === 1) return false;
+      throw error;
+    }
+  }
+
+  private async hasHead(cwd: string, timeout: number): Promise<boolean> {
+    try {
+      await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--verify", "-q", "HEAD"], { timeout });
+      return true;
+    } catch (error) {
+      if (gitExitCode(error) === 1) return false;
+      throw error;
+    }
   }
 
   /** Get list of files changed between two refs (tree or commit SHAs). */
@@ -461,41 +502,4 @@ export class SnapshotService {
     return collectDiffStats(outputs, statusOutputs, ignoreWhitespace);
   }
 
-  /**
-   * Stage the full working tree via a temp index and return its tree SHA.
-   * Used for dirty trees and unborn repos where HEAD^{tree} is unavailable.
-   */
-  private async captureStagedTreeRef(cwd: string, timeout: number): Promise<string> {
-    let tmpIndex = "";
-
-    const { stdout: gitDirOut } = await this.gitExecutor.exec(
-      ["-C", cwd, "rev-parse", "--git-dir"],
-      { timeout },
-    );
-    const gitDirRaw = gitDirOut.trim();
-    const gitDir = gitDirRaw.startsWith("/") || /^[A-Za-z]:/.test(gitDirRaw)
-      ? gitDirRaw
-      : NodePath.join(cwd, gitDirRaw);
-
-    tmpIndex = `${gitDir}/mcode-index-${NodeCrypto.randomUUID()}`;
-    const env = { ...process.env, GIT_INDEX_FILE: tmpIndex };
-
-    try {
-      try {
-        await this.gitExecutor.exec(["-C", cwd, "read-tree", "HEAD"], { timeout, env });
-      } catch {
-        // Unborn repo or corrupt HEAD - proceed with empty index
-      }
-
-      await this.gitExecutor.exec(["-C", cwd, "add", "-A"], { timeout, env });
-
-      const { stdout: treeOut } = await this.gitExecutor.exec(
-        ["-C", cwd, "write-tree"],
-        { timeout, env },
-      );
-      return treeOut.trim();
-    } finally {
-      NodeFSPromises.unlink(tmpIndex).catch(() => {});
-    }
-  }
 }

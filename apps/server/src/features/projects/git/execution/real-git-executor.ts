@@ -191,6 +191,7 @@ export class RealGitExecutor implements GitExecutor {
       ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       ...(opts.retainStdout === false ? { retainStdout: false } : {}),
+      ...(opts.input !== undefined ? { input: opts.input } : {}),
     }, observed ? { ...(onStdout ? { onStdout } : {}), ...(onStderr ? { onStderr } : {}) } : undefined);
   }
 
