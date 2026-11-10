@@ -76,6 +76,7 @@ import { TurnSteerRuntimePort, type SteerableTurn } from "../steering/turn-steer
 import { isLostProviderStream } from "../events/provider-event-publication.js";
 import { TurnAdmissionError, turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
 import { TurnLifecycles, type WorkerOwnedTurn } from "./turn-lifecycle.js";
+import type { TurnFileEvidenceLedger } from "../execution/turn-file-evidence-ledger.js";
 
 /**
  * Bounded wait for `provider.stopSession` before the turn is force-finalized.
@@ -154,6 +155,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Single ordered pipeline for validated provider envelopes and terminal materialization. */
   private readonly turnEventPipeline: TurnEventPipeline;
   private readonly lifecycles = new TurnLifecycles();
+  private fileEvidence?: TurnFileEvidenceLedger;
+
+  /** Bind the application-owned evidence ledger before work admission. */
+  bindFileEvidence(ledger: TurnFileEvidenceLedger): void { this.fileEvidence = ledger; }
   constructor(
     @inject(TURN_RUNTIME_PERSISTENCE)
     private readonly runtimePersistence: TurnRuntimePersistence,
@@ -473,6 +478,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       });
     }
     if (!this.ownsTurnAdmission(prepared.lease)) throw new Error("Worker turn lost admission during file preparation");
+    await this.fileEvidence?.begin(execution);
     const handoff = files.begin({ ...execution, deliveryAttempt: 1, cwd: prepared.cwd, baselineRef });
     const began = await worker.owner.submit(execution, {
       kind: "begin-files", cwd: prepared.cwd, handoff, deliveryAttempt: 1,
@@ -612,7 +618,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   private sealOptionalFileEvidence(active: WorkerOwnedTurn, outcome: TurnOutcome): ReturnType<ExecutionFileEvidenceCoordinator["seal"]> {
     try {
-      return this.requireWorkerFiles().seal({ ...active.execution, deliveryAttempt: active.deliveryAttempt, outcome });
+      const frozen = this.requireWorkerFiles().seal({ ...active.execution, deliveryAttempt: active.deliveryAttempt, outcome });
+      if (frozen) this.fileEvidence?.expect(active.execution, frozen);
+      return frozen;
     } catch (error) {
       logger.warn("Provider terminal file capture failed", { threadId: active.execution.threadId,
         executionId: active.execution.executionId, errorType: error instanceof Error ? error.name : "unknown" });
@@ -686,6 +694,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (event.type === "turnStarted") this.markProviderTurnActive(event.threadId);
     const outcome = workerTerminalOutcome(event);
     if (!outcome) return;
+    this.collectWorkerFileEvidence(active);
     active.terminalCommitted = true;
     active.terminalOutcome = outcome;
     this.turnRuntime.terminalize(active.execution.threadId, active.execution.executionId, outcome);
@@ -703,10 +712,17 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   private async releaseWorkerTurn(active: WorkerOwnedTurn): Promise<void> {
+    if (active.releasing) return active.releasing;
     if (active.releaseStarted || active.stopInProgress || !active.terminalCommitted) return;
+    active.releasing = this.performWorkerRelease(active);
+    try { await active.releasing; } catch (error) { active.releasing = undefined; throw error; }
+  }
+
+  private async performWorkerRelease(active: WorkerOwnedTurn): Promise<void> {
     active.releaseStarted = true;
     const { execution, provider, deliveryAttempt } = active;
     try {
+      await this.fileEvidence?.collected(execution);
       if (active.deliveryFailed) {
         await this.fenceWorkerProvider(provider, execution, deliveryAttempt).catch(() => {});
         await this.retireWorkerProvider(provider, execution, deliveryAttempt).catch(() => {});
@@ -722,6 +738,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       if (active.terminalOutcome === "completed") this.featureEffects.refreshAfterTurn(execution.threadId);
       this.clearTurnDispatch(execution.threadId);
       this.clearTurnEndedState(execution.threadId);
+      await this.fileEvidence?.resolveAbandoned(execution.threadId);
       this.settlePinsInBackground(execution);
     } catch (error) {
       active.releaseStarted = false;
@@ -772,7 +789,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.fenceWorkerProvider(provider, execution, deliveryAttempt);
     if (active.terminalCommitted) return this.releaseWorkerTurn(active);
     const frozen = this.requireWorkerFiles().seal({ ...execution, deliveryAttempt, outcome: "interrupted" });
-    if (!frozen) throw new Error("Lost stream finish lost its file evidence generation");
     await this.finishWorkerTurn(active, frozen, { outcome: "interrupted", ending: this.providerInterruptionEnding() });
   }
 
@@ -783,6 +799,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   private handleWorkerRecovery(execution: ExecutionIdentity): void {
+    this.fileEvidence?.tracked(execution, "lost");
+    this.fileEvidence?.terminalSaved(execution);
+    void this.fileEvidence?.resolveAbandoned(execution.threadId);
     // Recovery has committed the interruption, so the baseline can become the attempt's snapshot.
     this.settlePinsInBackground(execution);
     if (this.turnRuntime.snapshot(execution.threadId)?.turnExecutionId !== execution.executionId) return;
@@ -1005,6 +1024,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       && runtime.phase === "cancelled"
       && !this.mutationReservations.owns(prepared.lease.threadId, prepared.lease.mutationReservationToken, "activeTurn");
     if (cancelled) {
+      await this.fileEvidence?.resolveAbandoned(prepared.lease.threadId);
       await this.turnAdmissions.rollbackCommandEffect(prepared.commandEffect);
       this.releaseTurnAdmission(prepared.lease);
       return;
@@ -1014,6 +1034,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   private async failWorkerPreparedDispatch(prepared: PreparedTurnDispatch, error: unknown): Promise<never> {
     if (this.turnDispatchByThread.get(prepared.lease.threadId)?.dispatchStarted) throw error;
+    const execution = this.executionFor(prepared);
+    if (!this.lifecycles.workerFor(execution)) {
+      const user = prepared.parentStartInput.userMessage;
+      this.fileEvidence?.expectUnsent(execution, user.kind === "create" && user.systemNotice?.kind === "provider-turn");
+    }
     await this.finishUnsentWorkerTurn(prepared.lease.threadId, prepared.lease.turnExecutionId);
     this.turnRuntime.terminalize(prepared.lease.threadId, prepared.lease.turnExecutionId, "errored");
     this.clearTurnDispatch(prepared.lease.threadId);
@@ -1037,10 +1062,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const result = await this.submitUnsentWorkerFinish(worker, execution, active, terminal);
     if (!result) return true;
     if (!isAcceptedWorkerResult(result)) throw new Error("Unsent worker turn did not reach terminal acceptance");
-    this.publishWorkerPersistence(active, result);
+    this.publishUnsentFinish(execution, active, result);
+    await this.fileEvidence?.collected(execution);
     await worker.providerEvents.retire(execution);
     await worker.owner.release(execution);
-    if (active) this.requireWorkerFiles().retire(execution.threadId, execution.executionId, active.deliveryAttempt);
+    this.retireUnsentFiles(execution, active);
     this.lifecycles.end(execution);
     return true;
   }
@@ -1067,7 +1093,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     terminal: UnsentWorkerTerminal,
   ): Extract<ExecutionWorkCommand, { kind: "finish-from-state" }> {
     const { outcome } = terminal;
-    const frozen = this.unsentFileEvidence(execution, active, outcome);
+    const frozen = this.prepareUnsentEvidence(execution, active, outcome);
     const providerId = active?.prepared.providerId
       ?? this.runtimePersistence.load(execution.threadId)?.provider ?? "codex";
     return {
@@ -1079,6 +1105,26 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       ...(active ? { deliveryAttempt: active.deliveryAttempt } : {}) },
       ...(frozen ? { frozenFileEvidence: frozen } : {}),
     };
+  }
+
+  private publishUnsentFinish(execution: ExecutionIdentity, active: WorkerOwnedTurn | undefined,
+    result: Extract<ExecutionWorkerResult, { kind: "committed" | "accepted" }>): void {
+    if (active) this.collectWorkerFileEvidence(active);
+    if (result.kind === "committed" && result.terminalPersistence) publishTurnPersisted(execution, result.terminalPersistence);
+  }
+
+  private retireUnsentFiles(execution: ExecutionIdentity, active: WorkerOwnedTurn | undefined): void {
+    if (active) this.requireWorkerFiles().retire(execution.threadId, execution.executionId, active.deliveryAttempt);
+  }
+
+  private prepareUnsentEvidence(execution: ExecutionIdentity, active: WorkerOwnedTurn | undefined, outcome: "errored" | "cancelled") {
+    const frozen = this.unsentFileEvidence(execution, active, outcome);
+    if (frozen) this.fileEvidence?.expect(execution, frozen);
+    else {
+      const message = active?.prepared.parentStartInput.userMessage;
+      this.fileEvidence?.expectUnsent(execution, message?.kind === "create" && message.systemNotice?.kind === "provider-turn");
+    }
+    return frozen;
   }
 
   private unsentFileEvidence(
@@ -1209,32 +1255,43 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       if (stopped.kind !== "committed" && stopped.kind !== "accepted") throw new Error("Worker stop request did not commit");
       active.stopRequested = true;
     }
-    const frozen = this.requireWorkerFiles().seal({ ...active.execution,
-      deliveryAttempt: active.deliveryAttempt, outcome: "cancelled" });
-    if (!frozen) throw new Error("Worker stop lost its file evidence generation");
+    const frozen = this.sealOptionalFileEvidence(active, "cancelled");
     await this.finishWorkerTurn(active, frozen, { outcome: "cancelled", ending: { stop: prepared.stop } });
     return this.cancelledWorkerStop(prepared);
   }
 
   private async finishWorkerTurn(
     active: WorkerOwnedTurn,
-    frozen: NonNullable<ReturnType<ExecutionFileEvidenceCoordinator["seal"]>>,
+    frozen: ReturnType<ExecutionFileEvidenceCoordinator["seal"]>,
     terminal: { outcome: "cancelled" | "interrupted"; ending: TurnEndingCause },
   ): Promise<void> {
+    if (frozen) this.fileEvidence?.expect(active.execution, frozen);
+    else this.fileEvidence?.expectUnsent(active.execution, true);
     const result = await this.requireWorkerRuntime().owner.submit(active.execution, {
-      kind: "finish-from-state", outcome: terminal.outcome, frozenFileEvidence: frozen,
+      kind: "finish-from-state", outcome: terminal.outcome, ...(frozen ? { frozenFileEvidence: frozen } : {}),
       input: { ...active.execution, providerId: active.prepared.providerId,
         providerIdentities: active.prepared.parentStartInput.providerIdentities,
         ...terminal, deliveryAttempt: active.deliveryAttempt,
         projection: { kind: "writer-staged" } },
     });
     if (result.kind !== "committed" && result.kind !== "accepted") throw new Error("Worker terminal did not commit");
+    this.collectWorkerFileEvidence(active);
     this.publishWorkerPersistence(active, result);
     active.terminalCommitted = true;
     active.terminalOutcome = terminal.outcome;
     this.turnRuntime.terminalize(active.execution.threadId, active.execution.executionId, terminal.outcome);
     active.stopInProgress = false;
-    await this.releaseWorkerTurn(active);
+    if (terminal.outcome !== "cancelled") return this.releaseWorkerTurn(active);
+    active.terminalRelease = this.releaseWorkerTurn(active);
+    void active.terminalRelease.catch((error: unknown) => logger.error("Terminal release failed", { threadId: active.execution.threadId, error: String(error) }));
+  }
+
+  private collectWorkerFileEvidence(active: WorkerOwnedTurn): void {
+    if (active.fileCollectionStarted) return;
+    active.fileCollectionStarted = true;
+    void this.requireWorkerRuntime().owner.submit(active.execution, { kind: "collect-files" }).then((result) => {
+      this.fileEvidence?.tracked(active.execution, result.kind === "files-collected" ? result.fileEvidence ?? "lost" : "lost");
+    }, () => this.fileEvidence?.tracked(active.execution, "lost"));
   }
 
   private cancelledWorkerStop(prepared: PreparedStop): AgentStopResult {
@@ -1913,6 +1970,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private async stopForShutdown(threadId: string): Promise<void> {
     const active = this.lifecycles.worker(threadId);
     await this.featureEffects.stopDescendants(threadId);
+    if (active?.terminalCommitted) {
+      await this.waitForStoppingWorker(active);
+      return;
+    }
     const sessionId = `mcode-${threadId}`;
     const providerId = this.activeProviderId(threadId);
     if (!providerId) return;

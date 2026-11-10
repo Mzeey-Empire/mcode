@@ -148,7 +148,7 @@ describe("execution worker parent event ownership", () => {
     });
   });
 
-  it("settles captured edits on the worker before its single terminal writer call", async () => {
+  it("finishes without file data and retains tracked facts for post-terminal collection", async () => {
     const { cwd, tracker, handoff } = await fileFixture();
     const { writer, send } = fixture();
     const file = NodePath.join(cwd, "tracked.txt");
@@ -172,9 +172,11 @@ describe("execution worker parent event ownership", () => {
       frozenFileEvidence: { handoff, turnId: execution.turnId, deliveryAttempt: 1, outcome: "errored", nativeDiff: null } });
     expect(reply.result.kind).toBe("committed");
     expect(writer.operations).toHaveLength(6);
-    expect(writer.operations[5]?.mutation).toMatchObject({ kind: "finish-live-event", input: {
-      error: "Disconnected", fileEvidence: { filesChanged: ["tracked.txt"], fileEffects: { fileCount: 1, additions: 2, deletions: 1 } },
-    } });
+    expect(writer.operations[5]?.mutation).toMatchObject({ kind: "finish-live-event", input: { error: "Disconnected" } });
+    if (writer.operations[5]?.mutation.kind !== "finish-live-event") throw new Error("Expected terminal mutation");
+    expect(writer.operations[5].mutation.input.fileEvidence).toBeUndefined();
+    expect((await send(7, { kind: "collect-files" })).result).toMatchObject({ kind: "files-collected",
+      fileEvidence: { filesChanged: ["tracked.txt"], fileEffects: { fileCount: 1, additions: 2, deletions: 1 } } });
     expect((await send(7, { kind: "release" })).result).toEqual({ kind: "released" });
   });
 

@@ -12,12 +12,12 @@ import {
   storeIdentity,
   threads,
   turnSnapshots,
+  turnFileEvidence,
   turnReverts,
   workspaces,
 } from "../../../../runtime/persistence/sqlite/schema.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { expireTurnRevert } from "../../../agents/turns/persistence/turn-revert-write-operations.js";
-import { persistInterruptedAttemptSnapshot } from "../../../agents/turns/persistence/turn-finalization-write-operations.js";
 import type { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
@@ -199,8 +199,8 @@ export class SnapshotRefPins {
   }
 
   /**
-   * Settle the baseline pin of one finished execution: transfer it to the execution's snapshot,
-   * write the snapshot of an interrupted attempt, or release it. Running executions are kept.
+   * Transfer a resolved execution's baseline to its snapshot, or release it. Running executions
+   * and unresolved file observations keep their pins; restart never recaptures their workspace.
    */
   async settleExecution(threadId: string, executionId: string, options: SnapshotPinPassOptions = {}): Promise<void> {
     await this.guard("settle execution", { threadId }, async () => {
@@ -291,43 +291,15 @@ export class SnapshotRefPins {
     const terminalOutcome = this.executionTerminalOutcome(executionId);
     // A live thread may still be finalizing this execution, so its snapshot write is left to the finalizer.
     if (terminalOutcome === null || options.isThreadLive?.(threadId)) return;
+    if (this.orm.select({ state: turnFileEvidence.state }).from(turnFileEvidence)
+      .where(eq(turnFileEvidence.executionId, executionId)).get()?.state === "tracking") return;
     const assistantId = this.assistantMessageFor(threadId, executionId);
     const snapshot = assistantId ? this.snapshotForMessage(assistantId) : null;
     if (snapshot) {
       await this.transferToSnapshot(repositoryCwd, snapshot, listed.pin);
       return;
     }
-    if (assistantId && terminalOutcome === "interrupted") {
-      await this.writeInterruptedSnapshot(listed, assistantId, options);
-      return;
-    }
     await this.release(repositoryCwd, listed.pin);
-  }
-
-  private async writeInterruptedSnapshot(listed: ListedBaseline, messageId: string, options: SnapshotPinPassOptions): Promise<void> {
-    const { threadId } = listed.pin;
-    const cwd = this.threadWorkingDirectory(threadId);
-    if (!cwd) return;
-    let captured: { refAfter: string; filesChanged: string[] } | undefined;
-    const ok = await this.guard("capture interrupted attempt", { threadId }, () => this.lock.run(cwd, async () => {
-      const refAfter = await this.snapshots.captureRef(cwd);
-      captured = { refAfter, filesChanged: await this.snapshots.getFilesChanged(cwd, listed.tree, refAfter) };
-    }));
-    if (!ok || !captured) return;
-    const { refAfter, filesChanged } = captured;
-    if (options.stopAt === "before-row-write") throw new SnapshotPinFaultStop("before-row-write");
-    let snapshotId: string | null = null;
-    const written = await this.guard("write interrupted snapshot", { threadId }, async () => {
-      // A concurrent pass that already wrote the row returns null; the sweep pins that row.
-      ({ snapshotId } = await this.writer.execute(persistInterruptedAttemptSnapshot, {
-        snapshot: { messageId, threadId, refBefore: listed.tree, refAfter, filesChanged, worktreePath: null },
-        markFilesChanged: filesChanged.length > 0,
-      }));
-    });
-    if (!written || !snapshotId) return;
-    this.attention?.invalidate(threadId);
-    if (options.stopAt === "after-row-write") throw new SnapshotPinFaultStop("after-row-write");
-    await this.transferToSnapshot(cwd, { id: snapshotId, refBefore: listed.tree, refAfter }, listed.pin);
   }
 
   private async baselineCommitFor(cwd: string, baseline: BaselinePin | null, refBefore: string): Promise<string | null> {
