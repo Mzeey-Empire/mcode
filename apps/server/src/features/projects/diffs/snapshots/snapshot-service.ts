@@ -12,7 +12,7 @@ import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { gitExitCode } from "../../git/execution/git-failure.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
-import { batchLiteralPaths, isLiteralRepoPath } from "../../git/literal-paths.js";
+import { isLiteralRepoPath } from "../../git/literal-paths.js";
 import { withIndexCopy } from "../../git/temporary-index.js";
 import { rawGit, rawPath, readRawStates, restoreRaw, type RawPathState, type RawRestoreEntry } from "./snapshot-raw-state.js";
 import { blobIdsAt, planCheckout, pinRecovery, withSnapshotIndex } from "./snapshot-checkout.js";
@@ -283,7 +283,8 @@ export class SnapshotService {
     };
     let pending = "";
     // The listing names every tracked path, which outgrows a buffered stdout on large repositories.
-    await this.gitExecutor.exec(["-C", cwd, "ls-files", "-v", "-z"], {
+    // `:/` lists the whole repository when the project is a subfolder of it.
+    await this.gitExecutor.exec(["-C", cwd, "ls-files", "-v", "-z", "--", ":/"], {
       timeout, env, retainStdout: false,
       onStdout(chunk) {
         const records = (pending + chunk).split("\0");
@@ -298,10 +299,12 @@ export class SnapshotService {
     }
   }
 
+  /** One process for any number of paths; `core.ignoreStat` flags every tracked file. */
   private async updateIndexFlags(cwd: string, env: NodeJS.ProcessEnv, timeout: number, flag: string, paths: string[]): Promise<void> {
-    for (const batch of batchLiteralPaths(paths)) {
-      await this.gitExecutor.exec(["-C", cwd, "update-index", flag, "--", ...batch], { timeout, env });
-    }
+    if (paths.length === 0) return;
+    await this.gitExecutor.exec(["-C", cwd, "update-index", flag, "-z", "--stdin"], {
+      timeout, env, input: `${paths.join("\0")}\0`,
+    });
   }
 
   private async usesSparseCheckout(cwd: string, timeout: number): Promise<boolean> {

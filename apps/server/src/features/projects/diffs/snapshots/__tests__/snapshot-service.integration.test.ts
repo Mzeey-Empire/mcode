@@ -193,6 +193,40 @@ describe("SnapshotService integration", () => {
     expect(git("ls-files", "-v")).toBe(flags);
   }, GIT_OPERATION_TIMEOUT_MS);
 
+  it("captures an assume-unchanged edit outside a project that is a repository subfolder", async () => {
+    NodeFS.mkdirSync(NodePath.join(tmpDir, "app"));
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "app", "inside.txt"), "inside\n");
+    git("add", "app/inside.txt");
+    git("-c", "core.hooksPath=", "commit", "-m", "subfolder");
+    git("update-index", "--assume-unchanged", "existing.txt");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "assumed edit\n");
+
+    const ref = await service.captureRef(NodePath.join(tmpDir, "app"));
+
+    expect(git("show", `${ref}:existing.txt`)).toBe("assumed edit");
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("unflags every file that core.ignoreStat marked with one update-index process", async () => {
+    git("config", "core.ignoreStat", "true");
+    for (let n = 0; n < 300; n++) NodeFS.writeFileSync(NodePath.join(tmpDir, `file-${n}.txt`), `${n}\n`);
+    git("add", ".");
+    git("-c", "core.hooksPath=", "commit", "-m", "many files");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "file-299.txt"), "edited\n");
+    const real = new RealGitExecutor();
+    const subcommands: string[] = [];
+    const counted = new SnapshotService({
+      exec(args, opts) {
+        subcommands.push(args[2] ?? "");
+        return real.exec(args, opts);
+      },
+    });
+
+    const ref = await counted.captureRef(tmpDir);
+
+    expect(git("show", `${ref}:file-299.txt`)).toBe("edited");
+    expect(subcommands.filter((subcommand) => subcommand === "update-index")).toHaveLength(1);
+  }, GIT_OPERATION_TIMEOUT_MS);
+
   it("captures a checkout whose index listing exceeds a buffered stdout", async () => {
     const blob = git("hash-object", "-w", "existing.txt");
     const folder = "a-long-directory-name-that-makes-each-index-record-large/".repeat(2);
