@@ -747,7 +747,7 @@ export class CanonicalAgentStore {
       .where(and(eq(canonicalAgentEvents.threadId, threadId),
         sql`${canonicalAgentEvents.durableRevision} <= ${throughRevision}`,
         sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.payload.type') = 'turn.started'`))
-      .orderBy(desc(canonicalAgentEvents.durableRevision), desc(canonicalAgentEvents.acceptedSequence)).limit(1).get();
+      .orderBy(desc(canonicalAgentEvents.durableRevision)).limit(1).get();
     return started?.turnId ?? null;
   }
 
