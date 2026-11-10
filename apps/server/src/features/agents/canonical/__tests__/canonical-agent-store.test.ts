@@ -1,4 +1,6 @@
 import "reflect-metadata";
+import * as NodeCrypto from "node:crypto";
+import { createMockMessage } from "@mcode/contracts/testing";
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -2618,6 +2620,33 @@ describe("CanonicalAgentStore", () => {
     });
   });
 
+  it("replays a legacy completed-only child message after reopening without duplication", () => {
+    startCanonicalParent(sink, db);
+    const input = { parentThreadId: THREAD_ID, parentTurnId: TURN_ID, parentExecutionId: EXECUTION_ID,
+      parentItemId: "toolCall:spawn-legacy", receiverThreadIds: ["native-child-legacy"], providerIdentities: [] };
+    const delegation = sink.startCodexChildDelegation(input);
+    const turn = sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-legacy", nativeTurnId: "native-turn-legacy" });
+    const completion = { childThreadId: delegation.childThread.id, nativeTurnId: "native-turn-legacy",
+      nativeItemId: "native-message-legacy", eventKey: "completed", kind: "message" as const,
+      payload: { projection: "message", content: "Saved child answer" } };
+    const id = `item:codex-child:${NodeCrypto.createHash("sha256").update(`${turn.id}:native-message-legacy:completed:message`).digest("hex").slice(0, 32)}`;
+    db.prepare(`INSERT INTO canonical_agent_items
+      (id, thread_id, turn_id, kind, payload_json, created_at, updated_at) VALUES (?, ?, ?, 'message', ?, ?, ?)`)
+      .run(id, delegation.childThread.id, turn.id, JSON.stringify({ projection: "message",
+        nativeItemId: completion.nativeItemId, eventKey: "completed",
+        message: createMockMessage({ thread_id: delegation.childThread.id, role: "assistant", content: "Saved child answer" }) }), NOW, NOW);
+    const reopened = new CanonicalAgentStore(db, published);
+
+    expect(reopened.recordCodexChildItem(completion).id).toBe(id);
+    expect(reopened.recordCodexChildItem({ ...completion, eventKey: "stream",
+      payload: { projection: "message", content: " stale" } }).id).toBe(id);
+    expect(db.prepare("SELECT id FROM canonical_agent_items WHERE thread_id = ? AND kind = 'message' AND id NOT LIKE 'item:codex-child-prompt:%'")
+      .all(delegation.childThread.id)).toEqual([{ id }]);
+    expect(() => reopened.recordCodexChildItem({ ...completion,
+      payload: { projection: "message", content: "Conflicting answer" } })).toThrow();
+    expect(reopened.loadItem(id)?.payload.message).toMatchObject({ content: "Saved child answer" });
+  });
+
   it("updates one child assistant item as streamed content grows", () => {
     startCanonicalParent(sink, db);
     const input = {
@@ -2630,7 +2659,7 @@ describe("CanonicalAgentStore", () => {
       providerIdentities: [] as ProviderIdentity[],
     };
     const delegation = sink.startCodexChildDelegation(input);
-    sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-stream", nativeTurnId: "native-turn-stream" });
+    const childTurn = sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-stream", nativeTurnId: "native-turn-stream" });
     const first = sink.recordCodexChildItem({
       childThreadId: delegation.childThread.id,
       nativeTurnId: "native-turn-stream",
@@ -2655,6 +2684,13 @@ describe("CanonicalAgentStore", () => {
     });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE thread_id = ? AND kind = 'message'")
       .get(delegation.childThread.id)).toEqual({ count: 2 });
+
+    sink.finishCodexChildTurn({ childThreadId: delegation.childThread.id,
+      nativeTurnId: "native-turn-stream", outcome: "completed" });
+    sink.recordCodexChildItem({ childThreadId: delegation.childThread.id,
+      nativeTurnId: "native-turn-stream", nativeItemId: "native-message-stream", eventKey: "stream",
+      kind: "message", payload: { projection: "message", content: " late" } });
+    expect(sink.loadItem(first.id)?.payload.message).toMatchObject({ content: "AA late" });
 
     const completed = sink.recordCodexChildItem({
       childThreadId: delegation.childThread.id,
@@ -2689,6 +2725,7 @@ describe("CanonicalAgentStore", () => {
     expect(sink.loadItem(first.id)?.payload).toMatchObject({
       message: { content: "AA" },
     });
+    expect(sink.loadTurn(childTurn.id)?.status).toBe("Completed");
   });
 
   it("persists repeated child text deltas through the Codex adapter into one canonical item", () => {
@@ -2744,6 +2781,49 @@ describe("CanonicalAgentStore", () => {
       projection: "message",
       message: { content: "AA" },
     });
+  });
+
+  it("rejects a conflicting full child message after the saved full message and turn end", () => {
+    startCanonicalParent(sink, db);
+    const input = { parentThreadId: THREAD_ID, parentTurnId: TURN_ID, parentExecutionId: EXECUTION_ID,
+      parentItemId: "toolCall:spawn-full", receiverThreadIds: ["native-child-full"],
+      prompt: "Child task", providerIdentities: [] as ProviderIdentity[] };
+    const delegation = sink.startCodexChildDelegation(input);
+    sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-full", nativeTurnId: "native-turn" });
+    const full = (content: string) => ({ childThreadId: delegation.childThread.id, nativeTurnId: "native-turn",
+      nativeItemId: "native-message", eventKey: "stream-complete", kind: "message" as const,
+      payload: { projection: "message", content } });
+    const saved = sink.recordCodexChildItem(full("Full saved answer"));
+    sink.finishCodexChildTurn({ childThreadId: delegation.childThread.id, nativeTurnId: "native-turn", outcome: "completed" });
+
+    expect(() => sink.recordCodexChildItem(full("Full"))).toThrow("Codex child item identity conflict");
+    expect(sink.recordCodexChildItem(full("Full saved answer"))).toEqual(saved);
+    expect(sink.loadItem(saved.id)?.payload.message).toMatchObject({ content: "Full saved answer" });
+  });
+
+  it.each(["Saved child answer", "Conflicting answer"])("reconciles completed child text after a stray delta (%s)", (content) => {
+    startCanonicalParent(sink, db);
+    const input = { parentThreadId: THREAD_ID, parentTurnId: TURN_ID, parentExecutionId: EXECUTION_ID,
+      parentItemId: "toolCall:spawn-completed", receiverThreadIds: ["native-child-completed"],
+      prompt: "Child task", providerIdentities: [] as ProviderIdentity[] };
+    const delegation = sink.startCodexChildDelegation(input);
+    const turn = sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-completed", nativeTurnId: "native-turn" });
+    const message = { childThreadId: delegation.childThread.id, nativeTurnId: "native-turn",
+      nativeItemId: "native-message", eventKey: "completed", kind: "message" as const,
+      payload: { projection: "message", content: "Saved child answer" } };
+    const saved = sink.recordCodexChildItem(message);
+    sink.finishCodexChildTurn({ childThreadId: delegation.childThread.id, nativeTurnId: "native-turn", outcome: "completed" });
+    const terminal = sink.loadTurn(turn.id);
+    expect(sink.recordCodexChildItem({ ...message, eventKey: "stream",
+      payload: { projection: "message", content: " stray" } })).toEqual(saved);
+    const full = { ...message, eventKey: "stream-complete", payload: { projection: "message", content } };
+
+    if (content === "Saved child answer") expect(sink.recordCodexChildItem(full)).toEqual(saved);
+    else expect(() => sink.recordCodexChildItem(full)).toThrow("Codex child item identity conflict");
+    expect(sink.loadItem(saved.id)).toEqual(saved);
+    expect(sink.loadTurn(turn.id)).toEqual(terminal);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE thread_id = ? AND kind = 'message'")
+      .get(delegation.childThread.id)).toEqual({ count: 2 });
   });
 
   it("keeps child content under one child turn and restores it in a fresh sink", () => {

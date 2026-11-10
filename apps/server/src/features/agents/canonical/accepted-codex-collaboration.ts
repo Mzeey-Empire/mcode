@@ -440,6 +440,15 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
 
   recordCodexChildItem(input: CodexChildItemInput): AgentItem {
     const turn = this.childTurn(input.childThreadId, input.nativeTurnId);
+    if (input.kind === "message" && ["stream", "stream-complete"].includes(input.eventKey)) {
+      const completed = this.record("items", `item:codex-child:${hash(`${turn.id}:${input.nativeItemId}:completed:message`)}`);
+      if (completed) {
+        if (input.eventKey === "stream-complete") {
+          assertSameChildMessage(completed, messageSource(input.payload), MessageSchema().parse(completed.payload.message));
+        }
+        return completed;
+      }
+    }
     const stream = input.kind === "message" && ["stream", "stream-complete"].includes(input.eventKey);
     const id = `item:codex-child:${hash(`${turn.id}:${input.nativeItemId}:${stream ? "stream" : input.eventKey}:${input.kind}`)}`;
     return this.recordItemInTurn(turn, id, input, stream);
@@ -448,7 +457,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   private recordItemInTurn(turn: AgentTurn, id: string, input: Omit<CodexChildItemInput, "nativeTurnId">, stream: boolean): AgentItem {
     const existing = this.record("items", id);
     if (existing) return this.updateChildItem(existing, input, turn, stream);
-    if (isTerminal(turn)) throw new Error(`Codex child turn is terminal: ${turn.id}`);
+    if (isTerminal(turn) && input.kind !== "message") throw new Error(`Codex child turn is terminal: ${turn.id}`);
     const now = timestamp();
     const payload = input.kind === "message" ? this.messagePayload(input.childThreadId, input.payload)
       : publicChildPayload(input.payload);
@@ -585,8 +594,9 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
       return existing;
     }
     if (typeof source.content !== "string" || typeof source.id === "string" && source.id !== message.id) throw new Error(`Codex child streamed message identity conflict: ${existing.id}`);
-    if (isTerminal(turn)) return existing;
-    const content = input.eventKey === "stream-complete" ? source.content : message.content + source.content;
+    const content = streamedChildContent(existing.payload.eventKey, input.eventKey, message.content, source.content);
+    if (content === undefined) throw new Error(`Codex child streamed message identity conflict: ${existing.id}`);
+    if (content === null) return existing;
     const item = { ...existing, payload: { ...existing.payload, message: { ...message, content },
       nativeItemId: input.nativeItemId, eventKey: input.eventKey }, updatedAt: timestamp() };
     this.recordItem(item, this.context(turn));
@@ -744,6 +754,11 @@ function unique(index: ReadonlyMap<string, ReadonlySet<string>>, key: string, la
   const values = index.get(key);
   if (values && values.size > 1) throw new Error(`${label} identity is ambiguous: ${key}`);
   return values?.values().next().value;
+}
+function streamedChildContent(savedEventKey: unknown, eventKey: string, saved: string, incoming: string): string | null | undefined {
+  if (savedEventKey !== "stream-complete") return eventKey === "stream" ? saved + incoming : incoming;
+  if (eventKey === "stream") return null;
+  return incoming === saved ? null : undefined;
 }
 function isTerminal(turn: AgentTurn): boolean { return Object.values(TERMINAL_STATUS).some((status) => status === turn.status); }
 function text(value: string | undefined): string | undefined { return value?.trim().slice(0, CANONICAL_SUBAGENT_TASK_MAX_LENGTH) || undefined; }

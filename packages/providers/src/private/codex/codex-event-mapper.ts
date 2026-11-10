@@ -811,7 +811,6 @@ export class CodexEventMapper {
     const output = this.childTurnOutput(childThreadId, turn?.error?.message);
     const completion = this.completeSpawnAgent(collabId, output, turn?.status === "failed");
     if (collabId) this.childSpawnEvidenceByCollabId.delete(collabId);
-    this.clearChildAssistantItemBuffers(childThreadId);
     return [...this.childTurnCompletionEvents(context, output, turn?.status), ...completion];
   }
 
@@ -1324,6 +1323,7 @@ export class CodexEventMapper {
 
   /** Reads completed-message text from the OpenAI Responses-style item shape. */
   private completedMessageText(item: CompletedItem): string {
+    if (typeof item.text === "string") return item.text;
     const content = (item.content ?? []) as Array<{ type: string; text?: string }>;
     return content
       .filter((c) => c.type === "output_text" || c.type === "text")

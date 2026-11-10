@@ -37,18 +37,34 @@ import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testin
 
 const roots: string[] = [];
 const services: ReturnType<typeof createAgentServiceForTest>[] = [];
+const heldStartups: {
+  readonly creating: Promise<unknown>;
+  readonly release?: () => void;
+  readonly disposeBackgroundWork?: () => Promise<void>;
+}[] = [];
 
 afterEach(async () => {
+  const held = heldStartups.splice(0);
+  for (const startup of held) startup.release?.();
+  await Promise.allSettled(held.map((startup) => startup.creating));
   // Each service owns a pool of execution worker threads. Left open, the pools pile up across the file, slow later
   // pool starts, and keep writing after their database closes.
-  await Promise.all(services.splice(0).map((service) => drainAgentServicePersistenceForTest(service)));
-  await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+  const drains = await Promise.allSettled(services.splice(0).map((service) => drainAgentServicePersistenceForTest(service)));
+  const disposals = await Promise.allSettled(held.map(async (startup) => await startup.disposeBackgroundWork?.()));
+  const removals = await Promise.allSettled(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+  const failures = [...drains, ...disposals, ...removals].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Test teardown failed");
 });
 
 function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((next) => { resolve = next; });
   return { promise, resolve };
+}
+
+async function startedUnlessRejected(started: Promise<void>, ...work: Promise<unknown>[]): Promise<void> {
+  await Promise.race([started, ...work.map(async (pending) => { await pending; await started; })]);
 }
 
 function requireThreadCreationOptions(options: Parameters<ThreadService["create"]>[4]) {
@@ -496,6 +512,7 @@ describe("AgentService.createAndSend defaults", () => {
     const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-drain-"));
     roots.push(root);
     const setupCompletion = deferred<TerminalCommandCompletion>();
+    const setupStarted = deferred<void>();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = await createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
       startupEnvironmentFixture({
         mcodeDir: root,
@@ -507,7 +524,10 @@ describe("AgentService.createAndSend defaults", () => {
             kind: "ready" as const,
             command: {
               snapshot: { checkoutPath: "/repo/.worktrees/managed", terminal: { executable: "sh", arguments: ["-c", "bun run setup"] } },
-              start: async () => await setupCompletion.promise,
+              start: async () => {
+                setupStarted.resolve();
+                return await setupCompletion.promise;
+              },
               close: async () => ({ kind: "contained" as const }),
               waitForRelease: async () => await new Promise<never>(() => undefined),
             },
@@ -541,12 +561,14 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
+    heldStartups.push({ creating });
+    await startedUnlessRejected(setupStarted.promise, creating);
+    expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
     await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
     expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
 
     setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
-    await creating;
+    await expect(creating).resolves.toMatchObject({ id: managed.id });
     await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
     // Dispatch alone leaves the startup waiting for the provider's first frame.
     expect(threadStartups.get(startupId)).toMatchObject({ state: "running", phase: "agent" });
@@ -607,17 +629,25 @@ describe("AgentService.createAndSend defaults", () => {
     const startupId = "00000000-0000-4000-8000-000000000024";
     const creating = service.createAndSend({ workspaceId: workspace.id, content: "Cancelled first prompt",
       mode: "worktree", branch: "feature/managed", startupId });
-    await setupStarted.promise;
+    heldStartups.push({ creating, release: () => {
+      setupCompletion.resolve({ kind: "exited", exitCode: 1, output: "", outputTruncated: false });
+      setupRelease.resolve();
+    }, disposeBackgroundWork: () => automaticSetup.dispose() });
+    await startedUnlessRejected(setupStarted.promise, creating);
+    expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running");
     await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
       threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
       threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
     });
-    await creating;
+    await expect(creating).resolves.toMatchObject({ id: managed.id });
     expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup" });
     expect(provider.sendTurn).not.toHaveBeenCalled();
 
+    const providerStarted = deferred<void>();
+    provider.sendTurn.mockImplementation(async () => { providerStarted.resolve(); });
     await service.sendMessage({ threadId: managed.id, content: "New prompt after Keep thread" });
-    await vi.waitFor(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    await providerStarted.promise;
+    expect(provider.sendTurn).toHaveBeenCalledOnce();
     expect(provider.sendTurn.mock.calls[0]?.[0]).toMatchObject({ message: "New prompt after Keep thread" });
     expect(automaticSetup.getAutomaticSetup({ threadId: managed.id })).toMatchObject({
       gate: "not-required", queuedTurns: [{ state: "cancelled" }],
@@ -656,12 +686,17 @@ describe("AgentService.createAndSend defaults", () => {
     });
     const heldAdmission = deferred<{ kind: "passthrough" }>();
     const admissionStarted = deferred<void>();
+    const queuedDispatch = deferred<{ readonly dispatched: ReturnType<typeof service.dispatchQueuedAutomaticTurn> }>();
     goals.routeCommand.mockImplementation(async () => {
       admissionStarted.resolve();
       return await heldAdmission.promise;
     });
     const environment = automaticSetup as WorkspaceEnvironmentService;
-    environment.setAutomaticSetupDispatcher({ dispatch: (submission) => service.dispatchQueuedAutomaticTurn(submission) });
+    environment.setAutomaticSetupDispatcher({ dispatch: (submission) => {
+      const dispatched = service.dispatchQueuedAutomaticTurn(submission);
+      queuedDispatch.resolve({ dispatched });
+      return dispatched;
+    } });
     const startupId = "00000000-0000-4000-8000-000000000022";
 
     const creating = service.createAndSend({
@@ -671,13 +706,17 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await admissionStarted.promise;
+    const releaseAdmission = () => heldAdmission.resolve({ kind: "passthrough" });
+    heldStartups.push({ creating, release: releaseAdmission, disposeBackgroundWork: () => environment.dispose() });
+    await startedUnlessRejected(admissionStarted.promise, creating, queuedDispatch.promise.then(({ dispatched }) => dispatched));
+    expect(goals.routeCommand).toHaveBeenCalledOnce();
+    await threadStartups.cancel(startupId);
 
-    (await threadStartups.cancel(startupId));
-    heldAdmission.resolve({ kind: "passthrough" });
-
-    await creating;
-    await vi.waitFor(() => expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" }));
+    releaseAdmission();
+    await expect(creating).resolves.toMatchObject({ id: managed.id });
+    const { dispatched } = await queuedDispatch.promise;
+    await (await dispatched).completion;
+    expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "agent" });
     expect(provider.sendTurn).not.toHaveBeenCalled();
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(managed.id);
   });
@@ -698,9 +737,9 @@ describe("AgentService.createAndSend defaults", () => {
       return managed;
     });
     const heldAttachmentPersistence = deferred<{ stored: []; persisted: [] }>();
-    const persistenceStarted = deferred<void>();
+    const attachmentPersistenceStarted = deferred<void>();
     attachmentService.persist.mockImplementation(async () => {
-      persistenceStarted.resolve();
+      attachmentPersistenceStarted.resolve();
       return await heldAttachmentPersistence.promise;
     });
     const startupId = "00000000-0000-4000-8000-000000000024";
@@ -712,12 +751,14 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await persistenceStarted.promise;
+    const releaseAttachments = () => heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
+    heldStartups.push({ creating, release: releaseAttachments });
+    await startedUnlessRejected(attachmentPersistenceStarted.promise, creating);
+    expect(attachmentService.persist).toHaveBeenCalledOnce();
+    await threadStartups.cancel(startupId);
+    await threadStartups.markCancelled(startupId);
 
-    (await threadStartups.cancel(startupId));
-    (await threadStartups.markCancelled(startupId));
-    heldAttachmentPersistence.resolve({ stored: [], persisted: [] });
-
+    releaseAttachments();
     const result = await creating;
 
     expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", phase: "setup" });
