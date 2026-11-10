@@ -78,8 +78,12 @@ const UNAVAILABLE_REASONS: Readonly<Record<Extract<TurnFileEvidence, { state: "u
  * The notice an ended turn's file evidence shows, or null when the changes bar
  * (recorded) or nothing (untracked) already tells the truth.
  */
-export function fileEvidenceNotice(evidence: TurnFileEvidence): QuietNotice | null {
+export function fileEvidenceNotice(evidence: TurnFileEvidence, hasChangesBar = true): QuietNotice | null {
   if (evidence.state === "tracking") return { style: "quiet", icon: "files", title: "Checking changed files", delayed: true };
+  if (evidence.state === "recorded" && !hasChangesBar && evidence.filesChanged.length > 0) {
+    const count = evidence.filesChanged.length;
+    return { style: "quiet", icon: "files", title: `Changed ${count} ${count === 1 ? "file" : "files"}` };
+  }
   if (evidence.state !== "unavailable") return null;
   const count = evidence.knownPaths.length;
   const reported = count === 0 ? "" : ` The agent reported ${count} changed ${count === 1 ? "file" : "files"}.`;

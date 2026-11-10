@@ -264,7 +264,11 @@ function mergeResidentConversationCacheState(
   const residentCacheState = projectConversationCacheState(resident);
   const noticeState = mergeSessionNotices(resident, cached, options.preferResidentNotices);
   if (cachedConversationIsNewer(residentCacheState, cached)) {
-    return { ...cached, ...noticeState, fileEvidence: mergeConversationFileEvidence(residentCacheState, cached) };
+    const fileEvidence = mergeConversationFileEvidence(residentCacheState, cached);
+    // A pending page can land after the resolved push, so its paths come from the merged evidence.
+    const persistedFilesChanged = withRecordedEvidencePaths(cached.persistedFilesChanged, { fileEvidence, serverMessageIds: cached.serverMessageIds });
+    return { ...cached, ...noticeState, fileEvidence, persistedFilesChanged,
+      latestTurnWithChanges: findLatestTurnWithChanges(cached.messages, persistedFilesChanged) };
   }
   const messages = mergedConversationMessages(cached, residentCacheState, options.preferResidentMessages ?? true);
   const retainedMessageIds = new Set(messages.map((message) => message.id));

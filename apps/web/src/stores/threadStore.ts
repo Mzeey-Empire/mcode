@@ -3229,8 +3229,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const localMessageId = resolveTurnPersistLocalMessageId(record, event.messageId);
     return {
       ...(filesChanged.length > 0 ? { persistedFilesChanged: { ...record.persistedFilesChanged, [localMessageId]: filesChanged } } : {}),
-      ...(isCurrentThread ? { latestTurnWithChanges: filesChanged.length > 0 ? localMessageId : null } : {}),
+      ...(isCurrentThread ? latestTurnPatch(record, localMessageId, filesChanged) : {}),
     };
+  };
+
+  // An empty or unavailable result clears only its own turn, never another turn's bar.
+  const latestTurnPatch = (record: ThreadRecord, localMessageId: string, filesChanged: string[]): Partial<ThreadRecord> => {
+    if (filesChanged.length > 0) return { latestTurnWithChanges: localMessageId };
+    return record.latestTurnWithChanges === localMessageId ? { latestTurnWithChanges: null } : {};
   };
 
   const evidenceStopNotice = (record: ThreadRecord, event: TurnFileEvidenceEvent, filesChanged: string[]): Partial<ThreadRecord> => {

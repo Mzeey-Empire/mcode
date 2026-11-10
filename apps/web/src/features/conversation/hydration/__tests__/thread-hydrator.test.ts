@@ -545,6 +545,29 @@ describe("ThreadHydrator", () => {
     });
   });
 
+  it("keeps recorded changed files when a newer cached page still holds the pending evidence", async () => {
+    const recorded = createFileEvidenceEvent({ state: "recorded", filesChanged: ["src/a.ts"] },
+      { threadId: THREAD_A, executionId: "execution-1", messageId: "a1" });
+    const later = createMockMessage({ id: "a2", thread_id: THREAD_A, content: "later", sequence: 2 });
+    cacheRecord(THREAD_A, {
+      ...makeCachedRecord([msgA, later]),
+      fileEvidence: { "execution-1": { ...recorded, evidence: { state: "tracking" } } },
+    });
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([[THREAD_A, {
+        ...makeCachedRecord(),
+        fileEvidence: { "execution-1": recorded },
+        persistedFilesChanged: { a1: ["src/a.ts"] },
+        latestTurnWithChanges: "a1",
+      }]]),
+    });
+
+    await hydrator.hydrate(THREAD_A, "active");
+
+    expect(readActiveThreadField((record) => record.persistedFilesChanged)).toEqual({ a1: ["src/a.ts"] });
+    expect(readActiveThreadField((record) => record.latestTurnWithChanges)).toBe("a1");
+  });
+
   it("deduplicates a resident message id when its cached sequence is stale", async () => {
     const cachedMessage = createMockMessage({
       id: "same-message",

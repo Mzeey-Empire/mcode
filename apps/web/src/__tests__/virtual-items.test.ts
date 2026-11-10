@@ -315,6 +315,20 @@ describe("buildStableItems", () => {
 
       expect(evidenceNotice(items)).toBeUndefined();
     });
+
+    it("counts recorded files under a prompt whose turn has no reply to carry the changes bar", () => {
+      const items = withEvidence([makeMessage({ id: "u1", role: "user" })], endingsFor("u1", null),
+        { state: "recorded", filesChanged: ["src/a.ts", "src/b.ts"] });
+
+      expect(evidenceNotice(items)).toMatchObject({ notice: { title: "Changed 2 files" } });
+    });
+
+    it("keeps the evidence notice of a turn whose prompt is a hidden plan answer", () => {
+      const answer = makeMessage({ id: "u1", role: "user", content: `${PLAN_ANSWER_MESSAGE_PREFIX}\n- Named export` });
+      const items = withEvidence([answer], endingsFor("u1", null), { state: "unavailable", reason: "capture-failed", knownPaths: [] });
+
+      expect(items.map((item) => item.key)).toEqual(["turn-file-evidence:u1"]);
+    });
   });
 
   it("projects a completed current agent response without file-change metadata", () => {

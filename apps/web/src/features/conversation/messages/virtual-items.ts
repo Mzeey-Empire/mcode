@@ -561,9 +561,9 @@ function turnEndNoticeItem(message: Message, ending: TurnEnding | undefined): Ch
 }
 
 /** Shown only for an ended turn: a `tracking` row on a running turn means nothing yet. */
-function fileEvidenceNoticeItem(message: Message, ending: TurnEnding | undefined, input: StableItemInput): ChatVirtualItem | undefined {
+function fileEvidenceNoticeItem(message: Message, ending: TurnEnding | undefined, input: StableItemInput, hasChangesBar: boolean): ChatVirtualItem | undefined {
   const evidence = ending?.executionId ? input.fileEvidenceByExecutionId?.[ending.executionId] : undefined;
-  const notice = evidence ? fileEvidenceNotice(evidence.evidence) : null;
+  const notice = evidence ? fileEvidenceNotice(evidence.evidence, hasChangesBar) : null;
   return ending && notice
     ? { key: `turn-file-evidence:${message.id}`, type: "turn-end-notice", messageId: message.id, turnId: ending.turnId, providerId: ending.providerId, notice }
     : undefined;
@@ -579,9 +579,10 @@ function turnWorkItems(message: Message, input: StableItemInput, summary: TurnSu
 }
 
 function stableItemsForMessage(message: Message, input: StableItemInput): ChatVirtualItem[] {
-  if (isHiddenPlanAnswer(message)) return [];
   const ending = input.turnEndingsByMessageId?.[message.id];
-  if (message.role !== "assistant") return definedItems([messageVirtualItem(message, input), turnEndNoticeItem(message, ending), fileEvidenceNoticeItem(message, ending, input)]);
+  // A hidden plan answer still owns its turn's file evidence; only the answer row is hidden.
+  if (isHiddenPlanAnswer(message)) return definedItems([fileEvidenceNoticeItem(message, ending, input, false)]);
+  if (message.role !== "assistant") return definedItems([messageVirtualItem(message, input), turnEndNoticeItem(message, ending), fileEvidenceNoticeItem(message, ending, input, false)]);
   const settled = !isAgentDisplayActive(currentResponseState(message, input));
   const summary = settled ? settledTurnSummary(message, input) : undefined;
   const workItems = turnWorkItems(message, input, summary, ending);
@@ -591,7 +592,7 @@ function stableItemsForMessage(message: Message, input: StableItemInput): ChatVi
     summary && turnMetaLineItem(message, summary, input, workItems.some((item) => item.type === "work-fold")),
     turnChangesItem(message, input),
     turnEndNoticeItem(message, ending),
-    fileEvidenceNoticeItem(message, ending, input),
+    fileEvidenceNoticeItem(message, ending, input, true),
   ]);
 }
 

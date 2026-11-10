@@ -87,6 +87,26 @@ describe("handleTurnPersisted", () => {
     expect(readThreadField(THREAD_ID, (r) => r.pendingTurnPersistMessageIds)).toEqual([]);
   });
 
+  it("keeps the newer turn's changes bar when an older turn's evidence resolves with no files", () => {
+    useThreadStore.setState({
+      records: seedThreadRecord(THREAD_ID, {
+        messages: [
+          createMockMessage({ id: "assistant-old", thread_id: THREAD_ID, role: "assistant", content: "old" }),
+          createMockMessage({ id: "assistant-new", thread_id: THREAD_ID, role: "assistant", content: "new" }),
+        ],
+        persistedFilesChanged: { "assistant-new": ["src/new.ts"] },
+        latestTurnWithChanges: "assistant-new",
+      }),
+    });
+
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "unavailable", reason: "timed-out", knownPaths: [] },
+      { threadId: THREAD_ID, messageId: "assistant-old", executionId: "execution-old" },
+    ));
+
+    expect(readThreadField(THREAD_ID, (r) => r.latestTurnWithChanges)).toBe("assistant-new");
+  });
+
   it("keeps volatile narrative through turn completion and persistence", () => {
     startTrackedTurn("turn-volatile");
     useThreadStore.getState().handleAgentEvent({
