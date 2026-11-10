@@ -44,11 +44,12 @@ afterEach(async () => {
   await Promise.allSettled(held.map((startup) => startup.creating));
   // Each service owns a pool of execution worker threads. Left open, the pools pile up across the file, slow later
   // pool starts, and keep writing after their database closes.
-  await Promise.all(services.splice(0).map((service) => drainAgentServicePersistenceForTest(service)));
+  const drains = await Promise.allSettled(services.splice(0).map((service) => drainAgentServicePersistenceForTest(service)));
   const disposals = await Promise.allSettled(held.map(async (startup) => await startup.disposeBackgroundWork?.()));
-  await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
-  const disposalFailure = disposals.find((disposal) => disposal.status === "rejected");
-  if (disposalFailure) throw disposalFailure.reason;
+  const removals = await Promise.allSettled(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+  const failures = [...drains, ...disposals, ...removals].flatMap((result) => result.status === "rejected" ? [result.reason] : []);
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Test teardown failed");
 });
 
 function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
