@@ -17,6 +17,10 @@ export class MessageRepo {
     this.reader = new MessageStore(db);
   }
 
+  listFileEvidence(...args: Parameters<MessageStore["listFileEvidence"]>): ReturnType<MessageStore["listFileEvidence"]> {
+    return this.reader.listFileEvidence(...args);
+  }
+
   /** Commit the complete recovered detail projection against its owning assistant message. */
   persistRecoveredNarrative(messageId: string, items: readonly ParentNarrativeRecoveryItem[], replaceExisting = false): Promise<void> {
     return this.writer.execute(recoveredNarrativeWriteOperation, [messageId, [...items], replaceExisting]);

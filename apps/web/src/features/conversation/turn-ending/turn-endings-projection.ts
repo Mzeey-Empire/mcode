@@ -12,6 +12,8 @@ export interface TurnEnding {
   turnId: string;
   /** The thread's provider, which Sign in targets; null when the thread record is not loaded. */
   providerId: ProviderId | null;
+  /** Latest attempt's execution, which owns the turn's file evidence; null before dispatch. */
+  executionId: string | null;
   view: TurnEndingView;
 }
 
@@ -50,6 +52,7 @@ export function projectTurnEndings(threadId: string, state: AgentModelState, pro
     endingsByMessageId[anchor] = {
       turnId: latest.id,
       providerId,
+      executionId: latest.executionId ?? null,
       view: turnEndingView({
         status,
         ending: latest.ending,
@@ -100,7 +103,7 @@ function sameEndings(left: TurnEndingsProjection["endingsByMessageId"], right: T
   return Object.keys(left).length === ids.length && ids.every((id) => {
     const before = left[id];
     const after = right[id]!;
-    return before !== undefined && before.turnId === after.turnId && before.providerId === after.providerId && sameView(before.view, after.view);
+    return before !== undefined && before.turnId === after.turnId && before.providerId === after.providerId && before.executionId === after.executionId && sameView(before.view, after.view);
   });
 }
 

@@ -2,6 +2,7 @@ import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, it, expect } from "vitest";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { SnapshotBuilder } from "../snapshot-builder";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 
 
 describe("SnapshotBuilder", () => {
@@ -19,6 +20,24 @@ describe("SnapshotBuilder", () => {
     expect(snapshot.oldestLoadedSequence).toBe(10);
     expect(snapshot.hasMoreMessages).toBe(true);
     expect(snapshot.answeredPlanMessageIds).toEqual(new Set(["m1"]));
+  });
+
+  it("takes paths from evidence rows and keeps snapshot-row paths for row-less legacy turns", () => {
+    const messages = [
+      createMockMessage({ id: "legacy", sequence: 1 }),
+      createMockMessage({ id: "tracked", sequence: 2 }),
+    ];
+    const snapshots = [{ message_id: "legacy", files_changed: ["legacy.ts"] } as TurnSnapshot];
+    const turnFileEvidence = [createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["tracked.ts"] },
+      { executionId: "execution-tracked", messageId: "tracked" },
+    )];
+
+    const patch = builder.build({ messages, hasMore: false, snapshots, turnFileEvidence });
+
+    expect(patch.persistedFilesChanged).toEqual({ legacy: ["legacy.ts"], tracked: ["tracked.ts"] });
+    expect(patch.latestTurnWithChanges).toBe("tracked");
+    expect(patch.fileEvidence["execution-tracked"]).toEqual(turnFileEvidence[0]);
   });
 
   it("derived latest turn with file changes from snapshot rows", () => {

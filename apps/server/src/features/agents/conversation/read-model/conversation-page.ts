@@ -8,7 +8,7 @@ import type { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-qu
 
 /** Dependencies needed to load one paginated conversation page. */
 export interface ConversationPageDeps {
-  messageRepo: Pick<MessageRepo, "listByThread" | "listByThreadAfter" | "listSessionNotices">;
+  messageRepo: Pick<MessageRepo, "listByThread" | "listByThreadAfter" | "listSessionNotices" | "listFileEvidence">;
   planQuestionAnswersRepo: Pick<PlanQuestionAnswersRepo, "listAnsweredForThread">;
 }
 
@@ -31,6 +31,8 @@ export function loadConversationPage(
     answeredPlanMessageIds:
       deps.planQuestionAnswersRepo.listAnsweredForThread(input.threadId),
     narrativeByMessage: {},
+    // Evidence with no assistant message has no sequence, so it rides on the latest page only.
+    turnFileEvidence: deps.messageRepo.listFileEvidence(input.threadId, page.messages, input.before === undefined),
   };
 }
 
@@ -50,6 +52,7 @@ function buildOlderConversationPage(
       conversationRevision: request.conversationRevision,
     },
     messages: page.messages,
+    turnFileEvidence: page.turnFileEvidence?.filter((row) => row.messageId !== null && retainedMessageIds.has(row.messageId)),
     hasMore,
     nextCursor: hasMore && page.messages.length > 0
       ? { version: 1, beforeSequence: page.messages[0].sequence }
@@ -116,6 +119,7 @@ function buildNewerConversationPage(
       conversationRevision: request.conversationRevision,
     },
     messages: page.messages,
+    turnFileEvidence: page.turnFileEvidence?.filter((row) => row.messageId === null || retainedMessageIds.has(row.messageId)),
     hasMore,
     nextCursor: hasMore && page.messages.length > 0
       ? { version: 1, afterSequence: page.messages.at(-1)!.sequence }
@@ -154,6 +158,7 @@ function loadNewerConversationSource(
     hasMore: page.hasMore,
     answeredPlanMessageIds: deps.planQuestionAnswersRepo.listAnsweredForThread(request.threadId),
     narrativeByMessage: {},
+    turnFileEvidence: deps.messageRepo.listFileEvidence(request.threadId, page.messages, true),
   };
 }
 

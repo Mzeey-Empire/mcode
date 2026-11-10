@@ -21,6 +21,7 @@ const SUBSCRIPTION_SCOPED_CHANNELS = new Set<WsChannelName>([
   "subagents.changed",
   "agent.canonical",
   "turn.fileEffectsUpdated",
+  "turn.fileEvidence",
   "turn.diffChanged",
   "turn.savingStatus",
 ]);

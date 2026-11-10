@@ -23,6 +23,8 @@ import { SelectedTextCommentsSchema } from "@mcode/contracts/models/selected-tex
 import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts/thread-control";
 import { messages, threads, toolCallRecords, turnSteers } from "../../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../../runtime/persistence/sqlite/drizzle-changes.js";
+import type { TurnFileEvidenceEvent } from "@mcode/contracts/models/turn-file-evidence";
+import { listTurnFileEvidence } from "../../turns/persistence/turn-file-evidence-store.js";
 
 type MessageRow = typeof messages.$inferSelect & { toolCallCount?: number };
 
@@ -401,6 +403,11 @@ export class MessageStore {
         sql`json_extract(${messages.systemNotice}, '$.sessionId') IS NOT ${sessionId ?? null}`,
       )).run();
     })();
+  }
+
+  /** Load the evidence owned by a page's messages, plus endings without an assistant message when `unattached`. */
+  listFileEvidence(threadId: string, page: readonly { readonly id: string }[], unattached: boolean): TurnFileEvidenceEvent[] {
+    return listTurnFileEvidence(this.db, { threadId, messages: { ids: page.map((message) => message.id), unattached } });
   }
 
   /** Read the latest notices for the provider session selected at its startup boundary. */

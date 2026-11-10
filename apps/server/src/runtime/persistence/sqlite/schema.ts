@@ -436,6 +436,7 @@ export const messages = sqliteTable(
     index("idx_messages_thread").on(table.threadId),
     index("idx_messages_sequence").on(table.threadId, table.sequence),
     index("idx_messages_thread_sequence_id").on(table.threadId, table.sequence, table.id),
+    index("idx_messages_outcome_execution").on(table.outcomeExecutionId),
     index("idx_messages_notice_session_sequence").on(
       table.threadId,
       sql`json_extract(${table.systemNotice}, '$.sessionId')`,
@@ -957,6 +958,16 @@ export const canonicalAgentIngestCheckpoints = sqliteTable(
     index("idx_canonical_agent_checkpoints_recovery_incident").on(table.recoveryIncidentId, table.updatedAt),
   ],
 );
+
+/** Durable file observation owned by a dispatched execution, including turns without a reply. */
+export const turnFileEvidence = sqliteTable("turn_file_evidence", {
+  executionId: text("execution_id").primaryKey().notNull().references(() => canonicalAgentIngestCheckpoints.executionId, { onDelete: "cascade" }),
+  threadId: text("thread_id").notNull(),
+  turnId: text("turn_id").notNull(),
+  state: text("state").notNull(),
+  evidenceJson: text("evidence_json").notNull(),
+  recordedAt: text("recorded_at").notNull(),
+}, (table) => [index("idx_turn_file_evidence_thread").on(table.threadId)]);
 
 /** Temporary durable text headers for unfinished parent assistant responses. */
 export const parentAssistantTextCheckpoints = sqliteTable(

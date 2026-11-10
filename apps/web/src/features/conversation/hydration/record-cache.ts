@@ -51,6 +51,7 @@ export interface ConversationCacheState {
   persistedToolCallCounts: ThreadRecord["persistedToolCallCounts"];
   persistedFilesChanged: ThreadRecord["persistedFilesChanged"];
   latestTurnWithChanges: ThreadRecord["latestTurnWithChanges"];
+  fileEvidence: ThreadRecord["fileEvidence"];
   serverMessageIds: ThreadRecord["serverMessageIds"];
   narrativeByMessage: ThreadRecord["narrativeByMessage"];
   answeredPlanMessageIds: ThreadRecord["answeredPlanMessageIds"];
@@ -74,6 +75,7 @@ export function projectConversationCacheState(record: ThreadRecord): Conversatio
     persistedToolCallCounts: record.persistedToolCallCounts,
     persistedFilesChanged: record.persistedFilesChanged,
     latestTurnWithChanges: record.latestTurnWithChanges,
+    fileEvidence: record.fileEvidence,
     serverMessageIds: record.serverMessageIds,
     narrativeByMessage: record.narrativeByMessage,
     answeredPlanMessageIds: record.answeredPlanMessageIds,

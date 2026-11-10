@@ -1,6 +1,8 @@
 import type { Message } from "@/transport";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
+import type { TurnFileEvidenceEvent } from "@mcode/contracts/models/turn-file-evidence";
 import { providerNoticeSessionId, type ThreadRecord } from "@/stores/thread-record";
+import { EMPTY_FILE_EVIDENCE, mergeFileEvidence, recordedEvidencePaths } from "@/stores/thread-store/file-evidence";
 
 /** Raw RPC inputs used to assemble a canonical thread-record patch. */
 export interface SnapshotBuilderInput {
@@ -9,6 +11,8 @@ export interface SnapshotBuilderInput {
   hasMore: boolean;
   answeredPlanMessageIds?: string[];
   snapshots?: TurnSnapshot[];
+  /** Per-execution file evidence from the same page; rows win over snapshot rows. */
+  turnFileEvidence?: TurnFileEvidenceEvent[];
 }
 
 /** Derived file-change fields from turn snapshot rows. */
@@ -35,6 +39,7 @@ export type ThreadRecordPatch = Pick<
   | "persistedFilesChanged"
   | "latestTurnWithChanges"
   | "fileEffectSummary"
+  | "fileEvidence"
   | "answeredPlanMessageIds"
 >;
 
@@ -52,7 +57,6 @@ export class SnapshotBuilder {
       sessionNotices = [],
       hasMore,
       answeredPlanMessageIds,
-      snapshots = [],
     } = input;
 
     const persistedToolCallCounts: Record<string, number> = {};
@@ -64,7 +68,7 @@ export class SnapshotBuilder {
 
     const oldestLoadedSequence = messages.length > 0 ? messages[0].sequence : 0;
     const newestLoadedSequence = messages.at(-1)?.sequence ?? 0;
-    const fileChanges = SnapshotBuilder.deriveFileChanges(snapshots);
+    const fileChanges = SnapshotBuilder.deriveEvidenceFileChanges(messages, input);
 
     return {
       messages: messages.map((message) => ({ ...message, serverSequence: message.sequence })),
@@ -75,10 +79,24 @@ export class SnapshotBuilder {
       hasMoreMessages: hasMore,
       hasNewerMessages: false,
       persistedToolCallCounts,
-      persistedFilesChanged: fileChanges.persistedFilesChanged,
-      latestTurnWithChanges: fileChanges.latestTurnWithChanges,
-      fileEffectSummary: fileChanges.fileEffectSummary,
+      ...fileChanges,
       answeredPlanMessageIds: new Set(answeredPlanMessageIds ?? []),
+    };
+  }
+
+  /** Evidence rows own their paths; executions without a row are legacy turns and keep their snapshot-row paths. */
+  private static deriveEvidenceFileChanges(
+    messages: readonly Message[],
+    { snapshots = [], turnFileEvidence = [] }: Pick<SnapshotBuilderInput, "snapshots" | "turnFileEvidence">,
+  ): FileChangeFields & Pick<ThreadRecord, "fileEvidence"> {
+    const fileChanges = SnapshotBuilder.deriveFileChanges(snapshots);
+    const fileEvidence = mergeFileEvidence(EMPTY_FILE_EVIDENCE, turnFileEvidence);
+    const persistedFilesChanged = { ...fileChanges.persistedFilesChanged, ...recordedEvidencePaths(fileEvidence) };
+    return {
+      persistedFilesChanged,
+      latestTurnWithChanges: latestMessageWithChanges(messages, persistedFilesChanged) ?? fileChanges.latestTurnWithChanges,
+      fileEffectSummary: fileChanges.fileEffectSummary,
+      fileEvidence,
     };
   }
 
@@ -106,6 +124,14 @@ export class SnapshotBuilder {
 
     return { persistedFilesChanged, latestTurnWithChanges, fileEffectSummary };
   }
+}
+
+function latestMessageWithChanges(messages: readonly Message[], persistedFilesChanged: Record<string, string[]>): string | null {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const id = messages[index]!.id;
+    if ((persistedFilesChanged[id]?.length ?? 0) > 0) return id;
+  }
+  return null;
 }
 
 /** Shared singleton for hydrator call sites. */

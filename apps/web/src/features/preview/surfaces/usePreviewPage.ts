@@ -31,10 +31,11 @@ export function fileChangeMatchesPreviewScope(
     (parsed.data.threadId === undefined || parsed.data.threadId === threadId);
 }
 
-/** Checks whether a persisted turn changed files in this thread. */
-export function turnPersistedMatchesPreviewScope(data: unknown, threadId: string): boolean {
-  const parsed = WS_CHANNELS["turn.persisted"].safeParse(data);
-  return parsed.success && parsed.data.threadId === threadId && parsed.data.filesChanged.length > 0;
+/** Checks whether an ended turn's recorded evidence changed files in this thread. */
+export function turnFileEvidenceMatchesPreviewScope(data: unknown, threadId: string): boolean {
+  const parsed = WS_CHANNELS["turn.fileEvidence"].safeParse(data);
+  return parsed.success && parsed.data.threadId === threadId
+    && parsed.data.evidence.state === "recorded" && parsed.data.evidence.filesChanged.length > 0;
 }
 
 /** Returns a loopback address eligible for automatic preview reload. */
@@ -280,10 +281,10 @@ export function usePreviewPage({
     const offChanged = pushEmitter.on("files.changed", (data) => {
       if (fileChangeMatchesPreviewScope(data, workspaceId, threadId)) reload();
     });
-    const offPersisted = pushEmitter.on("turn.persisted", (data) => {
-      if (turnPersistedMatchesPreviewScope(data, threadId)) reload();
+    const offEvidence = pushEmitter.on("turn.fileEvidence", (data) => {
+      if (turnFileEvidenceMatchesPreviewScope(data, threadId)) reload();
     });
-    return () => { offChanged(); offPersisted(); };
+    return () => { offChanged(); offEvidence(); };
   }, [activeWebviewRef, threadId, workspaceId]);
 
   useEffect(() => {

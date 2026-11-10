@@ -145,6 +145,9 @@ import { ThreadControlMutationReservationService } from "../../features/thread-c
 import { ScopedPreGrantService } from "../../features/agents/permissions/scoped-pre-grant.js";
 import { PlanFileWriter } from "../../features/agents/planning/plan-file-writer.js";
 import { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
+import { TurnRuntimeController } from "../../features/agents/orchestration/turn-runtime-controller.js";
+import { TurnFileEvidenceLedger } from "../../features/agents/execution/turn-file-evidence-ledger.js";
+import { bindTurnFileEvidenceLedger } from "../../features/agents/execution/turn-persisted-publication.js";
 import { SettingsService } from "../../features/settings/settings-service.js";
 import { warmCodexProviderVersion } from "@mcode/providers";
 import { SkillWatcherService } from "../../features/agents/skills/catalog/skill-watcher-service.js";
@@ -548,6 +551,12 @@ const handoffStorage = container.resolve(HandoffStorage);
 const handoffCheckoutService = container.resolve(HandoffCheckoutService);
 const db = container.resolve<Database>("Database");
 const databaseWriter = container.resolve(ApplicationDatabaseWriter);
+const fileEvidenceLedger = new TurnFileEvidenceLedger(db, databaseWriter, snapshotService, (execution) => {
+  snapshotRefPins.attention?.invalidate(execution.threadId);
+  snapshotRefPins.runInBackground(() => snapshotRefPins.settleExecution(execution.threadId, execution.executionId));
+});
+container.resolve(TurnRuntimeController).bindFileEvidence(fileEvidenceLedger);
+bindTurnFileEvidenceLedger(fileEvidenceLedger);
 const threadAttentionService = new ThreadAttentionService(db, databaseWriter,
   [approvalWaitingSource(approvalService), planWaitingSource(db, "questions"), planWaitingSource(db, "plan")],
   delegatedTaskService,
@@ -1148,6 +1157,7 @@ async function bootstrapServer(): Promise<void> {
       },
     });
     await recoverTurnsAtStartup();
+    await fileEvidenceLedger.resolveAbandoned(undefined, "restarted");
     await planTurnService.recoverNativeQuestions();
     await planService.recoverInterrupted();
     planImplementStartupObserver.start();
@@ -1158,7 +1168,7 @@ async function bootstrapServer(): Promise<void> {
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
     recordStartupCheckpoint("orphaned background tools settled");
-    // Interrupted attempts get their snapshot rows here; git work must not delay startup.
+    // Pin settlement does git work, which must not delay startup.
     snapshotRefPins.runInBackground(sweepSnapshotPins);
     await threadControlService.recoverApprovals();
     recordStartupCheckpoint("approval recovery completed");
@@ -1302,6 +1312,7 @@ async function shutdown(): Promise<void> {
       stopObservingDelegatedTurns();
       stopObservingDelegatedAttention();
       shutdownCoordinator.setPhase("close application database writer");
+      fileEvidenceLedger.close();
       await captureCleanupFailure(() => databaseWriter.close());
     },
     onServicesOverrun: () => logger.error("Shutdown phase overran; saving turn output before the watchdog", {

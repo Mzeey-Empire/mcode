@@ -596,6 +596,19 @@
   animation: fade-up-in var(--duration-standard) var(--ease-standard);
 }
 
+/* A slow-state notice waits before it shows, so a state that resolves quickly
+ * never flashes. One shot; reduced motion keeps the wait and drops the fade. */
+@keyframes delayed-reveal {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-delayed-reveal {
+  animation: delayed-reveal var(--duration-standard) var(--ease-standard) 600ms both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-delayed-reveal { animation-duration: 0s; }
+}
+
 /* Reveal for the Overview repository row. The row mounts only once a safe
  * remote URL is known, so animating its entrance never flashes-then-hides.
  * grid-template-rows 0fr -> 1fr eases the rows below it down instead of

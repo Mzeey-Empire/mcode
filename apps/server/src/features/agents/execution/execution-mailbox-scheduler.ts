@@ -18,7 +18,7 @@ export type ExecutionMailboxCommand<Work extends { readonly kind: string }> =
 /** Lifecycle results that must be allowed to settle after Stop is admitted. */
 export const EXECUTION_CONTROL_KINDS = [
   "checkpoint", "effect-result", "provider-outcome", "release",
-  "finish-from-state", "finish-live-event", "post-terminal-event",
+  "finish-from-state", "finish-live-event", "post-terminal-event", "collect-files",
 ] as const;
 /** A command kind that must still settle after Stop begins draining the mailbox. */
 export type ExecutionControlKind = typeof EXECUTION_CONTROL_KINDS[number];
@@ -190,7 +190,8 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
     if (!assignment || assignment.revoked) return { kind: "stale-execution" };
     const decision = this.admissionDecision(assignment, input.command, input.byteLength);
     if (decision.kind !== "accept") return { kind: decision.kind };
-    const ordinal = assignment.nextOrdinal++;
+    // File collection reads worker memory; it must not leave a hole in the writer's sequence.
+    const ordinal = input.command.kind === "collect-files" ? assignment.nextOrdinal : assignment.nextOrdinal++;
     const request: ExecutionWorkerRequest<ExecutionMailboxCommand<Work>> = {
       requestId: this.nextRequestId++,
       execution: assignment.execution,

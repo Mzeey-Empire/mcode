@@ -48,7 +48,7 @@ describe("virtual item render isolation", () => {
       agentStartTime: 1000, streamingText: "",
       agentDisplayState: { phase: "cancelled" } as const,
       currentTurn: { threadId: "thread-1", messageId: "answer", responseKey: "response" },
-      turnEndingsByMessageId: { answer: { turnId: "turn-1", providerId: "claude" as const,
+      turnEndingsByMessageId: { answer: { turnId: "turn-1", providerId: "claude" as const, executionId: null,
         view: { foldLabel: "Stopped", notice: { style: "quiet" as const, title: "You stopped" } } } },
     };
     const position = (stopPending: boolean) => projectTranscript({ ...input,

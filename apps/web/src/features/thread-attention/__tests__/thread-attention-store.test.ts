@@ -62,7 +62,7 @@ describe("on-screen thread acknowledgements", () => {
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([]);
     useThreadStore.getState().handleTurnPersisted({ threadId: "a", messageId: null,
-      settledMessage: { id: "prompt-1", sequence: 3 }, outcome: "errored", executionId: "execution-1", toolCallCount: 0, filesChanged: [] });
+      settledMessage: { id: "prompt-1", sequence: 3 }, outcome: "errored", executionId: "execution-1", toolCallCount: 0 });
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3]]);
     expect(useThreadStore.getState().records.get("a")?.messages[0]).toMatchObject({ sequence: 4, serverSequence: 3 });
@@ -71,7 +71,7 @@ describe("on-screen thread acknowledgements", () => {
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3]]);
     useThreadStore.getState().handleTurnPersisted({ threadId: "a", messageId: "assistant-2",
-      settledMessage: { id: "assistant-2", sequence: 5 }, outcome: "completed", toolCallCount: 0, filesChanged: [] });
+      settledMessage: { id: "assistant-2", sequence: 5 }, outcome: "completed", toolCallCount: 0 });
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3], ["a", 5]]);
     expect(useThreadStore.getState().records.get("a")?.messages.map((message) => message.sequence)).toEqual([4, 7]);
@@ -82,7 +82,7 @@ describe("on-screen thread acknowledgements", () => {
     threadAttentionStore.getState().apply({ ...attention, lastTurn: { outcome: "errored", endedAt: NOW, sequence: 3, changedFileCount: null } });
     stop = startThreadAttentionTracking();
     useThreadStore.getState().handleTurnPersisted({ threadId: "a", messageId: null,
-      settledMessage: { id: "unloaded-prompt", sequence: 3 }, outcome: "errored", toolCallCount: 0, filesChanged: [] });
+      settledMessage: { id: "unloaded-prompt", sequence: 3 }, outcome: "errored", toolCallCount: 0 });
     await vi.advanceTimersByTimeAsync(150);
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([]);
     useThreadStore.setState({ records: new Map([["a", { ...createEmptyThreadRecord(),

@@ -105,7 +105,6 @@ describe("queued follow-ups after a turn ends", () => {
       executionId: EXECUTION_ID,
       outcome: "cancelled",
       toolCallCount: 0,
-      filesChanged: [],
     });
     useThreadStore.getState().handleAgentEvent(ended("cancelled", "approval_unanswerable"));
 
@@ -184,7 +183,6 @@ describe("queued follow-ups after a turn ends", () => {
         executionId,
         outcome: "interrupted",
         toolCallCount: 0,
-        filesChanged: [],
       });
     };
 

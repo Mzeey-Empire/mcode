@@ -37,6 +37,7 @@ type MessageListItemsInput = Pick<
   | "turnDurationsByMessageId"
   | "providerContinuationMessageIds"
   | "turnEndingsByMessageId"
+  | "fileEvidenceByExecutionId"
 > & {
   /** Groups and work folds open right now. Fold children mount without an entrance animation. */
   readonly expandedFolds: ReadonlySet<string>;
@@ -123,6 +124,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
     turnDurationsByMessageId,
     providerContinuationMessageIds,
     turnEndingsByMessageId,
+    fileEvidenceByExecutionId,
   } = input;
   const currentTurn = useMemo(
     () => createCurrentTurn({
@@ -155,6 +157,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       turnDurationsByMessageId,
       providerContinuationMessageIds,
       turnEndingsByMessageId,
+      fileEvidenceByExecutionId,
       toolCalls,
       agentDisplayState,
       agentStartTime,
@@ -191,6 +194,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
       turnDurationsByMessageId,
       providerContinuationMessageIds,
       turnEndingsByMessageId,
+      fileEvidenceByExecutionId,
     ],
   );
   const toolTransitions = useToolCallTransitions(toolCalls);

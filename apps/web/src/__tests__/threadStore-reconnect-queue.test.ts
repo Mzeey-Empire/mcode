@@ -161,7 +161,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
-      filesChanged: [],
       outcome: "completed",
       executionId: "execution-1",
     });
@@ -208,7 +207,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
-      filesChanged: [],
       outcome: "completed",
       executionId: "execution-1",
     });
@@ -243,7 +241,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
         threadId: THREAD_ID,
         messageId: "assistant-1",
         toolCallCount: 0,
-        filesChanged: [],
         outcome: "completed",
         executionId: "execution-1",
       });
@@ -280,7 +277,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
-      filesChanged: [],
       outcome: "completed",
       executionId: "execution-1",
     });
@@ -466,7 +462,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
         threadId: THREAD_ID,
         messageId: "assistant-1",
         toolCallCount: 0,
-        filesChanged: [],
         outcome: "completed",
         executionId: "execution-1",
       });
@@ -511,7 +506,6 @@ describe("threadStore reconnect and queued follow-ups", () => {
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
-      filesChanged: [],
       outcome: "completed",
       executionId: "execution-1",
     });

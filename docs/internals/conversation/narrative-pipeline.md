@@ -227,6 +227,12 @@ to save. Exhausted retention or invalid receipt application must explicitly
 stop the affected execution; storage failure alone must not cancel its provider.
 `turn.persisted` still means the terminal data was saved.
 
+`turn.persisted` carries no changed-file list, so an ending or Stop never waits
+on Git. File evidence is collected afterwards with a 10 s bound and sent on
+`turn.fileEvidence` after the ending. The next turn's release waits for that
+collection, so its edits cannot land in this turn's list. A turn whose list could
+not be recorded is stored and shown as `unavailable`, never as an empty list.
+
 Reconnect installs one saved-prefix and accepted-suffix cut. Frames received
 beyond that cut remain in order. Saved acknowledgements and recovery may update
 the model but cannot repeat publication effects, permissions, Stop, or provider

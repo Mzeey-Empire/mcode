@@ -50,6 +50,7 @@ import type { GoalLookupResult, GoalState } from "@mcode/contracts/models/goal";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { CONVERSATION_OLDER_PAGE_MAX_BYTES } from "@mcode/contracts/models/conversation-older-page";
 import { clearScrollMemory, rememberScrollTop } from "@/components/chat/scrollPositionMemory";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 
 vi.mock("@/transport", () => ({
   getTransport: () => mockTransport,
@@ -518,6 +519,55 @@ describe("ThreadHydrator", () => {
     });
   });
 
+  it("keeps resolved file evidence from either side when a cached conversation merges with the resident one", async () => {
+    const pending = (executionId: string) => createFileEvidenceEvent({ state: "tracking" }, { threadId: THREAD_A, executionId });
+    const residentResolved = createFileEvidenceEvent({ state: "untracked" }, { threadId: THREAD_A, executionId: "execution-resident" });
+    const cachedResolved = createFileEvidenceEvent(
+      { state: "unavailable", reason: "timed-out", knownPaths: [] },
+      { threadId: THREAD_A, executionId: "execution-cached" },
+    );
+    cacheRecord(THREAD_A, {
+      ...makeCachedRecord(),
+      fileEvidence: { "execution-resident": pending("execution-resident"), "execution-cached": cachedResolved },
+    });
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([[THREAD_A, {
+        ...makeCachedRecord(),
+        fileEvidence: { "execution-resident": residentResolved, "execution-cached": pending("execution-cached") },
+      }]]),
+    });
+
+    await hydrator.hydrate(THREAD_A, "active");
+
+    expect(readActiveThreadField((record) => record.fileEvidence)).toEqual({
+      "execution-resident": residentResolved,
+      "execution-cached": cachedResolved,
+    });
+  });
+
+  it("keeps recorded changed files when a newer cached page still holds the pending evidence", async () => {
+    const recorded = createFileEvidenceEvent({ state: "recorded", filesChanged: ["src/a.ts"] },
+      { threadId: THREAD_A, executionId: "execution-1", messageId: "a1" });
+    const later = createMockMessage({ id: "a2", thread_id: THREAD_A, content: "later", sequence: 2 });
+    cacheRecord(THREAD_A, {
+      ...makeCachedRecord([msgA, later]),
+      fileEvidence: { "execution-1": { ...recorded, evidence: { state: "tracking" } } },
+    });
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([[THREAD_A, {
+        ...makeCachedRecord(),
+        fileEvidence: { "execution-1": recorded },
+        persistedFilesChanged: { a1: ["src/a.ts"] },
+        latestTurnWithChanges: "a1",
+      }]]),
+    });
+
+    await hydrator.hydrate(THREAD_A, "active");
+
+    expect(readActiveThreadField((record) => record.persistedFilesChanged)).toEqual({ a1: ["src/a.ts"] });
+    expect(readActiveThreadField((record) => record.latestTurnWithChanges)).toBe("a1");
+  });
+
   it("deduplicates a resident message id when its cached sequence is stale", async () => {
     const cachedMessage = createMockMessage({
       id: "same-message",
@@ -722,6 +772,32 @@ describe("ThreadHydrator", () => {
 
     expect(readActiveThreadField((record) => record.fileEffectTurnId)).toBe("live-turn");
     expect(readActiveThreadField((record) => record.fileEffectSummary)).toEqual(liveSummary);
+  });
+
+  it("keeps the changes bar on a newer recorded turn when older snapshots arrive", async () => {
+    const later = createMockMessage({ id: "a2", thread_id: THREAD_A, content: "later", sequence: 2 });
+    const recorded = createFileEvidenceEvent({ state: "recorded", filesChanged: ["src/b.ts"] },
+      { threadId: THREAD_A, executionId: "execution-2", messageId: "a2" });
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: THREAD_A, has_file_changes: true })] });
+    resetThreadStoreForTests({
+      currentThreadId: THREAD_A,
+      records: new Map<string, ThreadRecord>([[THREAD_A, {
+        ...makeCachedRecord([msgA, later]),
+        fileEvidence: { "execution-2": recorded },
+        persistedFilesChanged: { a2: ["src/b.ts"] },
+        latestTurnWithChanges: "a2",
+      }]]),
+    });
+    (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { message_id: "a1", files_changed: ["old.ts"], file_effects: null } as unknown as TurnSnapshot,
+    ]);
+
+    await hydrator.hydrate(THREAD_A, "active");
+    await vi.waitFor(() => {
+      expect(readActiveThreadField((record) => record.persistedFilesChanged)).toEqual({ a1: ["old.ts"], a2: ["src/b.ts"] });
+    });
+
+    expect(readActiveThreadField((record) => record.latestTurnWithChanges)).toBe("a2");
   });
 
   it("discards resident running snapshots after a newer activation epoch wins", async () => {

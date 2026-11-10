@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openWorkerTurnFixture } from "../../orchestration/__tests__/worker-turn-fixture.js";
 import { TurnDiffRepo } from "../persistence/turn-diff-repo.js";
 
@@ -17,6 +17,7 @@ describe("worker-owned native diff terminal persistence", () => {
     await fixture.emit({ type: "message", threadId: fixture.thread.id, content: "Agent marker changed", tokens: null });
     await fixture.finish();
     const repo = new TurnDiffRepo(fixture.db, fixture.writer);
+    await vi.waitFor(() => expect(repo.latest(fixture.thread.id)).toBeDefined());
     expect(repo.latest(fixture.thread.id)).toMatchObject({ message_id: fixture.assistant()!.id, source: "native", patch });
     expect(fixture.diffs.liveComparison(fixture.thread.id)).toBeNull();
     expect(fixture.db.query("SELECT count(*) AS count FROM turn_diff_snapshots").get()).toEqual({ count: 1 });

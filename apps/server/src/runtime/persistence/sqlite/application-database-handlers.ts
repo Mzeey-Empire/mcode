@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { turnFileEvidenceWriteHandlers } from "../../../features/agents/turns/persistence/turn-file-evidence-store.js";
 import { buildThreadPullRequestWriteHandlers } from "../../../features/pull-requests/links/pull-request-link-funnel.js";
 import { delegatedTaskWriteHandlers } from "../../../features/thread-control/delegation/delegated-task-write-operations.js";
 import { turnResumeScheduleWriteHandlers } from "../../../features/agents/recovery/turn-resume-schedule-store.js";
@@ -8,7 +9,6 @@ import { workspaceWriteOperations } from "../../../features/projects/persistence
 import { databaseWriteHandler } from "./database-write-operation.js";
 import { sqliteMaintenanceWriteHandlers } from "./sqlite-maintenance-write-operation.js";
 import { agentStorageWriteHandlers } from "../../../features/agents/agent-storage-write-handlers.js";
-import { turnFinalizationWriteHandlers } from "../../../features/agents/turns/persistence/turn-finalization-write-operations.js";
 import { turnRevertWriteHandlers } from "../../../features/agents/turns/persistence/turn-revert-write-operations.js";
 import { conversationConversionWriteHandlers } from "../../../features/agents/conversation/migrations/conversation-conversion-write-handlers.js";
 import { canonicalRuntimeWriteHandlers } from "../../../features/agents/canonical/canonical-runtime-write-handlers.js";
@@ -42,13 +42,13 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
   const workspace = new WorkspaceStore(db);
   const operations = workspaceWriteOperations;
   return new Map([
+    ...turnFileEvidenceWriteHandlers(db),
     ...buildThreadPullRequestWriteHandlers(db),
     ...delegatedTaskWriteHandlers(db),
     ...turnResumeScheduleWriteHandlers(db),
     ...sqliteMaintenanceWriteHandlers(db),
     ...agentStorageWriteHandlers(db),
     ...projectLifecycleWriteHandlers(db),
-    ...turnFinalizationWriteHandlers(db),
     ...turnRevertWriteHandlers(db),
     ...conversationConversionWriteHandlers(db),
     ...canonicalRuntimeWriteHandlers(db),

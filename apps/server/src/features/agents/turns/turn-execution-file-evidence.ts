@@ -36,6 +36,7 @@ export async function prepareExecutionFileEvidence(input: {
   readonly nativeDiff: PreparedTurnDiffEvidence | null;
   readonly tracker: TurnFileTracker;
   readonly snapshots: SnapshotService;
+  readonly trackedOnly?: boolean;
 }): Promise<PreparedExecutionFileEvidence> {
   const { handoff, tracker, snapshots } = input;
   const evidence = await tracker.finalEvidenceForExecution(handoff);
@@ -43,7 +44,9 @@ export async function prepareExecutionFileEvidence(input: {
   assertNativeDiffOwner(input);
 
   const fileEffects = evidence.summary;
-  const { snapshot, filesChanged } = await prepareSnapshot(handoff, evidence.baselineRef, fileEffects, snapshots);
+  const { snapshot, filesChanged } = input.trackedOnly
+    ? { snapshot: null, filesChanged: fileEffects.effects.filter((effect) => effect.scope === "workspace").map((effect) => effect.path) }
+    : await prepareSnapshot(handoff, evidence.baselineRef, fileEffects, snapshots);
   return {
     threadId: handoff.threadId,
     turnId: input.turnId,

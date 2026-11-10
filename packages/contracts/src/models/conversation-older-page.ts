@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TurnFileEvidenceEventSchema } from "./turn-file-evidence.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ConversationNarrativeBatchSchema } from "./conversation-page.js";
 import {
@@ -67,6 +68,7 @@ export const ConversationOlderPageSchema = lazySchema(() =>
     nextCursor: ConversationOlderPageCursorSchema().nullable(),
     answeredPlanMessageIds: z.array(z.string()).max(CONVERSATION_HISTORY_PAGE_MAX_MESSAGES).optional(),
     narrativeByMessage: z.record(ConversationNarrativeBatchSchema()),
+    turnFileEvidence: z.array(TurnFileEvidenceEventSchema()).optional(),
   }).strict().superRefine(validateConversationOlderPage),
 );
 

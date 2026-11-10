@@ -978,7 +978,6 @@ describe("handleAgentEvent branches", () => {
       threadId: backgroundThreadId,
       messageId: "server-message",
       toolCallCount: 0,
-      filesChanged: [],
     });
 
     const promoted = readThreadField(backgroundThreadId, (thread) => thread);
@@ -1096,7 +1095,6 @@ describe("handleAgentEvent branches", () => {
       threadId: backgroundThreadId,
       messageId: "server-message",
       toolCallCount: 0,
-      filesChanged: [],
     });
 
     expect(readThreadField(backgroundThreadId, (thread) => thread.thoughtSegments)).toEqual([]);

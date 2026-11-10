@@ -2826,7 +2826,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(pushes.turns).toEqual([
       { channel: "thread.status", data: { threadId: execution.threadId, status: "completed" } },
       { channel: "turn.persisted", data: { threadId: execution.threadId, turnId: execution.turnId, executionId: execution.executionId,
-        messageId: saved.id, settledMessage: { id: saved.id, sequence: saved.sequence }, toolCallCount: 1, filesChanged: [],
+        messageId: saved.id, settledMessage: { id: saved.id, sequence: saved.sequence }, toolCallCount: 1,
         outcome: "completed" } },
     ]);
   });

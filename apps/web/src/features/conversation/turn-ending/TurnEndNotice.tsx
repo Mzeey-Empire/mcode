@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CircleAlert, CirclePause, Square, type LucideIcon } from "lucide-react";
+import { CircleAlert, CirclePause, FileDiff, Square, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
 import { cn } from "@/lib/utils";
@@ -36,10 +36,13 @@ export function TurnEndNotice({ notice, actions = {}, pending = false, error = n
   );
 }
 
+const QUIET_ICONS: Readonly<Record<NonNullable<QuietNotice["icon"]>, LucideIcon>> = { paused: CirclePause, files: FileDiff };
+
 function QuietTurnEndNotice({ notice }: { notice: QuietNotice }) {
+  const Icon = notice.icon ? QUIET_ICONS[notice.icon] : undefined;
   return (
-    <div className="flex items-center gap-3 py-1 pr-2.5 text-muted">
-      {notice.icon === "paused" ? <CirclePause {...ICON_PROPS} /> : <Square {...ICON_PROPS} fill="currentColor" />}
+    <div className={cn("flex items-center gap-3 py-1 pr-2.5 text-muted", notice.delayed && "animate-delayed-reveal")}>
+      {Icon ? <Icon {...ICON_PROPS} /> : <Square {...ICON_PROPS} fill="currentColor" />}
       <div className="flex flex-col">
         <p className="text-body-small">{notice.title}</p>
         {notice.detail ? <p className="text-body-small">{notice.detail}</p> : null}

@@ -20,6 +20,7 @@ type DiffHandoff = Pick<TurnDiffService, "begin" | "takeFinalizationEvidence" | 
 
 /** Cloneable terminal file data retained until the writer acknowledges finalization. */
 export interface FrozenExecutionFileEvidence {
+  readonly trackedOnly?: boolean;
   readonly handoff: FileTurnHandoff;
   readonly turnId: string;
   readonly deliveryAttempt: number;
@@ -150,5 +151,6 @@ export function prepareFrozenExecutionFileEvidence(
     nativeDiff: frozen.nativeDiff,
     tracker,
     snapshots,
+    trackedOnly: frozen.trackedOnly,
   });
 }

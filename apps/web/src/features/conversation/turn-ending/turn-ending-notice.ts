@@ -1,5 +1,6 @@
 import type { AgentTurnEnding, InterruptionCause, PersistedTurnFailure, SystemStopReason } from "@mcode/contracts/compat/agent-model";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
+import type { TurnFileEvidence } from "@mcode/contracts/models/turn-file-evidence";
 import { workFoldLabel } from "../turn/WorkFold";
 import { usageLimitLabel } from "./usage-limit";
 
@@ -26,10 +27,12 @@ export type TurnEndAction = "retry" | "sign_in" | "resume";
 /** A quiet one-line ending: no fill, muted title. */
 export interface QuietNotice {
   style: "quiet";
-  /** A stop is the default; a paused ending is one the composer tray can still resume. */
-  icon?: "paused";
+  /** A stop is the default; a paused ending is one the composer tray can still resume; files reports changed-file evidence. */
+  icon?: "paused" | "files";
   title: string;
   detail?: string;
+  /** Appears only after a short delay, so a state that resolves quickly never flashes. */
+  delayed?: true;
 }
 
 /** A filled ending with a cause, optional raw Details, and actions. */
@@ -60,8 +63,31 @@ export function sameTurnEndNotice(left: TurnEndNoticeView, right: TurnEndNoticeV
 }
 
 function noticeFields(notice: TurnEndNoticeView): ReadonlyArray<string | undefined> {
-  if (notice.style === "quiet") return [notice.style, notice.icon, notice.title, notice.detail];
+  if (notice.style === "quiet") return [notice.style, notice.icon, notice.title, notice.detail, notice.delayed ? "delayed" : undefined];
   return [notice.style, notice.icon, notice.title, notice.detail, notice.details, notice.primary?.action, notice.primary?.label];
+}
+
+const UNAVAILABLE_REASONS: Readonly<Record<Extract<TurnFileEvidence, { state: "unavailable" }>["reason"], string>> = {
+  "capture-failed": "Git snapshot failed",
+  "timed-out": "Timed out",
+  "observation-lost": "File tracking was interrupted",
+  restarted: "Mcode restarted first",
+};
+
+/**
+ * The notice an ended turn's file evidence shows, or null when the changes bar
+ * (recorded) or nothing (untracked) already tells the truth.
+ */
+export function fileEvidenceNotice(evidence: TurnFileEvidence, hasChangesBar = true): QuietNotice | null {
+  if (evidence.state === "tracking") return { style: "quiet", icon: "files", title: "Checking changed files", delayed: true };
+  if (evidence.state === "recorded" && !hasChangesBar && evidence.filesChanged.length > 0) {
+    const count = evidence.filesChanged.length;
+    return { style: "quiet", icon: "files", title: `Changed ${count} ${count === 1 ? "file" : "files"}` };
+  }
+  if (evidence.state !== "unavailable") return null;
+  const count = evidence.knownPaths.length;
+  const reported = count === 0 ? "" : ` The agent reported ${count} changed ${count === 1 ? "file" : "files"}.`;
+  return { style: "quiet", icon: "files", title: "Changed files unavailable", detail: `${UNAVAILABLE_REASONS[evidence.reason]}.${reported}` };
 }
 
 const STATUS_PHRASES: Readonly<Record<number, string>> = {

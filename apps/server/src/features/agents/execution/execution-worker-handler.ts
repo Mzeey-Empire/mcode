@@ -41,12 +41,14 @@ import { logger } from "@mcode/shared";
 import { ProviderExecutionEventState, type ExecutionParentStartContext, type PreparedProviderLiveEvent } from "./provider-execution-event-state.js";
 import { ExecutionWorkerFileEvidence } from "./execution-worker-file-evidence.js";
 import type { FrozenExecutionFileEvidence } from "./execution-file-evidence-coordinator.js";
+import type { PreparedExecutionFileEvidence } from "../turns/turn-execution-file-evidence.js";
 import type { CapturedToolUseObservation, FileTurnHandoff } from "../turns/turn-file-tracker.js";
 import type { SyntheticTerminalInput } from "./codex-live-event-reducer.js";
 import { adapterTurnFailure } from "../canonical/turn-ending.js";
 
 /** Data that an execution worker may receive without a server dependency container. */
 export type ExecutionWorkCommand =
+  | { readonly kind: "collect-files" }
   | { readonly kind: "start"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput; readonly parentLive?: ExecutionParentStartContext; readonly publishParentStart?: boolean; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
   | { readonly kind: "begin-files"; readonly cwd: string; readonly handoff: FileTurnHandoff; readonly deliveryAttempt: number }
   | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[]; readonly parentLive?: ParentLiveEffects; readonly terminalInput?: DataOnlyParentTurnFinishInput; readonly deliveryAttempt?: number; readonly capturedFileObservation?: CapturedToolUseObservation | null; readonly frozenFileEvidence?: FrozenExecutionFileEvidence; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
@@ -197,6 +199,7 @@ export type ExecutionParentEventResult = Pick<PreparedProviderLiveEvent, "runtim
 
 /** A command result that never calls an uncommitted mutation successful. */
 export type ExecutionWorkerResult =
+  | { readonly kind: "files-collected"; readonly fileEvidence: PreparedExecutionFileEvidence | null }
   | (Extract<ExecutionWriteReceipt, { kind: "committed" | "accepted" }> & { readonly parentEvent?: ExecutionParentEventResult })
   | { readonly kind: "dropped"; readonly reason: string; readonly receipt: Extract<ExecutionWriteReceipt, { kind: "committed" | "accepted" }> }
   | { readonly kind: "released" }
@@ -215,6 +218,7 @@ interface ExecutionState {
   phase: "running" | "stopping" | "finalized" | "poisoned";
   durableRevision: number;
   fileAttempt?: number;
+  fileCollection?: Promise<PreparedExecutionFileEvidence | null>;
 }
 
 interface PreparedExecutionRequest {
@@ -267,6 +271,9 @@ export class ExecutionWorkerHandler {
     const rejection = commandRejection(request, state);
     if (rejection) return { kind: "rejected", reason: rejection };
     if (request.command.kind === "release") return this.release(request, state);
+    if (request.command.kind === "collect-files") {
+      return this.collectFiles(state);
+    }
     if (this.isBlockedPhase(request.command, state)) {
       return { kind: "rejected", reason: "invalid-transition" };
     }
@@ -279,6 +286,16 @@ export class ExecutionWorkerHandler {
       return { kind: "rejected", reason: invalidReason(request) };
     }
     return await this.commitRequest(prepared, state, mutation);
+  }
+
+  private async collectFiles(state: ExecutionState): Promise<ExecutionWorkerResult> {
+    if (state.phase !== "finalized") return { kind: "rejected", reason: "invalid-transition" };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const fileEvidence = await Promise.race([state.fileCollection ?? Promise.resolve(null),
+        new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 10_000); })]);
+      return { kind: "files-collected", fileEvidence };
+    } finally { clearTimeout(timer); }
   }
 
   private isOptionalEvent(command: WorkerCommand, state: ExecutionState): boolean {
@@ -365,7 +382,6 @@ export class ExecutionWorkerHandler {
     if (request.command.kind === "stop") state.phase = "stopping";
     if (request.command.kind === "finish-live-event") {
       state.phase = "finalized";
-      if (state.fileAttempt !== undefined) this.files.retire(state.execution, state.fileAttempt);
     }
   }
 
@@ -518,10 +534,8 @@ export class ExecutionWorkerHandler {
   ): Promise<PreparedExecutionRequest | undefined> {
     const frozen = command.frozenFileEvidence;
     if (frozen && (frozen.outcome !== command.outcome || frozen.deliveryAttempt !== state.fileAttempt)) return undefined;
-    const evidence = await this.settleOptionalFiles(frozen, state);
-    if (!evidence) return prepared;
-    return { ...prepared, request: { ...prepared.request, command: { ...command,
-      input: { ...command.input, deliveryAttempt: state.fileAttempt, fileEvidence: evidence } } } };
+    state.fileCollection ??= this.settleOptionalFiles(frozen ? { ...frozen, trackedOnly: true } : undefined, state);
+    return prepared;
   }
 
   private async settleOptionalFiles(frozen: FrozenExecutionFileEvidence | undefined, state: ExecutionState) {
@@ -650,9 +664,9 @@ function mutationFor(
 }
 
 function auxiliaryMutation(
-  command: Extract<WorkerCommand, { kind: "begin-files" | "start" | "release" | "finish-from-state" | "checkpoint" | "effect-result" | "provider-outcome" }>,
+  command: Extract<WorkerCommand, { kind: "collect-files" | "begin-files" | "start" | "release" | "finish-from-state" | "checkpoint" | "effect-result" | "provider-outcome" }>,
 ): ExecutionSemanticOperation["mutation"] | undefined {
-  if (command.kind === "start" || command.kind === "release" || command.kind === "finish-from-state") return undefined;
+  if (command.kind === "collect-files" || command.kind === "start" || command.kind === "release" || command.kind === "finish-from-state") return undefined;
   // File handoff is the first command after durable start, before a provider cursor exists.
   if (command.kind === "begin-files") return { kind: "checkpoint", phase: "running", nativeCursor: null };
   return command;

@@ -260,7 +260,6 @@ describe("Agent Message Flow", () => {
       threadId: "thread-a",
       messageId: "thread-a-completed",
       toolCallCount: 0,
-      filesChanged: [],
     });
     vi.runAllTimers();
 

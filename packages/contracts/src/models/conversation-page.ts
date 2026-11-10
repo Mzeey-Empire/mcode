@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TurnFileEvidenceEventSchema, type TurnFileEvidenceEvent } from "./turn-file-evidence.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { MessageSchema, SessionNoticesSchema, type Message } from "./message.js";
 import { ToolCallRecordSchema, type ToolCallRecord } from "./tool-call-record.js";
@@ -25,6 +26,7 @@ export const ConversationPageSchema = lazySchema<z.ZodType<ConversationPage>>(()
     hasMore: z.boolean(),
     answeredPlanMessageIds: z.array(z.string()).optional(),
     narrativeByMessage: z.record(ConversationNarrativeBatchSchema()),
+    turnFileEvidence: z.array(TurnFileEvidenceEventSchema()).optional(),
   }),
 );
 
@@ -43,4 +45,5 @@ export interface ConversationPage {
   hasMore: boolean;
   answeredPlanMessageIds?: string[];
   narrativeByMessage: Record<string, ConversationNarrativeBatch>;
+  turnFileEvidence?: TurnFileEvidenceEvent[];
 }

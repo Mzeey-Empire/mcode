@@ -15,6 +15,8 @@ export interface WorkerOwnedTurn {
   persistedPublished: boolean;
   terminalOutcome?: TurnOutcome;
   releaseStarted: boolean;
+  releasing?: Promise<void>;
+  fileCollectionStarted?: boolean;
   /** The release scheduled by the committed Ended; a provider can start its next turn before it finishes. */
   terminalRelease?: Promise<void>;
   deliveryFailed?: boolean;

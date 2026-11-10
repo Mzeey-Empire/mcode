@@ -254,7 +254,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       releaseAttachments();
       await sending;
       await svc.stopSession(thread.id, { by: "user" });
-      expect(isThreadProtected(thread.id)).toBe(false);
+      await vi.waitFor(() => expect(isThreadProtected(thread.id)).toBe(false));
       pressureListener?.(pressure);
       expect(shedMemoryPressure).toHaveBeenCalledTimes(2);
       expect(shedMemoryPressure.mock.calls[1]?.[1](thread.id)).toBe(false);

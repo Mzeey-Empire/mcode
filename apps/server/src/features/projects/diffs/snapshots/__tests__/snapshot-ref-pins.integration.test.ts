@@ -1,4 +1,6 @@
 import "reflect-metadata";
+import { beginTurnFileEvidence } from "../../../../agents/turns/persistence/turn-file-evidence-store.js";
+import { TurnFileEvidenceLedger } from "../../../../agents/execution/turn-file-evidence-ledger.js";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -16,7 +18,7 @@ import { CanonicalAgentWriterClient } from "../../../../agents/canonical/canonic
 import { ParentAssistantTextCheckpointService } from "../../../../agents/turns/parent-assistant-text-checkpoint-service.js";
 import { TurnRecoveryService } from "../../../../agents/recovery/turn-recovery-service.js";
 import { TurnSnapshotRepo } from "../../../../agents/turns/persistence/turn-snapshot-repo.js";
-import { persistInterruptedAttemptSnapshot } from "../../../../agents/turns/persistence/turn-finalization-write-operations.js";
+import { turnSnapshotWriteOperations } from "../../../../agents/turns/persistence/turn-snapshot-write-operations.js";
 import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
 import { ThreadStartupRepo } from "../../../../thread-startup/persistence/thread-startup-repo.js";
 import { AttachmentService } from "../../../../attachments/storage/attachment-service.js";
@@ -28,7 +30,6 @@ import { ensureSnapshotStoreId, StoreIdSchema, type StoreId } from "../snapshot-
 import {
   formatPinRef,
   parsePinRef,
-  SnapshotPinFaultStop,
   SnapshotRefPins,
   storeRefPrefix,
 } from "../snapshot-ref-pins.js";
@@ -217,11 +218,8 @@ function snapshotRows(store: TestStore, messageId: string): SnapshotRow[] {
 }
 
 async function writeSnapshotRow(store: TestStore, input: { messageId: string; threadId: string; refBefore: string; refAfter: string }): Promise<string> {
-  const { snapshotId } = await store.writer.execute(persistInterruptedAttemptSnapshot, {
-    snapshot: { ...input, filesChanged: ["a.ts"], worktreePath: null },
-    markFilesChanged: true,
-  });
-  return snapshotId;
+  const snapshot = await store.writer.execute(turnSnapshotWriteOperations.create, [{ ...input, filesChanged: ["a.ts"], worktreePath: null }]);
+  return snapshot.id;
 }
 
 /** Arrange the restart case: a turn pinned its baseline, edited a.ts, then the process died. */
@@ -322,105 +320,24 @@ describe("SnapshotRefPins", () => {
     expect(listRefs(repo)).toEqual([]);
   }, TEST_TIMEOUT_MS);
 
-  it("writes the snapshot of a turn interrupted by a restart from its pinned baseline", async () => {
-    const repo = createRepo();
-    const { store: first, executionId, baseline, baselineRef } = await interruptedTurn(repo);
-    const store = await restart(first);
-    await expect(store.recovery.reconcileOnStartup()).resolves.toEqual({ interrupted: [executionId] });
-
-    await store.pins.settleExecution("thread-1", executionId);
-
-    const rows = snapshotRows(store, "assistant-1");
-    expect(rows).toHaveLength(1);
-    const [row] = rows;
-    expect(row?.ref_before).toBe(baseline);
-    expect(row?.ref_after).toBe(await store.snapshots.captureRef(repo));
-    expect(JSON.parse(row?.files_changed ?? "[]")).toContain("a.ts");
-    expect(listRefs(repo)).toEqual([`refs/mcode/${store.storeId}/snapshots/${row?.id}`]);
-    expect(listRefs(repo)).not.toContain(baselineRef);
-    gcPruneNow(repo);
-    expect(await store.snapshots.getDiff(repo, baseline, row?.ref_after ?? "")).toContain("+export const a = 'edited by the turn';");
-  }, TEST_TIMEOUT_MS);
-
-  it("recovers a second crash before the row write on the next start", async () => {
-    const repo = createRepo();
-    const interrupted = await interruptedTurn(repo);
-    let store = await restart(interrupted.store);
-    await store.recovery.reconcileOnStartup();
-    await expect(store.pins.sweep({ stopAt: "before-row-write" })).rejects.toBeInstanceOf(SnapshotPinFaultStop);
-    expect(snapshotRows(store, "assistant-1")).toHaveLength(0);
-
-    store = await restart(store);
-    await expect(store.recovery.reconcileOnStartup()).resolves.toEqual({ interrupted: [] });
-    await store.pins.sweep();
-
-    const rows = snapshotRows(store, "assistant-1");
-    expect(rows).toHaveLength(1);
-    expect(listRefs(repo)).toEqual([`refs/mcode/${store.storeId}/snapshots/${rows[0]?.id}`]);
-    gcPruneNow(repo);
-    expect(await store.snapshots.getDiff(repo, interrupted.baseline, rows[0]?.ref_after ?? "")).toContain("a.ts");
-  }, TEST_TIMEOUT_MS);
-
-  it("recovers a second crash after the row write without a second row", async () => {
-    const repo = createRepo();
-    const interrupted = await interruptedTurn(repo);
-    let store = await restart(interrupted.store);
-    await store.recovery.reconcileOnStartup();
-    await expect(store.pins.sweep({ stopAt: "after-row-write" })).rejects.toBeInstanceOf(SnapshotPinFaultStop);
-    expect(snapshotRows(store, "assistant-1")).toHaveLength(1);
-    expect(listRefs(repo)).toEqual([interrupted.baselineRef]);
-
-    store = await restart(store);
-    await store.recovery.reconcileOnStartup();
-    await store.pins.sweep();
-    const rows = snapshotRows(store, "assistant-1");
-    const settled = [`refs/mcode/${store.storeId}/snapshots/${rows[0]?.id}`];
-    expect(rows).toHaveLength(1);
-    expect(listRefs(repo)).toEqual(settled);
-
-    store = await restart(store);
-    await store.recovery.reconcileOnStartup();
-    await store.pins.sweep();
-    expect(snapshotRows(store, "assistant-1")).toEqual(rows);
-    expect(listRefs(repo)).toEqual(settled);
-  }, TEST_TIMEOUT_MS);
-
-  it("writes one row when a startup sweep and a worker-loss settle race for the same attempt", async () => {
+  it("never recaptures a restarted attempt from a later workspace", async () => {
     const repo = createRepo();
     const interrupted = await interruptedTurn(repo);
     const store = await restart(interrupted.store);
     await store.recovery.reconcileOnStartup();
-
-    await Promise.all([store.pins.sweep(), store.pins.settleExecution("thread-1", interrupted.executionId)]);
+    const capture = vi.spyOn(store.snapshots, "captureRef");
+    const turn = store.db.query<{ turn_id: string }, [string]>("SELECT turn_id FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(interrupted.executionId);
+    if (!turn) throw new Error("Expected interrupted checkpoint");
+    await store.writer.execute(beginTurnFileEvidence, { threadId: "thread-1", turnId: turn.turn_id, executionId: interrupted.executionId });
     await store.pins.sweep();
-
-    const rows = snapshotRows(store, "assistant-1");
-    expect(rows).toHaveLength(1);
-    expect(listRefs(repo)).toEqual([`refs/mcode/${store.storeId}/snapshots/${rows[0]?.id}`]);
-  }, TEST_TIMEOUT_MS);
-
-  it("keeps the baseline when the snapshot write fails and writes the row on the next start", async () => {
-    const repo = createRepo();
-    const interrupted = await interruptedTurn(repo);
-    let store = await restart(interrupted.store);
-    await store.recovery.reconcileOnStartup();
-    const warn = vi.spyOn(logger, "warn");
-    const failingWriter: Pick<ApplicationDatabaseWriter, "execute"> = {
-      execute: () => Promise.reject(new Error("database write failed")),
-    };
-    const failingPins = new SnapshotRefPins(
-      new RealGitExecutor(), store.storeId, store.db, failingWriter, new RepositoryGitMutationLock(hostRuntime), store.snapshots, hostRuntime,
-    );
-
-    await failingPins.sweep();
     expect(listRefs(repo)).toEqual([interrupted.baselineRef]);
-    expect(snapshotRows(store, "assistant-1")).toHaveLength(0);
-    expect(warn).toHaveBeenCalledWith("Snapshot ref pin failed", expect.objectContaining({ action: "write interrupted snapshot" }));
-
-    store = await restart(store);
-    await store.pins.sweep();
-    expect(snapshotRows(store, "assistant-1")).toHaveLength(1);
-    expect(listRefs(repo)).toEqual([`refs/mcode/${store.storeId}/snapshots/${snapshotRows(store, "assistant-1")[0]?.id}`]);
+    const ledger = new TurnFileEvidenceLedger(store.db, store.writer, store.snapshots);
+    await ledger.resolveAbandoned(undefined, "restarted");
+    ledger.close();
+    await Promise.all([store.pins.sweep(), store.pins.settleExecution("thread-1", interrupted.executionId)]);
+    expect(snapshotRows(store, "assistant-1")).toEqual([]);
+    expect(listRefs(repo)).toEqual([]);
+    expect(capture).not.toHaveBeenCalled();
   }, TEST_TIMEOUT_MS);
 
   it("deletes the baseline of an interrupted attempt that already has a row, without a new row", async () => {

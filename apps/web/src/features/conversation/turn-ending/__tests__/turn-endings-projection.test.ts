@@ -81,6 +81,7 @@ describe("projectTurnEndings", () => {
     expect(projection.endingsByMessageId["a2-retry"]).toEqual({
       turnId: "t2-retry",
       providerId: null,
+      executionId: null,
       view: {
         foldLabel: "Failed after 5s",
         notice: {
@@ -119,6 +120,7 @@ describe("projectTurnEndings", () => {
     expect(projectTurnEndings(THREAD_ID, state, false).endingsByMessageId.u1).toEqual({
       turnId: "t1-retry",
       providerId: null,
+      executionId: null,
       view: {
         foldLabel: null,
         notice: {

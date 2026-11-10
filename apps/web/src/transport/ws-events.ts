@@ -527,16 +527,25 @@ export function startPushListeners(): void {
       if (!parsed.success) return;
       const payload = parsed.data;
       useThreadStore.getState().handleTurnPersisted(payload);
+      // Changed files arrive later on turn.fileEvidence; the turn list still gains this ending now.
+      refreshTurnSnapshotsAfterPersist(payload.threadId, []);
+    }),
+  );
 
-      refreshTurnSnapshotsAfterPersist(payload.threadId, payload.filesChanged);
+  // turn.fileEvidence: the ended turn's changed files, published after its turn.persisted
+  unsubs.push(
+    pushEmitter.on("turn.fileEvidence", (data) => {
+      const parsed = WS_CHANNELS["turn.fileEvidence"].safeParse(data);
+      if (!parsed.success) return;
+      const event = parsed.data;
+      useThreadStore.getState().handleTurnFileEvidence(event);
+      if (event.evidence.state !== "recorded" || event.evidence.filesChanged.length === 0) return;
 
-      const hasFileChanges = payload.filesChanged.length > 0;
-      if (!hasFileChanges) return;
-
+      refreshTurnSnapshotsAfterPersist(event.threadId, event.evidence.filesChanged);
       const thread = useWorkspaceStore
         .getState()
-        .threads.find((candidate) => candidate.id === payload.threadId);
-      if (thread) clearFileListCache(thread.workspace_id, payload.threadId);
+        .threads.find((candidate) => candidate.id === event.threadId);
+      if (thread) clearFileListCache(thread.workspace_id, event.threadId);
     }),
   );
 

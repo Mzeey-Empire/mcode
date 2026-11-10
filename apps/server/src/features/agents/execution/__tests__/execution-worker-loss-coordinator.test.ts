@@ -29,7 +29,7 @@ import { RealGitExecutor } from "../../../projects/git/execution/real-git-execut
 import { RepositoryGitMutationLock } from "../../../projects/git/repository-git-mutation-lock.js";
 import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import { ensureSnapshotStoreId } from "../../../projects/diffs/snapshots/snapshot-store-identity.js";
-import { formatPinRef, SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
+import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
 
 const NOW = "2026-09-24T10:00:00.000Z";
 const execution = {
@@ -387,7 +387,7 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
     expect(JSON.stringify(liveEvents)).not.toContain("SECRET_RESULT");
   });
 
-  it("writes and pins the snapshot of an attempt whose worker was lost", async () => {
+  it("releases a lost attempt's baseline without recapturing its files", async () => {
     const repo = NodePath.join(directory, "repo");
     NodeFS.mkdirSync(repo);
     const git = (...args: string[]) => NodeChildProcess.execFileSync("git", ["-C", repo, ...args], {
@@ -412,12 +412,11 @@ describe("ExecutionWorkerLossCoordinator with a file-backed writer", () => {
 
     const assistant = new MessageRepo(db, owner).listIncludingInternal(execution.threadId)
       .find((message) => message.role === "assistant");
-    const row = db.query<{ id: string; ref_before: string; files_changed: string }, [string]>(
-      "SELECT id, ref_before, files_changed FROM turn_snapshots WHERE message_id = ?",
-    ).get(assistant?.id ?? "");
-    expect(row).toMatchObject({ ref_before: baseline, files_changed: JSON.stringify(["a.ts"]) });
-    const refs = git("for-each-ref", "--format=%(refname)", "refs/mcode/").split("\n");
-    expect(refs).toEqual([formatPinRef(storeId, { kind: "snapshot", snapshotId: row?.id ?? "" })]);
+    const rows = db.query("SELECT id FROM turn_snapshots WHERE message_id = ?").all(assistant?.id ?? "");
+    expect(assistant).toBeDefined();
+    expect(baseline).toBeTruthy();
+    expect(rows).toEqual([]);
+    expect(git("for-each-ref", "--format=%(refname)", "refs/mcode/")).toBe("");
   }, 30_000);
 
   it("keeps the slot fenced after a failed writer receipt until explicit retry", async () => {

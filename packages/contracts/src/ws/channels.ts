@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TurnFileEvidenceEventSchema } from "../models/turn-file-evidence.js";
 import { ThreadPullRequestSchema } from "../models/thread-pull-request.js";
 import { TurnRevertedEventSchema } from "../models/turn-revert.js";
 import { ThreadAttentionSchema } from "../models/thread-attention.js";
@@ -190,13 +191,12 @@ export const WS_CHANNELS = {
     messageId: z.string().nullable(),
     settledMessage: z.object({ id: z.string(), sequence: z.number().int().nonnegative() }).nullable(),
     toolCallCount: z.number(),
-    filesChanged: z.array(z.string()),
-    fileEffects: TurnFileEffectSummarySchema().optional(),
     outcome: TurnOutcomeSchema.optional(),
     executionId: z.string().nullable().optional(),
   }))(),
   /** Reports whether live assistant text remains recoverable or needs explicit risk acceptance. */
   "turn.savingStatus": TurnSavingStatusSchema(),
+  "turn.fileEvidence": TurnFileEvidenceEventSchema(),
   /** Live net file effects attributed to explicit agent mutation tools. */
   "turn.fileEffectsUpdated": z.object({
     threadId: z.string(),

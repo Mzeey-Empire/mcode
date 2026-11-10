@@ -254,7 +254,7 @@ describe("canonical runtime reconciliation", () => {
       events: events.map((event) => ({ ...event, progressPosition: { epoch, sequence: event.acceptedSequence } })) });
     useThreadStore.getState().handleTurnPersisted({ threadId: THREAD_ID, messageId: response.id,
       settledMessage: { id: response.id, sequence: 2 }, executionId: EXECUTION_ID, outcome: "cancelled",
-      toolCallCount: 0, filesChanged: [] });
+      toolCallCount: 0 });
     drainFrames();
 
     const record = readThreadField(THREAD_ID, (current) => current);
@@ -319,7 +319,7 @@ describe("canonical runtime reconciliation", () => {
         threadId: THREAD_ID, turnExecutionId: executionId, outcome: "completed" } });
       return () => useThreadStore.getState().handleTurnPersisted({ threadId: THREAD_ID, messageId: saved.id,
         settledMessage: { id: saved.id, sequence: saved.sequence }, executionId, outcome: "completed",
-        toolCallCount: 0, filesChanged: [] });
+        toolCallCount: 0 });
     };
 
     const persistFirst = await answeredTurn(TURN_ID, EXECUTION_ID, "first", "alpha");

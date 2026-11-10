@@ -14,7 +14,8 @@ import { deriveRunStatus, type RunHoldingSignals, type RunStatus } from "../narr
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 import { isHiddenPlanAnswer } from "@/lib/plan-fences";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
-import { sameTurnEndNotice, type TurnEndNoticeView } from "../turn-ending/turn-ending-notice";
+import { fileEvidenceNotice, sameTurnEndNotice, type TurnEndNoticeView } from "../turn-ending/turn-ending-notice";
+import type { FileEvidenceByExecution } from "@/stores/thread-store/file-evidence";
 import type { TurnEnding } from "../turn-ending/turn-endings-projection";
 import { createTurnNoticePlacer, turnNoticeFromMessage } from "./turn-notices";
 
@@ -155,6 +156,8 @@ export interface TranscriptProjectionInput {
   providerContinuationMessageIds?: ReadonlySet<string>;
   /** Settled turn endings keyed by the message each notice follows. */
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>;
+  /** Changed-file evidence keyed by execution id; an ended turn reads its own. */
+  fileEvidenceByExecutionId?: FileEvidenceByExecution;
   /** In-memory tool calls for the active turn. */
   toolCalls: readonly ToolCall[];
   /** Start time for active-turn timing displays. */
@@ -238,6 +241,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       turnDurationsByMessageId: input.turnDurationsByMessageId,
       providerContinuationMessageIds: input.providerContinuationMessageIds,
       turnEndingsByMessageId: input.turnEndingsByMessageId,
+      fileEvidenceByExecutionId: input.fileEvidenceByExecutionId,
       currentTurnLiveNarrative: settledLiveNarrative(input),
     };
     const stableItems = sameStableTranscriptInput(previousStableInput, stableInput)
@@ -256,6 +260,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.turnDurationsByMessageId,
         stableInput.providerContinuationMessageIds,
         stableInput.turnNoticesByResponseId,
+        stableInput.fileEvidenceByExecutionId,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -281,7 +286,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
 type StableTranscriptInput = Pick<TranscriptProjectionInput,
   "messages" | "persistedFilesChanged" | "latestTurnWithChanges" | "currentTurn" | "agentDisplayState"
   | "responseTextIsStreaming" | "persistedNarrativeByMessage" | "turnSummariesByMessageId"
-  | "turnDurationsByMessageId" | "providerContinuationMessageIds" | "turnEndingsByMessageId"> & {
+  | "turnDurationsByMessageId" | "providerContinuationMessageIds" | "turnEndingsByMessageId" | "fileEvidenceByExecutionId"> & {
   currentTurnLiveNarrative: SettledLiveNarrative | undefined;
   turnNoticesByResponseId: Readonly<Record<string, readonly Message[]>>;
 };
@@ -289,7 +294,7 @@ type StableTranscriptInput = Pick<TranscriptProjectionInput,
 const STABLE_TRANSCRIPT_KEYS = [
   "messages", "persistedFilesChanged", "latestTurnWithChanges", "currentTurn", "agentDisplayState",
   "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnDurationsByMessageId",
-  "turnEndingsByMessageId", "currentTurnLiveNarrative",
+  "turnEndingsByMessageId", "fileEvidenceByExecutionId", "currentTurnLiveNarrative",
   "providerContinuationMessageIds", "turnNoticesByResponseId",
 ] as const satisfies readonly (keyof StableTranscriptInput)[];
 
@@ -422,9 +427,10 @@ export function buildStableItems(
   turnDurationsByMessageId?: Readonly<Record<string, number | null>>,
   providerContinuationMessageIds?: ReadonlySet<string>,
   turnNoticesByResponseId?: Readonly<Record<string, readonly Message[]>>,
+  fileEvidenceByExecutionId?: FileEvidenceByExecution,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId, providerContinuationMessageIds, turnNoticesByResponseId,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId, providerContinuationMessageIds, turnNoticesByResponseId, fileEvidenceByExecutionId,
   }));
 }
 
@@ -443,6 +449,7 @@ interface StableItemInput {
   turnEndingsByMessageId?: Readonly<Record<string, TurnEnding>>;
   /** Notices taken out of the message list, keyed by the answer of the turn they happened in. */
   turnNoticesByResponseId?: Readonly<Record<string, readonly Message[]>>;
+  fileEvidenceByExecutionId?: FileEvidenceByExecution;
 };
 
 function isCurrentResponse(message: Message, input: Pick<StableItemInput, "currentTurn">): boolean {
@@ -553,6 +560,15 @@ function turnEndNoticeItem(message: Message, ending: TurnEnding | undefined): Ch
     : undefined;
 }
 
+/** Shown only for an ended turn: a `tracking` row on a running turn means nothing yet. */
+function fileEvidenceNoticeItem(message: Message, ending: TurnEnding | undefined, input: StableItemInput, hasChangesBar: boolean): ChatVirtualItem | undefined {
+  const evidence = ending?.executionId ? input.fileEvidenceByExecutionId?.[ending.executionId] : undefined;
+  const notice = evidence ? fileEvidenceNotice(evidence.evidence, hasChangesBar) : null;
+  return ending && notice
+    ? { key: `turn-file-evidence:${message.id}`, type: "turn-end-notice", messageId: message.id, turnId: ending.turnId, providerId: ending.providerId, notice }
+    : undefined;
+}
+
 /** The work fold above an answer, or, when the turn has none, its notices as their own rows. */
 function turnWorkItems(message: Message, input: StableItemInput, summary: TurnSummary | undefined, ending: TurnEnding | undefined): ChatVirtualItem[] {
   const notices = input.turnNoticesByResponseId?.[message.id] ?? EMPTY_NOTICE_MESSAGES;
@@ -563,18 +579,21 @@ function turnWorkItems(message: Message, input: StableItemInput, summary: TurnSu
 }
 
 function stableItemsForMessage(message: Message, input: StableItemInput): ChatVirtualItem[] {
-  if (isHiddenPlanAnswer(message)) return [];
   const ending = input.turnEndingsByMessageId?.[message.id];
-  if (message.role !== "assistant") return definedItems([messageVirtualItem(message, input), turnEndNoticeItem(message, ending)]);
+  // A hidden plan answer still owns its turn's file evidence; only the answer row is hidden.
+  if (isHiddenPlanAnswer(message)) return definedItems([fileEvidenceNoticeItem(message, ending, input, false)]);
+  if (message.role !== "assistant") return definedItems([messageVirtualItem(message, input), turnEndNoticeItem(message, ending), fileEvidenceNoticeItem(message, ending, input, false)]);
   const settled = !isAgentDisplayActive(currentResponseState(message, input));
   const summary = settled ? settledTurnSummary(message, input) : undefined;
   const workItems = turnWorkItems(message, input, summary, ending);
+  const changes = turnChangesItem(message, input);
   return definedItems([
     ...workItems,
     messageVirtualItem(message, input),
     summary && turnMetaLineItem(message, summary, input, workItems.some((item) => item.type === "work-fold")),
-    turnChangesItem(message, input),
+    changes,
     turnEndNoticeItem(message, ending),
+    fileEvidenceNoticeItem(message, ending, input, changes !== undefined),
   ]);
 }
 
