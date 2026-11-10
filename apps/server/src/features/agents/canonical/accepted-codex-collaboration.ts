@@ -440,7 +440,11 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
 
   recordCodexChildItem(input: CodexChildItemInput): AgentItem {
     const turn = this.childTurn(input.childThreadId, input.nativeTurnId);
-    const stream = input.kind === "message" && ["stream", "stream-complete", "completed"].includes(input.eventKey);
+    if (input.kind === "message" && input.eventKey === "stream") {
+      const completed = this.record("items", `item:codex-child:${hash(`${turn.id}:${input.nativeItemId}:completed:message`)}`);
+      if (completed) return completed;
+    }
+    const stream = input.kind === "message" && ["stream", "stream-complete"].includes(input.eventKey);
     const id = `item:codex-child:${hash(`${turn.id}:${input.nativeItemId}:${stream ? "stream" : input.eventKey}:${input.kind}`)}`;
     return this.recordItemInTurn(turn, id, input, stream);
   }
@@ -746,7 +750,7 @@ function unique(index: ReadonlyMap<string, ReadonlySet<string>>, key: string, la
   return values?.values().next().value;
 }
 function streamedChildContent(savedEventKey: unknown, eventKey: string, saved: string, incoming: string): string | null {
-  const fullMessageSaved = savedEventKey === "stream-complete" || savedEventKey === "completed";
+  const fullMessageSaved = savedEventKey === "stream-complete";
   if (eventKey === "stream") return fullMessageSaved ? null : saved + incoming;
   return fullMessageSaved && incoming === saved ? null : incoming;
 }
