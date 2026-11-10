@@ -122,6 +122,13 @@ class StartupCancelledError extends Error {
   }
 }
 
+class StartupShutdownError extends Error {
+  readonly code = "startup_shutdown";
+  constructor() {
+    super("Thread startup was interrupted by shutdown");
+  }
+}
+
 function initialBranch(command: CreateAndSendCommand): string {
   if (command.mode === "worktree" && !command.existingWorktreePath && !command.branch?.trim()) {
     throw new Error("Worktree mode requires a non-empty branch");
@@ -147,17 +154,17 @@ export class ThreadCreationCoordinator {
     private readonly startups: () => ThreadStartupService | undefined = () => undefined,
   ) {}
 
-  /** Cancel provisioning and wake fetch decisions before shutdown drains startup callers. */
-  async cancelPendingStartups(): Promise<void> {
+  /** Wake provisioning without persisting cancellation, so restart recovery retains user intent. */
+  interruptPendingStartups(): void {
     this.shuttingDown = true;
     for (const startupId of this.inFlightStartups.keys()) {
-      if (this.startups()?.get(startupId)) await this.startups()?.cancel(startupId);
       this.fetchDecisions.cancel(startupId);
     }
   }
 
   /** Provision a thread and prepare its first command without acquiring runtime authority. */
   async createInitialTurn(command: CreateAndSendCommand, options?: CreateAndSendOptions): Promise<CreatedInitialTurn> {
+    this.throwIfShuttingDown();
     const params = this.initialTurnParams(command);
     params.options = options;
     this.validateSetupSkip(params);
@@ -204,15 +211,13 @@ export class ThreadCreationCoordinator {
 
   private async startAndProvisionInitialTurn(command: CreateAndSendCommand, params: BranchedInitialTurnParams, fingerprint: string): Promise<CreatedInitialTurn> {
     const started = await this.startStartup(command, params, fingerprint);
-    if (this.shuttingDown && started) {
-      await this.startups()?.cancel(started.startup.startupId);
-      await this.cancelIfRequested(started.startup.startupId);
-    }
+    this.throwIfShuttingDown();
     return started?.existing ? this.replayStartup(started.startup) : this.provisionInitialTurn(command, params, started?.startup);
   }
 
   /** Enter the first runtime phase after direct thread provisioning. */
   async startInitialAgent(startupId: string | undefined): Promise<void> {
+    this.throwIfShuttingDown();
     if (startupId) await this.startups()?.advance(startupId, "agent");
   }
 
@@ -229,11 +234,13 @@ export class ThreadCreationCoordinator {
 
   /** Complete a startup whose initial command was handled without a provider turn, so no provider frame will come. */
   async completeHandledInitialCommand(startupId: string | undefined): Promise<void> {
+    this.throwIfShuttingDown();
     if (startupId) await this.startups()?.complete(startupId);
   }
 
   /** Preserve an initial provider dispatch failure on its current startup phase. */
   async failInitialAgent(startupId: string | undefined): Promise<void> {
+    this.throwIfShuttingDown();
     if (startupId) await this.startups()?.fail(startupId, {
       code: "AGENT_START_FAILED",
       message: "Agent startup failed",
@@ -347,6 +354,7 @@ export class ThreadCreationCoordinator {
     try {
       await this.fetchInitialBranch(params, startupId);
       const startPoint = await this.resolveStartPoint(params, startupId);
+      this.throwIfShuttingDown();
       const thread = await this.createStandaloneThread(params, { ...creation, startPoint }, startupId);
       await this.startManagedSetup(startupId, startup?.kind);
       if (params.options?.setupSkip) {
@@ -356,6 +364,7 @@ export class ThreadCreationCoordinator {
       const automatic = await this.admitInitialTurn(command, params, thread.id);
       return this.initialTurnResult(command, params, thread, automatic, startupId);
     } catch (error) {
+      this.throwIfShuttingDown();
       if (error instanceof StartupCancelledError || error instanceof DatabaseWriteOutcomeUnknown) throw error;
       await this.failStartup(startupId, error);
       throw error;
@@ -404,6 +413,7 @@ export class ThreadCreationCoordinator {
       lineage: creation.lineage,
     }, startupId && startupService ? (input) => startupService.createAndBindThread(startupId, input) : undefined);
     const thread = await this.configure(attached, creation);
+    this.throwIfShuttingDown();
     if (startupId) {
       await this.startups()?.bindThread(startupId, thread.id);
       await this.startups()?.advance(startupId, "worktree", worktreeDetail(thread.worktree_path ?? params.existingWorktreePath, "opened"));
@@ -413,6 +423,7 @@ export class ThreadCreationCoordinator {
   }
 
   private async startManagedSetup(startupId: string | undefined, kind: string | undefined): Promise<void> {
+    this.throwIfShuttingDown();
     if (!startupId || (kind !== "managed-worktree" && kind !== "attached-worktree")) return;
     await this.startups()?.advance(startupId, "setup");
   }
@@ -423,6 +434,7 @@ export class ThreadCreationCoordinator {
     try {
       await this.gitRepository.fetchBranch(params.workspaceId, params.branch, params.pullRequestNumber);
     } catch (cause) {
+      this.throwIfShuttingDown();
       if (startupId) {
         await this.startups()?.fail(startupId, {
           code: "FETCH_FAILED", message: "Git fetch failed", retryable: true,
@@ -469,7 +481,7 @@ export class ThreadCreationCoordinator {
         detail: error instanceof OriginFetchError ? (error.detail || error.message) : startupErrorDetail(error),
         actions: ["retry", "continue"],
       }, { phase: "fetch", ref: `origin/${branch}`, branch });
-      if (startups.isCancellationRequested(startupId)) this.fetchDecisions.cancel(startupId);
+      if (this.shuttingDown || startups.isCancellationRequested(startupId)) this.fetchDecisions.cancel(startupId);
     });
   }
 
@@ -563,6 +575,7 @@ export class ThreadCreationCoordinator {
       provider: input.provider,
       ...this.managedLifecycle(startupId),
     });
+    this.throwIfShuttingDown();
     if (startupId && created.worktree_path) {
       await this.startups()?.advance(startupId, "worktree", worktreeDetail(created.worktree_path, "created"));
     }
@@ -579,6 +592,7 @@ export class ThreadCreationCoordinator {
     return {
       lifecycle: {
         onThreadPersisted: async (thread) => {
+          this.throwIfShuttingDown();
           await this.startups()?.bindThread(startupId, thread.id);
           await this.startups()?.advance(startupId, "worktree", worktreeDetail(thread.worktree_path, "created"));
           await this.cancelIfRequested(startupId);
@@ -605,6 +619,7 @@ export class ThreadCreationCoordinator {
         branch: params.branch,
       } : undefined,
     }, fingerprint);
+    this.throwIfShuttingDown();
     if (!existing) {
       await startupService.advance(startup.startupId, "thread");
       await this.cancelIfRequested(startup.startupId);
@@ -639,9 +654,14 @@ export class ThreadCreationCoordinator {
   }
 
   private async cancelIfRequested(startupId: string | undefined): Promise<void> {
+    this.throwIfShuttingDown();
     if (!startupId || !this.startups()?.isCancellationRequested(startupId)) return;
     await this.startups()?.markCancelled(startupId);
     throw new StartupCancelledError();
+  }
+
+  private throwIfShuttingDown(): void {
+    if (this.shuttingDown) throw new StartupShutdownError();
   }
 
   private async failStartup(startupId: string | undefined, cause: unknown): Promise<void> {
@@ -661,7 +681,9 @@ export class ThreadCreationCoordinator {
     created: Thread & { warnings?: string[] },
     input: CreateThreadForTurnInput,
   ): Promise<Thread & { warnings?: string[] }> {
+    this.throwIfShuttingDown();
     await this.threads.updateModel(created.id, input.model);
+    this.throwIfShuttingDown();
     await this.threads.updateSettings(created.id, this.settings(input));
     return this.configuredThread(created, input);
   }
@@ -734,6 +756,8 @@ export class ThreadCreationCoordinator {
     try {
       return await this.provisionBranchedInitialTurn(params, startup);
     } catch (error) {
+      if (error instanceof StartupShutdownError) throw error;
+      this.throwIfShuttingDown();
       if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
       await this.clearRemovedBranchedThreadBinding(startup);
       if (!(error instanceof StartupCancelledError)) await this.failStartup(startup?.startupId, error);
@@ -845,6 +869,7 @@ export class ThreadCreationCoordinator {
   }
 
   private async finishBranchedStartup(startup: ThreadStartup | undefined, thread: Thread): Promise<void> {
+    this.throwIfShuttingDown();
     if (!startup) return;
     if (startup.kind === "managed-worktree" && thread.worktree_path) {
       await this.startups()?.advance(startup.startupId, "worktree", worktreeDetail(thread.worktree_path, "created"));

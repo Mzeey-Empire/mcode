@@ -29,6 +29,8 @@ import { ThreadStartupService } from "../../../thread-startup/thread-startup-ser
 import type { TerminalCommandCompletion } from "../../../terminal/commands/terminal-command-service.js";
 import { routeThreadStartupRpc } from "../../../thread-startup/transport/thread-startup-rpc.js";
 import { routeAgentRpc, type AgentRouterDeps } from "../../transport/agent-rpc.js";
+import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { leaseWriterWorker } from "../../../../runtime/persistence/sqlite/testing/reusable-writer-worker.js";
 
 const roots: string[] = [];
 const services: ReturnType<typeof createAgentServiceForTest>[] = [];
@@ -190,7 +192,7 @@ async function createAgentServiceHarness(automaticSetup?:
 }
 
 describe("AgentService.createAndSend defaults", () => {
-  it.each(["cancelled", "failed"])("settles %s managed startup before shutdown closes its database writer", async (outcome) => {
+  it.each(["resolved", "rejected"])("preserves a %s managed startup interrupted by shutdown before closing its database writer", async (outcome) => {
     const { threadRepo, workspaceRepo, threadService, service, threadStartups } = await createAgentServiceHarness();
     const workspace = await workspaceRepo.create("Repo", "/repo");
     const managed = await threadRepo.create(workspace.id, "Shutdown startup", "worktree", "feature/shutdown", true, "claude");
@@ -200,7 +202,7 @@ describe("AgentService.createAndSend defaults", () => {
     vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
       entered.resolve();
       await release.promise;
-      if (outcome === "failed") throw failure;
+      if (outcome === "rejected") throw failure;
       await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed);
       return managed;
     });
@@ -209,17 +211,38 @@ describe("AgentService.createAndSend defaults", () => {
       mode: "worktree", branch: "feature/shutdown", startupId });
     const result = creating.then(() => null, (error: unknown) => error);
     await entered.promise;
+    const beforeShutdown = threadStartups.get(startupId);
     const closing = service.stopAll().then(() => persistenceRuntime.writer.close());
     // Provisioning must outlive the session drain even on a fast runner.
     await new Promise<void>((resolve) => setImmediate(resolve));
     release.resolve();
     const error = await result;
     await closing;
-    if (outcome === "failed") expect(error).toBe(failure);
-    else expect(error).toMatchObject({ code: "startup_cancelled" });
-    expect(threadStartups.get(startupId)).toMatchObject({ state: outcome });
+    expect(threadStartups.get(startupId)).toEqual(beforeShutdown);
+    expect(error).toMatchObject({ code: "startup_shutdown" });
+    const recoveryWriter = new ApplicationDatabaseWriter(persistenceRuntime.database.filename, leaseWriterWorker);
+    try {
+      const recovery = new ThreadStartupService(new ThreadStartupRepo(persistenceRuntime.database, recoveryWriter), recoveryWriter);
+      await recovery.interruptNonterminalOnStartup();
+      expect(recovery.listInterrupted()).toMatchObject([{ startupId, state: "interrupted", cancellation: "none" }]);
+    } finally {
+      await recoveryWriter.close();
+    }
     await expect(service.createAndSend({ workspaceId: workspace.id, content: "After shutdown" })).rejects.toThrow("shutting down");
     expect(threadService.create).toHaveBeenCalledOnce();
+  });
+
+  it("records a provisioning failure before shutdown as failed", async () => {
+    const { workspaceRepo, threadService, service, threadStartups } = await createAgentServiceHarness();
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const failure = new Error("Worktree provisioning failed");
+    vi.mocked(threadService.create).mockRejectedValue(failure);
+    const startupId = "00000000-0000-4000-8000-000000000026";
+    await expect(service.createAndSend({ workspaceId: workspace.id, content: "First prompt",
+      mode: "worktree", branch: "feature/failure", startupId })).rejects.toBe(failure);
+    await service.stopAll();
+    expect(threadStartups.get(startupId)).toMatchObject({ state: "failed", cancellation: "none",
+      error: { code: "THREAD_CREATE_FAILED" } });
   });
 
   it("queues only the first Turn for a managed New worktree before AgentService reserves runtime state", async () => {

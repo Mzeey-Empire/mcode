@@ -134,6 +134,22 @@ describe("ThreadCreationCoordinator start from origin", { timeout: 20_000 }, () 
     expect(() => resolve("continue")).toThrow(expect.objectContaining({ code: "STARTUP_NOT_BLOCKED_ON_FETCH" }));
   });
 
+  it("wakes a blocked fetch on shutdown without changing its durable startup", async () => {
+    const { coordinator, command, startups, threads, workspace, repoPath } = await originHarness();
+    git(repoPath, "remote", "remove", "origin");
+    const blocked = new Promise<void>((resolve) => {
+      startups.subscribe((startup) => { if (startup.state === "blocked") resolve(); });
+    });
+    const creation = coordinator.createInitialTurn(command);
+    const rejected = expect(creation).rejects.toMatchObject({ code: "startup_shutdown" });
+    await blocked;
+    const beforeShutdown = startups.get(managedStartupId);
+    coordinator.interruptPendingStartups();
+    await rejected;
+    expect(startups.get(managedStartupId)).toEqual(beforeShutdown);
+    expect(threads.listByWorkspace(workspace.id)).toEqual([]);
+  });
+
   it("switch off omits fetch and uses local main even with no origin", async () => {
     const { coordinator, command, startups, repoPath, localSha } = await originHarness();
     git(repoPath, "remote", "remove", "origin");
