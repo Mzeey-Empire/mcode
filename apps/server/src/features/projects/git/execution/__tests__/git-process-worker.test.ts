@@ -78,6 +78,15 @@ describe("git process execution off the main thread", () => {
     expect(errors.join("")).toMatch(/not a git repository/i);
   });
 
+  it("finishes a run whose git exits before reading all of its input", async () => {
+    const executor = new RealGitExecutor();
+
+    const result = await executor.exec(["--version"], { input: "x".repeat(16 * 1024 * 1024) });
+
+    expect(result.stdout).toMatch(/^git version /);
+    await expect(executor.exec(["--version"])).resolves.toMatchObject({ stdout: expect.stringMatching(/^git version /) });
+  });
+
   it("applies server environment changes made after the worker started", async () => {
     const executor = new RealGitExecutor();
     await executor.exec(["--version"]);

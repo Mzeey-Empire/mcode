@@ -103,7 +103,13 @@ function runObservedGitProcess(request: GitProcessRequest, observer: GitOutputOb
       stderr += text;
       observer.onStderr?.(text);
     });
-    if (request.input !== undefined) child.stdin.end(request.input);
+    if (request.input !== undefined) {
+      // Git may exit before reading all of its input. Its exit code reports that; the broken pipe is not a second failure.
+      child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+        if (error.code !== "EPIPE") finish(() => reject(error));
+      });
+      child.stdin.end(request.input);
+    }
     child.once("error", (error) => finish(() => reject(error)));
     child.once("close", (code, signal) => finish(() => {
       const tail = stdoutDecoder.decode();
