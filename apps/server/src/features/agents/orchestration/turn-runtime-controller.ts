@@ -360,6 +360,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Reserve one runtime generation and its mutation lease for a new admitted turn. */
   private reserveTurnAdmission(command: SendMessageCommand): TurnRuntimeLease {
+    if (this.shuttingDown) throw new Error("Agent runtime is shutting down");
     if (!this.reserveTurn(command.threadId)) {
       throw new TurnAdmissionError("busy", `Thread ${command.threadId} already has an active agent session`);
     }
@@ -1750,7 +1751,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
           threadId: created.thread.id,
           error: err instanceof Error ? err.message : String(err),
         });
-        await this.threadCreation.failInitialAgent(created.startupId);
+        await this.threadCreation.failInitialAgent(created.startupId, err);
       }, () => this.threadCreation.canAdmitQueuedAgent(created.thread.id, created.startupId));
       runtimeSnapshot = initialDispatch.runtimeSnapshot;
       // A provider turn finishes the startup through StartupAgentPhaseObserver once the provider answers. A command
@@ -1761,7 +1762,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         await this.threadCreation.completeHandledInitialCommand(created.startupId);
       }
     } catch (error) {
-      await this.threadCreation.failInitialAgent(created.startupId);
+      await this.threadCreation.failInitialAgent(created.startupId, error);
       throw error;
     }
     return {
@@ -1809,7 +1810,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         }),
       ]);
     } catch (error) {
-      await this.threadCreation.failInitialAgent(startupId);
+      await this.threadCreation.failInitialAgent(startupId, error);
       throw error;
     }
     if (cancellationWon) {
@@ -1903,23 +1904,23 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
-  private async interruptPendingCreations(): Promise<void> {
+  /** Refuse new turns and wake startup decisions before admitted requests drain. */
+  beginShutdown(): void {
+    this.shuttingDown = true;
     this.threadCreation.interruptPendingStartups();
-    await Promise.allSettled(this.pendingCreations);
   }
 
   /** Stop all active agent sessions (for graceful shutdown). */
   async stopAll(): Promise<void> {
-    this.shuttingDown = true;
-    await this.interruptPendingCreations();
+    this.beginShutdown();
     const ids = [...this.activeSessionIds];
     await Promise.all(
-      ids.map((threadId) => diag.run(
+      [Promise.allSettled(this.pendingCreations), ...ids.map((threadId) => diag.run(
         "agent.stop",
         { th: threadId },
         () => this.stopForShutdown(threadId),
         () => ({ by: "shutdown", provider: this.activeProviderId(threadId) }),
-      )),
+      ))],
     );
     this.activeSessionIds.clear();
     for (const [threadId, token] of this.activeMutationReservations) {

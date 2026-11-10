@@ -124,8 +124,8 @@ class StartupCancelledError extends Error {
 
 class StartupShutdownError extends Error {
   readonly code = "startup_shutdown";
-  constructor() {
-    super("Thread startup was interrupted by shutdown");
+  constructor(cause?: unknown) {
+    super("Thread startup was interrupted by shutdown", { cause });
   }
 }
 
@@ -211,7 +211,6 @@ export class ThreadCreationCoordinator {
 
   private async startAndProvisionInitialTurn(command: CreateAndSendCommand, params: BranchedInitialTurnParams, fingerprint: string): Promise<CreatedInitialTurn> {
     const started = await this.startStartup(command, params, fingerprint);
-    this.throwIfShuttingDown();
     return started?.existing ? this.replayStartup(started.startup) : this.provisionInitialTurn(command, params, started?.startup);
   }
 
@@ -239,9 +238,8 @@ export class ThreadCreationCoordinator {
   }
 
   /** Preserve an initial provider dispatch failure on its current startup phase. */
-  async failInitialAgent(startupId: string | undefined): Promise<void> {
-    this.throwIfShuttingDown();
-    if (startupId) await this.startups()?.fail(startupId, {
+  async failInitialAgent(startupId: string | undefined, cause?: unknown): Promise<void> {
+    await this.failStartup(startupId, cause, {
       code: "AGENT_START_FAILED",
       message: "Agent startup failed",
       retryable: true,
@@ -364,7 +362,6 @@ export class ThreadCreationCoordinator {
       const automatic = await this.admitInitialTurn(command, params, thread.id);
       return this.initialTurnResult(command, params, thread, automatic, startupId);
     } catch (error) {
-      this.throwIfShuttingDown();
       if (error instanceof StartupCancelledError || error instanceof DatabaseWriteOutcomeUnknown) throw error;
       await this.failStartup(startupId, error);
       throw error;
@@ -413,7 +410,6 @@ export class ThreadCreationCoordinator {
       lineage: creation.lineage,
     }, startupId && startupService ? (input) => startupService.createAndBindThread(startupId, input) : undefined);
     const thread = await this.configure(attached, creation);
-    this.throwIfShuttingDown();
     if (startupId) {
       await this.startups()?.bindThread(startupId, thread.id);
       await this.startups()?.advance(startupId, "worktree", worktreeDetail(thread.worktree_path ?? params.existingWorktreePath, "opened"));
@@ -423,7 +419,6 @@ export class ThreadCreationCoordinator {
   }
 
   private async startManagedSetup(startupId: string | undefined, kind: string | undefined): Promise<void> {
-    this.throwIfShuttingDown();
     if (!startupId || (kind !== "managed-worktree" && kind !== "attached-worktree")) return;
     await this.startups()?.advance(startupId, "setup");
   }
@@ -434,13 +429,10 @@ export class ThreadCreationCoordinator {
     try {
       await this.gitRepository.fetchBranch(params.workspaceId, params.branch, params.pullRequestNumber);
     } catch (cause) {
-      this.throwIfShuttingDown();
-      if (startupId) {
-        await this.startups()?.fail(startupId, {
-          code: "FETCH_FAILED", message: "Git fetch failed", retryable: true,
-          detail: startupErrorDetail(cause),
-        });
-      }
+      await this.failStartup(startupId, cause, {
+        code: "FETCH_FAILED", message: "Git fetch failed", retryable: true,
+        detail: startupErrorDetail(cause),
+      });
       throw cause;
     }
     await this.cancelIfRequested(startupId);
@@ -460,6 +452,7 @@ export class ThreadCreationCoordinator {
         if (!startupId || !startups) throw error;
         const decision = await this.waitForFetchDecision(startups, startupId, params.branch, error);
         await this.cancelIfRequested(startupId);
+        this.throwIfShuttingDown(error);
         if (decision === "continue") {
           await startups.skip(startupId, "fetch");
           await this.cancelIfRequested(startupId);
@@ -575,7 +568,6 @@ export class ThreadCreationCoordinator {
       provider: input.provider,
       ...this.managedLifecycle(startupId),
     });
-    this.throwIfShuttingDown();
     if (startupId && created.worktree_path) {
       await this.startups()?.advance(startupId, "worktree", worktreeDetail(created.worktree_path, "created"));
     }
@@ -592,7 +584,6 @@ export class ThreadCreationCoordinator {
     return {
       lifecycle: {
         onThreadPersisted: async (thread) => {
-          this.throwIfShuttingDown();
           await this.startups()?.bindThread(startupId, thread.id);
           await this.startups()?.advance(startupId, "worktree", worktreeDetail(thread.worktree_path, "created"));
           await this.cancelIfRequested(startupId);
@@ -619,7 +610,6 @@ export class ThreadCreationCoordinator {
         branch: params.branch,
       } : undefined,
     }, fingerprint);
-    this.throwIfShuttingDown();
     if (!existing) {
       await startupService.advance(startup.startupId, "thread");
       await this.cancelIfRequested(startup.startupId);
@@ -654,17 +644,17 @@ export class ThreadCreationCoordinator {
   }
 
   private async cancelIfRequested(startupId: string | undefined): Promise<void> {
-    this.throwIfShuttingDown();
     if (!startupId || !this.startups()?.isCancellationRequested(startupId)) return;
     await this.startups()?.markCancelled(startupId);
     throw new StartupCancelledError();
   }
 
-  private throwIfShuttingDown(): void {
-    if (this.shuttingDown) throw new StartupShutdownError();
+  private throwIfShuttingDown(cause?: unknown): void {
+    if (this.shuttingDown) throw cause instanceof StartupShutdownError ? cause : new StartupShutdownError(cause);
   }
 
-  private async failStartup(startupId: string | undefined, cause: unknown): Promise<void> {
+  private async failStartup(startupId: string | undefined, cause: unknown, failure?: Parameters<ThreadStartupService["fail"]>[1]): Promise<void> {
+    this.throwIfShuttingDown(cause);
     if (!startupId) return;
     const startup = this.startups()?.get(startupId);
     if (!startup || startup.state === "blocked") return;
@@ -673,7 +663,7 @@ export class ThreadCreationCoordinator {
       : startup.phase === "worktree"
         ? { code: "WORKTREE_PREPARATION_FAILED", message: "Worktree preparation failed", retryable: true }
         : { code: "SETUP_ADMISSION_FAILED", message: "Project Setup admission failed", retryable: true };
-    await this.startups()?.fail(startupId, { ...error, detail: startupErrorDetail(cause) });
+    await this.startups()?.fail(startupId, failure ?? { ...error, detail: startupErrorDetail(cause) });
   }
 
   /** Apply first-turn provider settings to an already-provisioned thread. */
@@ -681,9 +671,7 @@ export class ThreadCreationCoordinator {
     created: Thread & { warnings?: string[] },
     input: CreateThreadForTurnInput,
   ): Promise<Thread & { warnings?: string[] }> {
-    this.throwIfShuttingDown();
     await this.threads.updateModel(created.id, input.model);
-    this.throwIfShuttingDown();
     await this.threads.updateSettings(created.id, this.settings(input));
     return this.configuredThread(created, input);
   }
@@ -757,7 +745,6 @@ export class ThreadCreationCoordinator {
       return await this.provisionBranchedInitialTurn(params, startup);
     } catch (error) {
       if (error instanceof StartupShutdownError) throw error;
-      this.throwIfShuttingDown();
       if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
       await this.clearRemovedBranchedThreadBinding(startup);
       if (!(error instanceof StartupCancelledError)) await this.failStartup(startup?.startupId, error);
@@ -786,6 +773,7 @@ export class ThreadCreationCoordinator {
   ): Promise<CreatedInitialTurn> {
     const branching = this.branching?.();
     if (!branching) throw new Error("Thread branching is not configured");
+    this.throwIfShuttingDown();
     const provisioned = await branching.create({
       workspaceId: params.workspaceId,
       content: params.content,
@@ -869,7 +857,6 @@ export class ThreadCreationCoordinator {
   }
 
   private async finishBranchedStartup(startup: ThreadStartup | undefined, thread: Thread): Promise<void> {
-    this.throwIfShuttingDown();
     if (!startup) return;
     if (startup.kind === "managed-worktree" && thread.worktree_path) {
       await this.startups()?.advance(startup.startupId, "worktree", worktreeDetail(thread.worktree_path, "created"));

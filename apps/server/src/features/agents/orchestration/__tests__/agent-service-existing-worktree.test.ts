@@ -19,6 +19,7 @@ import type { IAgentProvider, ProviderId } from "@mcode/contracts/providers/inte
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-executor.js";
+import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
 import type { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { GoalLifecycleService } from "../../goals/goal-lifecycle-service.js";
 import type { ThreadService } from "../../../thread-control/index.js";
@@ -208,7 +209,7 @@ describe("AgentService.createAndSend defaults", () => {
     });
     const startupId = "00000000-0000-4000-8000-000000000025";
     const creating = service.createAndSend({ workspaceId: workspace.id, content: "Start during shutdown",
-      mode: "worktree", branch: "feature/shutdown", startupId });
+      mode: "worktree", branch: "feature/shutdown", model: "provider-default", startupId });
     const result = creating.then(() => null, (error: unknown) => error);
     await entered.promise;
     const beforeShutdown = threadStartups.get(startupId);
@@ -216,18 +217,104 @@ describe("AgentService.createAndSend defaults", () => {
     release.resolve();
     const error = await result;
     await closing;
-    expect(threadStartups.get(startupId)).toEqual(beforeShutdown);
+    if (outcome === "resolved") {
+      expect(threadStartups.get(startupId)).toMatchObject({ threadId: managed.id, phase: "setup", state: "running" });
+      expect(threadRepo.findById(managed.id)).toMatchObject({ model: "provider-default", deleted_at: null });
+    } else {
+      expect(threadStartups.get(startupId)).toEqual(beforeShutdown);
+      expect(error).toMatchObject({ cause: failure });
+    }
     expect(error).toMatchObject({ code: "startup_shutdown" });
     const recoveryWriter = new ApplicationDatabaseWriter(persistenceRuntime.database.filename, leaseWriterWorker);
     try {
       const recovery = new ThreadStartupService(new ThreadStartupRepo(persistenceRuntime.database, recoveryWriter), recoveryWriter);
       await recovery.interruptNonterminalOnStartup();
-      expect(recovery.listInterrupted()).toMatchObject([{ startupId, state: "interrupted", cancellation: "none" }]);
+      const interrupted = recovery.listInterrupted();
+      expect(interrupted).toMatchObject([{ startupId, state: "interrupted", cancellation: "none" }]);
+      expect(interrupted[0]?.threadId).toBe(outcome === "resolved" ? managed.id : undefined);
     } finally {
       await recoveryWriter.close();
     }
     await expect(service.createAndSend({ workspaceId: workspace.id, content: "After shutdown" })).rejects.toThrow("shutting down");
     expect(threadService.create).toHaveBeenCalledOnce();
+  });
+
+  it("stops another session while thread provisioning is still pending", async () => {
+    const { threadRepo, workspaceRepo, threadService, service, provider } = await createAgentServiceHarness();
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const active = await threadRepo.create(workspace.id, "Active", "direct", "main", true, "claude");
+    await service.sendMessage({ threadId: active.id, content: "Keep working" });
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    vi.mocked(threadService.create).mockImplementation(async () => {
+      entered.resolve();
+      await release.promise;
+      throw new Error("Provisioning stopped");
+    });
+    const creating = service.createAndSend({ workspaceId: workspace.id, content: "Pending", mode: "worktree", branch: "feature/pending" });
+    const result = creating.catch((error: unknown) => error);
+    await entered.promise;
+    const closing = service.stopAll();
+    try {
+      await vi.waitFor(() => expect(provider.stopSession).toHaveBeenCalledWith(`mcode-${active.id}`));
+    } finally {
+      release.resolve();
+      await result;
+      await closing;
+    }
+  });
+
+  it("wakes a fetch decision at begin shutdown before draining the admitted request", async () => {
+    const fetch = vi.spyOn(GitRepositoryService.prototype, "fetchOriginTrackingBranch").mockRejectedValue(new Error("Origin unavailable"));
+    const { workspaceRepo, threadRepo, service, threadStartups, threadService } = await createAgentServiceHarness();
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const late = await threadRepo.create(workspace.id, "Late", "direct", "main", true, "claude");
+    const startupId = "00000000-0000-4000-8000-000000000027";
+    const blocked = deferred<void>();
+    const unsubscribe = threadStartups.subscribe((startup) => {
+      if (startup.startupId === startupId && startup.state === "blocked") blocked.resolve();
+    });
+    const request = service.createAndSend({ workspaceId: workspace.id, content: "Fetch first", mode: "worktree",
+      branch: "main", startFromOrigin: true, startupId });
+    const result = request.catch((error: unknown) => error);
+    await blocked.promise;
+    try {
+      service.beginShutdown();
+      expect(await result).toMatchObject({ code: "startup_shutdown" });
+      await expect(service.sendMessage({ threadId: late.id, content: "Too late" })).rejects.toThrow("shutting down");
+      expect(threadStartups.get(startupId)).toMatchObject({ state: "blocked", cancellation: "none" });
+      expect(threadStartups.get(startupId)?.threadId).toBeUndefined();
+      expect(threadService.create).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      fetch.mockRestore();
+      await service.stopAll();
+    }
+  });
+
+  it("records user cancellation requested before shutdown while provisioning unwinds", async () => {
+    const { workspaceRepo, threadRepo, threadService, service, threadStartups } = await createAgentServiceHarness();
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const managed = await threadRepo.create(workspace.id, "Cancel", "worktree", "main", true, "claude");
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const startupId = "00000000-0000-4000-8000-000000000028";
+    vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
+      entered.resolve();
+      await release.promise;
+      await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed);
+      return managed;
+    });
+    const request = service.createAndSend({ workspaceId: workspace.id, content: "Cancel this", mode: "worktree",
+      branch: "main", startFromOrigin: false, startupId });
+    const result = request.catch((error: unknown) => error);
+    await entered.promise;
+    await threadStartups.cancel(startupId);
+    const closing = service.stopAll();
+    release.resolve();
+    expect(await result).toMatchObject({ code: "startup_cancelled" });
+    await closing;
+    expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", cancellation: "requested" });
   });
 
   it("records a provisioning failure before shutdown as failed", async () => {

@@ -1203,6 +1203,7 @@ async function shutdown(): Promise<void> {
 
   await runShutdownPhases({
     stopServices: async () => {
+      agentService.beginShutdown();
       shutdownCoordinator.setPhase("begin shutdown");
       logger.info("Shutdown initiated");
       coordinatorWakeReady = false;

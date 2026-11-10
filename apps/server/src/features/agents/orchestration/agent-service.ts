@@ -67,6 +67,11 @@ export class AgentService {
     return this.runtime.onRuntimeReleased(listener);
   }
 
+  /** Refuse new turns and wake startup decisions before transport requests drain. */
+  beginShutdown(): void {
+    this.runtime.beginShutdown();
+  }
+
   /** Stop all active provider sessions during shutdown. */
   stopAll(): Promise<void> {
     return this.runtime.stopAll();
