@@ -732,20 +732,23 @@ export class CanonicalAgentStore {
    * Certify the saved watermark of an older generation and the turn started at that position.
    * Undefined when the thread saved nothing in that epoch.
    */
-  savedProgressHead(threadId: string, epoch: string): { readonly sequence: number; readonly turnId: string | null } | undefined {
+  savedProgressHead(threadId: string, epoch: string): { readonly sequence: number; readonly latestStartedTurnId: string | null } | undefined {
     const sequence = sql<number>`json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.sequence')`;
     const row = this.orm.select({ sequence, durableRevision: canonicalAgentEvents.durableRevision })
       .from(canonicalAgentEvents).where(and(eq(canonicalAgentEvents.threadId, threadId),
         sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.epoch') = ${epoch}`))
       .orderBy(desc(sequence)).limit(1).get();
     if (!row) return undefined;
-    // A late hook can write for a completed turn while a newer turn is streaming.
+    return { sequence: row.sequence, latestStartedTurnId: this.latestStartedTurnId(threadId, row.durableRevision) };
+  }
+
+  private latestStartedTurnId(threadId: string, throughRevision: number): string | null {
     const started = this.orm.select({ turnId: canonicalAgentEvents.turnId }).from(canonicalAgentEvents)
       .where(and(eq(canonicalAgentEvents.threadId, threadId),
-        sql`${canonicalAgentEvents.durableRevision} <= ${row.durableRevision}`,
+        sql`${canonicalAgentEvents.durableRevision} <= ${throughRevision}`,
         sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.payload.type') = 'turn.started'`))
       .orderBy(desc(canonicalAgentEvents.durableRevision), desc(canonicalAgentEvents.acceptedSequence)).limit(1).get();
-    return { sequence: row.sequence, turnId: started?.turnId ?? null };
+    return started?.turnId ?? null;
   }
 
   /** Hydrate complete already-saved parent history on the writer, without volatile-retention caps. */
