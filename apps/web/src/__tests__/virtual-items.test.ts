@@ -306,14 +306,25 @@ describe("buildStableItems", () => {
       } });
     });
 
-    it("adds no evidence notice once the files are recorded", () => {
+    it("adds no evidence notice once the recorded files show in the changes bar", () => {
+      const items = buildStableItems(
+        [makeMessage({ id: "u1", role: "user" }), makeMessage({ id: "a1", role: "assistant" })],
+        { a1: ["src/a.ts"] }, "a1", undefined, undefined, summary, undefined, undefined, undefined, endingsFor("a1", "Failed after 5s"),
+        undefined, undefined, undefined, { "execution-1": createFileEvidenceEvent({ state: "recorded", filesChanged: ["src/a.ts"] }) },
+      );
+
+      expect(items.some((item) => item.type === "turn-changes")).toBe(true);
+      expect(evidenceNotice(items)).toBeUndefined();
+    });
+
+    it("counts recorded files under a reply whose changes bar is missing", () => {
       const items = withEvidence(
         [makeMessage({ id: "u1", role: "user" }), makeMessage({ id: "a1", role: "assistant" })],
         endingsFor("a1", "Failed after 5s"),
         { state: "recorded", filesChanged: ["src/a.ts"] },
       );
 
-      expect(evidenceNotice(items)).toBeUndefined();
+      expect(evidenceNotice(items)).toMatchObject({ notice: { title: "Changed 1 file" } });
     });
 
     it("counts recorded files under a prompt whose turn has no reply to carry the changes bar", () => {

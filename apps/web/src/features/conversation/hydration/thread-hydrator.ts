@@ -1177,10 +1177,11 @@ export class ThreadHydrator {
       applied = true;
       const ownsLiveFileEffects = current.fileEffectTurnId.length > 0
         || state.runningThreadIds.has(threadId);
+      const persistedFilesChanged = withRecordedEvidencePaths(fileChanges.persistedFilesChanged, current);
       return {
         records: patchThreadRecord(state.records, threadId, {
-          persistedFilesChanged: withRecordedEvidencePaths(fileChanges.persistedFilesChanged, current),
-          latestTurnWithChanges: fileChanges.latestTurnWithChanges,
+          persistedFilesChanged,
+          latestTurnWithChanges: findLatestTurnWithChanges(current.messages, persistedFilesChanged),
           ...(!ownsLiveFileEffects ? { fileEffectSummary: fileChanges.fileEffectSummary } : {}),
         }),
       };
@@ -1191,10 +1192,11 @@ export class ThreadHydrator {
     const liveRecord = getThreadRecord(this.deps.getState().records, threadId);
     const ownsLiveFileEffects = liveRecord.fileEffectTurnId.length > 0
       || this.deps.getState().runningThreadIds.has(threadId);
+    const cachedFilesChanged = withRecordedEvidencePaths(fileChanges.persistedFilesChanged, cached);
     cacheRecord(threadId, {
       ...cached,
-      persistedFilesChanged: withRecordedEvidencePaths(fileChanges.persistedFilesChanged, cached),
-      latestTurnWithChanges: fileChanges.latestTurnWithChanges,
+      persistedFilesChanged: cachedFilesChanged,
+      latestTurnWithChanges: findLatestTurnWithChanges(cached.messages, cachedFilesChanged),
       ...(!ownsLiveFileEffects
         ? { settledFileEffectSummary: fileChanges.fileEffectSummary }
         : {}),

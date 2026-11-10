@@ -586,13 +586,14 @@ function stableItemsForMessage(message: Message, input: StableItemInput): ChatVi
   const settled = !isAgentDisplayActive(currentResponseState(message, input));
   const summary = settled ? settledTurnSummary(message, input) : undefined;
   const workItems = turnWorkItems(message, input, summary, ending);
+  const changes = turnChangesItem(message, input);
   return definedItems([
     ...workItems,
     messageVirtualItem(message, input),
     summary && turnMetaLineItem(message, summary, input, workItems.some((item) => item.type === "work-fold")),
-    turnChangesItem(message, input),
+    changes,
     turnEndNoticeItem(message, ending),
-    fileEvidenceNoticeItem(message, ending, input, true),
+    fileEvidenceNoticeItem(message, ending, input, changes !== undefined),
   ]);
 }
 

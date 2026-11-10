@@ -774,6 +774,32 @@ describe("ThreadHydrator", () => {
     expect(readActiveThreadField((record) => record.fileEffectSummary)).toEqual(liveSummary);
   });
 
+  it("keeps the changes bar on a newer recorded turn when older snapshots arrive", async () => {
+    const later = createMockMessage({ id: "a2", thread_id: THREAD_A, content: "later", sequence: 2 });
+    const recorded = createFileEvidenceEvent({ state: "recorded", filesChanged: ["src/b.ts"] },
+      { threadId: THREAD_A, executionId: "execution-2", messageId: "a2" });
+    useWorkspaceStore.setState({ threads: [createMockThread({ id: THREAD_A, has_file_changes: true })] });
+    resetThreadStoreForTests({
+      currentThreadId: THREAD_A,
+      records: new Map<string, ThreadRecord>([[THREAD_A, {
+        ...makeCachedRecord([msgA, later]),
+        fileEvidence: { "execution-2": recorded },
+        persistedFilesChanged: { a2: ["src/b.ts"] },
+        latestTurnWithChanges: "a2",
+      }]]),
+    });
+    (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { message_id: "a1", files_changed: ["old.ts"], file_effects: null } as unknown as TurnSnapshot,
+    ]);
+
+    await hydrator.hydrate(THREAD_A, "active");
+    await vi.waitFor(() => {
+      expect(readActiveThreadField((record) => record.persistedFilesChanged)).toEqual({ a1: ["old.ts"], a2: ["src/b.ts"] });
+    });
+
+    expect(readActiveThreadField((record) => record.latestTurnWithChanges)).toBe("a2");
+  });
+
   it("discards resident running snapshots after a newer activation epoch wins", async () => {
     let resolveSnapshots!: (value: Array<{
       message_id: string;
