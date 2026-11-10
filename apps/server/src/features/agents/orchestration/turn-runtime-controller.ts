@@ -1903,12 +1903,15 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
+  private async interruptPendingCreations(): Promise<void> {
+    this.threadCreation.interruptPendingStartups();
+    await Promise.allSettled(this.pendingCreations);
+  }
+
   /** Stop all active agent sessions (for graceful shutdown). */
   async stopAll(): Promise<void> {
     this.shuttingDown = true;
-    this.threadCreation.interruptPendingStartups();
-    // Callers own startup errors; shutdown must join both outcomes before storage closes.
-    await Promise.allSettled(this.pendingCreations);
+    await this.interruptPendingCreations();
     const ids = [...this.activeSessionIds];
     await Promise.all(
       ids.map((threadId) => diag.run(

@@ -213,8 +213,6 @@ describe("AgentService.createAndSend defaults", () => {
     await entered.promise;
     const beforeShutdown = threadStartups.get(startupId);
     const closing = service.stopAll().then(() => persistenceRuntime.writer.close());
-    // Provisioning must outlive the session drain even on a fast runner.
-    await new Promise<void>((resolve) => setImmediate(resolve));
     release.resolve();
     const error = await result;
     await closing;
