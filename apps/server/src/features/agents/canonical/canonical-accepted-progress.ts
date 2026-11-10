@@ -1073,7 +1073,7 @@ export class CanonicalAcceptedProgress {
     if (savedThrough < cursor.sequence) return true;
     // Live text is never accepted, so its checkpoint is the first event after the cursor. With nothing saved past
     // the cursor, the text was lost only if the turn it belongs to was still running when the server died.
-    return cursor.liveShown === true && savedThrough === cursor.sequence && this.endedByRestart(head?.turnId);
+    return cursor.liveShown === true && savedThrough === cursor.sequence && this.endedByRestart(head?.latestStartedTurnId);
   }
 
   private endedByRestart(turnId: string | null | undefined): boolean {

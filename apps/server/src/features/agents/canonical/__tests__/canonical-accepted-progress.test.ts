@@ -3136,6 +3136,37 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       await restarted.close();
     });
 
+    it.each([false, true])("recovers newer live text behind an older turn's late hook (text saved: %s)", async (saveText) => {
+      const older = { ...other, threadId: execution.threadId };
+      const olderLease = { ...lease, leaseId: "older-lease" };
+      await send(1, start("claude", older), older, olderLease);
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 1, "textDelta", { delta: "Older answer", isFinalResponse: true }, older)] }, older, olderLease);
+      await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 2, "turnComplete", {}, older)],
+        terminalInput: { ...older, providerId: "claude", providerIdentities: [], outcome: "completed",
+          projection: { kind: "writer-staged" } } }, older, olderLease);
+      await progress.waitForSaved(older.threadId);
+      await send(4, { kind: "release" }, older, olderLease);
+      await send(1, start("claude"));
+      await savedText();
+      progress.acceptLateHook(older.threadId, older.executionId, {
+        id: "older-hook", hookName: "Stop", toolName: null, phase: "stop", payload: "{}", durationMs: 12,
+        didBlock: false, startedAt: NOW, endedAt: NOW, sortOrder: 9,
+      });
+      await progress.waitForSaved(execution.threadId);
+
+      const cursor = await showUnsavedLiveText();
+      if (saveText) {
+        vi.useRealTimers();
+        await progress.waitForSaved(execution.threadId);
+      }
+      const restarted = restartServer(execution);
+      expect(restarted.recover(execution.threadId, known, { ...cursor, liveShown: true }).loss)
+        .toBe(saveText ? "none" : "runtime-restarted");
+      await restarted.close();
+    });
+
     it("reports no loss when the live text was saved before the server died", async () => {
       await send(1, start("claude"));
       await savedText();

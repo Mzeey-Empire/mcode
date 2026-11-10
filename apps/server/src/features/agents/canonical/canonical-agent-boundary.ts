@@ -135,7 +135,7 @@ export class CanonicalAgentBoundary {
     return this.reader.savedProgressPosition(...args);
   }
 
-  /** Certify the saved watermark of an older generation, and the turn of its last saved event. */
+  /** Certify the saved watermark of an older generation and the turn started at that position. */
   savedProgressHead(...args: Parameters<CanonicalAgentStore["savedProgressHead"]>): ReturnType<CanonicalAgentStore["savedProgressHead"]> {
     return this.reader.savedProgressHead(...args);
   }
