@@ -2630,7 +2630,6 @@ describe("CanonicalAgentStore", () => {
       nativeItemId: "native-message-legacy", eventKey: "completed", kind: "message" as const,
       payload: { projection: "message", content: "Saved child answer" } };
     const id = `item:codex-child:${NodeCrypto.createHash("sha256").update(`${turn.id}:native-message-legacy:completed:message`).digest("hex").slice(0, 32)}`;
-    // Seed main's persisted identity independently of the current writer's key selection.
     db.prepare(`INSERT INTO canonical_agent_items
       (id, thread_id, turn_id, kind, payload_json, created_at, updated_at) VALUES (?, ?, ?, 'message', ?, ?, ?)`)
       .run(id, delegation.childThread.id, turn.id, JSON.stringify({ projection: "message",
