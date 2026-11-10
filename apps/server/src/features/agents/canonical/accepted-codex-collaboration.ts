@@ -755,7 +755,6 @@ function unique(index: ReadonlyMap<string, ReadonlySet<string>>, key: string, la
   if (values && values.size > 1) throw new Error(`${label} identity is ambiguous: ${key}`);
   return values?.values().next().value;
 }
-/** Returns the content to save, null to keep the saved item, or undefined when a full replay conflicts with the saved full message. */
 function streamedChildContent(savedEventKey: unknown, eventKey: string, saved: string, incoming: string): string | null | undefined {
   if (savedEventKey !== "stream-complete") return eventKey === "stream" ? saved + incoming : incoming;
   if (eventKey === "stream") return null;
