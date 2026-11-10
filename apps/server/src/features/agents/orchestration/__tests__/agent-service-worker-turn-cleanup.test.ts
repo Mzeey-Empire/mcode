@@ -107,6 +107,12 @@ async function spawnChild(fixture: WorkerFixture, executionId: string, name: str
  */
 const FIXTURE_CLOSE_TIMEOUT_MS = 45_000;
 
+function holdDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 afterEach(async () => {
   await activeFixture?.close();
   activeFixture = undefined;
@@ -140,6 +146,41 @@ describe("AgentService cleanup through production worker composition", { timeout
       expect(listTurnFileEvidence(fixture.db, { threadId: fixture.thread.id })[0]?.evidence).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: [] });
       expect(fixture.sent).toHaveLength(2);
     } finally { vi.useRealTimers(); ledger.close(); }
+  });
+
+  it("returns a Stop that lands before provider dispatch while capture is wedged, gating the next send", async () => {
+    const fixture = await openFixture();
+    const snapshots = container.resolve(SnapshotService);
+    const capture = vi.spyOn(snapshots, "captureRef").mockResolvedValueOnce("a".repeat(40));
+    const ledger = new TurnFileEvidenceLedger(fixture.db, fixture.writer, snapshots);
+    container.resolve(TurnRuntimeController).bindFileEvidence(ledger);
+    bindTurnFileEvidenceLedger(ledger);
+    const reservations = container.resolve(ThreadControlMutationReservationService);
+    const runIfOwned = reservations.runIfOwned.bind(reservations);
+    const bound = holdDeferred();
+    const dispatchHeld = holdDeferred();
+    vi.spyOn(reservations, "runIfOwned").mockImplementation((threadId, token, kind, run) => kind !== "activeTurn"
+      ? runIfOwned(threadId, token, kind, run)
+      : (bound.resolve(), dispatchHeld.promise.then(() => runIfOwned(threadId, token, kind, run))));
+    const first = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work", provider: "codex", model: "gpt-5", permissionMode: "default" });
+    await bound.promise;
+    capture.mockImplementationOnce(() => new Promise(() => {}));
+    vi.useFakeTimers();
+    try {
+      const stopped = await fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      expect(stopped).toMatchObject({ status: "cancelled", dispatchState: "not-dispatched" });
+      dispatchHeld.resolve();
+      await first;
+      let sent = false;
+      const next = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" }).then(() => { sent = true; });
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(sent).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      vi.useRealTimers();
+      await next;
+      expect(listTurnFileEvidence(fixture.db, { threadId: fixture.thread.id })[0]?.evidence).toMatchObject({ state: "unavailable", reason: "timed-out" });
+      expect(fixture.sent.map((turn) => turn.message)).toEqual(["Next"]);
+    } finally { dispatchHeld.resolve(); vi.useRealTimers(); ledger.close(); }
   });
 
   it("aborts an auto-resumed turn when a pending mutation reservation owns the thread", async () => {
@@ -629,12 +670,6 @@ describe("AgentService cleanup through production worker composition", { timeout
 
   describe("a stop arriving while a failed provider start is being recorded", () => {
     const dispatchError = "Injected provider dispatch failure";
-
-    function holdDeferred() {
-      let resolve!: () => void;
-      const promise = new Promise<void>((done) => { resolve = done; });
-      return { promise, resolve };
-    }
 
     /** Resolves once Stop has looked up the worker turn, which is where it picks its path synchronously. */
     function watchStopDecision(fixture: WorkerFixture) {

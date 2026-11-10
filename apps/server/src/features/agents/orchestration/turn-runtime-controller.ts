@@ -1060,7 +1060,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     threadId: string,
     executionId: string,
     terminal: UnsentWorkerTerminal = { outcome: "errored" },
-  ): Promise<boolean> {
+    onDetachedRelease?: () => void,
+  ): Promise<boolean | "detached"> {
     const worker = this.workerRuntime;
     const owned = worker?.owner.current(threadId);
     if (!worker || !owned?.started || owned.execution.executionId !== executionId) return false;
@@ -1070,12 +1071,33 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!result) return true;
     if (!isAcceptedWorkerResult(result)) throw new Error("Unsent worker turn did not reach terminal acceptance");
     this.publishUnsentFinish(execution, active, result);
+    return this.settleUnsentRelease(active, terminal.outcome, this.releaseUnsentWorkerTurn(worker, execution, active), onDetachedRelease);
+  }
+
+  /** Stop returns once its ending is published; the next send waits on this release instead. */
+  private async settleUnsentRelease(active: WorkerOwnedTurn | undefined, outcome: UnsentWorkerTerminal["outcome"],
+    release: Promise<void>, onReleased: (() => void) | undefined): Promise<true | "detached"> {
+    if (!active || !onReleased) {
+      await release;
+      return true;
+    }
+    active.terminalCommitted = true;
+    active.terminalOutcome = outcome;
+    active.releaseStarted = true;
+    active.releasing = release;
+    active.terminalRelease = release.then(onReleased);
+    void active.terminalRelease.catch((error: unknown) => logger.error("Unsent terminal release failed",
+      { threadId: active.execution.threadId, error: String(error) }));
+    return "detached";
+  }
+
+  private async releaseUnsentWorkerTurn(worker: WorkerOwnedTurnRuntime, execution: ExecutionIdentity,
+    active: WorkerOwnedTurn | undefined): Promise<void> {
     await this.fileEvidence?.collected(execution);
     await worker.providerEvents.retire(execution);
     await worker.owner.release(execution);
     this.retireUnsentFiles(execution, active);
     this.lifecycles.end(execution);
-    return true;
   }
 
   private async submitUnsentWorkerFinish(
@@ -1218,10 +1240,15 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     const executionId = prepared.runtime.turnExecutionId!;
     const active = this.lifecycles.worker(prepared.threadId);
     if (!active || !this.turnDispatchByThread.get(prepared.threadId)?.dispatchStarted) {
-      await this.finishUnsentWorkerTurn(prepared.threadId, executionId, { outcome: "cancelled", stop: prepared.stop });
+      // A repeated Stop must not finish the turn a second time while the first release runs.
+      if (active?.terminalCommitted) return this.alreadyTerminal(prepared);
+      const ended = () => {
+        this.trackSessionEnded(prepared.threadId, executionId);
+        this.clearTurnDispatch(prepared.threadId);
+      };
+      const finished = await this.finishUnsentWorkerTurn(prepared.threadId, executionId, { outcome: "cancelled", stop: prepared.stop }, ended);
       this.turnRuntime.terminalize(prepared.threadId, executionId, "cancelled");
-      this.trackSessionEnded(prepared.threadId, executionId);
-      this.clearTurnDispatch(prepared.threadId);
+      if (finished !== "detached") ended();
       return this.cancelledWorkerStop(prepared);
     }
     if (active.ending) {
