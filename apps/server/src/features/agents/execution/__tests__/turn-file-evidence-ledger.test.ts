@@ -70,11 +70,15 @@ describe("TurnFileEvidenceLedger", () => {
     expect(evidence()).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: [] });
   });
 
-  it("retains provider paths when capture fails", async () => {
+  it("retains provider paths and the agent's own diff when capture fails", async () => {
     snapshots.captureRef.mockRejectedValueOnce(new Error("git failed"));
-    ledger.expect(execution, frozen); ledger.tracked(execution, { ...facts, filesChanged: ["edited.txt"] });
+    db.run("INSERT INTO messages (id,thread_id,role,content,timestamp,sequence,outcome_execution_id) VALUES ('assistant','thread','assistant','Done','now',1,?)", [execution.executionId]);
+    const selectedTurnDiff = { thread_id: execution.threadId, source: "native" as const, patch: "diff --git a/edited.txt b/edited.txt\n", revision: 1 };
+    ledger.expect(execution, frozen); ledger.tracked(execution, { ...facts, filesChanged: ["edited.txt"], selectedTurnDiff });
     terminal(); ledger.terminalSaved(execution); await flush();
     expect(evidence()).toEqual({ state: "unavailable", reason: "capture-failed", knownPaths: ["edited.txt"], fileEffects: summary });
+    expect(db.query("SELECT message_id, source, patch FROM turn_diff_snapshots").all())
+      .toEqual([{ message_id: "assistant", source: "native", patch: selectedTurnDiff.patch }]);
   });
 
   it("reports comparison failure rather than no changes", async () => {

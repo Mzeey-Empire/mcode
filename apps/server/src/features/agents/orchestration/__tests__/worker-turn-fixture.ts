@@ -26,6 +26,10 @@ import { AgentService } from "../agent-service.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
+import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
+import { TurnFileEvidenceLedger } from "../../execution/turn-file-evidence-ledger.js";
+import { bindTurnFileEvidenceLedger } from "../../execution/turn-persisted-publication.js";
+import { TurnRuntimeController } from "../turn-runtime-controller.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -101,6 +105,10 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
   };
   container.registerInstance("IProviderRegistry", providerRegistry);
   vi.spyOn(container.resolve(ProviderAvailabilityService), "assertUsable").mockReturnValue(undefined);
+  // Server bootstrap binds this outside the container, after the provider registry exists; turns record their files and native diff through it.
+  const fileEvidence = new TurnFileEvidenceLedger(container.resolve<Database>("Database"), writer, container.resolve(SnapshotService));
+  container.resolve(TurnRuntimeController).bindFileEvidence(fileEvidence);
+  bindTurnFileEvidenceLedger(fileEvidence);
   const publication = container.resolve(AgentEventPublicationRegistry);
   const threads = container.resolve(ThreadRepo);
   const progress = workers.progress;
@@ -203,6 +211,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
       await workers.progress?.waitForTerminalSaves(thread.id);
     }
     await workers.close();
+    fileEvidence.close();
     await container.resolve(SnapshotRefPins).drain();
     stopObserving();
     await writer.close();

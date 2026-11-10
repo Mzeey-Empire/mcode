@@ -134,7 +134,7 @@ export class TurnFileEvidenceLedger {
     if (!tracked) return { evidence: { state: "unavailable", reason: "observation-lost", knownPaths: [] } satisfies TurnFileEvidence, snapshot: null, diff: null };
     const knownPaths = [...tracked.filesChanged];
     const fileEffects = tracked.fileEffects;
-    const unavailable = () => ({ evidence: { state: "unavailable", reason: "capture-failed", knownPaths, fileEffects } satisfies TurnFileEvidence, snapshot: null, diff: null });
+    const unavailable = () => ({ evidence: { state: "unavailable", reason: "capture-failed", knownPaths, fileEffects } satisfies TurnFileEvidence, snapshot: null, diff: tracked.selectedTurnDiff });
     const before = frozen.handoff.baselineRef;
     const after = (await capture).ref;
     if (before && !after) return unavailable();

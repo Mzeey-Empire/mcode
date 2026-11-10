@@ -67,12 +67,11 @@ export function turnFileEvidenceWriteHandlers(db: Database): ReadonlyMap<string,
     return checkpoint;
   };
   const artifacts = (input: z.infer<typeof resolution>, outcome: string) => {
-    if (input.evidence.state !== "recorded") return;
     const message = orm.select({ id: messages.id }).from(messages).where(and(eq(messages.threadId, input.threadId), eq(messages.outcomeExecutionId, input.executionId), eq(messages.role, "assistant"))).get();
-    if (message) {
-      if (input.snapshot) new TurnSnapshotStore(db).create({ ...input.snapshot, messageId: message.id });
-      if (input.diff && outcome === "completed") new TurnDiffStore(db).create({ id: crypto.randomUUID(), message_id: message.id, ...input.diff });
-    }
+    // The agent's own diff does not depend on Mcode's snapshot, so it is kept when the file list is unavailable or untracked.
+    if (message && input.diff && outcome === "completed") new TurnDiffStore(db).create({ id: crypto.randomUUID(), message_id: message.id, ...input.diff });
+    if (input.evidence.state !== "recorded") return;
+    if (message && input.snapshot) new TurnSnapshotStore(db).create({ ...input.snapshot, messageId: message.id });
     if (input.evidence.filesChanged.length || input.evidence.fileEffects?.fileCount) orm.update(threads).set({ hasFileChanges: 1 }).where(eq(threads.id, input.threadId)).run();
   };
   return new Map([
