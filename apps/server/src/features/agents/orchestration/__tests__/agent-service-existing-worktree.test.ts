@@ -45,8 +45,10 @@ afterEach(async () => {
   // Each service owns a pool of execution worker threads. Left open, the pools pile up across the file, slow later
   // pool starts, and keep writing after their database closes.
   await Promise.all(services.splice(0).map((service) => drainAgentServicePersistenceForTest(service)));
-  await Promise.allSettled(held.map(async (startup) => await startup.disposeBackgroundWork?.()));
+  const disposals = await Promise.allSettled(held.map(async (startup) => await startup.disposeBackgroundWork?.()));
   await Promise.all(roots.splice(0).map((root) => NodeFSPromises.rm(root, { recursive: true, force: true })));
+  const disposalFailure = disposals.find((disposal) => disposal.status === "rejected");
+  if (disposalFailure) throw disposalFailure.reason;
 });
 
 function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
