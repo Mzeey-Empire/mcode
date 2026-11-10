@@ -1685,7 +1685,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return false;
   };
 
-  /** A history page merges evidence monotonically; its recorded paths fill rows that have none yet. */
   const paginationFileEvidencePatch = (
     record: ThreadRecord,
     pageEvidence: readonly TurnFileEvidenceEvent[] | undefined,

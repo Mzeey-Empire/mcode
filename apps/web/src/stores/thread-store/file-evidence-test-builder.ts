@@ -1,6 +1,5 @@
 import type { TurnFileEvidence, TurnFileEvidenceEvent } from "@mcode/contracts/models/turn-file-evidence";
 
-/** Test builder for one execution's `turn.fileEvidence` publication. */
 export function createFileEvidenceEvent(
   evidence: TurnFileEvidence,
   overrides: Partial<Omit<TurnFileEvidenceEvent, "evidence">> = {},
