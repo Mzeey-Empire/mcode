@@ -36,7 +36,6 @@ export async function withIndexCopy<T>(
     return await work(env);
   } finally {
     for (const path of [temporary, `${temporary}.lock`]) await NodeFSPromises.unlink(path).catch((error: unknown) => {
-      // Cleanup must preserve both successful work and the original Git failure.
       if (!hasErrorCode(error, "ENOENT")) {
         logger.warn("[withIndexCopy] Failed to remove temporary index", { path, err: error });
       }

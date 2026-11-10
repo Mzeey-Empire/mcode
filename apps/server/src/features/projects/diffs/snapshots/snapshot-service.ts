@@ -9,6 +9,7 @@ import { truncateUnifiedDiff } from "@mcode/shared";
 import type { DiffStats } from "@mcode/contracts/models/diff-stats";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
+import { gitExitCode } from "../../git/execution/git-failure.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
 import { isLiteralRepoPath } from "../../git/literal-paths.js";
@@ -239,9 +240,7 @@ export class SnapshotService {
   /**
    * Capture the current working tree state as a tree object SHA.
    *
-   * Stages the working tree into a private copy of the checkout's index, so Git
-   * reuses the index's stat data and hashes only changed files. Untracked
-   * non-ignored files are included; the user's index is never written.
+   * Includes untracked files that are not ignored, and never writes the checkout's index.
    *
    * Identical working trees produce identical tree SHAs (content-addressable),
    * so consecutive calls on a clean tree return the same value.
@@ -256,16 +255,24 @@ export class SnapshotService {
   private async captureRefUnlocked(cwd: string): Promise<string> {
     const timeout = RealGitExecutor.DEFAULT_TIMEOUT;
     return withIndexCopy(this.gitExecutor, cwd, "mcode-index", async (env) => {
-      try {
+      if (await this.hasHead(cwd, timeout)) {
         await this.gitExecutor.exec(["-C", cwd, "read-tree", "HEAD"], { timeout, env });
-      } catch {
-        // Unborn repo or missing HEAD: proceed with an empty index.
       }
     }, async (env) => {
       await this.gitExecutor.exec(["-C", cwd, "add", "-A"], { timeout, env });
       const { stdout } = await this.gitExecutor.exec(["-C", cwd, "write-tree"], { timeout, env });
       return stdout.trim();
     });
+  }
+
+  private async hasHead(cwd: string, timeout: number): Promise<boolean> {
+    try {
+      await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--verify", "-q", "HEAD"], { timeout });
+      return true;
+    } catch (error) {
+      if (gitExitCode(error) === 1) return false;
+      throw error;
+    }
   }
 
   /** Get list of files changed between two refs (tree or commit SHAs). */
