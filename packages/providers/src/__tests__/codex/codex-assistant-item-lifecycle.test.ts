@@ -13,6 +13,23 @@ function terminal(mapper: CodexEventMapper, status = "completed") {
 }
 
 describe("Codex assistant item lifecycle", () => {
+  it("keeps child delta identities distinct across completion and retains native full text", () => {
+    const mapper = new CodexEventMapper("thread");
+    const notify = (method: string, params: Record<string, unknown>) =>
+      mapper.mapNotification({ jsonrpc: "2.0", method, params });
+    notify("item/started", { item: { type: "collabAgentToolCall", id: "spawn", tool: "spawnAgent",
+      receiverThreadIds: ["child"] } });
+    const child = { threadId: "child", turnId: "child-turn" };
+    notify("turn/started", { ...child, turn: { id: "child-turn" } });
+    const first = notify("item/agentMessage/delta", { ...child, itemId: "answer", delta: "A" });
+    notify("turn/completed", { ...child, turn: { id: "child-turn", status: "completed" } });
+    const late = notify("item/agentMessage/delta", { ...child, itemId: "answer", delta: "B" });
+    expect(first[0]?.extension).not.toEqual(late[0]?.extension);
+    expect(late.map((runtime) => runtime.event)).toMatchObject([{ type: "textDelta", delta: "B" }]);
+    expect(notify("item/completed", { ...child, item: { type: "agentMessage", id: "answer", text: "ABC" } })
+      .map((runtime) => runtime.event)).toMatchObject([{ type: "message", content: "ABC" }]);
+  });
+
   it("streams native final phase into the response and closes it before turn completion", () => {
     const mapper = new CodexEventMapper("thread");
     map(mapper, "item/started", { item: { type: "agentMessage", id: "final", phase: "final_answer" } });

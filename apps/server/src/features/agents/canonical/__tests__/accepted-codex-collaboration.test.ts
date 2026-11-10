@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodeCrypto from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentEventSchema, AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { MessageSchema } from "@mcode/contracts/models/message";
@@ -230,6 +231,115 @@ describe("AcceptedCodexCollaboration", () => {
       reason: "completed", costUsd: null, tokensIn: 0, tokensOut: 0 })).changes).toEqual([]);
     expect(port.loadTurn(value.turn.id)?.status).toBe("Cancelled");
     expect(port.prepare(textDelta("Late bytes")).changes).toEqual([]);
+  });
+
+  it.each(["completed", "cancelled", "interrupted", "errored"] as const)("retains the full child message arriving after %s without changing the turn", (outcome) => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    port.prepare(textDelta("Partial"));
+    port.prepare(child({ type: AgentEventType.Ended, threadId: "parent", turnExecutionId: PARENT_EXECUTION, outcome }));
+    const terminal = port.loadTurn(value.turn.id);
+    const full = child({ type: AgentEventType.Message, threadId: "parent", turnExecutionId: PARENT_EXECUTION,
+      content: "Complete child answer", tokens: null }, { nativeItemId: "native-message", itemEventKey: "stream-complete" });
+
+    const result = port.prepare(full);
+
+    expect(result.changes).toMatchObject([{ kind: "item-recorded", item: { threadId: value.childThread.id,
+      payload: { message: { content: "Complete child answer" } } } }]);
+    expect(port.loadTurn(value.turn.id)).toEqual(terminal);
+    expect(port.prepare(textDelta(" stale delta")).changes).toEqual([]);
+    expect(port.prepare(full).changes).toEqual([]);
+  });
+
+  it("rejects a conflicting full child message after the saved full message and turn end", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    runningChild(port);
+    const full = (content: string) => child({ type: AgentEventType.Message, threadId: "parent", turnExecutionId: PARENT_EXECUTION,
+      content, tokens: null }, { nativeItemId: "native-message", itemEventKey: "stream-complete" });
+    port.prepare(full("Full saved answer"));
+    port.prepare(child({ type: AgentEventType.Ended, threadId: "parent", turnExecutionId: PARENT_EXECUTION, outcome: "completed" }));
+
+    const conflict = port.prepare(full("Full"));
+
+    expect(conflict.projection).toMatchObject({ status: "rejected",
+      diagnostic: { reason: expect.stringContaining("Codex child streamed message identity conflict") } });
+    expect(conflict.changes).not.toContainEqual(expect.objectContaining({ kind: "item-recorded" }));
+    expect(port.prepare(full("Full saved answer")).changes).toEqual([]);
+  });
+
+  it("replays a legacy completed-only child message without changing its identity", () => {
+    const state = initial();
+    const port = new AcceptedCodexCollaboration(state);
+    const value = runningChild(port);
+    const input = { childThreadId: value.childThread.id, nativeTurnId: "native-turn",
+      nativeItemId: "native-message", eventKey: "completed", kind: "message" as const,
+      payload: { projection: "message", content: "Saved child answer" } };
+    const saved = port.recordCodexChildItem(input);
+    const id = `item:codex-child:${NodeCrypto.createHash("sha256").update(`${value.turn.id}:native-message:completed:message`).digest("hex").slice(0, 32)}`;
+    const restored = new AcceptedCodexCollaboration({ ...state,
+      threads: { ...state.threads, [value.childThread.id]: value.childThread },
+      turns: { ...state.turns, [value.turn.id]: value.turn }, items: { [id]: { ...saved, id } } });
+
+    expect(restored.recordCodexChildItem(input)).toEqual({ ...saved, id });
+    expect(restored.recordCodexChildItem({ ...input, eventKey: "stream",
+      payload: { projection: "message", content: " stale" } })).toEqual({ ...saved, id });
+  });
+
+  it.each(["Saved child answer", "Conflicting answer"])("reconciles completed child text after a stray delta (%s)", (content) => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    const input = { childThreadId: value.childThread.id, nativeTurnId: "native-turn",
+      nativeItemId: "native-message", eventKey: "completed", kind: "message" as const,
+      payload: { projection: "message", content: "Saved child answer" } };
+    const saved = port.recordCodexChildItem(input);
+    port.prepare(child({ type: AgentEventType.Ended, threadId: "parent", turnExecutionId: PARENT_EXECUTION, outcome: "completed" }));
+    const terminal = port.loadTurn(value.turn.id);
+    expect(port.prepare(textDelta(" stray")).changes).toEqual([]);
+    const full = child({ type: AgentEventType.Message, threadId: "parent", turnExecutionId: PARENT_EXECUTION,
+      content, tokens: null }, { nativeItemId: "native-message", itemEventKey: "stream-complete" });
+
+    if (content === "Saved child answer") expect(port.prepare(full).changes).toEqual([]);
+    else expect(() => port.recordCodexChildItem({ ...input, eventKey: "stream-complete",
+      payload: { projection: "message", content } })).toThrow("Codex child message identity conflict");
+    expect(port.recordCodexChildItem(input)).toEqual(saved);
+    expect(port.loadTurn(value.turn.id)).toEqual(terminal);
+  });
+
+  it("rejects conflicting completed-only child text", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    const input = { childThreadId: value.childThread.id, nativeTurnId: "native-turn",
+      nativeItemId: "native-message", eventKey: "completed", kind: "message" as const,
+      payload: { projection: "message", content: "Saved child answer" } };
+    const saved = port.recordCodexChildItem(input);
+
+    expect(() => port.recordCodexChildItem({ ...input,
+      payload: { projection: "message", content: "Conflicting answer" } })).toThrow();
+    expect(port.recordCodexChildItem(input)).toEqual(saved);
+  });
+
+  it("ignores deltas after the full message on a running child turn", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    port.prepare(textDelta("Partial"));
+    port.prepare(child({ type: AgentEventType.Message, threadId: "parent", turnExecutionId: PARENT_EXECUTION,
+      content: "Complete child answer", tokens: null }, { nativeItemId: "native-message", itemEventKey: "stream-complete" }));
+    expect(port.prepare(textDelta(" stale")).changes).toEqual([]);
+    expect(port.loadTurn(value.turn.id)?.status).toBe("Running");
+  });
+
+  it("appends late child deltas until the authoritative full message arrives", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    port.prepare(textDelta("Partial"));
+    port.prepare(child({ type: AgentEventType.Ended, threadId: "parent", turnExecutionId: PARENT_EXECUTION, outcome: "completed" }));
+    const terminal = port.loadTurn(value.turn.id);
+
+    const result = port.prepare(textDelta(" answer"));
+
+    expect(result.changes).toMatchObject([{ kind: "item-recorded", item: {
+      payload: { message: { content: "Partial answer" } } } }]);
+    expect(port.loadTurn(value.turn.id)).toEqual(terminal);
   });
 
   it("keeps discarded spawn and text candidates out of accepted indexes and bodies", () => {
