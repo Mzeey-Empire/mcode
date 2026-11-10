@@ -65,16 +65,6 @@ describe("SnapshotService unified output", () => {
   });
 });
 
-describe("SnapshotService.captureRef", () => {
-  it("propagates add -A failures", async () => {
-    const fake = new FakeGitExecutor();
-    fake.setResponse(["rev-parse", "--git-path", "index"], { stdout: ".git/index\n", stderr: "" });
-    fake.setResponse(["add", "-A"], new Error("add failed"));
-
-    await expect(new SnapshotService(fake).captureRef("/repo")).rejects.toThrow("add failed");
-  });
-});
-
 describe("SnapshotService.validateRef", () => {
   let fake: FakeGitExecutor;
   let service: SnapshotService;

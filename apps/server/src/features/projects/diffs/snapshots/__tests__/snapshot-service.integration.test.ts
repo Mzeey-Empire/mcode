@@ -193,6 +193,19 @@ describe("SnapshotService integration", () => {
     expect(git("ls-files", "-v")).toBe(flags);
   }, GIT_OPERATION_TIMEOUT_MS);
 
+  it("seeds from HEAD when the checkout has no index file", async () => {
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "tracked.log"), "tracked\n");
+    git("add", "tracked.log");
+    git("-c", "core.hooksPath=", "commit", "-m", "tracked log");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, ".gitignore"), "*.log\n");
+    NodeFS.rmSync(indexPath());
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("show", `${ref}:tracked.log`)).toBe("tracked");
+    expect(git("show", `${ref}:.gitignore`)).toBe("*.log");
+  }, GIT_OPERATION_TIMEOUT_MS);
+
   it("keeps files that sparse checkout removed from disk", async () => {
     NodeFS.mkdirSync(NodePath.join(tmpDir, "kept"));
     NodeFS.mkdirSync(NodePath.join(tmpDir, "outside"));
