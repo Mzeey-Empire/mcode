@@ -14,6 +14,7 @@ import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { createAgentServiceForTest, drainAgentServicePersistenceForTest, goalLifecycleForAgentServiceTest, startProviderTurnForTest, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
 import { ThreadCreationCoordinator } from "../../turns/thread-creation-coordinator.js";
+import { TurnFeatureEffects } from "../../turns/turn-feature-effects.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import type { IAgentProvider, ProviderId } from "@mcode/contracts/providers/interfaces";
@@ -263,6 +264,37 @@ describe("AgentService.createAndSend defaults", () => {
       await result;
       await closing;
     }
+  });
+
+  it("waits for pending provisioning when another session's stop fails", async () => {
+    const { threadRepo, workspaceRepo, threadService, service } = await createAgentServiceHarness();
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const active = await threadRepo.create(workspace.id, "Active", "direct", "main", true, "claude");
+    await service.sendMessage({ threadId: active.id, content: "Keep working" });
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    vi.mocked(threadService.create).mockImplementation(async () => {
+      entered.resolve();
+      await release.promise;
+      throw new Error("Provisioning stopped");
+    });
+    const result = service.createAndSend({ workspaceId: workspace.id, content: "Pending", mode: "worktree", branch: "feature/pending" })
+      .catch((error: unknown) => error);
+    await entered.promise;
+    const stopFailure = new Error("Descendant stop failed");
+    const descendants = vi.spyOn(TurnFeatureEffects.prototype, "stopDescendants").mockRejectedValue(stopFailure);
+    let settled = false;
+    const closing = service.stopAll().then(() => null, (error: unknown) => error).finally(() => { settled = true; });
+    try {
+      await vi.waitFor(() => expect(descendants).toHaveBeenCalledWith(active.id));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+    } finally {
+      release.resolve();
+      await result;
+      descendants.mockRestore();
+    }
+    expect(await closing).toBe(stopFailure);
   });
 
   it("wakes a fetch decision at begin shutdown before draining the admitted request", async () => {

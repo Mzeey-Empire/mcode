@@ -1916,14 +1916,20 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.shuttingDown = true;
     this.beginShutdown();
     const ids = [...this.activeSessionIds];
-    await Promise.all(
-      [Promise.allSettled(this.pendingCreations), ...ids.map((threadId) => diag.run(
-        "agent.stop",
-        { th: threadId },
-        () => this.stopForShutdown(threadId),
-        () => ({ by: "shutdown", provider: this.activeProviderId(threadId) }),
-      ))],
-    );
+    const startupsSettled = Promise.allSettled(this.pendingCreations);
+    try {
+      await Promise.all(
+        [startupsSettled, ...ids.map((threadId) => diag.run(
+          "agent.stop",
+          { th: threadId },
+          () => this.stopForShutdown(threadId),
+          () => ({ by: "shutdown", provider: this.activeProviderId(threadId) }),
+        ))],
+      );
+    } finally {
+      // Bootstrap closes storage once stopAll settles, even when a session stop fails.
+      await startupsSettled;
+    }
     this.activeSessionIds.clear();
     for (const [threadId, token] of this.activeMutationReservations) {
       this.mutationReservations.release(threadId, token);
