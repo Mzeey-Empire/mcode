@@ -436,6 +436,7 @@ export const messages = sqliteTable(
     index("idx_messages_thread").on(table.threadId),
     index("idx_messages_sequence").on(table.threadId, table.sequence),
     index("idx_messages_thread_sequence_id").on(table.threadId, table.sequence, table.id),
+    index("idx_messages_outcome_execution").on(table.outcomeExecutionId),
     index("idx_messages_notice_session_sequence").on(
       table.threadId,
       sql`json_extract(${table.systemNotice}, '$.sessionId')`,

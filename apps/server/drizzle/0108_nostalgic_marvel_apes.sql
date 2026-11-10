@@ -8,4 +8,5 @@ CREATE TABLE IF NOT EXISTS `turn_file_evidence` (
 	FOREIGN KEY (`execution_id`) REFERENCES `canonical_agent_ingest_checkpoints`(`execution_id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS `idx_turn_file_evidence_thread` ON `turn_file_evidence` (`thread_id`);
+CREATE INDEX IF NOT EXISTS `idx_turn_file_evidence_thread` ON `turn_file_evidence` (`thread_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `idx_messages_outcome_execution` ON `messages` (`outcome_execution_id`);

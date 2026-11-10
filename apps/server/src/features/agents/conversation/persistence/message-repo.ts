@@ -3,7 +3,6 @@ import { type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrat
 import { recoveredNarrativeWriteOperation } from "../narrative/persistence/recovered-narrative-write-operation.js";
 import { inject, injectable } from "tsyringe";
 import type { Database } from "bun:sqlite";
-import { listTurnFileEvidence } from "../../turns/persistence/turn-file-evidence-store.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { MessageStore } from "./message-store.js";
 import { messageWriteOperations } from "./message-write-operations.js";
@@ -14,12 +13,13 @@ export type { ThreadControlMessageRecord } from "./message-store.js";
 export class MessageRepo {
   private readonly reader: MessageStore;
 
-  constructor(@inject("Database") private readonly db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
+  constructor(@inject("Database") db: Database, @inject(ApplicationDatabaseWriter) private readonly writer: ApplicationDatabaseWriter) {
     this.reader = new MessageStore(db);
   }
 
-  /** Load durable execution evidence, including endings without an assistant message. */
-  listFileEvidence(threadId: string): ReturnType<typeof listTurnFileEvidence> { return listTurnFileEvidence(this.db, threadId); }
+  listFileEvidence(...args: Parameters<MessageStore["listFileEvidence"]>): ReturnType<MessageStore["listFileEvidence"]> {
+    return this.reader.listFileEvidence(...args);
+  }
 
   /** Commit the complete recovered detail projection against its owning assistant message. */
   persistRecoveredNarrative(messageId: string, items: readonly ParentNarrativeRecoveryItem[], replaceExisting = false): Promise<void> {

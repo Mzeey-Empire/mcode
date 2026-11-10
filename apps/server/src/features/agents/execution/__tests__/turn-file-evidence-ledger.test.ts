@@ -180,17 +180,26 @@ describe("TurnFileEvidenceLedger", () => {
     expect(evidence()).toEqual({ state: "recorded", filesChanged: [] });
   });
 
+  it("pages evidence with its assistant message, and unattached evidence with the latest page only", () => {
+    const messages = new MessageStore(db);
+    const answer = messages.create(execution.threadId, "assistant", "Answer", 1);
+    for (const sequence of [2, 3]) messages.create(execution.threadId, "user", `Later ${sequence}`, sequence);
+    const paged = (before?: number) => loadConversationPage({ messageRepo: messages, planQuestionAnswersRepo: new PlanQuestionAnswersStore(db) },
+      { threadId: execution.threadId, limit: 2, ...(before === undefined ? {} : { before }) }).turnFileEvidence?.map((row) => row.executionId);
+    expect(paged()).toEqual([execution.executionId]);
+    expect(paged(2)).toEqual([]);
+    db.run("UPDATE messages SET outcome_execution_id = ? WHERE id = ?", [execution.executionId, answer.id]);
+    expect(paged()).toEqual([]);
+    expect(paged(2)).toEqual([execution.executionId]);
+  });
+
   it("leaves row-less legacy paths available through their snapshot fallback", async () => {
     db.run("DELETE FROM turn_file_evidence");
     const message = new MessageStore(db).create(execution.threadId, "assistant", "Legacy answer", 1);
     const snapshots = new TurnSnapshotStore(db);
     snapshots.create({ messageId: message.id, threadId: execution.threadId, refBefore: "before", refAfter: "after", filesChanged: ["legacy.txt"], worktreePath: null });
-    const page = loadConversationPage({ messageRepo: { ...new MessageStore(db),
-      listByThread: (threadId, limit, before) => new MessageStore(db).listByThread(threadId, limit, before),
-      listByThreadAfter: (threadId, limit, after) => new MessageStore(db).listByThreadAfter(threadId, limit, after),
-      listSessionNotices: (threadId) => new MessageStore(db).listSessionNotices(threadId),
-      listFileEvidence: (threadId) => listTurnFileEvidence(db, threadId),
-    }, planQuestionAnswersRepo: new PlanQuestionAnswersStore(db) }, { threadId: execution.threadId, limit: 20 });
+    const page = loadConversationPage({ messageRepo: new MessageStore(db), planQuestionAnswersRepo: new PlanQuestionAnswersStore(db) },
+      { threadId: execution.threadId, limit: 20 });
     expect(page.turnFileEvidence).toEqual([]);
     expect(snapshots.getByMessage(message.id)?.files_changed).toEqual(["legacy.txt"]);
   });

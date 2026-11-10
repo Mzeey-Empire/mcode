@@ -73,7 +73,7 @@ function sendRpcDeps(agentService: AgentRouterDeps["agentService"]): AgentRouter
     agentService,
     approvalService: { respondToApproval: unused, listPendingApprovals: unused },
     hookExecutionRepo: { listByMessage: unused },
-    messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, confirmUserMessage: unused },
+    messageRepo: { listByThread: unused, listByThreadAfter: unused, listSessionNotices: unused, listFileEvidence: unused, confirmUserMessage: unused },
     narrativeStore: { load: unused, listApprovals: unused },
     planQuestionAnswersRepo: { listAnsweredForThread: unused },
     planService: { saveVersion: unused, snapshot: unused, implement: unused, createComment: unused, updateComment: unused, setCommentStatus: unused, deleteComment: unused },

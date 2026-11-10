@@ -8,7 +8,7 @@ import type { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-qu
 
 /** Dependencies needed to load one paginated conversation page. */
 export interface ConversationPageDeps {
-  messageRepo: Pick<MessageRepo, "listByThread" | "listByThreadAfter" | "listSessionNotices"> & Partial<Pick<MessageRepo, "listFileEvidence">>;
+  messageRepo: Pick<MessageRepo, "listByThread" | "listByThreadAfter" | "listSessionNotices" | "listFileEvidence">;
   planQuestionAnswersRepo: Pick<PlanQuestionAnswersRepo, "listAnsweredForThread">;
 }
 
@@ -31,8 +31,8 @@ export function loadConversationPage(
     answeredPlanMessageIds:
       deps.planQuestionAnswersRepo.listAnsweredForThread(input.threadId),
     narrativeByMessage: {},
-    turnFileEvidence: deps.messageRepo.listFileEvidence?.(input.threadId).filter((row) =>
-      row.messageId ? page.messages.some((message) => message.id === row.messageId) : input.before === undefined),
+    // Evidence with no assistant message has no sequence, so it rides on the latest page only.
+    turnFileEvidence: deps.messageRepo.listFileEvidence(input.threadId, page.messages, input.before === undefined),
   };
 }
 
@@ -158,7 +158,7 @@ function loadNewerConversationSource(
     hasMore: page.hasMore,
     answeredPlanMessageIds: deps.planQuestionAnswersRepo.listAnsweredForThread(request.threadId),
     narrativeByMessage: {},
-    turnFileEvidence: deps.messageRepo.listFileEvidence?.(request.threadId),
+    turnFileEvidence: deps.messageRepo.listFileEvidence(request.threadId, page.messages, true),
   };
 }
 

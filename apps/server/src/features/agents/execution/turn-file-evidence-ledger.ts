@@ -92,8 +92,8 @@ export class TurnFileEvidenceLedger {
 
   /** Resolve abandoned tracking without recapturing a workspace that may have moved on. */
   async resolveAbandoned(threadId?: string, reason: "restarted" | "observation-lost" = "observation-lost"): Promise<void> {
-    for (const row of listTurnFileEvidence(this.db, threadId)) {
-      if (row.evidence.state !== "tracking" || this.entries.has(row.executionId)) continue;
+    for (const row of listTurnFileEvidence(this.db, { ...(threadId === undefined ? {} : { threadId }), tracking: true })) {
+      if (this.entries.has(row.executionId)) continue;
       if (reason === "observation-lost") {
         await this.resolveReleased(row);
         continue;
@@ -166,7 +166,7 @@ export class TurnFileEvidenceLedger {
   }
 
   private publish(execution: Pick<ExecutionIdentity, "threadId" | "executionId">): void {
-    const stored = listTurnFileEvidence(this.db, execution.threadId).find((row) => row.executionId === execution.executionId);
+    const [stored] = listTurnFileEvidence(this.db, { threadId: execution.threadId, executionId: execution.executionId });
     if (stored) {
       broadcast("turn.fileEvidence", stored);
       broadcast("turn.diffChanged", { threadId: execution.threadId });

@@ -21,12 +21,39 @@ export const beginTurnFileEvidence = databaseWriteOperation("turnFileEvidence.be
 /** Resolve tracking and its review artifacts in the same writer transaction. */
 export const recordTurnFileEvidence = databaseWriteOperation("turnFileEvidence.record", resolution, z.enum(["terminal-not-saved", "resolved", "untracked"]));
 
+/** Narrows an evidence read; every field is optional and they combine with AND. */
+export interface TurnFileEvidenceFilter {
+  readonly threadId?: string;
+  readonly executionId?: string;
+  readonly tracking?: boolean;
+  /** Keep rows owned by these assistant messages, plus rows with no assistant message when `unattached`. */
+  readonly messages?: { readonly ids: readonly string[]; readonly unattached: boolean };
+}
+
+interface EvidenceRow { threadId: string; turnId: string; executionId: string; evidenceJson: string; messageId: string | null }
+
+// Turn ends, page loads and boot all read here, so the owning message is resolved in the same
+// indexed statement instead of one query per row.
+const EVIDENCE_ROWS = `SELECT * FROM (SELECT e.thread_id AS threadId, e.turn_id AS turnId, e.execution_id AS executionId,
+  e.state AS state, e.evidence_json AS evidenceJson,
+  (SELECT m.id FROM messages m WHERE m.outcome_execution_id = e.execution_id AND m.thread_id = e.thread_id
+    AND m.role = 'assistant' LIMIT 1) AS messageId
+  FROM turn_file_evidence e)`;
+
 /** Read evidence without depending on retained diff snapshots. Missing rows remain legacy-owned. */
-export function listTurnFileEvidence(db: Database, threadId?: string): TurnFileEvidenceEvent[] {
-  const orm = drizzle(db);
-  return orm.select().from(turnFileEvidence).where(threadId ? eq(turnFileEvidence.threadId, threadId) : undefined).all().map((row) => ({
-    threadId: row.threadId, turnId: row.turnId, executionId: row.executionId,
-    messageId: orm.select({ id: messages.id }).from(messages).where(and(eq(messages.threadId, row.threadId), eq(messages.outcomeExecutionId, row.executionId), eq(messages.role, "assistant"))).get()?.id ?? null,
+export function listTurnFileEvidence(db: Database, filter: TurnFileEvidenceFilter = {}): TurnFileEvidenceEvent[] {
+  const where: string[] = [];
+  const params: string[] = [];
+  if (filter.threadId !== undefined) { where.push("threadId = ?"); params.push(filter.threadId); }
+  if (filter.executionId !== undefined) { where.push("executionId = ?"); params.push(filter.executionId); }
+  if (filter.tracking) where.push("state = 'tracking'");
+  if (filter.messages) {
+    where.push(`(messageId IN (SELECT value FROM json_each(?))${filter.messages.unattached ? " OR messageId IS NULL" : ""})`);
+    params.push(JSON.stringify(filter.messages.ids));
+  }
+  const sql = where.length ? `${EVIDENCE_ROWS} WHERE ${where.join(" AND ")}` : EVIDENCE_ROWS;
+  return db.query<EvidenceRow, string[]>(sql).all(...params).map((row) => ({
+    threadId: row.threadId, turnId: row.turnId, executionId: row.executionId, messageId: row.messageId,
     evidence: TurnFileEvidenceSchema().parse(JSON.parse(row.evidenceJson)),
   }));
 }

@@ -137,7 +137,7 @@ describe("AgentService cleanup through production worker composition", { timeout
       await vi.advanceTimersByTimeAsync(1);
       vi.useRealTimers();
       await next;
-      expect(listTurnFileEvidence(fixture.db, fixture.thread.id)[0]?.evidence).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: [] });
+      expect(listTurnFileEvidence(fixture.db, { threadId: fixture.thread.id })[0]?.evidence).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: [] });
       expect(fixture.sent).toHaveLength(2);
     } finally { vi.useRealTimers(); ledger.close(); }
   });

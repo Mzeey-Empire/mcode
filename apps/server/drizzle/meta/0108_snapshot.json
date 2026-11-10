@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "52c2e3e3-bb62-4041-b01d-0f88dac33e98",
+  "id": "b64ef2b2-02bb-43ea-9c91-5b5f35a98335",
   "prevId": "1e1e6590-5a97-461c-bda1-64c6ef7891f0",
   "tables": {
     "approval_receipts": {
@@ -2427,6 +2427,13 @@
             "thread_id",
             "sequence",
             "id"
+          ],
+          "isUnique": false
+        },
+        "idx_messages_outcome_execution": {
+          "name": "idx_messages_outcome_execution",
+          "columns": [
+            "outcome_execution_id"
           ],
           "isUnique": false
         },
