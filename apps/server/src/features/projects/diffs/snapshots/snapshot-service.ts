@@ -326,7 +326,6 @@ export class SnapshotService {
     }
   }
 
-  /** Get list of files changed between two refs (tree or commit SHAs). */
   /** Compare attributed trees without converting Git failure into an empty change list. */
   async compareTrees(cwd: string, refBefore: string, refAfter: string): Promise<string[]> {
     if (!refBefore || !refAfter || refBefore.startsWith("-") || refAfter.startsWith("-")) throw new Error("Invalid snapshot refs");
@@ -335,6 +334,7 @@ export class SnapshotService {
     return stdout.split("\0").filter(Boolean);
   }
 
+  /** Get list of files changed between two refs (tree or commit SHAs). */
   async getFilesChanged(cwd: string, refBefore: string, refAfter: string): Promise<string[]> {
     if (!refBefore
       || !refAfter

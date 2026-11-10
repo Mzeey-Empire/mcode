@@ -738,7 +738,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       if (active.terminalOutcome === "completed") this.featureEffects.refreshAfterTurn(execution.threadId);
       this.clearTurnDispatch(execution.threadId);
       this.clearTurnEndedState(execution.threadId);
-      await this.fileEvidence?.resolveAbandoned(execution.threadId);
+      await this.resolveAbandonedEvidence(execution.threadId);
       this.settlePinsInBackground(execution);
     } catch (error) {
       active.releaseStarted = false;
@@ -798,10 +798,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     pins?.runInBackground(() => pins.settleExecution(execution.threadId, execution.executionId));
   }
 
+  private async resolveAbandonedEvidence(threadId: string): Promise<void> {
+    // Startup resolves every row still tracking, so a failed sweep must not block release or admission.
+    await this.fileEvidence?.resolveAbandoned(threadId).catch((error: unknown) =>
+      logger.warn("Abandoned file evidence sweep failed", { threadId, error: String(error) }));
+  }
+
   private handleWorkerRecovery(execution: ExecutionIdentity): void {
     this.fileEvidence?.tracked(execution, "lost");
     this.fileEvidence?.terminalSaved(execution);
-    void this.fileEvidence?.resolveAbandoned(execution.threadId);
+    void this.resolveAbandonedEvidence(execution.threadId);
     // Recovery has committed the interruption, so the baseline can become the attempt's snapshot.
     this.settlePinsInBackground(execution);
     if (this.turnRuntime.snapshot(execution.threadId)?.turnExecutionId !== execution.executionId) return;
@@ -1024,7 +1030,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       && runtime.phase === "cancelled"
       && !this.mutationReservations.owns(prepared.lease.threadId, prepared.lease.mutationReservationToken, "activeTurn");
     if (cancelled) {
-      await this.fileEvidence?.resolveAbandoned(prepared.lease.threadId);
+      await this.resolveAbandonedEvidence(prepared.lease.threadId);
       await this.turnAdmissions.rollbackCommandEffect(prepared.commandEffect);
       this.releaseTurnAdmission(prepared.lease);
       return;
