@@ -190,6 +190,38 @@ async function createAgentServiceHarness(automaticSetup?:
 }
 
 describe("AgentService.createAndSend defaults", () => {
+  it.each(["cancelled", "failed"])("settles %s managed startup before shutdown closes its database writer", async (outcome) => {
+    const { threadRepo, workspaceRepo, threadService, service, threadStartups } = await createAgentServiceHarness();
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const managed = await threadRepo.create(workspace.id, "Shutdown startup", "worktree", "feature/shutdown", true, "claude");
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const failure = new Error("Worktree provisioning failed");
+    vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
+      entered.resolve();
+      await release.promise;
+      if (outcome === "failed") throw failure;
+      await requireThreadCreationOptions(options).lifecycle?.onThreadPersisted(managed);
+      return managed;
+    });
+    const startupId = "00000000-0000-4000-8000-000000000025";
+    const creating = service.createAndSend({ workspaceId: workspace.id, content: "Start during shutdown",
+      mode: "worktree", branch: "feature/shutdown", startupId });
+    const result = creating.then(() => null, (error: unknown) => error);
+    await entered.promise;
+    const closing = service.stopAll().then(() => persistenceRuntime.writer.close());
+    // Provisioning must outlive the session drain even on a fast runner.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    release.resolve();
+    const error = await result;
+    await closing;
+    if (outcome === "failed") expect(error).toBe(failure);
+    else expect(error).toMatchObject({ code: "startup_cancelled" });
+    expect(threadStartups.get(startupId)).toMatchObject({ state: outcome });
+    await expect(service.createAndSend({ workspaceId: workspace.id, content: "After shutdown" })).rejects.toThrow("shutting down");
+    expect(threadService.create).toHaveBeenCalledOnce();
+  });
+
   it("queues only the first Turn for a managed New worktree before AgentService reserves runtime state", async () => {
     const automaticSetup = { queueAutomaticFirstTurn: vi.fn(), admitAutomaticTurn: vi.fn(() => ({ queued: true })) };
     const { threadRepo, workspaceRepo, threadService, service, provider } = await createAgentServiceHarness(automaticSetup);
@@ -346,6 +378,7 @@ describe("AgentService.createAndSend defaults", () => {
     roots.push(root);
     const setupCompletion = deferred<TerminalCommandCompletion>();
     const setupRelease = deferred<void>();
+    const setupStarted = deferred<void>();
     const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = await createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
       startupEnvironmentFixture({
         mcodeDir: root, database: db, databaseWriter: persistenceRuntime.writer,
@@ -355,7 +388,10 @@ describe("AgentService.createAndSend defaults", () => {
             kind: "ready",
             command: {
               snapshot: { checkoutPath: "/repo/.worktrees/managed", terminal: { executable: "sh", arguments: ["-c", "bun run setup"] } },
-              start: async () => await setupCompletion.promise,
+              start: async () => {
+                setupStarted.resolve();
+                return await setupCompletion.promise;
+              },
               close: async () => {
                 setupCompletion.resolve({ kind: "exited", exitCode: 1, output: "", outputTruncated: false });
                 setupRelease.resolve();
@@ -383,7 +419,7 @@ describe("AgentService.createAndSend defaults", () => {
     const startupId = "00000000-0000-4000-8000-000000000024";
     const creating = service.createAndSend({ workspaceId: workspace.id, content: "Cancelled first prompt",
       mode: "worktree", branch: "feature/managed", startupId });
-    await vi.waitFor(() => expect(automaticSetup.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
+    await setupStarted.promise;
     await routeThreadStartupRpc("thread.startup.cancel", { startupId }, {
       threadStartupService: threadStartups, workspaceEnvironmentService: automaticSetup, agentService: service,
       threadStartupFetchDecisions: new ThreadStartupFetchDecisions(),
@@ -431,7 +467,11 @@ describe("AgentService.createAndSend defaults", () => {
       return managed;
     });
     const heldAdmission = deferred<{ kind: "passthrough" }>();
-    goals.routeCommand.mockImplementation(async () => await heldAdmission.promise);
+    const admissionStarted = deferred<void>();
+    goals.routeCommand.mockImplementation(async () => {
+      admissionStarted.resolve();
+      return await heldAdmission.promise;
+    });
     const environment = automaticSetup as WorkspaceEnvironmentService;
     environment.setAutomaticSetupDispatcher({ dispatch: (submission) => service.dispatchQueuedAutomaticTurn(submission) });
     const startupId = "00000000-0000-4000-8000-000000000022";
@@ -443,7 +483,7 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await vi.waitFor(() => expect(goals.routeCommand).toHaveBeenCalledOnce());
+    await admissionStarted.promise;
 
     (await threadStartups.cancel(startupId));
     heldAdmission.resolve({ kind: "passthrough" });
@@ -470,7 +510,11 @@ describe("AgentService.createAndSend defaults", () => {
       return managed;
     });
     const heldAttachmentPersistence = deferred<{ stored: []; persisted: [] }>();
-    attachmentService.persist.mockImplementation(async () => await heldAttachmentPersistence.promise);
+    const persistenceStarted = deferred<void>();
+    attachmentService.persist.mockImplementation(async () => {
+      persistenceStarted.resolve();
+      return await heldAttachmentPersistence.promise;
+    });
     const startupId = "00000000-0000-4000-8000-000000000024";
 
     const creating = service.createAndSend({
@@ -480,7 +524,7 @@ describe("AgentService.createAndSend defaults", () => {
       branch: "feature/managed",
       startupId,
     });
-    await vi.waitFor(() => expect(attachmentService.persist).toHaveBeenCalledOnce());
+    await persistenceStarted.promise;
 
     (await threadStartups.cancel(startupId));
     (await threadStartups.markCancelled(startupId));

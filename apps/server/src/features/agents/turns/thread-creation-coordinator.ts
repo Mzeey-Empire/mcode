@@ -133,6 +133,7 @@ function initialBranch(command: CreateAndSendCommand): string {
 @injectable()
 export class ThreadCreationCoordinator {
   private readonly inFlightStartups = new Map<string, { fingerprint: string; result: Promise<CreatedInitialTurn> }>();
+  private shuttingDown = false;
 
   constructor(
     @inject(ThreadRepo) private readonly threads: ThreadRepo,
@@ -145,6 +146,15 @@ export class ThreadCreationCoordinator {
     private readonly plans: () => PlanTurnService | undefined = () => undefined,
     private readonly startups: () => ThreadStartupService | undefined = () => undefined,
   ) {}
+
+  /** Cancel provisioning and wake fetch decisions before shutdown drains startup callers. */
+  async cancelPendingStartups(): Promise<void> {
+    this.shuttingDown = true;
+    for (const startupId of this.inFlightStartups.keys()) {
+      if (this.startups()?.get(startupId)) await this.startups()?.cancel(startupId);
+      this.fetchDecisions.cancel(startupId);
+    }
+  }
 
   /** Provision a thread and prepare its first command without acquiring runtime authority. */
   async createInitialTurn(command: CreateAndSendCommand, options?: CreateAndSendOptions): Promise<CreatedInitialTurn> {
@@ -194,6 +204,10 @@ export class ThreadCreationCoordinator {
 
   private async startAndProvisionInitialTurn(command: CreateAndSendCommand, params: BranchedInitialTurnParams, fingerprint: string): Promise<CreatedInitialTurn> {
     const started = await this.startStartup(command, params, fingerprint);
+    if (this.shuttingDown && started) {
+      await this.startups()?.cancel(started.startup.startupId);
+      await this.cancelIfRequested(started.startup.startupId);
+    }
     return started?.existing ? this.replayStartup(started.startup) : this.provisionInitialTurn(command, params, started?.startup);
   }
 
