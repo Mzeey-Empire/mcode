@@ -67,6 +67,124 @@ describe("SnapshotService integration", () => {
     NodeFS.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  function git(...args: string[]): string {
+    return NodeChildProcess.execFileSync("git", ["-C", tmpDir, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    }).trim();
+  }
+
+  function indexPath(): string {
+    return NodePath.resolve(tmpDir, git("rev-parse", "--git-path", "index"));
+  }
+
+  it("captures the HEAD tree for a clean checkout", async () => {
+    expect(await service.captureRef(tmpDir)).toBe(git("rev-parse", "HEAD^{tree}"));
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("captures tracked and untracked content while excluding ignored files", async () => {
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "modified\n");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "new.txt"), "untracked\n");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, ".gitignore"), "*.log\n");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "debug.log"), "ignored\n");
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("ls-tree", "-r", "--name-only", ref).split("\n")).toEqual([".gitignore", "existing.txt", "new.txt"]);
+    expect(git("show", `${ref}:existing.txt`)).toBe("modified");
+    expect(git("show", `${ref}:new.txt`)).toBe("untracked");
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("includes a force-staged ignored file", async () => {
+    NodeFS.writeFileSync(NodePath.join(tmpDir, ".gitignore"), "*.log\n");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "forced.log"), "force staged\n");
+    git("add", "-f", "forced.log");
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("ls-tree", "-r", "--name-only", ref).split("\n")).toEqual([".gitignore", "existing.txt", "forced.log"]);
+    expect(git("show", `${ref}:forced.log`)).toBe("force staged");
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("preserves staged and unstaged changes and the real index bytes", async () => {
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "staged\n");
+    git("add", "existing.txt");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "unstaged\n");
+    const staged = git("diff", "--cached", "--name-only");
+    const unstaged = git("diff", "--name-only");
+    const bytes = NodeFS.readFileSync(indexPath());
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("show", `${ref}:existing.txt`)).toBe("unstaged");
+    expect(NodeFS.readFileSync(indexPath())).toEqual(bytes);
+    expect(git("diff", "--cached", "--name-only")).toBe(staged);
+    expect(git("diff", "--name-only")).toBe(unstaged);
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("preserves split index files and staged changes without leaking temporary indexes", async () => {
+    git("config", "core.splitIndex", "true");
+    git("update-index", "--split-index");
+    git("-c", "core.hooksPath=", "commit", "--allow-empty", "-m", "split index");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "staged\n");
+    git("add", "existing.txt");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "unstaged\n");
+    const dir = NodePath.dirname(indexPath());
+    const shared = NodeFS.readdirSync(dir).filter((name) => name.startsWith("sharedindex.")).sort();
+    expect(shared.length).toBeGreaterThan(0);
+    const bytes = NodeFS.readFileSync(indexPath());
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("show", `${ref}:existing.txt`)).toBe("unstaged");
+    expect(NodeFS.readFileSync(indexPath())).toEqual(bytes);
+    expect(NodeFS.readdirSync(dir).filter((name) => name.startsWith("sharedindex.")).sort()).toEqual(shared);
+    expect(NodeFS.readdirSync(dir).filter((name) => name.startsWith("mcode-index-"))).toEqual([]);
+    expect(git("diff", "--cached", "--name-only")).toBe("existing.txt");
+    expect(git("show", ":existing.txt")).toBe("staged");
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("captures linked worktree content and cleans its private git directory", async () => {
+    const linked = NodePath.join(tmpDir, "linked");
+    git("worktree", "add", "-b", "linked", linked);
+    NodeFS.writeFileSync(NodePath.join(linked, "existing.txt"), "linked content\n");
+
+    const ref = await service.captureRef(linked);
+
+    expect(git("show", `${ref}:existing.txt`)).toBe("linked content");
+    const location = NodeChildProcess.execFileSync("git", ["-C", linked, "rev-parse", "--git-path", "index"], { encoding: "utf8" }).trim();
+    const dir = NodePath.dirname(NodePath.resolve(linked, location));
+    expect(NodeFS.readdirSync(dir).filter((name) => name.startsWith("mcode-index-"))).toEqual([]);
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("captures conflict markers while preserving the real unmerged entries", async () => {
+    git("checkout", "-b", "conflicting");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "branch\n");
+    git("add", "existing.txt");
+    git("-c", "core.hooksPath=", "commit", "-m", "branch change");
+    git("checkout", "main");
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "main\n");
+    git("add", "existing.txt");
+    git("-c", "core.hooksPath=", "commit", "-m", "main change");
+    expect(() => git("merge", "conflicting")).toThrow();
+    const unmerged = git("ls-files", "-u");
+    expect(unmerged.split("\n")).toHaveLength(3);
+
+    const ref = await service.captureRef(tmpDir);
+
+    expect(git("show", `${ref}:existing.txt`)).toBe("<<<<<<< HEAD\nmain\n=======\nbranch\n>>>>>>> conflicting");
+    expect(git("ls-files", "-u")).toBe(unmerged);
+  }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("rejects a non-repository folder", async () => {
+    const folder = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-no-git-"));
+    try {
+      await expect(service.captureRef(folder)).rejects.toThrow();
+    } finally {
+      NodeFS.rmSync(folder, { recursive: true, force: true });
+    }
+  }, GIT_OPERATION_TIMEOUT_MS);
+
   it("new untracked files appear in getFilesChanged", async () => {
     const refBefore = await service.captureRef(tmpDir);
 

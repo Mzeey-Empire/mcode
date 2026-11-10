@@ -6,15 +6,13 @@
 
 import { injectable, inject } from "tsyringe";
 import { truncateUnifiedDiff } from "@mcode/shared";
-import * as NodeFSPromises from "node:fs/promises";
-import * as NodePath from "node:path";
-import * as NodeCrypto from "node:crypto";
 import type { DiffStats } from "@mcode/contracts/models/diff-stats";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { RepositoryGitMutationLock } from "../../git/repository-git-mutation-lock.js";
 import { isLiteralRepoPath } from "../../git/literal-paths.js";
+import { withIndexCopy } from "../../git/temporary-index.js";
 import { rawGit, rawPath, readRawStates, restoreRaw, type RawPathState, type RawRestoreEntry } from "./snapshot-raw-state.js";
 import { blobIdsAt, planCheckout, pinRecovery, withSnapshotIndex } from "./snapshot-checkout.js";
 import type { StoreId } from "./snapshot-store-identity.js";
@@ -241,9 +239,9 @@ export class SnapshotService {
   /**
    * Capture the current working tree state as a tree object SHA.
    *
-   * Clean trees resolve from HEAD with a cheap status check. Dirty trees use a
-   * temporary git index (via GIT_INDEX_FILE) to stage all working tree changes
-   * including untracked files without touching the real index.
+   * Stages the working tree into a private copy of the checkout's index, so Git
+   * reuses the index's stat data and hashes only changed files. Untracked
+   * non-ignored files are included; the user's index is never written.
    *
    * Identical working trees produce identical tree SHAs (content-addressable),
    * so consecutive calls on a clean tree return the same value.
@@ -257,32 +255,17 @@ export class SnapshotService {
 
   private async captureRefUnlocked(cwd: string): Promise<string> {
     const timeout = RealGitExecutor.DEFAULT_TIMEOUT;
-
-    if (await this.isWorkingTreeClean(cwd, timeout)) {
+    return withIndexCopy(this.gitExecutor, cwd, "mcode-index", async (env) => {
       try {
-        const { stdout: treeOut } = await this.gitExecutor.exec(
-          ["-C", cwd, "rev-parse", "HEAD^{tree}"],
-          { timeout },
-        );
-        // Re-check after rev-parse: agent tools can write between status and tree lookup.
-        if (await this.isWorkingTreeClean(cwd, timeout)) {
-          return treeOut.trim();
-        }
+        await this.gitExecutor.exec(["-C", cwd, "read-tree", "HEAD"], { timeout, env });
       } catch {
-        // Unborn repo or missing HEAD: fall through to staged capture path.
+        // Unborn repo or missing HEAD: proceed with an empty index.
       }
-    }
-
-    return this.captureStagedTreeRef(cwd, timeout);
-  }
-
-  /** Return true when git reports no uncommitted changes in the working tree. */
-  private async isWorkingTreeClean(cwd: string, timeout: number): Promise<boolean> {
-    const { stdout } = await this.gitExecutor.exec(
-      ["-C", cwd, "status", "--porcelain"],
-      { timeout },
-    );
-    return stdout.trim() === "";
+    }, async (env) => {
+      await this.gitExecutor.exec(["-C", cwd, "add", "-A"], { timeout, env });
+      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "write-tree"], { timeout, env });
+      return stdout.trim();
+    });
   }
 
   /** Get list of files changed between two refs (tree or commit SHAs). */
@@ -461,41 +444,4 @@ export class SnapshotService {
     return collectDiffStats(outputs, statusOutputs, ignoreWhitespace);
   }
 
-  /**
-   * Stage the full working tree via a temp index and return its tree SHA.
-   * Used for dirty trees and unborn repos where HEAD^{tree} is unavailable.
-   */
-  private async captureStagedTreeRef(cwd: string, timeout: number): Promise<string> {
-    let tmpIndex = "";
-
-    const { stdout: gitDirOut } = await this.gitExecutor.exec(
-      ["-C", cwd, "rev-parse", "--git-dir"],
-      { timeout },
-    );
-    const gitDirRaw = gitDirOut.trim();
-    const gitDir = gitDirRaw.startsWith("/") || /^[A-Za-z]:/.test(gitDirRaw)
-      ? gitDirRaw
-      : NodePath.join(cwd, gitDirRaw);
-
-    tmpIndex = `${gitDir}/mcode-index-${NodeCrypto.randomUUID()}`;
-    const env = { ...process.env, GIT_INDEX_FILE: tmpIndex };
-
-    try {
-      try {
-        await this.gitExecutor.exec(["-C", cwd, "read-tree", "HEAD"], { timeout, env });
-      } catch {
-        // Unborn repo or corrupt HEAD - proceed with empty index
-      }
-
-      await this.gitExecutor.exec(["-C", cwd, "add", "-A"], { timeout, env });
-
-      const { stdout: treeOut } = await this.gitExecutor.exec(
-        ["-C", cwd, "write-tree"],
-        { timeout, env },
-      );
-      return treeOut.trim();
-    } finally {
-      NodeFSPromises.unlink(tmpIndex).catch(() => {});
-    }
-  }
 }
