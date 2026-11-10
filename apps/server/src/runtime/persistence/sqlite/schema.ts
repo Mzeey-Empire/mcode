@@ -958,6 +958,16 @@ export const canonicalAgentIngestCheckpoints = sqliteTable(
   ],
 );
 
+/** Durable file observation owned by a dispatched execution, including turns without a reply. */
+export const turnFileEvidence = sqliteTable("turn_file_evidence", {
+  executionId: text("execution_id").primaryKey().notNull().references(() => canonicalAgentIngestCheckpoints.executionId, { onDelete: "cascade" }),
+  threadId: text("thread_id").notNull(),
+  turnId: text("turn_id").notNull(),
+  state: text("state").notNull(),
+  evidenceJson: text("evidence_json").notNull(),
+  recordedAt: text("recorded_at").notNull(),
+}, (table) => [index("idx_turn_file_evidence_thread").on(table.threadId)]);
+
 /** Temporary durable text headers for unfinished parent assistant responses. */
 export const parentAssistantTextCheckpoints = sqliteTable(
   "parent_assistant_text_checkpoints",
