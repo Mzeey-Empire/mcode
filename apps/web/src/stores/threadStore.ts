@@ -113,7 +113,7 @@ import {
 import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
 import type { CanonicalPublicationIdentity } from "./thread-store/stable-agent-event-publications";
 import { shownLiveFrames } from "./thread-store/shown-live-frames";
-import { mergeFileEvidence } from "./thread-store/file-evidence";
+import { mergeFileEvidence, recordedEvidencePaths } from "./thread-store/file-evidence";
 import {
   hydrateRunningThreads as hydrateRunningThreadRecords,
   transferThreadRuntime as transferOptimisticThreadRuntime,
@@ -1683,6 +1683,22 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (conversationResidency.isConversationVisible(threadId)) return ownsCurrentRequest;
     if (ownsCurrentRequest) setHistoryPageLoading(threadId, direction, false);
     return false;
+  };
+
+  /** A history page merges evidence monotonically; its recorded paths fill rows that have none yet. */
+  const paginationFileEvidencePatch = (
+    record: ThreadRecord,
+    pageEvidence: readonly TurnFileEvidenceEvent[] | undefined,
+    retainedMessageIds: Set<string>,
+  ): Pick<ThreadRecord, "fileEvidence" | "persistedFilesChanged"> => {
+    const fileEvidence = mergeFileEvidence(record.fileEvidence, pageEvidence ?? []);
+    return {
+      fileEvidence,
+      persistedFilesChanged: filterPaginationMetadata(
+        { ...recordedEvidencePaths(fileEvidence), ...record.persistedFilesChanged },
+        retainedMessageIds,
+      ),
+    };
   };
 
   const hydratePaginationFileChanges = (
@@ -3677,6 +3693,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         hasMore,
         answeredPlanMessageIds,
         narrativeByMessage,
+        turnFileEvidence,
       } = prefetchedPage
         ?? await getTransport().loadOlderConversationPage(request);
       const olderMessages = prefetchedPage ? fetchedMessages
@@ -3714,10 +3731,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
               { ...newCounts, ...r.persistedToolCallCounts },
               retainedMessageIds,
             ),
-            persistedFilesChanged: filterPaginationMetadata(
-              r.persistedFilesChanged,
-              retainedMessageIds,
-            ),
+            ...paginationFileEvidencePatch(r, turnFileEvidence, retainedMessageIds),
             serverMessageIds: filterPaginationMetadata(r.serverMessageIds, retainedMessageIds),
             narrativeByMessage: selectConversationNarrative(
               filterPaginationMetadata(
@@ -3800,6 +3814,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         hasMore,
         answeredPlanMessageIds,
         narrativeByMessage,
+        turnFileEvidence,
       } = await getTransport().loadNewerConversationPage(request);
 
       const currentRecord = getRec(threadId);
@@ -3835,10 +3850,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
               { ...newCounts, ...r.persistedToolCallCounts },
               retainedMessageIds,
             ),
-            persistedFilesChanged: filterPaginationMetadata(
-              r.persistedFilesChanged,
-              retainedMessageIds,
-            ),
+            ...paginationFileEvidencePatch(r, turnFileEvidence, retainedMessageIds),
             serverMessageIds: filterPaginationMetadata(r.serverMessageIds, retainedMessageIds),
             narrativeByMessage: selectConversationNarrative(
               filterPaginationMetadata(

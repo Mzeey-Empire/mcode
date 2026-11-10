@@ -50,6 +50,7 @@ import type { GoalLookupResult, GoalState } from "@mcode/contracts/models/goal";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { CONVERSATION_OLDER_PAGE_MAX_BYTES } from "@mcode/contracts/models/conversation-older-page";
 import { clearScrollMemory, rememberScrollTop } from "@/components/chat/scrollPositionMemory";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 
 vi.mock("@/transport", () => ({
   getTransport: () => mockTransport,
@@ -515,6 +516,32 @@ describe("ThreadHydrator", () => {
     expect(readActiveThreadField((record) => record.serverMessageIds)).toEqual({
       "stale-cache-message": "server-stale",
       "resident-message": "server-resident",
+    });
+  });
+
+  it("keeps resolved file evidence from either side when a cached conversation merges with the resident one", async () => {
+    const pending = (executionId: string) => createFileEvidenceEvent({ state: "tracking" }, { threadId: THREAD_A, executionId });
+    const residentResolved = createFileEvidenceEvent({ state: "untracked" }, { threadId: THREAD_A, executionId: "execution-resident" });
+    const cachedResolved = createFileEvidenceEvent(
+      { state: "unavailable", reason: "timed-out", knownPaths: [] },
+      { threadId: THREAD_A, executionId: "execution-cached" },
+    );
+    cacheRecord(THREAD_A, {
+      ...makeCachedRecord(),
+      fileEvidence: { "execution-resident": pending("execution-resident"), "execution-cached": cachedResolved },
+    });
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([[THREAD_A, {
+        ...makeCachedRecord(),
+        fileEvidence: { "execution-resident": residentResolved, "execution-cached": pending("execution-cached") },
+      }]]),
+    });
+
+    await hydrator.hydrate(THREAD_A, "active");
+
+    expect(readActiveThreadField((record) => record.fileEvidence)).toEqual({
+      "execution-resident": residentResolved,
+      "execution-cached": cachedResolved,
     });
   });
 

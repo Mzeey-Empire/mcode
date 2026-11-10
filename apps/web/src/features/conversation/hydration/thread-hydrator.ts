@@ -19,6 +19,7 @@ import {
   providerNoticeSessionId,
 } from "@/stores/thread-record";
 import type { ThreadRecord } from "@/stores/thread-record";
+import { mergeFileEvidence, recordedEvidencePaths } from "@/stores/thread-store/file-evidence";
 import type { GoalLookupResult } from "@mcode/contracts/models/goal";
 import { resolveGoalLookupGoal } from "@/lib/goal-lookup";
 import type {
@@ -89,6 +90,26 @@ function findLatestTurnWithChanges(
   return null;
 }
 
+/**
+ * Snapshot rows cover only legacy turns reliably, so a snapshot refresh keeps
+ * the paths that evidence rows recorded. Live rows may use local message ids.
+ */
+function withRecordedEvidencePaths(
+  snapshotPaths: Record<string, string[]>,
+  record: Pick<ConversationCacheState, "fileEvidence" | "serverMessageIds">,
+): Record<string, string[]> {
+  const localByServer = new Map(Object.entries(record.serverMessageIds).map(([local, server]) => [server, local]));
+  return { ...snapshotPaths, ...recordedEvidencePaths(record.fileEvidence, (id) => localByServer.get(id) ?? id) };
+}
+
+/** Either side may hold the resolved copy, so a stale `tracking` copy never wins. */
+function mergeConversationFileEvidence(
+  resident: Pick<ConversationCacheState, "fileEvidence">,
+  cached: Pick<ConversationCacheState, "fileEvidence">,
+): ConversationCacheState["fileEvidence"] {
+  return mergeFileEvidence(resident.fileEvidence, Object.values(cached.fileEvidence));
+}
+
 function chooseSettledFileEffectSummary(
   resident: ConversationCacheState["settledFileEffectSummary"],
   cached: ConversationCacheState["settledFileEffectSummary"],
@@ -145,9 +166,10 @@ function mergedConversationMetadata(
   cached: ConversationCacheState,
   resident: ConversationCacheState,
   messageIds: Set<string>,
-): Pick<ConversationCacheState, "persistedToolCallCounts" | "persistedFilesChanged" | "serverMessageIds" | "narrativeByMessage" | "answeredPlanMessageIds" | "assistantResponseKeys" | "settledFileEffectSummary"> {
+): Pick<ConversationCacheState, "persistedToolCallCounts" | "persistedFilesChanged" | "fileEvidence" | "serverMessageIds" | "narrativeByMessage" | "answeredPlanMessageIds" | "assistantResponseKeys" | "settledFileEffectSummary"> {
   const persistedFilesChanged = mergeMessageMetadata(cached.persistedFilesChanged, resident.persistedFilesChanged, messageIds);
   return {
+    fileEvidence: mergeConversationFileEvidence(resident, cached),
     persistedToolCallCounts: mergeMessageMetadata(cached.persistedToolCallCounts, resident.persistedToolCallCounts, messageIds),
     persistedFilesChanged,
     serverMessageIds: mergeMessageMetadata(cached.serverMessageIds, resident.serverMessageIds, messageIds),
@@ -241,7 +263,9 @@ function mergeResidentConversationCacheState(
 ): ConversationCacheState {
   const residentCacheState = projectConversationCacheState(resident);
   const noticeState = mergeSessionNotices(resident, cached, options.preferResidentNotices);
-  if (cachedConversationIsNewer(residentCacheState, cached)) return { ...cached, ...noticeState };
+  if (cachedConversationIsNewer(residentCacheState, cached)) {
+    return { ...cached, ...noticeState, fileEvidence: mergeConversationFileEvidence(residentCacheState, cached) };
+  }
   const messages = mergedConversationMessages(cached, residentCacheState, options.preferResidentMessages ?? true);
   const retainedMessageIds = new Set(messages.map((message) => message.id));
   const metadata = mergedConversationMetadata(cached, residentCacheState, retainedMessageIds);
@@ -460,6 +484,7 @@ export class ThreadHydrator {
         sessionNotices: page.sessionNotices,
         hasMore: page.hasMore,
         answeredPlanMessageIds: page.answeredPlanMessageIds,
+        turnFileEvidence: page.turnFileEvidence,
       });
       this.deps.setState((state: ThreadHydratorWriteState) => {
         if (!opts.isCurrent()) return {};
@@ -756,6 +781,7 @@ export class ThreadHydrator {
         hasMore: tailPage.hasMore,
         answeredPlanMessageIds: tailPage.answeredPlanMessageIds,
         snapshots,
+        turnFileEvidence: tailPage.turnFileEvidence,
       });
 
       const record: ThreadRecord = {
@@ -1149,7 +1175,7 @@ export class ThreadHydrator {
         || state.runningThreadIds.has(threadId);
       return {
         records: patchThreadRecord(state.records, threadId, {
-          persistedFilesChanged: fileChanges.persistedFilesChanged,
+          persistedFilesChanged: withRecordedEvidencePaths(fileChanges.persistedFilesChanged, current),
           latestTurnWithChanges: fileChanges.latestTurnWithChanges,
           ...(!ownsLiveFileEffects ? { fileEffectSummary: fileChanges.fileEffectSummary } : {}),
         }),
@@ -1163,7 +1189,7 @@ export class ThreadHydrator {
       || this.deps.getState().runningThreadIds.has(threadId);
     cacheRecord(threadId, {
       ...cached,
-      persistedFilesChanged: fileChanges.persistedFilesChanged,
+      persistedFilesChanged: withRecordedEvidencePaths(fileChanges.persistedFilesChanged, cached),
       latestTurnWithChanges: fileChanges.latestTurnWithChanges,
       ...(!ownsLiveFileEffects
         ? { settledFileEffectSummary: fileChanges.fileEffectSummary }
@@ -1337,7 +1363,7 @@ export class ThreadHydrator {
   }
 
   private commitFetchedConversation(threadId: string, page: ConversationPage, context: FetchCommitContext): void {
-    const patch = snapshotBuilder.build({ messages: page.messages, sessionNotices: page.sessionNotices, hasMore: page.hasMore, answeredPlanMessageIds: page.answeredPlanMessageIds });
+    const patch = snapshotBuilder.build({ messages: page.messages, sessionNotices: page.sessionNotices, hasMore: page.hasMore, answeredPlanMessageIds: page.answeredPlanMessageIds, turnFileEvidence: page.turnFileEvidence });
     this.deps.setState((state: ThreadHydratorWriteState) => {
       const current = getThreadRecord(state.records, threadId);
       const fetchedConversation = projectConversationCacheState({ ...createEmptyThreadRecord(), ...patch, narrativeByMessage: page.narrativeByMessage });

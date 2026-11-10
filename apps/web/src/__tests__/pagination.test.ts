@@ -25,6 +25,7 @@ import {
 } from "@/features/conversation/hydration/record-cache";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { mockTransport } from "./mocks/transport";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 import type { Message } from "@/transport";
 import { rememberScrollTop } from "@/components/chat/scrollPositionMemory";
 import {
@@ -110,6 +111,42 @@ await activateTestConversation(threadId);
     expect(getTestThreadHasMoreMessages(threadId)).toBe(false);
     expect(getTestThreadIsLoadingMore(threadId)).toBe(false);
     expect(mockTransport.getMessages).toHaveBeenCalledWith(threadId, 25, 51);
+  });
+
+  it("never downgrades resolved file evidence when an older page carries a stale pending copy", async () => {
+    const recorded = createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["src/new.ts"] },
+      { threadId, executionId: "execution-new", messageId: "m4" },
+    );
+    resetThreadStoreForTests({
+      currentThreadId: threadId,
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [
+            createMockMessage({ id: "m3", thread_id: threadId, sequence: 51 }),
+            createMockMessage({ id: "m4", thread_id: threadId, sequence: 52 }),
+          ],
+          oldestLoadedSequence: 51,
+          hasMoreMessages: true,
+          fileEvidence: { "execution-new": recorded },
+          persistedFilesChanged: { m4: ["src/new.ts"] },
+        }],
+      ]),
+    });
+    (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: [createMockMessage({ id: "m1", thread_id: threadId, sequence: 1 })],
+      hasMore: false,
+      turnFileEvidence: [
+        createFileEvidenceEvent({ state: "tracking" }, { threadId, executionId: "execution-new", messageId: "m4" }),
+        createFileEvidenceEvent({ state: "recorded", filesChanged: ["src/old.ts"] }, { threadId, executionId: "execution-old", messageId: "m1" }),
+      ],
+    });
+
+    await useThreadStore.getState().loadOlderMessages(threadId);
+
+    expect(readThreadField(threadId, (record) => record.fileEvidence["execution-new"])).toEqual(recorded);
+    expect(getTestThreadPersistedFilesChanged(threadId)).toEqual({ m1: ["src/old.ts"], m4: ["src/new.ts"] });
   });
 
   it("loadOlderMessages is a no-op when hasMore is false", async () => {
