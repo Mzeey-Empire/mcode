@@ -147,9 +147,14 @@ export class CanonicalCodexCollaborationCoordinator {
   recordChildItem(input: CodexChildItemInput): AgentItem {
     const turn = this.loadChildTurn(input.childThreadId, input.nativeTurnId);
     if (!turn) throw new Error(`Codex child turn not found: ${input.nativeTurnId}`);
-    if (input.kind === "message" && input.eventKey === "stream") {
+    if (input.kind === "message" && ["stream", "stream-complete"].includes(input.eventKey)) {
       const completed = this.operations.loadItem(`item:codex-child:${hashCodexKey(`${turn.id}:${input.nativeItemId}:completed:message`)}`);
-      if (completed) return completed;
+      if (completed) {
+        if (input.eventKey === "stream-complete" && !this.matchesExistingChildMessage(completed, input)) {
+          throw this.childItemConflict(completed.id);
+        }
+        return completed;
+      }
     }
     const itemId = `item:codex-child:${hashCodexKey(`${turn.id}:${input.nativeItemId}:${this.childItemEventKey(input)}:${input.kind}`)}`;
     const existing = this.operations.loadItem(itemId);

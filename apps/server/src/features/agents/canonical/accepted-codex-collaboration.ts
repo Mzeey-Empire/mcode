@@ -440,9 +440,14 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
 
   recordCodexChildItem(input: CodexChildItemInput): AgentItem {
     const turn = this.childTurn(input.childThreadId, input.nativeTurnId);
-    if (input.kind === "message" && input.eventKey === "stream") {
+    if (input.kind === "message" && ["stream", "stream-complete"].includes(input.eventKey)) {
       const completed = this.record("items", `item:codex-child:${hash(`${turn.id}:${input.nativeItemId}:completed:message`)}`);
-      if (completed) return completed;
+      if (completed) {
+        if (input.eventKey === "stream-complete") {
+          assertSameChildMessage(completed, messageSource(input.payload), MessageSchema().parse(completed.payload.message));
+        }
+        return completed;
+      }
     }
     const stream = input.kind === "message" && ["stream", "stream-complete"].includes(input.eventKey);
     const id = `item:codex-child:${hash(`${turn.id}:${input.nativeItemId}:${stream ? "stream" : input.eventKey}:${input.kind}`)}`;

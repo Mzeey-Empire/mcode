@@ -269,6 +269,26 @@ describe("AcceptedCodexCollaboration", () => {
       payload: { projection: "message", content: " stale" } })).toEqual({ ...saved, id });
   });
 
+  it.each(["Saved child answer", "Conflicting answer"])("reconciles completed child text after a stray delta (%s)", (content) => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    const input = { childThreadId: value.childThread.id, nativeTurnId: "native-turn",
+      nativeItemId: "native-message", eventKey: "completed", kind: "message" as const,
+      payload: { projection: "message", content: "Saved child answer" } };
+    const saved = port.recordCodexChildItem(input);
+    port.prepare(child({ type: AgentEventType.Ended, threadId: "parent", turnExecutionId: PARENT_EXECUTION, outcome: "completed" }));
+    const terminal = port.loadTurn(value.turn.id);
+    expect(port.prepare(textDelta(" stray")).changes).toEqual([]);
+    const full = child({ type: AgentEventType.Message, threadId: "parent", turnExecutionId: PARENT_EXECUTION,
+      content, tokens: null }, { nativeItemId: "native-message", itemEventKey: "stream-complete" });
+
+    if (content === "Saved child answer") expect(port.prepare(full).changes).toEqual([]);
+    else expect(() => port.recordCodexChildItem({ ...input, eventKey: "stream-complete",
+      payload: { projection: "message", content } })).toThrow("Codex child message identity conflict");
+    expect(port.recordCodexChildItem(input)).toEqual(saved);
+    expect(port.loadTurn(value.turn.id)).toEqual(terminal);
+  });
+
   it("rejects conflicting completed-only child text", () => {
     const port = new AcceptedCodexCollaboration(initial());
     const value = runningChild(port);

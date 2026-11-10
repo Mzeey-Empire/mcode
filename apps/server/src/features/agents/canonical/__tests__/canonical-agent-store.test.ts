@@ -2783,6 +2783,31 @@ describe("CanonicalAgentStore", () => {
     });
   });
 
+  it.each(["Saved child answer", "Conflicting answer"])("reconciles completed child text after a stray delta (%s)", (content) => {
+    startCanonicalParent(sink, db);
+    const input = { parentThreadId: THREAD_ID, parentTurnId: TURN_ID, parentExecutionId: EXECUTION_ID,
+      parentItemId: "toolCall:spawn-completed", receiverThreadIds: ["native-child-completed"],
+      prompt: "Child task", providerIdentities: [] as ProviderIdentity[] };
+    const delegation = sink.startCodexChildDelegation(input);
+    const turn = sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-completed", nativeTurnId: "native-turn" });
+    const message = { childThreadId: delegation.childThread.id, nativeTurnId: "native-turn",
+      nativeItemId: "native-message", eventKey: "completed", kind: "message" as const,
+      payload: { projection: "message", content: "Saved child answer" } };
+    const saved = sink.recordCodexChildItem(message);
+    sink.finishCodexChildTurn({ childThreadId: delegation.childThread.id, nativeTurnId: "native-turn", outcome: "completed" });
+    const terminal = sink.loadTurn(turn.id);
+    expect(sink.recordCodexChildItem({ ...message, eventKey: "stream",
+      payload: { projection: "message", content: " stray" } })).toEqual(saved);
+    const full = { ...message, eventKey: "stream-complete", payload: { projection: "message", content } };
+
+    if (content === "Saved child answer") expect(sink.recordCodexChildItem(full)).toEqual(saved);
+    else expect(() => sink.recordCodexChildItem(full)).toThrow("Codex child item identity conflict");
+    expect(sink.loadItem(saved.id)).toEqual(saved);
+    expect(sink.loadTurn(turn.id)).toEqual(terminal);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE thread_id = ? AND kind = 'message'")
+      .get(delegation.childThread.id)).toEqual({ count: 2 });
+  });
+
   it("keeps child content under one child turn and restores it in a fresh sink", () => {
     startCanonicalParent(sink, db);
     const input = {
