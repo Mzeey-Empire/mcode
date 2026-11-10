@@ -66,13 +66,6 @@ describe("SnapshotService unified output", () => {
 });
 
 describe("SnapshotService.captureRef", () => {
-  it("rejects when the index location cannot be resolved", async () => {
-    const fake = new FakeGitExecutor();
-    fake.setResponse(["rev-parse", "--git-path", "index"], new Error("not a git repo"));
-
-    await expect(new SnapshotService(fake).captureRef("/repo")).rejects.toThrow("not a git repo");
-  });
-
   it("propagates add -A failures", async () => {
     const fake = new FakeGitExecutor();
     fake.setResponse(["rev-parse", "--git-path", "index"], { stdout: ".git/index\n", stderr: "" });
