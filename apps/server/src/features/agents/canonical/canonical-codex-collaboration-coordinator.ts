@@ -1041,11 +1041,11 @@ export class CanonicalCodexCollaborationCoordinator {
     const inputMessage = childMessageSource(input.payload);
     if (typeof inputMessage.content !== "string") return undefined;
     if (typeof inputMessage.id === "string" && inputMessage.id !== existing.payload.message.id) return undefined;
-    const savedFullMessage = existing.payload.eventKey === "stream-complete";
-    if (input.eventKey === "stream") {
-      return savedFullMessage ? null : `${existing.payload.message.content}${inputMessage.content}`;
+    if (existing.payload.eventKey !== "stream-complete") {
+      return input.eventKey === "stream" ? `${existing.payload.message.content}${inputMessage.content}` : inputMessage.content;
     }
-    return savedFullMessage && inputMessage.content === existing.payload.message.content ? null : inputMessage.content;
+    if (input.eventKey === "stream") return null;
+    return inputMessage.content === existing.payload.message.content ? null : undefined;
   }
 
   private childItemEventKey(input: CodexChildItemInput): string {

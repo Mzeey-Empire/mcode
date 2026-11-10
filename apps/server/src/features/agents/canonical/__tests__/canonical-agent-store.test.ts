@@ -2783,6 +2783,24 @@ describe("CanonicalAgentStore", () => {
     });
   });
 
+  it("rejects a conflicting full child message after the saved full message and turn end", () => {
+    startCanonicalParent(sink, db);
+    const input = { parentThreadId: THREAD_ID, parentTurnId: TURN_ID, parentExecutionId: EXECUTION_ID,
+      parentItemId: "toolCall:spawn-full", receiverThreadIds: ["native-child-full"],
+      prompt: "Child task", providerIdentities: [] as ProviderIdentity[] };
+    const delegation = sink.startCodexChildDelegation(input);
+    sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-full", nativeTurnId: "native-turn" });
+    const full = (content: string) => ({ childThreadId: delegation.childThread.id, nativeTurnId: "native-turn",
+      nativeItemId: "native-message", eventKey: "stream-complete", kind: "message" as const,
+      payload: { projection: "message", content } });
+    const saved = sink.recordCodexChildItem(full("Full saved answer"));
+    sink.finishCodexChildTurn({ childThreadId: delegation.childThread.id, nativeTurnId: "native-turn", outcome: "completed" });
+
+    expect(() => sink.recordCodexChildItem(full("Full"))).toThrow("Codex child item identity conflict");
+    expect(sink.recordCodexChildItem(full("Full saved answer"))).toEqual(saved);
+    expect(sink.loadItem(saved.id)?.payload.message).toMatchObject({ content: "Full saved answer" });
+  });
+
   it.each(["Saved child answer", "Conflicting answer"])("reconciles completed child text after a stray delta (%s)", (content) => {
     startCanonicalParent(sink, db);
     const input = { parentThreadId: THREAD_ID, parentTurnId: TURN_ID, parentExecutionId: EXECUTION_ID,

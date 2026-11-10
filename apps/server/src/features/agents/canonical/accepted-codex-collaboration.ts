@@ -595,6 +595,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
     }
     if (typeof source.content !== "string" || typeof source.id === "string" && source.id !== message.id) throw new Error(`Codex child streamed message identity conflict: ${existing.id}`);
     const content = streamedChildContent(existing.payload.eventKey, input.eventKey, message.content, source.content);
+    if (content === undefined) throw new Error(`Codex child streamed message identity conflict: ${existing.id}`);
     if (content === null) return existing;
     const item = { ...existing, payload: { ...existing.payload, message: { ...message, content },
       nativeItemId: input.nativeItemId, eventKey: input.eventKey }, updatedAt: timestamp() };
@@ -754,10 +755,11 @@ function unique(index: ReadonlyMap<string, ReadonlySet<string>>, key: string, la
   if (values && values.size > 1) throw new Error(`${label} identity is ambiguous: ${key}`);
   return values?.values().next().value;
 }
-function streamedChildContent(savedEventKey: unknown, eventKey: string, saved: string, incoming: string): string | null {
-  const fullMessageSaved = savedEventKey === "stream-complete";
-  if (eventKey === "stream") return fullMessageSaved ? null : saved + incoming;
-  return fullMessageSaved && incoming === saved ? null : incoming;
+/** Returns the content to save, null to keep the saved item, or undefined when a full replay conflicts with the saved full message. */
+function streamedChildContent(savedEventKey: unknown, eventKey: string, saved: string, incoming: string): string | null | undefined {
+  if (savedEventKey !== "stream-complete") return eventKey === "stream" ? saved + incoming : incoming;
+  if (eventKey === "stream") return null;
+  return incoming === saved ? null : undefined;
 }
 function isTerminal(turn: AgentTurn): boolean { return Object.values(TERMINAL_STATUS).some((status) => status === turn.status); }
 function text(value: string | undefined): string | undefined { return value?.trim().slice(0, CANONICAL_SUBAGENT_TASK_MAX_LENGTH) || undefined; }

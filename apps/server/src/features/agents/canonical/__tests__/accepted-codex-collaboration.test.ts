@@ -251,6 +251,22 @@ describe("AcceptedCodexCollaboration", () => {
     expect(port.prepare(full).changes).toEqual([]);
   });
 
+  it("rejects a conflicting full child message after the saved full message and turn end", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    runningChild(port);
+    const full = (content: string) => child({ type: AgentEventType.Message, threadId: "parent", turnExecutionId: PARENT_EXECUTION,
+      content, tokens: null }, { nativeItemId: "native-message", itemEventKey: "stream-complete" });
+    port.prepare(full("Full saved answer"));
+    port.prepare(child({ type: AgentEventType.Ended, threadId: "parent", turnExecutionId: PARENT_EXECUTION, outcome: "completed" }));
+
+    const conflict = port.prepare(full("Full"));
+
+    expect(conflict.projection).toMatchObject({ status: "rejected",
+      diagnostic: { reason: expect.stringContaining("Codex child streamed message identity conflict") } });
+    expect(conflict.changes).not.toContainEqual(expect.objectContaining({ kind: "item-recorded" }));
+    expect(port.prepare(full("Full saved answer")).changes).toEqual([]);
+  });
+
   it("replays a legacy completed-only child message without changing its identity", () => {
     const state = initial();
     const port = new AcceptedCodexCollaboration(state);
