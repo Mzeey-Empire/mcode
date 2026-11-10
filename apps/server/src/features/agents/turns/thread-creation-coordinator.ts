@@ -216,7 +216,7 @@ export class ThreadCreationCoordinator {
 
   /** Enter the first runtime phase after direct thread provisioning. */
   async startInitialAgent(startupId: string | undefined): Promise<void> {
-    this.throwIfShuttingDown();
+    await this.interruptIfShuttingDown(startupId);
     if (startupId) await this.startups()?.advance(startupId, "agent");
   }
 
@@ -233,7 +233,7 @@ export class ThreadCreationCoordinator {
 
   /** Complete a startup whose initial command was handled without a provider turn, so no provider frame will come. */
   async completeHandledInitialCommand(startupId: string | undefined): Promise<void> {
-    this.throwIfShuttingDown();
+    await this.interruptIfShuttingDown(startupId);
     if (startupId) await this.startups()?.complete(startupId);
   }
 
@@ -653,8 +653,14 @@ export class ThreadCreationCoordinator {
     if (this.shuttingDown) throw cause instanceof StartupShutdownError ? cause : new StartupShutdownError(cause);
   }
 
-  private async failStartup(startupId: string | undefined, cause: unknown, failure?: Parameters<ThreadStartupService["fail"]>[1]): Promise<void> {
+  private async interruptIfShuttingDown(startupId: string | undefined, cause?: unknown): Promise<void> {
+    if (!this.shuttingDown) return;
+    await this.cancelIfRequested(startupId);
     this.throwIfShuttingDown(cause);
+  }
+
+  private async failStartup(startupId: string | undefined, cause: unknown, failure?: Parameters<ThreadStartupService["fail"]>[1]): Promise<void> {
+    await this.interruptIfShuttingDown(startupId, cause);
     if (!startupId) return;
     const startup = this.startups()?.get(startupId);
     if (!startup || startup.state === "blocked") return;

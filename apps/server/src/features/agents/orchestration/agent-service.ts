@@ -67,7 +67,7 @@ export class AgentService {
     return this.runtime.onRuntimeReleased(listener);
   }
 
-  /** Refuse new turns and wake startup decisions before transport requests drain. */
+  /** Refuse new thread startups and wake startup decisions before transport requests drain. */
   beginShutdown(): void {
     this.runtime.beginShutdown();
   }

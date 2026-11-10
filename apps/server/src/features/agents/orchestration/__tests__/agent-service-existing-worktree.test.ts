@@ -12,7 +12,8 @@ let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
-import { createAgentServiceForTest, drainAgentServicePersistenceForTest, goalLifecycleForAgentServiceTest, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
+import { createAgentServiceForTest, drainAgentServicePersistenceForTest, goalLifecycleForAgentServiceTest, startProviderTurnForTest, waitForAgentServiceWorkersForTest } from "./agent-service-test-harness.js";
+import { ThreadCreationCoordinator } from "../../turns/thread-creation-coordinator.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 import { createCanonicalAgentBoundaryStub } from "../../canonical/__tests__/canonical-agent-boundary-stub.js";
 import type { IAgentProvider, ProviderId } from "@mcode/contracts/providers/interfaces";
@@ -266,7 +267,7 @@ describe("AgentService.createAndSend defaults", () => {
 
   it("wakes a fetch decision at begin shutdown before draining the admitted request", async () => {
     const fetch = vi.spyOn(GitRepositoryService.prototype, "fetchOriginTrackingBranch").mockRejectedValue(new Error("Origin unavailable"));
-    const { workspaceRepo, threadRepo, service, threadStartups, threadService } = await createAgentServiceHarness();
+    const { workspaceRepo, threadRepo, messageRepo, service, threadStartups, threadService } = await createAgentServiceHarness();
     const workspace = await workspaceRepo.create("Repo", "/repo");
     const late = await threadRepo.create(workspace.id, "Late", "direct", "main", true, "claude");
     const startupId = "00000000-0000-4000-8000-000000000027";
@@ -281,6 +282,10 @@ describe("AgentService.createAndSend defaults", () => {
     try {
       service.beginShutdown();
       expect(await result).toMatchObject({ code: "startup_shutdown" });
+      await service.sendMessage({ threadId: late.id, content: "Accepted during drain" });
+      expect(messageRepo.listByThread(late.id, 10).messages.map(message => ({ role: message.role, content: message.content })))
+        .toContainEqual({ role: "user", content: "Accepted during drain" });
+      await service.stopAll();
       await expect(service.sendMessage({ threadId: late.id, content: "Too late" })).rejects.toThrow("shutting down");
       expect(threadStartups.get(startupId)).toMatchObject({ state: "blocked", cancellation: "none" });
       expect(threadStartups.get(startupId)?.threadId).toBeUndefined();
@@ -289,6 +294,49 @@ describe("AgentService.createAndSend defaults", () => {
       unsubscribe();
       fetch.mockRestore();
       await service.stopAll();
+    }
+  });
+
+  it("opens provider turns during the drain and refuses them after stopAll", async () => {
+    const { workspaceRepo, threadRepo, service } = await createAgentServiceHarness();
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const thread = await threadRepo.create(workspace.id, "Provider", "direct", "main", true, "claude");
+    service.beginShutdown();
+    const executionId = await startProviderTurnForTest(service, thread.id);
+    expect(service.runtimeAccess().runtimeSnapshots()).toContainEqual(expect.objectContaining({ turnExecutionId: executionId }));
+    await service.stopAll();
+    await expect(startProviderTurnForTest(service, thread.id)).rejects.toThrow("Provider fixture turn was declined");
+  });
+
+  it("keeps a late cancellation cancelled when shutdown starts after provisioning", async () => {
+    const { workspaceRepo, threadRepo, threadService, service, threadStartups } = await createAgentServiceHarness();
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const thread = await threadRepo.create(workspace.id, "Cancel", "direct", "main", true, "claude");
+    vi.mocked(threadService.create).mockResolvedValue(thread);
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    const start = ThreadCreationCoordinator.prototype.startInitialAgent;
+    const gate = vi.spyOn(ThreadCreationCoordinator.prototype, "startInitialAgent").mockImplementation(async function (this: ThreadCreationCoordinator, startupId) {
+      entered.resolve();
+      await release.promise;
+      return start.call(this, startupId);
+    });
+    const startupId = "00000000-0000-4000-8000-000000000029";
+    const result = service.createAndSend({ workspaceId: workspace.id, content: "Cancel this", startupId })
+      .catch((error: unknown) => error);
+    await entered.promise;
+    try {
+      await threadStartups.cancel(startupId);
+      service.beginShutdown();
+      release.resolve();
+      expect(await result).toMatchObject({ code: "startup_cancelled" });
+      expect(threadStartups.get(startupId)).toMatchObject({ state: "cancelled", cancellation: "requested" });
+      await service.stopAll();
+      await threadStartups.interruptNonterminalOnStartup();
+      expect(threadStartups.listInterrupted()).toEqual([]);
+    } finally {
+      release.resolve();
+      gate.mockRestore();
     }
   });
 

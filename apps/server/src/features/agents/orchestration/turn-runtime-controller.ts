@@ -123,6 +123,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private initialized = false;
   /** Set once graceful shutdown begins; the process exits afterward, so it never resets. */
   private shuttingDown = false;
+  private startupAdmissionClosed = false;
   private readonly pendingCreations = new Set<Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[]; queued?: boolean }>>();
   /** Callbacks keyed by turn execution that run once that runtime releases its active slot, so follow-up turns can admit. */
   private readonly runtimeReleaseCallbacks = new Map<string, (cause?: RuntimeReleaseCause) => void>();
@@ -1711,7 +1712,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Provision a thread through its coordinator, then start its generic first-turn command. */
   async createAndSend(command: CreateAndSendCommand, options?: CreateAndSendOptions): Promise<Thread & { runtimeSnapshot: TurnRuntimeSnapshot; warnings?: string[]; queued?: boolean }> {
-    if (this.shuttingDown) throw new Error("Agent runtime is shutting down");
+    if (this.startupAdmissionClosed) throw new Error("Agent runtime is shutting down");
     const creation = this.createAndDispatchInitialTurn(command, options);
     this.pendingCreations.add(creation);
     try {
@@ -1904,14 +1905,15 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     }
   }
 
-  /** Refuse new turns and wake startup decisions before admitted requests drain. */
+  /** Refuse new thread startups and wake startup decisions before admitted requests drain. */
   beginShutdown(): void {
-    this.shuttingDown = true;
+    this.startupAdmissionClosed = true;
     this.threadCreation.interruptPendingStartups();
   }
 
   /** Stop all active agent sessions (for graceful shutdown). */
   async stopAll(): Promise<void> {
+    this.shuttingDown = true;
     this.beginShutdown();
     const ids = [...this.activeSessionIds];
     await Promise.all(
