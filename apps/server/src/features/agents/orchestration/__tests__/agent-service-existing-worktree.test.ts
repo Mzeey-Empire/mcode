@@ -1268,6 +1268,24 @@ describe("AgentService.createAndSend defaults", () => {
     expect(provider.sendTurn).not.toHaveBeenCalled();
   });
 
+  it("completes a handled initial command when shutdown begins after the agent phase starts", async () => {
+    const { workspaceRepo, service, threadStartups } = await createAgentServiceHarness(undefined, true);
+    const workspace = await workspaceRepo.create("Repo", "/repo");
+    const start = ThreadCreationCoordinator.prototype.startInitialAgent;
+    const gate = vi.spyOn(ThreadCreationCoordinator.prototype, "startInitialAgent").mockImplementation(async function (this: ThreadCreationCoordinator, startupId) {
+      await start.call(this, startupId);
+      service.beginShutdown();
+    });
+    const startupId = "00000000-0000-4000-8000-000000000030";
+    try {
+      await service.createAndSend({ workspaceId: workspace.id, content: "/goal clear", startupId });
+      expect(threadStartups.get(startupId)).toMatchObject({ state: "completed", phase: "agent" });
+    } finally {
+      gate.mockRestore();
+      await service.stopAll();
+    }
+  });
+
   it("returns an idle snapshot when startup fails before runtime ownership", async () => {
     const { workspaceRepo, service, availability } = await createAgentServiceHarness();
     const workspace = (await workspaceRepo.create("Repo", "/repo"));

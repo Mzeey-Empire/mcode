@@ -233,7 +233,6 @@ export class ThreadCreationCoordinator {
 
   /** Complete a startup whose initial command was handled without a provider turn, so no provider frame will come. */
   async completeHandledInitialCommand(startupId: string | undefined): Promise<void> {
-    await this.interruptIfShuttingDown(startupId);
     if (startupId) await this.startups()?.complete(startupId);
   }
 
