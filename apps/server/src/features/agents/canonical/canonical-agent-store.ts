@@ -729,16 +729,23 @@ export class CanonicalAgentStore {
   }
 
   /**
-   * Certify the saved watermark of an older generation even after later starts or startup recovery, with the turn
-   * of its last saved event. Undefined when the thread saved nothing in that epoch.
+   * Certify the saved watermark of an older generation and the turn started at that position.
+   * Undefined when the thread saved nothing in that epoch.
    */
   savedProgressHead(threadId: string, epoch: string): { readonly sequence: number; readonly turnId: string | null } | undefined {
     const sequence = sql<number>`json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.sequence')`;
-    const row = this.orm.select({ sequence, turnId: canonicalAgentEvents.turnId })
+    const row = this.orm.select({ sequence, durableRevision: canonicalAgentEvents.durableRevision })
       .from(canonicalAgentEvents).where(and(eq(canonicalAgentEvents.threadId, threadId),
         sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.progressPosition.epoch') = ${epoch}`))
       .orderBy(desc(sequence)).limit(1).get();
-    return row ? { sequence: row.sequence, turnId: row.turnId } : undefined;
+    if (!row) return undefined;
+    // A late hook can write for a completed turn while a newer turn is streaming.
+    const started = this.orm.select({ turnId: canonicalAgentEvents.turnId }).from(canonicalAgentEvents)
+      .where(and(eq(canonicalAgentEvents.threadId, threadId),
+        sql`${canonicalAgentEvents.durableRevision} <= ${row.durableRevision}`,
+        sql`json_extract(${canonicalAgentEvents.envelopeJson}, '$.payload.type') = 'turn.started'`))
+      .orderBy(desc(canonicalAgentEvents.durableRevision), desc(canonicalAgentEvents.acceptedSequence)).limit(1).get();
+    return { sequence: row.sequence, turnId: started?.turnId ?? null };
   }
 
   /** Hydrate complete already-saved parent history on the writer, without volatile-retention caps. */
