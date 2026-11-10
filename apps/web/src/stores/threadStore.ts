@@ -3233,10 +3233,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     };
   };
 
-  // An empty or unavailable result clears only its own turn, never another turn's bar.
+  // A late result for an older turn never takes the bar from a newer one, and an empty result clears only its own.
   const latestTurnPatch = (record: ThreadRecord, localMessageId: string, filesChanged: string[]): Partial<ThreadRecord> => {
-    if (filesChanged.length > 0) return { latestTurnWithChanges: localMessageId };
-    return record.latestTurnWithChanges === localMessageId ? { latestTurnWithChanges: null } : {};
+    const current = record.latestTurnWithChanges;
+    if (filesChanged.length === 0) return current === localMessageId ? { latestTurnWithChanges: null } : {};
+    const position = (id: string) => record.messages.findIndex((message) => message.id === id);
+    return current && position(current) > position(localMessageId) ? {} : { latestTurnWithChanges: localMessageId };
   };
 
   const evidenceStopNotice = (record: ThreadRecord, event: TurnFileEvidenceEvent, filesChanged: string[]): Partial<ThreadRecord> => {

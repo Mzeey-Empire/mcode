@@ -105,6 +105,14 @@ describe("handleTurnPersisted", () => {
     ));
 
     expect(readThreadField(THREAD_ID, (r) => r.latestTurnWithChanges)).toBe("assistant-new");
+
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["src/old.ts"] },
+      { threadId: THREAD_ID, messageId: "assistant-old", executionId: "execution-old-retry" },
+    ));
+
+    expect(readThreadField(THREAD_ID, (r) => r.latestTurnWithChanges)).toBe("assistant-new");
+    expect(readThreadField(THREAD_ID, (r) => r.persistedFilesChanged["assistant-old"])).toEqual(["src/old.ts"]);
   });
 
   it("keeps volatile narrative through turn completion and persistence", () => {
