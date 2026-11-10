@@ -46,7 +46,7 @@ import { fitViewportCanvasBounds } from "./usePreviewViewport";
 import {
   localPreviewAddress,
   fileChangeMatchesPreviewScope,
-  turnPersistedMatchesPreviewScope,
+  turnFileEvidenceMatchesPreviewScope,
 } from "./usePreviewPage";
 
 function runtimeViewportPresentation(
@@ -298,10 +298,10 @@ export function WebRuntimePreview({
     const offChanged = pushEmitter.on("files.changed", (data) => {
       if (fileChangeMatchesPreviewScope(data, workspaceId, threadId)) reload();
     });
-    const offPersisted = pushEmitter.on("turn.persisted", (data) => {
-      if (turnPersistedMatchesPreviewScope(data, threadId)) reload();
+    const offEvidence = pushEmitter.on("turn.fileEvidence", (data) => {
+      if (turnFileEvidenceMatchesPreviewScope(data, threadId)) reload();
     });
-    return () => { offChanged(); offPersisted(); };
+    return () => { offChanged(); offEvidence(); };
   }, [identity, threadId, workspaceId]);
   useLayoutEffect(() => {
     if (!surfaceAvailable) return;

@@ -16,6 +16,7 @@ import type { GoalLookupResult } from "@mcode/contracts/models/goal";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
+import type { TurnFileEvidenceEvent } from "@mcode/contracts/models/turn-file-evidence";
 import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { reduceAgentEventBatch } from "@mcode/contracts/compat/agent-model";
@@ -112,6 +113,7 @@ import {
 import { stableAgentEventPublications } from "./thread-store/stable-agent-event-publications";
 import type { CanonicalPublicationIdentity } from "./thread-store/stable-agent-event-publications";
 import { shownLiveFrames } from "./thread-store/shown-live-frames";
+import { mergeFileEvidence } from "./thread-store/file-evidence";
 import {
   hydrateRunningThreads as hydrateRunningThreadRecords,
   transferThreadRuntime as transferOptimisticThreadRuntime,
@@ -540,9 +542,9 @@ interface ThreadState {
     executionId?: string | null;
     outcome?: TurnOutcome | null;
     toolCallCount: number;
-    filesChanged: string[];
-    fileEffects?: TurnFileEffectSummary;
   }) => void;
+  /** Apply one execution's file evidence; a resolved execution never returns to pending. */
+  handleTurnFileEvidence: (event: TurnFileEvidenceEvent) => void;
   /** Apply a monotonic live file-effect update for one thread. */
   handleFileEffectsUpdated: (
     threadId: string,
@@ -3154,9 +3156,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!record.awaitingUserStopPersist) {
       return { awaitingUserStopPersist: record.awaitingUserStopPersist, interruptStopFileNotice: record.interruptStopFileNotice };
     }
+    // The stop's changed files arrive later on turn.fileEvidence for this execution.
     return {
       awaitingUserStopPersist: undefined,
-      interruptStopFileNotice: payload.filesChanged.length > 0 ? { paths: payload.filesChanged } : record.interruptStopFileNotice,
+      awaitingStopEvidenceExecutionId: payload.executionId ?? undefined,
+      interruptStopFileNotice: record.interruptStopFileNotice,
     };
   };
 
@@ -3168,7 +3172,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     // Persistence can arrive before terminal progress, so preserve buffered
     // text before the terminal runtime patch clears it.
     const unflushedStreaming = payload.outcome !== undefined && record.streaming.length > 0;
-    const ensured = payload.filesChanged.length > 0 || payload.toolCallCount > 0 || unflushedStreaming
+    const ensured = payload.toolCallCount > 0 || unflushedStreaming
       ? ensureAssistantMessageForTurnPersist(record, payload.threadId, localMessageId, unflushedStreaming ? record.streaming : "")
       : undefined;
     if (payload.outcome === undefined) return ensured;
@@ -3177,16 +3181,49 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       : message);
   };
 
-  const persistedTurnFileEffects = (
+  const evidenceFileEffects = (record: ThreadRecord, event: TurnFileEvidenceEvent): Partial<ThreadRecord> => {
+    const fileEffects = event.evidence.state === "recorded" || event.evidence.state === "unavailable" ? event.evidence.fileEffects : undefined;
+    if (!fileEffects || event.turnId !== record.fileEffectTurnId || fileEffects.revision < record.fileEffectSummary.revision) return {};
+    return { fileEffectSummary: fileEffects };
+  };
+
+  const projectFileEvidence = (
     record: ThreadRecord,
-    payload: TurnPersistedPayload,
-    localMessageId: string,
+    event: TurnFileEvidenceEvent,
+    currentThreadId: string | null,
+  ): Partial<ThreadRecord> | undefined => {
+    const fileEvidence = mergeFileEvidence(record.fileEvidence, [event]);
+    if (fileEvidence === record.fileEvidence) return undefined;
+    if (event.evidence.state === "tracking") return { fileEvidence };
+    const filesChanged = event.evidence.state === "recorded" ? event.evidence.filesChanged : [];
+    return {
+      fileEvidence,
+      ...evidenceMessageFiles(record, event, filesChanged, currentThreadId === event.threadId),
+      ...evidenceStopNotice(record, event, filesChanged),
+      ...evidenceFileEffects(record, event),
+    };
+  };
+
+  const evidenceMessageFiles = (
+    record: ThreadRecord,
+    event: TurnFileEvidenceEvent,
+    filesChanged: string[],
+    isCurrentThread: boolean,
   ): Partial<ThreadRecord> => {
-    const ownsLiveEffects = payload.turnId != null
-      && payload.turnId === record.fileEffectTurnId
-      && (localMessageId === record.currentTurnMessageId || record.pendingTurnPersistMessageIds.includes(localMessageId));
-    if (!payload.fileEffects || !ownsLiveEffects || payload.fileEffects.revision < record.fileEffectSummary.revision) return {};
-    return { fileEffectSummary: payload.fileEffects };
+    if (event.messageId === null) return {};
+    const localMessageId = resolveTurnPersistLocalMessageId(record, event.messageId);
+    return {
+      ...(filesChanged.length > 0 ? { persistedFilesChanged: { ...record.persistedFilesChanged, [localMessageId]: filesChanged } } : {}),
+      ...(isCurrentThread ? { latestTurnWithChanges: filesChanged.length > 0 ? localMessageId : null } : {}),
+    };
+  };
+
+  const evidenceStopNotice = (record: ThreadRecord, event: TurnFileEvidenceEvent, filesChanged: string[]): Partial<ThreadRecord> => {
+    if (record.awaitingStopEvidenceExecutionId !== event.executionId) return {};
+    return {
+      awaitingStopEvidenceExecutionId: undefined,
+      ...(filesChanged.length > 0 ? { interruptStopFileNotice: { paths: filesChanged } } : {}),
+    };
   };
 
   const persistedTerminalPhase = (
@@ -3205,7 +3242,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const projectPersistedTurn = (
     record: ThreadRecord,
     payload: TurnPersistedPayload,
-    currentThreadId: string | null,
     terminalPhase: ThreadRecord["runtimePhase"] | undefined,
   ): Partial<ThreadRecord> => {
     if (payload.messageId === null) {
@@ -3215,10 +3251,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           : message),
         ...turnPersistStopState(record, payload),
         ...(terminalPhase ? terminalRuntimePatch(record, terminalPhase) : {}),
-        ...(payload.fileEffects && payload.turnId === record.fileEffectTurnId
-          && payload.fileEffects.revision >= record.fileEffectSummary.revision
-          ? { fileEffectSummary: payload.fileEffects }
-          : {}),
       };
     }
     const localMessageId = resolveTurnPersistLocalMessageId(record, payload.messageId);
@@ -3229,15 +3261,10 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         ? { ...message, serverSequence: payload.settledMessage.sequence }
         : message),
       persistedToolCallCounts: { ...record.persistedToolCallCounts, [localMessageId]: payload.toolCallCount },
-      persistedFilesChanged: { ...record.persistedFilesChanged, [localMessageId]: payload.filesChanged },
-      latestTurnWithChanges: currentThreadId === payload.threadId
-        ? payload.filesChanged.length > 0 ? localMessageId : null
-        : record.latestTurnWithChanges,
       serverMessageIds: { ...record.serverMessageIds, [localMessageId]: payload.messageId },
       ...clearPendingTurnPersistMessage(record, localMessageId),
       ...stopState,
       ...(terminalPhase ? terminalRuntimePatch(record, terminalPhase) : {}),
-      ...persistedTurnFileEffects(record, payload, localMessageId),
     };
   };
 
@@ -4647,7 +4674,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         };
         cacheRecord(payload.threadId, projectConversationCacheState({
           ...record,
-          ...projectPersistedTurn(record, payload, state.currentThreadId, undefined),
+          ...projectPersistedTurn(record, payload, undefined),
         }));
         return {};
       }
@@ -4658,7 +4685,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
           projectPersistedTurn(
             getThreadRecord(state.records, payload.threadId),
             payload,
-            state.currentThreadId,
             terminalPhase,
           ),
         ),
@@ -4670,17 +4696,32 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       persistedExecutionByThread.set(payload.threadId, payload.executionId);
     }
     retireSettledConversation(payload.threadId, payload.executionId);
+  },
 
-    if (payload.filesChanged.length > 0) {
+  handleTurnFileEvidence: (event) => {
+    const resident = get().records.get(event.threadId);
+    const cached = getCachedRecord(event.threadId);
+    set((state) => {
+      if (!resident && cached) {
+        const empty = createEmptyThreadRecord();
+        const record = { ...empty, ...cached, fileEffectSummary: cached.settledFileEffectSummary ?? empty.fileEffectSummary };
+        const patch = projectFileEvidence(record, event, state.currentThreadId);
+        if (patch) cacheRecord(event.threadId, projectConversationCacheState({ ...record, ...patch }));
+        return {};
+      }
+      const patch = projectFileEvidence(getThreadRecord(state.records, event.threadId), event, state.currentThreadId);
+      return patch ? { records: patchThreadRecord(state.records, event.threadId, patch) } : {};
+    });
+
+    if (event.evidence.state === "recorded" && event.evidence.filesChanged.length > 0) {
       useWorkspaceStore.setState((ws) => ({
         threads: ws.threads.map((t) =>
-          t.id === payload.threadId && !t.has_file_changes
+          t.id === event.threadId && !t.has_file_changes
             ? { ...t, has_file_changes: true }
             : t,
         ),
       }));
     }
-
   },
   };
 });

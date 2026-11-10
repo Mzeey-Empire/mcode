@@ -9,6 +9,7 @@ import {
 } from "@/stores/thread-record";
 import { readThreadField, resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { mockTransport } from "./mocks/transport";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -41,8 +42,13 @@ function persist(messageId: string, toolCallCount = 0): void {
     threadId: THREAD_ID,
     messageId,
     toolCallCount,
-    filesChanged: toolCallCount > 0 ? ["src/changed.ts"] : [],
   });
+  if (toolCallCount > 0) {
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["src/changed.ts"] },
+      { threadId: THREAD_ID, executionId: `execution-${messageId}`, messageId },
+    ));
+  }
 }
 
 function message(messageId: string, content = "final response"): void {

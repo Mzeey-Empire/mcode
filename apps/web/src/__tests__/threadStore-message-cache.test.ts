@@ -26,6 +26,7 @@ import {
   measureConversationValue,
 } from "@/features/conversation/hydration/conversation-memory-policy";
 import { mockTransport } from "./mocks/transport";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -115,7 +116,7 @@ describe("hidden completion residency", () => {
     useThreadStore.getState().handleTurnPersisted({
       threadId: "plan", messageId: "plan-answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "plan-answer", sequence: 10 },
-      outcome: "completed", toolCallCount: 0, filesChanged: [],
+      outcome: "completed", toolCallCount: 0,
     });
     scheduleDrainAfterEdit("plan");
     await vi.advanceTimersByTimeAsync(1_000);
@@ -139,7 +140,7 @@ describe("hidden completion residency", () => {
     useThreadStore.getState().handleTurnPersisted({
       threadId: "queued", messageId: "queued-answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "queued-answer", sequence: 10 },
-      outcome: "completed", toolCallCount: 0, filesChanged: [],
+      outcome: "completed", toolCallCount: 0,
     });
     scheduleDrainAfterEdit("queued");
     await vi.advanceTimersByTimeAsync(2_000);
@@ -163,7 +164,7 @@ describe("hidden completion residency", () => {
     useThreadStore.getState().handleTurnPersisted({
       threadId: "effects", messageId: "effects-answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "effects-answer", sequence: 10 },
-      outcome: "completed", toolCallCount: 1, filesChanged: ["src/a.ts"],
+      outcome: "completed", toolCallCount: 1,
     });
     expect(useThreadStore.getState().records.has("effects")).toBe(false);
     const restoration = activateTestConversation("effects");
@@ -180,7 +181,7 @@ describe("hidden completion residency", () => {
     useThreadStore.getState().handleTurnPersisted({
       threadId: "replaced", messageId: "replaced-answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "replaced-answer", sequence: 10 },
-      outcome: "completed", toolCallCount: 0, filesChanged: [],
+      outcome: "completed", toolCallCount: 0,
     });
     useThreadStore.getState().handleAgentEvent({
       type: "turnStarted", threadId: "replaced",
@@ -196,7 +197,7 @@ describe("hidden completion residency", () => {
     useThreadStore.getState().handleTurnPersisted({
       threadId: "replaced", messageId: "replaced-answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "replaced-answer", sequence: 10 },
-      outcome: "completed", toolCallCount: 0, filesChanged: [],
+      outcome: "completed", toolCallCount: 0,
     });
     expect(getCachedRecord("replaced")).toBeUndefined();
     expect(useThreadStore.getState().records.get("replaced")).toMatchObject({
@@ -216,8 +217,12 @@ describe("hidden completion residency", () => {
     useThreadStore.getState().handleTurnPersisted({
       threadId: "late", messageId: "late-answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "late-answer", sequence: 10 },
-      outcome: "completed", toolCallCount: 2, filesChanged: ["src/a.ts"],
+      outcome: "completed", toolCallCount: 2,
     });
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["src/a.ts"] },
+      { threadId: "late", executionId: CACHE_EXECUTION, messageId: "late-answer" },
+    ));
     expect(useWorkspaceStore.getState().threads.find((thread) => thread.id === "late")?.has_file_changes).toBe(true);
     expect(useThreadStore.getState().records.has("late")).toBe(false);
     expect(getCachedRecord("late")?.persistedFilesChanged).toEqual({ "late-answer": ["src/a.ts"] });
@@ -226,22 +231,26 @@ describe("hidden completion residency", () => {
     useThreadStore.getState().handleTurnPersisted({
       threadId: "late", messageId: "late-answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "late-answer", sequence: 11 },
-      outcome: "completed", toolCallCount: 3, filesChanged: ["src/a.ts", "src/b.ts"],
+      outcome: "completed", toolCallCount: 3,
     });
     expect(useThreadStore.getState().records.has("late")).toBe(false);
     expect(getCachedRecord("late")?.persistedToolCallCounts).toEqual({ "late-answer": 3 });
     expect(getCachedRecord("late")?.messages[0]?.serverSequence).toBe(11);
     await activateTestConversation("late");
-    expect(getThreadRecord(useThreadStore.getState().records, "late").persistedFilesChanged).toEqual({ "late-answer": ["src/a.ts", "src/b.ts"] });
+    expect(getThreadRecord(useThreadStore.getState().records, "late").persistedFilesChanged).toEqual({ "late-answer": ["src/a.ts"] });
   });
 
-  it("applies turn.persisted for a thread this window never loaded", () => {
+  it("applies turn.fileEvidence for a thread this window never loaded", () => {
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "unloaded", has_file_changes: false })] });
     useThreadStore.getState().handleTurnPersisted({
       threadId: "unloaded", messageId: "answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "answer", sequence: 3 },
-      outcome: "completed", toolCallCount: 0, filesChanged: ["src/b.ts"],
+      outcome: "completed", toolCallCount: 0,
     });
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["src/b.ts"] },
+      { threadId: "unloaded", executionId: CACHE_EXECUTION, messageId: "answer" },
+    ));
     expect(useWorkspaceStore.getState().threads.find((thread) => thread.id === "unloaded")?.has_file_changes).toBe(true);
   });
 
@@ -252,7 +261,7 @@ describe("hidden completion residency", () => {
     useThreadStore.getState().handleTurnPersisted({
       threadId: "unsaved", messageId: "unsaved-answer", executionId: CACHE_EXECUTION,
       settledMessage: { id: "unsaved-answer", sequence: 10 },
-      outcome: "completed", toolCallCount: 0, filesChanged: [],
+      outcome: "completed", toolCallCount: 0,
     });
     expect(useThreadStore.getState().records.get("unsaved")?.canonicalAgent.progress?.savedThrough).toBe(0);
     execution.save();
@@ -271,14 +280,14 @@ describe("hidden completion residency", () => {
       useThreadStore.getState().handleTurnPersisted({ threadId: `hidden-${index}`,
         messageId: `hidden-${index}-answer`, executionId: CACHE_EXECUTION,
         settledMessage: { id: `hidden-${index}-answer`, sequence: 10 },
-        outcome: "completed", toolCallCount: 0, filesChanged: [] });
+        outcome: "completed", toolCallCount: 0 });
     }
     const records = [...useThreadStore.getState().records.values()];
     const canonicalItems = records.reduce((count, record) => count + Object.keys(record.canonicalAgent.state.items).length, 0);
     expect({ liveRecords: records.length, canonicalItems }).toEqual({ liveRecords: 0, canonicalItems: 0 });
     useThreadStore.getState().handleTurnPersisted({ threadId: "hidden-0", messageId: "hidden-0-answer",
       settledMessage: { id: "hidden-0-answer", sequence: 10 },
-      executionId: CACHE_EXECUTION, outcome: "completed", toolCallCount: 0, filesChanged: [] });
+      executionId: CACHE_EXECUTION, outcome: "completed", toolCallCount: 0 });
     expect(useThreadStore.getState().records.has("hidden-0")).toBe(false);
     const cached = getCachedRecord("hidden-0");
     expect(cached?.messages.map((message) => message.content)).toEqual(["Answer for hidden-0"]);
@@ -300,7 +309,7 @@ describe("hidden completion residency", () => {
     await vi.advanceTimersByTimeAsync(100);
     useThreadStore.getState().handleTurnPersisted({ threadId: "displayed", messageId: "displayed-answer",
       settledMessage: { id: "displayed-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
-      outcome: "completed", toolCallCount: 0, filesChanged: [] });
+      outcome: "completed", toolCallCount: 0 });
     expect(useThreadStore.getState().records.get("displayed")?.runtimePhase).toBe("completed");
     expect(Object.keys(useThreadStore.getState().records.get("displayed")?.canonicalAgent.state.items ?? {})).toEqual(["message:displayed-answer"]);
     if (display === "leased") getConversationResidency().unmountDisplayConversation("displayed");
@@ -337,7 +346,7 @@ describe("hidden completion residency", () => {
     expect(useThreadStore.getState().records.has("pending")).toBe(true);
     useThreadStore.getState().handleTurnPersisted({ threadId: "pending", messageId: "pending-answer",
       settledMessage: { id: "pending-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
-      outcome: "completed", toolCallCount: 0, filesChanged: [] });
+      outcome: "completed", toolCallCount: 0 });
     expect(useThreadStore.getState().records.has("pending")).toBe(false);
     expect(getCachedRecord("pending")?.messages.map((message) => message.content)).toEqual(["Answer for pending"]);
   });
@@ -354,7 +363,7 @@ describe("hidden completion residency", () => {
     await vi.advanceTimersByTimeAsync(100);
     useThreadStore.getState().handleTurnPersisted({ threadId: "background", messageId: "background-answer",
       settledMessage: { id: "background-answer", sequence: 10 }, executionId: CACHE_EXECUTION,
-      outcome: "completed", toolCallCount: 1, filesChanged: [] });
+      outcome: "completed", toolCallCount: 1 });
     expect(useThreadStore.getState().records.get("background")?.toolCalls.map((tool) => ({
       id: tool.id, complete: tool.isComplete,
     }))).toEqual([{ id: "background-tool", complete: false }]);
@@ -847,7 +856,6 @@ describe("loadMessages cache synchronization", () => {
       threadId: "t1",
       messageId: "m1",
       toolCallCount: 0,
-      filesChanged: [],
     });
     expect(getCachedRecord("t1")).toBeUndefined();
   });

@@ -280,7 +280,6 @@ describe("threadStore textDelta batching", () => {
       threadId: tid,
       messageId: serverMessageId,
       toolCallCount: 1,
-      filesChanged: [],
     });
 
     expect(mockTransport.loadTurn).not.toHaveBeenCalled();

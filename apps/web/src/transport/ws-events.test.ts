@@ -35,7 +35,9 @@ import { useThreadStartupStore } from "@/features/thread-startup";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 
 import { useProjectIconStore } from "@/features/projects/icons/projectIconStore";
-import { resetThreadStoreForTests, getTestThreadToolCalls } from "@/stores/thread-store-test-utils";
+import { resetThreadStoreForTests, getTestThreadToolCalls, readThreadField } from "@/stores/thread-store-test-utils";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
+import type { TurnFileEvidence } from "@mcode/contracts/models/turn-file-evidence";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 
 describe("workspace deletion Browser profiles", () => {
@@ -571,9 +573,10 @@ describe("ws-events approval.requested", () => {
   });
 });
 
-describe("ws-events turn.persisted Review invalidation", () => {
+describe("ws-events turn file evidence", () => {
   beforeEach(() => {
     stopPushListeners();
+    resetThreadStoreForTests({ currentThreadId: "thread-1" });
     useWorkspaceStore.setState({ threads: [makeThread()] });
     useDiffStore.setState({ diffRevisionByScope: {} });
     startPushListeners();
@@ -581,24 +584,39 @@ describe("ws-events turn.persisted Review invalidation", () => {
 
   afterEach(() => stopPushListeners());
 
-  it("invalidates Review only when the persisted turn changed files", () => {
-    pushEmitter.emit("turn.persisted", {
-      threadId: "thread-1",
-      messageId: "message-1",
-      settledMessage: { id: "message-1", sequence: 1 },
-      toolCallCount: 0,
-      filesChanged: [],
-    });
-    expect(useDiffStore.getState().diffRevisionByScope["thread-1"]).toBeUndefined();
+  const persisted = () => pushEmitter.emit("turn.persisted", {
+    threadId: "thread-1",
+    messageId: "message-1",
+    settledMessage: { id: "message-1", sequence: 1 },
+    toolCallCount: 0,
+    executionId: "execution-1",
+    outcome: "completed",
+  });
+  const evidence = (value: TurnFileEvidence) => pushEmitter.emit("turn.fileEvidence", createFileEvidenceEvent(value, { messageId: "message-1" }));
+  const recorded: TurnFileEvidence = { state: "recorded", filesChanged: ["src/changed.ts"] };
 
-    pushEmitter.emit("turn.persisted", {
-      threadId: "thread-1",
-      messageId: "message-2",
-      settledMessage: { id: "message-2", sequence: 2 },
-      toolCallCount: 0,
-      filesChanged: ["src/changed.ts"],
-    });
+  it("shows changed files when resolved evidence follows the pending push", () => {
+    persisted();
+    evidence({ state: "tracking" });
+    expect(useDiffStore.getState().diffRevisionByScope["thread-1"]).toBeUndefined();
+    expect(readThreadField("thread-1", (r) => r.persistedFilesChanged["message-1"])).toBeUndefined();
+
+    evidence(recorded);
+
+    expect(readThreadField("thread-1", (r) => r.persistedFilesChanged["message-1"])).toEqual(["src/changed.ts"]);
+    expect(readThreadField("thread-1", (r) => r.latestTurnWithChanges)).toBe("message-1");
     expect(useDiffStore.getState().diffRevisionByScope["thread-1"]).toBe(1);
+  });
+
+  it("keeps resolved evidence when a duplicate turn.persisted or a stale pending push arrives", () => {
+    persisted();
+    evidence(recorded);
+
+    persisted();
+    evidence({ state: "tracking" });
+
+    expect(readThreadField("thread-1", (r) => r.fileEvidence["execution-1"]?.evidence)).toEqual(recorded);
+    expect(readThreadField("thread-1", (r) => r.persistedFilesChanged["message-1"])).toEqual(["src/changed.ts"]);
   });
 });
 

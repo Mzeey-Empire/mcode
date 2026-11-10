@@ -11,6 +11,7 @@ import {
   seedThreadRecord,
 } from "@/stores/thread-store-test-utils";
 import { mockTransport } from "./mocks/transport";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 import { useTaskStore } from "@/stores/taskStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 
@@ -72,8 +73,11 @@ describe("handleTurnPersisted", () => {
       threadId: THREAD_ID,
       messageId: "server-turn-1",
       toolCallCount: 2,
-      filesChanged: ["src/a.ts"],
     });
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["src/a.ts"] },
+      { threadId: THREAD_ID, messageId: "server-turn-1" },
+    ));
 
     expect(readThreadField(THREAD_ID, (r) => r.persistedFilesChanged[turnOneId])).toEqual([
       "src/a.ts",
@@ -124,7 +128,6 @@ describe("handleTurnPersisted", () => {
       threadId: THREAD_ID,
       messageId: "server-volatile",
       toolCallCount: 1,
-      filesChanged: [],
     });
 
     expect(readThreadField(THREAD_ID, (record) => record.toolCalls)).toEqual([
@@ -161,7 +164,6 @@ describe("handleTurnPersisted", () => {
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
-      filesChanged: [],
       outcome: "interrupted",
       executionId: "execution-1",
     });
@@ -211,7 +213,6 @@ describe("handleTurnPersisted", () => {
       threadId: THREAD_ID,
       messageId: "assistant-1",
       toolCallCount: 0,
-      filesChanged: [],
       outcome: "interrupted",
       executionId: "execution-1",
     });
@@ -249,8 +250,11 @@ describe("handleTurnPersisted", () => {
       threadId: THREAD_ID,
       messageId: "server-tools-only",
       toolCallCount: 3,
-      filesChanged: ["README.md"],
     });
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["README.md"] },
+      { threadId: THREAD_ID, messageId: "server-tools-only" },
+    ));
 
     const messages = readThreadField(THREAD_ID, (r) => r.messages);
     expect(messages.some((m) => m.id === "server-tools-only" && m.role === "assistant")).toBe(
@@ -338,9 +342,11 @@ describe("handleTurnPersisted", () => {
       messageId: "server-turn",
       turnId: "turn-1",
       toolCallCount: 1,
-      filesChanged: ["a.ts", "b.ts"],
-      fileEffects: { revision: 2, fileCount: 1, additions: 1, deletions: 0, effects: [] },
     });
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["a.ts", "b.ts"], fileEffects: { revision: 2, fileCount: 1, additions: 1, deletions: 0, effects: [] } },
+      { threadId: THREAD_ID, turnId: "turn-1", messageId: "server-turn" },
+    ));
     expect(readThreadField(THREAD_ID, (r) => r.fileEffectSummary)).toMatchObject({
       revision: 3,
       fileCount: 2,
@@ -376,15 +382,11 @@ describe("handleTurnPersisted", () => {
       turnId: "turn-1",
       messageId: "server-turn-1",
       toolCallCount: 1,
-      filesChanged: ["old.ts"],
-      fileEffects: {
-        revision: 10,
-        fileCount: 10,
-        additions: 10,
-        deletions: 10,
-        effects: [],
-      },
     });
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["old.ts"], fileEffects: { revision: 10, fileCount: 10, additions: 10, deletions: 10, effects: [] } },
+      { threadId: THREAD_ID, turnId: "turn-1", messageId: "server-turn-1" },
+    ));
 
     expect(readThreadField(THREAD_ID, (r) => r.fileEffectSummary)).toMatchObject({
       revision: 1,
@@ -439,7 +441,6 @@ describe("handleTurnPersisted", () => {
       threadId: THREAD_ID,
       messageId: "server-stop-1",
       toolCallCount: 0,
-      filesChanged: [],
       outcome: "cancelled",
       executionId: "execution-stop",
     });
@@ -478,13 +479,19 @@ describe("handleTurnPersisted", () => {
       threadId: THREAD_ID,
       messageId: null,
       toolCallCount: 0,
-      filesChanged: [],
       outcome: "cancelled",
       executionId: "execution-early-stop",
     });
 
     expect(readThreadField(THREAD_ID, (record) => record.messages)).toEqual([user]);
     expect(readThreadField(THREAD_ID, (record) => record.awaitingUserStopPersist)).toBeUndefined();
+    expect(readThreadField(THREAD_ID, (record) => record.interruptStopFileNotice)).toBeUndefined();
+
+    useThreadStore.getState().handleTurnFileEvidence(createFileEvidenceEvent(
+      { state: "recorded", filesChanged: ["src/stopped.ts"] },
+      { threadId: THREAD_ID, executionId: "execution-early-stop", messageId: null },
+    ));
+    expect(readThreadField(THREAD_ID, (record) => record.interruptStopFileNotice)).toEqual({ paths: ["src/stopped.ts"] });
     expect(readThreadField(THREAD_ID, (record) => record.runtimePhase)).toBe("cancelled");
     expect(useThreadStore.getState().runningThreadIds.has(THREAD_ID)).toBe(false);
   });

@@ -10,6 +10,7 @@ import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect"
 import type { TurnRuntimePhase, TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
 import type { DevinMode } from "@mcode/contracts/models/enums";
 import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts/models/enums";
+import { EMPTY_FILE_EVIDENCE, type FileEvidenceByExecution } from "./thread-store/file-evidence";
 import type { ApprovalReceipt, ThoughtSegment } from "@/features/conversation/narrative/types";
 import type { ProviderRetry } from "@/features/conversation/turn-ending/provider-retry";
 import {
@@ -115,6 +116,8 @@ export interface ThreadRecord {
   persistedToolCallCounts: Record<string, number>;
   persistedFilesChanged: Record<string, string[]>;
   latestTurnWithChanges: string | null;
+  /** File evidence per execution; resolved entries never return to `tracking`. */
+  fileEvidence: FileEvidenceByExecution;
   /** Live or just-finalized agent-attributed file-effect aggregate for the current turn. */
   fileEffectSummary: TurnFileEffectSummary;
   /** Server tracker generation that owns the live file-effect aggregate. */
@@ -155,6 +158,8 @@ export interface ThreadRecord {
   /** Exact execution whose Stop was requested, retained until its lifecycle settles. */
   stopRequestedExecutionId?: string;
   interruptStopFileNotice?: { paths: string[] };
+  /** Execution whose user Stop has persisted; its recorded evidence fills the stop file notice. */
+  awaitingStopEvidenceExecutionId?: string;
   lastHydratedAt?: number;
 
   planQuestions: PlanQuestion[] | null;
@@ -222,6 +227,7 @@ export function createEmptyThreadRecord(): ThreadRecord {
     persistedToolCallCounts: {},
     persistedFilesChanged: {},
     latestTurnWithChanges: null,
+    fileEvidence: EMPTY_FILE_EVIDENCE,
     fileEffectSummary: { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] },
     fileEffectTurnId: "",
     serverMessageIds: {},

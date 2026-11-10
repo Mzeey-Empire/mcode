@@ -132,6 +132,7 @@ import {
 import { ViewportCoordinator } from "../../automation/services/viewportCoordinator";
 import { browserSurfaceHost } from "../BrowserSurfaceHostRoot";
 import { pushEmitter } from "@/transport/ws-transport";
+import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 
 function mockBridgeState(overrides: Record<string, unknown> = {}) {
   const state = {
@@ -1032,7 +1033,7 @@ describe("PreviewPanel: full panel state", () => {
     }));
   });
 
-  it("reloads the current local webview when a turn persists file changes", async () => {
+  it("reloads the current local webview when a turn records file changes", async () => {
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({ storedUrl: "http://127.0.0.1:4173/index.html" }),
     );
@@ -1040,16 +1041,13 @@ describe("PreviewPanel: full panel state", () => {
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
     await screen.findByTestId("preview-webview");
-    await waitFor(() => expect(pushEmitter.channels()).toContain("turn.persisted"));
+    await waitFor(() => expect(pushEmitter.channels()).toContain("turn.fileEvidence"));
 
     act(() => {
-      pushEmitter.emit("turn.persisted", {
-        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        messageId: "message-1",
-        settledMessage: { id: "message-1", sequence: 1 },
-        toolCallCount: 1,
-        filesChanged: ["src/main.ts"],
-      });
+      pushEmitter.emit("turn.fileEvidence", createFileEvidenceEvent(
+        { state: "recorded", filesChanged: ["src/main.ts"] },
+        { threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messageId: "message-1" },
+      ));
     });
 
     expect(navigateSurface).toHaveBeenCalledWith(expect.objectContaining({
@@ -1057,7 +1055,7 @@ describe("PreviewPanel: full panel state", () => {
     }));
   });
 
-  it("does not reload the webview when a persisted turn changed no files", async () => {
+  it("does not reload the webview when a turn recorded no changed files", async () => {
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({ storedUrl: "http://127.0.0.1:4173/index.html" }),
     );
@@ -1065,20 +1063,17 @@ describe("PreviewPanel: full panel state", () => {
 
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" workspaceId="11111111-1111-4111-8111-111111111111" />);
     await screen.findByTestId("preview-webview");
-    await waitFor(() => expect(pushEmitter.channels()).toContain("turn.persisted"));
+    await waitFor(() => expect(pushEmitter.channels()).toContain("turn.fileEvidence"));
     await waitFor(() => expect(navigateSurface).toHaveBeenCalledWith(expect.objectContaining({
       navigation: { kind: "address", address: "http://127.0.0.1:4173/index.html" },
     })));
     navigateSurface.mockClear();
 
     act(() => {
-      pushEmitter.emit("turn.persisted", {
-        threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        messageId: "message-1",
-        settledMessage: { id: "message-1", sequence: 1 },
-        toolCallCount: 3,
-        filesChanged: [],
-      });
+      pushEmitter.emit("turn.fileEvidence", createFileEvidenceEvent(
+        { state: "recorded", filesChanged: [] },
+        { threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messageId: "message-1" },
+      ));
     });
 
     expect(navigateSurface).not.toHaveBeenCalled();
