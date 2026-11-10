@@ -982,7 +982,11 @@ export class CanonicalCodexCollaborationCoordinator {
       if (!this.matchesExistingChildPayload(existing, input)) throw this.childItemConflict(itemId);
       return existing;
     }
-    if (input.eventKey !== "stream" && input.eventKey !== "stream-complete") {
+    if (input.eventKey === "completed" && existing.payload.eventKey === "completed") {
+      if (!this.matchesExistingChildMessage(existing, input)) throw this.childItemConflict(itemId);
+      return existing;
+    }
+    if (!["stream", "stream-complete", "completed"].includes(input.eventKey)) {
       if (!this.matchesExistingChildMessage(existing, input)) throw this.childItemConflict(itemId);
       return existing;
     }
@@ -996,15 +1000,13 @@ export class CanonicalCodexCollaborationCoordinator {
   ): AgentItem {
     const content = this.streamedChildMessageContent(existing, input);
     if (content === undefined) throw this.childItemConflict(itemId);
+    if (content === null) return existing;
     const message = existing.payload.message;
     if (!isRecord(message)) throw this.childItemConflict(itemId);
     const thread = this.operations.loadThread(input.childThreadId);
     if (!thread) throw new Error(`Codex child thread not found: ${input.childThreadId}`);
     const turn = this.loadChildTurn(input.childThreadId, input.nativeTurnId);
     if (!turn) throw new Error(`Codex child turn not found: ${input.nativeTurnId}`);
-    if (isTerminalTurn(turn)) {
-      return existing;
-    }
     const item = {
       ...existing,
       payload: {
@@ -1026,22 +1028,23 @@ export class CanonicalCodexCollaborationCoordinator {
     return item;
   }
 
-  private streamedChildMessageContent(existing: AgentItem, input: CodexChildItemInput): string | undefined {
+  private streamedChildMessageContent(existing: AgentItem, input: CodexChildItemInput): string | null | undefined {
     if (
-      (input.eventKey !== "stream" && input.eventKey !== "stream-complete")
-      || !isRecord(existing.payload.message)
+      !isRecord(existing.payload.message)
       || typeof existing.payload.message.content !== "string"
     ) return undefined;
     const inputMessage = childMessageSource(input.payload);
     if (typeof inputMessage.content !== "string") return undefined;
     if (typeof inputMessage.id === "string" && inputMessage.id !== existing.payload.message.id) return undefined;
-    return input.eventKey === "stream-complete"
-      ? inputMessage.content
-      : `${existing.payload.message.content}${inputMessage.content}`;
+    const savedFullMessage = isFullChildMessage(existing.payload.eventKey);
+    if (input.eventKey === "stream") {
+      return savedFullMessage ? null : `${existing.payload.message.content}${inputMessage.content}`;
+    }
+    return savedFullMessage && inputMessage.content === existing.payload.message.content ? null : inputMessage.content;
   }
 
   private childItemEventKey(input: CodexChildItemInput): string {
-    return input.kind === "message" && (input.eventKey === "stream" || input.eventKey === "stream-complete")
+    return input.kind === "message" && ["stream", "stream-complete", "completed"].includes(input.eventKey)
       ? "stream"
       : input.eventKey;
   }
@@ -1174,6 +1177,10 @@ function hasNativeTurnIdentity(turn: AgentTurn, nativeTurnId: string): boolean {
   return turn.providerIdentities.some((identity) => (
     identity.providerId === "codex" && identity.scope === "turn" && identity.value === nativeTurnId
   ));
+}
+
+function isFullChildMessage(eventKey: unknown): boolean {
+  return eventKey === "stream-complete" || eventKey === "completed";
 }
 
 function isTerminalTurn(turn: AgentTurn): boolean {

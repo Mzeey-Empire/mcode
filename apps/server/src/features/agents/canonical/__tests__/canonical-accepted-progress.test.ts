@@ -986,8 +986,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       await event([childDraft("turnComplete", {})]);
       await event([childDraft("textDelta", { delta: "late child answer" }, "late-message")]);
       await progress.waitForSaved(execution.threadId);
-      expect(childAnswer()).toEqual(["first"]);
-      expect(savedParentRuntimeText()).toContain("late child answer");
+      expect(childAnswer()).toEqual(provider === "codex" ? ["first", "late child answer"] : ["first"]);
+      expect(savedParentRuntimeText()).toEqual(provider === "codex" ? [] : ["late child answer"]);
     });
 
     it("saves no item for empty child pieces that arrive after its child turn ended", async () => {
@@ -998,7 +998,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       for (let index = 0; index < 50; index++) await event([childDraft("textDelta", { delta: "" }, "late-message")]);
       await event([childDraft("textDelta", { delta: "late" }, "late-message")]);
       await progress.waitForSaved(execution.threadId);
-      expect(savedParentRuntimeText()).toEqual(["late"]);
+      expect(savedParentRuntimeText()).toEqual(provider === "codex" ? [] : ["late"]);
+      expect(childAnswer()).toEqual(provider === "codex" ? ["first", "late"] : ["first"]);
       expect(Object.keys(savedState().items).length - itemsBefore).toBeLessThan(50);
     });
 
@@ -1502,6 +1503,50 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(childPublication).toBeTruthy();
     expect(saved.loadAcceptedFeatureSeed(execution.threadId).noticeSessionId).not.toBe("child-session");
     expect(progress.recover(childId, { conversationRevision: 0, rosterRevision: 0 }).retained).toEqual([]);
+  });
+
+  it.each(["early-delta", "late-delta", "full-only"])("saves real Codex late child text (%s) with idempotent receipts", async (mode) => {
+    await send(1, start("codex"));
+    let ordinal = 1;
+    const routing = { ...execution, deliveryAttempt: 1 };
+    const publisher = new CodexCanonicalEventPublisher({ submit: async (batch) => {
+      const sequence = ++ordinal;
+      const operation: ExecutionSemanticOperation = { operationId: `live-lease:${sequence}`, execution, lease, ordinal: sequence,
+        mutation: { kind: "append-events", phase: batch.phase, nativeCursor: null, events: batch.events } };
+      const result = await port.transact(operation);
+      expect(result.kind).toBe("accepted");
+      await progress.waitForSaved(execution.threadId);
+      expect(await port.transact(structuredClone(operation))).toEqual(result);
+      if (result.kind !== "accepted") throw new Error("Expected accepted mapper output");
+      return { commit: { outcome: "accepted", acceptedThrough: result.acceptedThrough, eventCount: batch.events.length,
+        progressPosition: result.progressPosition }, delivery: { ingress: "not-required" } };
+    } });
+    const mapper = new CodexEventMapper(execution.threadId);
+    const notify = async (method: string, params: Record<string, unknown>) => {
+      for (const runtime of mapper.mapNotification({ jsonrpc: "2.0", method, params })) {
+        publisher.publish(routing, { ...runtime, event: { ...runtime.event, turnExecutionId: execution.executionId } });
+      }
+      await publisher.waitForExecution(routing);
+    };
+    await notify("item/started", { item: { type: "collabAgentToolCall", id: "spawn", tool: "spawnAgent",
+      receiverThreadIds: ["native-child"], prompt: "Child task" } });
+    const child = { threadId: "native-child", turnId: "native-turn" };
+    await notify("turn/started", { ...child, turn: { id: "native-turn" } });
+    const childId = progress.loadSubagentRoster({ owningParentThreadId: execution.threadId, limit: 100 })?.active[0]?.id;
+    if (!childId) throw new Error("Expected mapped child");
+    if (mode === "early-delta") await notify("item/agentMessage/delta", { ...child, itemId: "answer", delta: "Partial" });
+    await notify("turn/completed", { ...child, turn: { id: "native-turn", status: "completed" } });
+    if (mode !== "full-only") await notify("item/agentMessage/delta", { ...child, itemId: "answer", delta: " answer" });
+    const saved = new CanonicalAgentStore(db, () => {});
+    const partial = mode === "early-delta" ? [{ content: "Partial answer" }] : [{ content: " answer" }];
+    expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").all(childId))
+      .toEqual(mode === "full-only" ? [] : partial);
+    await notify("item/completed", { ...child, item: { type: "agentMessage", id: "answer", text: "Complete child answer" } });
+    await notify("item/agentMessage/delta", { ...child, itemId: "answer", delta: " stale" });
+    expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant'").all(childId))
+      .toEqual([{ content: "Complete child answer" }]);
+    expect(saved.loadLatestTurn(childId)?.status).toBe("Completed");
+    expect(saved.loadTurn(execution.turnId)?.status).toBe("Running");
   });
 
   it("saves late child text and replays saved operations without appending twice", async () => {

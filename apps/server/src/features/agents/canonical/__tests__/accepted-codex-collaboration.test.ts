@@ -250,6 +250,16 @@ describe("AcceptedCodexCollaboration", () => {
     expect(port.prepare(full).changes).toEqual([]);
   });
 
+  it("ignores deltas after the full message on a running child turn", () => {
+    const port = new AcceptedCodexCollaboration(initial());
+    const value = runningChild(port);
+    port.prepare(textDelta("Partial"));
+    port.prepare(child({ type: AgentEventType.Message, threadId: "parent", turnExecutionId: PARENT_EXECUTION,
+      content: "Complete child answer", tokens: null }, { nativeItemId: "native-message", itemEventKey: "completed" }));
+    expect(port.prepare(textDelta(" stale")).changes).toEqual([]);
+    expect(port.loadTurn(value.turn.id)?.status).toBe("Running");
+  });
+
   it("appends late child deltas until the authoritative full message arrives", () => {
     const port = new AcceptedCodexCollaboration(initial());
     const value = runningChild(port);

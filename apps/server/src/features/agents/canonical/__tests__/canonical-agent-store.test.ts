@@ -2630,7 +2630,7 @@ describe("CanonicalAgentStore", () => {
       providerIdentities: [] as ProviderIdentity[],
     };
     const delegation = sink.startCodexChildDelegation(input);
-    sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-stream", nativeTurnId: "native-turn-stream" });
+    const childTurn = sink.startCodexChildTurn({ ...input, nativeThreadId: "native-child-stream", nativeTurnId: "native-turn-stream" });
     const first = sink.recordCodexChildItem({
       childThreadId: delegation.childThread.id,
       nativeTurnId: "native-turn-stream",
@@ -2656,11 +2656,18 @@ describe("CanonicalAgentStore", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE thread_id = ? AND kind = 'message'")
       .get(delegation.childThread.id)).toEqual({ count: 2 });
 
+    sink.finishCodexChildTurn({ childThreadId: delegation.childThread.id,
+      nativeTurnId: "native-turn-stream", outcome: "completed" });
+    sink.recordCodexChildItem({ childThreadId: delegation.childThread.id,
+      nativeTurnId: "native-turn-stream", nativeItemId: "native-message-stream", eventKey: "stream",
+      kind: "message", payload: { projection: "message", content: " late" } });
+    expect(sink.loadItem(first.id)?.payload.message).toMatchObject({ content: "AA late" });
+
     const completed = sink.recordCodexChildItem({
       childThreadId: delegation.childThread.id,
       nativeTurnId: "native-turn-stream",
       nativeItemId: "native-message-stream",
-      eventKey: "stream-complete",
+      eventKey: "completed",
       kind: "message",
       payload: { projection: "message", content: "AA" },
     });
@@ -2689,6 +2696,7 @@ describe("CanonicalAgentStore", () => {
     expect(sink.loadItem(first.id)?.payload).toMatchObject({
       message: { content: "AA" },
     });
+    expect(sink.loadTurn(childTurn.id)?.status).toBe("Completed");
   });
 
   it("persists repeated child text deltas through the Codex adapter into one canonical item", () => {

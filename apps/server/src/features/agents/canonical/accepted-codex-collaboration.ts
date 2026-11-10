@@ -440,7 +440,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
 
   recordCodexChildItem(input: CodexChildItemInput): AgentItem {
     const turn = this.childTurn(input.childThreadId, input.nativeTurnId);
-    const stream = input.kind === "message" && ["stream", "stream-complete"].includes(input.eventKey);
+    const stream = input.kind === "message" && ["stream", "stream-complete", "completed"].includes(input.eventKey);
     const id = `item:codex-child:${hash(`${turn.id}:${input.nativeItemId}:${stream ? "stream" : input.eventKey}:${input.kind}`)}`;
     return this.recordItemInTurn(turn, id, input, stream);
   }
@@ -448,7 +448,7 @@ export class AcceptedCodexCollaboration implements CodexCollaborationDurability,
   private recordItemInTurn(turn: AgentTurn, id: string, input: Omit<CodexChildItemInput, "nativeTurnId">, stream: boolean): AgentItem {
     const existing = this.record("items", id);
     if (existing) return this.updateChildItem(existing, input, turn, stream);
-    if (isTerminal(turn)) throw new Error(`Codex child turn is terminal: ${turn.id}`);
+    if (isTerminal(turn) && input.kind !== "message") throw new Error(`Codex child turn is terminal: ${turn.id}`);
     const now = timestamp();
     const payload = input.kind === "message" ? this.messagePayload(input.childThreadId, input.payload)
       : publicChildPayload(input.payload);
@@ -746,8 +746,8 @@ function unique(index: ReadonlyMap<string, ReadonlySet<string>>, key: string, la
   return values?.values().next().value;
 }
 function streamedChildContent(savedEventKey: unknown, eventKey: string, saved: string, incoming: string): string | null {
-  const fullMessageSaved = savedEventKey === "stream-complete";
-  if (eventKey !== "stream-complete") return fullMessageSaved ? null : saved + incoming;
+  const fullMessageSaved = savedEventKey === "stream-complete" || savedEventKey === "completed";
+  if (eventKey === "stream") return fullMessageSaved ? null : saved + incoming;
   return fullMessageSaved && incoming === saved ? null : incoming;
 }
 function isTerminal(turn: AgentTurn): boolean { return Object.values(TERMINAL_STATUS).some((status) => status === turn.status); }
