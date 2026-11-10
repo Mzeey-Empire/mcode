@@ -421,7 +421,8 @@ describe("AgentService container composition", () => {
 
     expect(stopped.status).toBe("cancelled");
     expect(stopProvider).toHaveBeenCalledWith(`mcode-${thread.id}`);
-    expect(workerRuntime?.owner.current(thread.id)).toBeUndefined();
+    // Stop returns once the ending is saved; the worker releases after the file check.
+    await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
   }, 15_000);
 
   it("confirms a stopped turn without assistant text through its durable terminal push", async () => {
@@ -439,7 +440,7 @@ describe("AgentService container composition", () => {
     expect(stopped.status).toBe("cancelled");
     expect(container.resolve(MessageRepo).listByThread(thread.id, 10).messages.map((message) => message.role))
       .toEqual(["user"]);
-    expect(workerRuntime?.owner.current(thread.id)).toBeUndefined();
+    await waitFor(() => workerRuntime?.owner.current(thread.id) === undefined);
   }, 15_000);
 
   it("publishes a provider cancelled Ended event from the worker terminal receipt", async () => {
@@ -562,8 +563,7 @@ describe("AgentService container composition", () => {
       threadId: thread.id, turnExecutionId: request.turnExecutionId, phase: "cancelled" } });
     expect(sealing.mock.calls.map(([input]) => input.outcome)).toEqual(["cancelled"]);
     expect(recover).not.toHaveBeenCalled();
-    expect(service.runtimeAccess().activeCount()).toBe(0);
-    expect(runtime.owner.current(thread.id)).toBeUndefined();
+    await waitFor(() => service.runtimeAccess().activeCount() === 0 && runtime.owner.current(thread.id) === undefined);
     await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.cancelled"));
     expect(database?.query("SELECT status FROM canonical_agent_turns WHERE execution_id=?").get(request.turnExecutionId)).toEqual({ status: "Cancelled" });
     expect(canonicalPayloadTypes(thread.id).filter((type) => ["turn.completed", "turn.cancelled", "turn.errored", "turn.interrupted"].includes(type))).toEqual(["turn.cancelled"]);

@@ -82,7 +82,11 @@ export class TurnFileEvidenceLedger {
   /** Called only after turn.persisted was broadcast, including the accepted-save path. */
   terminalSaved(execution: ExecutionIdentity): void {
     const entry = this.entries.get(execution.executionId);
-    if (!entry) return;
+    // A lost worker or failed seal never registered an entry; its saved ending must still resolve the row.
+    if (!entry) {
+      void this.resolveReleased(execution).catch((error: unknown) => logger.warn("Turn file evidence resolution failed", { ...execution, error: String(error) }));
+      return;
+    }
     entry.published = true;
     try { this.publish(execution); } finally { void entry.write?.(); }
   }

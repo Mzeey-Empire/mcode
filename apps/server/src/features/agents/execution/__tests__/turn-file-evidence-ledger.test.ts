@@ -113,6 +113,13 @@ describe("TurnFileEvidenceLedger", () => {
       .toEqual(["turn.persisted", "turn.fileEvidence", "turn.fileEvidence"]);
   });
 
+  it("resolves a lost worker's tracking once its interruption is saved, with no live entry", async () => {
+    ledger.terminalSaved(execution); await flush();
+    expect(evidence()).toEqual({ state: "tracking" });
+    terminal("interrupted"); ledger.terminalSaved(execution); await flush();
+    expect(evidence()).toEqual({ state: "unavailable", reason: "observation-lost", knownPaths: [] });
+  });
+
   it("stops retrying once the thread's execution is deleted", async () => {
     const execute = vi.spyOn(writer, "execute");
     ledger.expect(execution, frozen); ledger.tracked(execution, facts); terminal(); failures = 1;

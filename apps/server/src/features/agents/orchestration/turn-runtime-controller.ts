@@ -808,7 +808,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.fileEvidence?.tracked(execution, "lost");
     this.fileEvidence?.terminalSaved(execution);
     void this.resolveAbandonedEvidence(execution.threadId);
-    // Recovery has committed the interruption, so the baseline can become the attempt's snapshot.
+    // Recovery has committed the interruption, so the baseline pin can settle.
     this.settlePinsInBackground(execution);
     if (this.turnRuntime.snapshot(execution.threadId)?.turnExecutionId !== execution.executionId) return;
     const active = this.lifecycles.workerFor(execution);
@@ -1046,7 +1046,9 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       const user = prepared.parentStartInput.userMessage;
       this.fileEvidence?.expectUnsent(execution, user.kind === "create" && user.systemNotice?.kind === "provider-turn");
     }
-    if (!await this.finishUnsentWorkerTurn(prepared.lease.threadId, prepared.lease.turnExecutionId)) this.fileEvidence?.forget(execution);
+    const finished = await this.finishUnsentWorkerTurn(prepared.lease.threadId, prepared.lease.turnExecutionId)
+      .catch((finishError: unknown) => { this.fileEvidence?.forget(execution); throw finishError; });
+    if (!finished) this.fileEvidence?.forget(execution);
     this.turnRuntime.terminalize(prepared.lease.threadId, prepared.lease.turnExecutionId, "errored");
     this.clearTurnDispatch(prepared.lease.threadId);
     this.trackSessionEnded(prepared.lease.threadId, prepared.lease.turnExecutionId);
