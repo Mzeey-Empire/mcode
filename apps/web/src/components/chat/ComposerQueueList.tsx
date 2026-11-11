@@ -2,7 +2,6 @@ import { Fragment } from "react";
 import { ArrowUp, CornerDownRight, FileText, Paperclip, Pencil, X } from "lucide-react";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { Button, IconButton } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import {
   isSteerable,
   releaseHeldSteer,
@@ -153,17 +152,17 @@ function ParkedDraftRow({ message }: { readonly message: QueuedMessage }) {
         <FileText className="size-4 text-muted" aria-hidden />
       </span>
       <span className="shrink-0 text-body-small text-muted">Draft</span>
-      <QueueRowText message={message} muted />
+      <QueueRowText message={message} />
     </li>
   );
 }
 
-function QueueRowText({ message, muted = false }: { message: QueuedMessage; muted?: boolean }) {
+function QueueRowText({ message }: { message: QueuedMessage }) {
   const text = stripPreviewAnnotationFence(message.displayContent || message.content);
   const annotations = message.previewAnnotations;
   return (
     <>
-        <span className={cn("text-fade flex-1 text-body-small", muted ? "text-muted" : "text-ink")}>
+        <span className="text-fade flex-1 text-body-small text-ink">
           {text || <span className="sr-only">Preview annotation</span>}
         </span>
         {annotations && annotations.annotations.length > 0 ? (
