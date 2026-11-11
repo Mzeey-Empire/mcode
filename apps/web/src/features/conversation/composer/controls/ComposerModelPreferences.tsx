@@ -2,7 +2,7 @@ import { MENU_LIST_CLASS, MENU_ROW_CLASS, MenuRowBody } from "@/components/ui/me
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { Brain, Network, Zap, type LucideIcon } from "lucide-react";
 import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
-import { Button } from "@/components/ui/button";
+import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
@@ -179,18 +179,22 @@ export function ComposerModelOptions({
         />
       )}
       {toggles.map(({ label, icon: Icon, on, set }) => (
-        // Off reads as an outlined choice and on takes the selected fill, as the chosen speed does beside it.
-        <Button
-          key={label}
-          variant="outline"
-          size="compact"
-          aria-pressed={on}
-          onClick={() => set(!on)}
-          className="px-2.5 text-body-small text-muted aria-pressed:border-transparent aria-pressed:bg-selected aria-pressed:text-ink"
-        >
-          <Icon aria-hidden className="size-[1.4rem]" />
-          {label}
-        </Button>
+        // A one-segment tray, so a mode reads off and on exactly as an unchosen and a chosen speed do beside it.
+        <span key={label} className="inline-flex h-control-compact shrink-0 items-center rounded-control bg-ink/[0.07] p-0.5">
+          <button
+            type="button"
+            aria-pressed={on}
+            onClick={() => set(!on)}
+            className={cn(
+              "inline-flex h-7 items-center gap-2 rounded-md px-3 text-body-small whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)",
+              FOCUS_RING_CLASS,
+              on ? "bg-ink/[0.07] font-medium text-ink" : "text-muted hover:text-ink",
+            )}
+          >
+            <Icon aria-hidden className="size-[1.4rem]" />
+            {label}
+          </button>
+        </span>
       ))}
     </div>
   );

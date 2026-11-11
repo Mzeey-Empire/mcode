@@ -400,13 +400,17 @@ function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
         ) : null}
         <div className="@container/picker-area min-w-0 flex-1">
           <div className={DETAIL_GRID_CLASS}>
-            <div className="flex min-h-10 items-center border-b border-border pl-2 [grid-area:search] focus-within:border-focus">
+            {/*
+              The rules under the search and the caption are content underlines, so they stop at the rows' edges below
+              them (the list's 8px and 4px gutters, the pane's 4px and 8px); the column and footer rules run edge to edge.
+            */}
+            <div className="relative flex min-h-10 items-center pl-2 [grid-area:search] after:absolute after:right-1 after:bottom-0 after:left-2 after:h-px after:bg-border focus-within:after:bg-focus">
               {props.search}
             </div>
             <div className="flex min-h-0 flex-col py-2 pl-2 [grid-area:list]">{props.list}</div>
             <div
               onPointerEnter={props.onPanePointerEnter}
-              className="flex min-h-10 items-center border-b border-l border-border px-3 [grid-area:caption] @max-[340px]/picker-area:border-t @max-[340px]/picker-area:border-l-0"
+              className="relative flex min-h-10 items-center border-l border-border px-3 [grid-area:caption] after:absolute after:right-2 after:bottom-0 after:left-1 after:h-px after:bg-border @max-[340px]/picker-area:border-t @max-[340px]/picker-area:border-l-0"
             >
               {paneItem === undefined ? null : detail.caption?.(paneItem)}
             </div>

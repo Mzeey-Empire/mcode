@@ -1209,8 +1209,10 @@ are provider-native, so they show the parent thread's provider.
   columns that each run its full height behind `border` hairlines: the
   provider rail, the search over the model list, and a 168px reasoning pane,
   with a footer across all three. The search row and the pane's caption
-  share one row and one hairline, which turns `focus` under the search
-  while it has focus. The caption is one line in Caption `muted`:
+  share one row, each underlined by a hairline that stops at the edges of
+  the rows below it, so it reads as part of its column rather than a
+  divider; the search's turns `focus` while it has focus. The column and
+  footer rules run edge to edge. The caption is one line in Caption `muted`:
   "Reasoning" on the left and the highlighted model's short name on the
   right, since the rail or group label already names the provider. A name
   too long for the line drops whole to its own line rather than fading. The
@@ -1236,8 +1238,8 @@ are provider-native, so they show the parent thread's provider.
 - The picker's footer holds what applies to the selected model and the turn,
   whichever row is highlighted, and changes it in place without closing. On
   the left: a compact segmented Standard or Fast when the model offers Fast,
-  then a toggle for each mode the model offers, outlined with `muted` text
-  when off and in the `selected` fill with `ink` when on, as the chosen speed is (Thinking on
+  then a toggle for each mode the model offers, drawn as a one-segment tray
+  that reads off and on exactly as an unchosen and a chosen speed do (Thinking on
   older Claude models, Ultra on Codex and Ultracode on Claude). On the right:
   access as a ghost button with its icon, label and an up chevron, opening
   the access list (232px) above it; choosing closes only that list. The
