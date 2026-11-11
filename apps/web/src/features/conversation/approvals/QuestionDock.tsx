@@ -4,6 +4,7 @@ import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
 import { isNativePlanQuestionId, type PlanAnswer, type PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { Button } from "@/components/ui/button";
+import { MenuRowCheck } from "@/components/ui/menu-row";
 import { cn } from "@/lib/utils";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import { useThreadStore } from "@/stores/threadStore";
@@ -70,6 +71,8 @@ function OptionRows({ question, selectedRow, focusedRow, freeText, rowRefs, inpu
             <span className={cn("text-sm text-ink", row === selectedRow && "font-medium")}>{option.title}</span>
             {option.recommended && <span className="text-xs text-muted">Recommended</span>}
           </span>
+          {/* Focus follows the pick, so without a mark the ring alone would say which answer is chosen. */}
+          {row === selectedRow ? <MenuRowCheck /> : null}
         </button>
       ))}
       {selectedRow === otherRow ? (

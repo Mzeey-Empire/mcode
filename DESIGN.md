@@ -1279,7 +1279,9 @@ are provider-native, so they show the parent thread's provider.
   remove button at its top right, shown on hover or keyboard focus. The tile
   row scrolls sideways with no scrollbar.
 - A request that needs the user (approval, plan questions) docks in place of
-  the composer surface and names the waiting state in the status line.
+  the composer surface and names the waiting state in the status line. A
+  question's picked answer shows a trailing check, because focus follows the
+  pick and the ring alone would be the only sign of it.
 
 ### Tabs and Toolbars
 
