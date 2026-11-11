@@ -309,13 +309,12 @@ export class CanonicalParentTurnWrite {
     return this.canonical.commit(input);
   }
 
-  /** Stage the exact live body on this writer connection for terminal reuse. */
-  stageLiveAssistant(execution: ExecutionIdentity, input: DataOnlyParentLiveMessageInput): boolean {
+  /** Stage the latest live body on this writer connection for terminal reuse, replacing an earlier staged body. */
+  upsertStagedAssistant(execution: ExecutionIdentity, input: DataOnlyParentLiveMessageInput): boolean {
     if (!this.canStageLiveAssistant(execution, input)) return false;
     const existing = this.messages.findByIdInThreadIncludingInternal(execution.threadId, input.messageId);
     if (existing) {
       if (!existing.is_internal || existing.role !== "assistant") return false;
-      // Match the live reducer's latest-wins body when an absorbed segment emits another message.
       if (!this.matchesAssistantBody(existing, input)) {
         this.messages.updateInternalAssistant({ threadId: execution.threadId, id: input.messageId,
           content: input.content, model: input.model, attachments: [...input.attachments] });

@@ -1390,8 +1390,6 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       .toThrow("Steered message has no matching accepted execution");
   });
 
-  // Each steer that lands while Claude streams aborts the segment, and the absorbed segment emits its text as a
-  // full message. The second such message in one turn must still save, or every later save, steers included, waits.
   it("saves a second steer after two absorbed Claude segments each emit a mid-turn message", async () => {
     const steers = new TurnSteerStore(db);
     const first = "6f1c2b8e-3d4a-4c5b-9e7f-0a1b2c3d4e5f";

@@ -239,7 +239,7 @@ describe("CanonicalParentTurnWrite", () => {
     messages.createSystemNotice(THREAD_ID, "Provider notice", 2, undefined);
     const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
 
-    expect(writer.stageLiveAssistant({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID }, {
+    expect(writer.upsertStagedAssistant({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID }, {
       precedingMessageId: "user-1", messageId, content: "Answer", model: null, attachments: [],
     })).toBe(true);
     expect(messages.findByIdInThreadIncludingInternal(THREAD_ID, messageId))
@@ -298,7 +298,7 @@ describe("CanonicalParentTurnWrite", () => {
     messages.create(THREAD_ID, "user", "Later prompt", 3);
     const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
 
-    expect(writer.stageLiveAssistant({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID }, {
+    expect(writer.upsertStagedAssistant({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID }, {
       precedingMessageId: "user-1", messageId, content: "Answer", model: null, attachments: [],
     })).toBe(false);
     expect(messages.findByIdInThreadIncludingInternal(THREAD_ID, messageId)).toBeNull();

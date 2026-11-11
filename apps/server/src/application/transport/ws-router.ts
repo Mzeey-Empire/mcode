@@ -490,7 +490,6 @@ function validateRpcParameters(
   };
 }
 
-/** Domain errors whose own `code` and message reach the client unchanged. */
 const CODED_ROUTE_ERRORS = [
   ThreadStartupResolveError,
   WorkspaceFileNotFoundError,

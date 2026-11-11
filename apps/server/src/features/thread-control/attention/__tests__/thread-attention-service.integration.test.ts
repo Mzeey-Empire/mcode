@@ -334,7 +334,7 @@ describe("thread attention through real SQLite and the serialized writer", () =>
     } else {
       const recovered = new CanonicalParentTurnWrite(t.database, () => {});
       const messageId = deriveTurnAssistantMessageId(t.a.id, "user-1");
-      expect(recovered.stageLiveAssistant(execution, { precedingMessageId: "user-1", messageId, content: "Partial answer", model: null, attachments: [] })).toBe(true);
+      expect(recovered.upsertStagedAssistant(execution, { precedingMessageId: "user-1", messageId, content: "Partial answer", model: null, attachments: [] })).toBe(true);
       t.database.transaction(() => recovered.interruptLostExecution({ ...execution, assignedMessageId: messageId, reason: "Server restarted", cause: "app_closed", recoveryIncidentId: "restart-1", endedAt: ENDED }))();
     }
     expect(t.database.query("SELECT status, last_turn_outcome, last_turn_sequence FROM threads WHERE id = ?").get(t.a.id))

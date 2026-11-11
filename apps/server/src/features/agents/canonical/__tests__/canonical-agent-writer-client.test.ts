@@ -76,7 +76,6 @@ function workerWithEmptyFailureMessage(): Worker {
     set(target, property, value) {
       if (property !== "onmessage" || typeof value !== "function") return Reflect.set(target, property, value);
       target.onmessage = (message) => {
-        // Exercise the empty-message boundary while retaining the real worker's error identity and stack.
         if (message.data.kind === "failed" && message.data.failure) message.data.failure.message = "";
         value(message);
       };

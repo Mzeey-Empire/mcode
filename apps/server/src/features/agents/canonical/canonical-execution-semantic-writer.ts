@@ -732,7 +732,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   ): void {
     if (!message) return;
     if (head.assignedMessageId && head.assignedMessageId !== message.messageId) throw new SemanticConflict("live message id differs from the turn's assigned message id");
-    if (!this.turns.stageLiveAssistant(execution, message)) throw new SemanticConflict("staged assistant row conflicts with the live message");
+    if (!this.turns.upsertStagedAssistant(execution, message)) throw new SemanticConflict("staged assistant row conflicts with the live message");
   }
 
   private persistLivePlanOutput(
