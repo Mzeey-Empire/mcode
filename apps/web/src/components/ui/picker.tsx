@@ -663,7 +663,7 @@ function PickerList<T>(props: PickerListProps<T>) {
       id={listId}
       role="listbox"
       onScroll={measure}
-      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", fill ? "pr-1" : "max-h-[17.2rem] pt-2")}
+      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", fill ? "snap-y snap-mandatory pr-1" : "max-h-[17.2rem] pt-2")}
     >
       <SlidingHighlight follow="data-active" />
       {rows.map((entry, index) => (
@@ -777,7 +777,7 @@ function PickerOptionItem({ id, row, digit, active, keyboard, selected, selected
       // Keeps focus in the search field so typing and arrow keys keep working after a click.
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        "group/option relative flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-selected:bg-selected data-keyboard:outline-2 data-keyboard:-outline-offset-2 data-keyboard:outline-focus",
+        "group/option relative flex shrink-0 snap-start cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-selected:bg-selected data-keyboard:outline-2 data-keyboard:-outline-offset-2 data-keyboard:outline-focus",
         row.description == null ? "h-8" : "min-h-8 py-1.5",
         row.disabled && "cursor-default opacity-50",
       )}

@@ -1338,7 +1338,8 @@ commit, model, project):
    The selected row shows a trailing check, with a `muted` tag when it helps
    ("current", "worktree"). About five rows are visible; the list scrolls
    with top and bottom fades. The arrow keys scroll it by whole rows and keep
-   the row past the highlight in view, so no sliver of a row shows. The highlighted row takes the sliding
+   the row past the highlight in view, and a list beside a pane snaps the
+   wheel to row edges, so no sliver of a row shows. The highlighted row takes the sliding
    highlight, and a row the arrow keys reached also takes the 2px `focus`
    ring, so keyboard and pointer focus look like every other control. The
    selected row keeps its own `selected` fill.
