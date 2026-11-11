@@ -1287,7 +1287,7 @@ export class CanonicalAcceptedProgress {
     const cut = thread.owner.recoveryCut();
     logger.warn("Turn command refused: an earlier save of the thread failed", { threadId,
       pendingBatches: cut.retained.length, error: describeSaveFailure(error) });
-    return new ThreadSaveBlockedError(threadId, error);
+    return new ThreadSaveBlockedError(error);
   }
 
   private async stopFailedOwner(thread: ProgressThread, error: Error): Promise<void> {

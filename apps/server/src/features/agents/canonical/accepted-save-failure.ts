@@ -25,7 +25,7 @@ export class ThreadSaveBlockedError extends Error {
   override readonly name = "ThreadSaveBlockedError";
   readonly code = "THREAD_SAVE_BLOCKED";
 
-  constructor(readonly threadId: string, cause: Error) {
+  constructor(cause: Error) {
     super(`This thread cannot save new work because an earlier save failed (${cause.message || cause.name}). `
       + "Restart Mcode to recover the thread.", { cause });
   }

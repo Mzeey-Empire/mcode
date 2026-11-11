@@ -1912,7 +1912,7 @@ describe("mapRouteError for refused turn admission", () => {
   it("tells the client a thread is blocked by a failed save instead of reporting an internal error", () => {
     const error = vi.spyOn(logger, "error").mockImplementation(() => logger);
 
-    const response = mapRouteError(request, new ThreadSaveBlockedError("thread-1", new Error("Canonical writer write-failed: SemanticConflict")));
+    const response = mapRouteError(request, new ThreadSaveBlockedError(new Error("Canonical writer write-failed: SemanticConflict")));
 
     expect(response.error).toMatchObject({ code: "THREAD_SAVE_BLOCKED",
       message: expect.stringContaining("Canonical writer write-failed: SemanticConflict") });
