@@ -6,7 +6,6 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
-  DropdownMenuGroupLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -91,14 +90,12 @@ export function ComposerAddMenu({
         className="w-58"
       >
         <DropdownMenuGroup>
-          <DropdownMenuGroupLabel>Attach</DropdownMenuGroupLabel>
           <DropdownMenuItem label="Files" icon={<FilePlusCorner />} onClick={nextFrame(onAttachFiles)} />
         </DropdownMenuGroup>
         {capabilities.length > 0 ? (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
-              <DropdownMenuGroupLabel>Capabilities</DropdownMenuGroupLabel>
               {capabilities.map((capability) => {
                 const Icon = CAPABILITY_ICONS[capability.id];
                 const attached = attachedCapabilityIds.has(capability.id);
