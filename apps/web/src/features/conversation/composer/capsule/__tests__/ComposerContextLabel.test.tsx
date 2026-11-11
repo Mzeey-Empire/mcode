@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { ComposerContextLabel } from "../ComposerContextLabel";
 
 describe("ComposerContextLabel", () => {
-  it("names a low provider quota when only the quota brings the label up", () => {
+  it("names the low quota, not a context percentage, while context use is below its warning level", () => {
     render(<ComposerContextLabel tokensIn={30_000} contextWindow={100_000} hasLowQuota />);
-    expect(screen.getByRole("img", { name: /30%.*low provider quota/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /low provider quota/i })).toHaveTextContent("Low quota");
   });
 
   it("names a low provider quota when the context alone already shows the label", () => {
@@ -15,7 +15,7 @@ describe("ComposerContextLabel", () => {
 
   it("warns of a low provider quota before any tokens are used", () => {
     render(<ComposerContextLabel tokensIn={0} contextWindow={100_000} hasLowQuota />);
-    expect(screen.getByRole("img", { name: /0%.*low provider quota/i })).toHaveTextContent("0% context");
+    expect(screen.getByRole("img", { name: /low provider quota/i })).toHaveTextContent("Low quota");
   });
 
   it("warns of a low provider quota when the context window is unknown", () => {

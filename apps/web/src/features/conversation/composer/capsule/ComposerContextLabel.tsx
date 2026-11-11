@@ -1,7 +1,7 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { CapsuleDivider } from "./ComposerCapsuleSplit";
-import { contextLabelFor, formatContextPercent, type ContextLabel } from "./context-label";
+import { contextLabelFor, type ContextLabel } from "./context-label";
 
 interface ComposerContextLabelProps {
   /** Tokens in the last completed turn. */
@@ -19,6 +19,9 @@ const TONE_CLASS: Record<ContextLabel["tone"], { readonly text: string; readonly
   destructive: { text: "text-destructive", fill: "bg-destructive" },
 };
 
+const LABEL_CLASS =
+  "inline-flex h-8 shrink-0 cursor-default items-center rounded-full pr-1.5 pl-1 text-compact whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+
 function abbreviateTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
@@ -26,15 +29,8 @@ function abbreviateTokens(n: number): string {
 }
 
 function percentUsedOf(tokensIn: number, contextWindow: number | undefined): number | null {
-  if (!contextWindow) return null;
-  return Math.min(100, (Math.max(0, tokensIn) / contextWindow) * 100);
-}
-
-/** The label to show, with low quota forcing the warning tone below the usual threshold. */
-function labelFor(percentUsed: number | null, hasLowQuota: boolean): ContextLabel | null {
-  const label = contextLabelFor(percentUsed);
-  if (label || !hasLowQuota || percentUsed === null) return label;
-  return { text: formatContextPercent(percentUsed), tone: "warning" };
+  if (tokensIn <= 0 || !contextWindow) return null;
+  return Math.min(100, (tokensIn / contextWindow) * 100);
 }
 
 /**
@@ -43,9 +39,8 @@ function labelFor(percentUsed: number | null, hasLowQuota: boolean): ContextLabe
  */
 export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTokens, hasLowQuota }: ComposerContextLabelProps) {
   const percentUsed = percentUsedOf(tokensIn, contextWindow);
-  if (percentUsed === null || !contextWindow) return hasLowQuota ? <LowQuotaLabel /> : null;
-  const label = labelFor(percentUsed, hasLowQuota);
-  if (!label) return null;
+  const label = contextLabelFor(percentUsed);
+  if (!label || percentUsed === null || !contextWindow) return hasLowQuota ? <LowQuotaLabel /> : null;
 
   const tone = TONE_CLASS[label.tone];
   const summary = `${label.text} · ${abbreviateTokens(tokensIn)}/${abbreviateTokens(contextWindow)} context used`;
@@ -61,11 +56,7 @@ export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTo
               role="img"
               aria-label={`Context window: ${summary}${hasLowQuota ? " · Low provider quota" : ""}`}
               tabIndex={0}
-              className={cn(
-                "inline-flex h-8 shrink-0 cursor-default items-center rounded-full pr-1.5 pl-1 text-compact tabular-nums whitespace-nowrap",
-                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                tone.text,
-              )}
+              className={cn(LABEL_CLASS, "tabular-nums", tone.text)}
             >
               {label.text}
               {/* A bare percentage beside Stop reads as task progress, so name it where there is room. */}
@@ -117,7 +108,10 @@ function ProviderQuotaLine({ className }: { readonly className?: string }) {
   );
 }
 
-/** Without a known context window there is no percentage to show, but a nearly spent quota still needs flagging. */
+/**
+ * Stands in for the context label while context use is below its warning level or unknown. The warning tone there
+ * would belong to the quota, so a percentage beside it would read as quota left.
+ */
 function LowQuotaLabel() {
   return (
     <>
@@ -130,11 +124,7 @@ function LowQuotaLabel() {
               role="img"
               aria-label="Low provider quota"
               tabIndex={0}
-              className={cn(
-                "inline-flex h-8 shrink-0 cursor-default items-center rounded-full pr-1.5 pl-1 text-compact whitespace-nowrap",
-                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                TONE_CLASS.warning.text,
-              )}
+              className={cn(LABEL_CLASS, TONE_CLASS.warning.text)}
             >
               Low quota
             </span>
