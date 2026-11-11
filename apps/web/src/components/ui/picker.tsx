@@ -259,7 +259,7 @@ export function Picker<T>(props: PickerProps<T>) {
     setKeyboardRow(true);
     highlightRow(next);
     // Only keyboard moves scroll; hover highlights must never move the list under the pointer.
-    document.getElementById(optionId(listId, next))?.scrollIntoView?.({ block: "nearest" });
+    revealRow(listId, next);
     if (next >= rows.length - LOAD_MORE_ROWS) loadMore();
   };
 
@@ -370,8 +370,8 @@ interface PickerListAreaProps<T> {
 function PickerListArea<T>({ list, detail, paneEntry, paneRef, onKeyDown, onPointerEnter }: PickerListAreaProps<T>) {
   if (!list || !detail) return list;
   return (
-    // Seven 33px rows less the last gap, so a list scrolled to its end starts on a row edge instead of a sliver.
-    <div className="grid h-[23rem] grid-cols-[minmax(0,1fr)_16.8rem]">
+    // Seven 33px rows less the last gap, with the 8px gap above outside the scroller, so the list shows whole rows at every keyboard stop.
+    <div className="mt-2 grid h-[23rem] grid-cols-[minmax(0,1fr)_16.8rem]">
       {list}
       <div
         ref={paneRef}
@@ -545,6 +545,35 @@ function optionId(listId: string, index: number): string {
 }
 
 /**
+ * Scrolls the list so row `index` shows with one whole row beyond it, landing the top edge on a row. The browser's
+ * `scrollIntoView` stops mid-row, which leaves a faded sliver of a row at each edge.
+ */
+function revealRow(listId: string, index: number): void {
+  const list = document.getElementById(listId);
+  const row = document.getElementById(optionId(listId, index));
+  if (!list || !row) return;
+  const after = document.getElementById(optionId(listId, index + 1)) ?? row;
+  const top = document.getElementById(optionId(listId, index - 1))?.offsetTop ?? 0;
+  if (top < list.scrollTop) {
+    list.scrollTop = top;
+    return;
+  }
+  const needed = after.offsetTop + after.offsetHeight - list.clientHeight;
+  if (needed > list.scrollTop) list.scrollTop = firstRowTopFrom(listId, index, needed);
+}
+
+/** The top of the first row at or below `offset`, searching up from row `index`. */
+function firstRowTopFrom(listId: string, index: number, offset: number): number {
+  let edge = document.getElementById(optionId(listId, index))?.offsetTop ?? offset;
+  for (let above = index - 1; above >= 0; above -= 1) {
+    const top = document.getElementById(optionId(listId, above))?.offsetTop;
+    if (top === undefined || top < offset) break;
+    edge = top;
+  }
+  return edge;
+}
+
+/**
  * Wraps `onLoadMore` so it fires at most once per page. A page is identified by the list (tab and
  * query) plus the item count, so a fresh list of the same length still gets its second page.
  */
@@ -617,7 +646,7 @@ function PickerList<T>(props: PickerListProps<T>) {
   // never picks a row the user can't see. Later moves scroll from the keyboard handler, never from hover.
   const revealActive = useEffectEvent(() => {
     if (activeIndex === -1) return;
-    document.getElementById(optionId(listId, activeIndex))?.scrollIntoView?.({ block: "nearest" });
+    revealRow(listId, activeIndex);
   });
   // Declared before the measure effect so a new list is measured after it has scrolled.
   useLayoutEffect(() => {
@@ -634,7 +663,7 @@ function PickerList<T>(props: PickerListProps<T>) {
       id={listId}
       role="listbox"
       onScroll={measure}
-      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px pt-2", fill ? "pr-1" : "max-h-[17.2rem]")}
+      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", fill ? "pr-1" : "max-h-[17.2rem] pt-2")}
     >
       <SlidingHighlight follow="data-active" />
       {rows.map((entry, index) => (

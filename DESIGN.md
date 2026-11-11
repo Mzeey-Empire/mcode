@@ -1208,8 +1208,9 @@ are provider-native, so they show the parent thread's provider.
   hairline, listing the highlighted model's levels under a two-line caption:
   "Reasoning" in Caption `muted` over the model's full name in Caption 500
   `ink`, with 8px before the first level. A check marks the committed model
-  and level. The list and pane are seven rows tall (23rem), so a list
-  scrolled to its end starts on a row edge rather than a sliver. A hovered row reaches the
+  and level. The list and pane are seven rows tall (23rem), with the 8px
+  gap above them outside the scrolling list, so every keyboard stop shows
+  seven whole rows. A hovered row reaches the
   pane after 100ms, so a pointer crossing rows on its way to the pane keeps
   it. Right Arrow at the end of the search enters the pane and Left Arrow
   leaves it. A level sets the model and level and closes; picking a model
@@ -1333,7 +1334,8 @@ commit, model, project):
 3. A flat list with no section labels and no per-row type icons or counts.
    The selected row shows a trailing check, with a `muted` tag when it helps
    ("current", "worktree"). About five rows are visible; the list scrolls
-   with top and bottom fades. The highlighted row takes the sliding
+   with top and bottom fades. The arrow keys scroll it by whole rows and keep
+   the row past the highlight in view, so no sliver of a row shows. The highlighted row takes the sliding
    highlight, and a row the arrow keys reached also takes the 2px `focus`
    ring, so keyboard and pointer focus look like every other control. The
    selected row keeps its own `selected` fill.
