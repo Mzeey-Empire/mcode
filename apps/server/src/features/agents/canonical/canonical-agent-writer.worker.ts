@@ -277,8 +277,9 @@ function failureMessageWithCause(error: Error): string {
 }
 
 function describeFailure(error: unknown): WriterFailure {
-  if (!(error instanceof Error)) return { name: "Error", message: String(error).slice(0, 8_000) };
+  if (!(error instanceof Error)) return { name: `NonError:${typeof error}`, message: String(error).slice(0, 8_000) };
   return { name: error.name.slice(0, 128), message: failureMessageWithCause(error).slice(0, 8_000),
+    ...(error.stack ? { stack: error.stack.slice(0, 4_000) } : {}),
     ...(error instanceof DatabaseStartupRefusal ? { refusal: error.refusal } : {}),
     ...(error instanceof AcceptedContentRejected ? { contentRejection: error.reason.slice(0, 500) } : {}),
     ...("code" in error && typeof error.code === "string" ? { code: error.code.slice(0, 128) } : {}),

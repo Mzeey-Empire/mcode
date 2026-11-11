@@ -1623,8 +1623,9 @@ function requireExecutionHead(thread: ProgressThread, operation: ExecutionSemant
   return head;
 }
 
-function describeSaveFailure(error: Error): { name: string; message: string; code?: string; cause?: ReturnType<typeof describeSaveFailure> } {
+function describeSaveFailure(error: Error): { name: string; message: string; stack?: string; code?: string; cause?: ReturnType<typeof describeSaveFailure> } {
   return { name: error.name, message: error.message,
+    ...(error.stack ? { stack: error.stack.slice(0, 4_000) } : {}),
     ...("code" in error && typeof error.code === "string" ? { code: error.code } : {}),
     ...(error.cause instanceof Error ? { cause: describeSaveFailure(error.cause) } : {}) };
 }

@@ -70,6 +70,25 @@ function workerDroppingReply(kind: CanonicalWriterResponse["kind"]): Worker {
   });
 }
 
+function workerWithEmptyFailureMessage(): Worker {
+  const worker = new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" });
+  return new Proxy(worker, {
+    set(target, property, value) {
+      if (property !== "onmessage" || typeof value !== "function") return Reflect.set(target, property, value);
+      target.onmessage = (message) => {
+        // Exercise the empty-message boundary while retaining the real worker's error identity and stack.
+        if (message.data.kind === "failed" && message.data.failure) message.data.failure.message = "";
+        value(message);
+      };
+      return true;
+    },
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 function events(): CanonicalAgentEventDraft[] {
   const sourceIdentities = [{ providerId: "codex" as const, scope: "thread" as const, value: "native-writer-thread", provenance: "native" as const }];
   return [
@@ -304,6 +323,21 @@ describe("canonical SQLite writer", () => {
     const next = await writer.appendAccepted("headless-next", nextHeadlessInput(input, "headless-next"));
     expect(next.events).toMatchObject([{ acceptedSequence: 3, routing: { executionId: input.execution.executionId } }]);
     expect(db.query("SELECT COUNT(*) AS count FROM canonical_agent_events").get()).toEqual({ count: 3 });
+  });
+
+  it("restores an empty-message worker failure with its class name and worker stack", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath, workerWithEmptyFailureMessage);
+    const input = headlessAcceptedInput(THREAD_ID, "empty-failure");
+    await writer.appendAccepted("empty-failure", input);
+    const failure = await writer.appendAccepted("empty-failure", { ...input, contentHash: "b".repeat(64) })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) throw new Error("Expected a restored worker error");
+    expect(failure.name).toBe("CanonicalWriterOperationConflict");
+    expect(failure.message).toBe("Canonical writer operation-conflict: CanonicalWriterOperationConflict");
+    expect(failure.stack).toContain("canonical-agent-writer-receipts.ts");
+    if (!failure.stack) throw new Error("Expected the worker stack");
+    expect(failure.stack.length).toBeLessThanOrEqual(4000);
   });
 
   it("keeps matching operation IDs independent across headless threads and retries only their acknowledgements", async () => {

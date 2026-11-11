@@ -62,10 +62,14 @@ const storedReceiptSchema = z.discriminatedUnion("kind", [
 ]);
 
 /** An operation ID may be retried only with the same kind and semantic input. */
-export class CanonicalWriterOperationConflict extends Error {}
+export class CanonicalWriterOperationConflict extends Error {
+  override readonly name = "CanonicalWriterOperationConflict";
+}
 
 /** The caller must acknowledge handled receipts before admitting more writes for an execution. */
-export class CanonicalWriterReceiptCapacity extends Error {}
+export class CanonicalWriterReceiptCapacity extends Error {
+  override readonly name = "CanonicalWriterReceiptCapacity";
+}
 
 export const MAX_UNACKNOWLEDGED_RECEIPTS_PER_EXECUTION = 16_384;
 
