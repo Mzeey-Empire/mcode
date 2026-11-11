@@ -9,6 +9,7 @@ import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useApprovalStore } from "@/stores/approvalStore";
+import { useQueueStore } from "@/stores/queueStore";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -84,7 +85,6 @@ vi.mock("@/components/chat/FileTagPopup", () => ({
 }));
 
 vi.mock("@/components/chat/SpellcheckContextMenu", () => ({ SpellcheckContextMenu: () => <div /> }));
-vi.mock("@/components/chat/ComposerQueueList", () => ({ ComposerQueueList: () => <div /> }));
 vi.mock("@/components/chat/SlashCommandTray", () => ({ SlashCommandTray: () => <div /> }));
 
 function seedIdleThread() {
@@ -109,6 +109,7 @@ describe("Composer while the approval dock shows", () => {
     resetThreadStoreForTests({ runningThreadIds: new Set() });
     useComposerDraftStore.setState({ drafts: {}, pendingPrefill: null });
     useApprovalStore.setState({ approvals: [], submissions: {} });
+    useQueueStore.setState({ queues: {}, inFlightQueuedMessages: {}, editingThreadId: null });
     seedIdleThread();
   });
 
@@ -125,5 +126,24 @@ describe("Composer while the approval dock shows", () => {
     expect(screen.queryByTestId("approval-dock")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Add to composer")).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByTestId("composer-add-menu")).not.toBeInTheDocument();
+  });
+
+  it("disables editing a queued message while the dock hides the composer input", () => {
+    useQueueStore.getState().enqueue("thread-1", {
+      content: "queued follow-up",
+      displayContent: "queued follow-up",
+      attachments: [],
+      model: "gpt-5",
+      permissionMode: "full",
+    });
+    render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+    expect(screen.getByLabelText("Edit queued message 1")).toBeEnabled();
+
+    act(() => useApprovalStore.getState().add(createMockApproval({ requestId: "approval-1", threadId: "thread-1" })));
+    expect(screen.getByLabelText("Edit queued message 1")).toBeDisabled();
+    expect(screen.getByLabelText("Remove queued message 1")).toBeEnabled();
+
+    act(() => useApprovalStore.getState().resolve("approval-1"));
+    expect(screen.getByLabelText("Edit queued message 1")).toBeEnabled();
   });
 });

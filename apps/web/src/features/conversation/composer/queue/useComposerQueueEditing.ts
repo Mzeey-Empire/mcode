@@ -66,7 +66,7 @@ function fallbackPreviewAnnotations(original: QueuedMessage | null): PreviewAnno
  */
 function requeueHoldingDraft(
   threadId: string,
-  index: number,
+  index: number | undefined,
   payload: Omit<QueuedMessage, "id" | "queuedAt">,
 ): boolean {
   const content = readDraftContentInBundle(threadId, payload.previewAnnotations);
@@ -106,6 +106,26 @@ function preserveBrowserCapturePayload(
         ? [...new Set(browserCaptureSpillPaths)]
         : undefined,
   };
+}
+
+/**
+ * Queues what the Composer holds before another queued message replaces it. A message being
+ * edited returns to its own slot; an unsent draft goes to the end of the queue.
+ */
+function queueComposerContent(
+  threadId: string,
+  form: ComposerQueueEditForm,
+  leaving: { index: number; original: QueuedMessage | null; annotationsCleared: boolean } | null,
+): boolean {
+  if (!leaving) return requeueHoldingDraft(threadId, undefined, form.capture(undefined));
+  const restoredPreviewAnnotations = leaving.annotationsCleared
+    ? undefined
+    : fallbackPreviewAnnotations(leaving.original);
+  return requeueHoldingDraft(
+    threadId,
+    leaving.index,
+    preserveBrowserCapturePayload(form.capture(restoredPreviewAnnotations), leaving.original),
+  );
 }
 
 /** Manages the pop, restore, swap, cancel, and completion lifecycle for one queued Composer message. */
@@ -176,19 +196,13 @@ export function useComposerQueueEditing({
       if (targetIndex === -1) return;
 
       form.invalidateAttachments();
-      if (editing && form.hasContent()) {
-        const restoredPreviewAnnotations = restoredPreviewAnnotationsClearedRef.current
-          ? undefined
-          : fallbackPreviewAnnotations(originalMessageRef.current);
-        requeueHoldingDraft(
-          threadId,
-          editing.originalIndex,
-          preserveBrowserCapturePayload(
-            form.capture(restoredPreviewAnnotations),
-            originalMessageRef.current,
-          ),
-        );
-      }
+      const leaving = editing ? {
+        index: editing.originalIndex,
+        original: originalMessageRef.current,
+        annotationsCleared: restoredPreviewAnnotationsClearedRef.current,
+      } : null;
+      // Abort rather than overwrite the Composer when its content could not be queued.
+      if (form.hasContent() && !queueComposerContent(threadId, form, leaving)) return;
 
       // Clear first: popping a message that held its elements returns them to the draft at once.
       annotations.clear();
@@ -211,7 +225,7 @@ export function useComposerQueueEditing({
   const loadIntoComposer = useCallback(
     (message: QueuedMessage) => {
       if (!threadId || editConsumedByDispatchRef.current || settlingRef.current) return;
-      if (!editing || !form.hasContent()) {
+      if (!form.hasContent()) {
         swapIntoComposer(message);
         return;
       }
@@ -223,7 +237,7 @@ export function useComposerQueueEditing({
         if (settled && unchanged) swapIntoComposer(message);
       });
     },
-    [annotations, editing, form, swapIntoComposer, threadId],
+    [annotations, form, swapIntoComposer, threadId],
   );
 
   const cancelEdit = useCallback(() => {
