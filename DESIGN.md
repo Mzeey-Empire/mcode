@@ -748,7 +748,8 @@ Workspace panes stay square to the app shell.
   `control-border`.
 - Keyboard focus is a 2px `focus` ring with a 2px offset in the surface
   color, drawn outside the control (`shadows.focusRing`). It never changes the
-  control's own size.
+  control's own size. Rows inside a menu, list or pane draw it inside the row
+  instead, because they sit 4px from the container's edge.
 
 ### Shadow vocabulary
 

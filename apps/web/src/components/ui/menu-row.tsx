@@ -3,7 +3,7 @@ import { CheckIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { ShortcutCombo } from "./shortcut-keys"
-import { FOCUS_RING_CLASS } from "./focus-ring"
+import { FOCUS_RING_INSET_CLASS } from "./focus-ring"
 
 /**
  * Paper's compact menu row (161H-0): 32px tall, 12px inline padding, 6px radius, 8px gap,
@@ -12,7 +12,7 @@ import { FOCUS_RING_CLASS } from "./focus-ring"
  */
 export const MENU_ROW_CLASS = cn(
   "relative flex h-row-compact w-full min-w-0 shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-3 text-left text-body-small text-ink",
-  FOCUS_RING_CLASS,
+  FOCUS_RING_INSET_CLASS,
 )
 
 /** Menu surface (I6X-0) spacing: 4px padding, with rows sitting flush. */
