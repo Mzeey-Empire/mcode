@@ -51,7 +51,7 @@ colors:
   light-link: "oklch(0.50 0.16 260)" # blue-700
   light-success: "oklch(0.52 0.12 145)" # sage-600
   light-error: "oklch(0.52 0.14 25)" # clay-700
-  light-warning: "oklch(0.44 0.14 70)" # ochre, below the lamp
+  light-warning: "oklch(0.46 0.10 92)" # dark brass, off the lamp's hue
   light-info: "oklch(0.50 0.16 260)" # blue-700
   light-pr-merged: "oklch(0.50 0.16 293)" # violet-700
   light-diff-add-bg: "oklch(0.96 0.035 145)" # sage-100
@@ -531,7 +531,7 @@ token values, never component anatomy, status meaning, or action priority.
 | Link | `link` (blue-400) | `light-link` (blue-700) |
 | Success | `success` (sage-400) | `light-success` (sage-600) |
 | Error | `error` (clay-400) | `light-error` (clay-700) |
-| Warning | `warning` (brass, off the lamp's hue so a warning never reads as Send) | `light-warning` (ochre, darker and less saturated than the lamp so a warning never reads as Send) |
+| Warning | `warning` (brass, off the lamp's hue so a warning never reads as Send) | `light-warning` (dark brass, the same hue) |
 | Information | `info` (blue-400) | `light-info` (blue-700) |
 | Merged PR | `pr-merged` (violet-400) | `light-pr-merged` (violet-700) |
 | Capability | `capability` (owned here) | `light-capability` (owned here) |
