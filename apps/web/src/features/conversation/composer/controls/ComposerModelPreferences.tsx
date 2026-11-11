@@ -1,11 +1,15 @@
 import { MENU_LIST_CLASS, MENU_ROW_CLASS, MenuRowBody } from "@/components/ui/menu-row";
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
-import { Switch } from "@/components/ui/switch";
+import { Brain, Network, Zap, type LucideIcon } from "lucide-react";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
+import { Button } from "@/components/ui/button";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { findProviderModel, supportsThinkingToggle } from "@/lib/model-registry";
 import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
+import { resolveComposerCapabilities } from "../composer-capabilities";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import { moveOptionFocus } from "./AccessOptionList";
 
@@ -99,54 +103,94 @@ export function persistReasoningLevel(
 
 interface ModelOptionToggle {
   readonly label: string;
+  readonly icon: LucideIcon;
   readonly on: boolean;
   readonly set: (on: boolean) => void;
 }
 
-function modelOptionToggles(state: ModelPreferenceState, actionProps: ModelPreferenceActionProps): ModelOptionToggle[] {
-  const toggles: ModelOptionToggle[] = [];
+/** The selected model's options: Fast as its own speed choice, then the on/off modes the model offers. */
+interface ModelOptions {
+  readonly fast: Omit<ModelOptionToggle, "label" | "icon"> | null;
+  readonly toggles: readonly ModelOptionToggle[];
+}
+
+function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenceActionProps): ModelOptions {
   const change = (patch: Partial<ThreadSettings> & Partial<ComposerAgentSelection>) => {
     actionProps.onSelectionChange(patch);
     persistThreadSetting(actionProps, patch, { skipForks: true });
   };
-  if (state.hasFast) {
+  const toggles: ModelOptionToggle[] = [];
+  if (state.hasThinking) {
+    toggles.push({ label: "Thinking", icon: Brain, on: state.thinking, set: (thinking) => change({ thinking }) });
+  }
+  const { selection } = actionProps;
+  const orchestration = resolveComposerCapabilities({ providerId: selection.provider, modelId: selection.modelId })
+    .find((capability) => capability.id === "orchestration");
+  if (orchestration) {
     toggles.push({
-      label: "Fast",
-      on: state.fastMode,
-      // Matching the global default stores no override, so the thread keeps following the setting.
-      set: (on) => change({ fastMode: on === actionProps.defaults.globalCodexFast ? null : on }),
+      label: orchestration.label,
+      icon: Network,
+      on: selection.orchestrationMode === ORCHESTRATION_MODES.PROACTIVE,
+      set: (on) => change({ orchestrationMode: on ? ORCHESTRATION_MODES.PROACTIVE : ORCHESTRATION_MODES.STANDARD }),
     });
   }
-  if (state.hasThinking) {
-    toggles.push({ label: "Thinking", on: state.thinking, set: (thinking) => change({ thinking }) });
-  }
-  return toggles;
+  return {
+    fast: state.hasFast
+      ? {
+          on: state.fastMode,
+          // Matching the global default stores no override, so the thread keeps following the setting.
+          set: (on) => change({ fastMode: on === actionProps.defaults.globalCodexFast ? null : on }),
+        }
+      : null,
+    toggles,
+  };
 }
 
+const SPEED_OPTIONS = [
+  { value: "standard", label: "Standard" },
+  { value: "fast", label: "Fast", icon: <Zap aria-hidden className="size-[1.4rem]" /> },
+] as const;
+
 /**
- * The selected model's on/off options (Fast, Thinking) as labelled switch rows, persisted to the thread
- * as they change; null when it has none. Rows carry no inline padding, so each host lines the labels up with its list
- * through `className`.
+ * The selected model's options in a row, persisted to the thread as they change: Standard or Fast as a segmented
+ * choice, then a pressed toggle for each mode the model offers (Thinking, Ultra or Ultracode). Renders nothing for a
+ * model with none.
  */
-export function ComposerModelPreferenceSettings({
+export function ComposerModelOptions({
   threadId,
   branchFromMessageId,
   selection,
   defaults,
   onSelectionChange,
-  className,
-}: ComposerModelPreferencesProps & { readonly className?: string }) {
+}: ComposerModelPreferencesProps) {
   const state = getModelPreferenceState(selection, defaults);
-  const toggles = modelOptionToggles(state, { threadId, branchFromMessageId, selection, defaults, onSelectionChange });
-  if (toggles.length === 0) return null;
+  const { fast, toggles } = modelOptionsOf(state, { threadId, branchFromMessageId, selection, defaults, onSelectionChange });
+  if (!fast && toggles.length === 0) return null;
 
   return (
-    <div role="group" aria-label="Model options" className={cn("flex flex-col", className)}>
-      {toggles.map((toggle) => (
-        <label key={toggle.label} className="flex h-row-compact cursor-pointer items-center justify-between gap-3 text-body-small text-ink">
-          {toggle.label}
-          <Switch checked={toggle.on} onCheckedChange={toggle.set} />
-        </label>
+    <div role="group" aria-label="Model options" className="flex min-w-0 items-center gap-2">
+      {fast && (
+        <SegmentedControl
+          size="compact"
+          aria-label="Speed"
+          options={SPEED_OPTIONS}
+          value={fast.on ? "fast" : "standard"}
+          onChange={(value) => fast.set(value === "fast")}
+        />
+      )}
+      {toggles.map(({ label, icon: Icon, on, set }) => (
+        // Off reads as an outlined choice and on takes the selected fill, as the chosen speed does beside it.
+        <Button
+          key={label}
+          variant="outline"
+          size="compact"
+          aria-pressed={on}
+          onClick={() => set(!on)}
+          className="px-2.5 text-body-small text-muted aria-pressed:border-transparent aria-pressed:bg-selected aria-pressed:text-ink"
+        >
+          <Icon aria-hidden className="size-[1.4rem]" />
+          {label}
+        </Button>
       ))}
     </div>
   );

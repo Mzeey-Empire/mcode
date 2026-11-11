@@ -10,8 +10,7 @@ import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { ProviderModelInfo } from "@/transport/types";
 import { ComposerCapsuleSplit } from "../ComposerCapsuleSplit";
-import { ComposerModelPreferenceSettings } from "../../controls/ComposerModelPreferences";
-import { SWITCH_DWELL_MS } from "../part-popover-group";
+import { ComposerModelOptions } from "../../controls/ComposerModelPreferences";
 import type { ComposerAgentSelection } from "../../draft/useComposerFormController";
 
 // The real transport module imports the models store, so spreading it would load the store bound to the real transport.
@@ -64,11 +63,6 @@ function part(name: RegExp): HTMLElement {
   return screen.getByRole("button", { name });
 }
 
-function rest(element: HTMLElement, ms: number): void {
-  fireEvent.pointerEnter(element, { pointerType: "mouse" });
-  act(() => vi.advanceTimersByTime(ms));
-}
-
 interface SplitOverrides {
   readonly selection?: Partial<ComposerAgentSelection>;
   readonly reasoningLevels?: ReasoningLevel[];
@@ -99,16 +93,19 @@ async function renderSplit(overrides: SplitOverrides = {}) {
   return onSelectionChange;
 }
 
-function openPart(name: RegExp): void {
-  fireEvent.click(part(name));
-  for (let i = 0; i < 16; i++) frame();
-}
-
 async function openModelPicker(): Promise<HTMLElement> {
   fireEvent.click(part(/^Model:/));
-  // Lets the catalog request resolve.
+  // Lets the catalog request resolve, then the frame where Base UI moves focus to the search.
   await act(async () => {});
+  for (let i = 0; i < 4; i++) frame();
   return screen.getByRole("dialog", { name: "Choose model and provider" });
+}
+
+/** Opens the access list from the model picker's footer. */
+async function openAccess(name: RegExp): Promise<void> {
+  await openModelPicker();
+  fireEvent.click(screen.getByRole("button", { name }));
+  for (let i = 0; i < 16; i++) frame();
 }
 
 beforeEach(() => {
@@ -159,24 +156,6 @@ describe("ComposerCapsuleSplit", () => {
     expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({ provider: "claude", modelId: "claude-haiku-9" }));
   });
 
-  it("keeps the model search and its focus across hover switches", async () => {
-    // Base UI returns focus only to an element `tabbable` sees, and it sees nothing in a layout-free jsdom.
-    vi.spyOn(Element.prototype, "getClientRects").mockReturnValue(Object.assign([new DOMRect(0, 0, 10, 10)], { item: () => null }));
-    await renderSplit();
-    await openModelPicker();
-    fireEvent.change(screen.getByRole("combobox", { name: "Search models" }), { target: { value: "son" } });
-
-    rest(part(/^Access mode:/), SWITCH_DWELL_MS);
-    await act(async () => {});
-    expect(screen.getByRole("option", { selected: true })).toHaveFocus();
-    rest(part(/^Model:/), SWITCH_DWELL_MS);
-    await act(async () => {});
-
-    const search = screen.getByRole("combobox", { name: "Search models" });
-    expect(search).toHaveValue("son");
-    expect(search).toHaveFocus();
-  });
-
   it("hands focus back to the part at once on Escape, without the part's tooltip", async () => {
     await renderSplit();
     await openModelPicker();
@@ -203,52 +182,18 @@ describe("ComposerCapsuleSplit", () => {
     expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent("Model: GPT-9 Deep, High reasoning");
   });
 
-  it("lists the warm catalog across part switches without fetching it again", async () => {
-    useProviderModelsStore.getState().applyModels("codex", CODEX_MODELS);
-    vi.mocked(mockTransport.listProviderModels).mockClear();
-    await renderSplit();
-    await openModelPicker();
-
-    rest(part(/^Access mode:/), SWITCH_DWELL_MS);
-    rest(part(/^Model:/), SWITCH_DWELL_MS);
-    await act(async () => {});
-
-    expect(screen.getAllByRole("option").map((option) => option.getAttribute("aria-label") ?? option.textContent))
-      .toEqual(expect.arrayContaining([expect.stringContaining("GPT-9 Deep"), expect.stringContaining("GPT-9 Plain")]));
-    expect(mockTransport.listProviderModels).not.toHaveBeenCalled();
-  });
-
-  it("keeps the chosen provider tab across part switches and starts over after closing", async () => {
+  it("starts the search and the provider tab over on each open", async () => {
     await renderSplit();
     await openModelPicker();
     fireEvent.click(screen.getByRole("radio", { name: "Favourites" }));
-
-    rest(part(/^Access mode:/), SWITCH_DWELL_MS);
-    rest(part(/^Model:/), SWITCH_DWELL_MS);
-    expect(screen.getByRole("radio", { name: "Favourites" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.change(screen.getByRole("combobox", { name: "Search models" }), { target: { value: "son" } });
 
     fireEvent.keyDown(screen.getByRole("combobox", { name: "Search models" }), { key: "Escape" });
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
     await openModelPicker();
+
     expect(screen.getByRole("radio", { name: "Codex" })).toHaveAttribute("aria-checked", "true");
-  });
-
-  it("does not switch when the pointer rests just under the dwell", async () => {
-    await renderSplit();
-    await openModelPicker();
-
-    rest(part(/^Access mode:/), SWITCH_DWELL_MS - 1);
-
-    expect(screen.getByRole("dialog", { name: "Choose model and provider" })).toBeInTheDocument();
-    expect(screen.queryByRole("listbox", { name: "Access" })).toBeNull();
-  });
-
-  it("opens nothing when the pointer rests on a part while everything is closed", async () => {
-    await renderSplit();
-
-    rest(part(/^Model:/), SWITCH_DWELL_MS);
-
-    expect(realPopup()).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Search models" })).toHaveValue("");
   });
 
   it("sets model, provider and level in one change from the reasoning pane of a hovered model, and closes", async () => {
@@ -324,9 +269,8 @@ describe("ComposerCapsuleSplit", () => {
 
   it("focuses the Access option under the pointer, so the arrow keys carry on from it", async () => {
     await renderSplit();
-    fireEvent.click(part(/^Access mode: Ask me/));
-    for (let i = 0; i < 16; i++) frame();
-    const [, hovered, next] = screen.getAllByRole("option");
+    await openAccess(/^Access: Ask me/);
+    const [, hovered, next] = within(screen.getByRole("listbox", { name: "Access" })).getAllByRole("option");
     if (!hovered || !next) throw new Error("expected at least three access options");
 
     fireEvent.pointerMove(hovered);
@@ -335,17 +279,24 @@ describe("ComposerCapsuleSplit", () => {
     expect(next).toHaveFocus();
   });
 
-  it("maps an access pick to the turn selection and closes", async () => {
+  it("maps an access pick to the turn selection, closing the access list but not the picker", async () => {
     const onSelectionChange = await renderSplit();
-    fireEvent.click(part(/^Access mode: Ask me/));
-    for (let i = 0; i < 16; i++) frame();
+    await openAccess(/^Access: Ask me/);
 
     expect(screen.getByRole("option", { name: "Ask me" })).toHaveFocus();
     fireEvent.click(screen.getByRole("option", { name: "Don't ask" }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({ permissionMode: "full", approvalReviewMode: "manual" });
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
-    expect(realPopup()).toBeNull();
+    expect(screen.queryByRole("listbox", { name: "Access" })).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Choose model and provider" })).toBeInTheDocument();
+  });
+
+  it("flags the model part while the agent runs without approval prompts", async () => {
+    await renderSplit({ selection: { permissionMode: "full" } });
+
+    expect(part(/^Model: /)).toHaveAccessibleName("Model: GPT-9 Deep, High reasoning, Don't ask");
+    expect(screen.getByTestId("composer-unsupervised-icon")).toBeInTheDocument();
   });
 });
 
@@ -380,23 +331,39 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     expect(realPopup()).toBeNull();
   });
 
-  it("keeps Fast toggling in place under the selected model's levels, and offers it on no other model", async () => {
-    serveModels([
-      { id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: LEVELS, supportsFastMode: true },
-      { id: "gpt-9-wide", name: "GPT-9 Wide", supportedReasoningEfforts: LEVELS, supportsFastMode: true },
-    ]);
+  it("sets Fast from the footer in place, keeping the picker open", async () => {
+    serveModels([{ id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: LEVELS, supportsFastMode: true }]);
     const onSelectionChange = await renderSplit();
     await openModelPicker();
 
-    fireEvent.click(screen.getByRole("switch", { name: "Fast" }));
+    const speed = screen.getByRole("radiogroup", { name: "Speed" });
+    expect(within(speed).getByRole("radio", { name: "Standard" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(speed).getByRole("radio", { name: "Fast" }));
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
+
     expect(onSelectionChange).toHaveBeenCalledWith({ fastMode: true });
     expect(screen.getByRole("dialog", { name: "Choose model and provider" })).toBeInTheDocument();
+  });
 
-    fireEvent.mouseMove(screen.getByRole("option", { name: "GPT-9 Wide" }));
-    act(() => vi.advanceTimersByTime(PANE_SETTLE_MS));
-    expect(pane("GPT-9 Wide")).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: "Fast" })).toBeNull();
+  it("offers no speed choice for a model without Fast", async () => {
+    await renderSplit();
+    await openModelPicker();
+
+    expect(screen.queryByRole("radiogroup", { name: "Speed" })).toBeNull();
+  });
+
+  it("turns Ultra on in place for a Codex model that offers it, and persists it", async () => {
+    const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
+    const onSelectionChange = await renderSplit({ threadId: "thread-1", selection: { modelId: "gpt-6-astra" } });
+    await openModelPicker();
+
+    const ultra = screen.getByRole("button", { name: "Ultra" });
+    expect(ultra).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(ultra);
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ orchestrationMode: "proactive" });
+    expect(setThreadSettings).toHaveBeenCalledWith("thread-1", { orchestrationMode: "proactive" });
+    expect(screen.getByRole("dialog", { name: "Choose model and provider" })).toBeInTheDocument();
   });
 
   it("turns Fast on for a fork without persisting it to the source thread", async () => {
@@ -405,7 +372,7 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     const onSelectionChange = await renderSplit({ threadId: "thread-1", branchFromMessageId: "message-1" });
     await openModelPicker();
 
-    fireEvent.click(screen.getByRole("switch", { name: "Fast" }));
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Fast" }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({ fastMode: true });
     expect(setThreadSettings).not.toHaveBeenCalled();
@@ -420,14 +387,15 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
 
   it("leaves the context window to Settings, even for a model with a 1M option", () => {
     render(
-      <ComposerModelPreferenceSettings
+      <ComposerModelOptions
         selection={{ ...selection, provider: "claude", modelId: "claude-opus-5-5" }}
         defaults={{ thinking: undefined, globalCodexFast: false }}
         onSelectionChange={vi.fn()}
       />,
     );
 
-    expect(screen.queryByRole("switch", { name: /context/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /context|1M/i })).toBeNull();
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 });
 
@@ -481,7 +449,7 @@ describe("ComposerCapsuleSplit access", () => {
     ["Don't ask", { permissionMode: "full", approvalReviewMode: "manual" }],
   ] as const)("maps %s to one atomic turn selection", async (label, patch) => {
     const onSelectionChange = await renderSplit({ selection: { permissionMode: "full" } });
-    openPart(/^Access mode:/);
+    await openAccess(/^Access:/);
 
     fireEvent.click(screen.getByRole("option", { name: label }));
 
@@ -490,9 +458,9 @@ describe("ComposerCapsuleSplit access", () => {
 
   it("shows only Ask me and Don't ask when the provider does not support approval review", async () => {
     await renderSplit({ approvalReviewSupported: false });
-    openPart(/^Access mode: Ask me/);
+    await openAccess(/^Access: Ask me/);
 
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["Ask me", "Don't ask"]);
+    expect(within(screen.getByRole("listbox", { name: "Access" })).getAllByRole("option").map((option) => option.textContent)).toEqual(["Ask me", "Don't ask"]);
   });
 
   it("dims locked modes with the reason and keeps Don't ask available", async () => {
@@ -501,7 +469,7 @@ describe("ComposerCapsuleSplit access", () => {
       permissionLocked: true,
       approvalReviewSupported: false,
     });
-    openPart(/^Access mode: Don't ask/);
+    await openAccess(/^Access: Don't ask/);
 
     const askMe = screen.getByRole("option", { name: "Ask me" });
     expect(askMe).toHaveAttribute("aria-disabled", "true");
@@ -518,7 +486,7 @@ describe("ComposerCapsuleSplit access", () => {
     ["Bypass", { devinMode: "bypass", permissionMode: "full" }],
   ] as const)("maps Devin %s to a native mode plus permission mode", async (label, patch) => {
     const onSelectionChange = await renderSplit({ selection: { provider: "devin", modelId: "swe-2", devinMode: "smart" } });
-    openPart(/^Access mode: Smart/);
+    await openAccess(/^Access: Smart/);
 
     fireEvent.click(screen.getByRole("option", { name: label }));
 
@@ -528,6 +496,8 @@ describe("ComposerCapsuleSplit access", () => {
   it("derives the Devin access label from permissionMode when devinMode is unset", async () => {
     await renderSplit({ selection: { provider: "devin", modelId: "swe-2", permissionMode: "full" } });
 
-    expect(part(/^Access mode: Bypass/)).toBeInTheDocument();
+    expect(part(/^Model: .*, Bypass$/)).toBeInTheDocument();
+    await openModelPicker();
+    expect(screen.getByRole("button", { name: "Access: Bypass" })).toBeInTheDocument();
   });
 });

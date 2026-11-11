@@ -89,10 +89,17 @@ const INACTIVE_TRAY_SEGMENT = "text-muted enabled:hover:text-ink";
 const SEGMENT_BASE =
   "relative inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)";
 
+// A rail marks its tab with a bar on the side facing the content, as a sidebar does, so the marks stand without fills.
+// The bar is ink, not the primary: a selection stays neutral under the One Lamp Rule.
+const RAIL_ACTIVE_SEGMENT = "text-ink after:absolute after:inset-y-2 after:right-0 after:w-0.5 after:rounded-full after:bg-ink";
+
+function iconSegmentClass(isActive: boolean, vertical: boolean): string {
+  if (vertical) return cn(SEGMENT_BASE, "size-9 shrink-0 rounded-sm", isActive ? RAIL_ACTIVE_SEGMENT : INACTIVE_TRAY_SEGMENT);
+  return cn(SEGMENT_BASE, "h-7 w-[3rem] shrink-0 rounded-sm text-body-small", isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
+}
+
 function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean, fill: boolean, vertical: boolean): string {
-  if (layout === "icon") {
-    return cn(SEGMENT_BASE, vertical ? "size-8" : "h-7 w-[3rem]", "shrink-0 rounded-sm text-body-small", isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
-  }
+  if (layout === "icon") return iconSegmentClass(isActive, vertical);
   if (layout === "pill") {
     return cn(SEGMENT_BASE, "rounded-full", fill ? "flex-1" : "shrink-0", PILL_SEGMENT[size], isActive ? "bg-border text-ink" : "text-muted enabled:hover:text-ink");
   }

@@ -83,6 +83,8 @@ export interface PickerDetail<T> {
   readonly hint: string;
   /** The pane for an item. Return null for an item with nothing to show. */
   readonly render: (item: T) => ReactNode;
+  /** The pane's title for an item, level with the search field and sharing its rule, such as the model the pane shows. */
+  readonly caption?: (item: T) => ReactNode;
 }
 
 /** One picker tab, drawn as a segment above the list. */
@@ -163,7 +165,7 @@ interface ListRow<T> {
  * `numberedShortcuts`, Ctrl/Cmd+1..9 pick the first nine selectable rows directly.
  */
 export function Picker<T>(props: PickerProps<T>) {
-  const { query, onQueryChange, searchPlaceholder = "Search", items, renderItem, selectedKey, status, hairlines = true, selectedCheck = true } = props;
+  const { query, onQueryChange, searchPlaceholder = "Search", items, renderItem, selectedKey, hairlines = true, selectedCheck = true } = props;
   const listId = useId();
   const rows = useMemo<ListRow<T>[]>(() => items.map((item) => ({ item, row: renderItem(item) })), [items, renderItem]);
   const shortcutRows = useShortcutRows(rows, props.numberedShortcuts === true);
@@ -286,42 +288,54 @@ export function Picker<T>(props: PickerProps<T>) {
       unmatched={props.unmatchedGroup === undefined ? undefined : { label: props.unmatchedGroup, query }}
     />
   ) : null;
-  const body = (
-    <>
-      <PickerSearchField
-        inputRef={searchRef}
-        listId={listId}
-        query={query}
-        onQueryChange={onQueryChange}
-        placeholder={searchPlaceholder}
-        expanded={hasRows}
-        activeIndex={activeIndex}
-        detail={props.detail}
-        onKeyDown={handleKeyDown}
-      />
-      <PickerTabs tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} />
-      <PickerListArea
-        list={list}
-        detail={props.detail}
-        paneEntry={rows.find(({ row }) => row.key === pane.key)}
-        paneRef={paneRef}
-        onKeyDown={leavePane}
-        onPointerEnter={settlePane}
-      />
-      {/* A failed page keeps the rows already loaded; only an empty list gives way to the status. */}
-      {typeof status === "object" ? (
-        <PickerFailure status={status} onRetry={props.onRetry} />
-      ) : hasRows ? null : (
-        <PickerEmptyState {...props} listId={listId} />
-      )}
-      <PickerFooter loaded={items.length} total={props.total} countLabel={props.countLabel} footer={props.footer} hairline={hairlines} />
-    </>
+  const search = (
+    <PickerSearchField
+      inputRef={searchRef}
+      listId={listId}
+      query={query}
+      onQueryChange={onQueryChange}
+      placeholder={searchPlaceholder}
+      expanded={hasRows}
+      activeIndex={activeIndex}
+      detail={props.detail}
+      onKeyDown={handleKeyDown}
+    />
   );
+  const tabs = <PickerTabs tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} />;
+  const listStatus = <PickerListStatus {...props} hasRows={hasRows} listId={listId} />;
+  if (props.detail) {
+    return (
+      <PickerDetailLayout
+        tabs={props.tabs}
+        activeTab={props.activeTab}
+        onTabChange={props.onTabChange}
+        onKeyDown={handleNumberShortcut}
+        search={search}
+        list={<>{tabs}{list}{listStatus}</>}
+        detail={props.detail}
+        paneItem={rows.find(({ row }) => row.key === pane.key)?.item}
+        paneRef={paneRef}
+        onPaneKeyDown={leavePane}
+        onPanePointerEnter={settlePane}
+        footer={props.footer}
+      />
+    );
+  }
   return (
     <PickerFrame tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} onKeyDown={handleNumberShortcut}>
-      {body}
+      {search}
+      {tabs}
+      {list}
+      {listStatus}
+      <PickerFooter loaded={items.length} total={props.total} countLabel={props.countLabel} footer={props.footer} hairline={hairlines} />
     </PickerFrame>
   );
+}
+
+/** A failed page keeps the rows already loaded; only an empty list gives way to the status. */
+function PickerListStatus<T>(props: PickerProps<T> & { readonly hasRows: boolean; readonly listId: string }) {
+  if (typeof props.status === "object") return <PickerFailure status={props.status} onRetry={props.onRetry} />;
+  return props.hasRows ? null : <PickerEmptyState {...props} />;
 }
 
 /** The picker's outer box: a column, or a row with the provider rail beside the column when the tabs are icons. */
@@ -344,8 +358,71 @@ function PickerFrame({
   }
   return (
     <div data-slot="picker" className="flex min-w-0" onKeyDown={onKeyDown}>
-      <PickerRail tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} />
+      <PickerRail tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} className="mr-2 pr-1.5" />
       <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+    </div>
+  );
+}
+
+interface PickerDetailLayoutProps<T> extends Pick<PickerProps<T>, "tabs" | "activeTab" | "onTabChange" | "footer"> {
+  readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly search: ReactNode;
+  readonly list: ReactNode;
+  readonly detail: PickerDetail<T>;
+  readonly paneItem: T | undefined;
+  readonly paneRef: RefObject<HTMLDivElement | null>;
+  readonly onPaneKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly onPanePointerEnter: () => void;
+}
+
+// The list's track is eight 33px rows less the last gap, plus its 8px insets, so a provider with eight models opens with
+// every Ctrl shortcut in view, and the insets sit outside the scroller, so it shows whole rows at every keyboard stop.
+// Too narrow to share a row (a 320px window, or 400% zoom), the pane drops under four rows instead of squeezing the names,
+// which leaves the footer in view above the composer.
+const DETAIL_GRID_CLASS = cn(
+  "grid grid-cols-[minmax(0,1fr)_16.8rem] grid-rows-[auto_27.9rem] [grid-template-areas:'search_caption'_'list_pane']",
+  "@max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[auto_14.7rem_auto_auto] @max-[340px]/picker-area:[grid-template-areas:'search'_'list'_'caption'_'pane']",
+);
+
+/**
+ * The picker with a detail pane, in columns: the rail, the search over the list, and the pane under its caption. Each
+ * column runs the panel's full height, the search and the caption share one rule, and the footer spans all three.
+ * It draws its own edges and insets, so its host's panel has no padding. The pair keeps a fixed height, so moving
+ * between rows whose panes differ never resizes the panel.
+ */
+function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
+  const { tabs, detail, paneItem } = props;
+  return (
+    <div data-slot="picker" className="flex min-w-0 flex-col" onKeyDown={props.onKeyDown}>
+      <div className="flex min-w-0">
+        {tabs && drawsTabsAsRail(tabs) ? (
+          <PickerRail tabs={tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} className="px-1.5 py-0.5" />
+        ) : null}
+        <div className="@container/picker-area min-w-0 flex-1">
+          <div className={DETAIL_GRID_CLASS}>
+            <div className="flex min-h-10 items-center border-b border-border pl-2 [grid-area:search] focus-within:border-focus">
+              {props.search}
+            </div>
+            <div className="flex min-h-0 flex-col py-2 pl-2 [grid-area:list]">{props.list}</div>
+            <div
+              onPointerEnter={props.onPanePointerEnter}
+              className="flex min-h-10 items-center border-b border-l border-border px-3 [grid-area:caption] @max-[340px]/picker-area:border-t @max-[340px]/picker-area:border-l-0"
+            >
+              {paneItem === undefined ? null : detail.caption?.(paneItem)}
+            </div>
+            <div
+              ref={props.paneRef}
+              data-slot="picker-detail"
+              onKeyDown={props.onPaneKeyDown}
+              onPointerEnter={props.onPanePointerEnter}
+              className="min-h-0 overflow-y-auto border-l border-border py-1 pr-2 pl-1 [grid-area:pane] @max-[340px]/picker-area:border-l-0"
+            >
+              {paneItem === undefined ? null : detail.render(paneItem)}
+            </div>
+          </div>
+        </div>
+      </div>
+      {props.footer ? <div className="border-t border-border p-2">{props.footer}</div> : null}
     </div>
   );
 }
@@ -385,43 +462,6 @@ function PickerSearchField({ inputRef, listId, query, onQueryChange, placeholder
         onKeyDown={onKeyDown}
         className="min-w-0 flex-1 bg-transparent text-body-small text-ink outline-none placeholder:text-muted"
       />
-    </div>
-  );
-}
-
-interface PickerListAreaProps<T> {
-  readonly list: ReactNode;
-  readonly detail: PickerDetail<T> | undefined;
-  readonly paneEntry: ListRow<T> | undefined;
-  readonly paneRef: RefObject<HTMLDivElement | null>;
-  readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
-  readonly onPointerEnter: () => void;
-}
-
-/**
- * The list, beside its detail pane when the picker has one. The pair sits at a fixed height, so moving between rows
- * whose panes differ never resizes the panel.
- */
-function PickerListArea<T>({ list, detail, paneEntry, paneRef, onKeyDown, onPointerEnter }: PickerListAreaProps<T>) {
-  if (!list || !detail) return list;
-  return (
-    // Eight 33px rows less the last gap, so a provider with eight models opens with every Ctrl shortcut in view; the 8px gap
-    // above sits outside the scroller, so the list shows whole rows at every keyboard stop. Too narrow to share a row
-    // (a 320px window, or 400% zoom), the pane drops under five rows of the list instead of squeezing the names away.
-    <div className="@container/picker-area">
-      <div className="mt-2 grid h-[26.3rem] grid-cols-[minmax(0,1fr)_16.8rem] @max-[340px]/picker-area:h-auto @max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[16.4rem_auto]">
-        {list}
-        <div
-          ref={paneRef}
-          data-slot="picker-detail"
-          onKeyDown={onKeyDown}
-          onPointerEnter={onPointerEnter}
-          // No right padding: the panel's 8px already sits there, so the pane mirrors the list's 8px outer and 4px inner gutters.
-          className="min-h-0 overflow-y-auto border-l border-border py-1 pl-1 @max-[340px]/picker-area:mt-1 @max-[340px]/picker-area:border-t @max-[340px]/picker-area:border-l-0 @max-[340px]/picker-area:pl-0"
-        >
-          {paneEntry ? detail.render(paneEntry.item) : null}
-        </div>
-      </div>
     </div>
   );
 }
@@ -466,9 +506,9 @@ function drawsTabsAsRail(tabs: readonly PickerTab[]): boolean {
   return tabs.length > 1 && tabs.every((tab) => tab.icon != null);
 }
 
-function PickerRail({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>, "activeTab" | "onTabChange"> & { readonly tabs: readonly PickerTab[] }) {
+function PickerRail({ tabs, activeTab, onTabChange, className }: Pick<PickerProps<unknown>, "activeTab" | "onTabChange"> & { readonly tabs: readonly PickerTab[]; readonly className: string }) {
   return (
-    <div className="mr-2 shrink-0 border-r border-border pr-1.5">
+    <div className={cn("shrink-0 border-r border-border", className)}>
       <SegmentedControl
         size="compact"
         iconOnly

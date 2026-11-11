@@ -35,7 +35,7 @@ function percentUsedOf(tokensIn: number, contextWindow: number | undefined): num
 
 /**
  * The capsule's context usage, shown from 70% as "72% context", or "72%" below the 680px capsule tier, behind a rule
- * that sets it off from the access part. Hover or focus opens the token breakdown card the old ring showed.
+ * that sets it off from the model part. Hover or focus opens the token breakdown card the old ring showed.
  */
 export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTokens, hasLowQuota }: ComposerContextLabelProps) {
   const percentUsed = percentUsedOf(tokensIn, contextWindow);
