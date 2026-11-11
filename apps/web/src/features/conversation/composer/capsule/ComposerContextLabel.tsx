@@ -26,8 +26,8 @@ function abbreviateTokens(n: number): string {
 }
 
 function percentUsedOf(tokensIn: number, contextWindow: number | undefined): number | null {
-  if (tokensIn <= 0 || !contextWindow) return null;
-  return Math.min(100, (tokensIn / contextWindow) * 100);
+  if (!contextWindow) return null;
+  return Math.min(100, (Math.max(0, tokensIn) / contextWindow) * 100);
 }
 
 /** The label to show, with low quota forcing the warning tone below the usual threshold. */
@@ -43,8 +43,9 @@ function labelFor(percentUsed: number | null, hasLowQuota: boolean): ContextLabe
  */
 export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTokens, hasLowQuota }: ComposerContextLabelProps) {
   const percentUsed = percentUsedOf(tokensIn, contextWindow);
+  if (percentUsed === null || !contextWindow) return hasLowQuota ? <LowQuotaLabel /> : null;
   const label = labelFor(percentUsed, hasLowQuota);
-  if (!label || percentUsed === null || !contextWindow) return null;
+  if (!label) return null;
 
   const tone = TONE_CLASS[label.tone];
   const summary = `${label.text} · ${abbreviateTokens(tokensIn)}/${abbreviateTokens(contextWindow)} context used`;
@@ -99,13 +100,48 @@ export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTo
                 <span className="tabular-nums">{abbreviateTokens(totalProcessedTokens)} tokens</span>
               </div>
             )}
-            {hasLowQuota && (
-              <div className="flex justify-between gap-4 border-t border-border pt-2">
-                <span>Provider quota</span>
-                <span className="font-medium text-warning">Low</span>
-              </div>
-            )}
+            {hasLowQuota && <ProviderQuotaLine className="border-t border-border pt-2" />}
           </div>
+        </TooltipContent>
+      </Tooltip>
+    </>
+  );
+}
+
+function ProviderQuotaLine({ className }: { readonly className?: string }) {
+  return (
+    <div className={cn("flex justify-between gap-4", className)}>
+      <span>Provider quota</span>
+      <span className="font-medium text-warning">Low</span>
+    </div>
+  );
+}
+
+/** Without a known context window there is no percentage to show, but a nearly spent quota still needs flagging. */
+function LowQuotaLabel() {
+  return (
+    <>
+      <CapsuleDivider />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              data-testid="composer-context-label"
+              role="img"
+              aria-label="Low provider quota"
+              tabIndex={0}
+              className={cn(
+                "inline-flex h-8 shrink-0 cursor-default items-center rounded-full pr-1.5 pl-1 text-compact whitespace-nowrap",
+                "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+                TONE_CLASS.warning.text,
+              )}
+            >
+              Low quota
+            </span>
+          }
+        />
+        <TooltipContent side="top" align="end" sideOffset={8} className="w-72 max-w-none p-3">
+          <ProviderQuotaLine />
         </TooltipContent>
       </Tooltip>
     </>
