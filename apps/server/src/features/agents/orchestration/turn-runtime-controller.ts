@@ -1073,6 +1073,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!result) return true;
     if (!isAcceptedWorkerResult(result)) throw new Error("Unsent worker turn did not reach terminal acceptance");
     this.publishUnsentFinish(execution, active, result);
+    // Set the saved outcome before release, whose recovery would otherwise claim the turn as interrupted.
+    this.turnRuntime.terminalize(threadId, executionId, terminal.outcome);
     return this.settleUnsentRelease(active, terminal.outcome, this.releaseUnsentWorkerTurn(worker, execution, active), onDetachedRelease);
   }
 
