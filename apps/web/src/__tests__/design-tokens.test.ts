@@ -44,16 +44,6 @@ const ROLE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
   "diff-remove-bg": ["--diff-remove-bg"],
 };
 
-/**
- * Light-theme variables that depart from their Paper role by a recorded decision,
- * mapped to the Paper token they resolve to instead.
- */
-const LIGHT_DEVIATIONS: Readonly<Record<string, { readonly role: string; readonly token: string }>> = {
-  // decisions.md D4: Paper's light selected equals page and hover, so a selected row
-  // vanished. Only selection moves; the secondary button (--button-secondary) keeps Paper's pair.
-  "--selected": { role: "selected", token: "--color-neutral-200" },
-};
-
 const TYPE_ROLES = ["body", "prose", "body-small", "caption", "label", "button", "code"] as const;
 const RADIUS_ROLES = ["badge", "menu", "control", "composer", "dialog"] as const;
 const SIZE_TOKENS = [
@@ -114,6 +104,27 @@ const themes = {
 };
 const theme = blockDeclarations("@theme inline");
 const code = (scope: ReadonlyMap<string, string>, name: string) => resolveVars(`var(${name})`, scope);
+type Theme = keyof typeof themes;
+const paperRole = (theme: Theme, role: string) => paper(theme === "light" ? `--color-light-${role}` : `--color-${role}`);
+
+/**
+ * Variables that depart from their Paper role by a recorded decision, mapped to the
+ * value they resolve to instead. index.css gives each one its reason.
+ */
+const DEVIATIONS: Readonly<Record<Theme, Readonly<Record<string, string>>>> = {
+  light: {
+    // decisions.md D4: Paper's light selected equals page and hover, so a selected row
+    // vanished. Only selection moves; the secondary button (--button-secondary) keeps Paper's pair.
+    "--selected": paper("--color-neutral-200"),
+    // Paper's neutral-400 reads 4.45:1 on the selected fill the composer uses.
+    "--muted": "oklch(47% 0.010 260)",
+    // Paper's amber warning shares the run lamp's hue, so warnings read as more Sends.
+    "--warning": "oklch(46% 0.100 92)",
+  },
+  dark: {
+    "--warning": "oklch(82% 0.110 92)",
+  },
+};
 
 describe("design tokens match the Paper export", () => {
   it("maps every Paper colour role", () => {
@@ -133,16 +144,20 @@ describe("design tokens match the Paper export", () => {
 
   it.each(Object.entries(ROLE_VARIABLES))("resolves %s to Paper's value in both themes", (role, variables) => {
     for (const variable of variables) {
-      expect(code(themes.dark, variable), `dark ${variable}`).toBe(paper(`--color-${role}`));
-      expect(code(themes.light, variable), `light ${variable}`).toBe(
-        paper(LIGHT_DEVIATIONS[variable]?.token ?? `--color-light-${role}`),
-      );
+      for (const name of ["dark", "light"] as const) {
+        expect(code(themes[name], variable), `${name} ${variable}`).toBe(
+          DEVIATIONS[name][variable] ?? paperRole(name, role),
+        );
+      }
     }
   });
 
   it("keeps each decided deviation different from Paper", () => {
-    for (const [variable, { role, token }] of Object.entries(LIGHT_DEVIATIONS)) {
-      expect(paper(`--color-light-${role}`), `Paper now matches ${variable}; drop the deviation`).not.toBe(paper(token));
+    for (const name of ["dark", "light"] as const) {
+      for (const [variable, value] of Object.entries(DEVIATIONS[name])) {
+        const role = Object.keys(ROLE_VARIABLES).find((key) => ROLE_VARIABLES[key]!.includes(variable))!;
+        expect(paperRole(name, role), `Paper now matches ${name} ${variable}; drop the deviation`).not.toBe(value);
+      }
     }
   });
 
