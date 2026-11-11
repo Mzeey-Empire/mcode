@@ -49,16 +49,17 @@ type OpenPartPopover = Extract<PartPopoverState, { status: "open" }>;
 
 // The access list carries the menu's own 4px padding, so its popover adds none.
 const POPUP_CLASS: Record<CapsulePart, string> = {
-  // Wider than other pickers to fit the reasoning pane beside the model list.
-  // Below 504px the composer, 32px narrower than the window, is narrower than 440px plus its insets, so the picker
+  // Wider than other pickers to fit the provider rail and the reasoning pane beside the model list.
+  // Below 552px the composer, 32px narrower than the window, is narrower than 488px plus its insets, so the picker
   // takes the composer's width and both its edges meet the composer's instead of sitting a few pixels inside one.
-  model: cn(PICKER_PANEL_CLASS, "w-[44rem] max-[504px]:w-[calc(100vw-3.2rem)] max-h-(--available-height) overflow-y-auto"),
+  model: cn(PICKER_PANEL_CLASS, "w-[48.8rem] max-[552px]:w-[calc(100vw-3.2rem)] max-h-(--available-height) overflow-y-auto"),
   access: "w-58 p-0",
 };
 
-// The open part takes the fill a step above the hover, so it still reads as open with the pointer on another part.
+// The open part takes the fill a step above the hover, so it still reads as open with the pointer on another part. A
+// pressed part takes it from CSS on pointer-down, a frame before the popover's render can show it.
 const PART_CLASS =
-  "group/part relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
+  "group/part relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink active:bg-button-secondary-hover aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
 
 /** The model part's label below the 680px tier, read against its provider's other models. */
 function narrowLabelOf(model: SelectedModelPresentation, providerId: string): string {

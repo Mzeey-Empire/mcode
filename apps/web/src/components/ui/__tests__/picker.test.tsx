@@ -304,6 +304,17 @@ describe("Picker", () => {
     await waitFor(() => expect(screen.getAllByText("Pull requests").some((node) => !node.hidden && !node.classList.contains("sr-only"))).toBe(true));
   });
 
+  it("stacks icon tabs in a vertical rail that Down Arrow moves through", async () => {
+    render(<PagedPicker tabs={TABS.map((tab) => ({ ...tab, icon: <span>{tab.label[0]}</span> }))} />);
+    const rail = screen.getByRole("radiogroup", { name: "Picker tabs" });
+    expect(rail).toHaveAttribute("aria-orientation", "vertical");
+
+    act(() => screen.getByRole("radio", { name: "Branches" }).focus());
+    await userEvent.keyboard("{ArrowDown}");
+
+    expect(screen.getByRole("radio", { name: "Pull requests" })).toHaveAttribute("aria-checked", "true");
+  });
+
   it("divides rows where the group changes", () => {
     render(<PagedPicker pages={1} renderItem={(branch) => ({ key: branch.name, name: branch.name, group: branch.name < "branch-002" ? "a" : "b" })} />);
     const separators = screen.getByRole("listbox").querySelectorAll("li[role=presentation]");
@@ -330,9 +341,9 @@ describe("Picker", () => {
     const row = screen.getByRole("option", { name: /branch-000/ });
     expect(row).toHaveTextContent("origin");
     expect(row).toHaveAccessibleDescription("Star branch-000 (Ctrl+D)");
-    const button = row.querySelector<HTMLButtonElement>("[data-slot=picker-row-action]");
-    expect(button).toHaveAttribute("tabindex", "-1");
-    await userEvent.click(button as HTMLButtonElement);
+    const button = row.querySelector<HTMLElement>("[data-slot=picker-row-action]");
+    expect(button?.tabIndex).toBe(-1);
+    await userEvent.click(button as HTMLElement);
     expect(onAction).toHaveBeenCalledWith("branch-000");
     expect(onSelect).not.toHaveBeenCalled();
     expect(search).toHaveFocus();

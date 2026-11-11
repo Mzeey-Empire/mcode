@@ -1207,9 +1207,9 @@ are provider-native, so they show the parent thread's provider.
   access 232px, and the `+` menu 232px. Every part's popover opens in one spot: 8px above the right edge of the
   capsule, covering any tray, so it never moves when content above
   changes. With a popover open, resting 100ms on another part switches to
-  its popover, as in a menu bar. The model picker is 440px, or the composer's
-  width when the window leaves less, so both its edges meet the composer's: the model list on
-  the left and a 168px reasoning pane on the right, behind a `border`
+  its popover, as in a menu bar. The model picker is 488px, or the composer's
+  width when the window leaves less, so both its edges meet the composer's: the provider rail, the model list,
+  and a 168px reasoning pane on the right, behind a `border`
   hairline, listing the highlighted model's levels under a one-line caption
   in Caption `muted`: "Reasoning" on the left and the model's short name on
   the right, since the tab or group label already names the provider. A name
@@ -1218,7 +1218,9 @@ are provider-native, so they show the parent thread's provider.
   carries a `Default` tag in Caption `muted`, before any check. The pane mirrors the list's
   gutters (8px to the panel edge, 4px to the hairline) and its 8px row inset. A check marks the committed model
   and level. The list and pane are eight rows tall (26.3rem), so a provider
-  with eight models opens with Ctrl+1 to Ctrl+8 in view, and the 8px gap
+  with eight models opens with Ctrl+1 to Ctrl+8 in view. A list narrower
+  than 240px, in a narrow window, hides the keycaps so model names stay
+  whole; the shortcuts still work. The 8px gap
   above them sits outside the scrolling list, so every keyboard stop shows
   eight whole rows. A hovered row reaches the
   pane after 100ms, so a pointer crossing rows on its way to the pane keeps
@@ -1233,10 +1235,12 @@ are provider-native, so they show the parent thread's provider.
   over a muted "Nothing matches" line. Favourites searches only
   favourites, and a provider-locked thread searches only its provider. While
   the pane shows the selected model, it ends with that model's options (Fast,
-  1M context, Thinking) as labelled switch rows under a hairline; they change
-  in place. On any other model the pane leaves them out, because a switch
-  there would change a model the user has not picked. So every model setting
-  is two clicks from the closed capsule: open, then a level or a switch. The
+  Thinking) as labelled switch rows under a hairline; they change in place.
+  On any other model the pane leaves them out, because a switch there would
+  change a model the user has not picked. The context window is a Settings
+  default, not a per-message choice, so the pane has no 1M switch. So every
+  model setting the composer offers is two clicks from the closed capsule:
+  open, then a level or a switch. The
   part whose popover is open keeps the `button-secondary-hover` fill, a step
   above the hover, so it still reads as open while the pointer rests on
   another part. Each part names its
@@ -1353,7 +1357,11 @@ top-aligned to the trigger row, never stacked below it.
 commit, model, project):
 1. A borderless search row on top.
 2. Segmented tabs under it when the list has sibling sources. A single
-   source shows no tab row.
+   source shows no tab row. Icon tabs, such as the model picker's
+   providers, stand in a rail of 32px squares left of the search instead,
+   behind a `border` hairline, with the search at the top of the column
+   beside it. A second row of icons under the search read as part of the
+   search, so the providers move out of its way.
 3. A flat list with no section labels and no per-row type icons or counts.
    The selected row shows a trailing check, with a `muted` tag when it helps
    ("current", "worktree"). About five rows are visible; the list scrolls

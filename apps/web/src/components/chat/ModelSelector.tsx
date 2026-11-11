@@ -71,6 +71,7 @@ export function ModelSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const genieMotion = useMemo((): PopoverMotion => ({ kind: "genie", origin: () => triggerRef.current }), []);
   const popoverActions = useRef<PopoverRootActions | null>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
   return (
     <Popover
@@ -89,6 +90,9 @@ export function ModelSelector({
         }
       />
       <PopoverContent
+        ref={popupRef}
+        // The provider rail precedes the search in the DOM, so the first tabbable element is a provider, not the search.
+        initialFocus={() => popupRef.current?.querySelector<HTMLElement>('input[role="combobox"]') ?? true}
         role="dialog"
         aria-label="Choose model and provider"
         side="top"
