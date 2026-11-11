@@ -183,6 +183,29 @@ describe("AgentService cleanup through production worker composition", { timeout
     } finally { dispatchHeld.resolve(); vi.useRealTimers(); ledger.close(); }
   });
 
+  it("unlocks the thread when the release after an early Stop fails", async () => {
+    const fixture = await openFixture();
+    const reservations = container.resolve(ThreadControlMutationReservationService);
+    const runIfOwned = reservations.runIfOwned.bind(reservations);
+    const bound = holdDeferred();
+    const dispatchHeld = holdDeferred();
+    vi.spyOn(reservations, "runIfOwned").mockImplementation((threadId, token, kind, run) => kind !== "activeTurn"
+      ? runIfOwned(threadId, token, kind, run)
+      : (bound.resolve(), dispatchHeld.promise.then(() => runIfOwned(threadId, token, kind, run))));
+    const first = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work", provider: "codex", model: "gpt-5", permissionMode: "default" });
+    await bound.promise;
+    vi.spyOn(fixture.workers.owner, "release").mockRejectedValueOnce(new Error("worker slot release failed"));
+    try {
+      const stopped = await fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      expect(stopped).toMatchObject({ status: "cancelled", dispatchState: "not-dispatched" });
+      dispatchHeld.resolve();
+      await first;
+      await fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" });
+      await vi.waitFor(() => expect(fixture.sent.map((turn) => turn.message)).toEqual(["Next"]));
+      expect(fixture.canonical.loadTurnByExecution(stopped.turnExecutionId!)?.ending).toEqual({ outcome: "cancelled", stop: { by: "user" } });
+    } finally { dispatchHeld.resolve(); }
+  });
+
   it("aborts an auto-resumed turn when a pending mutation reservation owns the thread", async () => {
     const fixture = await openFixture("claude");
     const mutationReservations = container.resolve(ThreadControlMutationReservationService);
