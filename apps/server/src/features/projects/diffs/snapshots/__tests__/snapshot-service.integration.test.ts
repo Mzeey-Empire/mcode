@@ -1,11 +1,12 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import * as NodeChildProcess from "node:child_process";
 import { SnapshotService } from "../snapshot-service.js";
 import { RealGitExecutor } from "../../../git/execution/real-git-executor.js";
+import type { GitExecOptions, GitExecResult } from "../../../git/execution/types.js";
 
 const GIT_REPO_SETUP_TIMEOUT_MS = 30_000;
 const GIT_OPERATION_TIMEOUT_MS = 30_000;
@@ -64,6 +65,7 @@ describe("SnapshotService integration", () => {
   }, GIT_REPO_SETUP_TIMEOUT_MS);
 
   afterEach(() => {
+    vi.restoreAllMocks();
     NodeFS.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -81,6 +83,26 @@ describe("SnapshotService integration", () => {
   it("captures the HEAD tree for a clean checkout", async () => {
     expect(await service.captureRef(tmpDir)).toBe(git("rev-parse", "HEAD^{tree}"));
   }, GIT_OPERATION_TIMEOUT_MS);
+
+  it("bounds the whole capture by one deadline instead of a fresh limit per command", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const timeouts: Record<string, number | undefined> = {};
+    class SlowAddExecutor extends RealGitExecutor {
+      override exec(args: string[], opts?: GitExecOptions): Promise<GitExecResult> {
+        const command = ["ls-files", "add", "write-tree"].find((name) => args.includes(name));
+        if (command) timeouts[command] = opts?.timeout;
+        // A slow listing spends most of the budget before `add` starts.
+        if (command === "ls-files") now += 50_000;
+        return super.exec(args, opts);
+      }
+    }
+    service = new SnapshotService(new SlowAddExecutor());
+    NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "edited");
+
+    await expect(service.captureRef(tmpDir)).resolves.toMatch(/^[0-9a-f]{40}$/);
+    expect(timeouts).toEqual({ "ls-files": 60_000, add: 10_000, "write-tree": 10_000 });
+  });
 
   it("captures tracked and untracked content while excluding ignored files", async () => {
     NodeFS.writeFileSync(NodePath.join(tmpDir, "existing.txt"), "modified\n");

@@ -75,6 +75,21 @@ describe("TurnFileEvidenceLedger", () => {
     expect(db.query("SELECT message_id, source, patch FROM turn_diff_snapshots").all()).toEqual(kept);
   });
 
+  it("starts the collection budget when the ending is saved, so a slow save cannot time out a finished capture", async () => {
+    ledger.expect(execution, frozen);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(evidence()).toEqual({ state: "tracking" });
+    ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution); await flush();
+    expect(evidence()).toMatchObject({ state: "recorded", filesChanged: ["shell.txt"] });
+  });
+
+  it("reports a capture that Git ran out of time for as timed out", async () => {
+    snapshots.captureRef.mockRejectedValueOnce(Object.assign(new Error("Git command timed out after 60000 ms"), { killed: true }));
+    ledger.expect(execution, frozen); ledger.tracked(execution, { ...facts, filesChanged: ["edited.txt"] });
+    terminal(); ledger.terminalSaved(execution); await flush();
+    expect(evidence()).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: ["edited.txt"], fileEffects: summary });
+  });
+
   it("retains provider paths and the agent's own diff when capture fails", async () => {
     snapshots.captureRef.mockRejectedValueOnce(new Error("git failed"));
     db.run("INSERT INTO messages (id,thread_id,role,content,timestamp,sequence,outcome_execution_id) VALUES ('assistant','thread','assistant','Done','now',1,?)", [execution.executionId]);
