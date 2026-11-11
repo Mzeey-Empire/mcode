@@ -1217,7 +1217,11 @@ are provider-native, so they show the parent thread's provider.
   pane after 100ms, so a pointer crossing rows on its way to the pane keeps
   it. Right Arrow at the end of the search enters the pane and Left Arrow
   leaves it. A level sets the model and level and closes; picking a model
-  closes and keeps the level when the model supports it. The reasoning
+  closes and keeps the level when the model supports it. A search on a
+  provider tab lists that provider's matches first, then each other usable
+  provider's matches under its name as a group label, so another provider's
+  model and level are a search and one click away. Favourites searches only
+  favourites, and a provider-locked thread searches only its provider. The reasoning
   popover lists the same levels, and one click sets the level and closes.
   It ends with the selected model's options (Fast, 1M context, Thinking) as
   labelled switch rows under a hairline; they change in place. The model

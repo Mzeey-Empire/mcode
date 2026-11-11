@@ -117,6 +117,33 @@ describe("ModelSelector", () => {
     expect(optionNames()).toEqual(["GPT-5.6 Sol"]);
   });
 
+  it("lists other providers' matches under their names when searching a provider tab", async () => {
+    setProviders({ claude: true, codex: true });
+    const onSelect = vi.fn();
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={onSelect} />);
+    await openPicker();
+
+    await userEvent.type(screen.getByRole("combobox", { name: "Search models" }), "5.6 sol");
+
+    expect(screen.getByRole("radio", { name: "Claude" })).toHaveAttribute("aria-checked", "true");
+    expect(optionNames()).toEqual(["GPT-5.6 Sol"]);
+    expect(screen.getByText("Codex", { selector: "[data-slot=picker-group-label]" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("option", { name: /GPT-5.6 Sol/ }));
+    expect(onSelect).toHaveBeenCalledWith(expect.any(String), "codex");
+  });
+
+  it("keeps a search to the thread's provider when the provider is locked", async () => {
+    setProviders({ claude: true, codex: true });
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={vi.fn()} providerLocked />);
+    await openPicker();
+
+    await userEvent.type(screen.getByRole("combobox", { name: "Search models" }), "5.6 sol");
+
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
   it("closes on Escape and returns focus to the trigger", async () => {
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
       onSelect={vi.fn()} />);
@@ -352,7 +379,7 @@ describe("ModelSelector", () => {
     ];
 
     async function openClaudeTab(selectedModelId: string, onSelect = vi.fn()) {
-      listProviderModels.mockResolvedValue(LIVE_CLAUDE);
+      listProviderModels.mockImplementation(async (providerId) => (providerId === "claude" ? LIVE_CLAUDE : []));
       render(<ModelSelector selectedModelId={selectedModelId} selectedProviderId="claude"
         onSelect={onSelect} />);
       await openPicker();
@@ -411,7 +438,9 @@ describe("ModelSelector", () => {
 
       await userEvent.type(screen.getByRole("combobox"), "sonnet");
 
-      expect(optionNames()).toEqual(["Claude Sonnet 5.5", "Claude Sonnet 5"]);
+      // The tab's own matches lead; other providers' matches follow under their names.
+      expect(optionNames().slice(0, 2)).toEqual(["Claude Sonnet 5.5", "Claude Sonnet 5"]);
+      expect(screen.queryByRole("option", { name: /Legacy models/ })).toBeNull();
     });
 
     it("shows no fold for a catalog without legacy models", async () => {
