@@ -121,7 +121,9 @@
   --primary-ink: var(--neutral-50);
   --button-secondary: var(--neutral-100);
   --hover: var(--neutral-100);
-  --muted: var(--neutral-400);
+  /* neutral-400 reads 4.45:1 on the neutral-200 selected fill, which the composer uses, so muted text there fell
+     under its 4.5:1 promise. neutral-400 also draws dark control borders, so light muted takes its own darker step. */
+  --muted: oklch(47% 0.010 260);
   /* Paper's light selected is neutral-100, the same as page and hover, so a
      selected sidebar row would vanish (decisions.md D4). Only selection moves:
      the secondary button keeps neutral-100 so its neutral-200 hover still shows. */

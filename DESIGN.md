@@ -35,11 +35,11 @@ colors:
   light-background: "oklch(0.99 0.005 260)" # neutral-50
   light-panel: "oklch(0.99 0.005 260)" # neutral-50
   light-hover: "oklch(0.955 0.005 260)" # neutral-100
-  light-selected: "oklch(0.955 0.005 260)" # neutral-100
+  light-selected: "oklch(0.90 0.005 260)" # neutral-200
   light-border: "oklch(0.90 0.005 260)" # neutral-200
   light-control-border: "oklch(0.65 0.005 260)" # neutral-300
   light-ink: "oklch(0.19 0.005 260)" # neutral-800
-  light-muted: "oklch(0.50 0.010 260)" # neutral-400
+  light-muted: "oklch(0.47 0.010 260)" # a step below neutral-400
   light-primary: "oklch(0.52 0.17 75)" # amber-700
   light-primary-hover: "oklch(0.48 0.17 75)" # amber-800
   light-primary-ink: "oklch(0.99 0.005 260)" # neutral-50
@@ -496,7 +496,7 @@ Paper defines six 50 to 950 ramps (neutral, amber, blue, sage, clay, violet) on 
 
 ### Neutral
 - **Ink** (`ink`, neutral-100 dark / neutral-800 light): Primary text. Near-white in dark, near-black-cool in light. Never pure `#fff` or `#000`.
-- **Muted** (`muted`, neutral-300 dark / neutral-400 light): Secondary text, meta, captions, resting icons. Holds 4.5:1 on its surfaces; do not push muted text lighter "for elegance."
+- **Muted** (`muted`, neutral-300 dark / 47% neutral light): Secondary text, meta, captions, resting icons. Holds 4.5:1 on its surfaces; do not push muted text lighter "for elegance."
 - **Page** (`page`): The darkest layer, page chrome and the sidebar. Panels sit *above* it.
 - **Background** (`background`): App background and the conversation canvas, one step up from page.
 - **Panel** (`panel`): Menus, popovers, pickers, tooltips, dialogs, and cards.
@@ -515,11 +515,11 @@ token values, never component anatomy, status meaning, or action priority.
 | Background | `background` (neutral-900) | `light-background` (neutral-50) |
 | Panel | `panel` (neutral-800) | `light-panel` (neutral-50) |
 | Hover | `hover` (neutral-700) | `light-hover` (neutral-100) |
-| Selected | `selected` (neutral-600) | `light-selected` (neutral-100) |
+| Selected | `selected` (neutral-600) | `light-selected` (neutral-200) |
 | Border | `border` (neutral-500) | `light-border` (neutral-200) |
 | Control boundary | `control-border` (neutral-400) | `light-control-border` (neutral-300) |
 | Text | `ink` (neutral-100) | `light-ink` (neutral-800) |
-| Muted text | `muted` (neutral-300) | `light-muted` (neutral-400) |
+| Muted text | `muted` (neutral-300) | `light-muted` (47% lightness, a step below neutral-400, so it holds 4.5:1 on `light-selected`) |
 | Primary | `primary` (amber-500) | `light-primary` (amber-700) |
 | Primary hover | `primary-hover` (amber-600) | `light-primary-hover` (amber-800) |
 | Primary text | `primary-ink` (neutral-900) | `light-primary-ink` (neutral-50) |
