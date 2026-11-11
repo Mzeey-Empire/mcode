@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "@mcode/shared";
 import type { Database } from "bun:sqlite";
 import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
@@ -82,6 +83,26 @@ describe("TurnFileEvidenceLedger", () => {
     expect(evidence()).toEqual({ state: "tracking" });
     ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution); await flush();
     expect(evidence()).toMatchObject({ state: "recorded", filesChanged: ["shell.txt"] });
+  });
+
+  it("still releases the next turn when the ending is never saved and capture is wedged", async () => {
+    snapshots.captureRef.mockImplementationOnce(() => new Promise(() => {}));
+    ledger.expect(execution, frozen);
+    let released = false;
+    void ledger.collected(execution).then(() => { released = true; });
+    await vi.advanceTimersByTimeAsync(2 * SNAPSHOT_CAPTURE_BUDGET_MS);
+    expect(released).toBe(true);
+    expect(evidence()).toEqual({ state: "tracking" });
+  });
+
+  it("does not report a timeout for a collection that finished before the ending was saved", async () => {
+    const warn = vi.spyOn(logger, "warn");
+    ledger.expect(execution, frozen); ledger.tracked(execution, facts);
+    await ledger.collected(execution);
+    terminal(); ledger.terminalSaved(execution);
+    await vi.advanceTimersByTimeAsync(2 * SNAPSHOT_CAPTURE_BUDGET_MS);
+    expect(warn.mock.calls.map(([message]) => message)).not.toContain("Turn file evidence collection timed out");
+    expect(evidence()).toMatchObject({ state: "recorded" });
   });
 
   it("reports a capture that Git ran out of time for as timed out", async () => {
