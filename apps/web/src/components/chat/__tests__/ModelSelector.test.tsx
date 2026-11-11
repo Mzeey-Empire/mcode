@@ -149,6 +149,23 @@ describe("ModelSelector", () => {
     expect([...labels].map((label) => label.textContent)).toEqual(["Claude", "Codex"]);
   });
 
+  it("says its own provider found nothing when a search matches only other providers", async () => {
+    setProviders({ claude: true, codex: true });
+    listProviderModels.mockImplementation(async (providerId) => (
+      ({ codex: [{ id: "gpt-shared", name: "Shared GPT" }] })[providerId] ?? []
+    ));
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={vi.fn()} />);
+    await openPicker();
+
+    await userEvent.type(screen.getByRole("combobox", { name: "Search models" }), "shared");
+
+    await waitFor(() => expect(optionNames()).toEqual(["Shared GPT"]));
+    const labels = document.querySelectorAll("[data-slot=picker-group-label]");
+    expect([...labels].map((label) => label.textContent)).toEqual(["Claude", "Codex"]);
+    expect(screen.getByText("Nothing matches “shared”")).toBeInTheDocument();
+  });
+
   it("keeps a search to the thread's provider when the provider is locked", async () => {
     setProviders({ claude: true, codex: true });
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"

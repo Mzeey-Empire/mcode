@@ -336,7 +336,7 @@ function underProviderName(options: readonly ModelPickerOption[], provider: Mode
 /**
  * A search on a provider tab also lists every other usable provider's matches, so a model from another provider is one
  * search away instead of behind its tab. Once results span providers, every group, the tab's own included, carries
- * its provider's name.
+ * its provider's name, and a tab with no matches of its own is named as `unmatched` so the picker still says so.
  */
 function searchAcrossProviders(
   active: ModelProvider,
@@ -344,11 +344,18 @@ function searchAcrossProviders(
   providers: readonly ModelProvider[],
   getModels: (provider: ModelProvider) => ModelProvider["models"],
   searchQuery: string,
-): readonly ModelPickerOption[] {
+): ModelSearchResults {
   const others = providers
     .filter((provider) => provider.id !== active.id)
     .flatMap((provider) => underProviderName(catalogModelOptions(provider.id, filterModelsBySearchQuery(getModels(provider), searchQuery)), provider));
-  return others.length === 0 ? own : [...underProviderName(own, active), ...others];
+  if (others.length === 0) return { options: own };
+  return { options: [...underProviderName(own, active), ...others], unmatched: own.length === 0 ? active.name : undefined };
+}
+
+interface ModelSearchResults {
+  readonly options: readonly ModelPickerOption[];
+  /** The tab's provider when the search found nothing in it but found other providers' models. */
+  readonly unmatched?: string;
 }
 
 function providerModelOptions(
@@ -553,16 +560,16 @@ export function ModelPickerPanel({
   );
 
   const selectedModelInTab = presentation.selectedProviderId === activeTab ? presentation.normalizedModelId : undefined;
-  const items = useMemo((): ModelPickerOption[] => {
+  const results = useMemo((): ModelSearchResults => {
     if (activeTab === FAVORITES_TAB) {
-      return favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels);
+      return { options: favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels) };
     }
     const provider = MODEL_PROVIDERS.find((entry) => entry.id === activeTab);
-    if (!provider) return [];
+    if (!provider) return { options: [] };
     const models = getModels(provider);
     const legacyExpanded = isLegacyFoldExpanded(legacyFold, models, selectedModelInTab);
     const own = providerModelOptions(provider.id, models, query, legacyExpanded);
-    return [...searchAcrossProviders(provider, own, searchedProviders, getModels, query)];
+    return searchAcrossProviders(provider, own, searchedProviders, getModels, query);
   }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab, searchedProviders]);
 
   const selectedKey = presentation.selectedProviderId
@@ -628,7 +635,8 @@ export function ModelPickerPanel({
       query={query}
       onQueryChange={onQueryChange}
       searchPlaceholder="Search models"
-      items={items}
+      items={results.options}
+      unmatchedGroup={results.unmatched}
       total={null}
       status={loading ? "loading" : "ready"}
       selectedKey={selectedKey}

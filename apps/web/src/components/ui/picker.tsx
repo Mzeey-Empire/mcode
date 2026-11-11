@@ -122,6 +122,8 @@ export interface PickerProps<T> {
   readonly renderItem: (item: T) => PickerRow;
   /** Offers another tab when this one shows nothing, e.g. "matches in Pull requests". */
   readonly emptySwitch?: { readonly tabId: string; readonly label: string };
+  /** A group the search found nothing in while other groups matched, drawn first as its label over the no-match line. */
+  readonly unmatchedGroup?: string;
   /** Content under the list, set off by a divider, such as a toggle row. */
   readonly footer?: ReactNode;
   /** Set false to separate groups and the footer with space instead of hairlines. Defaults to true. */
@@ -280,6 +282,7 @@ export function Picker<T>(props: PickerProps<T>) {
       hairlines={hairlines}
       selectedCheck={selectedCheck}
       fill={props.detail !== undefined}
+      unmatched={props.unmatchedGroup === undefined ? undefined : { label: props.unmatchedGroup, query }}
     />
   ) : null;
   return (
@@ -631,10 +634,11 @@ interface PickerListProps<T> {
   readonly selectedCheck: boolean;
   /** Fills its grid cell instead of capping at five rows, so it matches the detail pane's height. */
   readonly fill: boolean;
+  readonly unmatched?: { readonly label: string; readonly query: string };
 }
 
 function PickerList<T>(props: PickerListProps<T>) {
-  const { listId, listKey, rows, shortcutRows, activeIndex, keyboardRow, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck, fill } = props;
+  const { listId, listKey, rows, shortcutRows, activeIndex, keyboardRow, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck, fill, unmatched } = props;
   const listRef = useRef<HTMLUListElement>(null);
 
   const measure = useCallback(() => {
@@ -668,6 +672,7 @@ function PickerList<T>(props: PickerListProps<T>) {
       className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", fill ? "snap-y snap-mandatory pr-1" : "max-h-[17.2rem] pt-2")}
     >
       <SlidingHighlight follow="data-active" />
+      {unmatched ? <PickerUnmatchedGroup {...unmatched} /> : null}
       {rows.map((entry, index) => (
         <Fragment key={entry.row.key}>
           <PickerGroupStart row={entry.row} previous={rows[index - 1]?.row} hairlines={hairlines} />
@@ -689,12 +694,28 @@ function PickerList<T>(props: PickerListProps<T>) {
   );
 }
 
+const GROUP_LABEL_CLASS = "shrink-0 px-2 pt-2 pb-1 text-caption font-medium text-muted";
+
+/** A group with no matches keeps its label, so a tab whose results all come from other groups still says it found nothing. */
+function PickerUnmatchedGroup({ label, query }: { readonly label: string; readonly query: string }) {
+  return (
+    <>
+      <li role="presentation" data-slot="picker-group-label" className={GROUP_LABEL_CLASS}>
+        {label}
+      </li>
+      <li role="presentation" className="flex h-8 shrink-0 items-center px-2 text-body-small text-muted">
+        Nothing matches “{query}”
+      </li>
+    </>
+  );
+}
+
 /** Marks where a new group begins: its label when it has one, otherwise a divider or a gap. The first group needs a mark only when labelled. */
 function PickerGroupStart({ row, previous, hairlines }: { readonly row: PickerRow; readonly previous: PickerRow | undefined; readonly hairlines: boolean }) {
   if (previous !== undefined && row.group === previous.group) return null;
   if (row.groupLabel) {
     return (
-      <li role="presentation" data-slot="picker-group-label" className="shrink-0 px-2 pt-2 pb-1 text-caption font-medium text-muted">
+      <li role="presentation" data-slot="picker-group-label" className={GROUP_LABEL_CLASS}>
         {row.groupLabel}
       </li>
     );
