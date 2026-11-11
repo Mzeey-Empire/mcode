@@ -147,8 +147,8 @@
   --file-reference: oklch(48% 0.080 205);
   --success: var(--sage-600);
   --error: var(--clay-700);
-  /* A step darker than --primary, so the Don't ask key and Low quota never read as a second Send. */
-  --warning: var(--amber-800);
+  /* Darker and less saturated than --primary, so the Don't ask key and Low quota read as ochre, never as a second Send. */
+  --warning: oklch(44% 0.140 70);
   --info: var(--blue-700);
   --pr-merged: var(--violet-700);
   --selection: color-mix(in oklch, var(--blue-500) 18%, transparent);
