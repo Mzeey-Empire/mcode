@@ -228,8 +228,11 @@ stop the affected execution; storage failure alone must not cancel its provider.
 `turn.persisted` still means the terminal data was saved.
 
 `turn.persisted` carries no changed-file list, so an ending or Stop never waits
-on Git. File evidence is collected afterwards with a 10 s bound and sent on
-`turn.fileEvidence` after the ending. The next turn's release waits for that
+on Git. File evidence is collected afterwards and sent on `turn.fileEvidence`
+after the ending. Its 60 s bound starts when the ending is saved, however late,
+so a slow save cannot spend it. If the save has not landed 60 s after the turn
+ends, the bound starts then, so a failing save cannot hold the thread. Capturing a large edit on Windows can take
+tens of seconds. The next turn's release waits for that
 collection, so its edits cannot land in this turn's list. A turn whose list could
 not be recorded is stored and shown as `unavailable`, never as an empty list.
 

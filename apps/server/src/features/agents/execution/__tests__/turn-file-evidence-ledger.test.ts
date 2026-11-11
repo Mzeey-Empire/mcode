@@ -1,10 +1,12 @@
 import "reflect-metadata";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { logger } from "@mcode/shared";
 import type { Database } from "bun:sqlite";
 import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { turnFileEvidenceWriteHandlers, listTurnFileEvidence, recordTurnFileEvidence } from "../../turns/persistence/turn-file-evidence-store.js";
 import { TurnFileEvidenceLedger } from "../turn-file-evidence-ledger.js";
+import { SNAPSHOT_CAPTURE_BUDGET_MS } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import type { FrozenExecutionFileEvidence } from "../execution-file-evidence-coordinator.js";
 import type { PreparedExecutionFileEvidence } from "../../turns/turn-execution-file-evidence.js";
 import * as push from "../../../../application/transport/push.js";
@@ -63,7 +65,7 @@ describe("TurnFileEvidenceLedger", () => {
     ledger.expect(execution, frozen); ledger.tracked(execution, { ...facts, selectedTurnDiff }); terminal(); ledger.terminalSaved(execution);
     let released = false;
     void ledger.collected(execution).then(() => { released = true; });
-    await vi.advanceTimersByTimeAsync(9_999);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
     expect(released).toBe(false); expect(evidence()).toEqual({ state: "tracking" });
     await vi.advanceTimersByTimeAsync(1);
     expect(released).toBe(true);
@@ -73,6 +75,69 @@ describe("TurnFileEvidenceLedger", () => {
     complete("late"); await flush();
     expect(evidence()).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: [] });
     expect(db.query("SELECT message_id, source, patch FROM turn_diff_snapshots").all()).toEqual(kept);
+  });
+
+  it("starts the collection budget when the ending is saved, so a slow save cannot time out a finished capture", async () => {
+    ledger.expect(execution, frozen);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(evidence()).toEqual({ state: "tracking" });
+    ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution); await flush();
+    expect(evidence()).toMatchObject({ state: "recorded", filesChanged: ["shell.txt"] });
+  });
+
+  it("gives a wedged capture its full budget after a slow save", async () => {
+    snapshots.captureRef.mockImplementationOnce(() => new Promise(() => {}));
+    ledger.expect(execution, frozen);
+    await vi.advanceTimersByTimeAsync(50_000);
+    ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
+    expect(evidence()).toEqual({ state: "tracking" });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(evidence()).toMatchObject({ state: "unavailable", reason: "timed-out" });
+  });
+
+  it("gives a full budget after a save that lands later than one budget", async () => {
+    snapshots.captureRef.mockImplementationOnce(() => new Promise(() => {}));
+    ledger.expect(execution, frozen);
+    await vi.advanceTimersByTimeAsync(90_000);
+    ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
+    expect(evidence()).toEqual({ state: "tracking" });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(evidence()).toMatchObject({ state: "unavailable", reason: "timed-out" });
+  });
+
+  it("reports a comparison that Git ran out of time for as timed out", async () => {
+    snapshots.compareTrees.mockRejectedValueOnce(Object.assign(new Error("Git command timed out after 10000 ms"), { killed: true }));
+    ledger.expect(execution, frozen); ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution); await flush();
+    expect(evidence()).toMatchObject({ state: "unavailable", reason: "timed-out", knownPaths: [] });
+  });
+
+  it("still releases the next turn when the ending is never saved and capture is wedged", async () => {
+    snapshots.captureRef.mockImplementationOnce(() => new Promise(() => {}));
+    ledger.expect(execution, frozen);
+    let released = false;
+    void ledger.collected(execution).then(() => { released = true; });
+    await vi.advanceTimersByTimeAsync(2 * SNAPSHOT_CAPTURE_BUDGET_MS);
+    expect(released).toBe(true);
+    expect(evidence()).toEqual({ state: "tracking" });
+  });
+
+  it("does not report a timeout for a collection that finished before the ending was saved", async () => {
+    const warn = vi.spyOn(logger, "warn");
+    ledger.expect(execution, frozen); ledger.tracked(execution, facts);
+    await ledger.collected(execution);
+    terminal(); ledger.terminalSaved(execution);
+    await vi.advanceTimersByTimeAsync(2 * SNAPSHOT_CAPTURE_BUDGET_MS);
+    expect(warn.mock.calls.map(([message]) => message)).not.toContain("Turn file evidence collection timed out");
+    expect(evidence()).toMatchObject({ state: "recorded" });
+  });
+
+  it("reports a capture that Git ran out of time for as timed out", async () => {
+    snapshots.captureRef.mockRejectedValueOnce(Object.assign(new Error("Git command timed out after 60000 ms"), { killed: true }));
+    ledger.expect(execution, frozen); ledger.tracked(execution, { ...facts, filesChanged: ["edited.txt"] });
+    terminal(); ledger.terminalSaved(execution); await flush();
+    expect(evidence()).toEqual({ state: "unavailable", reason: "timed-out", knownPaths: ["edited.txt"], fileEffects: summary });
   });
 
   it("retains provider paths and the agent's own diff when capture fails", async () => {

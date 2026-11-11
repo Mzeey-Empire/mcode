@@ -1073,6 +1073,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!result) return true;
     if (!isAcceptedWorkerResult(result)) throw new Error("Unsent worker turn did not reach terminal acceptance");
     this.publishUnsentFinish(execution, active, result);
+    // Set the saved outcome before release, whose recovery would otherwise claim the turn as interrupted.
+    this.turnRuntime.terminalize(threadId, executionId, terminal.outcome);
     return this.settleUnsentRelease(active, terminal.outcome, this.releaseUnsentWorkerTurn(worker, execution, active), onDetachedRelease);
   }
 
@@ -1096,8 +1098,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private async releaseUnsentWorkerTurn(worker: WorkerOwnedTurnRuntime, execution: ExecutionIdentity,
     active: WorkerOwnedTurn | undefined): Promise<void> {
     await this.fileEvidence?.collected(execution);
-    await worker.providerEvents.retire(execution);
-    await worker.owner.release(execution);
+    try {
+      await worker.providerEvents.retire(execution);
+      await worker.owner.release(execution);
+    } catch (error) {
+      // The ending is already saved, so recovery keeps it and frees the worker slot; the turn is then
+      // fully released and the thread must unlock. Only a failed recovery leaves the thread held.
+      logger.error("Unsent worker release failed; recovering the turn", { threadId: execution.threadId,
+        executionId: execution.executionId, error: error instanceof Error ? error.message : String(error) });
+      await worker.recoverRejected(execution);
+    }
     this.retireUnsentFiles(execution, active);
     this.lifecycles.end(execution);
   }

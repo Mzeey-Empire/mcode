@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { TurnFileEvidenceLedger } from "../../execution/turn-file-evidence-ledger.js";
 import { bindTurnFileEvidenceLedger } from "../../execution/turn-persisted-publication.js";
 import { listTurnFileEvidence } from "../../turns/persistence/turn-file-evidence-store.js";
-import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
+import { SNAPSHOT_CAPTURE_BUDGET_MS, SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
@@ -120,7 +120,7 @@ afterEach(async () => {
 }, FIXTURE_CLOSE_TIMEOUT_MS);
 
 describe("AgentService cleanup through production worker composition", { timeout: 30_000 }, () => {
-  it("returns Stop and publishes its ending while capture is wedged, gating the next send for ten seconds", async () => {
+  it("returns Stop and publishes its ending while capture is wedged, gating the next send for the file check budget", async () => {
     const fixture = await openFixture();
     const snapshots = container.resolve(SnapshotService);
     const capture = vi.spyOn(snapshots, "captureRef").mockResolvedValueOnce("a".repeat(40));
@@ -137,7 +137,7 @@ describe("AgentService cleanup through production worker composition", { timeout
       expect(vi.mocked(broadcast).mock.calls.some(([channel]) => channel === "turn.persisted")).toBe(true);
       let sent = false;
       const next = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" }).then(() => { sent = true; });
-      await vi.advanceTimersByTimeAsync(9_999);
+      await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
       expect(sent).toBe(false);
       expect(fixture.sent).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(1);
@@ -171,9 +171,10 @@ describe("AgentService cleanup through production worker composition", { timeout
       expect(stopped).toMatchObject({ status: "cancelled", dispatchState: "not-dispatched" });
       dispatchHeld.resolve();
       await first;
+      await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
       let sent = false;
       const next = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" }).then(() => { sent = true; });
-      await vi.advanceTimersByTimeAsync(9_999);
+      await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
       expect(sent).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       vi.useRealTimers();
@@ -181,6 +182,49 @@ describe("AgentService cleanup through production worker composition", { timeout
       expect(listTurnFileEvidence(fixture.db, { threadId: fixture.thread.id })[0]?.evidence).toMatchObject({ state: "unavailable", reason: "timed-out" });
       expect(fixture.sent.map((turn) => turn.message)).toEqual(["Next"]);
     } finally { dispatchHeld.resolve(); vi.useRealTimers(); ledger.close(); }
+  });
+
+  it("unlocks the thread when the release after an early Stop fails", async () => {
+    const fixture = await openFixture();
+    const reservations = container.resolve(ThreadControlMutationReservationService);
+    const runIfOwned = reservations.runIfOwned.bind(reservations);
+    const bound = holdDeferred();
+    const dispatchHeld = holdDeferred();
+    vi.spyOn(reservations, "runIfOwned").mockImplementation((threadId, token, kind, run) => kind !== "activeTurn"
+      ? runIfOwned(threadId, token, kind, run)
+      : (bound.resolve(), dispatchHeld.promise.then(() => runIfOwned(threadId, token, kind, run))));
+    const first = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work", provider: "codex", model: "gpt-5", permissionMode: "default" });
+    await bound.promise;
+    vi.spyOn(fixture.workers.owner, "release").mockRejectedValueOnce(new Error("worker slot release failed"));
+    try {
+      const stopped = await fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      expect(stopped).toMatchObject({ status: "cancelled", dispatchState: "not-dispatched" });
+      dispatchHeld.resolve();
+      await first;
+      await fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" });
+      await vi.waitFor(() => expect(fixture.sent.map((turn) => turn.message)).toEqual(["Next"]));
+      expect(fixture.canonical.loadTurnByExecution(stopped.turnExecutionId!)?.ending).toEqual({ outcome: "cancelled", stop: { by: "user" } });
+    } finally { dispatchHeld.resolve(); }
+  });
+
+  it("keeps Stop's cancelled state when the release after a Stop during file preparation fails", async () => {
+    const fixture = await openFixture();
+    const preparing = holdDeferred();
+    const baseline = holdDeferred();
+    vi.spyOn(container.resolve(SnapshotService), "captureRef").mockImplementationOnce(async () => {
+      preparing.resolve();
+      await baseline.promise;
+      return "a".repeat(40);
+    });
+    const first = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work", provider: "codex", model: "gpt-5", permissionMode: "default" }).catch(() => undefined);
+    await preparing.promise;
+    vi.spyOn(fixture.workers.owner, "release").mockRejectedValueOnce(new Error("worker slot release failed"));
+    try {
+      const stopped = await fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      expect(stopped).toMatchObject({ status: "cancelled", snapshot: { phase: "cancelled" } });
+    } finally { baseline.resolve(); await first; }
+    await fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" });
+    await vi.waitFor(() => expect(fixture.sent.map((turn) => turn.message)).toEqual(["Next"]));
   });
 
   it("aborts an auto-resumed turn when a pending mutation reservation owns the thread", async () => {

@@ -4,19 +4,23 @@ import type { TurnFileEvidence } from "@mcode/contracts/models/turn-file-evidenc
 import { logger } from "@mcode/shared";
 import { broadcast } from "../../../application/transport/push.js";
 import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
-import type { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
+import { SNAPSHOT_CAPTURE_BUDGET_MS, type SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
+import { gitWasKilled } from "../../projects/git/execution/git-failure.js";
 import type { FrozenExecutionFileEvidence } from "./execution-file-evidence-coordinator.js";
 import type { PreparedExecutionFileEvidence } from "../turns/turn-execution-file-evidence.js";
 import { beginTurnFileEvidence, listTurnFileEvidence, recordTurnFileEvidence } from "../turns/persistence/turn-file-evidence-store.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 
 type Resolution = Omit<z.infer<typeof recordTurnFileEvidence.input>, keyof ExecutionIdentity>;
+type Capture = { ref: string } | { ref: null; reason: "capture-failed" | "timed-out" };
 
 interface Entry {
   collected: Promise<void>;
   facts: Promise<PreparedExecutionFileEvidence | null>;
   tracked: (facts: PreparedExecutionFileEvidence | null) => void;
   write?: () => Promise<void>;
+  /** Starts a full collection budget once, when the ending is saved, so no save can spend it. */
+  startBudget?: () => void;
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
   published: boolean;
@@ -48,24 +52,34 @@ export class TurnFileEvidenceLedger {
   /** Start capture synchronously at seal, before another baseline can claim the Git lock. */
   expect(execution: ExecutionIdentity, frozen: FrozenExecutionFileEvidence): void {
     if (this.entries.has(execution.executionId)) return;
-    const capture = frozen.handoff.baselineRef ? this.snapshots.captureRef(frozen.handoff.cwd).then(
-      (ref) => ({ ref }), () => ({ ref: null }),
-    ) : Promise.resolve({ ref: null });
+    const capture: Promise<Capture> = frozen.handoff.baselineRef ? this.snapshots.captureRef(frozen.handoff.cwd).then(
+      (ref) => ({ ref }), (error: unknown) => ({ ref: null, reason: gitWasKilled(error) ? "timed-out" : "capture-failed" }),
+    ) : Promise.resolve({ ref: null, reason: "capture-failed" });
     let tracked!: Entry["tracked"];
     const facts = new Promise<PreparedExecutionFileEvidence | null>((resolve) => { tracked = resolve; });
     const entry: Entry = { facts, tracked, collected: Promise.resolve(), attempts: 0, published: false };
     this.entries.set(execution.executionId, entry);
-    let timer: ReturnType<typeof setTimeout>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let armBudget!: () => void;
     const timeout = new Promise<TurnFileEvidence>((resolve) => {
-      timer = setTimeout(() => {
-        logger.warn("Turn file evidence collection timed out", execution);
-        resolve({ state: "unavailable", reason: "timed-out", knownPaths: [...entry.observed?.filesChanged ?? []],
-          ...(entry.observed?.fileEffects.fileCount ? { fileEffects: entry.observed.fileEffects } : {}) });
-      }, 10_000);
+      armBudget = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          logger.warn("Turn file evidence collection timed out", execution);
+          resolve({ state: "unavailable", reason: "timed-out", knownPaths: [...entry.observed?.filesChanged ?? []],
+            ...(entry.observed?.fileEffects.fileCount ? { fileEffects: entry.observed.fileEffects } : {}) });
+        }, SNAPSHOT_CAPTURE_BUDGET_MS);
+      };
     });
+    // A save that keeps failing never calls terminalSaved; it must not hold the next turn forever.
+    const backstop = setTimeout(armBudget, SNAPSHOT_CAPTURE_BUDGET_MS);
+    // A save that lands after the backstop restarts the budget, so collection always gets a full one after it.
+    entry.startBudget = () => { entry.startBudget = undefined; clearTimeout(backstop); armBudget(); };
     const prepared = this.prepare(frozen, capture, facts);
     entry.collected = Promise.race([prepared, timeout.then((evidence) => ({ evidence, snapshot: null, diff: entry.observed?.selectedTurnDiff ?? null }))]).then((result) => {
       clearTimeout(timer);
+      clearTimeout(backstop);
+      entry.startBudget = undefined;
       entry.write = () => this.persist(execution, entry, result);
       void entry.write();
     });
@@ -88,6 +102,7 @@ export class TurnFileEvidenceLedger {
       return;
     }
     entry.published = true;
+    entry.startBudget?.();
     try { this.publish(execution); } finally { void entry.write?.(); }
   }
 
@@ -129,20 +144,22 @@ export class TurnFileEvidenceLedger {
   /** Stop retry timers during server shutdown. */
   close(): void { this.closed = true; for (const entry of this.entries.values()) clearTimeout(entry.retry); }
 
-  private async prepare(frozen: FrozenExecutionFileEvidence, capture: Promise<{ ref: string | null }>, facts: Entry["facts"]): Promise<Resolution> {
+  private async prepare(frozen: FrozenExecutionFileEvidence, capture: Promise<Capture>, facts: Entry["facts"]): Promise<Resolution> {
     const tracked = await facts;
     if (!tracked) return { evidence: { state: "unavailable", reason: "observation-lost", knownPaths: [] } satisfies TurnFileEvidence, snapshot: null, diff: null };
     const knownPaths = [...tracked.filesChanged];
     const fileEffects = tracked.fileEffects;
-    const unavailable = () => ({ evidence: { state: "unavailable", reason: "capture-failed", knownPaths, fileEffects } satisfies TurnFileEvidence, snapshot: null, diff: tracked.selectedTurnDiff });
+    const unavailable = (reason: "capture-failed" | "timed-out" = "capture-failed") => ({
+      evidence: { state: "unavailable", reason, knownPaths, fileEffects } satisfies TurnFileEvidence, snapshot: null, diff: tracked.selectedTurnDiff });
     const before = frozen.handoff.baselineRef;
-    const after = (await capture).ref;
-    if (before && !after) return unavailable();
+    const captured = await capture;
+    const after = captured.ref;
+    if (before && captured.ref === null) return unavailable(captured.reason);
     try {
       const filesChanged = await this.paths(frozen, knownPaths, after);
       const evidence: TurnFileEvidence = !before && !filesChanged.length ? { state: "untracked" } : { state: "recorded", filesChanged, fileEffects };
       return { evidence, snapshot: this.snapshot(tracked, evidence, before, after), diff: tracked.selectedTurnDiff };
-    } catch { return unavailable(); }
+    } catch (error) { return unavailable(gitWasKilled(error) ? "timed-out" : "capture-failed"); }
   }
 
   private snapshot(tracked: PreparedExecutionFileEvidence, evidence: TurnFileEvidence, before: string | null, after: string | null): Resolution["snapshot"] {
