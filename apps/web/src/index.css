@@ -199,7 +199,8 @@
   --file-reference: oklch(80% 0.070 205);
   --success: var(--sage-400);
   --error: var(--clay-400);
-  --warning: var(--amber-400);
+  /* Brass, off the lamp's hue, so the key icon and Low quota beside an amber Send never read as more Sends. */
+  --warning: oklch(82% 0.110 92);
   --info: var(--blue-400);
   --pr-merged: var(--violet-400);
   --selection: color-mix(in oklch, var(--blue-500) 30%, transparent);
