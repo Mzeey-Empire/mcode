@@ -847,7 +847,8 @@ function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAc
       }}
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        "flex size-[1.4rem] shrink-0 items-center justify-center rounded-xs [&_svg]:size-[1.4rem]",
+        // A 24px box around the 14px glyph, as DESIGN.md asks of inline row actions.
+        "-mx-[5px] flex size-6 shrink-0 items-center justify-center rounded-xs [&_svg]:size-[1.4rem]",
         // An unpinned action shows only on the highlighted or hovered row, so the list reads as a column of names.
         !action.pinned && "opacity-0 group-hover/option:opacity-100 group-data-active/option:opacity-100",
       )}
