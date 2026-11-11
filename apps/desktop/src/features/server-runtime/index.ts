@@ -1,9 +1,10 @@
 import { logger as fileLogger } from "@mcode/shared";
+import * as NodeHTTP from "node:http";
 import { installServerAuthCookie } from "./connection/auth-cookie.js";
 import { registerServerConnectionHandlers } from "./connection/handlers.js";
 import { startIpcRelay } from "./connection/ipc-relay.js";
 import { BusyBlocker } from "./power/busy-blocker.js";
-import { ServerManager } from "./process/manager.js";
+import { ServerManager, type ServerLaunchHooks } from "./process/manager.js";
 import { ServerCrashRecovery } from "./recovery/crash-recovery.js";
 import { ServerHealthRecovery } from "./recovery/health-recovery.js";
 import { ServerNotifications } from "./recovery/notifications.js";
@@ -71,6 +72,7 @@ interface ServerRuntimeNotification {
 }
 
 interface ServerRuntimeDependencies {
+  launch?: ServerLaunchHooks;
   /** Platform selected by the Electron composition root. */
   platform: NodeJS.Platform;
   manager?: ServerRuntimeManager;
@@ -124,7 +126,7 @@ export class ServerRuntime {
 
   constructor(dependencies: ServerRuntimeDependencies) {
     this.dependencies = dependencies;
-    this.serverManager = dependencies.manager ?? new ServerManager(dependencies.platform);
+    this.serverManager = dependencies.manager ?? new ServerManager(dependencies.platform, dependencies.launch);
     this.relayStarter = dependencies.relayStarter ?? startIpcRelay;
     const capabilityPath = dependencies.reliabilityHarnessCapabilityPath;
     const capability = capabilityPath ? readReliabilityHarnessCapability(capabilityPath) : null;
@@ -163,6 +165,26 @@ export class ServerRuntime {
     this.serverBusyBlocker = new BusyBlocker({
       blocker: dependencies.powerSaveBlocker,
       log: (...args) => console.log(...args),
+    });
+  }
+
+  /**
+   * Read launch observations without exposing the connection credential. With `usableAt` the server holds the
+   * response until its window closes. Node's `http` client sets no response deadline, unlike `fetch`, whose
+   * 300-second headers timeout would drop the observations of a server stall that crosses the window's end. The read
+   * ends when the server answers or its connection closes.
+   */
+  fetchLaunchTelemetry(usableAt?: number): Promise<Response> {
+    const query = usableAt === undefined ? "" : `?usableAt=${usableAt}`;
+    const url = `http://127.0.0.1:${this.serverManager.port}/__mcode/launch-telemetry${query}`;
+    return new Promise((resolve, reject) => {
+      NodeHTTP.get(url, { headers: { Authorization: `Bearer ${this.serverManager.authToken}` } }, (response) => {
+        let body = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => { body += chunk; });
+        response.on("end", () => resolve(new Response(body, { status: response.statusCode })));
+        response.on("error", reject);
+      }).on("error", reject);
     });
   }
 

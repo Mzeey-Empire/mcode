@@ -36,4 +36,26 @@ describe("logger data directory", () => {
       NodeFS.rmSync(dataDir, { recursive: true, force: true });
     }
   });
+
+  it("appends a synchronous entry to the file the logger rotates into today", async () => {
+    const dataDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-logger-"));
+    vi.stubEnv("MCODE_DATA_DIR", dataDir);
+    vi.resetModules();
+    try {
+      const { logger, appendLogSync } = await import("../index.js");
+      const logDir = NodePath.join(dataDir, "logs");
+
+      appendLogSync("Launch record", { launchId: "launch-1" });
+      const [file] = NodeFS.readdirSync(logDir);
+      expect(JSON.parse(NodeFS.readFileSync(NodePath.join(logDir, file ?? ""), "utf8"))).toMatchObject({
+        level: "info", message: "Launch record", launchId: "launch-1",
+      });
+      logger.info("streamed entry");
+      await vi.waitFor(() => expect(NodeFS.readFileSync(NodePath.join(logDir, file ?? ""), "utf8")).toContain("streamed entry"));
+      expect(NodeFS.readdirSync(logDir).filter((name) => name.startsWith("mcode.log."))).toEqual([file]);
+      logger.close();
+    } finally {
+      NodeFS.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
 });
