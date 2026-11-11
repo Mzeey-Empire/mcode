@@ -247,6 +247,7 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
   );
   const modelLabel = `Model: ${model.shortLabel}`;
   const accessLabel = `Access mode: ${access.selected.label}`;
+  const reasoningLabel = reasoningTipOf(reasoningLevels, selection.reasoning);
   const unsupervised = selection.permissionMode === PERMISSION_MODES.FULL;
 
   return (
@@ -263,7 +264,7 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
         {showReasoning && (
           <>
             <CapsuleDivider />
-            {part("reasoning", "Model settings", reasoningTipOf(reasoningLevels, selection.reasoning), reasoningLevels.length > 0
+            {part("reasoning", reasoningLabel, reasoningLabel, reasoningLevels.length > 0
               ? (
                 <>
                   <span className="contents @max-[680px]/capsule:hidden"><SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} /></span>

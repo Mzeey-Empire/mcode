@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useId, useMemo } from "react";
 import {
   EMPTY_PROVIDER_CATALOG_CACHE_ENTRY,
   providerCatalogCacheKey,
@@ -216,6 +216,10 @@ export interface UseSlashCommandReturn {
   allCommands: Command[];
   selectedIndex: number;
   anchorRect: DOMRect | null;
+  /** DOM id for the menu's listbox, unique per hook so two composers never share option ids. */
+  listboxId: string;
+  /** What the focused editor announces about the menu it drives. */
+  menuAria: SlashMenuAria;
   /**
    * Notify the hook of a text change. Pass `cursorPos` for inputs where the
    * cursor may be mid-text (e.g. the annotation bubble `<input>`); when omitted
@@ -235,6 +239,28 @@ export interface UseSlashCommandReturn {
   /** Closes the menu because focus left it, such as a click outside. */
   onBlur: () => void;
   onRetry: () => void;
+}
+
+/** The ARIA state the focused editor exposes for the slash menu it drives. */
+export interface SlashMenuAria {
+  expanded: boolean;
+  listboxId: string;
+  /** Id of the highlighted option; absent while no option is rendered. */
+  activeOptionId?: string;
+}
+
+/** DOM id of the slash menu option at `index` in the listbox `listboxId`. */
+export function slashOptionId(listboxId: string, index: number): string {
+  return `${listboxId}-option-${index}`;
+}
+
+function slashMenuAria(state: PopupState, listboxId: string, selectedIndex: number, itemCount: number): SlashMenuAria {
+  const listShown = state.kind === "ready" || state.kind === "staleRevalidating";
+  return {
+    expanded: listShown,
+    listboxId,
+    activeOptionId: listShown && itemCount > 0 ? slashOptionId(listboxId, selectedIndex) : undefined,
+  };
 }
 
 /** Routes a Lexical navigation key to an open slash-command picker. */
@@ -285,6 +311,7 @@ export function useSlashCommand({
   const isOpen = menu.status === "open";
   const { query: filter, scope } = menuFilter(menu);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const listboxId = useId();
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
   // The visible list is an interaction snapshot. Cache invalidations must not
   // reorder a picker while the user is navigating it with the keyboard.
@@ -541,9 +568,13 @@ export function useSlashCommand({
     load(catalogRequest, true).catch(() => { /* surfaced via `error` */ });
   }, [catalogRequest, load]);
 
+  const menuAria = slashMenuAria(state, listboxId, displayedSelectedIndex, filtered.length);
+
   return {
     isOpen,
     state,
+    listboxId,
+    menuAria,
     items: filtered,
     query: filter,
     allCommands,

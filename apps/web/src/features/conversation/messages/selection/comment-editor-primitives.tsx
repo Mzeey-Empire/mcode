@@ -236,6 +236,7 @@ export function CommentEditorComposer({
         compactMaxHeight={maxHeight}
         isPopupOpen={isPopupOpenRef.current}
         onPopupKeyDown={handlePopupKeyDown}
+        slashMenu={slashCommand.menuAria}
       />
       <FileTagPopup
         items={fileAutocomplete.suggestions}
@@ -250,6 +251,7 @@ export function CommentEditorComposer({
         state={slashCommand.state}
         selectedIndex={slashCommand.selectedIndex}
         anchorRect={slashCommand.anchorRect}
+        listboxId={slashCommand.listboxId}
         onSelect={handleSlashSelect}
         onHighlight={slashCommand.onHighlight}
         onDismiss={slashCommand.onDismiss}

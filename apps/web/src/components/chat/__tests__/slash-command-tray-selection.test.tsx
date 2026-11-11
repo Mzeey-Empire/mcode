@@ -171,6 +171,24 @@ describe("SlashCommandTray selection indicator", () => {
     expect(highlighted).toEqual([2, 1]);
   });
 
+  it("selects a row on click, the activation assistive tech sends", () => {
+    const selected: string[] = [];
+    render(
+      <SlashCommandTray
+        state={{ kind: "ready", items: COMMANDS }}
+        selectedIndex={0}
+        anchorRect={makeAnchorRect()}
+        onSelect={(command) => selected.push(command.name)}
+        onDismiss={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("option", { name: /bar/ }));
+
+    expect(selected).toEqual(["bar"]);
+  });
+
   it("renders long skill lists as ordinary rows", () => {
     renderLongPopup();
     expect(screen.getByRole("option", { name: /skill-00/ })).toBeInTheDocument();
@@ -213,7 +231,7 @@ describe("SlashCommandTray selection indicator", () => {
       />,
     );
 
-    fireEvent.mouseDown(screen.getByRole("option", { name: /@Browser/ }));
+    fireEvent.click(screen.getByRole("option", { name: /@Browser/ }));
 
     await waitFor(() => expect(extractComposerMessage(editor)).toEqual({
       text: "@Browser ",

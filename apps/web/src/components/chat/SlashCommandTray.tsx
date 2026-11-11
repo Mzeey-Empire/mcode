@@ -1,9 +1,9 @@
-import { Fragment, useEffect, useRef, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { cn } from "@/lib/utils";
-import type { Command, PopupState } from "./useSlashCommand";
+import { slashOptionId, type Command, type PopupState } from "./useSlashCommand";
 import { ComposerOverlaySurface } from "./ComposerOverlaySurface";
 import { shortenPathPrefixedName } from "./command-name";
 import { EntityIcon } from "./EntityToken";
@@ -48,6 +48,8 @@ interface SlashCommandTrayProps {
   query?: string;
   /** Docks in the composer capsule, in the attachment tray's place. Otherwise it floats above its anchor. */
   docked?: boolean;
+  /** Listbox id the focused editor's `aria-controls` names; {@link useSlashCommand} supplies it. */
+  listboxId?: string;
 }
 
 /**
@@ -71,7 +73,9 @@ export function SlashCommandTray({
   workspacePath,
   query = "",
   docked = false,
+  listboxId,
 }: SlashCommandTrayProps) {
+  const fallbackListboxId = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
   const pointerSelectedIndexRef = useRef<number | null>(null);
@@ -121,6 +125,7 @@ export function SlashCommandTray({
     <SlashMenuContent
       state={state}
       selectedIndex={selectedIndex}
+      listboxId={listboxId ?? fallbackListboxId}
       scrollRef={scrollRef}
       query={query}
       tone={tone}
@@ -154,6 +159,7 @@ export function SlashCommandTray({
 function SlashMenuContent({
   state,
   selectedIndex,
+  listboxId,
   scrollRef,
   query,
   tone,
@@ -164,6 +170,7 @@ function SlashMenuContent({
 }: {
   state: Exclude<PopupState, { kind: "closed" }>;
   selectedIndex: number;
+  listboxId: string;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   query: string;
   tone: "default" | "dark";
@@ -184,9 +191,9 @@ function SlashMenuContent({
       return (
         <div
           ref={scrollRef}
+          id={listboxId}
           role="listbox"
           aria-label="Slash commands"
-          aria-activedescendant={items[selectedIndex] ? `slash-cmd-${selectedIndex}` : undefined}
           className={LIST_CLASS}
           onPointerMove={onPointerMove}
         >
@@ -194,10 +201,11 @@ function SlashMenuContent({
           {items.map((cmd, index) => (
             <Fragment key={cmd.id}>
               {index > 0 && items[index - 1].namespace !== cmd.namespace && (
-                <div role="separator" className="mx-2 my-1 h-px bg-border" />
+                <div aria-hidden="true" className="mx-2 my-1 h-px bg-border" />
               )}
               <CommandRow
                 cmd={cmd}
+                id={slashOptionId(listboxId, index)}
                 index={index}
                 selected={index === selectedIndex}
                 query={query}
@@ -232,6 +240,7 @@ function highlightMatch(label: string, query: string): ReactNode {
 
 function CommandRow({
   cmd,
+  id,
   index,
   selected,
   query,
@@ -240,6 +249,7 @@ function CommandRow({
   origin,
 }: {
   cmd: Command;
+  id: string;
   index: number;
   selected: boolean;
   query: string;
@@ -252,7 +262,7 @@ function CommandRow({
       type="button"
       variant="ghost"
       size="compact"
-      id={`slash-cmd-${index}`}
+      id={id}
       role="option"
       aria-selected={selected}
       data-index={index}
@@ -262,10 +272,9 @@ function CommandRow({
         cmd.description,
         origin,
       ].filter(Boolean).join(" ")}
-      onMouseDown={(e) => {
-        e.preventDefault(); // prevent textarea blur
-        onSelect(cmd);
-      }}
+      // Keep editor focus on press; select on click, which assistive-tech activation sends without a mousedown.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={() => onSelect(cmd)}
       // The sliding highlight is the only fill; a hover fill would show a second highlighted row.
       className="group/row relative h-8 w-full min-w-0 justify-start gap-2 overflow-hidden rounded-full pr-3 pl-2 text-left hover:bg-transparent [&_svg:not([class*='size-'])]:size-3.5"
     >

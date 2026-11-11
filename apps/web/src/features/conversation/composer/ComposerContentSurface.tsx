@@ -326,6 +326,7 @@ function ComposerDraftCell({
         disabled={disabled}
         isPopupOpen={model.fileAutocomplete.isOpen || model.slashCommand.isOpen}
         onPopupKeyDown={actions.onPopupKeyDown}
+        slashMenu={model.slashCommand.menuAria}
         placeholder={getEditorPlaceholder(model)}
         ariaLabel="Message Mcode"
       />
@@ -355,6 +356,7 @@ function ComposerEditorPopups({
         anchorRect={model.slashCommand.anchorRect}
         workspacePath={model.workspacePath}
         query={model.slashCommand.query}
+        listboxId={model.slashCommand.listboxId}
         docked
         onSelect={actions.onSlashSelect}
         onHighlight={model.slashCommand.onHighlight}

@@ -154,6 +154,33 @@ describe("SlashCommandPlugin /plan in the composer", () => {
     expect(planMode()).toBeNull();
   });
 
+  it("points the editor's active descendant at the option ArrowDown highlights", async () => {
+    const { editor, user, type } = await renderComposer();
+    expect(editor).not.toHaveAttribute("aria-activedescendant");
+
+    await type("/");
+    const tray = await waitFor(() => {
+      const listbox = slashTray();
+      if (!listbox) throw new Error("slash tray not open");
+      return listbox;
+    });
+    expect(editor).toHaveAttribute("aria-controls", tray.id);
+    expect(editor).toHaveAttribute("aria-autocomplete", "list");
+    expect(tray).not.toHaveAttribute("aria-activedescendant");
+    const options = within(tray).getAllByRole("option");
+    expect(editor).toHaveAttribute("aria-activedescendant", options[0].id);
+
+    await user.keyboard("{ArrowDown}");
+
+    await waitFor(() => expect(editor).toHaveAttribute("aria-activedescendant", options[1].id));
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(slashTray()).toBeNull());
+    expect(editor).not.toHaveAttribute("aria-activedescendant");
+    expect(editor).not.toHaveAttribute("aria-controls");
+  });
+
   it.each(["{Enter}", "{Tab}"])("removes /pl and turns Plan on with %s", async (key) => {
     const { editor, user, type } = await renderComposer();
 
