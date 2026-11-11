@@ -66,6 +66,7 @@ interface ComposerContentSurfaceProps {
     readonly needsWorkspace: boolean;
     readonly editingFromQueue: {
       readonly originalIndex: number;
+      readonly parkedDraftId: string | null;
     } | null;
     readonly composerMode: ComposerMode;
     readonly isDragOver: boolean;
@@ -186,7 +187,7 @@ function ComposerTraySurface({
           isPaused={paused}
           isEditLocked={docked}
           onLoadIntoComposer={actions.onLoadIntoComposer}
-          editingIndex={model.editingFromQueue?.originalIndex ?? null}
+          editing={model.editingFromQueue}
           onSendNow={(message) => { if (!paused) void actions.onSendQueuedMessageNow(message); }}
         />
       )}

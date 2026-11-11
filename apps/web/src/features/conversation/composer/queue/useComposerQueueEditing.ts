@@ -15,6 +15,8 @@ import { queueHoldingDraftElements } from "./queued-draft-holds";
 export interface ComposerQueueEdit {
   messageId: string;
   originalIndex: number;
+  /** The queue entry holding the unsent draft set aside for this edit, or null when there was none. */
+  parkedDraftId: string | null;
 }
 
 /** The live Composer operations needed to restore or clear a queued message. */
@@ -108,14 +110,22 @@ function preserveBrowserCapturePayload(
   };
 }
 
+/** The edit the Composer is leaving: the slot it returns to and what it was restored from. */
+interface LeavingEdit {
+  index: number;
+  original: QueuedMessage | null;
+  annotationsCleared: boolean;
+}
+
 /**
  * Queues what the Composer holds before another queued message replaces it. A message being
- * edited returns to its own slot; an unsent draft goes to the end of the queue.
+ * edited returns to its own slot. An unsent draft waits at the end of the queue, behind every message, where the
+ * edit's end takes it back into the Composer before the queue can reach it.
  */
 function queueComposerContent(
   threadId: string,
   form: ComposerQueueEditForm,
-  leaving: { index: number; original: QueuedMessage | null; annotationsCleared: boolean } | null,
+  leaving: LeavingEdit | null,
 ): boolean {
   if (!leaving) return requeueHoldingDraft(threadId, undefined, form.capture(undefined));
   const restoredPreviewAnnotations = leaving.annotationsCleared
@@ -126,6 +136,22 @@ function queueComposerContent(
     leaving.index,
     preserveBrowserCapturePayload(form.capture(restoredPreviewAnnotations), leaving.original),
   );
+}
+
+/**
+ * Moves what the Composer holds into the queue before another queued message replaces it, and records an unsent
+ * draft as the one to bring back when the edit ends. False when the queue could not take it.
+ */
+function setComposerAside(
+  threadId: string,
+  form: ComposerQueueEditForm,
+  leaving: LeavingEdit | null,
+  parkedDraftId: { current: string | null },
+): boolean {
+  if (!form.hasContent()) return true;
+  if (!queueComposerContent(threadId, form, leaving)) return false;
+  if (!leaving) parkedDraftId.current = useQueueStore.getState().queues[threadId]?.at(-1)?.id ?? null;
+  return true;
 }
 
 /** Manages the pop, restore, swap, cancel, and completion lifecycle for one queued Composer message. */
@@ -153,14 +179,29 @@ export function useComposerQueueEditing({
   // reinsert the popped original — it would resend as a ghost queue entry.
   const editConsumedByDispatchRef = useRef(false);
   const settlingRef = useRef(false);
+  // Read synchronously when an edit ends, so the draft is back before the queue resumes draining.
+  const parkedDraftIdRef = useRef<string | null>(null);
+
+  /** Takes the draft set aside when the edit began back into the Composer, which the edit has just emptied. */
+  const restoreParkedDraft = useCallback(() => {
+    const id = parkedDraftIdRef.current;
+    parkedDraftIdRef.current = null;
+    if (!threadId || !id) return;
+    annotations.clear();
+    const parked = useQueueStore.getState().popMessage(threadId, id);
+    if (!parked) return;
+    form.restore(parked);
+    annotations.restore(parked);
+  }, [annotations, form, threadId]);
 
   const finishEditing = useCallback(() => {
     editConsumedByDispatchRef.current = false;
     originalMessageRef.current = null;
     restoredPreviewAnnotationsClearedRef.current = false;
     setEditing(null);
+    restoreParkedDraft();
     useQueueStore.getState().setEditingThreadId(null);
-  }, []);
+  }, [restoreParkedDraft]);
 
   const consumeEditForDispatch = useCallback(() => {
     if (editing) editConsumedByDispatchRef.current = true;
@@ -202,7 +243,8 @@ export function useComposerQueueEditing({
         annotationsCleared: restoredPreviewAnnotationsClearedRef.current,
       } : null;
       // Abort rather than overwrite the Composer when its content could not be queued.
-      if (form.hasContent() && !queueComposerContent(threadId, form, leaving)) return;
+      if (!setComposerAside(threadId, form, leaving, parkedDraftIdRef)) return;
+      if (message.id === parkedDraftIdRef.current) parkedDraftIdRef.current = null;
 
       // Clear first: popping a message that held its elements returns them to the draft at once.
       annotations.clear();
@@ -211,7 +253,7 @@ export function useComposerQueueEditing({
 
       originalMessageRef.current = popped;
       restoredPreviewAnnotationsClearedRef.current = false;
-      setEditing({ messageId: popped.id, originalIndex: targetIndex });
+      setEditing({ messageId: popped.id, originalIndex: targetIndex, parkedDraftId: parkedDraftIdRef.current });
       queue.setEditingThreadId(threadId);
 
       form.restore(popped);
@@ -246,10 +288,10 @@ export function useComposerQueueEditing({
     form.invalidateAttachments();
     const original = originalMessageRef.current;
     if (original) requeueHoldingDraft(threadId, editing.originalIndex, toQueuePayload(original));
-    finishEditing();
     annotations.clear();
-    scheduleDrainAfterEdit(threadId);
     form.clear();
+    finishEditing();
+    scheduleDrainAfterEdit(threadId);
   }, [annotations, editing, finishEditing, form, threadId]);
 
   const discardEmptyEdit = useCallback((): boolean => {
@@ -257,8 +299,8 @@ export function useComposerQueueEditing({
 
     const slot = editing.originalIndex;
     const browserCaptureSpillPaths = originalMessageRef.current?.browserCaptureSpillPaths ?? [];
-    finishEditing();
     annotations.clear();
+    finishEditing();
     scheduleDrainAfterEdit(threadId);
     void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
     useToastStore

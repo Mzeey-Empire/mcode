@@ -1,7 +1,8 @@
 import { Fragment } from "react";
-import { ArrowUp, CornerDownRight, Paperclip, Pencil, X } from "lucide-react";
+import { ArrowUp, CornerDownRight, FileText, Paperclip, Pencil, X } from "lucide-react";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { Button, IconButton } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import {
   isSteerable,
   releaseHeldSteer,
@@ -28,8 +29,11 @@ interface ComposerQueueListProps {
   onSendNow: (message: QueuedMessage) => void;
   /** Hands a queued message to the composer for editing; the parent pops it from the queue. */
   onLoadIntoComposer: (message: QueuedMessage) => void;
-  /** Where the message being edited in the composer goes back on save, or null when nothing is being edited. */
-  editingIndex?: number | null;
+  /**
+   * The queued message open in the composer, or null: where it goes back on save, and the unsent draft set aside
+   * behind the queue meanwhile, which returns to the composer and never sends.
+   */
+  editing?: { readonly originalIndex: number; readonly parkedDraftId: string | null } | null;
 }
 
 /**
@@ -43,7 +47,7 @@ export function ComposerQueueList({
   isEditLocked = false,
   onSendNow,
   onLoadIntoComposer,
-  editingIndex = null,
+  editing = null,
 }: ComposerQueueListProps) {
   const queue = useQueueStore((s) => s.queues[threadId] ?? EMPTY_QUEUE);
   const providerId = ProviderIdSchema.safeParse(provider);
@@ -53,8 +57,8 @@ export function ComposerQueueList({
   const held = useQueueStore((s) => s.autoDrainSuppressedThreadIds.has(threadId));
   const pauseReason = useQueueStore((s) => s.autoDrainPauseReasons[threadId]);
   const { resume } = useQueuedMessageDispatch(threadId);
-  if (queue.length === 0 && editingIndex === null) return null;
-  const { slot, position } = editingSlot(editingIndex, queue.length);
+  if (queue.length === 0 && editing === null) return null;
+  const { slot, position, parkedDraftId } = editingSlot(editing, queue.length);
 
   const canSendNow = (message: QueuedMessage) => !isPaused
     && (route === "send" || (route === "steer" && canSteer && isSteerable(message)));
@@ -81,10 +85,8 @@ export function ComposerQueueList({
         {queue.map((message, index) => (
           <Fragment key={message.id}>
             <li className="flex h-10 items-center gap-2">
-              <span className="flex size-4 shrink-0 items-center justify-center">
-                <CornerDownRight className="size-4 text-muted" aria-hidden />
-              </span>
-              <QueueRowText message={message} />
+              <QueueRowGlyph parked={message.id === parkedDraftId} />
+              <QueueRowText message={message} parked={message.id === parkedDraftId} />
               {isDeliveryUnknown(message) ? (
                 <DeliveryUnknownActions
                   position={position(index)}
@@ -115,9 +117,13 @@ export function ComposerQueueList({
  * The edited message keeps its slot, so the tray shows which message the composer is editing, and the rows after it
  * show the positions they will have once it is saved.
  */
-function editingSlot(editingIndex: number | null, length: number) {
-  const slot = editingIndex === null ? null : Math.min(editingIndex, length);
-  return { slot, position: (index: number) => (slot !== null && index >= slot ? index + 2 : index + 1) };
+function editingSlot(editing: ComposerQueueListProps["editing"], length: number) {
+  const slot = editing ? Math.min(editing.originalIndex, length) : null;
+  return {
+    slot,
+    position: (index: number) => (slot !== null && index >= slot ? index + 2 : index + 1),
+    parkedDraftId: editing ? editing.parkedDraftId : null,
+  };
 }
 
 /** Holds the place of the queued message open in the composer. */
@@ -132,12 +138,23 @@ function EditingSlotRow() {
   );
 }
 
-function QueueRowText({ message }: { message: QueuedMessage }) {
+/** A queued message leads with the send-next arrow; the set-aside draft, which never sends, with a page. */
+function QueueRowGlyph({ parked }: { readonly parked: boolean }) {
+  const Glyph = parked ? FileText : CornerDownRight;
+  return (
+    <span className="flex size-4 shrink-0 items-center justify-center">
+      <Glyph className="size-4 text-muted" aria-hidden />
+    </span>
+  );
+}
+
+function QueueRowText({ message, parked }: { message: QueuedMessage; parked: boolean }) {
   const text = stripPreviewAnnotationFence(message.displayContent || message.content);
   const annotations = message.previewAnnotations;
   return (
     <>
-        <span className="text-fade flex-1 text-body-small text-ink">
+        <span className={cn("text-fade flex-1 text-body-small", parked ? "text-muted" : "text-ink")}>
+          {parked ? <span className="sr-only">Unsent draft, back in the composer after the edit: </span> : null}
           {text || <span className="sr-only">Preview annotation</span>}
         </span>
         {annotations && annotations.annotations.length > 0 ? (
