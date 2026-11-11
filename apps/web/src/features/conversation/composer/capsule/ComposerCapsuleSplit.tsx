@@ -51,7 +51,7 @@ type OpenPartPopover = Extract<PartPopoverState, { status: "open" }>;
 
 // The access list carries the menu's own 4px padding, so its popover adds none.
 const POPUP_CLASS: Record<CapsulePart, string> = {
-  // Wider than other pickers: a row shows a model name beside its five reasoning-level chips.
+  // Wider than other pickers to fit the reasoning pane beside the model list.
   model: cn(PICKER_PANEL_CLASS, "w-[min(92vw,44rem)] max-h-(--available-height) overflow-y-auto"),
   reasoning: "w-56 p-1",
   access: "w-58 p-0",
@@ -177,8 +177,8 @@ export function CapsuleDivider() {
 
 /**
  * The composer's model, reasoning and access in one pill. Each part opens its own body in one shared popover spot;
- * with a popover open, resting on another part switches to it. Picking a model, a model row's level chip or a level
- * closes the popover; the option toggles change in place. The body is keyed by part, so a switch remounts it and it
+ * with a popover open, resting on another part switches to it. Picking a model, a level in the model picker's reasoning
+ * pane or a level in the reasoning popover closes the popover; the option toggles change in place. The body is keyed by part, so a switch remounts it and it
  * focuses its own target.
  */
 export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
@@ -209,7 +209,6 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
     reasoningLevels,
     onSelectionChange,
   };
-  const settings = <ComposerModelPreferenceSettings {...preferenceProps} />;
   // Closing through the root, not the reducer, lets the popup pour back into the part.
   const close = () => actionsRef.current?.close();
   const pickModel = (modelId: string, providerId: string) => {
@@ -323,14 +322,13 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
                     onTabChange={(tab) => dispatch({ type: "tab", tab })}
                     onSelect={pickModel}
                     reasoning={modelReasoning}
-                    footer={settings}
                   />
                 </FocusOnMount>
               ),
               reasoning: (
                 <FocusOnMount key="reasoning" selectors={REASONING_FOCUS}>
                   <ComposerReasoningLevelList {...preferenceProps} onChosen={close} />
-                  {settings}
+                  <ComposerModelPreferenceSettings {...preferenceProps} className="mt-1 border-t border-border px-3 pt-1" />
                 </FocusOnMount>
               ),
               access: <AccessOptionList key="access" access={access} onChosen={close} />,

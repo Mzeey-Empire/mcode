@@ -10,6 +10,7 @@ import {
   useState,
   type KeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { CheckIcon, ChevronDownIcon, ChevronRightIcon, SearchIcon } from "lucide-react";
 
@@ -47,8 +48,6 @@ export interface PickerRow {
   readonly description?: ReactNode;
   /** A secondary action on the row, such as starring it. Running it never picks the row. */
   readonly action?: PickerRowAction;
-  /** Inline alternatives drawn after the name, such as a model's reasoning levels. */
-  readonly choices?: PickerRowChoices;
   /** Makes the row a disclosure whose pick shows or hides the rows after it, drawn with a chevron. */
   readonly expanded?: boolean;
   /** Rows sharing a group sit together; a divider marks where the group changes. */
@@ -75,16 +74,15 @@ export interface PickerRowAction {
 }
 
 /**
- * Inline alternatives on a row, such as a model's reasoning levels. Choosing one picks the row with that choice. Like
- * {@link PickerRowAction}, the buttons answer the pointer only: a listbox option cannot hold a focusable control.
+ * A pane beside the list that shows the highlighted row's details, such as a model's reasoning levels. Right Arrow at
+ * the end of the search text focuses the pane's element with `tabindex="0"`, and Left Arrow in the pane returns to the
+ * search.
  */
-export interface PickerRowChoices {
-  /** The group's name, read before the choices in the row's description, such as "Reasoning". */
-  readonly label: string;
-  readonly items: readonly { readonly id: string; readonly label: string }[];
-  /** The choice drawn as current; set it on the selected row only. */
-  readonly current?: string;
-  readonly onChoose: (id: string) => void;
+export interface PickerDetail<T> {
+  /** Read on the search field, so a screen reader learns the pane exists, such as "Right Arrow: reasoning level". */
+  readonly hint: string;
+  /** The pane for an item. Return null for an item with nothing to show. */
+  readonly render: (item: T) => ReactNode;
 }
 
 /** One picker tab, drawn as a segment above the list. */
@@ -132,6 +130,8 @@ export interface PickerProps<T> {
   readonly selectedCheck?: boolean;
   /** Ctrl/Cmd+1..9 pick the Nth selectable row, skipping disclosure rows; each such row shows its keycap. Defaults to false. */
   readonly numberedShortcuts?: boolean;
+  /** A pane beside the list for the highlighted row. */
+  readonly detail?: PickerDetail<T>;
   readonly onSelect: (item: T) => void;
 }
 
@@ -139,6 +139,11 @@ export interface PickerProps<T> {
 const LOAD_MORE_ROWS = 4;
 /** A 32px row plus the 1px gap between rows. */
 const ROW_PITCH_PX = 33;
+/**
+ * How long a hovered row waits before the pane shows it. A pointer heading diagonally for the pane crosses other rows,
+ * and the pane must not swap to each of them on the way.
+ */
+const PANE_FOLLOW_MS = 100;
 const ARROW_STEPS: Partial<Record<string, 1 | -1>> = { ArrowDown: 1, ArrowUp: -1 };
 
 interface ListRow<T> {
@@ -160,8 +165,11 @@ export function Picker<T>(props: PickerProps<T>) {
   const rows = useMemo<ListRow<T>[]>(() => items.map((item) => ({ item, row: renderItem(item) })), [items, renderItem]);
   const shortcutRows = useShortcutRows(rows, props.numberedShortcuts === true);
   const listKey = `${props.activeTab ?? ""}\u0000${query}`;
-  const { activeIndex, setHighlight } = useActiveRow(rows, listKey, selectedKey);
+  const { activeRowKey, activeIndex, setHighlight } = useActiveRow(rows, listKey, selectedKey);
+  const pane = usePaneRow(activeRowKey);
   const loadMore = useLoadMoreOnce(props, listKey);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const paneRef = useRef<HTMLDivElement>(null);
 
   const select = (entry: ListRow<T> | undefined) => {
     if (entry && !entry.row.disabled) props.onSelect(entry.item);
@@ -181,10 +189,21 @@ export function Picker<T>(props: PickerProps<T>) {
       runRowAction(activeIndex);
       return;
     }
+    if (enterPane(event)) return;
     const target = highlightTarget(rows, activeIndex, event.key);
     if (target === null) return;
     event.preventDefault();
     moveHighlight(target);
+  };
+
+  const enterPane = (event: KeyboardEvent<HTMLInputElement>): boolean => {
+    if (event.key !== "ArrowRight" || !caretAtEnd(event.currentTarget)) return false;
+    const paneTarget = paneRef.current?.querySelector<HTMLElement>('[tabindex="0"]');
+    if (!paneTarget) return false;
+    event.preventDefault();
+    pane.follow();
+    paneTarget.focus();
+    return true;
   };
 
   // Bound on the panel, not the search field: clicking a tab moves focus onto it, and the chord must still pick a row.
@@ -211,8 +230,27 @@ export function Picker<T>(props: PickerProps<T>) {
     if (key !== undefined) setHighlight({ key, index });
   };
 
+  const hoverRow = (index: number) => {
+    pane.lag();
+    highlightRow(index);
+  };
+
+  // The pointer reached the pane: the row it shows becomes the highlighted one again.
+  const settlePane = () => {
+    const key = pane.settle();
+    const index = rows.findIndex(({ row }) => row.key === key);
+    if (index !== -1) highlightRow(index);
+  };
+
+  const leavePane = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    searchRef.current?.focus();
+  };
+
   const moveHighlight = (next: number) => {
     if (rows[next] === undefined) return;
+    pane.follow();
     highlightRow(next);
     // Only keyboard moves scroll; hover highlights must never move the list under the pointer.
     document.getElementById(optionId(listId, next))?.scrollIntoView?.({ block: "nearest" });
@@ -220,41 +258,45 @@ export function Picker<T>(props: PickerProps<T>) {
   };
 
   const hasRows = rows.length > 0;
+  const list = hasRows ? (
+    <PickerList
+      listId={listId}
+      listKey={listKey}
+      rows={rows}
+      shortcutRows={shortcutRows}
+      activeIndex={activeIndex}
+      selectedKey={selectedKey}
+      onHighlight={hoverRow}
+      onPick={select}
+      onRunAction={runRowAction}
+      onNearEnd={loadMore}
+      hairlines={hairlines}
+      selectedCheck={selectedCheck}
+      fill={props.detail !== undefined}
+    />
+  ) : null;
   return (
     <div data-slot="picker" className="flex min-w-0 flex-col" onKeyDown={handleNumberShortcut}>
-      <div className="flex h-control-compact items-center gap-2 px-2">
-        <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" />
-        <input
-          role="combobox"
-          aria-expanded={hasRows}
-          aria-controls={listId}
-          aria-autocomplete="list"
-          aria-activedescendant={activeIndex !== -1 ? optionId(listId, activeIndex) : undefined}
-          aria-label={searchPlaceholder}
-          placeholder={searchPlaceholder}
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          onKeyDown={handleKeyDown}
-          className="min-w-0 flex-1 bg-transparent text-body-small text-ink outline-none placeholder:text-muted"
-        />
-      </div>
+      <PickerSearchField
+        inputRef={searchRef}
+        listId={listId}
+        query={query}
+        onQueryChange={onQueryChange}
+        placeholder={searchPlaceholder}
+        expanded={hasRows}
+        activeIndex={activeIndex}
+        detail={props.detail}
+        onKeyDown={handleKeyDown}
+      />
       <PickerTabs tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} />
-      {hasRows ? (
-        <PickerList
-          listId={listId}
-          listKey={listKey}
-          rows={rows}
-          shortcutRows={shortcutRows}
-          activeIndex={activeIndex}
-          selectedKey={selectedKey}
-          onHighlight={highlightRow}
-          onPick={select}
-          onRunAction={runRowAction}
-          onNearEnd={loadMore}
-          hairlines={hairlines}
-          selectedCheck={selectedCheck}
-        />
-      ) : null}
+      <PickerListArea
+        list={list}
+        detail={props.detail}
+        paneEntry={rows.find(({ row }) => row.key === pane.key)}
+        paneRef={paneRef}
+        onKeyDown={leavePane}
+        onPointerEnter={settlePane}
+      />
       {/* A failed page keeps the rows already loaded; only an empty list gives way to the status. */}
       {typeof status === "object" ? (
         <PickerFailure status={status} onRetry={props.onRetry} />
@@ -264,6 +306,108 @@ export function Picker<T>(props: PickerProps<T>) {
       <PickerFooter loaded={items.length} total={props.total} countLabel={props.countLabel} footer={props.footer} hairline={hairlines} />
     </div>
   );
+}
+
+interface PickerSearchFieldProps {
+  readonly inputRef: RefObject<HTMLInputElement | null>;
+  readonly listId: string;
+  readonly query: string;
+  readonly onQueryChange: (query: string) => void;
+  readonly placeholder: string;
+  readonly expanded: boolean;
+  readonly activeIndex: number;
+  /** Its hint, how to reach the pane, is read as the field's description. */
+  readonly detail: Pick<PickerDetail<unknown>, "hint"> | undefined;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+}
+
+function PickerSearchField({ inputRef, listId, query, onQueryChange, placeholder, expanded, activeIndex, detail, onKeyDown }: PickerSearchFieldProps) {
+  const hintId = `${listId}-detail-hint`;
+  const hint = detail?.hint;
+  return (
+    <div className="flex h-control-compact items-center gap-2 px-2">
+      <SearchIcon aria-hidden className="size-[1.4rem] shrink-0 text-muted" />
+      {hint ? <span id={hintId} hidden>{hint}</span> : null}
+      <input
+        ref={inputRef}
+        role="combobox"
+        aria-expanded={expanded}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={activeIndex !== -1 ? optionId(listId, activeIndex) : undefined}
+        aria-describedby={hint ? hintId : undefined}
+        aria-label={placeholder}
+        placeholder={placeholder}
+        value={query}
+        onChange={(event) => onQueryChange(event.target.value)}
+        onKeyDown={onKeyDown}
+        className="min-w-0 flex-1 bg-transparent text-body-small text-ink outline-none placeholder:text-muted"
+      />
+    </div>
+  );
+}
+
+interface PickerListAreaProps<T> {
+  readonly list: ReactNode;
+  readonly detail: PickerDetail<T> | undefined;
+  readonly paneEntry: ListRow<T> | undefined;
+  readonly paneRef: RefObject<HTMLDivElement | null>;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly onPointerEnter: () => void;
+}
+
+/**
+ * The list, beside its detail pane when the picker has one. The pair sits at a fixed height, so moving between rows
+ * whose panes differ never resizes the panel.
+ */
+function PickerListArea<T>({ list, detail, paneEntry, paneRef, onKeyDown, onPointerEnter }: PickerListAreaProps<T>) {
+  if (!list || !detail) return list;
+  return (
+    <div className="grid h-[20.8rem] grid-cols-[minmax(0,1fr)_16.8rem]">
+      {list}
+      <div
+        ref={paneRef}
+        data-slot="picker-detail"
+        onKeyDown={onKeyDown}
+        onPointerEnter={onPointerEnter}
+        className="min-h-0 overflow-y-auto border-l border-border p-1"
+      >
+        {paneEntry ? detail.render(paneEntry.item) : null}
+      </div>
+    </div>
+  );
+}
+
+function caretAtEnd(input: HTMLInputElement): boolean {
+  return input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+}
+
+/**
+ * Which row the detail pane shows. Keyboard moves show the new row at once. A hover holds the pane on its row for
+ * {@link PANE_FOLLOW_MS}, and reaching the pane in that time keeps it there.
+ */
+function usePaneRow(activeRowKey: string | null) {
+  const [held, setHeld] = useState<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return {
+    key: held ?? activeRowKey,
+    lag: () => {
+      setHeld((current) => current ?? activeRowKey);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setHeld(null), PANE_FOLLOW_MS);
+    },
+    follow: () => {
+      clearTimeout(timer.current);
+      setHeld(null);
+    },
+    /** Stops a pending swap and returns the row the pane keeps. */
+    settle: () => {
+      clearTimeout(timer.current);
+      setHeld(null);
+      return held ?? activeRowKey;
+    },
+  };
 }
 
 function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>, "tabs" | "activeTab" | "onTabChange">) {
@@ -443,10 +587,12 @@ interface PickerListProps<T> {
   readonly onNearEnd: () => void;
   readonly hairlines: boolean;
   readonly selectedCheck: boolean;
+  /** Fills its grid cell instead of capping at five rows, so it matches the detail pane's height. */
+  readonly fill: boolean;
 }
 
 function PickerList<T>(props: PickerListProps<T>) {
-  const { listId, listKey, rows, shortcutRows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck } = props;
+  const { listId, listKey, rows, shortcutRows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck, fill } = props;
   const listRef = useRef<HTMLUListElement>(null);
 
   const measure = useCallback(() => {
@@ -477,7 +623,7 @@ function PickerList<T>(props: PickerListProps<T>) {
       id={listId}
       role="listbox"
       onScroll={measure}
-      className="scroll-fade-y relative flex max-h-[17.2rem] flex-col gap-px pt-2"
+      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px pt-2", fill ? "pr-1" : "max-h-[17.2rem]")}
     >
       <SlidingHighlight follow="data-active" />
       {rows.map((entry, index) => (
@@ -551,15 +697,13 @@ function PickerOption(props: PickerOptionProps) {
 /** What an option reads after its name: why it is disabled, and how to run its action from the keyboard. */
 function optionDescriptions(id: string, row: PickerRow, reason: string | undefined, digit: number | undefined) {
   const actionHint = row.action ? `${row.action.label} (${ROW_ACTION_SHORTCUT.label})` : undefined;
-  const choicesHint = row.choices ? `${row.choices.label}: ${row.choices.items.map((item) => item.label).join(", ")}` : undefined;
-  const describedBy = [reason && `${id}-reason`, choicesHint && `${id}-choices`, actionHint && `${id}-action`].filter(Boolean).join(" ");
+  const describedBy = [reason && `${id}-reason`, actionHint && `${id}-action`].filter(Boolean).join(" ");
   return {
     describedBy: describedBy || undefined,
     keyShortcuts: optionKeyShortcuts(digit, actionHint !== undefined),
     spans: (
       <>
         {reason ? <span id={`${id}-reason`} hidden>{reason}</span> : null}
-        {choicesHint ? <span id={`${id}-choices`} hidden>{choicesHint}</span> : null}
         {actionHint ? <span id={`${id}-action`} hidden>{actionHint}</span> : null}
       </>
     ),
@@ -622,18 +766,11 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
       {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
       <PickerDisclosureChevron expanded={row.expanded} />
       {digit !== undefined ? (
-        <span
-          aria-hidden
-          className={cn(
-            "shrink-0 text-muted",
-            // The row's choices take this slot while they show, so the name keeps the room it has.
-            row.choices && "group-hover/option:hidden group-data-active/option:hidden group-data-selected/option:hidden",
-          )}
-        >
+        <span aria-hidden className="shrink-0 text-muted">
           <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
         </span>
       ) : null}
-      <PickerRowControls row={row} onRunAction={onRunAction} />
+      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       {selectedCheck ? (
         <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
           {selected ? <CheckIcon className="size-[1.4rem] text-ink" /> : null}
@@ -674,48 +811,6 @@ function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAc
     >
       {action.icon}
     </button>
-  );
-}
-
-/** The pointer-only controls at a row's end: its inline choices, then its action. */
-function PickerRowControls({ row, onRunAction }: { readonly row: PickerRow; readonly onRunAction: () => void }) {
-  return (
-    <>
-      {row.choices ? <PickerRowChoiceButtons choices={row.choices} /> : null}
-      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
-    </>
-  );
-}
-
-function PickerRowChoiceButtons({ choices }: { readonly choices: PickerRowChoices }) {
-  return (
-    <span
-      aria-hidden
-      // Shown on the hovered, highlighted or selected row only, and out of the layout elsewhere, so the other rows keep
-      // their full names.
-      className="hidden shrink-0 items-center gap-0.5 group-hover/option:flex group-data-active/option:flex group-data-selected/option:flex"
-    >
-      {choices.items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          tabIndex={-1}
-          data-slot="picker-row-choice"
-          onClick={(event) => {
-            // Choosing must never also pick the row underneath it.
-            event.stopPropagation();
-            choices.onChoose(item.id);
-          }}
-          onMouseDown={(event) => event.preventDefault()}
-          className={cn(
-            "h-[2.2rem] shrink-0 cursor-pointer rounded-full px-[0.7rem] text-compact",
-            item.id === choices.current ? "bg-selected text-ink" : "text-muted hover:bg-hover hover:text-ink",
-          )}
-        >
-          {item.label}
-        </button>
-      ))}
-    </span>
   );
 }
 

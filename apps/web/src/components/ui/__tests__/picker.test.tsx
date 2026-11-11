@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { Picker, type PickerProps, type PickerStatus } from "@/components/ui/picker";
+import { Picker, type PickerDetail, type PickerProps, type PickerStatus } from "@/components/ui/picker";
 import { installListboxLayout, LISTBOX_ROW_PX as ROW_PX, scrollListTo } from "@/__tests__/helpers/picker-layout";
 
 interface Branch {
@@ -22,6 +22,16 @@ const TABS = [
 ];
 
 installListboxLayout();
+
+const BRANCH_DETAIL: PickerDetail<Branch> = {
+  hint: "Right Arrow: branch actions",
+  render: (branch) => (
+    <div>
+      <p>Detail of {branch.name}</p>
+      <button type="button" tabIndex={0}>Use {branch.name}</button>
+    </div>
+  ),
+};
 
 /** A fake paged source: filters by query and serves 50 rows per page, only when the test says so. */
 function PagedPicker(props: Partial<PickerProps<Branch>> & { readonly pages?: number; readonly status?: PickerStatus }) {
@@ -327,33 +337,51 @@ describe("Picker", () => {
     expect(search).toHaveFocus();
   });
 
-  it("chooses a row's inline choice without picking the row, and reads the choices as its description", async () => {
-    const onSelect = vi.fn();
-    const onChoose = vi.fn();
-    render(
-      <PagedPicker
-        onSelect={onSelect}
-        renderItem={(branch) => ({
-          key: branch.name,
-          name: branch.name,
-          choices: {
-            label: "Reasoning",
-            items: [{ id: "low", label: "Low" }, { id: "high", label: "High" }],
-            onChoose: (id) => onChoose(branch.name, id),
-          },
-        })}
-      />,
-    );
+  it("shows the highlighted row in the detail pane, and Right Arrow at the end of the search moves focus into it", async () => {
+    render(<PagedPicker detail={BRANCH_DETAIL} />);
     const search = screen.getByRole("combobox");
     search.focus();
-    const row = screen.getByRole("option", { name: "branch-001" });
-    expect(row).toHaveAccessibleDescription("Reasoning: Low, High");
-    const high = [...row.querySelectorAll<HTMLButtonElement>("[data-slot=picker-row-choice]")].find((chip) => chip.textContent === "High");
-    expect(high).toHaveAttribute("tabindex", "-1");
-    await userEvent.click(high as HTMLButtonElement);
-    expect(onChoose).toHaveBeenCalledWith("branch-001", "high");
-    expect(onSelect).not.toHaveBeenCalled();
+    expect(search).toHaveAccessibleDescription("Right Arrow: branch actions");
+    expect(screen.getByText("Detail of branch-000")).toBeInTheDocument();
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByText("Detail of branch-002")).toBeInTheDocument();
+
+    await userEvent.keyboard("{ArrowRight}");
+    expect(screen.getByRole("button", { name: "Use branch-002" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowLeft}");
     expect(search).toHaveFocus();
+  });
+
+  it("keeps Right Arrow for the caret while it is inside the search text", async () => {
+    render(<PagedPicker detail={BRANCH_DETAIL} />);
+    const search = screen.getByRole("combobox");
+    search.focus();
+
+    await userEvent.keyboard("br{ArrowLeft}{ArrowRight}");
+
+    expect(search).toHaveFocus();
+  });
+
+  it("holds the pane on its row while the pointer crosses other rows on the way to it", () => {
+    vi.useFakeTimers();
+    onTestFinished(() => void vi.useRealTimers());
+    render(<PagedPicker detail={BRANCH_DETAIL} />);
+    const search = screen.getByRole("combobox");
+    const crossed = screen.getByRole("option", { name: "branch-003" });
+
+    fireEvent.mouseMove(crossed);
+    expect(search).toHaveAttribute("aria-activedescendant", crossed.id);
+    expect(screen.getByText("Detail of branch-000")).toBeInTheDocument();
+    fireEvent.pointerEnter(screen.getByText("Detail of branch-000"));
+    act(() => void vi.advanceTimersByTime(200));
+
+    expect(screen.getByText("Detail of branch-000")).toBeInTheDocument();
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "branch-000" }).id);
+
+    fireEvent.mouseMove(crossed);
+    act(() => void vi.advanceTimersByTime(100));
+    expect(screen.getByText("Detail of branch-003")).toBeInTheDocument();
   });
 
   it("runs the active row's action on Ctrl+D without picking it", async () => {

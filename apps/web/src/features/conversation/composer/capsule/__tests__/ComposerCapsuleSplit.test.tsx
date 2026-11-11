@@ -27,6 +27,9 @@ const CODEX_MODELS: ProviderModelInfo[] = [
 
 const LEVELS: ReasoningLevel[] = ["low", "medium", "high"];
 
+/** Longer than the picker's wait before a hovered row takes over its reasoning pane. */
+const PANE_SETTLE_MS = 150;
+
 const selection: ComposerAgentSelection = {
   modelId: "gpt-9-deep",
   provider: "codex",
@@ -245,18 +248,34 @@ describe("ComposerCapsuleSplit", () => {
     expect(realPopup()).toBeNull();
   });
 
-  it("sets model, provider and level in one change from a level chip on another model's row, and closes", async () => {
+  it("sets model, provider and level in one change from the reasoning pane of a hovered model, and closes", async () => {
     const onSelectionChange = await renderSplit();
     await openModelPicker();
 
-    const wide = screen.getByRole("option", { name: "GPT-9 Wide" });
-    expect(wide).toHaveAccessibleDescription(expect.stringContaining("Reasoning: Low, Medium, High, X-High"));
-    fireEvent.click(within(wide).getByText("X-High"));
+    fireEvent.mouseMove(screen.getByRole("option", { name: "GPT-9 Wide" }));
+    act(() => vi.advanceTimersByTime(PANE_SETTLE_MS));
+    const pane = screen.getByRole("listbox", { name: "Reasoning for GPT-9 Wide" });
+    expect(within(pane).queryByRole("option", { selected: true })).toBeNull();
+    fireEvent.click(within(pane).getByRole("option", { name: "X-High" }));
 
     expect(onSelectionChange).toHaveBeenCalledTimes(1);
     expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-wide", provider: "codex", reasoning: "xhigh" });
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
     expect(realPopup()).toBeNull();
+  });
+
+  it("reaches the pane from the search with Right Arrow and commits a model and level with Enter", async () => {
+    const onSelectionChange = await renderSplit();
+    await openModelPicker();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    expect(screen.getByRole("listbox", { name: "Reasoning for GPT-9 Deep" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "High", selected: true })).toBeInTheDocument();
+    const typing = user.keyboard("{ArrowDown}{ArrowDown}{ArrowRight}{ArrowDown}{ArrowDown}{ArrowDown}{Enter}");
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    await typing;
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-wide", provider: "codex", reasoning: "xhigh" });
   });
 
   it("closes on a model pick without opening the reasoning popover, keeping a level the model supports", async () => {
@@ -391,7 +410,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
     const onSelectionChange = await renderSplit();
     openPart(/^Reasoning: /);
 
-    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Fast" }));
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
 
     expect(onSelectionChange).toHaveBeenCalledWith({ fastMode: true });
@@ -404,7 +423,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
     const onSelectionChange = await renderSplit({ threadId: "thread-1", branchFromMessageId: "message-1" });
     openPart(/^Reasoning: /);
 
-    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Fast" }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({ fastMode: true });
     expect(setThreadSettings).not.toHaveBeenCalled();
@@ -432,7 +451,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
     await renderSplit({ selection: { provider: "claude", modelId } });
     openPart(/^Reasoning: /);
 
-    expect(screen.queryByRole("button", { name: "1M context" }) !== null).toBe(shown);
+    expect(screen.queryByRole("switch", { name: "1M context" }) !== null).toBe(shown);
   });
 });
 

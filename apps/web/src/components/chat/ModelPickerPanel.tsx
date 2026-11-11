@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { Star } from "lucide-react";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
-import { Picker, type PickerRow, type PickerRowAction, type PickerRowChoices, type PickerTab } from "@/components/ui/picker";
-import { formatReasoningLabel } from "@/lib/format-model-label";
+import { Picker, type PickerDetail, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
+import { ReasoningLevelOptions } from "@/features/conversation/composer/controls/ComposerModelPreferences";
 import {
   MODEL_PROVIDERS,
   findModelById,
@@ -436,28 +436,36 @@ export interface ModelPickerPanelProps {
   readonly onSelect: (modelId: string, providerId: string) => void;
   /** Settings for the selected model, shown under the catalog. */
   readonly footer?: ReactNode;
-  /** Shows each model's reasoning levels on its row, so one click picks the model and its level. */
+  /** Shows the highlighted model's reasoning levels in a pane beside the list, so one click picks the model and its level. */
   readonly reasoning?: ModelPickerReasoning;
 }
 
-/** The current reasoning level and what choosing a level on a model row does. */
+/** The current reasoning level and what choosing a level in the pane does. */
 export interface ModelPickerReasoning {
   readonly current: ReasoningLevel;
   readonly onChoose: (modelId: string, providerId: string, level: ReasoningLevel) => void;
 }
 
-function reasoningChoices(modelId: string, providerId: string, selected: boolean, reasoning: ModelPickerReasoning): PickerRowChoices | undefined {
-  const levels = getReasoningLevels(providerId, modelId);
-  if (levels.length === 0) return undefined;
-  return {
-    label: "Reasoning",
-    items: levels.map((level) => ({ id: level, label: formatReasoningLabel(level) })),
-    current: selected ? reasoning.current : undefined,
-    onChoose: (id) => {
-      const level = levels.find((candidate) => candidate === id);
-      if (level) reasoning.onChoose(modelId, providerId, level);
-    },
-  };
+function ReasoningPane({ option, selected, reasoning }: { readonly option: ModelOption; readonly selected: boolean; readonly reasoning: ModelPickerReasoning }) {
+  const levels = getReasoningLevels(option.providerId, option.modelId);
+  return (
+    <div className="flex flex-col">
+      <p className="flex flex-col px-3 pt-1 pb-1">
+        <span className="text-caption text-muted">Reasoning</span>
+        <span className="text-body-small break-words text-ink">{option.label}</span>
+      </p>
+      {levels.length > 0 ? (
+        <ReasoningLevelOptions
+          levels={levels}
+          checked={selected ? reasoning.current : undefined}
+          label={`Reasoning for ${option.label}`}
+          onChoose={(level) => reasoning.onChoose(option.modelId, option.providerId, level)}
+        />
+      ) : (
+        <p className="px-3 py-1.5 text-caption text-muted">No reasoning levels</p>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -545,13 +553,20 @@ export function ModelPickerPanel({
         ) : undefined,
         // A model whose access ended can still be unstarred, but not newly starred.
         action: option.endedOn && !starred ? undefined : favoriteAction(option, starred, toggleFavorite),
-        choices: reasoning && !option.endedOn
-          ? reasoningChoices(option.modelId, option.providerId, key === selectedKey, reasoning)
-          : undefined,
       };
     },
-    [starredKeys, toggleFavorite, reasoning, selectedKey],
+    [starredKeys, toggleFavorite],
   );
+
+  const detail = useMemo((): PickerDetail<ModelPickerOption> | undefined => {
+    if (!reasoning) return undefined;
+    return {
+      hint: "Right Arrow: reasoning level",
+      render: (option) => option.kind === "model" && !option.endedOn
+        ? <ReasoningPane option={option} selected={optionKey(option.providerId, option.modelId) === selectedKey} reasoning={reasoning} />
+        : null,
+    };
+  }, [reasoning, selectedKey]);
 
   const showTab = useCallback((next: ModelPickerTab) => {
     setActiveTab(next);
@@ -585,8 +600,8 @@ export function ModelPickerPanel({
       renderItem={renderItem}
       onSelect={handlePick}
       footer={footer}
+      detail={detail}
       hairlines={false}
-      selectedCheck={false}
     />
   );
 }
