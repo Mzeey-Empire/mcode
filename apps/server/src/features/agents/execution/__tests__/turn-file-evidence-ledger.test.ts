@@ -5,6 +5,7 @@ import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { turnFileEvidenceWriteHandlers, listTurnFileEvidence, recordTurnFileEvidence } from "../../turns/persistence/turn-file-evidence-store.js";
 import { TurnFileEvidenceLedger } from "../turn-file-evidence-ledger.js";
+import { SNAPSHOT_CAPTURE_BUDGET_MS } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import type { FrozenExecutionFileEvidence } from "../execution-file-evidence-coordinator.js";
 import type { PreparedExecutionFileEvidence } from "../../turns/turn-execution-file-evidence.js";
 import * as push from "../../../../application/transport/push.js";
@@ -63,7 +64,7 @@ describe("TurnFileEvidenceLedger", () => {
     ledger.expect(execution, frozen); ledger.tracked(execution, { ...facts, selectedTurnDiff }); terminal(); ledger.terminalSaved(execution);
     let released = false;
     void ledger.collected(execution).then(() => { released = true; });
-    await vi.advanceTimersByTimeAsync(9_999);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
     expect(released).toBe(false); expect(evidence()).toEqual({ state: "tracking" });
     await vi.advanceTimersByTimeAsync(1);
     expect(released).toBe(true);

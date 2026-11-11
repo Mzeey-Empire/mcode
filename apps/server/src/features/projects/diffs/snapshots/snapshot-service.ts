@@ -18,6 +18,16 @@ import { rawGit, rawPath, readRawStates, restoreRaw, type RawPathState, type Raw
 import { blobIdsAt, planCheckout, pinRecovery, withSnapshotIndex } from "./snapshot-checkout.js";
 import type { StoreId } from "./snapshot-store-identity.js";
 
+/**
+ * Upper bound for one working-tree capture, from when it holds the repository lock. A turn that
+ * changed about 1,000 files took 17 to 22 s to capture on a 100,000-file repository on Windows,
+ * because Git writes one new object file per changed file and folder, at about 9 ms each there.
+ */
+export const SNAPSHOT_CAPTURE_BUDGET_MS = 60_000;
+
+/** Remaining milliseconds before a capture's shared deadline. */
+type CaptureTimeout = () => number;
+
 const MAX_ATTRIBUTED_PATHS = 16_384;
 const MAX_PATHS_PER_GIT_CALL = 128;
 const MAX_PATHSPEC_CHARS_PER_GIT_CALL = 20_000;
@@ -253,15 +263,17 @@ export class SnapshotService {
   }
 
   private async captureRefUnlocked(cwd: string): Promise<string> {
-    const timeout = RealGitExecutor.DEFAULT_TIMEOUT;
+    // Hashing a turn's new files dominates; one deadline bounds the whole capture, not each command.
+    const deadline = Date.now() + SNAPSHOT_CAPTURE_BUDGET_MS;
+    const timeout = () => Math.max(1, deadline - Date.now());
     return withIndexCopy(this.gitExecutor, cwd, "mcode-index", async (env) => {
       if (await this.hasHead(cwd, timeout)) {
-        await this.gitExecutor.exec(["-C", cwd, "read-tree", "HEAD"], { timeout, env });
+        await this.gitExecutor.exec(["-C", cwd, "read-tree", "HEAD"], { timeout: timeout(), env });
       }
     }, async (env) => {
       await this.unflagHiddenEntries(cwd, env, timeout);
-      await this.gitExecutor.exec(["-C", cwd, "add", "-A"], { timeout, env });
-      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "write-tree"], { timeout, env });
+      await this.gitExecutor.exec(["-C", cwd, "add", "-A"], { timeout: timeout(), env });
+      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "write-tree"], { timeout: timeout(), env });
       return stdout.trim();
     });
   }
@@ -271,7 +283,7 @@ export class SnapshotService {
    * their staged blobs over an agent's edit. Sparse checkout owns skip-worktree bits for the files
    * it removed from disk, so those stay set.
    */
-  private async unflagHiddenEntries(cwd: string, env: NodeJS.ProcessEnv, timeout: number): Promise<void> {
+  private async unflagHiddenEntries(cwd: string, env: NodeJS.ProcessEnv, timeout: CaptureTimeout): Promise<void> {
     const assumed: string[] = [];
     const skipped: string[] = [];
     const collect = (record: string) => {
@@ -285,7 +297,7 @@ export class SnapshotService {
     // The listing names every tracked path, which outgrows a buffered stdout on large repositories.
     // `:/` lists the whole repository when the project is a subfolder of it.
     await this.gitExecutor.exec(["-C", cwd, "ls-files", "-v", "-z", "--", ":/"], {
-      timeout, env, retainStdout: false,
+      timeout: timeout(), env, retainStdout: false,
       onStdout(chunk) {
         const records = (pending + chunk).split("\0");
         pending = records.pop() ?? "";
@@ -299,16 +311,16 @@ export class SnapshotService {
     }
   }
 
-  private async updateIndexFlags(cwd: string, env: NodeJS.ProcessEnv, timeout: number, flag: string, paths: string[]): Promise<void> {
+  private async updateIndexFlags(cwd: string, env: NodeJS.ProcessEnv, timeout: CaptureTimeout, flag: string, paths: string[]): Promise<void> {
     if (paths.length === 0) return;
     await this.gitExecutor.exec(["-C", cwd, "update-index", flag, "-z", "--stdin"], {
-      timeout, env, input: `${paths.join("\0")}\0`,
+      timeout: timeout(), env, input: `${paths.join("\0")}\0`,
     });
   }
 
-  private async usesSparseCheckout(cwd: string, timeout: number): Promise<boolean> {
+  private async usesSparseCheckout(cwd: string, timeout: CaptureTimeout): Promise<boolean> {
     try {
-      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "config", "--type=bool", "--get", "core.sparseCheckout"], { timeout });
+      const { stdout } = await this.gitExecutor.exec(["-C", cwd, "config", "--type=bool", "--get", "core.sparseCheckout"], { timeout: timeout() });
       return stdout.trim() === "true";
     } catch (error) {
       if (gitExitCode(error) === 1) return false;
@@ -316,9 +328,9 @@ export class SnapshotService {
     }
   }
 
-  private async hasHead(cwd: string, timeout: number): Promise<boolean> {
+  private async hasHead(cwd: string, timeout: CaptureTimeout): Promise<boolean> {
     try {
-      await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--verify", "-q", "HEAD"], { timeout });
+      await this.gitExecutor.exec(["-C", cwd, "rev-parse", "--verify", "-q", "HEAD"], { timeout: timeout() });
       return true;
     } catch (error) {
       if (gitExitCode(error) === 1) return false;

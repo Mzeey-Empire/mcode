@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { TurnFileEvidenceLedger } from "../../execution/turn-file-evidence-ledger.js";
 import { bindTurnFileEvidenceLedger } from "../../execution/turn-persisted-publication.js";
 import { listTurnFileEvidence } from "../../turns/persistence/turn-file-evidence-store.js";
-import { SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
+import { SNAPSHOT_CAPTURE_BUDGET_MS, SnapshotService } from "../../../projects/diffs/snapshots/snapshot-service.js";
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeFSPromises from "node:fs/promises";
@@ -120,7 +120,7 @@ afterEach(async () => {
 }, FIXTURE_CLOSE_TIMEOUT_MS);
 
 describe("AgentService cleanup through production worker composition", { timeout: 30_000 }, () => {
-  it("returns Stop and publishes its ending while capture is wedged, gating the next send for ten seconds", async () => {
+  it("returns Stop and publishes its ending while capture is wedged, gating the next send for the file check budget", async () => {
     const fixture = await openFixture();
     const snapshots = container.resolve(SnapshotService);
     const capture = vi.spyOn(snapshots, "captureRef").mockResolvedValueOnce("a".repeat(40));
@@ -137,7 +137,7 @@ describe("AgentService cleanup through production worker composition", { timeout
       expect(vi.mocked(broadcast).mock.calls.some(([channel]) => channel === "turn.persisted")).toBe(true);
       let sent = false;
       const next = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" }).then(() => { sent = true; });
-      await vi.advanceTimersByTimeAsync(9_999);
+      await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
       expect(sent).toBe(false);
       expect(fixture.sent).toHaveLength(1);
       await vi.advanceTimersByTimeAsync(1);
@@ -171,9 +171,10 @@ describe("AgentService cleanup through production worker composition", { timeout
       expect(stopped).toMatchObject({ status: "cancelled", dispatchState: "not-dispatched" });
       dispatchHeld.resolve();
       await first;
+      await fixture.workers.progress?.waitForTerminalSaves(fixture.thread.id);
       let sent = false;
       const next = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" }).then(() => { sent = true; });
-      await vi.advanceTimersByTimeAsync(9_999);
+      await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
       expect(sent).toBe(false);
       await vi.advanceTimersByTimeAsync(1);
       vi.useRealTimers();
