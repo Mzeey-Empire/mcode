@@ -622,7 +622,14 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
       {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
       <PickerDisclosureChevron expanded={row.expanded} />
       {digit !== undefined ? (
-        <span aria-hidden className="shrink-0 text-muted">
+        <span
+          aria-hidden
+          className={cn(
+            "shrink-0 text-muted",
+            // The row's choices take this slot while they show, so the name keeps the room it has.
+            row.choices && "group-hover/option:hidden group-data-active/option:hidden group-data-selected/option:hidden",
+          )}
+        >
           <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
         </span>
       ) : null}
@@ -684,8 +691,9 @@ function PickerRowChoiceButtons({ choices }: { readonly choices: PickerRowChoice
   return (
     <span
       aria-hidden
-      // Shown on the hovered, highlighted or selected row only, so the list reads as a column of names.
-      className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover/option:opacity-100 group-data-active/option:opacity-100 group-data-selected/option:opacity-100"
+      // Shown on the hovered, highlighted or selected row only, and out of the layout elsewhere, so the other rows keep
+      // their full names.
+      className="hidden shrink-0 items-center gap-0.5 group-hover/option:flex group-data-active/option:flex group-data-selected/option:flex"
     >
       {choices.items.map((item) => (
         <button
