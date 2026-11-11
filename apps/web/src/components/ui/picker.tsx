@@ -370,15 +370,17 @@ interface PickerListAreaProps<T> {
 function PickerListArea<T>({ list, detail, paneEntry, paneRef, onKeyDown, onPointerEnter }: PickerListAreaProps<T>) {
   if (!list || !detail) return list;
   return (
-    // Seven 33px rows less the last gap, with the 8px gap above outside the scroller, so the list shows whole rows at every keyboard stop.
-    <div className="mt-2 grid h-[23rem] grid-cols-[minmax(0,1fr)_16.8rem]">
+    // Eight 33px rows less the last gap, so a provider with eight models opens with every Ctrl shortcut in view; the 8px gap
+    // above sits outside the scroller, so the list shows whole rows at every keyboard stop.
+    <div className="mt-2 grid h-[26.3rem] grid-cols-[minmax(0,1fr)_16.8rem]">
       {list}
       <div
         ref={paneRef}
         data-slot="picker-detail"
         onKeyDown={onKeyDown}
         onPointerEnter={onPointerEnter}
-        className="min-h-0 overflow-y-auto border-l border-border p-1"
+        // No right padding: the panel's 8px already sits there, so the pane mirrors the list's 8px outer and 4px inner gutters.
+        className="min-h-0 overflow-y-auto border-l border-border py-1 pl-1"
       >
         {paneEntry ? detail.render(paneEntry.item) : null}
       </div>
