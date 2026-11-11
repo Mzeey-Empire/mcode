@@ -694,7 +694,8 @@ function PickerList<T>(props: PickerListProps<T>) {
   );
 }
 
-const GROUP_LABEL_CLASS = "shrink-0 px-2 pt-2 pb-1 text-caption font-medium text-muted";
+// A snap point of its own, so a list that snaps to rows can rest with its first heading in view instead of under the fade.
+const GROUP_LABEL_CLASS = "shrink-0 snap-start px-2 pt-2 pb-1 text-caption font-medium text-muted";
 
 /** A group with no matches keeps its label, so a tab whose results all come from other groups still says it found nothing. */
 function PickerUnmatchedGroup({ label, query }: { readonly label: string; readonly query: string }) {
