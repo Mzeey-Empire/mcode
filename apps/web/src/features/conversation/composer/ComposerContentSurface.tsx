@@ -237,7 +237,7 @@ function ComposerQueueEditNotice({
   if (!model.editingFromQueue) return null;
 
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border py-0.5 pr-1 pl-3.5">
+    <div className="flex items-center justify-between gap-2 border-b border-border py-0.5 pr-1 pl-4">
       <span className="min-w-0 text-fade text-caption text-muted">
         Editing a queued message
       </span>

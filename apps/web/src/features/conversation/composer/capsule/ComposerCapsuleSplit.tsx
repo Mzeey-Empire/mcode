@@ -300,7 +300,8 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
               reasoning: (
                 <FocusOnMount key="reasoning" selectors={REASONING_FOCUS}>
                   <ComposerReasoningLevelList {...preferenceProps} onChosen={close} />
-                  <ComposerModelPreferenceSettings {...preferenceProps} className="mt-1 border-t border-border px-3 pt-1" />
+                  {/* 14px on the right: the check glyph's ink ends 2px inside its box, so the switches end where the checks do. */}
+                  <ComposerModelPreferenceSettings {...preferenceProps} className="mt-1 border-t border-border pt-1 pr-3.5 pl-3" />
                 </FocusOnMount>
               ),
               access: <AccessOptionList key="access" access={access} onChosen={close} />,
