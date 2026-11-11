@@ -450,9 +450,9 @@ function ReasoningPane({ option, selected, reasoning }: { readonly option: Model
   const levels = getReasoningLevels(option.providerId, option.modelId);
   return (
     <div className="flex flex-col">
-      <p className="flex flex-col px-3 pt-1 pb-1">
+      <p className="flex flex-col px-3 pt-1 pb-2">
         <span className="text-caption text-muted">Reasoning</span>
-        <span className="text-body-small break-words text-ink">{option.label}</span>
+        <span className="text-caption font-medium break-words text-ink">{option.label}</span>
       </p>
       {levels.length > 0 ? (
         <ReasoningLevelOptions

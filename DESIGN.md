@@ -1205,9 +1205,11 @@ are provider-native, so they show the parent thread's provider.
   changes. With a popover open, resting 100ms on another part switches to
   its popover, as in a menu bar. The model picker is 440px: the model list on
   the left and a 168px reasoning pane on the right, behind a `border`
-  hairline, listing the highlighted model's levels under a two-line caption
-  ("Reasoning" over the model's full name). A check marks the committed model
-  and level. A hovered row reaches the
+  hairline, listing the highlighted model's levels under a two-line caption:
+  "Reasoning" in Caption `muted` over the model's full name in Caption 500
+  `ink`, with 8px before the first level. A check marks the committed model
+  and level. The list and pane are seven rows tall (23rem), so a list
+  scrolled to its end starts on a row edge rather than a sliver. A hovered row reaches the
   pane after 100ms, so a pointer crossing rows on its way to the pane keeps
   it. Right Arrow at the end of the search enters the pane and Left Arrow
   leaves it. A level sets the model and level and closes; picking a model

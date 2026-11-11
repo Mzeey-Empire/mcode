@@ -150,12 +150,15 @@ describe("ModelSelector", () => {
     expect(screen.getByRole("radio", { name: "Claude" })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("keeps only the thread's provider tab when the provider is locked", async () => {
+  it("lists only the thread's provider, with no tabs, when the provider is locked", async () => {
+    setProviders({ claude: true, codex: true });
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
       onSelect={vi.fn()} providerLocked />);
     await openPicker();
 
-    expect(screen.getAllByRole("radio").map((tab) => tab.textContent)).toEqual(["Claude"]);
+    expect(screen.queryAllByRole("radio")).toHaveLength(0);
+    expect(screen.getByRole("option", { selected: true })).toBeInTheDocument();
+    expect(optionNames().filter((name) => name.startsWith("GPT"))).toEqual([]);
   });
 
   it("marks the selected row and stars a model without choosing it", async () => {

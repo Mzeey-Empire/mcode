@@ -363,7 +363,8 @@ interface PickerListAreaProps<T> {
 function PickerListArea<T>({ list, detail, paneEntry, paneRef, onKeyDown, onPointerEnter }: PickerListAreaProps<T>) {
   if (!list || !detail) return list;
   return (
-    <div className="grid h-[20.8rem] grid-cols-[minmax(0,1fr)_16.8rem]">
+    // Seven 33px rows less the last gap, so a list scrolled to its end starts on a row edge instead of a sliver.
+    <div className="grid h-[23rem] grid-cols-[minmax(0,1fr)_16.8rem]">
       {list}
       <div
         ref={paneRef}
@@ -411,7 +412,8 @@ function usePaneRow(activeRowKey: string | null) {
 }
 
 function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>, "tabs" | "activeTab" | "onTabChange">) {
-  if (!tabs || tabs.length === 0) return null;
+  // One tab has no sibling to switch to.
+  if (!tabs || tabs.length < 2) return null;
   const iconOnly = tabs.every((tab) => tab.icon != null);
   return (
     <div className={cn("flex items-center px-0.5 pb-1.5", iconOnly ? "gap-0.5 pt-0.5" : "gap-2")}>
