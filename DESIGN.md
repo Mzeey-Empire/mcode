@@ -1180,10 +1180,9 @@ are provider-native, so they show the parent thread's provider.
   fits the one-row column with 48px to spare, so editing near the wrap point
   does not flip it back and forth.
 - Width tiers are container queries on the capsule. Below 680px the model
-  part shows its short name, the reasoning part shows rising bars (one per
-  level, filled up to the current one), the parts tighten to 7px padding,
-  and the modes show icons only. Below 480px the model part shows only its
-  logo.
+  part shows its short name, the parts tighten to 7px padding, and the modes
+  show icons only. The model and reasoning parts keep their text at every
+  width, so the selection reads without a hover.
 - Plan and Goal, when on, sit beside `+` as modes in a 36px pill with the
   panel fill and the split's 1px by 14px dividers. Each mode is 32px high
   with a 14px icon, its name in Compact, and a 24px remove button; removing it returns

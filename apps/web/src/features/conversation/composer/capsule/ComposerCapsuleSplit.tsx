@@ -147,29 +147,6 @@ function SteadyReasoningLabel({ levels, current }: { readonly levels: readonly R
   );
 }
 
-function ReasoningBars({ levels, current }: { readonly levels: readonly ReasoningLevel[]; readonly current: ReasoningLevel }) {
-  const filled = levels.indexOf(current) + 1;
-  const step = 16 / levels.length;
-  return (
-    <svg aria-hidden width={14} height={14} viewBox="0 0 18 16" className="hidden @max-[680px]/capsule:block" data-testid="capsule-reasoning-bars">
-      {levels.map((level, index) => {
-        const height = 4 + Math.round((index * 11) / Math.max(1, levels.length - 1));
-        return (
-          <rect
-            key={level}
-            x={1 + index * step}
-            y={15 - height}
-            width={step - 1.2}
-            height={height}
-            rx={1}
-            className={index < filled ? "fill-ink" : "fill-muted/35"}
-          />
-        );
-      })}
-    </svg>
-  );
-}
-
 /** The rule between the pill's parts. It paints under the hover fill, so the fill slides over it. */
 export function CapsuleDivider() {
   return <span aria-hidden className="h-3.5 w-px shrink-0 bg-border" />;
@@ -260,19 +237,14 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
           <>
             <ProviderIcon provider={model.iconProviderId} size={14} />
             <span className="min-w-0 text-fade @max-[680px]/capsule:hidden">{model.shortLabel}</span>
-            <span className="hidden min-w-0 text-fade @max-[680px]/capsule:inline @max-[480px]/capsule:hidden">{narrowLabelOf(model, selection.provider)}</span>
+            <span className="hidden min-w-0 text-fade @max-[680px]/capsule:inline">{narrowLabelOf(model, selection.provider)}</span>
           </>
         ))}
         {showReasoning && (
           <>
             <CapsuleDivider />
             {part("reasoning", reasoningLabel, reasoningLabel, reasoningLevels.length > 0
-              ? (
-                <>
-                  <span className="contents @max-[680px]/capsule:hidden"><SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} /></span>
-                  <ReasoningBars levels={reasoningLevels} current={selection.reasoning} />
-                </>
-              )
+              ? <SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} />
               : <ComposerModelPreferenceSummary selection={selection} defaults={defaults} reasoningLevels={reasoningLevels} />)}
           </>
         )}
