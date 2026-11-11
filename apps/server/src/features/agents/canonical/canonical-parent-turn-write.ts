@@ -313,7 +313,15 @@ export class CanonicalParentTurnWrite {
   stageLiveAssistant(execution: ExecutionIdentity, input: DataOnlyParentLiveMessageInput): boolean {
     if (!this.canStageLiveAssistant(execution, input)) return false;
     const existing = this.messages.findByIdInThreadIncludingInternal(execution.threadId, input.messageId);
-    if (existing) return Boolean(existing.is_internal && this.matchesAssistantBody(existing, input));
+    if (existing) {
+      if (!existing.is_internal || existing.role !== "assistant") return false;
+      // Match the live reducer's latest-wins body when an absorbed segment emits another message.
+      if (!this.matchesAssistantBody(existing, input)) {
+        this.messages.updateInternalAssistant({ threadId: execution.threadId, id: input.messageId,
+          content: input.content, model: input.model, attachments: [...input.attachments] });
+      }
+      return true;
+    }
     return this.createLiveAssistant(execution.threadId, input);
   }
 

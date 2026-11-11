@@ -1424,6 +1424,22 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(steers.find(second)?.state).toBe("delivered");
   });
 
+  it("completes a Claude turn with the final answer after an absorbed segment message", async () => {
+    await send(1, start("claude"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 2, "message", { content: "Segment one", tokens: 10 })] });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 3, "message", { content: "Final answer", tokens: 10 })] });
+    await send(4, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 4, "turnComplete")], terminalInput: { ...execution, providerId: "claude", providerIdentities: [],
+        outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
+    expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant' AND is_internal = 0")
+      .all(execution.threadId)).toEqual([{ content: "Final answer" }]);
+  });
+
   it("preserves the durable child roster revision across a parent follow-up and fresh recovery owner", async () => {
     await send(1, start("codex"));
     expect(recovery().durable).toMatchObject({ mode: "snapshot", snapshot: { revision: { rosterRevision: 0 } } });

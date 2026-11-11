@@ -554,6 +554,16 @@ export class MessageStore {
     return attachments ?? null;
   }
 
+  /** Replace the staged assistant body without changing a public message. */
+  updateInternalAssistant(input: { threadId: string; id: string; content: string; model: string | null;
+    attachments: StoredAttachment[] }): void {
+    this.orm.update(messages)
+      .set({ content: input.content, model: input.model, attachments: this.serializeNonEmptyArray(input.attachments) })
+      .where(and(eq(messages.threadId, input.threadId), eq(messages.id, input.id),
+        eq(messages.role, "assistant"), eq(messages.isInternal, 1)))
+      .run();
+  }
+
   /** Persist a terminal outcome after the turn finalizer proves the turn ended. */
   setAssistantOutcome(messageId: string, outcome: TurnOutcome, executionId?: string): void {
     this.orm.update(messages)
