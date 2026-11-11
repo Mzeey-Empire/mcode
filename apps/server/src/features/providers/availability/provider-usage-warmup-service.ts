@@ -18,13 +18,13 @@ export class ProviderUsageWarmupService {
     @inject("IProviderRegistry") private readonly registry: IProviderRegistry,
   ) {}
 
-  /** Starts one non-blocking usage refresh per enabled provider that exposes usage. */
-  warmEnabledProviders(force = false): void {
+  /** Refreshes usage for each enabled provider that exposes it, concurrently. Resolves once every refresh settles. */
+  async warmEnabledProviders(force = false): Promise<void> {
     const enabled = this.settings.get().provider.enabled;
-    for (const provider of this.registry.resolveAll()) {
-      if (!enabled[provider.id] || !provider.getUsage) continue;
-      void this.warmProvider(provider as WarmableUsageProvider, force);
-    }
+    const warmups = this.registry.resolveAll()
+      .filter((provider) => enabled[provider.id] && provider.getUsage)
+      .map((provider) => this.warmProvider(provider as WarmableUsageProvider, force));
+    await Promise.all(warmups);
   }
 
   private async warmProvider(provider: WarmableUsageProvider, force: boolean): Promise<void> {

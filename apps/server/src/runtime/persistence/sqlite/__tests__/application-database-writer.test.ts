@@ -37,6 +37,22 @@ describe("application SQLite owner", () => {
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
+  it("returns migration observations from the bootstrap worker", async () => {
+    owner = new ApplicationDatabaseWriter(dbPath, undefined, { bootstrap: true });
+    await owner.whenReady();
+    expect(owner.bootstrapObservations.migrated).toBe(false);
+    expect(owner.bootstrapObservations.marks.map((mark) => mark.name)).toEqual([
+      "migration plan read", "schema patches applied",
+    ]);
+    await owner.close();
+    owner = new ApplicationDatabaseWriter(NodePath.join(directory, "fresh.sqlite"), undefined, { bootstrap: true });
+    await owner.whenReady();
+    expect(owner.bootstrapObservations.migrated).toBe(true);
+    expect(owner.bootstrapObservations.marks.map((mark) => mark.name)).toEqual([
+      "migration plan read", "migrations applied", "schema patches applied", "ledger verified",
+    ]);
+  });
+
   it("shares ordered ordinary and canonical commands and continues after a rolled-back constraint failure", async () => {
     owner = new ApplicationDatabaseWriter(dbPath);
     const first = owner.execute(workspaceWriteOperations.create, ["First", "first", true]);
