@@ -1235,6 +1235,11 @@ are provider-native, so they show the parent thread's provider.
   of 2px radius. While a turn runs with a draft, a file, or an annotation it
   is Queue, with the Send look. A running thread never shows a second
   button.
+- Editing a queued message while a turn runs puts a one-line caption above
+  the draft, "Editing queued message 2" in Caption `muted`, with a ghost
+  "Cancel edit" button at its end. The run button becomes Save changes, a
+  check in the Send look, and saving returns the message to its place in the
+  queue.
 - The context label replaces the old ring. It shows nothing below 70% of the
   context window or when the window is unknown. From 70% it reads "72%
   context" in `warning`, and from 90% in `destructive`; below the 680px tier

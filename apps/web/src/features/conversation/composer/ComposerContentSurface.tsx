@@ -1,5 +1,5 @@
 import { useRef, type ComponentProps, type DragEventHandler, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { ArrowUp, X } from "lucide-react";
+import { ArrowUp, Check } from "lucide-react";
 import { AttachmentPreview } from "@/components/chat/AttachmentPreview";
 import { ComposerAddMenu } from "@/components/chat/ComposerAddMenu";
 import { ComposerBranchBar } from "@/components/chat/ComposerBranchBar";
@@ -235,31 +235,13 @@ function ComposerQueueEditNotice({
   if (!model.editingFromQueue) return null;
 
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-primary/20 bg-primary/5 px-3 py-1.5">
-      <span className="font-mono text-xs uppercase tracking-[0.18em] text-primary/85">
-        Editing
-        <span className="ml-1.5 tabular-nums text-primary/55">
-          {String(model.editingFromQueue.originalIndex + 1).padStart(2, "0")}
-        </span>
-        <span className="ml-2 normal-case tracking-normal text-primary/55">
-          Send to save - changes return to the same slot.
-        </span>
+    <div className="flex items-center justify-between gap-2 border-b border-border py-0.5 pr-1 pl-3.5">
+      <span className="min-w-0 text-fade text-caption text-muted">
+        Editing queued message {model.editingFromQueue.originalIndex + 1}
       </span>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              type="button"
-              onClick={actions.onCancelEdit}
-              aria-label="Discard edits and restore the original queued message"
-              className="rounded-sm p-1 text-primary/55 transition-colors hover:bg-primary/10 hover:text-primary"
-            >
-              <X size={11} />
-            </button>
-          }
-        />
-        <TooltipContent>Discard changes (restores the original message at its slot)</TooltipContent>
-      </Tooltip>
+      <Button variant="ghost" size="compact" onClick={actions.onCancelEdit} className="h-6 shrink-0 px-2">
+        Cancel edit
+      </Button>
     </div>
   );
 }
@@ -282,7 +264,7 @@ export function getEditorPlaceholder(
   if (model.isStaleWorktree) return "Worktree directory no longer exists. This thread is read-only.";
   if (model.goalPending) return "Describe the goal...";
   if (model.branchFromMessageId) return "What should the branch work on?";
-  if (model.editingFromQueue) return "Edit the queued message - send to save.";
+  if (model.editingFromQueue) return "Edit the queued message, then save.";
   if (model.isAgentRunning) return "Queue a follow-up";
   // A send in this state revises the plan; the server classifies it, so the copy is what tells the user.
   if (model.activeThread?.plan_phase === "ready") return `Tell ${getCatalogEntry(model.effectiveProviderId).name} what to change`;
@@ -467,7 +449,7 @@ function ComposerContextUsage({
 }
 
 export type ComposerSendButtonVisualState = "starting" | "queue" | "stop" | "stopping" | "send" | "empty";
-type ComposerSendButtonCopy = "choose-project" | "cancel-startup" | "queue-message" | "stop-agent" | "stopping-agent" | "send-message";
+type ComposerSendButtonCopy = "choose-project" | "cancel-startup" | "queue-message" | "save-edit" | "stop-agent" | "stopping-agent" | "send-message";
 
 export function getComposerSendButtonVisualState({
   startingThread,
@@ -487,18 +469,22 @@ function getComposerSendButtonCopy({
   isAgentRunning,
   isStopPending,
   hasContent,
+  editingFromQueue,
 }: {
   readonly needsWorkspace: boolean;
   readonly startingThread: boolean;
   readonly isAgentRunning: boolean;
   readonly isStopPending: boolean;
   readonly hasContent: boolean;
+  readonly editingFromQueue: ComposerContentSurfaceProps["model"]["editingFromQueue"];
 }): ComposerSendButtonCopy {
   if (needsWorkspace) return "choose-project";
   if (startingThread) return "cancel-startup";
   if (isStopPending) return "stopping-agent";
-  if (isAgentRunning) return hasContent ? "queue-message" : "stop-agent";
-  return "send-message";
+  if (!isAgentRunning) return "send-message";
+  if (!hasContent) return "stop-agent";
+  // An edit goes back to its slot while the agent runs; once it stops, the queue drains and Send is the truth.
+  return editingFromQueue ? "save-edit" : "queue-message";
 }
 
 export function isComposerSendButtonDisabled({
@@ -556,6 +542,7 @@ const SEND_BUTTON_COPY: Record<ComposerSendButtonCopy, string> = {
   "choose-project": "Choose a project",
   "cancel-startup": "Cancel startup",
   "queue-message": "Queue message",
+  "save-edit": "Save changes",
   "stop-agent": "Stop agent",
   "stopping-agent": "Stopping",
   "send-message": "Send message",
@@ -591,6 +578,8 @@ function ComposerSendButton({
         <Spinner size={16} className="text-current" />
       ) : visualState === "stop" || visualState === "starting" ? (
         <div className="size-3 rounded-[2px] bg-current" />
+      ) : copy === "save-edit" ? (
+        <Check />
       ) : (
         <ArrowUp />
       )}
