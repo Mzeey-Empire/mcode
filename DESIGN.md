@@ -1250,7 +1250,7 @@ are provider-native, so they show the parent thread's provider.
   context" in `warning`, and from 90% in `destructive`; below the 680px tier
   it reads only "72%". A low provider quota shows it below 70% in `warning`.
   It sits behind a divider after the access part, 32px high in Compact with
-  tabular numbers, and hover or focus opens the token
+  tabular numbers and the parts' 9px sides (7px below the 680px tier), and hover or focus opens the token
   breakdown card, which adds a "Provider quota: Low" line when quota is low.
 - Trays that belong to the composer (the task row, queued messages, file and
   image tiles) dock flush on its top edge with the panel fill and no border.
