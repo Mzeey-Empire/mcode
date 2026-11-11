@@ -1253,6 +1253,7 @@ are provider-native, so they show the parent thread's provider.
   breakdown card, which adds a "Provider quota: Low" line when quota is low.
 - Trays that belong to the composer (the task row, queued messages, file and
   image tiles) dock flush on its top edge with the panel fill and no border.
+  Light mode uses `page` instead, because light panel matches the background.
   A new thread's tab (Local, the branch) has the same look. With tiles under
   it, the tray squares its top corners, so the tab and the tray read as one
   panel.

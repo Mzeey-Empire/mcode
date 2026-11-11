@@ -16,8 +16,11 @@ export interface ComposerTrayProps {
   readonly covered?: boolean;
 }
 
-/** The panel the tray and the new-thread tab share above the capsule. */
-export const TRAY_SURFACE_CLASS = "mx-(--tray-inset) rounded-t-[14px] bg-panel";
+/**
+ * The panel the tray and the new-thread tab share above the capsule, a step between the page and the capsule's fill.
+ * Light panel matches the light background, so the light tray takes `page` to stay visible.
+ */
+export const TRAY_SURFACE_CLASS = "mx-(--tray-inset) rounded-t-[14px] bg-page dark:bg-panel";
 
 /**
  * Tray look: inset by `--tray-inset` from the capsule, which the slash menu shares, with the panel fill and top corners.
