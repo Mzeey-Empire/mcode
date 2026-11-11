@@ -1209,7 +1209,7 @@ are provider-native, so they show the parent thread's provider.
   hairline, listing the highlighted model's levels under a two-line caption:
   "Reasoning" in Caption `muted` over the model's full name in Body small
   500 `ink`, with 8px before the first level. The pane mirrors the list's
-  gutters: 8px to the panel edge, 4px to the hairline. A check marks the committed model
+  gutters (8px to the panel edge, 4px to the hairline) and its 8px row inset. A check marks the committed model
   and level. The list and pane are eight rows tall (26.3rem), so a provider
   with eight models opens with Ctrl+1 to Ctrl+8 in view, and the 8px gap
   above them sits outside the scrolling list, so every keyboard stop shows

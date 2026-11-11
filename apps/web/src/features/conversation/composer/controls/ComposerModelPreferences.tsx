@@ -247,13 +247,15 @@ export interface ReasoningLevelOptionsProps {
    * which must keep focus so typing still works.
    */
   readonly takesFocus?: boolean;
+  /** Uses the picker list's 8px row inset instead of the menu's 12px, so a pane's rows line up with the list beside it. */
+  readonly listInset?: boolean;
 }
 
 /**
  * Reasoning levels as a single-choice listbox: the arrow keys wrap, and Enter, Space or a click chooses. Focus enters
  * on the checked level, or the first when none is checked.
  */
-export function ReasoningLevelOptions({ levels, checked, label, onChoose, takesFocus = false }: ReasoningLevelOptionsProps) {
+export function ReasoningLevelOptions({ levels, checked, label, onChoose, takesFocus = false, listInset = false }: ReasoningLevelOptionsProps) {
   const listRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (takesFocus) listRef.current?.querySelector<HTMLElement>('[tabindex="0"]')?.focus();
@@ -272,7 +274,7 @@ export function ReasoningLevelOptions({ levels, checked, label, onChoose, takesF
           tabIndex={level === tabbable ? 0 : -1}
           onPointerMove={takesFocus ? focusUnderPointer : undefined}
           onClick={() => onChoose(level)}
-          className={MENU_ROW_CLASS}
+          className={cn(MENU_ROW_CLASS, listInset && "px-2")}
         >
           <MenuRowBody label={formatReasoningLabel(level)} checked={level === checked} />
         </button>

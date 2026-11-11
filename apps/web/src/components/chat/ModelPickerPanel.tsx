@@ -470,7 +470,7 @@ function ReasoningPane({ option, selected, reasoning }: { readonly option: Model
   const levels = getReasoningLevels(option.providerId, option.modelId);
   return (
     <div className="flex flex-col">
-      <p className="flex flex-col px-3 pt-1 pb-2">
+      <p className="flex flex-col px-2 pt-1 pb-2">
         <span className="text-caption text-muted">Reasoning</span>
         <span className="text-body-small font-medium break-words text-ink">{option.label}</span>
       </p>
@@ -478,11 +478,12 @@ function ReasoningPane({ option, selected, reasoning }: { readonly option: Model
         <ReasoningLevelOptions
           levels={levels}
           checked={selected ? reasoning.current : undefined}
+          listInset
           label={`Reasoning for ${option.label}`}
           onChoose={(level) => reasoning.onChoose(option.modelId, option.providerId, level)}
         />
       ) : (
-        <p className="px-3 py-1.5 text-caption text-muted">No reasoning levels</p>
+        <p className="px-2 py-1.5 text-caption text-muted">No reasoning levels</p>
       )}
     </div>
   );
