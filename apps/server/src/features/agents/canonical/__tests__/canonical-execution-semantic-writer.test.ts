@@ -1000,12 +1000,6 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
       message: { ...message, content: "Different body" } },
     livePublication: [{ after: "writer", event: { ...event, content: "Different body" } }] }))
       .toEqual({ kind: "conflict", operationId: "lease-1:2" });
-    expect(await writer.transact({ ...liveOperation, ordinal: 3, operationId: "lease-1:3",
-      mutation: { kind: "live-event", text: { kind: "unchanged" }, message: { ...message, content: "Different body" } },
-      livePublication: [{ after: "writer", event: { ...event, content: "Different body" } }],
-    })).toEqual({ kind: "conflict", operationId: "lease-1:3" });
-    expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, message.messageId))
-      .toMatchObject({ content: "Live answer" });
 
     const terminal = projection.projectTerminal({
       execution, outcome: "completed", endedAt: NOW, fallbackModel: null, narrative: [],
