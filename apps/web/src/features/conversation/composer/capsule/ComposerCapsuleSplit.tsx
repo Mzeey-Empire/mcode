@@ -52,7 +52,9 @@ type OpenPartPopover = Extract<PartPopoverState, { status: "open" }>;
 // The access list carries the menu's own 4px padding, so its popover adds none.
 const POPUP_CLASS: Record<CapsulePart, string> = {
   // Wider than other pickers to fit the reasoning pane beside the model list.
-  model: cn(PICKER_PANEL_CLASS, "w-[min(calc(100vw-3.2rem),44rem)] max-h-(--available-height) overflow-y-auto"),
+  // Below 504px the composer, 32px narrower than the window, is narrower than 440px plus its insets, so the picker
+  // takes the composer's width and both its edges meet the composer's instead of sitting a few pixels inside one.
+  model: cn(PICKER_PANEL_CLASS, "w-[44rem] max-[504px]:w-[calc(100vw-3.2rem)] max-h-(--available-height) overflow-y-auto"),
   reasoning: "w-56 p-1",
   access: "w-58 p-0",
 };
