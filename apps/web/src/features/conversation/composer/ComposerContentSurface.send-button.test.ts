@@ -79,6 +79,21 @@ describe("composer send button with a pending target branch", () => {
   });
 });
 
+describe("composer send button when sending is blocked", () => {
+  const blockers = [
+    { name: "the provider is unavailable", args: { providerReason: "disabled" } },
+    { name: "the worktree is stale", args: { isStaleWorktree: true } },
+  ] as const;
+
+  it.each(blockers)("keeps Stop enabled for a running agent when $name", ({ args }) => {
+    expect(isComposerSendButtonDisabled({ ...disabledArgs, ...args })).toBe(false);
+  });
+
+  it.each(blockers)("keeps Send disabled when $name", ({ args }) => {
+    expect(isComposerSendButtonDisabled({ ...disabledArgs, ...args, isAgentRunning: false, hasContent: true })).toBe(true);
+  });
+});
+
 describe("composer send button while the thread is starting", () => {
   const starting = { ...disabledArgs, startingThread: true, isAgentRunning: false } as const;
 

@@ -524,9 +524,20 @@ export function isComposerSendButtonDisabled({
 }) {
   // A starting thread never sends, so its button is only Stop for the startup.
   if (startingThread) return !canCancelStartup;
-  // With content the button sends, so it waits for a known target branch. Without content it stops a running agent.
-  return needsWorkspace || Boolean(providerReason) || isStaleWorktree || planPending
+  // Stop must survive anything that only blocks sending, such as a provider disabled mid-run or a stale worktree.
+  if (!needsWorkspace && isAgentRunning && !hasContent) return isStopPending;
+  // With content the button sends, so it waits for a known target branch.
+  return isSendBlocked({ needsWorkspace, providerReason, isStaleWorktree, planPending })
     || isStopPending || (hasContent ? targetPending : !isAgentRunning);
+}
+
+function isSendBlocked(args: {
+  readonly needsWorkspace: boolean;
+  readonly providerReason: ComposerContentSurfaceProps["model"]["providerReason"];
+  readonly isStaleWorktree: boolean;
+  readonly planPending: boolean;
+}): boolean {
+  return args.needsWorkspace || Boolean(args.providerReason) || args.isStaleWorktree || args.planPending;
 }
 
 /** Button variant per send state. Send is the round primary; Stop is neutral by rule: an ink circle with a background-colour square. */
