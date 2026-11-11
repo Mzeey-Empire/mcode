@@ -85,6 +85,23 @@ describe("TurnFileEvidenceLedger", () => {
     expect(evidence()).toMatchObject({ state: "recorded", filesChanged: ["shell.txt"] });
   });
 
+  it("gives a wedged capture its full budget after a slow save", async () => {
+    snapshots.captureRef.mockImplementationOnce(() => new Promise(() => {}));
+    ledger.expect(execution, frozen);
+    await vi.advanceTimersByTimeAsync(50_000);
+    ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution);
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_CAPTURE_BUDGET_MS - 1);
+    expect(evidence()).toEqual({ state: "tracking" });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(evidence()).toMatchObject({ state: "unavailable", reason: "timed-out" });
+  });
+
+  it("reports a comparison that Git ran out of time for as timed out", async () => {
+    snapshots.compareTrees.mockRejectedValueOnce(Object.assign(new Error("Git command timed out after 10000 ms"), { killed: true }));
+    ledger.expect(execution, frozen); ledger.tracked(execution, facts); terminal(); ledger.terminalSaved(execution); await flush();
+    expect(evidence()).toMatchObject({ state: "unavailable", reason: "timed-out", knownPaths: [] });
+  });
+
   it("still releases the next turn when the ending is never saved and capture is wedged", async () => {
     snapshots.captureRef.mockImplementationOnce(() => new Promise(() => {}));
     ledger.expect(execution, frozen);
