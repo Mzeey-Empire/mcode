@@ -1239,14 +1239,15 @@ are provider-native, so they show the parent thread's provider.
   with a `muted` icon that does not look pressable. While a turn runs with
   an empty draft it is Stop: an `ink` circle with a 12px `background` square
   of 2px radius. While a turn runs with a draft, a file, or an annotation it
-  is Queue, with the Send look. A running thread never shows a second
-  button.
+  is Queue, with the Send look and the tray's queued mark (a corner-down-right
+  arrow), since the tray's Send now keeps the up arrow. A running thread
+  never shows a second button.
 - Editing a queued message while a turn runs puts a one-line caption above
-  the draft, "Editing queued message 2" in Caption `muted`, with a ghost
+  the draft, "Editing a queued message" in Caption `muted`, with a ghost
   "Cancel edit" button at its end. The run button becomes Save changes, a
   check in the Send look, and saving returns the message to its place in the
   queue. Until then the tray keeps that place as a muted "Editing" row with a
-  pencil, so the caption's number points at a row the user can see.
+  pencil, so the user can see which message is out for editing.
 - The context label replaces the old ring. It shows nothing below 70% of the
   context window or when the window is unknown. From 70% it reads "72%
   context" in `warning`, and from 90% in `destructive`; below the 680px tier

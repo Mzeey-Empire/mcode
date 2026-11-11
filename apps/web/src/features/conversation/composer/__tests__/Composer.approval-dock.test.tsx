@@ -138,7 +138,7 @@ describe("Composer while the approval dock shows", () => {
     render(<Composer threadId="thread-1" workspaceId="ws-1" />);
 
     await user.click(screen.getByLabelText("Edit queued message 1"));
-    expect(screen.getByText(/Editing queued message 1/)).toBeInTheDocument();
+    expect(screen.getByText("Editing a queued message")).toBeInTheDocument();
     const rows = within(screen.getByRole("list", { name: "Queued messages" })).getAllByRole("listitem");
     expect(rows[0]).toHaveTextContent("Editing");
     expect(within(rows[1]!).getByLabelText("Edit queued message 2")).toBeInTheDocument();

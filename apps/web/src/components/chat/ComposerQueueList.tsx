@@ -112,8 +112,8 @@ export function ComposerQueueList({
 }
 
 /**
- * The edited message keeps its slot, so the composer's "Editing queued message N" points at a visible row, and the
- * rows after it show the positions they will have once it is saved.
+ * The edited message keeps its slot, so the tray shows which message the composer is editing, and the rows after it
+ * show the positions they will have once it is saved.
  */
 function editingSlot(editingIndex: number | null, length: number) {
   const slot = editingIndex === null ? null : Math.min(editingIndex, length);

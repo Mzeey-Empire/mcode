@@ -1,5 +1,5 @@
 import { useRef, type ComponentProps, type DragEventHandler, type MouseEvent, type ReactNode, type RefObject } from "react";
-import { ArrowUp, Check } from "lucide-react";
+import { ArrowUp, Check, CornerDownRight } from "lucide-react";
 import { AttachmentPreview } from "@/components/chat/AttachmentPreview";
 import { ComposerAddMenu } from "@/components/chat/ComposerAddMenu";
 import { ComposerBranchBar } from "@/components/chat/ComposerBranchBar";
@@ -239,7 +239,7 @@ function ComposerQueueEditNotice({
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border py-0.5 pr-1 pl-3.5">
       <span className="min-w-0 text-fade text-caption text-muted">
-        Editing queued message {model.editingFromQueue.originalIndex + 1}
+        Editing a queued message
       </span>
       <Button variant="ghost" size="compact" onClick={actions.onCancelEdit} className="h-6 shrink-0 px-2">
         Cancel edit
@@ -540,6 +540,15 @@ export const SEND_BUTTON_VARIANT: Record<ComposerSendButtonVisualState, "default
   empty: "default",
 };
 
+/** Queue shows the tray's queued mark, because the tray's own "Send now" button already uses the send arrow. */
+function RunButtonGlyph({ visualState, copy }: { readonly visualState: ComposerSendButtonVisualState; readonly copy: ComposerSendButtonCopy }) {
+  if (visualState === "stopping") return <Spinner size={16} className="text-current" />;
+  if (visualState === "stop" || visualState === "starting") return <div className="size-3 rounded-[2px] bg-current" />;
+  if (copy === "save-edit") return <Check />;
+  if (copy === "queue-message") return <CornerDownRight />;
+  return <ArrowUp />;
+}
+
 const SEND_BUTTON_COPY: Record<ComposerSendButtonCopy, string> = {
   "choose-project": "Choose a project",
   "cancel-startup": "Cancel startup",
@@ -576,15 +585,7 @@ function ComposerSendButton({
       disabled={disabled}
       aria-label={SEND_BUTTON_COPY[copy]}
     >
-      {visualState === "stopping" ? (
-        <Spinner size={16} className="text-current" />
-      ) : visualState === "stop" || visualState === "starting" ? (
-        <div className="size-3 rounded-[2px] bg-current" />
-      ) : copy === "save-edit" ? (
-        <Check />
-      ) : (
-        <ArrowUp />
-      )}
+      <RunButtonGlyph visualState={visualState} copy={copy} />
     </Button>
   );
 
