@@ -1172,8 +1172,8 @@ are provider-native, so they show the parent thread's provider.
   and branch selectors; after it, the overview carries mode, branch, and
   tasks.
 - An empty composer is one fully rounded capsule row: `+`, the modes, the
-  draft (one 24px line), then the split pill, which holds model, reasoning,
-  access, the context label, and the run button. The row has 5px padding (6px on the left) and a 4px gap.
+  draft (one 24px line), then the split pill, which holds model and its
+  reasoning level, access, the context label, and the run button. The row has 5px padding (6px on the left) and a 4px gap.
   Once the draft wraps, it takes the full width on top and the controls drop
   to a row below; the radius becomes 22px and the draft scrolls past 240px.
   The capsule also takes two rows whenever the one-row draft column would be
@@ -1182,8 +1182,8 @@ are provider-native, so they show the parent thread's provider.
   does not flip it back and forth.
 - Width tiers are container queries on the capsule. Below 680px the model
   part shows its short name, the parts tighten to 7px padding, and the modes
-  show icons only. The model and reasoning parts keep their text at every
-  width, so the selection reads without a hover.
+  show icons only. The model part keeps its name and level at every width,
+  so the selection reads without a hover.
 - Plan and Goal, when on, sit beside `+` as modes in a 36px pill with the
   panel fill and the split's 1px by 14px dividers. Each mode is 32px high
   with a 14px icon, its name in Compact, and a 24px remove button; removing it returns
@@ -1192,25 +1192,30 @@ are provider-native, so they show the parent thread's provider.
   bare 32px button. The `+` menu toggles Plan and a goal not yet sent. A
   running goal and orchestration stay checked there but turn off only from
   their own chip.
-- Model, reasoning, and access share one 36px rounded pill on the right of
+- Model and access share one 36px rounded pill on the right of
   the capsule, with the panel fill and 2px padding. Each part is 32px high in
-  Compact with 9px side padding, separated by 1px by 14px `border` dividers,
-  and one sliding highlight moves across the parts and over the dividers.
-  The model part shows its 14px provider mark and name in `ink`, the
-  reasoning part its level in `muted` (`ink` while its popover is open, where
-  the stronger fill would drop `muted` below AA), and the access part a 16px icon in
+  Compact with 9px side padding, separated by a 1px by 14px `border` divider,
+  and one sliding highlight moves across the parts and over the divider.
+  The model part shows its 14px provider mark and name in `ink`, then a
+  `·` and the reasoning level in `muted` (`ink` while its popover is open,
+  where the stronger fill would drop `muted` below AA), then a 12px lightning
+  mark while Fast is on. The level sits at its own width, since it changes only
+  as the picker closes. The access part shows a 16px icon in
   `muted`, or `warning` while Don't ask is on. The context label and the run
   button share the pill after the parts, outside the highlight. Popovers keep
-  the prototype widths: the model picker at its own width, reasoning 224px,
+  the prototype widths: the model picker at its own width,
   access 232px, and the `+` menu 232px. Every part's popover opens in one spot: 8px above the right edge of the
   capsule, covering any tray, so it never moves when content above
   changes. With a popover open, resting 100ms on another part switches to
   its popover, as in a menu bar. The model picker is 440px, or the composer's
   width when the window leaves less, so both its edges meet the composer's: the model list on
   the left and a 168px reasoning pane on the right, behind a `border`
-  hairline, listing the highlighted model's levels under a two-line caption:
-  "Reasoning" in Caption `muted` over the model's full name in Body small
-  500 `ink`, with 8px before the first level. The pane mirrors the list's
+  hairline, listing the highlighted model's levels under a one-line caption
+  in Caption `muted`: "Reasoning" on the left and the model's short name on
+  the right, since the tab or group label already names the provider. A name
+  too long for the line drops whole to its own line rather than fading. 8px
+  separates the caption from the first level. The model's own default level
+  carries a `Default` tag in Caption `muted`, before any check. The pane mirrors the list's
   gutters (8px to the panel edge, 4px to the hairline) and its 8px row inset. A check marks the committed model
   and level. The list and pane are eight rows tall (26.3rem), so a provider
   with eight models opens with Ctrl+1 to Ctrl+8 in view, and the 8px gap
@@ -1226,14 +1231,12 @@ are provider-native, so they show the parent thread's provider.
   provider's model and level are a search and one click away. When only
   other providers match, the tab's provider still heads the list, its label
   over a muted "Nothing matches" line. Favourites searches only
-  favourites, and a provider-locked thread searches only its provider. The reasoning
-  popover lists the same levels, and one click sets the level and closes.
-  It ends with the selected model's options (Fast, 1M context, Thinking) as
-  labelled switch rows under a hairline; they change in place. The model
-  picker leaves them out, because its pane can show a model other than the
-  one they would change. The reasoning part is
-  as wide as the model's widest level, so changing the level never resizes the
-  pill. The
+  favourites, and a provider-locked thread searches only its provider. While
+  the pane shows the selected model, it ends with that model's options (Fast,
+  1M context, Thinking) as labelled switch rows under a hairline; they change
+  in place. On any other model the pane leaves them out, because a switch
+  there would change a model the user has not picked. So every model setting
+  is two clicks from the closed capsule: open, then a level or a switch. The
   part whose popover is open keeps the `button-secondary-hover` fill, a step
   above the hover, so it still reads as open while the pointer rests on
   another part. Each part names its
@@ -1563,8 +1566,8 @@ enhances a state change and may not gate rendering.
   distance; releasing past 35% of its width, or a flick, sends it off that
   side in 160ms, otherwise it returns to rest. The stack closes the gap in
   200ms. Close and auto-hide reverse the entry.
-- **Genie.** Popovers fade, with one exception: the composer's model,
-  reasoning, and access popovers pour out of their trigger in 200ms and back
+- **Genie.** Popovers fade, with one exception: the composer's model and
+  access popovers pour out of their trigger in 200ms and back
   into it in 160ms, like a window minimising to the Dock. The popover takes
   focus and keys from the first frame; typing during the pour ends it at once.
   Switching between these popovers swaps them in place without a pour, and

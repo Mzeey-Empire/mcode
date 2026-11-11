@@ -6,6 +6,7 @@ import { ReasoningLevelOptions } from "@/features/conversation/composer/controls
 import {
   MODEL_PROVIDERS,
   findModelById,
+  findProviderModel,
   getReasoningLevels,
   isModelAvailable,
   type ModelProvider,
@@ -478,20 +479,31 @@ export interface ModelPickerPanelProps {
 export interface ModelPickerReasoning {
   readonly current: ReasoningLevel;
   readonly onChoose: (modelId: string, providerId: string, level: ReasoningLevel) => void;
+  /**
+   * The selected model's on/off options, shown under its levels. Only for the selected model: they change the
+   * selection in place, so on any other model they would change a model the user has not picked.
+   */
+  readonly options?: ReactNode;
 }
 
 function ReasoningPane({ option, selected, reasoning }: { readonly option: ModelOption; readonly selected: boolean; readonly reasoning: ModelPickerReasoning }) {
   const levels = getReasoningLevels(option.providerId, option.modelId);
+  const declaredDefault = findProviderModel(option.providerId, option.modelId)?.defaultReasoningLevel;
   return (
     <div className="flex flex-col">
-      <p className="flex flex-col px-2 pt-1 pb-2">
-        <span className="text-caption text-muted">Reasoning</span>
-        <span className="text-body-small font-medium break-words text-ink">{option.label}</span>
+      {/*
+        The tab or the search group already names the provider, so the caption uses the short name. A name too long
+        for the line drops whole to a line of its own instead of fading, so the pane always says which model it shows.
+      */}
+      <p className="flex flex-wrap items-baseline justify-between gap-x-2 px-2 pt-1 pb-2 text-caption text-muted">
+        <span>Reasoning</span>
+        <span className="min-w-0 break-words">{getSelectedModelPresentation(option.modelId, option.providerId).shortLabel}</span>
       </p>
       {levels.length > 0 ? (
         <ReasoningLevelOptions
           levels={levels}
           checked={selected ? reasoning.current : undefined}
+          defaultLevel={levels.find((level) => level === declaredDefault)}
           listInset
           label={`Reasoning for ${option.label}`}
           onChoose={(level) => reasoning.onChoose(option.modelId, option.providerId, level)}
@@ -499,6 +511,7 @@ function ReasoningPane({ option, selected, reasoning }: { readonly option: Model
       ) : (
         <p className="px-2 py-1.5 text-caption text-muted">No reasoning levels</p>
       )}
+      {selected && reasoning.options}
     </div>
   );
 }

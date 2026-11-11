@@ -29,9 +29,9 @@ describe("partPopoverReducer", () => {
   });
 
   it("ignores a dwell on the part already open", () => {
-    const open: PartPopoverState = { status: "open", part: "reasoning", modelQuery: "", modelTab: null };
+    const open: PartPopoverState = { status: "open", part: "access", modelQuery: "", modelTab: null };
 
-    expect(partPopoverReducer(open, { type: "dwell", part: "reasoning" })).toBe(open);
+    expect(partPopoverReducer(open, { type: "dwell", part: "access" })).toBe(open);
   });
 
   it("switches on a dwell over another part and keeps the search text", () => {

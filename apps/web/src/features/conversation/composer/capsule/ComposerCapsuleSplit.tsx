@@ -1,4 +1,5 @@
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover";
+import { Zap } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type PointerEvent, type ReactNode, type RefObject } from "react";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { PERMISSION_MODES } from "@/transport";
@@ -15,9 +16,7 @@ import { AccessOptionList } from "../controls/AccessOptionList";
 import { useComposerAccess, type ComposerAccessInput } from "../controls/ComposerAccessControls";
 import {
   ComposerModelPreferenceSettings,
-  ComposerModelPreferenceSummary,
-  ComposerReasoningLevelList,
-  hasModelPreferences,
+  isFastModeOn,
   persistReasoningLevel,
   type ComposerModelPreferenceDefaults,
 } from "../controls/ComposerModelPreferences";
@@ -38,7 +37,6 @@ export interface ComposerCapsuleSplitProps extends ComposerAccessInput {
 
 const POPUP_LABEL: Record<CapsulePart, string> = {
   model: "Choose model and provider",
-  reasoning: "Model settings",
   access: "Access",
 };
 
@@ -55,7 +53,6 @@ const POPUP_CLASS: Record<CapsulePart, string> = {
   // Below 504px the composer, 32px narrower than the window, is narrower than 440px plus its insets, so the picker
   // takes the composer's width and both its edges meet the composer's instead of sitting a few pixels inside one.
   model: cn(PICKER_PANEL_CLASS, "w-[44rem] max-[504px]:w-[calc(100vw-3.2rem)] max-h-(--available-height) overflow-y-auto"),
-  reasoning: "w-56 p-1",
   access: "w-58 p-0",
 };
 
@@ -69,8 +66,10 @@ function narrowLabelOf(model: SelectedModelPresentation, providerId: string): st
   return narrowModelLabel(model.shortLabel, listProviderModels(providerId).map((sibling) => sibling.label.replace(prefix, "")));
 }
 
-function reasoningTipOf(levels: readonly ReasoningLevel[], current: ReasoningLevel): string {
-  return levels.length > 0 ? `Reasoning: ${formatReasoningLabel(current)}` : POPUP_LABEL.reasoning;
+/** Names the model part with everything it shows: the model, its reasoning level, and Fast when it is on. */
+function modelPartLabelOf(model: SelectedModelPresentation, levels: readonly ReasoningLevel[], current: ReasoningLevel, fast: boolean): string {
+  const level = levels.includes(current) ? `, ${formatReasoningLabel(current)} reasoning` : "";
+  return `Model: ${model.shortLabel}${level}${fast ? ", Fast" : ""}`;
 }
 
 function isCapsulePart(value: string | null | undefined): value is CapsulePart {
@@ -113,9 +112,8 @@ function useDwell(onDwell: (part: CapsulePart) => void) {
   });
 }
 
-/** Where each body puts focus, in order of preference; the reasoning level list focuses its own current level. */
+/** Where the model body puts focus, so a switch lands focus as an open does. */
 const MODEL_FOCUS: readonly string[] = ['input[role="combobox"]'];
-const REASONING_FOCUS: readonly string[] = ['[role="listbox"]', "button"];
 
 /** Moves focus to the first of `selectors` found inside the body once it mounts, so a switch lands focus as an open does. */
 function FocusOnMount({ selectors, children }: { readonly selectors: readonly string[]; readonly children: ReactNode }) {
@@ -123,8 +121,7 @@ function FocusOnMount({ selectors, children }: { readonly selectors: readonly st
   useLayoutEffect(() => {
     const body = ref.current;
     const target = selectors.map((selector) => body?.querySelector<HTMLElement>(selector)).find(Boolean);
-    // A list has already focused its current option in its own layout effect, which runs before this one.
-    if (!target || target.getAttribute("role") === "listbox") return;
+    if (!target) return;
     target.focus();
     if (target instanceof HTMLInputElement && target.type === "text") {
       target.setSelectionRange(target.value.length, target.value.length);
@@ -133,33 +130,17 @@ function FocusOnMount({ selectors, children }: { readonly selectors: readonly st
   return <div ref={ref} className="contents">{children}</div>;
 }
 
-/**
- * The reasoning label at the width of the model's widest level: every level sits in one grid cell and all but the
- * current one are invisible, so changing the level never resizes the capsule.
- */
-function SteadyReasoningLabel({ levels, current }: { readonly levels: readonly ReasoningLevel[]; readonly current: ReasoningLevel }) {
-  return (
-    // On the open part's stronger fill, muted drops below AA in dark, so the open label takes ink like the model part.
-    <span className="inline-grid justify-items-center text-muted group-aria-expanded/part:text-ink" data-testid="capsule-reasoning-label">
-      {levels.map((level) => (
-        <span key={level} className={cn("col-start-1 row-start-1", level !== current && "invisible")} aria-hidden={level !== current || undefined}>
-          {formatReasoningLabel(level)}
-        </span>
-      ))}
-    </span>
-  );
-}
-
 /** The rule between the pill's parts. It paints under the hover fill, so the fill slides over it. */
 export function CapsuleDivider() {
   return <span aria-hidden className="h-3.5 w-px shrink-0 bg-border" />;
 }
 
 /**
- * The composer's model, reasoning and access in one pill. Each part opens its own body in one shared popover spot;
- * with a popover open, resting on another part switches to it. Picking a model, a level in the model picker's reasoning
- * pane or a level in the reasoning popover closes the popover; the option toggles change in place. The body is keyed by part, so a switch remounts it and it
- * focuses its own target.
+ * The composer's model and access in one pill. The model part shows the reasoning level too, and its picker sets both:
+ * a level in the reasoning pane picks the model and level together. Each part opens its own body in one shared popover
+ * spot; with a popover open, resting on another part switches to it. Picking a model or a level closes the popover; the
+ * selected model's option switches, under its levels, change in place. The body is keyed by part, so a switch remounts
+ * it and it focuses its own target.
  */
 export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
   const { anchorRef, selection, defaults, reasoningLevels, isProviderLocked, onSelectionChange } = props;
@@ -179,14 +160,13 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
   );
   const dwellProps = useDwell((part) => dispatch({ type: "dwell", part }));
   const access = useComposerAccess(props);
-  const showReasoning = hasModelPreferences(selection, defaults, reasoningLevels);
   const model = getSelectedModelPresentation(selection.modelId, selection.provider);
+  const fast = isFastModeOn(selection, defaults);
   const preferenceProps = {
     threadId: props.threadId,
     branchFromMessageId: props.branchFromMessageId,
     selection,
     defaults,
-    reasoningLevels,
     onSelectionChange,
   };
   // Closing through the root, not the reducer, lets the popup pour back into the part.
@@ -202,6 +182,8 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
       persistReasoningLevel(preferenceProps, reasoning);
       close();
     },
+    // 10px on the right: the check glyph's ink ends 2px inside its box, so the switches end where the checks do.
+    options: <ComposerModelPreferenceSettings {...preferenceProps} className="mt-1 border-t border-border pt-1 pr-2.5 pl-2" />,
   };
   const AccessIcon = access.selected.icon;
   const part = (name: CapsulePart, label: string, tip: string, children: ReactNode) => (
@@ -227,9 +209,8 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
       <TooltipContent>{tip}</TooltipContent>
     </Tooltip>
   );
-  const modelLabel = `Model: ${model.shortLabel}`;
+  const modelLabel = modelPartLabelOf(model, reasoningLevels, selection.reasoning, fast);
   const accessLabel = `Access mode: ${access.selected.label}`;
-  const reasoningLabel = reasoningTipOf(reasoningLevels, selection.reasoning);
   const unsupervised = selection.permissionMode === PERMISSION_MODES.FULL;
 
   return (
@@ -241,16 +222,16 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
             <ProviderIcon provider={model.iconProviderId} size={14} />
             <span className="min-w-0 text-fade @max-[680px]/capsule:hidden">{model.shortLabel}</span>
             <span className="hidden min-w-0 text-fade @max-[680px]/capsule:inline">{narrowLabelOf(model, selection.provider)}</span>
+            {reasoningLevels.includes(selection.reasoning) && (
+              // On the open part's stronger fill, muted drops below AA in dark, so the open label takes ink.
+              <span className="flex shrink-0 gap-1.5 text-muted group-aria-expanded/part:text-ink">
+                <span aria-hidden>·</span>
+                {formatReasoningLabel(selection.reasoning)}
+              </span>
+            )}
+            {fast && <Zap aria-hidden size={12} data-testid="composer-fast-mode-icon" className="shrink-0 text-muted group-aria-expanded/part:text-ink" />}
           </>
         ))}
-        {showReasoning && (
-          <>
-            <CapsuleDivider />
-            {part("reasoning", reasoningLabel, reasoningLabel, reasoningLevels.length > 0
-              ? <SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} />
-              : <ComposerModelPreferenceSummary selection={selection} defaults={defaults} reasoningLevels={reasoningLevels} />)}
-          </>
-        )}
         <CapsuleDivider />
         {part("access", accessLabel, accessLabel, <AccessIcon size={16} className={unsupervised ? "text-warning" : "text-muted"} />)}
         <Popover
@@ -298,13 +279,6 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
                     onSelect={pickModel}
                     reasoning={modelReasoning}
                   />
-                </FocusOnMount>
-              ),
-              reasoning: (
-                <FocusOnMount key="reasoning" selectors={REASONING_FOCUS}>
-                  <ComposerReasoningLevelList {...preferenceProps} onChosen={close} />
-                  {/* 14px on the right: the check glyph's ink ends 2px inside its box, so the switches end where the checks do. */}
-                  <ComposerModelPreferenceSettings {...preferenceProps} className="mt-1 border-t border-border pt-1 pr-3.5 pl-3" />
                 </FocusOnMount>
               ),
               access: <AccessOptionList key="access" access={access} onChosen={close} />,

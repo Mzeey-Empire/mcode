@@ -1,5 +1,5 @@
-/** The three parts of the split capsule, left to right. */
-export const CAPSULE_PARTS = ["model", "reasoning", "access"] as const;
+/** The parts of the split capsule, left to right. The model part also opens the reasoning levels, in its picker's pane. */
+export const CAPSULE_PARTS = ["model", "access"] as const;
 
 /** One part of the split capsule; each opens its own popover body in the shared spot. */
 export type CapsulePart = (typeof CAPSULE_PARTS)[number];

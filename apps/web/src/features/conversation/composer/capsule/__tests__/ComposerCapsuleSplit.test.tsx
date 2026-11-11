@@ -10,6 +10,7 @@ import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { ProviderModelInfo } from "@/transport/types";
 import { ComposerCapsuleSplit } from "../ComposerCapsuleSplit";
+import { ComposerModelPreferenceSettings } from "../../controls/ComposerModelPreferences";
 import { SWITCH_DWELL_MS } from "../part-popover-group";
 import type { ComposerAgentSelection } from "../../draft/useComposerFormController";
 
@@ -186,18 +187,20 @@ describe("ComposerCapsuleSplit", () => {
     expect(document.querySelector("[data-slot='tooltip-content']")).not.toBeInTheDocument();
   });
 
-  it("names the reasoning part with its current level, like the model and access parts", async () => {
-    await renderSplit();
+  it("names the model part with the model and its reasoning level, and Fast when it is on", async () => {
+    registerProviderModels("codex", [{ id: "gpt-9-deep", label: "GPT-9 Deep", providerId: "codex", supportedReasoningLevels: LEVELS, supportsFastMode: true }]);
+    await renderSplit({ selection: { fastMode: true } });
 
-    expect(screen.getByRole("button", { name: "Reasoning: High" })).toHaveAttribute("data-capsule-part", "reasoning");
+    expect(screen.getByRole("button", { name: "Model: GPT-9 Deep, High reasoning, Fast" })).toHaveAttribute("data-capsule-part", "model");
+    expect(screen.queryByRole("button", { name: /^Reasoning/ })).toBeNull();
   });
 
   it("names a part in a tooltip when focus reaches it", async () => {
     await renderSplit();
 
-    act(() => part(/^Reasoning: /).focus());
+    act(() => part(/^Model: /).focus());
 
-    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent("Reasoning: High");
+    expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent("Model: GPT-9 Deep, High reasoning");
   });
 
   it("lists the warm catalog across part switches without fetching it again", async () => {
@@ -206,7 +209,7 @@ describe("ComposerCapsuleSplit", () => {
     await renderSplit();
     await openModelPicker();
 
-    rest(part(/^Reasoning: /), SWITCH_DWELL_MS);
+    rest(part(/^Access mode:/), SWITCH_DWELL_MS);
     rest(part(/^Model:/), SWITCH_DWELL_MS);
     await act(async () => {});
 
@@ -220,7 +223,7 @@ describe("ComposerCapsuleSplit", () => {
     await openModelPicker();
     fireEvent.click(screen.getByRole("radio", { name: "Favourites" }));
 
-    rest(part(/^Reasoning: /), SWITCH_DWELL_MS);
+    rest(part(/^Access mode:/), SWITCH_DWELL_MS);
     rest(part(/^Model:/), SWITCH_DWELL_MS);
     expect(screen.getByRole("radio", { name: "Favourites" })).toHaveAttribute("aria-checked", "true");
 
@@ -278,14 +281,13 @@ describe("ComposerCapsuleSplit", () => {
     expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-wide", provider: "codex", reasoning: "xhigh" });
   });
 
-  it("closes on a model pick without opening the reasoning popover, keeping a level the model supports", async () => {
+  it("closes on a model pick, keeping a level the model supports", async () => {
     const onSelectionChange = await renderSplit();
     await openModelPicker();
 
     fireEvent.click(screen.getByRole("option", { name: "GPT-9 Wide" }));
 
     expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-wide", provider: "codex" });
-    expect(screen.queryByRole("dialog", { name: "Model settings" })).toBeNull();
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
     expect(realPopup()).toBeNull();
   });
@@ -314,38 +316,10 @@ describe("ComposerCapsuleSplit", () => {
     expect(realPopup()).toBeNull();
   });
 
-  it("focuses the current reasoning level ahead of the Fast toggle", async () => {
-    registerProviderModels("codex", [{ id: "gpt-9-fast", label: "GPT-9 Fast", providerId: "codex", supportedReasoningLevels: LEVELS, supportsFastMode: true }]);
-    await renderSplit({ selection: { modelId: "gpt-9-fast" } });
-
-    openPart(/^Reasoning: /);
-
-    expect(screen.getByRole("option", { name: "High" })).toHaveFocus();
-  });
-
-  it("keeps focus inside the popover while a hover switches it from the model search to the reasoning levels", async () => {
-    await renderSplit();
-    await openModelPicker();
-
-    rest(part(/^Reasoning: /), SWITCH_DWELL_MS);
-    expect(realPopup()?.contains(document.activeElement)).toBe(true);
-    await act(async () => {});
-
-    expect(screen.getByRole("option", { name: "High" })).toHaveFocus();
-  });
-
   it("opens the model picker while the agent runs", async () => {
     await renderSplit({ isProviderLocked: true });
 
     expect(await openModelPicker()).toBeInTheDocument();
-  });
-
-  it("keeps every level in the reasoning label for its width and exposes only the current one", async () => {
-    await renderSplit({ selection: { reasoning: "medium" } });
-
-    const labels = [...screen.getByTestId("capsule-reasoning-label").children];
-    expect(labels.map((label) => label.textContent)).toEqual(["Low", "Medium", "High"]);
-    expect(labels.filter((label) => label.getAttribute("aria-hidden") !== "true").map((label) => label.textContent)).toEqual(["Medium"]);
   });
 
   it("focuses the Access option under the pointer, so the arrow keys carry on from it", async () => {
@@ -375,53 +349,61 @@ describe("ComposerCapsuleSplit", () => {
   });
 });
 
-describe("ComposerCapsuleSplit reasoning", () => {
-  it("sets and persists a level in one click while the agent runs, and closes", async () => {
+describe("ComposerCapsuleSplit reasoning pane", () => {
+  function pane(name: string): HTMLElement {
+    return screen.getByRole("listbox", { name: `Reasoning for ${name}` });
+  }
+
+  /** Registers the models and serves them as the catalog, which the picker fetches and registers again on open. */
+  function serveModels(models: ProviderModelInfo[]): void {
+    registerProviderModels("codex", models.map((model) => ({
+      id: model.id,
+      label: model.name,
+      providerId: "codex",
+      supportedReasoningLevels: model.supportedReasoningEfforts,
+      supportsFastMode: model.supportsFastMode,
+    })));
+    vi.mocked(mockTransport.listProviderModels).mockResolvedValue(models);
+  }
+
+  it("sets and persists the selected model's level in one click while the agent runs, and closes", async () => {
     const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
     const onSelectionChange = await renderSplit({ threadId: "thread-1", isProviderLocked: true });
-    openPart(/^Reasoning: /);
+    await openModelPicker();
 
-    expect(screen.getByRole("option", { name: "High" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("option", { name: "Low" }));
+    expect(within(pane("GPT-9 Deep")).getByRole("option", { name: "High" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(within(pane("GPT-9 Deep")).getByRole("option", { name: "Low" }));
 
-    expect(onSelectionChange).toHaveBeenCalledWith({ reasoning: "low" });
+    expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-deep", provider: "codex", reasoning: "low" });
     expect(setThreadSettings).toHaveBeenCalledWith("thread-1", { reasoningLevel: "low" });
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
     expect(realPopup()).toBeNull();
   });
 
-  it("moves to the next level with ArrowDown and chooses it with Enter, then closes", async () => {
-    const onSelectionChange = await renderSplit({ selection: { reasoning: "medium" } });
-    openPart(/^Reasoning: /);
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-
-    expect(screen.getByRole("option", { name: "Medium" })).toHaveFocus();
-    const typing = user.keyboard("{ArrowDown}{Enter}");
-    await act(() => vi.advanceTimersByTimeAsync(100));
-    await typing;
-
-    expect(onSelectionChange).toHaveBeenCalledWith({ reasoning: "high" });
-    for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
-    expect(realPopup()).toBeNull();
-  });
-
-  it("keeps Fast toggling in place without closing", async () => {
-    registerProviderModels("codex", [{ id: "gpt-9-deep", label: "GPT-9 Deep", providerId: "codex", supportedReasoningLevels: LEVELS, supportsFastMode: true }]);
+  it("keeps Fast toggling in place under the selected model's levels, and offers it on no other model", async () => {
+    serveModels([
+      { id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: LEVELS, supportsFastMode: true },
+      { id: "gpt-9-wide", name: "GPT-9 Wide", supportedReasoningEfforts: LEVELS, supportsFastMode: true },
+    ]);
     const onSelectionChange = await renderSplit();
-    openPart(/^Reasoning: /);
+    await openModelPicker();
 
     fireEvent.click(screen.getByRole("switch", { name: "Fast" }));
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
-
     expect(onSelectionChange).toHaveBeenCalledWith({ fastMode: true });
-    expect(screen.getByRole("dialog", { name: "Model settings" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Choose model and provider" })).toBeInTheDocument();
+
+    fireEvent.mouseMove(screen.getByRole("option", { name: "GPT-9 Wide" }));
+    act(() => vi.advanceTimersByTime(PANE_SETTLE_MS));
+    expect(pane("GPT-9 Wide")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Fast" })).toBeNull();
   });
 
   it("turns Fast on for a fork without persisting it to the source thread", async () => {
     const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
-    registerProviderModels("codex", [{ id: "gpt-9-deep", label: "GPT-9 Deep", providerId: "codex", supportsFastMode: true }]);
+    serveModels([{ id: "gpt-9-deep", name: "GPT-9 Deep", supportsFastMode: true }]);
     const onSelectionChange = await renderSplit({ threadId: "thread-1", branchFromMessageId: "message-1" });
-    openPart(/^Reasoning: /);
+    await openModelPicker();
 
     fireEvent.click(screen.getByRole("switch", { name: "Fast" }));
 
@@ -429,27 +411,24 @@ describe("ComposerCapsuleSplit reasoning", () => {
     expect(setThreadSettings).not.toHaveBeenCalled();
   });
 
-  it("focuses the first level when the current level is not on the model's ladder", async () => {
+  it("checks no level when the current level is not on the model's ladder", async () => {
     await renderSplit({ selection: { reasoning: "xhigh" } });
-    openPart(/^Reasoning: /);
+    await openModelPicker();
 
-    expect(screen.queryByRole("option", { selected: true })).toBeNull();
-    expect(screen.getByRole("option", { name: "Low" })).toHaveFocus();
-  });
-
-  it("lists a single reasoning level as one checked choice", async () => {
-    await renderSplit({ reasoningLevels: ["high"] });
-    openPart(/^Reasoning: /);
-
-    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual(["High"]);
+    expect(within(pane("GPT-9 Deep")).queryByRole("option", { selected: true })).toBeNull();
   });
 
   it.each([
-    ["shows the 1M toggle for the Claude 1M cohort", "claude-opus-5-5", true],
-    ["hides the 1M toggle for Haiku", "claude-haiku-4-5", false],
-  ] as const)("%s", async (_name, modelId, shown) => {
-    await renderSplit({ selection: { provider: "claude", modelId } });
-    openPart(/^Reasoning: /);
+    ["shows the 1M switch for the Claude 1M cohort", "claude-opus-5-5", true],
+    ["hides the 1M switch for Haiku", "claude-haiku-4-5", false],
+  ] as const)("%s", (_name, modelId, shown) => {
+    render(
+      <ComposerModelPreferenceSettings
+        selection={{ ...selection, provider: "claude", modelId }}
+        defaults={{ contextWindow: undefined, thinking: undefined, globalCodexFast: false }}
+        onSelectionChange={vi.fn()}
+      />,
+    );
 
     expect(screen.queryByRole("switch", { name: "1M context" }) !== null).toBe(shown);
   });
@@ -487,6 +466,14 @@ describe("ComposerCapsuleSplit Devin model switch", () => {
     fireEvent.click(screen.getByRole("option", { name: label }));
 
     expect(onSelectionChange).toHaveBeenCalledWith(patch);
+  });
+
+  it("tags the model's own default level in the reasoning pane", async () => {
+    await renderSplit({ selection: { provider: "devin", modelId: "swe-2", reasoning: "max" }, reasoningLevels: ["medium", "high", "max"] });
+    await openModelPicker();
+
+    const pane = screen.getByRole("listbox", { name: "Reasoning for SWE-2" });
+    expect(within(pane).getAllByRole("option").map((option) => option.getAttribute("aria-label"))).toEqual(["Medium", "High, default", "Max"]);
   });
 });
 
