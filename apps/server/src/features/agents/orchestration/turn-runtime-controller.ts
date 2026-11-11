@@ -1096,8 +1096,16 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private async releaseUnsentWorkerTurn(worker: WorkerOwnedTurnRuntime, execution: ExecutionIdentity,
     active: WorkerOwnedTurn | undefined): Promise<void> {
     await this.fileEvidence?.collected(execution);
-    await worker.providerEvents.retire(execution);
-    await worker.owner.release(execution);
+    try {
+      await worker.providerEvents.retire(execution);
+      await worker.owner.release(execution);
+    } catch (error) {
+      // The ending is already saved, so recovery keeps it and frees the worker slot; the turn is then
+      // fully released and the thread must unlock. Only a failed recovery leaves the thread held.
+      logger.error("Unsent worker release failed; recovering the turn", { threadId: execution.threadId,
+        executionId: execution.executionId, error: error instanceof Error ? error.message : String(error) });
+      await worker.recoverRejected(execution);
+    }
     this.retireUnsentFiles(execution, active);
     this.lifecycles.end(execution);
   }
