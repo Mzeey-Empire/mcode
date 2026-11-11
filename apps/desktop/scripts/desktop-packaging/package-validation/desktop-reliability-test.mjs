@@ -275,16 +275,16 @@ export async function cleanupOwnedRun(child, dataDir, runRoot, overrides = {}) {
   } catch (error) {
     errors.push(error);
   }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, `Reliability harness cleanup failed; kept ${runRoot} because an owned process may still be running`);
+  }
   try {
     await operations.removeRunRoot(runRoot);
     if (operations.pathExists(runRoot)) {
       throw new Error(`Owned reliability run directory survived cleanup: ${runRoot}`);
     }
   } catch (error) {
-    errors.push(error);
-  }
-  if (errors.length > 0) {
-    throw new AggregateError(errors, "Reliability harness cleanup failed");
+    throw new AggregateError([error], "Reliability harness cleanup failed");
   }
 }
 
