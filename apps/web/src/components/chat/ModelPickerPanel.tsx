@@ -417,7 +417,8 @@ function getPickerTabs(
   });
   if (lockedToProvider) return providerTabs;
   return [
-    { id: FAVORITES_TAB, label: "Favourites", icon: <Star aria-hidden className="size-[1.4rem]" /> },
+    // Lucide's star sits high in its box, so it drops 1px to centre with the provider marks beside it.
+    { id: FAVORITES_TAB, label: "Favourites", icon: <Star aria-hidden className="size-[1.4rem] translate-y-px" /> },
     ...providerTabs,
   ];
 }
