@@ -69,9 +69,13 @@ export class TurnFileEvidenceLedger {
         }, SNAPSHOT_CAPTURE_BUDGET_MS);
       };
     });
+    // A save that keeps failing never calls terminalSaved; it must not hold the next turn forever.
+    const backstop = setTimeout(() => entry.startBudget?.(), SNAPSHOT_CAPTURE_BUDGET_MS);
     const prepared = this.prepare(frozen, capture, facts);
     entry.collected = Promise.race([prepared, timeout.then((evidence) => ({ evidence, snapshot: null, diff: entry.observed?.selectedTurnDiff ?? null }))]).then((result) => {
       clearTimeout(timer);
+      clearTimeout(backstop);
+      entry.startBudget = undefined;
       entry.write = () => this.persist(execution, entry, result);
       void entry.write();
     });
