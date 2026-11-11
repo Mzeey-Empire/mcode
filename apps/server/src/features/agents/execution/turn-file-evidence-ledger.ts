@@ -19,7 +19,7 @@ interface Entry {
   facts: Promise<PreparedExecutionFileEvidence | null>;
   tracked: (facts: PreparedExecutionFileEvidence | null) => void;
   write?: () => Promise<void>;
-  /** Starts the collection budget once the ending is saved, so a save under one budget cannot spend it. */
+  /** Starts a full collection budget once, when the ending is saved, so no save can spend it. */
   startBudget?: () => void;
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
@@ -74,7 +74,7 @@ export class TurnFileEvidenceLedger {
     // A save that keeps failing never calls terminalSaved; it must not hold the next turn forever.
     const backstop = setTimeout(armBudget, SNAPSHOT_CAPTURE_BUDGET_MS);
     // A save that lands after the backstop restarts the budget, so collection always gets a full one after it.
-    entry.startBudget = () => { clearTimeout(backstop); armBudget(); };
+    entry.startBudget = () => { entry.startBudget = undefined; clearTimeout(backstop); armBudget(); };
     const prepared = this.prepare(frozen, capture, facts);
     entry.collected = Promise.race([prepared, timeout.then((evidence) => ({ evidence, snapshot: null, diff: entry.observed?.selectedTurnDiff ?? null }))]).then((result) => {
       clearTimeout(timer);
