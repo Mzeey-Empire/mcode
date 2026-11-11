@@ -1205,7 +1205,8 @@ are provider-native, so they show the parent thread's provider.
   access 232px, and the `+` menu 232px. Every part's popover opens in one spot: 8px above the right edge of the
   capsule, covering any tray, so it never moves when content above
   changes. With a popover open, resting 100ms on another part switches to
-  its popover, as in a menu bar. The model picker is 440px: the model list on
+  its popover, as in a menu bar. The model picker is 440px, or the composer's
+  width when the window leaves less, so both its edges meet the composer's: the model list on
   the left and a 168px reasoning pane on the right, behind a `border`
   hairline, listing the highlighted model's levels under a two-line caption:
   "Reasoning" in Caption `muted` over the model's full name in Body small
