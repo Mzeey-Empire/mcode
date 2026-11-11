@@ -1249,8 +1249,9 @@ are provider-native, so they show the parent thread's provider.
   never shows a second button.
 - Editing a queued message while a turn runs puts a one-line caption above
   the draft, "Editing a queued message" in Caption `muted`, with a ghost
-  "Cancel edit" button at its end. The run button becomes Save changes, a
-  check in the Send look, and saving returns the message to its place in the
+  "Cancel edit" button at its end, the caption starting at the + glyph's ink
+  and the button's text ending flush with the run button. The run button
+  becomes Save changes, a check in the Send look, and saving returns the message to its place in the
   queue. Until then the tray keeps that place as a muted "Editing" row with a
   pencil, so the user can see which message is out for editing.
 - The context label replaces the old ring. It shows nothing below 70% of the
