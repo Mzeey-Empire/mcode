@@ -1390,6 +1390,40 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       .toThrow("Steered message has no matching accepted execution");
   });
 
+  // Each steer that lands while Claude streams aborts the segment, and the absorbed segment emits its text as a
+  // full message. The second such message in one turn must still save, or every later save, steers included, waits.
+  it("saves a second steer after two absorbed Claude segments each emit a mid-turn message", async () => {
+    const steers = new TurnSteerStore(db);
+    const first = "6f1c2b8e-3d4a-4c5b-9e7f-0a1b2c3d4e5f";
+    const second = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+    for (const messageId of [first, second]) {
+      steers.insertPending({ messageId, threadId: execution.threadId, turnExecutionId: execution.executionId,
+        inputsHash: "inputs", payload: { content: "Delegate finished" } });
+    }
+    let ordinal = 1;
+    const event = (type: AgentEvent["type"], fields: Record<string, unknown> = {}, delivery?: "live") =>
+      send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [{ ...draft("claude", ordinal, type, fields), ...(delivery ? { delivery } : {}) }] });
+    await send(1, start("claude"));
+    await event("textDelta", { delta: "Segment one", isFinalResponse: true }, "live");
+    await event("toolUse", { toolCallId: "tool-a", toolName: "Read", toolInput: {} });
+    await event("message", { content: "Segment one", tokens: 10 });
+    await progress.acceptSteeredUserMessage({ threadId: execution.threadId, turnExecutionId: execution.executionId,
+      messageId: first, content: "First wake" });
+    await event("textDelta", { delta: "Segment two", isFinalResponse: true }, "live");
+    await event("toolUse", { toolCallId: "tool-b", toolName: "Read", toolInput: {} });
+    await event("message", { content: "Segment two", tokens: 10 });
+    const secondSaved = progress.acceptSteeredUserMessage({ threadId: execution.threadId,
+      turnExecutionId: execution.executionId, messageId: second, content: "Second wake" });
+    secondSaved.catch(() => {});
+
+    await expect.poll(() => progress.savingStatuses(execution.threadId)).toEqual([]);
+    await expect(secondSaved).resolves.toBeUndefined();
+    expect(db.prepare("SELECT id FROM messages WHERE role = 'user' AND id IN (?, ?) ORDER BY sequence").all(first, second))
+      .toEqual([{ id: first }, { id: second }]);
+    expect(steers.find(second)?.state).toBe("delivered");
+  });
+
   it("preserves the durable child roster revision across a parent follow-up and fresh recovery owner", async () => {
     await send(1, start("codex"));
     expect(recovery().durable).toMatchObject({ mode: "snapshot", snapshot: { revision: { rosterRevision: 0 } } });
