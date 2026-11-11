@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { ArrowUp, CornerDownRight, Paperclip, Pencil, X } from "lucide-react";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { Button, IconButton } from "@/components/ui/button";
@@ -27,6 +28,8 @@ interface ComposerQueueListProps {
   onSendNow: (message: QueuedMessage) => void;
   /** Hands a queued message to the composer for editing; the parent pops it from the queue. */
   onLoadIntoComposer: (message: QueuedMessage) => void;
+  /** Where the message being edited in the composer goes back on save, or null when nothing is being edited. */
+  editingIndex?: number | null;
 }
 
 /**
@@ -40,6 +43,7 @@ export function ComposerQueueList({
   isEditLocked = false,
   onSendNow,
   onLoadIntoComposer,
+  editingIndex = null,
 }: ComposerQueueListProps) {
   const queue = useQueueStore((s) => s.queues[threadId] ?? EMPTY_QUEUE);
   const providerId = ProviderIdSchema.safeParse(provider);
@@ -49,7 +53,8 @@ export function ComposerQueueList({
   const held = useQueueStore((s) => s.autoDrainSuppressedThreadIds.has(threadId));
   const pauseReason = useQueueStore((s) => s.autoDrainPauseReasons[threadId]);
   const { resume } = useQueuedMessageDispatch(threadId);
-  if (queue.length === 0) return null;
+  if (queue.length === 0 && editingIndex === null) return null;
+  const { slot, position } = editingSlot(editingIndex, queue.length);
 
   const canSendNow = (message: QueuedMessage) => !isPaused
     && (route === "send" || (route === "steer" && canSteer && isSteerable(message)));
@@ -72,33 +77,58 @@ export function ComposerQueueList({
         </div>
       ) : null}
       <ul aria-label="Queued messages" className="m-0 list-none p-0">
+        {slot === 0 ? <EditingSlotRow /> : null}
         {queue.map((message, index) => (
-          <li key={message.id} className="flex h-10 items-center gap-2">
-            <span className="flex size-4 shrink-0 items-center justify-center">
-              <CornerDownRight className="size-4 text-muted" aria-hidden />
-            </span>
-            <QueueRowText message={message} />
-            {isDeliveryUnknown(message) ? (
-              <DeliveryUnknownActions
-                position={index + 1}
-                onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
-                onRemove={() => void remove(message)}
-              />
-            ) : (
-              <QueueRowActions
-                position={index + 1}
-                pending={pendingLabel(message)}
-                canSendNow={canSendNow(message)}
-                editLocked={isEditLocked}
-                onSendNow={() => onSendNow(message)}
-                onEdit={() => void edit(message)}
-                onRemove={() => void remove(message)}
-              />
-            )}
-          </li>
+          <Fragment key={message.id}>
+            <li className="flex h-10 items-center gap-2">
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                <CornerDownRight className="size-4 text-muted" aria-hidden />
+              </span>
+              <QueueRowText message={message} />
+              {isDeliveryUnknown(message) ? (
+                <DeliveryUnknownActions
+                  position={position(index)}
+                  onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
+                  onRemove={() => void remove(message)}
+                />
+              ) : (
+                <QueueRowActions
+                  position={position(index)}
+                  pending={pendingLabel(message)}
+                  canSendNow={canSendNow(message)}
+                  editLocked={isEditLocked}
+                  onSendNow={() => onSendNow(message)}
+                  onEdit={() => void edit(message)}
+                  onRemove={() => void remove(message)}
+                />
+              )}
+            </li>
+            {slot === index + 1 ? <EditingSlotRow /> : null}
+          </Fragment>
         ))}
       </ul>
     </>
+  );
+}
+
+/**
+ * The edited message keeps its slot, so the composer's "Editing queued message N" points at a visible row, and the
+ * rows after it show the positions they will have once it is saved.
+ */
+function editingSlot(editingIndex: number | null, length: number) {
+  const slot = editingIndex === null ? null : Math.min(editingIndex, length);
+  return { slot, position: (index: number) => (slot !== null && index >= slot ? index + 2 : index + 1) };
+}
+
+/** Holds the place of the queued message open in the composer. */
+function EditingSlotRow() {
+  return (
+    <li className="flex h-10 items-center gap-2 text-body-small text-muted">
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        <Pencil className="size-4" aria-hidden />
+      </span>
+      Editing
+    </li>
   );
 }
 

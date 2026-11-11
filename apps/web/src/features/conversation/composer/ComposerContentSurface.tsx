@@ -178,6 +178,7 @@ function ComposerTraySurface({
       running={model.isAgentRunning}
       covered={covered}
       tiles={tiles}
+      editing={model.editingFromQueue !== null}
       queue={(
         <ComposerQueueList
           threadId={model.threadId}
@@ -185,6 +186,7 @@ function ComposerTraySurface({
           isPaused={paused}
           isEditLocked={docked}
           onLoadIntoComposer={actions.onLoadIntoComposer}
+          editingIndex={model.editingFromQueue?.originalIndex ?? null}
           onSendNow={(message) => { if (!paused) void actions.onSendQueuedMessageNow(message); }}
         />
       )}

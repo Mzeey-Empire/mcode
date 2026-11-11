@@ -1,6 +1,6 @@
 import { createMockApproval, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import React from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Composer } from "../Composer";
@@ -139,6 +139,9 @@ describe("Composer while the approval dock shows", () => {
 
     await user.click(screen.getByLabelText("Edit queued message 1"));
     expect(screen.getByText(/Editing queued message 1/)).toBeInTheDocument();
+    const rows = within(screen.getByRole("list", { name: "Queued messages" })).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Editing");
+    expect(within(rows[1]!).getByLabelText("Edit queued message 2")).toBeInTheDocument();
     await user.type(screen.getByRole("textbox", { name: "Message Mcode" }), "first edited");
     vi.mocked(extractComposerMessage).mockReturnValue({ text: "first edited", mentions: [] });
     onTestFinished(() => void vi.mocked(extractComposerMessage).mockReturnValue({ text: "", mentions: [] }));

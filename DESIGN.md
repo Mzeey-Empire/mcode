@@ -1243,7 +1243,8 @@ are provider-native, so they show the parent thread's provider.
   the draft, "Editing queued message 2" in Caption `muted`, with a ghost
   "Cancel edit" button at its end. The run button becomes Save changes, a
   check in the Send look, and saving returns the message to its place in the
-  queue.
+  queue. Until then the tray keeps that place as a muted "Editing" row with a
+  pencil, so the caption's number points at a row the user can see.
 - The context label replaces the old ring. It shows nothing below 70% of the
   context window or when the window is unknown. From 70% it reads "72%
   context" in `warning`, and from 90% in `destructive`; below the 680px tier
