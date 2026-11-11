@@ -60,9 +60,11 @@ export class TurnFileEvidenceLedger {
     const entry: Entry = { facts, tracked, collected: Promise.resolve(), attempts: 0, published: false };
     this.entries.set(execution.executionId, entry);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let armBudget!: () => void;
     const timeout = new Promise<TurnFileEvidence>((resolve) => {
-      entry.startBudget = () => {
-        timer ??= setTimeout(() => {
+      armBudget = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
           logger.warn("Turn file evidence collection timed out", execution);
           resolve({ state: "unavailable", reason: "timed-out", knownPaths: [...entry.observed?.filesChanged ?? []],
             ...(entry.observed?.fileEffects.fileCount ? { fileEffects: entry.observed.fileEffects } : {}) });
@@ -70,7 +72,9 @@ export class TurnFileEvidenceLedger {
       };
     });
     // A save that keeps failing never calls terminalSaved; it must not hold the next turn forever.
-    const backstop = setTimeout(() => entry.startBudget?.(), SNAPSHOT_CAPTURE_BUDGET_MS);
+    const backstop = setTimeout(armBudget, SNAPSHOT_CAPTURE_BUDGET_MS);
+    // A save that lands after the backstop restarts the budget, so collection always gets a full one after it.
+    entry.startBudget = () => { clearTimeout(backstop); armBudget(); };
     const prepared = this.prepare(frozen, capture, facts);
     entry.collected = Promise.race([prepared, timeout.then((evidence) => ({ evidence, snapshot: null, diff: entry.observed?.selectedTurnDiff ?? null }))]).then((result) => {
       clearTimeout(timer);
