@@ -1326,12 +1326,15 @@ top-aligned to the trigger row, never stacked below it.
 **Picker anatomy.** One anatomy for every picker (branch, pull request,
 commit, model, project):
 1. A borderless search row on top.
-2. Segmented tabs under it when the list has sibling sources.
+2. Segmented tabs under it when the list has sibling sources. A single
+   source shows no tab row.
 3. A flat list with no section labels and no per-row type icons or counts.
    The selected row shows a trailing check, with a `muted` tag when it helps
    ("current", "worktree"). About five rows are visible; the list scrolls
    with top and bottom fades. The highlighted row takes the sliding
-   highlight; the selected row keeps its own `selected` fill.
+   highlight, and a row the arrow keys reached also takes the 2px `focus`
+   ring, so keyboard and pointer focus look like every other control. The
+   selected row keeps its own `selected` fill.
 4. Silent paging: more rows load as the user scrolls, and a `muted` footer
    reads "Showing 50 of 568". A search across all history may read
    "N matches in M commits" instead.

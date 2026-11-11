@@ -353,6 +353,25 @@ describe("Picker", () => {
     expect(search).toHaveFocus();
   });
 
+  it("rings the row the keyboard reached, but not a hovered row or a row whose pane has focus", async () => {
+    render(<PagedPicker detail={BRANCH_DETAIL} />);
+    const search = screen.getByRole("combobox");
+    search.focus();
+    const ringed = () => screen.queryAllByRole("option").filter((option) => option.hasAttribute("data-keyboard")).map((option) => option.textContent);
+    expect(ringed()).toEqual([]);
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(ringed()).toEqual(["branch-002"]);
+
+    await userEvent.keyboard("{ArrowRight}");
+    expect(ringed()).toEqual([]);
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(ringed()).toEqual(["branch-002"]);
+
+    fireEvent.mouseMove(screen.getByRole("option", { name: "branch-004" }));
+    expect(ringed()).toEqual([]);
+  });
+
   it("keeps Right Arrow for the caret while it is inside the search text", async () => {
     render(<PagedPicker detail={BRANCH_DETAIL} />);
     const search = screen.getByRole("combobox");

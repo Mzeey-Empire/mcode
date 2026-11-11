@@ -170,6 +170,8 @@ export function Picker<T>(props: PickerProps<T>) {
   const loadMore = useLoadMoreOnce(props, listKey);
   const searchRef = useRef<HTMLInputElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
+  // The list's highlight is virtual focus, so the row the keyboard reached takes the focus ring a pointer row lacks.
+  const [keyboardRow, setKeyboardRow] = useState(false);
 
   const select = (entry: ListRow<T> | undefined) => {
     if (entry && !entry.row.disabled) props.onSelect(entry.item);
@@ -202,6 +204,7 @@ export function Picker<T>(props: PickerProps<T>) {
     if (!paneTarget) return false;
     event.preventDefault();
     pane.follow();
+    setKeyboardRow(false);
     paneTarget.focus();
     return true;
   };
@@ -231,6 +234,7 @@ export function Picker<T>(props: PickerProps<T>) {
   };
 
   const hoverRow = (index: number) => {
+    setKeyboardRow(false);
     pane.lag();
     highlightRow(index);
   };
@@ -245,12 +249,14 @@ export function Picker<T>(props: PickerProps<T>) {
   const leavePane = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft") return;
     event.preventDefault();
+    setKeyboardRow(true);
     searchRef.current?.focus();
   };
 
   const moveHighlight = (next: number) => {
     if (rows[next] === undefined) return;
     pane.follow();
+    setKeyboardRow(true);
     highlightRow(next);
     // Only keyboard moves scroll; hover highlights must never move the list under the pointer.
     document.getElementById(optionId(listId, next))?.scrollIntoView?.({ block: "nearest" });
@@ -265,6 +271,7 @@ export function Picker<T>(props: PickerProps<T>) {
       rows={rows}
       shortcutRows={shortcutRows}
       activeIndex={activeIndex}
+      keyboardRow={keyboardRow}
       selectedKey={selectedKey}
       onHighlight={hoverRow}
       onPick={select}
@@ -582,6 +589,8 @@ interface PickerListProps<T> {
   readonly rows: readonly ListRow<T>[];
   readonly shortcutRows: readonly number[];
   readonly activeIndex: number;
+  /** The keyboard, not the pointer, moved the highlight to the active row. */
+  readonly keyboardRow: boolean;
   readonly selectedKey?: string;
   readonly onHighlight: (index: number) => void;
   readonly onPick: (entry: ListRow<T>) => void;
@@ -594,7 +603,7 @@ interface PickerListProps<T> {
 }
 
 function PickerList<T>(props: PickerListProps<T>) {
-  const { listId, listKey, rows, shortcutRows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck, fill } = props;
+  const { listId, listKey, rows, shortcutRows, activeIndex, keyboardRow, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck, fill } = props;
   const listRef = useRef<HTMLUListElement>(null);
 
   const measure = useCallback(() => {
@@ -636,6 +645,7 @@ function PickerList<T>(props: PickerListProps<T>) {
             row={entry.row}
             digit={shortcutDigit(shortcutRows, index)}
             active={index === activeIndex}
+            keyboard={keyboardRow && index === activeIndex}
             selected={entry.row.key === selectedKey}
             selectedCheck={selectedCheck}
             onHighlight={() => onHighlight(index)}
@@ -677,6 +687,7 @@ interface PickerOptionProps {
   readonly row: PickerRow;
   readonly digit?: number;
   readonly active: boolean;
+  readonly keyboard: boolean;
   readonly selected: boolean;
   readonly selectedCheck: boolean;
   readonly onHighlight: () => void;
@@ -717,7 +728,7 @@ function optionKeyShortcuts(digit: number | undefined, hasAction: boolean): stri
   return [pick, hasAction ? ROW_ACTION_SHORTCUT.aria : undefined].filter(Boolean).join(" ") || undefined;
 }
 
-function PickerOptionItem({ id, row, digit, active, selected, selectedCheck, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
+function PickerOptionItem({ id, row, digit, active, keyboard, selected, selectedCheck, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
   const descriptions = optionDescriptions(id, row, reason, digit);
   return (
     <li
@@ -732,11 +743,12 @@ function PickerOptionItem({ id, row, digit, active, selected, selectedCheck, onH
       aria-describedby={descriptions.describedBy}
       aria-keyshortcuts={descriptions.keyShortcuts}
       data-active={active || undefined}
+      data-keyboard={keyboard || undefined}
       data-selected={selected || undefined}
       // Keeps focus in the search field so typing and arrow keys keep working after a click.
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        "group/option relative flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-selected:bg-selected",
+        "group/option relative flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-selected:bg-selected data-keyboard:outline-2 data-keyboard:-outline-offset-2 data-keyboard:outline-focus",
         row.description == null ? "h-8" : "min-h-8 py-1.5",
         row.disabled && "cursor-default opacity-50",
       )}
