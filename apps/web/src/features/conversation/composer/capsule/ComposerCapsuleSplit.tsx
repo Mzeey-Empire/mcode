@@ -59,7 +59,7 @@ const POPUP_CLASS: Record<CapsulePart, string> = {
 
 // The open part takes the fill a step above the hover, so it still reads as open with the pointer on another part.
 const PART_CLASS =
-  "relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
+  "group/part relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
 
 /** The model part's label below the 680px tier, read against its provider's other models. */
 function narrowLabelOf(model: SelectedModelPresentation, providerId: string): string {
@@ -137,7 +137,8 @@ function FocusOnMount({ selectors, children }: { readonly selectors: readonly st
  */
 function SteadyReasoningLabel({ levels, current }: { readonly levels: readonly ReasoningLevel[]; readonly current: ReasoningLevel }) {
   return (
-    <span className="inline-grid justify-items-center text-muted" data-testid="capsule-reasoning-label">
+    // On the open part's stronger fill, muted drops below AA in dark, so the open label takes ink like the model part.
+    <span className="inline-grid justify-items-center text-muted group-aria-expanded/part:text-ink" data-testid="capsule-reasoning-label">
       {levels.map((level) => (
         <span key={level} className={cn("col-start-1 row-start-1", level !== current && "invisible")} aria-hidden={level !== current || undefined}>
           {formatReasoningLabel(level)}

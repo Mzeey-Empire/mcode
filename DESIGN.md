@@ -1197,7 +1197,8 @@ are provider-native, so they show the parent thread's provider.
   Compact with 9px side padding, separated by 1px by 14px `border` dividers,
   and one sliding highlight moves across the parts and over the dividers.
   The model part shows its 14px provider mark and name in `ink`, the
-  reasoning part its level in `muted`, and the access part a 16px icon in
+  reasoning part its level in `muted` (`ink` while its popover is open, where
+  the stronger fill would drop `muted` below AA), and the access part a 16px icon in
   `muted`, or `warning` while Don't ask is on. The context label and the run
   button share the pill after the parts, outside the highlight. Popovers keep
   the prototype widths: the model picker at its own width, reasoning 224px,
