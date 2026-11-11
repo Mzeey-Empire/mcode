@@ -62,13 +62,13 @@ function OptionRows({ question, selectedRow, focusedRow, freeText, rowRefs, inpu
           type="button"
           tabIndex={row === focusedRow ? 0 : -1}
           aria-pressed={row === selectedRow}
-          className={cn(choiceRowClass(row === focusedRow, false, false))}
+          className={cn(choiceRowClass(row === focusedRow, false, false), row === selectedRow && "bg-selected")}
           onClick={() => onSelect(row)}
           onFocus={() => onSelect(row)}
         >
           <KeyChip index={row} />
           <span className="flex min-w-0 flex-1 flex-col gap-px">
-            <span className={cn("text-sm text-ink", row === selectedRow && "font-medium")}>{option.title}</span>
+            <span className="text-sm text-ink">{option.title}</span>
             {option.recommended && <span className="text-xs text-muted">Recommended</span>}
           </span>
           {/* Focus follows the pick, so without a mark the ring alone would say which answer is chosen. */}
@@ -76,7 +76,7 @@ function OptionRows({ question, selectedRow, focusedRow, freeText, rowRefs, inpu
         </button>
       ))}
       {selectedRow === otherRow ? (
-        <div className={cn(ROW_CLASS, "bg-hover")}>
+        <div className={cn(ROW_CLASS, "bg-selected")}>
           <KeyChip index={otherRow} />
           <input
             ref={inputRef}
