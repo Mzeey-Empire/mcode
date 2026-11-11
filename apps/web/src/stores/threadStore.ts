@@ -4404,16 +4404,27 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   },
 
   clearPlanQuestions: (threadId) => {
+    const { planQuestions, planAnswers, activeQuestionIndex, planQuestionsStatus } = getRec(threadId);
     patchRec(threadId, {
       planQuestions: null,
       planAnswers: new Map(),
       activeQuestionIndex: 0,
       planQuestionsStatus: "idle",
     });
+    const dismissedRevision = getRec(threadId).planQuestionsRevision;
     void getTransport()
       .dismissPlanQuestions(threadId)
       .catch((err: unknown) => {
-        console.warn("[plan] dismissPlanQuestions failed", err);
+        // The provider is still waiting on the questions, so the dock must come back, unless a newer batch arrived
+        // meanwhile, even one already answered or cleared.
+        if (getRec(threadId).planQuestionsRevision === dismissedRevision) {
+          patchRec(threadId, { planQuestions, planAnswers, activeQuestionIndex, planQuestionsStatus });
+        }
+        useToastStore.getState().show({
+          kind: "failed",
+          title: "Could not dismiss questions",
+          meta: sendFailureDetail(err),
+        });
       });
   },
 

@@ -52,6 +52,13 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
 }
 
 describe("routeMessage Agent RPCs", () => {
+  it("rejects agent.dismissPlanQuestions when the dismissal fails", async () => {
+    const fixture = admissionFixture(async () => {});
+    fixture.deps.planTurnService.dismissQuestions = async () => { throw new Error("dismiss failed"); };
+    await expect(routeAgentRpc("agent.dismissPlanQuestions", { threadId: "t" }, fixture.deps))
+      .rejects.toThrow("dismiss failed");
+  });
+
   it("ignores client worktreeStart and setupSkip, keeping the attached checkout behind Setup", async () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "rpc-setup-"));
     const oldDatabase = process.env.MCODE_DB_PATH;
