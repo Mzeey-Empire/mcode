@@ -84,9 +84,12 @@ export function ComposerQueueList({
         {slot === 0 ? <EditingSlotRow /> : null}
         {queue.map((message, index) => (
           <Fragment key={message.id}>
+            {message.id === parkedDraftId ? <ParkedDraftRow message={message} /> : (
             <li className="flex h-10 items-center gap-2">
-              <QueueRowGlyph parked={message.id === parkedDraftId} />
-              <QueueRowText message={message} parked={message.id === parkedDraftId} />
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                <CornerDownRight className="size-4 text-muted" aria-hidden />
+              </span>
+              <QueueRowText message={message} />
               {isDeliveryUnknown(message) ? (
                 <DeliveryUnknownActions
                   position={position(index)}
@@ -105,6 +108,7 @@ export function ComposerQueueList({
                 />
               )}
             </li>
+            )}
             {slot === index + 1 ? <EditingSlotRow /> : null}
           </Fragment>
         ))}
@@ -138,23 +142,28 @@ function EditingSlotRow() {
   );
 }
 
-/** A queued message leads with the send-next arrow; the set-aside draft, which never sends, with a page. */
-function QueueRowGlyph({ parked }: { readonly parked: boolean }) {
-  const Glyph = parked ? FileText : CornerDownRight;
+/**
+ * The unsent draft set aside while a queued message is edited. It is not queued: it returns to the composer when
+ * the edit ends, so it is named "Draft" and offers none of the queue's actions.
+ */
+function ParkedDraftRow({ message }: { readonly message: QueuedMessage }) {
   return (
-    <span className="flex size-4 shrink-0 items-center justify-center">
-      <Glyph className="size-4 text-muted" aria-hidden />
-    </span>
+    <li className="flex h-10 items-center gap-2">
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        <FileText className="size-4 text-muted" aria-hidden />
+      </span>
+      <span className="shrink-0 text-body-small text-muted">Draft</span>
+      <QueueRowText message={message} muted />
+    </li>
   );
 }
 
-function QueueRowText({ message, parked }: { message: QueuedMessage; parked: boolean }) {
+function QueueRowText({ message, muted = false }: { message: QueuedMessage; muted?: boolean }) {
   const text = stripPreviewAnnotationFence(message.displayContent || message.content);
   const annotations = message.previewAnnotations;
   return (
     <>
-        <span className={cn("text-fade flex-1 text-body-small", parked ? "text-muted" : "text-ink")}>
-          {parked ? <span className="sr-only">Unsent draft, back in the composer after the edit: </span> : null}
+        <span className={cn("text-fade flex-1 text-body-small", muted ? "text-muted" : "text-ink")}>
           {text || <span className="sr-only">Preview annotation</span>}
         </span>
         {annotations && annotations.annotations.length > 0 ? (

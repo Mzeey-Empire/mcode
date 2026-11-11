@@ -1259,7 +1259,7 @@ are provider-native, so they show the parent thread's provider.
   message to its place in the queue. Until then the tray keeps that place as
   a muted "Editing" row with a pencil, so the user can see which message is
   out for editing. An unsent draft the edit displaced waits behind the queue
-  as a muted row with a page glyph, and saving or cancelling the edit puts it
+  as a muted "Draft" row with a page glyph and no actions, and saving or cancelling the edit puts it
   back in the composer; the queue never sends it.
 - The context label replaces the old ring. It shows nothing below 70% of the
   context window or when the window is unknown. From 70% it reads "72%
