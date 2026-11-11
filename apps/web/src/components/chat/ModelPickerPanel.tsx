@@ -329,20 +329,26 @@ function catalogModelOptions(
   );
 }
 
+function underProviderName(options: readonly ModelPickerOption[], provider: ModelProvider): ModelPickerOption[] {
+  return options.map((option) => ({ ...option, group: `provider:${provider.id}`, groupLabel: provider.name }));
+}
+
 /**
- * A search on a provider tab also lists every other usable provider's matches under that provider's name, so a
- * model from another provider is one search away instead of behind its tab.
+ * A search on a provider tab also lists every other usable provider's matches, so a model from another provider is one
+ * search away instead of behind its tab. Once results span providers, every group, the tab's own included, carries
+ * its provider's name.
  */
-function otherProviderMatches(
-  activeProviderId: string,
+function searchAcrossProviders(
+  active: ModelProvider,
+  own: readonly ModelPickerOption[],
   providers: readonly ModelProvider[],
   getModels: (provider: ModelProvider) => ModelProvider["models"],
   searchQuery: string,
-): ModelOption[] {
-  return providers
-    .filter((provider) => provider.id !== activeProviderId)
-    .flatMap((provider) => catalogModelOptions(provider.id, filterModelsBySearchQuery(getModels(provider), searchQuery), `provider:${provider.id}`)
-      .map((option) => ({ ...option, groupLabel: provider.name })));
+): readonly ModelPickerOption[] {
+  const others = providers
+    .filter((provider) => provider.id !== active.id)
+    .flatMap((provider) => underProviderName(catalogModelOptions(provider.id, filterModelsBySearchQuery(getModels(provider), searchQuery)), provider));
+  return others.length === 0 ? own : [...underProviderName(own, active), ...others];
 }
 
 function providerModelOptions(
@@ -556,7 +562,7 @@ export function ModelPickerPanel({
     const models = getModels(provider);
     const legacyExpanded = isLegacyFoldExpanded(legacyFold, models, selectedModelInTab);
     const own = providerModelOptions(provider.id, models, query, legacyExpanded);
-    return [...own, ...otherProviderMatches(provider.id, searchedProviders, getModels, query)];
+    return [...searchAcrossProviders(provider, own, searchedProviders, getModels, query)];
   }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab, searchedProviders]);
 
   const selectedKey = presentation.selectedProviderId

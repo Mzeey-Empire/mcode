@@ -133,6 +133,22 @@ describe("ModelSelector", () => {
     expect(onSelect).toHaveBeenCalledWith(expect.any(String), "codex");
   });
 
+  it("names every provider, its own tab's first, once a search's matches span providers", async () => {
+    setProviders({ claude: true, codex: true });
+    listProviderModels.mockImplementation(async (providerId) => (
+      ({ claude: [{ id: "claude-shared", name: "Shared Claude" }], codex: [{ id: "gpt-shared", name: "Shared GPT" }] })[providerId] ?? []
+    ));
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={vi.fn()} />);
+    await openPicker();
+
+    await userEvent.type(screen.getByRole("combobox", { name: "Search models" }), "shared");
+
+    await waitFor(() => expect(optionNames()).toEqual(["Shared Claude", "Shared GPT"]));
+    const labels = document.querySelectorAll("[data-slot=picker-group-label]");
+    expect([...labels].map((label) => label.textContent)).toEqual(["Claude", "Codex"]);
+  });
+
   it("keeps a search to the thread's provider when the provider is locked", async () => {
     setProviders({ claude: true, codex: true });
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"

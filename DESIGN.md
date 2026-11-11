@@ -1219,8 +1219,9 @@ are provider-native, so they show the parent thread's provider.
   leaves it. A level sets the model and level and closes; picking a model
   closes and keeps the level when the model supports it. A search on a
   provider tab lists that provider's matches first, then each other usable
-  provider's matches under its name as a group label, so another provider's
-  model and level are a search and one click away. Favourites searches only
+  provider's matches, each provider's rows under its name as a group label
+  (the tab's own included once results span providers), so another
+  provider's model and level are a search and one click away. Favourites searches only
   favourites, and a provider-locked thread searches only its provider. The reasoning
   popover lists the same levels, and one click sets the level and closes.
   It ends with the selected model's options (Fast, 1M context, Thinking) as
