@@ -19,7 +19,7 @@ interface Entry {
   facts: Promise<PreparedExecutionFileEvidence | null>;
   tracked: (facts: PreparedExecutionFileEvidence | null) => void;
   write?: () => Promise<void>;
-  /** Starts the collection budget once the ending is saved; a slow save must not spend it. */
+  /** Starts the collection budget once the ending is saved, so a save under one budget cannot spend it. */
   startBudget?: () => void;
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
