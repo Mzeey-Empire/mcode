@@ -59,7 +59,7 @@ const POPUP_CLASS: Record<CapsulePart, string> = {
 
 // The open part takes the fill a step above the hover, so it still reads as open with the pointer on another part.
 const PART_CLASS =
-  "relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink outline-none aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
+  "relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
 
 /** The model part's label below the 680px tier, read against its provider's other models. */
 function narrowLabelOf(model: SelectedModelPresentation, providerId: string): string {

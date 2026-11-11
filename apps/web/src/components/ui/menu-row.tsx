@@ -11,7 +11,7 @@ import { FOCUS_RING_CLASS } from "./focus-ring"
  * selects mark it with `data-highlighted`, while the plain context menu relies on `:hover`.
  */
 export const MENU_ROW_CLASS = cn(
-  "relative flex h-row-compact w-full min-w-0 shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-3 text-left text-body-small text-ink outline-none",
+  "relative flex h-row-compact w-full min-w-0 shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-3 text-left text-body-small text-ink",
   FOCUS_RING_CLASS,
 )
 
