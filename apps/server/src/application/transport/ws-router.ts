@@ -109,6 +109,7 @@ import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attach
 import type { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { DraftImageMissingError } from "../../features/attachments/storage/draft-image-missing-error.js";
 import { SequenceAheadError } from "../../features/thread-control/attention/sequence-ahead-error.js";
+import { ThreadSaveBlockedError } from "../../features/agents/canonical/accepted-save-failure.js";
 import { TurnSteerConflictError, TurnSteerMentionError, asTurnSteerError } from "../../features/agents/steering/turn-steer.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
 import { isGitRpcMethod, routeGitRpc } from "../../features/projects/git/transport/git-rpc.js";
@@ -489,12 +490,26 @@ function validateRpcParameters(
   };
 }
 
+/** Domain errors whose own `code` and message reach the client unchanged. */
+const CODED_ROUTE_ERRORS = [
+  ThreadStartupResolveError,
+  WorkspaceFileNotFoundError,
+  ProjectIconError,
+  SequenceAheadError,
+  TurnRevertValidationError,
+  ThreadSaveBlockedError,
+] as const;
+
+function codedRouteErrorCode(error: unknown): string | undefined {
+  for (const ErrorClass of CODED_ROUTE_ERRORS) {
+    if (error instanceof ErrorClass) return error.code;
+  }
+  return undefined;
+}
+
 function domainRouteError(id: string, error: unknown, message: string): WebSocketResponse | null {
-  const recoveryCode = turnRecoveryErrorCode(error);
-  if (recoveryCode) return { id, error: { code: recoveryCode, message } };
-  if (error instanceof ThreadStartupResolveError) return { id, error: { code: error.code, message } };
-  if (error instanceof WorkspaceFileNotFoundError) return { id, error: { code: error.code, message } };
-  if (error instanceof ProjectIconError) return { id, error: { code: error.code, message } };
+  const code = turnRecoveryErrorCode(error) ?? codedRouteErrorCode(error);
+  if (code) return { id, error: { code, message } };
   if (error instanceof PlanServiceError) {
     return { id, error: { code: error.code, message, data: { latestVersion: error.latestVersion } } };
   }
@@ -504,7 +519,6 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
   if (error instanceof DraftImageMissingError) {
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
   }
-  if (error instanceof SequenceAheadError || error instanceof TurnRevertValidationError) return { id, error: { code: error.code, message } };
   return steerRouteError(id, error, message);
 }
 

@@ -17,6 +17,20 @@ export class AcceptedContentRejected extends Error {
   }
 }
 
+/**
+ * A new turn command refused because an earlier save of the thread cannot complete. Later saves wait behind
+ * the failed one in order, so the thread accepts no new turn until the save succeeds or the server restarts.
+ */
+export class ThreadSaveBlockedError extends Error {
+  override readonly name = "ThreadSaveBlockedError";
+  readonly code = "THREAD_SAVE_BLOCKED";
+
+  constructor(readonly threadId: string, cause: Error) {
+    super(`This thread cannot save new work because an earlier save failed (${cause.message || cause.name}). `
+      + "Restart Mcode to recover the thread.", { cause });
+  }
+}
+
 /** Classify a failed save by the codes on its error and `cause` chain. */
 export function classifySaveFailure(error: Error): SaveFailureClass {
   if (findCode(error, (code) => /^SQLITE_(BUSY|LOCKED)/.test(code))) return "transient";

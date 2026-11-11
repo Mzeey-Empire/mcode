@@ -2954,7 +2954,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(execution.threadId))
       .toEqual(previousPublicationHead);
     expect(failures).toEqual([]);
-    await expect(progress.beforeDurableCommand(execution.threadId)).rejects.toThrow("disk checkpoint unavailable");
+    await expect(progress.beforeDurableCommand(execution.threadId)).rejects.toMatchObject({
+      code: "THREAD_SAVE_BLOCKED", message: expect.stringContaining("disk checkpoint unavailable") });
     vi.spyOn(progress, "accept").mockImplementationOnce(() => { throw new ProgressAdmissionError("retention-exhausted"); });
     expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 2, "toolUse", { toolCallId: "blocked-tool", toolName: "Read", toolInput: {} })] })).result)

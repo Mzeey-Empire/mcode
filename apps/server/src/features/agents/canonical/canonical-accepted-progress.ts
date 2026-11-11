@@ -25,7 +25,7 @@ import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
 import { replacedOperationId, type CanonicalAcceptedWriteInput } from "./canonical-accepted-write.js";
 import { AcceptedSaveScheduler } from "./accepted-save-scheduler.js";
-import { classifySaveFailure, contentRejectionReason } from "./accepted-save-failure.js";
+import { classifySaveFailure, contentRejectionReason, ThreadSaveBlockedError } from "./accepted-save-failure.js";
 import { SavingStatusPublisher, type SavingStatusTimer } from "./saving-status-publisher.js";
 import { prepareAcceptedParentEvents } from "./accepted-parent-events.js";
 import { acceptedNarrative, advanceAcceptedExecution, advanceLiveExecution, seedAcceptedExecution, type AcceptedExecutionState } from "./accepted-execution-state.js";
@@ -190,7 +190,10 @@ export class CanonicalAcceptedProgress {
     this.flushLive(thread);
     thread.commandPending = true;
     const saving = thread.owner.savingState();
-    if (saving.kind === "failed") { thread.commandPending = false; throw saving.error; }
+    if (saving.kind === "failed") {
+      thread.commandPending = false;
+      throw this.saveBlocked(threadId, saving.error);
+    }
     if (thread.owner.recoveryCut().retained.length === 0) return;
     await new Promise<void>((resolve, reject) => thread.waiters.add({ resolve, reject }));
   }
@@ -1256,7 +1259,10 @@ export class CanonicalAcceptedProgress {
     if (failure.exhausted) {
       this.settleSteerSave(batch.operationId, failure.error);
       thread.commandPending = false;
-      for (const waiter of thread.waiters) waiter.reject(failure.error);
+      if (thread.waiters.size > 0) {
+        const blocked = this.saveBlocked(batch.execution.threadId, failure.error);
+        for (const waiter of thread.waiters) waiter.reject(blocked);
+      }
       thread.waiters.clear();
     }
     logger.error(source === "receipt" ? "Accepted progress receipt processing failed" : "Accepted progress save failed", { threadId: batch.execution.threadId,
@@ -1274,6 +1280,14 @@ export class CanonicalAcceptedProgress {
     this.publishSaving(batch.execution.threadId);
     // Disk failure retains the accepted stream; invalid receipt application still invalidates execution ownership.
     if (failure.exhausted && source === "receipt") await this.stopFailedOwner(thread, failure.error);
+  }
+
+  private saveBlocked(threadId: string, error: Error): ThreadSaveBlockedError {
+    const thread = this.saveThread(threadId);
+    const cut = thread.owner.recoveryCut();
+    logger.warn("Turn command refused: an earlier save of the thread failed", { threadId,
+      pendingBatches: cut.retained.length, error: describeSaveFailure(error) });
+    return new ThreadSaveBlockedError(threadId, error);
   }
 
   private async stopFailedOwner(thread: ProgressThread, error: Error): Promise<void> {

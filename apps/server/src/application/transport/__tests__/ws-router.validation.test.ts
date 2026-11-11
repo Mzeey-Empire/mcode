@@ -14,6 +14,7 @@ import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 import { mapRouteError, routeMessage, type RouterDeps } from "../ws-router.js";
 import { ProviderDisabledError } from "../../../features/providers/availability/provider-availability-errors.js";
 import { DraftImageMissingError } from "../../../features/attachments/storage/draft-image-missing-error.js";
+import { ThreadSaveBlockedError } from "../../../features/agents/canonical/accepted-save-failure.js";
 import { CodexCatalogService } from "../../../features/providers/catalog/codex-catalog-service.js";
 import { ProviderCatalogService } from "../../../features/providers/catalog/provider-catalog-service.js";
 import { ProviderCatalogSnapshotRepo } from "../../../features/providers/catalog/persistence/provider-catalog-snapshot-repo.js";
@@ -1906,6 +1907,16 @@ describe("mapRouteError for refused turn admission", () => {
 
     expect(response.error?.code).toBe("INTERNAL_ERROR");
     expect(error).toHaveBeenCalledWith("RPC handler error", expect.objectContaining({ method: "agent.send" }));
+  });
+
+  it("tells the client a thread is blocked by a failed save instead of reporting an internal error", () => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => logger);
+
+    const response = mapRouteError(request, new ThreadSaveBlockedError("thread-1", new Error("Canonical writer write-failed: SemanticConflict")));
+
+    expect(response.error).toMatchObject({ code: "THREAD_SAVE_BLOCKED",
+      message: expect.stringContaining("Canonical writer write-failed: SemanticConflict") });
+    expect(error).not.toHaveBeenCalled();
   });
 
   it("keeps a provider availability failure's own code and provider", () => {
