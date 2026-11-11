@@ -2,7 +2,7 @@ import { MENU_LIST_CLASS, MENU_ROW_CLASS, MenuRowBody } from "@/components/ui/me
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { findProviderModel, supportsThinkingToggle } from "@/lib/model-registry";
 import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
@@ -11,7 +11,6 @@ import { moveOptionFocus } from "./AccessOptionList";
 
 /** Defaults that model preferences use when no thread override exists. */
 export interface ComposerModelPreferenceDefaults {
-  contextWindow: ContextWindowMode | undefined;
   thinking: boolean | undefined;
   globalCodexFast: boolean;
 }
@@ -26,10 +25,8 @@ export interface ComposerModelPreferencesProps {
 }
 
 interface ModelPreferenceState {
-  has1M: boolean;
   hasThinking: boolean;
   hasFast: boolean;
-  contextWindow: ContextWindowMode;
   thinking: boolean;
   fastMode: boolean;
 }
@@ -58,13 +55,6 @@ function getFastMode(
   return selection.fastMode;
 }
 
-function getContextWindow(
-  selection: ComposerAgentSelection,
-  defaults: ComposerModelPreferenceDefaults,
-): ContextWindowMode {
-  return selection.contextWindow ?? defaults.contextWindow ?? "200k";
-}
-
 function getThinking(
   selection: ComposerAgentSelection,
   defaults: ComposerModelPreferenceDefaults,
@@ -77,13 +67,11 @@ function getModelPreferenceState(
   defaults: ComposerModelPreferenceDefaults,
 ): ModelPreferenceState {
   const model = findProviderModel(selection.provider, selection.modelId);
-  const has1M = model?.contextWindowOptions?.includes("1m") === true;
   const hasThinking = supportsClaudeModelOption(selection.provider, selection.modelId, supportsThinkingToggle);
   const hasFast = model?.supportsFastMode === true;
-  const contextWindow = getContextWindow(selection, defaults);
   const thinking = getThinking(selection, defaults);
   const fastMode = getFastMode(selection, defaults);
-  return { has1M, hasThinking, hasFast, contextWindow, thinking, fastMode };
+  return { hasThinking, hasFast, thinking, fastMode };
 }
 
 /** Whether the selected model runs in Fast mode, from the thread's override or the global default. */
@@ -129,9 +117,6 @@ function modelOptionToggles(state: ModelPreferenceState, actionProps: ModelPrefe
       set: (on) => change({ fastMode: on === actionProps.defaults.globalCodexFast ? null : on }),
     });
   }
-  if (state.has1M) {
-    toggles.push({ label: "1M context", on: state.contextWindow === "1m", set: (on) => change({ contextWindow: on ? "1m" : "200k" }) });
-  }
   if (state.hasThinking) {
     toggles.push({ label: "Thinking", on: state.thinking, set: (thinking) => change({ thinking }) });
   }
@@ -139,7 +124,7 @@ function modelOptionToggles(state: ModelPreferenceState, actionProps: ModelPrefe
 }
 
 /**
- * The selected model's on/off options (context window, Thinking, Fast) as labelled switch rows, persisted to the thread
+ * The selected model's on/off options (Fast, Thinking) as labelled switch rows, persisted to the thread
  * as they change; null when it has none. Rows carry no inline padding, so each host lines the labels up with its list
  * through `className`.
  */
@@ -197,15 +182,18 @@ export function ReasoningLevelOptions({ levels, checked, defaultLevel, label, on
           type="button"
           role="option"
           aria-selected={level === checked}
-          // Named outright: the Default tag's text would otherwise run into the level's, as "HighDefault".
-          aria-label={level === defaultLevel ? `${formatReasoningLabel(level)}, default` : formatReasoningLabel(level)}
           tabIndex={level === tabbable ? 0 : -1}
           onClick={() => onChoose(level)}
           className={cn(MENU_ROW_CLASS, listInset && "px-2")}
         >
           <MenuRowBody
             label={formatReasoningLabel(level)}
-            trailing={level === defaultLevel ? <span className="text-caption text-muted">Default</span> : undefined}
+            trailing={
+              level === defaultLevel ? (
+                // The hidden comma keeps the name from running together as "HighDefault" while it still holds the visible text.
+                <span className="text-caption text-muted"><span className="sr-only">,</span>{" Default"}</span>
+              ) : undefined
+            }
             checked={level === checked}
           />
         </button>

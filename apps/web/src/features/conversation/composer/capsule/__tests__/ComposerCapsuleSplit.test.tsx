@@ -87,7 +87,7 @@ async function renderSplit(overrides: SplitOverrides = {}) {
       threadId={overrides.threadId}
       branchFromMessageId={overrides.branchFromMessageId}
       selection={{ ...selection, ...overrides.selection }}
-      defaults={{ contextWindow: undefined, thinking: undefined, globalCodexFast: false }}
+      defaults={{ thinking: undefined, globalCodexFast: false }}
       reasoningLevels={overrides.reasoningLevels ?? LEVELS}
       permissionLocked={overrides.permissionLocked ?? false}
       approvalReviewSupported={overrides.approvalReviewSupported ?? true}
@@ -418,19 +418,16 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     expect(within(pane("GPT-9 Deep")).queryByRole("option", { selected: true })).toBeNull();
   });
 
-  it.each([
-    ["shows the 1M switch for the Claude 1M cohort", "claude-opus-5-5", true],
-    ["hides the 1M switch for Haiku", "claude-haiku-4-5", false],
-  ] as const)("%s", (_name, modelId, shown) => {
+  it("leaves the context window to Settings, even for a model with a 1M option", () => {
     render(
       <ComposerModelPreferenceSettings
-        selection={{ ...selection, provider: "claude", modelId }}
-        defaults={{ contextWindow: undefined, thinking: undefined, globalCodexFast: false }}
+        selection={{ ...selection, provider: "claude", modelId: "claude-opus-5-5" }}
+        defaults={{ thinking: undefined, globalCodexFast: false }}
         onSelectionChange={vi.fn()}
       />,
     );
 
-    expect(screen.queryByRole("switch", { name: "1M context" }) !== null).toBe(shown);
+    expect(screen.queryByRole("switch", { name: /context/i })).toBeNull();
   });
 });
 
@@ -473,7 +470,7 @@ describe("ComposerCapsuleSplit Devin model switch", () => {
     await openModelPicker();
 
     const pane = screen.getByRole("listbox", { name: "Reasoning for SWE-2" });
-    expect(within(pane).getAllByRole("option").map((option) => option.getAttribute("aria-label"))).toEqual(["Medium", "High, default", "Max"]);
+    for (const name of ["Medium", "High, Default", "Max"]) expect(within(pane).getByRole("option", { name })).toBeInTheDocument();
   });
 });
 
