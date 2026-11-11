@@ -29,8 +29,9 @@ export class ThreadSaveBlockedError extends Error {
   readonly code = THREAD_SAVE_BLOCKED_CODE;
 
   constructor(cause: Error) {
-    super(`This thread cannot save new work because an earlier save failed (${cause.message || cause.name}). `
-      + "Restart Mcode to recover the thread.", { cause });
+    // The hint leads and the reason is capped so both survive the execution worker's 2,000-character message limit.
+    super("This thread cannot save new work. Restart Mcode to recover it. "
+      + `The earlier save failed: ${(cause.message || cause.name).slice(0, 1_000)}`, { cause });
   }
 }
 
