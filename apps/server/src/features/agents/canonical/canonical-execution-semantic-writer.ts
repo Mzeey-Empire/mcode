@@ -197,7 +197,13 @@ interface SemanticHead {
 
 type StoredOperation = z.infer<typeof storedOperationSchema>;
 
-class SemanticConflict extends Error {}
+class SemanticConflict extends Error {
+  override readonly name = "SemanticConflict";
+
+  constructor(message: string) {
+    super(message);
+  }
+}
 
 /** The revoked ownership and recovery incident for a worker that cannot prove its live turn. */
 export interface LostExecutionInterruption {
@@ -358,7 +364,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     hash: string,
   ): ExecutionWriteReceipt {
     const current = this.loadHead(input.execution.executionId);
-    if (!current || current.terminal || !sameExecutionAndLease(current, input)) throw new SemanticConflict();
+    if (!current || current.terminal || !sameExecutionAndLease(current, input)) throw new SemanticConflict("execution head is missing, terminal, or owned by a different lease");
     const result = this.turns.interruptLostExecution({ ...input.execution,
       // A lost worker means Mcode could no longer save the provider's output.
       reason: input.reason, cause: "saving_stopped", recoveryIncidentId: input.recoveryIncidentId,
@@ -464,7 +470,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.turns.publishAcceptedTerminal({ ...mutation.input,
       projection: { kind: "writer-staged", ...(staged.messageId ? { messageId: staged.messageId } : {}) } });
     const recorded = this.threads.recordTurnOutcome(head.execution.threadId, mutation.outcome, mutation.projection.endedAt);
-    if (!recorded && !this.threads.findById(head.execution.threadId)) throw new SemanticConflict();
+    if (!recorded && !this.threads.findById(head.execution.threadId)) throw new SemanticConflict("terminal thread is missing");
     return { ...head, terminal: true, providerOutcome: mutation.outcome, assignedMessageId: staged.messageId };
   }
 
@@ -486,9 +492,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       || mutation.input.turnId !== operation.execution.turnId
       || mutation.input.executionId !== operation.execution.executionId) return conflict(operation);
     return this.withBufferedPublication(() => this.db.transaction(() => {
-      if (this.loadHead(operation.execution.executionId)) throw new SemanticConflict();
+      if (this.loadHead(operation.execution.executionId)) throw new SemanticConflict("execution already has a semantic head");
       const result = this.turns.start(mutation.input);
-      if (result.outcome !== "committed") throw new SemanticConflict();
+      if (result.outcome !== "committed") throw new SemanticConflict("parent turn start did not commit");
       const receipt = committed(operation, result.durableThrough);
       const head: SemanticHead = {
         execution: operation.execution,
@@ -517,17 +523,17 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         || event.routing.executionId !== operation.execution.executionId)) return conflict(operation);
     const receipt = this.withBufferedPublication(() => this.db.transaction(() => {
       const head = this.requireNextHead(operation);
-      if (!validPublicationProvider(operation, head.providerId)) throw new SemanticConflict();
+      if (!validPublicationProvider(operation, head.providerId)) throw new SemanticConflict("publication provider differs from the execution provider");
       const result = this.turns.append({
         ...operation.execution,
         phase: mutation.phase,
         nativeCursor: mutation.nativeCursor,
         events: mutation.events,
       });
-      if (result.outcome !== "committed") throw new SemanticConflict();
+      if (result.outcome !== "committed") throw new SemanticConflict("parent event append did not commit");
       const providerEvents = this.providerProjector.project(result.events);
       const compacting = this.contextCompaction.apply(operation.execution.threadId, head.compacting, providerEvents);
-      if (compacting === null) throw new SemanticConflict();
+      if (compacting === null) throw new SemanticConflict("context compaction transition conflicts with the publication");
       const live = this.appendParentLive(operation, head, providerEvents);
       const checkpoint = durableSequenceRowSchema.parse(this.findDurableSequence.get(operation.execution.executionId));
       const providerCommit: ExecutionProviderCommitReceipt = {
@@ -617,7 +623,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const publication = liveEventPublication(live);
     const matches = providerEvents.filter((projected) => publication
       && sameParentLiveEvent(projected.event, publication.event));
-    if (matches.length !== 1) throw new SemanticConflict();
+    if (matches.length !== 1) throw new SemanticConflict("live event does not match exactly one provider publication");
     this.requireUnfinishedCheckpoint(operation.execution);
     return {
       ...this.applyLiveFeatureEffects(live, head),
@@ -670,7 +676,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (mutation.kind !== "live-event") return conflict(operation);
     const receipt = this.withBufferedPublication(() => this.db.transaction(() => {
       const head = this.requireNextHead(operation);
-      if (!validPublicationProvider(operation, head.providerId)) throw new SemanticConflict();
+      if (!validPublicationProvider(operation, head.providerId)) throw new SemanticConflict("live publication provider differs from the execution provider");
       this.requireUnfinishedCheckpoint(operation.execution);
       const { textResult, planQuestions, planOutput } = this.applyLiveFeatureEffects(operation, head);
       const livePublication = this.projectLiveSystem(operation, head.providerId);
@@ -690,7 +696,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const mutation = operation.mutation;
     if (mutation.kind !== "live-event" || mutation.systemIntents === undefined) return undefined;
     const publication = operation.livePublication?.length === 1 ? operation.livePublication[0] : undefined;
-    if (publication?.event.type !== "system") throw new SemanticConflict();
+    if (publication?.event.type !== "system") throw new SemanticConflict("system intents require a system publication");
     const result = this.systemProjection.projectBoundSystem(
       operation.execution, providerId, publication.event, mutation.systemIntents, publication.after,
     );
@@ -703,7 +709,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     includeNarrative = true,
   ) {
     const mutation = operation.mutation;
-    if (mutation.kind !== "live-event") throw new SemanticConflict();
+    if (mutation.kind !== "live-event") throw new SemanticConflict("live effects require a live-event mutation");
     this.stageLiveMessage(operation.execution, head, mutation.message);
     const textResult = this.applyLiveText(mutation.text, operation.execution.executionId);
     if (includeNarrative && mutation.narrative) this.persistNarrativeDelta(mutation.narrative);
@@ -725,8 +731,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     message: DataOnlyParentLiveMessageInput | undefined,
   ): void {
     if (!message) return;
-    if (head.assignedMessageId && head.assignedMessageId !== message.messageId) throw new SemanticConflict();
-    if (!this.turns.stageLiveAssistant(execution, message)) throw new SemanticConflict();
+    if (head.assignedMessageId && head.assignedMessageId !== message.messageId) throw new SemanticConflict("live message id differs from the turn's assigned message id");
+    if (!this.turns.upsertStagedAssistant(execution, message)) throw new SemanticConflict("staged assistant row conflicts with the live message");
   }
 
   private persistLivePlanOutput(
@@ -747,16 +753,16 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const stored = this.assistantText.restore(executionId);
       const expected = (text.retainedText ?? "") + text.expectedText;
       const matches = this.assistantText.isOverflowed(executionId) ? expected.startsWith(stored) : expected === stored;
-      if (!matches) throw new SemanticConflict();
+      if (!matches) throw new SemanticConflict("persisted assistant text differs from the expected text");
       return undefined;
     }
     const result = this.assistantText.appendChunk(text.kind === "append" ? text.inputs : [text.input]);
-    if (result.outcome === "duplicate") throw new SemanticConflict();
+    if (result.outcome === "duplicate") throw new SemanticConflict("assistant text chunk was already appended");
     return result;
   }
 
   private resetReclassifiedText(text: Extract<ParentLiveEffects["text"], { kind: "reclassify" }>, execution: ExecutionIdentity): void {
-    if (!this.assistantText.resetInTransaction(execution.executionId)) throw new SemanticConflict();
+    if (!this.assistantText.resetInTransaction(execution.executionId)) throw new SemanticConflict("assistant text checkpoint could not be reset");
     if (text.retainedText) {
       this.assistantText.appendChunk([{ ...execution, sequence: 1, text: text.retainedText }]);
     }
@@ -778,7 +784,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     messageId: string,
     output: NonNullable<Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>["planOutput"]>,
   ) {
-    if (this.plans.getByMessageId(messageId)) throw new SemanticConflict();
+    if (this.plans.getByMessageId(messageId)) throw new SemanticConflict("message already has a plan");
     return this.plans.create(threadId, messageId, output, ProviderIdSchema.parse(this.threads.findById(threadId)?.provider));
   }
 
@@ -786,13 +792,13 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const checkpoint = this.canonical.loadCheckpoint(execution.executionId);
     if (!checkpoint || checkpoint.threadId !== execution.threadId
       || checkpoint.turnId !== execution.turnId || checkpoint.terminalOutcome !== null) {
-      throw new SemanticConflict();
+      throw new SemanticConflict("live execution checkpoint is missing, terminal, or belongs to another turn");
     }
   }
 
   private persistNarrativeDelta(input: Extract<ExecutionSemanticOperation["mutation"],
     { kind: "narrative-delta" }>["input"]): void {
-    if (!this.canonical.recordParentNarrativeRecovery(input)) throw new SemanticConflict();
+    if (!this.canonical.recordParentNarrativeRecovery(input)) throw new SemanticConflict("parent narrative recovery could not be recorded");
   }
 
   private async finish(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
@@ -805,10 +811,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.storePublicationChunks(operation.execution.executionId, hash, batch.publishedSequences);
       if (batch.terminal) {
         const current = this.requireNextHead(operation);
-        if (current.providerId !== mutation.input.providerId) throw new SemanticConflict();
+        if (current.providerId !== mutation.input.providerId) throw new SemanticConflict("terminal provider differs from the execution provider");
         const receipt = committed(operation, batch.durableSequence, providerCommit, providerCommit ? [] : undefined);
         const recorded = this.threads.recordTurnOutcome(operation.execution.threadId, mutation.outcome, mutation.projection.endedAt);
-        if (!recorded && !this.threads.findById(operation.execution.threadId)) throw new SemanticConflict();
+        if (!recorded && !this.threads.findById(operation.execution.threadId)) throw new SemanticConflict("completed thread is missing");
         this.storeHead({ ...current, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, terminal: true });
         this.storeReceipt(operation, hash, receipt);
       }
@@ -833,14 +839,14 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>,
   ): DataOnlyParentTurnFinishInput {
     const pending = this.loadOperation(operation.execution.executionId, operation.operationId);
-    if (!pending || pending.kind !== PENDING_FINISH_KIND) throw new SemanticConflict();
+    if (!pending || pending.kind !== PENDING_FINISH_KIND) throw new SemanticConflict("pending terminal preparation is missing or has a different kind");
     const preparation = pendingFinishSchema.parse(JSON.parse(pending.receipt_json));
     return { ...mutation.input, providerIdentities: preparation.providerIdentities };
   }
 
   private terminalProviderIdentities(threadId: string, providerId: string): ProviderIdentity[] {
     const canonicalThread = this.canonical.loadThread(threadId);
-    if (!canonicalThread || canonicalThread.providerId !== providerId) throw new SemanticConflict();
+    if (!canonicalThread || canonicalThread.providerId !== providerId) throw new SemanticConflict("terminal thread is missing or has a different provider");
     const thread = this.threads.findById(threadId);
     if (!thread?.sdk_session_id || thread.provider !== providerId) return [...canonicalThread.providerIdentities];
     return [{ providerId: canonicalThread.providerId, scope: providerId === "codex" ? "thread" : "session",
@@ -852,7 +858,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     hash: string,
     mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "finish-live-event" }>,
   ): ExecutionProviderCommitReceipt | undefined {
-    if (!validLiveFinish(operation.execution, mutation)) throw new SemanticConflict();
+    if (!validLiveFinish(operation.execution, mutation)) throw new SemanticConflict("terminal input does not match the execution");
     const prepared = this.withBufferedPublication(() => this.db.transaction(() => {
       const head = this.requireNextHead(operation);
       const pending = this.loadOperation(operation.execution.executionId, operation.operationId);
@@ -861,7 +867,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         return committed(operation, head.durableRevision, pendingFinishSchema.parse(JSON.parse(pending.receipt_json)).providerCommit);
       }
       if (head.assignedMessageId && head.assignedMessageId !== mutation.projection.assistant.messageId) {
-        throw new SemanticConflict();
+        throw new SemanticConflict("terminal message id differs from the turn's assigned message id");
       }
       const next = this.recordProviderOutcome(head, mutation.outcome);
       const evidence = this.appendTerminalEvidence(operation, hash, mutation, next);
@@ -871,7 +877,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         this.terminalProviderIdentities(operation.execution.threadId, head.providerId));
       return committed(operation, head.durableRevision, evidence.providerCommit);
     }).immediate(), false);
-    if (prepared.kind !== "committed") throw new SemanticConflict();
+    if (prepared.kind !== "committed") throw new SemanticConflict("terminal preparation did not commit");
     return prepared.providerCommit;
   }
 
@@ -885,11 +891,11 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const checkpoint = this.canonical.loadCheckpoint(operation.execution.executionId);
     const result = this.turns.append({ ...operation.execution, ...mutation.providerEvent,
       nativeCursor: mutation.providerEvent.nativeCursor ?? checkpoint?.nativeCursor ?? null });
-    if (result.outcome !== "committed") throw new SemanticConflict();
+    if (result.outcome !== "committed") throw new SemanticConflict("terminal provider events did not commit");
     const projected = this.providerProjector.project(result.events);
-    if (!matchesTerminalProviderPublication(operation, projected)) throw new SemanticConflict();
+    if (!matchesTerminalProviderPublication(operation, projected)) throw new SemanticConflict("terminal provider publication differs from the projected events");
     const compacting = this.contextCompaction.apply(operation.execution.threadId, head.compacting, projected);
-    if (compacting === null) throw new SemanticConflict();
+    if (compacting === null) throw new SemanticConflict("terminal context compaction transition conflicts with the publication");
     const publicationEvents = this.bufferedPublication?.flat() ?? [];
     this.storePublicationChunks(operation.execution.executionId, hash,
       publicationEvents.map((event) => event.acceptedSequence));
@@ -916,9 +922,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private requirePostTerminalPublication(operation: ExecutionSemanticOperation, head: SemanticHead): void {
     const event = operation.livePublication?.[0]?.event;
-    if (!event || !validPublicationProvider(operation, head.providerId)) throw new SemanticConflict();
+    if (!event || !validPublicationProvider(operation, head.providerId)) throw new SemanticConflict("post-terminal publication is missing or has a different provider");
     const checkpoint = this.canonical.loadCheckpoint(operation.execution.executionId);
-    if (!checkpoint?.terminalOutcome || !matchesLateOutcome(event, checkpoint.terminalOutcome)) throw new SemanticConflict();
+    if (!checkpoint?.terminalOutcome || !matchesLateOutcome(event, checkpoint.terminalOutcome)) throw new SemanticConflict("post-terminal outcome differs from the terminal checkpoint");
   }
 
   private terminalHookPublication(operation: ExecutionSemanticOperation): readonly ExecutionLivePublicationIntent[] | undefined {
@@ -928,7 +934,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const hook = mutation.hooks?.[0];
     if (!hook) return undefined;
     const message = this.canonical.loadTerminalProjection(operation.execution.turnId).message;
-    if (!message) throw new SemanticConflict();
+    if (!message) throw new SemanticConflict("terminal hook publication has no assistant message");
     return [{ after: "terminal", event: { ...publication.event,
       persistedMessageId: message.id, persistedHookId: hook.record.id } }];
   }
@@ -947,7 +953,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   private requireTerminalHead(operation: OperationPosition): SemanticHead {
     const head = this.loadHead(operation.execution.executionId);
     if (!head?.terminal || head.ended || head.ordinal + 1 !== operation.ordinal
-      || !sameExecutionAndLease(head, operation)) throw new SemanticConflict();
+      || !sameExecutionAndLease(head, operation)) throw new SemanticConflict("terminal head is missing, ended, out of order, or owned by a different lease");
     return head;
   }
 
@@ -958,13 +964,13 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   ): Extract<ExecutionSemanticOperation["mutation"], { kind: "append-events" }>["events"] {
     if (hooks.length === 0) return [];
     const message = this.canonical.loadTerminalProjection(operation.execution.turnId).message;
-    if (!message) throw new SemanticConflict();
+    if (!message) throw new SemanticConflict("terminal hooks have no assistant message");
     const drafts = [];
     for (const hook of hooks) {
       const record = hook.record;
       const existing = this.db.prepare("SELECT message_id FROM hook_executions WHERE id = ?").get(record.id);
-      if (existing && !NodeUtil.isDeepStrictEqual(existing, { message_id: message.id })) throw new SemanticConflict();
-      if (record.message_id && record.message_id !== message.id) throw new SemanticConflict();
+      if (existing && !NodeUtil.isDeepStrictEqual(existing, { message_id: message.id })) throw new SemanticConflict("persisted hook belongs to a different assistant message");
+      if (record.message_id && record.message_id !== message.id) throw new SemanticConflict("terminal hook input belongs to a different assistant message");
       this.hooks.bulkCreate([{ id: record.id, messageId: message.id, hookName: record.hook_name,
         toolName: record.tool_name, phase: record.phase, payload: record.payload, durationMs: record.duration_ms,
         didBlock: record.did_block, startedAt: record.started_at, endedAt: record.ended_at, sortOrder: record.sort_order }], true);
@@ -978,15 +984,15 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     hooks: Extract<ExecutionSemanticOperation["mutation"], { kind: "append-events" }>["events"],
   ): ExecutionProviderCommitReceipt | undefined {
     const mutation = operation.mutation;
-    if (mutation.kind !== "post-terminal-event") throw new SemanticConflict();
+    if (mutation.kind !== "post-terminal-event") throw new SemanticConflict("post-terminal evidence requires a post-terminal-event mutation");
     const source = mutation.providerEvent;
     const events = [...source ? source.events : [], ...hooks];
     if (events.length === 0) return undefined;
     const result = this.turns.append({ ...operation.execution, events,
       phase: source ? source.phase : "post-terminal", nativeCursor: null });
-    if (result.outcome !== "committed") throw new SemanticConflict();
+    if (result.outcome !== "committed") throw new SemanticConflict("post-terminal evidence did not commit");
     const projected = this.providerProjector.project(result.events);
-    if (mutation.providerEvent && !matchesPostTerminalProviderPublication(operation, projected)) throw new SemanticConflict();
+    if (mutation.providerEvent && !matchesPostTerminalProviderPublication(operation, projected)) throw new SemanticConflict("post-terminal provider publication differs from the projected events");
     return { outcome: result.outcome, conversationRevision: result.conversationRevision, rosterRevision: result.rosterRevision,
       acceptedThrough: result.acceptedThrough, durableThrough: result.durableThrough,
       eventCount: source ? source.events.length : 0 };
@@ -1008,7 +1014,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       case "stop-requested": return this.recordStop(head, operation, mutation);
       case "provider-outcome": return this.recordProviderOutcome(head, mutation.outcome);
       case "checkpoint": return this.recordCheckpoint(head, operation.execution.executionId, mutation);
-      default: throw new SemanticConflict();
+      default: throw new SemanticConflict("unsupported control mutation");
     }
   }
 
@@ -1018,15 +1024,15 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "stop-requested" }>,
   ): SemanticHead {
     if (!mutation.requestId || head.stopRequestId || head.providerOutcome
-      || mutation.lastAdmittedOrdinal !== operation.ordinal - 1) throw new SemanticConflict();
+      || mutation.lastAdmittedOrdinal !== operation.ordinal - 1) throw new SemanticConflict("stop request is missing, repeated, after provider outcome, or has a different watermark");
     if (this.updateCheckpointPhase.run("stopping", new Date().toISOString(), operation.execution.executionId).changes !== 1) {
-      throw new SemanticConflict();
+      throw new SemanticConflict("stopping checkpoint could not be updated");
     }
     return { ...head, stopRequestId: mutation.requestId, stopWatermark: mutation.lastAdmittedOrdinal };
   }
 
   private recordProviderOutcome(head: SemanticHead, outcome: TurnOutcome): SemanticHead {
-    if (head.providerOutcome || head.stopRequestId && outcome !== "cancelled") throw new SemanticConflict();
+    if (head.providerOutcome || head.stopRequestId && outcome !== "cancelled") throw new SemanticConflict("provider outcome is repeated or conflicts with a stop request");
     return { ...head, providerOutcome: outcome };
   }
 
@@ -1038,7 +1044,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const cursor = mutation.nativeCursor === null ? null : JSON.stringify(mutation.nativeCursor);
     if (!mutation.phase || mutation.phase.length > 64 || cursor === undefined
       || this.updateCheckpoint.run(mutation.phase, cursor, new Date().toISOString(), executionId).changes !== 1) {
-      throw new SemanticConflict();
+      throw new SemanticConflict("checkpoint phase or cursor is invalid, or checkpoint is missing");
     }
     return head;
   }
@@ -1051,14 +1057,14 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private requireNextHead(operation: OperationPosition, afterOrdinal?: number): SemanticHead {
     const head = this.loadHead(operation.execution.executionId);
-    if (!head || !nextHead(head, operation, afterOrdinal)) throw new SemanticConflict();
+    if (!head || !nextHead(head, operation, afterOrdinal)) throw new SemanticConflict("execution head is missing, out of order, or owned by a different lease");
     return head;
   }
 
   private loadHead(executionId: string): SemanticHead | null {
     const row = this.loadOperation(executionId, HEAD_ID);
     if (!row) return null;
-    if (row.kind !== HEAD_KIND) throw new SemanticConflict();
+    if (row.kind !== HEAD_KIND) throw new SemanticConflict("stored execution head has a different operation kind");
     return storedHeadSchema.parse(JSON.parse(row.receipt_json));
   }
 
@@ -1074,7 +1080,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     providerIdentities?: readonly ProviderIdentity[]): void {
     const existing = this.loadOperation(operation.execution.executionId, operation.operationId);
     if (existing) {
-      if (existing.kind !== PENDING_FINISH_KIND || existing.input_hash !== hash) throw new SemanticConflict();
+      if (existing.kind !== PENDING_FINISH_KIND || existing.input_hash !== hash) throw new SemanticConflict("pending finish has a different operation kind or input hash");
       return;
     }
     this.insertOperation.run(operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash,
@@ -1095,7 +1101,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       const existing = this.loadOperation(executionId, id);
       if (existing) {
         if (existing.kind !== PUBLICATION_KIND || existing.input_hash !== hash || existing.receipt_json !== json) {
-          throw new SemanticConflict();
+          throw new SemanticConflict("stored publication chunk has a different kind, hash, or contents");
         }
         continue;
       }
@@ -1118,13 +1124,13 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       ).get(operation.execution.threadId) } : {}),
     });
     if (operation.livePublication && Buffer.byteLength(receiptJson, "utf8") > MAX_LIVE_RECEIPT_BYTES) {
-      throw new SemanticConflict();
+      throw new SemanticConflict("live receipt exceeds the maximum byte size");
     }
     if (isFinishMutation(operation.mutation)) {
       const updated = this.commitPendingFinish.run(
         `semantic:${operation.mutation.kind}`, receiptJson, operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash,
       );
-      if (updated.changes !== 1) throw new SemanticConflict();
+      if (updated.changes !== 1) throw new SemanticConflict("pending finish receipt could not be committed");
       return storedReceipt;
     }
     this.insertOperation.run(
@@ -1148,7 +1154,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   ): void {
     const thread = this.canonical.loadThread(operation.execution.threadId);
     const checkpoint = this.canonical.loadCheckpoint(operation.execution.executionId);
-    if (!thread || !checkpoint) throw new SemanticConflict();
+    if (!thread || !checkpoint) throw new SemanticConflict("publication has no canonical thread or checkpoint");
     const result = this.canonical.commitInsideTransaction({
       threadId: operation.execution.threadId,
       turnId: operation.execution.turnId,
@@ -1174,7 +1180,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     });
     if (result.outcome !== "committed" && result.outcome !== "duplicate"
       && result.outcome !== "terminal-outcome-confirmed") {
-      throw new SemanticConflict();
+      throw new SemanticConflict("provider publication did not commit");
     }
     if (result.events.length === 0) return;
     this.storePublicationChunks(operation.execution.executionId, hash,
@@ -1193,7 +1199,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const row = livePublicationHeadSchema.safeParse(
       this.advanceLivePublication.get(operation.execution.threadId, intents.length),
     );
-    if (!row.success) throw new SemanticConflict();
+    if (!row.success) throw new SemanticConflict("live publication head could not be advanced");
     const first = row.data.last_sequence - intents.length + 1;
     return intents.map((intent, index) => ({ ...intent, publicationId: String(first + index) }));
   }
@@ -1227,11 +1233,11 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
 
   private terminalPersistence(operation: ExecutionSemanticOperation, settledMessage: ExecutionTerminalPersistenceReceipt["settledMessage"] = null): ExecutionTerminalPersistenceReceipt {
     const mutation = operation.mutation;
-    if (mutation.kind !== "finish-live-event") throw new SemanticConflict();
+    if (mutation.kind !== "finish-live-event") throw new SemanticConflict("terminal persistence requires a finish-live-event mutation");
     const persisted = this.canonical.loadTerminalProjection(operation.execution.turnId);
     const message = persisted.message;
     if (message && !matchesCommittedTerminalMessage(message, operation.execution, mutation.outcome)) {
-      throw new SemanticConflict();
+      throw new SemanticConflict("persisted terminal message conflicts with the execution or outcome");
     }
     const fileEvidence = mutation.input.fileEvidence;
     return {

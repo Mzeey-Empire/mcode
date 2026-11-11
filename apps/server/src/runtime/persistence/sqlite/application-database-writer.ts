@@ -305,15 +305,17 @@ function matchesResponse(request: ApplicationDatabaseWriterRequest, response: Ap
 function responseError(response: ApplicationDatabaseWriterResponse): Error {
   if (response.kind !== "failed" && response.kind !== "ordinary-failed") return new Error("Unexpected database writer response");
   const failure = response.failure;
-  if (failure?.refusal) return new DatabaseStartupRefusal(failure.refusal);
-  if (failure && "contentRejection" in failure && failure.contentRejection) return new AcceptedContentRejected(failure.contentRejection);
-  const error = new Error(failureMessage(response));
+  let error: Error;
+  if (failure?.refusal) error = new DatabaseStartupRefusal(failure.refusal);
+  else if (failure && "contentRejection" in failure && failure.contentRejection) error = new AcceptedContentRejected(failure.contentRejection);
+  else error = new Error(failureMessage(response));
   if (failure) copyFailureFields(error, failure);
   return error;
 }
 
 function copyFailureFields(error: Error, failure: NonNullable<Extract<ApplicationDatabaseWriterResponse, { kind: "failed" | "ordinary-failed" }>["failure"]>): void {
   error.name = failure.name;
+  if (failure.stack) error.stack = failure.stack;
   if (failure.code) Object.assign(error, { code: failure.code });
   if ("retryAfterSeconds" in failure && typeof failure.retryAfterSeconds === "number") {
     Object.assign(error, { retryAfterSeconds: failure.retryAfterSeconds });
@@ -321,8 +323,8 @@ function copyFailureFields(error: Error, failure: NonNullable<Extract<Applicatio
 }
 
 function failureMessage(response: Extract<ApplicationDatabaseWriterResponse, { kind: "failed" | "ordinary-failed" }>): string {
-  if (response.kind === "ordinary-failed") return response.failure.message;
-  const suffix = response.failure ? ": " + response.failure.message : "";
+  if (response.kind === "ordinary-failed") return response.failure.message || response.failure.name;
+  const suffix = response.failure ? ": " + (response.failure.message || response.failure.name) : "";
   return "Canonical writer " + response.reason + suffix;
 }
 

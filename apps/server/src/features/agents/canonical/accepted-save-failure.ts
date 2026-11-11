@@ -17,6 +17,32 @@ export class AcceptedContentRejected extends Error {
   }
 }
 
+/** Error code a client receives when a thread refuses new turns behind a failed save. */
+export const THREAD_SAVE_BLOCKED_CODE = "THREAD_SAVE_BLOCKED";
+
+/**
+ * A new turn command refused because an earlier save of the thread cannot complete. Later saves wait behind
+ * the failed one in order, so the thread accepts no new turn until the save succeeds or the server restarts.
+ */
+export class ThreadSaveBlockedError extends Error {
+  override readonly name = "ThreadSaveBlockedError";
+  readonly code = THREAD_SAVE_BLOCKED_CODE;
+
+  constructor(cause: Error) {
+    // The hint leads and the reason is capped so both survive the execution worker's 2,000-character message limit.
+    super("This thread cannot save new work. Restart Mcode to recover it. "
+      + `The earlier save failed: ${(cause.message || cause.name).slice(0, 1_000)}`, { cause });
+  }
+}
+
+/**
+ * Whether an error is a save-blocked refusal. Checks the code, not the class, because a send's refusal reaches
+ * the router rebuilt as a plain `Error` after it crosses the execution worker.
+ */
+export function isThreadSaveBlocked(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === THREAD_SAVE_BLOCKED_CODE;
+}
+
 /** Classify a failed save by the codes on its error and `cause` chain. */
 export function classifySaveFailure(error: Error): SaveFailureClass {
   if (findCode(error, (code) => /^SQLITE_(BUSY|LOCKED)/.test(code))) return "transient";

@@ -14,6 +14,8 @@ import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 import { mapRouteError, routeMessage, type RouterDeps } from "../ws-router.js";
 import { ProviderDisabledError } from "../../../features/providers/availability/provider-availability-errors.js";
 import { DraftImageMissingError } from "../../../features/attachments/storage/draft-image-missing-error.js";
+import { ThreadSaveBlockedError } from "../../../features/agents/canonical/accepted-save-failure.js";
+import { executionWriterFailure, restoreExecutionWriterFailure } from "../../../features/agents/execution/execution-writer-failure.js";
 import { CodexCatalogService } from "../../../features/providers/catalog/codex-catalog-service.js";
 import { ProviderCatalogService } from "../../../features/providers/catalog/provider-catalog-service.js";
 import { ProviderCatalogSnapshotRepo } from "../../../features/providers/catalog/persistence/provider-catalog-snapshot-repo.js";
@@ -1906,6 +1908,35 @@ describe("mapRouteError for refused turn admission", () => {
 
     expect(response.error?.code).toBe("INTERNAL_ERROR");
     expect(error).toHaveBeenCalledWith("RPC handler error", expect.objectContaining({ method: "agent.send" }));
+  });
+
+  it("tells the client a thread is blocked by a failed save after the refusal crosses the execution worker", () => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    const refusal = new ThreadSaveBlockedError(new Error("Canonical writer write-failed: SemanticConflict"));
+
+    const response = mapRouteError(request, restoreExecutionWriterFailure(executionWriterFailure(refusal)));
+
+    expect(response.error).toMatchObject({ code: "THREAD_SAVE_BLOCKED",
+      message: expect.stringMatching(/Restart Mcode.*Canonical writer write-failed: SemanticConflict/) });
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it("keeps the restart hint when a blocked save's reason is longer than the worker's message limit", () => {
+    const refusal = new ThreadSaveBlockedError(new Error(`Canonical writer write-failed: ${"x".repeat(8_000)}`));
+
+    const response = mapRouteError(request, restoreExecutionWriterFailure(executionWriterFailure(refusal)));
+
+    expect(response.error?.message).toMatch(/^This thread cannot save new work\. Restart Mcode to recover it\. .*Canonical writer write-failed: x+/);
+  });
+
+  it("logs a writer failure that crossed the execution worker with its original name and stack", () => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    const failure = new TypeError("boom");
+
+    mapRouteError(request, restoreExecutionWriterFailure(executionWriterFailure(failure)));
+
+    expect(error).toHaveBeenCalledWith("RPC handler error",
+      expect.objectContaining({ error: "boom", name: "TypeError", stack: failure.stack }));
   });
 
   it("keeps a provider availability failure's own code and provider", () => {

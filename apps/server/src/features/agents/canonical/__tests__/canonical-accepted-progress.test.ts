@@ -1390,6 +1390,54 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       .toThrow("Steered message has no matching accepted execution");
   });
 
+  it("saves a second steer after two absorbed Claude segments each emit a mid-turn message", async () => {
+    const steers = new TurnSteerStore(db);
+    const first = "6f1c2b8e-3d4a-4c5b-9e7f-0a1b2c3d4e5f";
+    const second = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
+    for (const messageId of [first, second]) {
+      steers.insertPending({ messageId, threadId: execution.threadId, turnExecutionId: execution.executionId,
+        inputsHash: "inputs", payload: { content: "Delegate finished" } });
+    }
+    let ordinal = 1;
+    const event = (type: AgentEvent["type"], fields: Record<string, unknown> = {}, delivery?: "live") =>
+      send(++ordinal, { kind: "event", phase: "running", nativeCursor: null,
+        events: [{ ...draft("claude", ordinal, type, fields), ...(delivery ? { delivery } : {}) }] });
+    await send(1, start("claude"));
+    await event("textDelta", { delta: "Segment one", isFinalResponse: true }, "live");
+    await event("toolUse", { toolCallId: "tool-a", toolName: "Read", toolInput: {} });
+    await event("message", { content: "Segment one", tokens: 10 });
+    await progress.acceptSteeredUserMessage({ threadId: execution.threadId, turnExecutionId: execution.executionId,
+      messageId: first, content: "First wake" });
+    await event("textDelta", { delta: "Segment two", isFinalResponse: true }, "live");
+    await event("toolUse", { toolCallId: "tool-b", toolName: "Read", toolInput: {} });
+    await event("message", { content: "Segment two", tokens: 10 });
+    const secondSaved = progress.acceptSteeredUserMessage({ threadId: execution.threadId,
+      turnExecutionId: execution.executionId, messageId: second, content: "Second wake" });
+    secondSaved.catch(() => {});
+
+    await expect.poll(() => progress.savingStatuses(execution.threadId)).toEqual([]);
+    await expect(secondSaved).resolves.toBeUndefined();
+    expect(db.prepare("SELECT id FROM messages WHERE role = 'user' AND id IN (?, ?) ORDER BY sequence").all(first, second))
+      .toEqual([{ id: first }, { id: second }]);
+    expect(steers.find(second)?.state).toBe("delivered");
+  });
+
+  it("completes a Claude turn with the final answer after an absorbed segment message", async () => {
+    await send(1, start("claude"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 2, "message", { content: "Segment one", tokens: 10 })] });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 3, "message", { content: "Final answer", tokens: 10 })] });
+    await send(4, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 4, "turnComplete")], terminalInput: { ...execution, providerId: "claude", providerIdentities: [],
+        outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(new CanonicalAgentStore(db, () => {}).loadTurn(execution.turnId)?.status).toBe("Completed");
+    expect(db.prepare("SELECT content FROM messages WHERE thread_id = ? AND role = 'assistant' AND is_internal = 0")
+      .all(execution.threadId)).toEqual([{ content: "Final answer" }]);
+  });
+
   it("preserves the durable child roster revision across a parent follow-up and fresh recovery owner", async () => {
     await send(1, start("codex"));
     expect(recovery().durable).toMatchObject({ mode: "snapshot", snapshot: { revision: { rosterRevision: 0 } } });
@@ -2904,7 +2952,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT last_sequence FROM canonical_writer_live_publication_heads WHERE thread_id = ?").get(execution.threadId))
       .toEqual(previousPublicationHead);
     expect(failures).toEqual([]);
-    await expect(progress.beforeDurableCommand(execution.threadId)).rejects.toThrow("disk checkpoint unavailable");
+    await expect(progress.beforeDurableCommand(execution.threadId)).rejects.toMatchObject({
+      code: "THREAD_SAVE_BLOCKED", message: expect.stringContaining("disk checkpoint unavailable") });
     vi.spyOn(progress, "accept").mockImplementationOnce(() => { throw new ProgressAdmissionError("retention-exhausted"); });
     expect((await send(3, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("codex", 2, "toolUse", { toolCallId: "blocked-tool", toolName: "Read", toolInput: {} })] })).result)

@@ -21,6 +21,7 @@ import type {
 export type WriterFailure = {
   name: string;
   message: string;
+  stack?: string;
   code?: string;
   retryAfterSeconds?: number;
   refusal?: StartupRefusal;
