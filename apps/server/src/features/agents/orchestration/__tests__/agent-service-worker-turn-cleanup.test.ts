@@ -207,6 +207,26 @@ describe("AgentService cleanup through production worker composition", { timeout
     } finally { dispatchHeld.resolve(); }
   });
 
+  it("keeps Stop's cancelled state when the release after a Stop during file preparation fails", async () => {
+    const fixture = await openFixture();
+    const preparing = holdDeferred();
+    const baseline = holdDeferred();
+    vi.spyOn(container.resolve(SnapshotService), "captureRef").mockImplementationOnce(async () => {
+      preparing.resolve();
+      await baseline.promise;
+      return "a".repeat(40);
+    });
+    const first = fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Do the work", provider: "codex", model: "gpt-5", permissionMode: "default" }).catch(() => undefined);
+    await preparing.promise;
+    vi.spyOn(fixture.workers.owner, "release").mockRejectedValueOnce(new Error("worker slot release failed"));
+    try {
+      const stopped = await fixture.service.stopSession(fixture.thread.id, { by: "user" });
+      expect(stopped).toMatchObject({ status: "cancelled", snapshot: { phase: "cancelled" } });
+    } finally { baseline.resolve(); await first; }
+    await fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Next", provider: "codex", model: "gpt-5", permissionMode: "default" });
+    await vi.waitFor(() => expect(fixture.sent.map((turn) => turn.message)).toEqual(["Next"]));
+  });
+
   it("aborts an auto-resumed turn when a pending mutation reservation owns the thread", async () => {
     const fixture = await openFixture("claude");
     const mutationReservations = container.resolve(ThreadControlMutationReservationService);
