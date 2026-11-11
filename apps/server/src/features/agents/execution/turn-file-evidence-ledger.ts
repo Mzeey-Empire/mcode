@@ -155,7 +155,7 @@ export class TurnFileEvidenceLedger {
       const filesChanged = await this.paths(frozen, knownPaths, after);
       const evidence: TurnFileEvidence = !before && !filesChanged.length ? { state: "untracked" } : { state: "recorded", filesChanged, fileEffects };
       return { evidence, snapshot: this.snapshot(tracked, evidence, before, after), diff: tracked.selectedTurnDiff };
-    } catch { return unavailable(); }
+    } catch (error) { return unavailable(gitWasKilled(error) ? "timed-out" : "capture-failed"); }
   }
 
   private snapshot(tracked: PreparedExecutionFileEvidence, evidence: TurnFileEvidence, before: string | null, after: string | null): Resolution["snapshot"] {
