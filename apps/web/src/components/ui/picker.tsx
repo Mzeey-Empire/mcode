@@ -47,6 +47,8 @@ export interface PickerRow {
   readonly description?: ReactNode;
   /** A secondary action on the row, such as starring it. Running it never picks the row. */
   readonly action?: PickerRowAction;
+  /** Inline alternatives drawn after the name, such as a model's reasoning levels. */
+  readonly choices?: PickerRowChoices;
   /** Makes the row a disclosure whose pick shows or hides the rows after it, drawn with a chevron. */
   readonly expanded?: boolean;
   /** Rows sharing a group sit together; a divider marks where the group changes. */
@@ -70,6 +72,19 @@ export interface PickerRowAction {
   /** Keeps the button visible when the row is not highlighted, such as a filled star. */
   readonly pinned?: boolean;
   readonly run: () => void;
+}
+
+/**
+ * Inline alternatives on a row, such as a model's reasoning levels. Choosing one picks the row with that choice. Like
+ * {@link PickerRowAction}, the buttons answer the pointer only: a listbox option cannot hold a focusable control.
+ */
+export interface PickerRowChoices {
+  /** The group's name, read before the choices in the row's description, such as "Reasoning". */
+  readonly label: string;
+  readonly items: readonly { readonly id: string; readonly label: string }[];
+  /** The choice drawn as current; set it on the selected row only. */
+  readonly current?: string;
+  readonly onChoose: (id: string) => void;
 }
 
 /** One picker tab, drawn as a segment above the list. */
@@ -536,13 +551,15 @@ function PickerOption(props: PickerOptionProps) {
 /** What an option reads after its name: why it is disabled, and how to run its action from the keyboard. */
 function optionDescriptions(id: string, row: PickerRow, reason: string | undefined, digit: number | undefined) {
   const actionHint = row.action ? `${row.action.label} (${ROW_ACTION_SHORTCUT.label})` : undefined;
-  const describedBy = [reason && `${id}-reason`, actionHint && `${id}-action`].filter(Boolean).join(" ");
+  const choicesHint = row.choices ? `${row.choices.label}: ${row.choices.items.map((item) => item.label).join(", ")}` : undefined;
+  const describedBy = [reason && `${id}-reason`, choicesHint && `${id}-choices`, actionHint && `${id}-action`].filter(Boolean).join(" ");
   return {
     describedBy: describedBy || undefined,
     keyShortcuts: optionKeyShortcuts(digit, actionHint !== undefined),
     spans: (
       <>
         {reason ? <span id={`${id}-reason`} hidden>{reason}</span> : null}
+        {choicesHint ? <span id={`${id}-choices`} hidden>{choicesHint}</span> : null}
         {actionHint ? <span id={`${id}-action`} hidden>{actionHint}</span> : null}
       </>
     ),
@@ -609,7 +626,7 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
           <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
         </span>
       ) : null}
-      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
+      <PickerRowControls row={row} onRunAction={onRunAction} />
       {selectedCheck ? (
         <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
           {selected ? <CheckIcon className="size-[1.4rem] text-ink" /> : null}
@@ -650,6 +667,47 @@ function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAc
     >
       {action.icon}
     </button>
+  );
+}
+
+/** The pointer-only controls at a row's end: its inline choices, then its action. */
+function PickerRowControls({ row, onRunAction }: { readonly row: PickerRow; readonly onRunAction: () => void }) {
+  return (
+    <>
+      {row.choices ? <PickerRowChoiceButtons choices={row.choices} /> : null}
+      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
+    </>
+  );
+}
+
+function PickerRowChoiceButtons({ choices }: { readonly choices: PickerRowChoices }) {
+  return (
+    <span
+      aria-hidden
+      // Shown on the hovered, highlighted or selected row only, so the list reads as a column of names.
+      className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover/option:opacity-100 group-data-active/option:opacity-100 group-data-selected/option:opacity-100"
+    >
+      {choices.items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          tabIndex={-1}
+          data-slot="picker-row-choice"
+          onClick={(event) => {
+            // Choosing must never also pick the row underneath it.
+            event.stopPropagation();
+            choices.onChoose(item.id);
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+          className={cn(
+            "h-[2.2rem] shrink-0 cursor-pointer rounded-full px-[0.7rem] text-compact",
+            item.id === choices.current ? "bg-selected text-ink" : "text-muted hover:bg-hover hover:text-ink",
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
+    </span>
   );
 }
 

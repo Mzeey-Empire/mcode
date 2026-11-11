@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { Star } from "lucide-react";
-import { Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
+import { Picker, type PickerRow, type PickerRowAction, type PickerRowChoices, type PickerTab } from "@/components/ui/picker";
+import { formatReasoningLabel } from "@/lib/format-model-label";
 import {
   MODEL_PROVIDERS,
   findModelById,
+  getReasoningLevels,
   isModelAvailable,
   type ModelProvider,
 } from "@/lib/model-registry";
@@ -433,6 +436,28 @@ export interface ModelPickerPanelProps {
   readonly onSelect: (modelId: string, providerId: string) => void;
   /** Settings for the selected model, shown under the catalog. */
   readonly footer?: ReactNode;
+  /** Shows each model's reasoning levels on its row, so one click picks the model and its level. */
+  readonly reasoning?: ModelPickerReasoning;
+}
+
+/** The current reasoning level and what choosing a level on a model row does. */
+export interface ModelPickerReasoning {
+  readonly current: ReasoningLevel;
+  readonly onChoose: (modelId: string, providerId: string, level: ReasoningLevel) => void;
+}
+
+function reasoningChoices(modelId: string, providerId: string, selected: boolean, reasoning: ModelPickerReasoning): PickerRowChoices | undefined {
+  const levels = getReasoningLevels(providerId, modelId);
+  if (levels.length === 0) return undefined;
+  return {
+    label: "Reasoning",
+    items: levels.map((level) => ({ id: level, label: formatReasoningLabel(level) })),
+    current: selected ? reasoning.current : undefined,
+    onChoose: (id) => {
+      const level = levels.find((candidate) => candidate === id);
+      if (level) reasoning.onChoose(modelId, providerId, level);
+    },
+  };
 }
 
 /**
@@ -449,6 +474,7 @@ export function ModelPickerPanel({
   onTabChange,
   onSelect,
   footer,
+  reasoning,
 }: ModelPickerPanelProps) {
   const presentation = getSelectedModelPresentation(selectedModelId, selectedProviderId);
   const { displayProvider } = presentation;
@@ -497,6 +523,9 @@ export function ModelPickerPanel({
     return providerModelOptions(provider.id, models, query, legacyExpanded);
   }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab]);
 
+  const selectedKey = presentation.selectedProviderId
+    ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId)
+    : undefined;
   const renderItem = useCallback(
     (option: ModelPickerOption): PickerRow => {
       if (option.kind === "legacy-fold") return legacyFoldRow(option);
@@ -516,9 +545,12 @@ export function ModelPickerPanel({
         ) : undefined,
         // A model whose access ended can still be unstarred, but not newly starred.
         action: option.endedOn && !starred ? undefined : favoriteAction(option, starred, toggleFavorite),
+        choices: reasoning && !option.endedOn
+          ? reasoningChoices(option.modelId, option.providerId, key === selectedKey, reasoning)
+          : undefined,
       };
     },
-    [starredKeys, toggleFavorite],
+    [starredKeys, toggleFavorite, reasoning, selectedKey],
   );
 
   const showTab = useCallback((next: ModelPickerTab) => {
@@ -549,11 +581,7 @@ export function ModelPickerPanel({
       items={items}
       total={null}
       status={loading ? "loading" : "ready"}
-      selectedKey={
-        presentation.selectedProviderId
-          ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId)
-          : undefined
-      }
+      selectedKey={selectedKey}
       renderItem={renderItem}
       onSelect={handlePick}
       footer={footer}

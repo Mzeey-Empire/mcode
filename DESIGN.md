@@ -1204,9 +1204,13 @@ are provider-native, so they show the parent thread's provider.
   access 232px, and the `+` menu 232px. Every part's popover opens in one spot: 8px above the right edge of the
   capsule, covering any tray, so it never moves when content above
   changes. With a popover open, resting 100ms on another part switches to
-  its popover, as in a menu bar. Picking a model that has reasoning levels
-  swaps to the reasoning popover in place. The reasoning part is as wide as
-  the model's widest level, so dragging the bar never resizes the pill. The
+  its popover, as in a menu bar. Model rows show their reasoning levels as
+  chips on the hovered, highlighted, and current row; a chip sets the model
+  and level and closes. Picking a model closes and keeps the level when the
+  model supports it. The reasoning popover is a list where one click sets the
+  level and closes; the option toggles change in place. The reasoning part is
+  as wide as the model's widest level, so changing the level never resizes the
+  pill. The
   part whose popover is open keeps the `button-secondary-hover` fill, a step
   above the hover, so it still reads as open while the pointer rests on
   another part. Each part names its

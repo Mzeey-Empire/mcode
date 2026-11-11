@@ -12,6 +12,19 @@ const MOVE_KEYS: Readonly<Record<string, (index: number, count: number) => numbe
   End: (_index, count) => count - 1,
 };
 
+/**
+ * Moves focus among a listbox's options as a menu does: the arrow keys wrap and Home and End reach the ends. Bind it
+ * to the listbox's `onKeyDown`.
+ */
+export function moveOptionFocus(event: KeyboardEvent<HTMLElement>): void {
+  const move = MOVE_KEYS[event.key];
+  const options = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')];
+  if (!move || options.length === 0) return;
+  event.preventDefault();
+  const current = options.findIndex((option) => option === document.activeElement);
+  options[move(Math.max(current, 0), options.length)]?.focus();
+}
+
 /** Props for {@link AccessOptionList}. */
 export interface AccessOptionListProps {
   readonly access: ComposerAccessModel;
@@ -30,21 +43,12 @@ export function AccessOptionList({ access, onChosen }: AccessOptionListProps) {
     listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
   }, []);
 
-  const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
-    const move = MOVE_KEYS[event.key];
-    const options = [...(listRef.current?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])];
-    if (!move || options.length === 0) return;
-    event.preventDefault();
-    const current = options.findIndex((option) => option === document.activeElement);
-    options[move(Math.max(current, 0), options.length)]?.focus();
-  };
-
   return (
     <div
       ref={listRef}
       role="listbox"
       aria-label="Access"
-      onKeyDown={moveFocus}
+      onKeyDown={moveOptionFocus}
       className={cn("relative", MENU_LIST_CLASS)}
     >
       <SlidingHighlight follow={{ pointer: '[role="option"]' }} />

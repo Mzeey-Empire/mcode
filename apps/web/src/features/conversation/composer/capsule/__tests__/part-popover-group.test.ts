@@ -45,23 +45,6 @@ describe("partPopoverReducer", () => {
     });
   });
 
-  it("chains a model pick to reasoning when the new model has reasoning levels", () => {
-    const open: PartPopoverState = { status: "open", part: "model", modelQuery: "son", modelTab: null };
-
-    expect(partPopoverReducer(open, { type: "modelPicked", reasoningAvailable: true })).toEqual({
-      status: "open",
-      part: "reasoning",
-      modelQuery: "son",
-      modelTab: null,
-    });
-  });
-
-  it("leaves the close of a pick without reasoning to the popover root", () => {
-    const open: PartPopoverState = { status: "open", part: "model", modelQuery: "", modelTab: null };
-
-    expect(partPopoverReducer(open, { type: "modelPicked", reasoningAvailable: false })).toBe(open);
-  });
-
   it("updates the search text while open", () => {
     const open: PartPopoverState = { status: "open", part: "model", modelQuery: "so", modelTab: null };
 

@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { Brain, Zap } from "lucide-react";
 import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
-import { SteppedSlider } from "@/components/ui/slider";
+import { MENU_LIST_CLASS, MENU_ROW_CLASS, MenuRowBody } from "@/components/ui/menu-row";
+import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
@@ -9,6 +10,7 @@ import { findProviderModel, supportsThinkingToggle } from "@/lib/model-registry"
 import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
+import { moveOptionFocus } from "./AccessOptionList";
 
 /** Defaults that model preferences use when no thread override exists. */
 export interface ComposerModelPreferenceDefaults {
@@ -36,7 +38,6 @@ interface ModelPreferenceState {
   fastMode: boolean;
   reasoningLevels: ReasoningLevel[];
   preferenceLabel: string;
-  preferenceTooltip: string;
   canShowPreferences: boolean;
 }
 
@@ -87,26 +88,11 @@ function hasAvailablePreference(
   return reasoningLevels.length > 0 || has1M || hasThinking || hasFast;
 }
 
-function getPreferenceLabel(state: Omit<ModelPreferenceState, "preferenceLabel" | "preferenceTooltip" | "canShowPreferences">, selection: ComposerAgentSelection): string {
+function getPreferenceLabel(state: Omit<ModelPreferenceState, "preferenceLabel" | "canShowPreferences">, selection: ComposerAgentSelection): string {
   if (state.reasoningLevels.length > 0) return formatReasoningLabel(selection.reasoning);
   if (state.hasThinking) return "Thinking";
   if (state.hasFast) return state.fastMode ? "Fast" : "Off";
   return state.contextWindow === "1m" ? "1M" : "200K";
-}
-
-function getPreferenceTooltip(
-  reasoningLevels: ReasoningLevel[],
-  has1M: boolean,
-  hasThinking: boolean,
-  hasFast: boolean,
-): string {
-  if (reasoningLevels.length > 0) {
-    if (has1M || hasThinking || hasFast) return "Reasoning and model options";
-    return "Reasoning level";
-  }
-  if (hasThinking) return "Thinking";
-  if (hasFast) return "Fast mode";
-  return "Context window";
 }
 
 function getModelPreferenceState(
@@ -125,7 +111,6 @@ function getModelPreferenceState(
   return {
     ...baseState,
     preferenceLabel: getPreferenceLabel(baseState, selection),
-    preferenceTooltip: getPreferenceTooltip(reasoningLevels, has1M, hasThinking, hasFast),
     canShowPreferences: hasAvailablePreference(reasoningLevels, has1M, hasThinking, hasFast),
   };
 }
@@ -164,7 +149,7 @@ function ComposerModelPreferenceSummaryContent({ state }: { state: ModelPreferen
 }
 
 function persistThreadSetting(
-  actionProps: ModelPreferenceActionProps,
+  actionProps: Pick<ComposerModelPreferencesProps, "threadId" | "branchFromMessageId">,
   settings: Partial<ThreadSettings>,
   { skipForks }: { skipForks: boolean },
 ) {
@@ -172,32 +157,12 @@ function persistThreadSetting(
   void useThreadStore.getState().setThreadSettings(actionProps.threadId, settings);
 }
 
-function ComposerReasoningSlider({
-  state,
-  actionProps,
-}: {
-  state: ModelPreferenceState;
-  actionProps: ModelPreferenceActionProps;
-}) {
-  // One level leaves nothing to choose, and the header already names it.
-  if (state.reasoningLevels.length < 2) return null;
-  const { reasoning } = actionProps.selection;
-
-  return (
-    <SteppedSlider
-      // An off-ladder level selects no stop, so choosing any stop, including the first, commits it.
-      value={state.reasoningLevels.indexOf(reasoning)}
-      stops={state.reasoningLevels.length}
-      aria-label="Reasoning effort"
-      getStopLabel={(stop) => formatReasoningLabel(state.reasoningLevels[stop] ?? reasoning)}
-      onValueChange={(stop) => {
-        const reasoning = state.reasoningLevels[stop];
-        if (!reasoning) return;
-        actionProps.onSelectionChange({ reasoning });
-        persistThreadSetting(actionProps, { reasoningLevel: reasoning }, { skipForks: false });
-      }}
-    />
-  );
+/** Saves a reasoning level to the thread, forks included, as every other way of changing it does. */
+export function persistReasoningLevel(
+  thread: Pick<ComposerModelPreferencesProps, "threadId" | "branchFromMessageId">,
+  reasoningLevel: ReasoningLevel,
+): void {
+  persistThreadSetting(thread, { reasoningLevel }, { skipForks: false });
 }
 
 /** An on/off model option as a small icon button; the tooltip carries the name the icon leaves out. */
@@ -287,30 +252,6 @@ function ComposerOptionToggles({
   );
 }
 
-function ComposerSettingsHeader({
-  state,
-  actionProps,
-}: {
-  state: ModelPreferenceState;
-  actionProps: ModelPreferenceActionProps;
-}) {
-  return (
-    <div className="flex min-h-6.5 items-center justify-between gap-4">
-      {state.reasoningLevels.length > 0 ? (
-        <span className="flex min-w-0 items-baseline gap-2 text-body-small">
-          <span className="text-muted">Reasoning</span>
-          <span data-testid="composer-settings-label" className="text-fade font-medium text-ink">
-            {formatReasoningLabel(actionProps.selection.reasoning)}
-          </span>
-        </span>
-      ) : (
-        <span className="text-body-small text-muted">Options</span>
-      )}
-      <ComposerOptionToggles state={state} actionProps={actionProps} />
-    </div>
-  );
-}
-
 /** The selected model's preference summary for the model trigger, such as "High" or "Fast"; null when the model has none. */
 export function ComposerModelPreferenceSummary({
   selection,
@@ -322,7 +263,7 @@ export function ComposerModelPreferenceSummary({
   return <ComposerModelPreferenceSummaryContent state={state} />;
 }
 
-/** The selected model's settings (reasoning, context window, Thinking, Fast), persisted to the thread as they change. */
+/** The selected model's on/off options (context window, Thinking, Fast), persisted to the thread as they change; null when it has none. */
 export function ComposerModelPreferenceSettings({
   threadId,
   branchFromMessageId,
@@ -332,13 +273,60 @@ export function ComposerModelPreferenceSettings({
   onSelectionChange,
 }: ComposerModelPreferencesProps) {
   const state = getModelPreferenceState(selection, defaults, reasoningLevels);
-  if (!state.canShowPreferences) return null;
+  if (!state.has1M && !state.hasThinking && !state.hasFast) return null;
   const actionProps = { threadId, branchFromMessageId, selection, defaults, onSelectionChange };
 
   return (
-    <div role="group" aria-label={state.preferenceTooltip} className="flex w-full flex-col gap-2 px-1.5 py-1">
-      <ComposerSettingsHeader state={state} actionProps={actionProps} />
-      <ComposerReasoningSlider state={state} actionProps={actionProps} />
+    <div role="group" aria-label="Model options" className="flex min-h-6.5 w-full items-center justify-between gap-4 px-1.5 py-1">
+      <span className="text-body-small text-muted">Options</span>
+      <ComposerOptionToggles state={state} actionProps={actionProps} />
+    </div>
+  );
+}
+
+/** Props for {@link ComposerReasoningLevelList}. */
+export interface ComposerReasoningLevelListProps extends ComposerModelPreferencesProps {
+  /** Runs after a level is chosen, so the host can close its popover. */
+  readonly onChosen: () => void;
+}
+
+/**
+ * The model's reasoning levels as a single-choice listbox, the current one checked, as the access list is: focus
+ * starts on the current level (the first when the current one is off the model's ladder), the arrow keys wrap, and
+ * Enter, Space or a click chooses.
+ */
+export function ComposerReasoningLevelList({ reasoningLevels, onChosen, ...props }: ComposerReasoningLevelListProps) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    (list?.querySelector<HTMLElement>('[aria-selected="true"]') ?? list?.querySelector<HTMLElement>('[role="option"]'))?.focus();
+  }, []);
+  if (reasoningLevels.length === 0) return null;
+  const tabbable = reasoningLevels.includes(props.selection.reasoning) ? props.selection.reasoning : reasoningLevels[0];
+
+  return (
+    <div ref={listRef} role="listbox" aria-label="Reasoning" onKeyDown={moveOptionFocus} className={cn("relative", MENU_LIST_CLASS, "p-0")}>
+      <SlidingHighlight follow={{ pointer: '[role="option"]' }} />
+      {reasoningLevels.map((level) => (
+        <button
+          key={level}
+          type="button"
+          role="option"
+          aria-selected={level === props.selection.reasoning}
+          tabIndex={level === tabbable ? 0 : -1}
+          onPointerMove={(event) => {
+            if (event.pointerType !== "touch") event.currentTarget.focus();
+          }}
+          onClick={() => {
+            props.onSelectionChange({ reasoning: level });
+            persistReasoningLevel(props, level);
+            onChosen();
+          }}
+          className={MENU_ROW_CLASS}
+        >
+          <MenuRowBody label={formatReasoningLabel(level)} checked={level === props.selection.reasoning} />
+        </button>
+      ))}
     </div>
   );
 }

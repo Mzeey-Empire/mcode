@@ -327,6 +327,35 @@ describe("Picker", () => {
     expect(search).toHaveFocus();
   });
 
+  it("chooses a row's inline choice without picking the row, and reads the choices as its description", async () => {
+    const onSelect = vi.fn();
+    const onChoose = vi.fn();
+    render(
+      <PagedPicker
+        onSelect={onSelect}
+        renderItem={(branch) => ({
+          key: branch.name,
+          name: branch.name,
+          choices: {
+            label: "Reasoning",
+            items: [{ id: "low", label: "Low" }, { id: "high", label: "High" }],
+            onChoose: (id) => onChoose(branch.name, id),
+          },
+        })}
+      />,
+    );
+    const search = screen.getByRole("combobox");
+    search.focus();
+    const row = screen.getByRole("option", { name: "branch-001" });
+    expect(row).toHaveAccessibleDescription("Reasoning: Low, High");
+    const high = [...row.querySelectorAll<HTMLButtonElement>("[data-slot=picker-row-choice]")].find((chip) => chip.textContent === "High");
+    expect(high).toHaveAttribute("tabindex", "-1");
+    await userEvent.click(high as HTMLButtonElement);
+    expect(onChoose).toHaveBeenCalledWith("branch-001", "high");
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(search).toHaveFocus();
+  });
+
   it("runs the active row's action on Ctrl+D without picking it", async () => {
     const onSelect = vi.fn();
     const onAction = vi.fn();

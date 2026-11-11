@@ -9,14 +9,16 @@ import { ProviderIcon } from "@/components/ui/provider-icon";
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatReasoningLabel, narrowModelLabel } from "@/lib/format-model-label";
-import { findProviderModel, getReasoningLevels, listProviderModels } from "@/lib/model-registry";
+import { findProviderModel, listProviderModels } from "@/lib/model-registry";
 import { cn } from "@/lib/utils";
 import { AccessOptionList } from "../controls/AccessOptionList";
 import { useComposerAccess, type ComposerAccessInput } from "../controls/ComposerAccessControls";
 import {
   ComposerModelPreferenceSettings,
   ComposerModelPreferenceSummary,
+  ComposerReasoningLevelList,
   hasModelPreferences,
+  persistReasoningLevel,
   type ComposerModelPreferenceDefaults,
 } from "../controls/ComposerModelPreferences";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
@@ -73,8 +75,8 @@ function isCapsulePart(value: string | null | undefined): value is CapsulePart {
 }
 
 /**
- * Devin effort levels are part of the model id family; when the new model cannot express the current reasoning
- * level, snap to its declared default so the label and the wire id stay consistent.
+ * Keeps the current reasoning level when the new model can express it, else snaps to the model's declared default (or
+ * its first level), so the label, the wire id and the level the model runs at stay consistent.
  */
 function modelPickPatch(
   selection: ComposerAgentSelection,
@@ -82,7 +84,6 @@ function modelPickPatch(
   provider: ComposerAgentSelection["provider"],
 ): Partial<ComposerAgentSelection> {
   const patch: Partial<ComposerAgentSelection> = { modelId, provider };
-  if (provider !== "devin") return patch;
   const model = findProviderModel(provider, modelId);
   const levels = model?.supportedReasoningLevels;
   if (levels?.length && !levels.includes(selection.reasoning)) {
@@ -109,9 +110,9 @@ function useDwell(onDwell: (part: CapsulePart) => void) {
   });
 }
 
-/** Where each body puts focus, in order of preference: the reasoning slider comes before the toggles that precede it. */
+/** Where each body puts focus, in order of preference; the reasoning level list focuses its own current level. */
 const MODEL_FOCUS: readonly string[] = ['input[role="combobox"]'];
-const REASONING_FOCUS: readonly string[] = ['input[type="range"]', "button"];
+const REASONING_FOCUS: readonly string[] = ['[role="listbox"]', "button"];
 
 /** Moves focus to the first of `selectors` found inside the body once it mounts, so a switch lands focus as an open does. */
 function FocusOnMount({ selectors, children }: { readonly selectors: readonly string[]; readonly children: ReactNode }) {
@@ -119,25 +120,19 @@ function FocusOnMount({ selectors, children }: { readonly selectors: readonly st
   useLayoutEffect(() => {
     const body = ref.current;
     const target = selectors.map((selector) => body?.querySelector<HTMLElement>(selector)).find(Boolean);
-    if (!body || !target) return;
+    // A list has already focused its current option in its own layout effect, which runs before this one.
+    if (!target || target.getAttribute("role") === "listbox") return;
     target.focus();
     if (target instanceof HTMLInputElement && target.type === "text") {
       target.setSelectionRange(target.value.length, target.value.length);
     }
-    if (target.ownerDocument.activeElement === target) return;
-    // Base UI keeps the slider's thumb hidden until it has measured it, which settles only after this commit, and a
-    // hidden input takes no focus. Focus waits on the popup until the next frame: left on the page, it would make the
-    // popover pull focus back onto the popup a frame later, over the slider.
-    body.closest<HTMLElement>('[data-slot="popover-content"]')?.focus({ preventScroll: true });
-    const frame = requestAnimationFrame(() => target.focus());
-    return () => cancelAnimationFrame(frame);
   }, [selectors]);
   return <div ref={ref} className="contents">{children}</div>;
 }
 
 /**
  * The reasoning label at the width of the model's widest level: every level sits in one grid cell and all but the
- * current one are invisible, so dragging the bar never resizes the capsule.
+ * current one are invisible, so changing the level never resizes the capsule.
  */
 function SteadyReasoningLabel({ levels, current }: { readonly levels: readonly ReasoningLevel[]; readonly current: ReasoningLevel }) {
   return (
@@ -181,8 +176,9 @@ export function CapsuleDivider() {
 
 /**
  * The composer's model, reasoning and access in one pill. Each part opens its own body in one shared popover spot;
- * with a popover open, resting on another part switches to it, and picking a model with reasoning levels chains to
- * reasoning. The body is keyed by part, so a switch remounts it and it focuses its own target.
+ * with a popover open, resting on another part switches to it. Picking a model, a model row's level chip or a level
+ * closes the popover; the option toggles change in place. The body is keyed by part, so a switch remounts it and it
+ * focuses its own target.
  */
 export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
   const { anchorRef, selection, defaults, reasoningLevels, isProviderLocked, onSelectionChange } = props;
@@ -204,22 +200,28 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
   const access = useComposerAccess(props);
   const showReasoning = hasModelPreferences(selection, defaults, reasoningLevels);
   const model = getSelectedModelPresentation(selection.modelId, selection.provider);
-  const settings = (
-    <ComposerModelPreferenceSettings
-      threadId={props.threadId}
-      branchFromMessageId={props.branchFromMessageId}
-      selection={selection}
-      defaults={defaults}
-      reasoningLevels={reasoningLevels}
-      onSelectionChange={onSelectionChange}
-    />
-  );
+  const preferenceProps = {
+    threadId: props.threadId,
+    branchFromMessageId: props.branchFromMessageId,
+    selection,
+    defaults,
+    reasoningLevels,
+    onSelectionChange,
+  };
+  const settings = <ComposerModelPreferenceSettings {...preferenceProps} />;
+  // Closing through the root, not the reducer, lets the popup pour back into the part.
+  const close = () => actionsRef.current?.close();
   const pickModel = (modelId: string, providerId: string) => {
     onSelectionChange(modelPickPatch(selection, modelId, providerId));
-    const reasoningAvailable = getReasoningLevels(providerId, modelId).length > 0;
-    dispatch({ type: "modelPicked", reasoningAvailable });
-    // Closing through the root, not the reducer, lets the popup pour back into the part.
-    if (!reasoningAvailable) actionsRef.current?.close();
+    close();
+  };
+  const modelReasoning = {
+    current: selection.reasoning,
+    onChoose: (modelId: string, provider: string, reasoning: ReasoningLevel) => {
+      onSelectionChange({ modelId, provider, reasoning });
+      persistReasoningLevel(preferenceProps, reasoning);
+      close();
+    },
   };
   const AccessIcon = access.selected.icon;
   const part = (name: CapsulePart, label: string, tip: string, children: ReactNode) => (
@@ -319,16 +321,18 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
                     tab={shown.modelTab}
                     onTabChange={(tab) => dispatch({ type: "tab", tab })}
                     onSelect={pickModel}
-                    footer={showReasoning ? settings : null}
+                    reasoning={modelReasoning}
+                    footer={settings}
                   />
                 </FocusOnMount>
               ),
               reasoning: (
                 <FocusOnMount key="reasoning" selectors={REASONING_FOCUS}>
+                  <ComposerReasoningLevelList {...preferenceProps} onChosen={close} />
                   {settings}
                 </FocusOnMount>
               ),
-              access: <AccessOptionList key="access" access={access} onChosen={() => actionsRef.current?.close()} />,
+              access: <AccessOptionList key="access" access={access} onChosen={close} />,
             }[shown.part]}
           </PopoverContent>
         </Popover>
