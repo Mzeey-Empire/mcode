@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { reportLaunchMark } from "@/transport/launch-marks";
 import { rankPullRequests, type ThreadPullRequest, type ThreadPullRequestState } from "@mcode/contracts/models/thread-pull-request";
 import type { Workspace, Thread, PermissionMode, WorktreeInfo, AttachmentMeta } from "@/transport";
 import {
@@ -606,6 +607,7 @@ export type WorkspaceRpcCall = (method: string, params: unknown) => Promise<unkn
 /** Full state shape and action interface for the workspace store. */
 interface WorkspaceState {
   workspaces: Workspace[];
+  workspacesLoaded: boolean;
   activeWorkspaceId: string | null;
   threads: WorkspaceThread[];
   threadSnapshotEpoch: number;
@@ -842,6 +844,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
     get().setActiveWorkspace(thread.workspace_id);
     get().setActiveThread(thread.id);
+    reportLaunchMark("threadReopened");
   };
 
   const applyOptimisticSuccess = (
@@ -1144,6 +1147,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
   return {
   workspaces: [],
+  workspacesLoaded: false,
   activeWorkspaceId: null,
   threads: [],
   threadSnapshotEpoch: 0,
@@ -1174,7 +1178,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     set({ loading: true, error: null });
     try {
       const workspaces = await getTransport().listWorkspaces();
-      set({ workspaces, loading: false });
+      set({ workspaces, workspacesLoaded: true, loading: false });
       void useProjectIconStore.getState().resolve(workspaces.map((workspace) => workspace.id)).catch((error: unknown) => {
         console.error("Project icon resolution failed", error);
       });

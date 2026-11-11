@@ -8,7 +8,11 @@ import { AppErrorBoundary } from "./app/AppErrorBoundary";
 import { initRendererErrorReporting } from "./app/renderer-error-reporting";
 import { initTransport } from "./transport";
 import { initDesktopPowerReporting } from "./lib/desktop-power";
+import { reportLaunchMark, observeUsableLaunch } from "./transport/launch-marks";
+import { useWorkspaceStore } from "./features/projects/state/workspaceStore";
 import "./index.css";
+
+reportLaunchMark("scriptsEvaluated");
 
 /** Render an error fallback when transport initialization fails. */
 function renderTransportError(root: HTMLElement, error: unknown): void {
@@ -69,7 +73,9 @@ initRendererErrorReporting();
 // Show loading state immediately so the screen is never blank.
 renderConnecting(root);
 
-initTransport()
+const transportReady = initTransport();
+observeUsableLaunch(useWorkspaceStore, transportReady);
+transportReady
   .then(async () => {
     if (
       import.meta.env.VITE_MCODE_PERFORMANCE_MODE === "profiling" ||

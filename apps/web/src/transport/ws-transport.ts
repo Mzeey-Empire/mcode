@@ -1,4 +1,5 @@
 import type { DiffStats } from "@mcode/contracts/models/diff-stats";
+import { reportLaunchMark, reportLaunchResponse } from "./launch-marks";
 import type { FileReadResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
 import type { FilesystemBrowseResult, WorkspaceCreateResult, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
@@ -254,6 +255,7 @@ export function shouldReattachSelectedTerminal(
 }
 
 interface PendingCall {
+  method: string;
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
 }
@@ -491,7 +493,10 @@ export function createWsTransport(
   ): true {
     pending.delete(id);
     if (message.error) call.reject(toTransportRpcError(message.error));
-    else call.resolve(message.result);
+    else {
+      reportLaunchResponse(call.method);
+      call.resolve(message.result);
+    }
     return true;
   }
 
@@ -534,6 +539,7 @@ export function createWsTransport(
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
+      reportLaunchMark("socketOpen");
       const reconnecting = hasConnected;
       hasConnected = true;
       reconnectDelay = MIN_RECONNECT_MS;
@@ -777,7 +783,7 @@ export function createWsTransport(
             return;
           }
           requestId = `req_${++idCounter}`;
-          pending.set(requestId, { resolve: complete, reject: fail });
+          pending.set(requestId, { method, resolve: complete, reject: fail });
           try {
             ws.send(JSON.stringify({ id: requestId, method, params }));
             if (waitToSendTimer !== null) clearTimeout(waitToSendTimer);
@@ -879,6 +885,7 @@ export function createWsTransport(
       }
       const id = `req_${++idCounter}`;
       pending.set(id, {
+        method,
         resolve: resolve as (v: unknown) => void,
         reject,
       });

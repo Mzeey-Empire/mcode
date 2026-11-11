@@ -506,7 +506,7 @@ function ConversationStageContent({
     />
   ));
   return (
-    <div className="relative h-full" aria-busy={stage === "hold" || stage === "transition"}>
+    <div className="relative h-full" aria-busy={stage === "hold" || stage === "transition"} data-conversation-stage={stage} data-thread-id={state.activeThreadId ?? undefined}>
       <div className={stage === "messages" ? "relative h-full" : "pointer-events-none relative h-full"} inert={stage !== "messages"}>{transcripts}</div>
       <ConversationStageOverlay stage={stage} state={state} thread={thread} />
     </div>
