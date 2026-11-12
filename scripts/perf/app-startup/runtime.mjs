@@ -18,7 +18,7 @@ export function assertPackagedExecutable(path, flag) {
 /** Clear inherited MCODE_, ELECTRON_, VITE_, and NODE_ENV variables, then set isolated harness paths. */
 export function launchEnvironment(parentEnv, { data, userData, capability }) {
   const env = { ...parentEnv };
-  // Start menu launches omit NODE_ENV; the server then validates payloads as in development.
+  // Start menu launches omit NODE_ENV, and the packaged server still reads it at runtime for its single-instance default.
   for (const key of Object.keys(env)) {
     if (/^(MCODE_|ELECTRON_|VITE_)/.test(key) || key === "NODE_ENV") delete env[key];
   }
