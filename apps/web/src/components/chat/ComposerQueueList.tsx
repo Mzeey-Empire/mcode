@@ -21,6 +21,8 @@ interface ComposerQueueListProps {
   provider?: string;
   /** True while another composer surface must finish before anything is sent. */
   isPaused?: boolean;
+  /** True while a dock hides the composer input, so Edit would move a row out of sight. */
+  isEditLocked?: boolean;
   /** Sends the message now: at once when idle, by steering while a turn runs. */
   onSendNow: (message: QueuedMessage) => void;
   /** Hands a queued message to the composer for editing; the parent pops it from the queue. */
@@ -35,6 +37,7 @@ export function ComposerQueueList({
   threadId,
   provider,
   isPaused = false,
+  isEditLocked = false,
   onSendNow,
   onLoadIntoComposer,
 }: ComposerQueueListProps) {
@@ -86,6 +89,7 @@ export function ComposerQueueList({
                 position={index + 1}
                 pending={pendingLabel(message)}
                 canSendNow={canSendNow(message)}
+                editLocked={isEditLocked}
                 onSendNow={() => onSendNow(message)}
                 onEdit={() => void edit(message)}
                 onRemove={() => void remove(message)}
@@ -133,12 +137,13 @@ interface QueueRowActionsProps {
   readonly position: number;
   readonly pending: string | undefined;
   readonly canSendNow: boolean;
+  readonly editLocked: boolean;
   readonly onSendNow: () => void;
   readonly onEdit: () => void;
   readonly onRemove: () => void;
 }
 
-function QueueRowActions({ position, pending, canSendNow, onSendNow, onEdit, onRemove }: QueueRowActionsProps) {
+function QueueRowActions({ position, pending, canSendNow, editLocked, onSendNow, onEdit, onRemove }: QueueRowActionsProps) {
   const busy = pending !== undefined;
   return (
     <span className="flex shrink-0 items-center justify-end gap-1">
@@ -149,7 +154,7 @@ function QueueRowActions({ position, pending, canSendNow, onSendNow, onEdit, onR
           <ArrowUp />
         </IconButton>
       ) : null}
-      <IconButton aria-label={`Edit queued message ${position}`} tooltip="Edit" disabled={busy} onClick={onEdit}>
+      <IconButton aria-label={`Edit queued message ${position}`} tooltip="Edit" disabled={busy || editLocked} onClick={onEdit}>
         <Pencil />
       </IconButton>
       <IconButton aria-label={`Remove queued message ${position}`} tooltip="Remove" disabled={busy} onClick={onRemove}>

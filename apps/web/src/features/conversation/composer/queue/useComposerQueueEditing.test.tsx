@@ -30,13 +30,21 @@ function queuedContents(): string[] {
   );
 }
 
-function formStub(): ComposerQueueEditForm {
+const DRAFT_ATTACHMENT = {
+  id: "draft-file",
+  name: "notes.md",
+  mimeType: "text/markdown",
+  sizeBytes: 12,
+  sourcePath: "/tmp/notes.md",
+};
+
+function formStub(hasContent: () => boolean): ComposerQueueEditForm {
   return {
-    hasContent: () => true,
+    hasContent,
     capture: vi.fn(() => ({
       content: "captured draft",
       displayContent: "captured draft",
-      attachments: [],
+      attachments: [DRAFT_ATTACHMENT],
       model: "claude-sonnet-4-6",
       permissionMode: "full" as const,
     })),
@@ -47,12 +55,16 @@ function formStub(): ComposerQueueEditForm {
 }
 
 function setup(settle: () => Promise<boolean> = async () => true) {
-  const form = formStub();
+  let composerHasDraft = false;
+  const form = formStub(() => composerHasDraft);
   const annotations = { restore: vi.fn(), clear: vi.fn(), settle: vi.fn(settle) };
   const hook = renderHook(() =>
     useComposerQueueEditing({ threadId: THREAD_ID, form, annotations }),
   );
-  return { form, annotations, hook };
+  const typeDraft = () => {
+    composerHasDraft = true;
+  };
+  return { form, annotations, hook, typeDraft };
 }
 
 describe("useComposerQueueEditing dispatch consumption", () => {
@@ -116,8 +128,9 @@ describe("useComposerQueueEditing switching between queued messages", () => {
   it("settles page snapshots before it captures the edit being left", async () => {
     const first = enqueue("first");
     const second = enqueue("second");
-    const { hook, form, annotations } = setup();
+    const { hook, form, annotations, typeDraft } = setup();
     act(() => hook.result.current.loadIntoComposer(first));
+    typeDraft();
 
     await act(async () => hook.result.current.loadIntoComposer(second));
 
@@ -131,8 +144,9 @@ describe("useComposerQueueEditing switching between queued messages", () => {
   it("leaves both messages where they are when a page snapshot cannot settle", async () => {
     const first = enqueue("first");
     const second = enqueue("second");
-    const { hook, form } = setup(async () => false);
+    const { hook, form, typeDraft } = setup(async () => false);
     act(() => hook.result.current.loadIntoComposer(first));
+    typeDraft();
 
     await act(async () => hook.result.current.loadIntoComposer(second));
 
@@ -145,8 +159,9 @@ describe("useComposerQueueEditing switching between queued messages", () => {
     const first = enqueue("first");
     const second = enqueue("second");
     let finish: (settled: boolean) => void = () => {};
-    const { hook, form } = setup(() => new Promise((resolve) => { finish = resolve; }));
+    const { hook, form, typeDraft } = setup(() => new Promise((resolve) => { finish = resolve; }));
     act(() => hook.result.current.loadIntoComposer(first));
+    typeDraft();
     act(() => hook.result.current.loadIntoComposer(second));
 
     act(() => hook.result.current.cancelEdit());
@@ -155,5 +170,30 @@ describe("useComposerQueueEditing switching between queued messages", () => {
     expect(form.capture).not.toHaveBeenCalled();
     expect(hook.result.current.editing).toBeNull();
     expect(queuedContents()).toEqual(["first", "second"]);
+  });
+});
+
+describe("useComposerQueueEditing with an unsent draft", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useQueueStore.setState({
+      queues: {},
+      inFlightQueuedMessages: {},
+      editingThreadId: null,
+    });
+  });
+
+  it("queues the unsent draft at the end before editing a queued message", async () => {
+    enqueue("first");
+    const second = enqueue("second");
+    const { hook, typeDraft } = setup();
+    typeDraft();
+
+    await act(async () => hook.result.current.loadIntoComposer(second));
+
+    expect(hook.result.current.editing?.messageId).toBe(second.id);
+    const queued = useQueueStore.getState().queues[THREAD_ID] ?? [];
+    expect(queued.map((message) => message.content)).toEqual(["first", "captured draft"]);
+    expect(queued[1]?.attachments).toEqual([DRAFT_ATTACHMENT]);
   });
 });

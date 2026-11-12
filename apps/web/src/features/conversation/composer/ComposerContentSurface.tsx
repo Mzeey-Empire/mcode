@@ -159,7 +159,8 @@ interface ComposerContentSurfaceProps {
 function ComposerTraySurface({
   model,
   actions,
-}: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
+  docked,
+}: Pick<ComposerContentSurfaceProps, "model" | "actions"> & { readonly docked: boolean }) {
   const tiles = model.attachments.length > 0
     ? <AttachmentPreview attachments={model.attachments} onRemove={actions.onRemoveAttachment} />
     : null;
@@ -182,6 +183,7 @@ function ComposerTraySurface({
           threadId={model.threadId}
           provider={model.provider}
           isPaused={paused}
+          isEditLocked={docked}
           onLoadIntoComposer={actions.onLoadIntoComposer}
           onSendNow={(message) => { if (!paused) void actions.onSendQueuedMessageNow(message); }}
         />
@@ -802,7 +804,7 @@ export function ComposerContentSurface(props: ComposerContentSurfaceProps) {
   return (
     <>
       <ComposerNewThreadSurface {...props} />
-      <ComposerTraySurface {...props} />
+      <ComposerTraySurface {...props} docked={docked} />
       <ApprovalAnnouncer requests={approvals} />
       {dock === "approvals" && (
         <ApprovalDock
