@@ -33,7 +33,7 @@ import { retainTargetTerminalNativeArtifacts } from "../package-validation/termi
 export const BUN_WORKER_FILENAMES = [
   "execution.worker.cjs",
   "canonical-agent-writer.worker.cjs",
-  "git-process.worker.cjs",
+  "process-start.worker.cjs",
 ];
 
 /**

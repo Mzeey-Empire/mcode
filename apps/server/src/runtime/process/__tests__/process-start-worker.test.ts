@@ -30,14 +30,37 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, execFile, spawn };
 });
 
-import { gitExitCode, gitFailureOutput } from "../git-failure.js";
-import { createGitProcessWorker, GitProcessWorkerClient } from "../git-process-worker-client.js";
-import { RealGitExecutor } from "../real-git-executor.js";
+import { gitExitCode, gitFailureOutput } from "../../../features/projects/git/execution/git-failure.js";
+import { createProcessStartWorker, ProcessStartWorkerClient } from "../process-start-worker-client.js";
+import { RealGitExecutor } from "../../../features/projects/git/execution/real-git-executor.js";
 
 const PROBE_KEYS = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"] as const;
 
 describe("git process execution off the main thread", () => {
   const tempDirs: string[] = [];
+
+  it("runs a non-git command with arguments on the worker", async () => {
+    const result = await new ProcessStartWorkerClient().run({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write(process.argv[1])", "worker output"],
+      timeout: 10_000,
+    });
+
+    expect(result).toEqual({ stdout: "worker output", stderr: "" });
+  });
+
+  it("preserves failure fields from a non-git command", async () => {
+    const failure = await new ProcessStartWorkerClient().run({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('partial'); process.stderr.write('failed'); process.exit(7)"],
+      timeout: 10_000,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).toMatchObject({ code: 7, stdout: "partial", stderr: "failed", killed: false });
+    expect(gitExitCode(failure)).toBe(7);
+    expect(gitFailureOutput(failure)).toContain("failed");
+  });
 
   afterEach(() => {
     for (const key of PROBE_KEYS) delete process.env[key];
@@ -65,7 +88,7 @@ describe("git process execution off the main thread", () => {
   });
 
   it("keeps git's exit code and streamed error output on observed failures", async () => {
-    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "git-process-worker-"));
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "process-start-worker-"));
     tempDirs.push(dir);
     const errors: string[] = [];
 
@@ -98,7 +121,7 @@ describe("git process execution off the main thread", () => {
   });
 
   it("keeps git's exit code and output on failures", async () => {
-    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "git-process-worker-"));
+    const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "process-start-worker-"));
     tempDirs.push(dir);
 
     const failure = await new RealGitExecutor()
@@ -114,11 +137,11 @@ describe("git process execution off the main thread", () => {
       ["globalThis.onmessage = () => process.exit(1);"],
       { type: "application/javascript" },
     )));
-    const factories = [exitingWorker, createGitProcessWorker];
-    const client = new GitProcessWorkerClient(() => factories.shift()!());
+    const factories = [exitingWorker, createProcessStartWorker];
+    const client = new ProcessStartWorkerClient(() => factories.shift()!());
 
-    await expect(client.run({ args: ["--version"], timeout: 10_000 })).rejects.toThrow(/Git process worker/);
-    const result = await client.run({ args: ["--version"], timeout: 10_000 });
+    await expect(client.run({ command: "git", args: ["--version"], timeout: 10_000 })).rejects.toThrow(/Process worker/);
+    const result = await client.run({ command: "git", args: ["--version"], timeout: 10_000 });
 
     expect(result.stdout).toMatch(/^git version /);
   });

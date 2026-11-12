@@ -597,7 +597,7 @@ export async function buildServerRuntimeBundles({
   ptyHostOutFile,
   canonicalWriterWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "canonical-agent-writer.worker.cjs"),
   executionWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "execution.worker.cjs"),
-  gitProcessWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "git-process.worker.cjs"),
+  processStartWorkerOutFile = NodePath.resolve(NodePath.dirname(serverOutFile), "process-start.worker.cjs"),
   production = false,
 }) {
   const shared = {
@@ -641,8 +641,8 @@ export async function buildServerRuntimeBundles({
   }));
   bundles.push(build({
     ...shared,
-    entryPoints: [NodePath.resolve(serverRoot, "dist-tsc/features/projects/git/execution/git-process.worker.js")],
-    outfile: gitProcessWorkerOutFile,
+    entryPoints: [NodePath.resolve(serverRoot, "dist-tsc/runtime/process/process-start.worker.js")],
+    outfile: processStartWorkerOutFile,
   }));
   await Promise.all(bundles);
 }
@@ -681,5 +681,5 @@ export async function rebuildServerDevBundle(options = {}) {
     console.log(`[server-dev-bundle] Copied Drizzle migrations -> ${drizzleDst}`);
   }
 
-  console.log(`[server-dev-bundle] Complete: ${serverOutFile}, ${ptyHostOutFile}, execution.worker.cjs, git-process.worker.cjs`);
+  console.log(`[server-dev-bundle] Complete: ${serverOutFile}, ${ptyHostOutFile}, execution.worker.cjs, process-start.worker.cjs`);
 }
