@@ -577,6 +577,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementation(hang);
     const sessions = new SessionRuntime({ spawn: async () => ({ state: {}, pids: [] }), isBusy: () => false,
       interrupt: async () => undefined, close: hang, isStale: () => false }, {
+      providerId: "codex",
+      occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       jobObject: { isWindowsJob: false, assign: () => true, setDescription: () => undefined },
       envService: { getEnv: () => ({}) },
     });

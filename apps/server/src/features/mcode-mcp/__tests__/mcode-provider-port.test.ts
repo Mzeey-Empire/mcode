@@ -5,6 +5,7 @@ import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { BrowserAutomationSessionLease } from "../../browser-automation/access/browser-automation-session-lease.js";
 import { McodeProviderPort } from "../mcode-provider-port.js";
 import { McodeSessionAuthority } from "../mcode-session-authority.js";
+import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 
 const { query } = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query }));
@@ -35,6 +36,7 @@ function createClaudeFixture(port: McodeProviderPort) {
   const provider = createClaudeProvider({
     configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 },
     host: {
+      occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       runtime: hostRuntime,
       environment: { snapshot: () => ({}) },
       processes: { attach: () => undefined, terminateTree: async () => undefined },
