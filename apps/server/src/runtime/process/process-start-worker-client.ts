@@ -86,12 +86,7 @@ export class ProcessStartWorkerClient {
 
   /** Opens an interactive process on the same worker used by buffered runs. */
   readonly open: ProcessStartOpener = (request, observer) => {
-    let worker: Worker;
-    try {
-      worker = this.worker ?? this.start();
-    } catch {
-      return { write: () => {}, stop: () => {}, exited: Promise.resolve() };
-    }
+    const worker = this.worker ?? this.start();
     const id = this.nextId++;
     const exited = new Promise<void>((resolve) => { this.sessions.set(id, { observer, resolve }); });
     worker.postMessage({
