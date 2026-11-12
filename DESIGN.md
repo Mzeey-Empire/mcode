@@ -11,7 +11,7 @@ colors:
   panel: "oklch(0.19 0.005 260)" # neutral-800
   hover: "oklch(0.22 0.005 260)" # neutral-700
   selected: "oklch(0.24 0.005 260)" # neutral-600
-  border: "oklch(0.28 0.005 260)" # neutral-500
+  border: "oklch(0.25 0.005 260)" # between neutral-600 and neutral-500
   control-border: "oklch(0.50 0.010 260)" # neutral-400
   ink: "oklch(0.955 0.005 260)" # neutral-100
   muted: "oklch(0.65 0.005 260)" # neutral-300
@@ -36,7 +36,7 @@ colors:
   light-panel: "oklch(0.99 0.005 260)" # neutral-50
   light-hover: "oklch(0.955 0.005 260)" # neutral-100
   light-selected: "oklch(0.90 0.005 260)" # neutral-200
-  light-border: "oklch(0.90 0.005 260)" # neutral-200
+  light-border: "oklch(0.925 0.005 260)" # between neutral-100 and neutral-200
   light-control-border: "oklch(0.65 0.005 260)" # neutral-300
   light-ink: "oklch(0.19 0.005 260)" # neutral-800
   light-muted: "oklch(0.47 0.010 260)" # a step below neutral-400
@@ -516,7 +516,7 @@ token values, never component anatomy, status meaning, or action priority.
 | Panel | `panel` (neutral-800) | `light-panel` (neutral-50) |
 | Hover | `hover` (neutral-700) | `light-hover` (neutral-100) |
 | Selected | `selected` (neutral-600) | `light-selected` (neutral-200) |
-| Border | `border` (neutral-500) | `light-border` (neutral-200) |
+| Border | `border` (25%, a step under neutral-500) | `light-border` (92.5%, a step under neutral-200) |
 | Control boundary | `control-border` (neutral-400) | `light-control-border` (neutral-300) |
 | Text | `ink` (neutral-100) | `light-ink` (neutral-800) |
 | Muted text | `muted` (neutral-300) | `light-muted` (47% lightness, a step below neutral-400, so it holds 4.5:1 on `light-selected`) |
