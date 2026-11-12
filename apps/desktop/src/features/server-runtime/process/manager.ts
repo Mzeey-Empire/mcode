@@ -303,13 +303,14 @@ export class ServerManager {
 
   /** Find a port, spawn the child, and retain the server lock identity. */
   private async startNewServer(): Promise<{ port: number; authToken: string }> {
-    if (this.startCancelled) {
-      throw new Error("Server start was cancelled because the app is quitting");
-    }
     this._port = await this.findStartupPort();
     this.startupId = NodeCrypto.randomUUID();
     const launchId = this.launchServerSpawned ? undefined : this.launch?.launchId;
     this.launchServerSpawned = true;
+    // The quit can arrive while the port search is pending.
+    if (this.startCancelled) {
+      throw new Error("Server start was cancelled because the app is quitting");
+    }
     const spawned = spawnServerProcess(this._port, this.platform, this.startupId, launchId);
     this.launch?.mark("serverSpawned");
     const generation = this.assignServerProcess(spawned.child);

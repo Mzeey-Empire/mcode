@@ -177,6 +177,7 @@ const originalFetch = globalThis.fetch;
 
 import { ServerManager } from "../manager.js";
 import { ServerStartupRefusedError } from "../startup-failure.js";
+import * as Startup from "../startup.js";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
@@ -1066,6 +1067,29 @@ describe("ServerManager", () => {
     expect(NodeFS.rmdirSync).toHaveBeenCalledWith(
       NodePath.join("/tmp/mcode", "server.starting"),
     );
+  });
+
+  it("does not spawn a server when a quit cancels the start during the port search", async () => {
+    const portSearch = Promise.withResolvers<number>();
+    const portSearchStarted = Promise.withResolvers<void>();
+    const findPort = vi.spyOn(Startup, "findAvailablePort").mockImplementationOnce(() => {
+      portSearchStarted.resolve();
+      return portSearch.promise;
+    });
+
+    try {
+      const start = manager.start();
+      await portSearchStarted.promise;
+      manager.stopStartingServer();
+      portSearch.resolve(19600);
+
+      await expect(start).rejects.toThrow(
+        "Server start was cancelled because the app is quitting",
+      );
+      expect(NodeChildProcess.spawn).not.toHaveBeenCalled();
+    } finally {
+      findPort.mockRestore();
+    }
   });
 
   it("forceReplace sends POST /shutdown to the running server", async () => {
