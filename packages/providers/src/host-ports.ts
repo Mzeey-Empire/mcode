@@ -37,6 +37,7 @@ export type ProviderProcessRunner = (request: {
   readonly command: string;
   readonly args: readonly string[];
   readonly shell?: boolean;
+  readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly timeout: number;
   readonly maxBuffer?: number;
@@ -44,11 +45,15 @@ export type ProviderProcessRunner = (request: {
 
 /** Opens an interactive process off the request thread because Windows process creation blocks that thread. */
 export type ProviderProcessOpener = (request: Parameters<ProviderProcessRunner>[0], observer: {
+  readonly onSpawn?: (pid: number) => void;
+  readonly onStartError?: (message: string) => void;
+  readonly onExit?: (code: number | null, signal: string | null) => void;
+  readonly onStderr?: (chunk: string) => void;
   readonly onStdout?: (chunk: string) => void;
   readonly onStdinError?: (message: string) => void;
 }) => {
   write(text: string): void;
-  stop(): void;
+  stop(graceful?: boolean): void;
   readonly exited: Promise<void>;
 };
 

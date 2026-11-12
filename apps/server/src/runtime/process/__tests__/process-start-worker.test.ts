@@ -37,6 +37,43 @@ import { RealGitExecutor } from "../../../features/projects/git/execution/real-g
 const PROBE_KEYS = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"] as const;
 
 describe("interactive process worker sessions", () => {
+  it("reports a live pid and the process exit code", async () => {
+    let pid: number | undefined;
+    const exits: unknown[] = [];
+    const session = new ProcessStartWorkerClient().open({
+      command: process.execPath,
+      args: ["-e", "process.stdin.on('data', () => process.exit(7))"],
+      timeout: 10_000,
+    }, {
+      onSpawn: (value: number) => { pid = value; },
+      onExit: (code: number | null, signal: string | null) => exits.push({ code, signal }),
+    });
+    try {
+      await vi.waitFor(() => expect(pid).toBeGreaterThan(0));
+      expect(process.kill(pid!, 0)).toBe(true);
+      session.write("exit\n");
+      await session.exited;
+      expect(exits).toEqual([{ code: 7, signal: null }]);
+    } finally {
+      session.stop();
+      await session.exited;
+    }
+  });
+
+  it("reports a missing binary's start error without a pid", async () => {
+    const pids: number[] = [];
+    const errors: string[] = [];
+    const session = new ProcessStartWorkerClient().open({
+      command: "missing-mcode-session-binary-xyz", args: [], timeout: 10_000,
+    }, {
+      onSpawn: (pid: number) => pids.push(pid),
+      onStartError: (message: string) => errors.push(message),
+    });
+    await session.exited;
+    expect(pids).toEqual([]);
+    expect(errors).toEqual([expect.stringMatching(/ENOENT|not found/i)]);
+  });
+
   it("echoes stdin through the worker and stops without a main-thread process start", async () => {
     mainThreadStarts.count = 0;
     let output = "";

@@ -33,10 +33,13 @@ export type ProcessStartWorkerInbound = {
   /** Present when the run streams output back as `output` messages before its result. */
   readonly observe?: ProcessStartObservedStreams;
 } | { readonly kind: "write"; readonly id: number; readonly text: string }
-  | { readonly kind: "stop"; readonly id: number };
+  | { readonly kind: "stop"; readonly id: number; readonly graceful?: boolean };
 
 /** Process worker to main thread. */
 export type ProcessStartWorkerOutbound =
+  | { readonly id: number; readonly pid: number }
+  | { readonly id: number; readonly startError: string }
+  | { readonly id: number; readonly exit: { readonly code: number | null; readonly signal: string | null } }
   | { readonly id: number; readonly exited: true }
   | { readonly id: number; readonly stdinError: string }
   | { readonly id: number; readonly output: "stdout" | "stderr"; readonly chunk: string }
@@ -52,6 +55,12 @@ interface PendingRun {
 function deliverOutput(observer: ProcessOutputObserver | undefined, stream: "stdout" | "stderr", chunk: string): void {
   if (stream === "stdout") observer?.onStdout?.(chunk);
   else observer?.onStderr?.(chunk);
+}
+
+function deliverLifecycle(observer: ProcessOutputObserver, reply: ProcessStartWorkerOutbound): void {
+  if ("pid" in reply) observer.onSpawn?.(reply.pid);
+  else if ("startError" in reply) observer.onStartError?.(reply.startError);
+  else if ("exit" in reply) observer.onExit?.(reply.exit.code, reply.exit.signal);
 }
 
 /** Creates the worker thread that starts processes. */
@@ -98,10 +107,10 @@ export class ProcessStartWorkerClient {
       write: (text) => {
         if (!stopped && this.sessions.has(id)) worker.postMessage({ kind: "write", id, text } satisfies ProcessStartWorkerInbound);
       },
-      stop: () => {
+      stop: (graceful) => {
         if (stopped || !this.sessions.has(id)) return;
         stopped = true;
-        worker.postMessage({ kind: "stop", id } satisfies ProcessStartWorkerInbound);
+        worker.postMessage({ kind: "stop", id, graceful } satisfies ProcessStartWorkerInbound);
       },
       exited,
     };
@@ -128,7 +137,7 @@ export class ProcessStartWorkerClient {
       } else if ("stdinError" in reply) session.observer.onStdinError?.(reply.stdinError);
       else if ("output" in reply) {
         deliverOutput(session.observer, reply.output, reply.chunk);
-      }
+      } else deliverLifecycle(session.observer, reply);
       return true;
     }
     return false;
@@ -136,7 +145,7 @@ export class ProcessStartWorkerClient {
 
   private settle(reply: ProcessStartWorkerOutbound): void {
     if (this.settleSession(reply)) return;
-    if ("exited" in reply || "stdinError" in reply) return;
+    if ("exited" in reply || "stdinError" in reply || "pid" in reply || "startError" in reply || "exit" in reply) return;
     const run = this.pending.get(reply.id);
     if (!run) return;
     // Worker messages arrive in send order, so every chunk precedes its run's result.
@@ -157,7 +166,10 @@ export class ProcessStartWorkerClient {
     const runs = [...this.pending.values()];
     this.pending.clear();
     for (const run of runs) run.reject(error);
-    for (const session of this.sessions.values()) session.resolve();
+    for (const session of this.sessions.values()) {
+      session.observer.onStartError?.(error.message);
+      session.resolve();
+    }
     this.sessions.clear();
   }
 }

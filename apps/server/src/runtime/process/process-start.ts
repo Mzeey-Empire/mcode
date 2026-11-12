@@ -35,6 +35,9 @@ export interface ProcessStartRequest {
 
 /** Receives process output while the process runs. */
 export interface ProcessOutputObserver {
+  readonly onSpawn?: (pid: number) => void;
+  readonly onStartError?: (message: string) => void;
+  readonly onExit?: (code: number | null, signal: string | null) => void;
   readonly onStdout?: (chunk: string) => void;
   readonly onStderr?: (chunk: string) => void;
   readonly onStdinError?: (message: string) => void;
@@ -43,7 +46,7 @@ export interface ProcessOutputObserver {
 /** An interactive process owned by the thread that starts it. */
 export interface ProcessStartSession {
   write(text: string): void;
-  stop(): void;
+  stop(graceful?: boolean): void;
   readonly exited: Promise<void>;
 }
 
@@ -59,19 +62,24 @@ export const openProcessStart: ProcessStartOpener = (request, observer) => {
   let ended = false;
   let stopping = false;
   let timer: ReturnType<typeof setTimeout>;
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
   const finish = () => {
     if (ended) return;
     ended = true;
     clearTimeout(timer);
+    clearTimeout(killTimer);
     resolveExit();
   };
   let child: NodeChildProcess.ChildProcessWithoutNullStreams;
-  const stop = () => {
+  const stop = (graceful = false) => {
     if (ended || stopping) return;
     stopping = true;
     // With shell:true, killing cmd.exe alone would orphan the actual process.
     if (hostRuntime.platform === "win32" && child.pid !== undefined) {
-      NodeChildProcess.execFile("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true }, finish);
+      NodeChildProcess.execFile("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, timeout: 5_000 }, () => {});
+    } else if (graceful) {
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => { if (!ended) child.kill("SIGKILL"); }, 3_000);
     } else {
       child.kill("SIGKILL");
     }
@@ -85,7 +93,8 @@ export const openProcessStart: ProcessStartOpener = (request, observer) => {
     child = NodeChildProcess.spawn(request.command, [...request.args], {
       windowsHide: true, shell: request.shell, env: request.env, cwd: request.cwd,
     });
-  } catch {
+  } catch (error) {
+    observer.onStartError?.(error instanceof Error ? error.message : String(error));
     finish();
     return session;
   }
@@ -94,9 +103,10 @@ export const openProcessStart: ProcessStartOpener = (request, observer) => {
   child.stdout.on("data", (chunk: string) => observer.onStdout?.(chunk));
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => observer.onStderr?.(chunk));
-  child.once("error", finish);
-  child.once("close", () => { if (!stopping || hostRuntime.platform !== "win32") finish(); });
-  timer = setTimeout(stop, request.timeout);
+  child.once("spawn", () => { if (child.pid !== undefined) observer.onSpawn?.(child.pid); });
+  child.once("error", (error) => { observer.onStartError?.(error.message); finish(); });
+  child.once("close", (code, signal) => { observer.onExit?.(code, signal); finish(); });
+  if (request.timeout > 0) timer = setTimeout(stop, request.timeout);
   return session;
 };
 

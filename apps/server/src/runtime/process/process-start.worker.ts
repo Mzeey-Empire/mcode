@@ -23,12 +23,17 @@ globalThis.onmessage = (event: MessageEvent<ProcessStartWorkerInbound>): void =>
     return;
   }
   if (message.kind === "stop") {
-    sessions.get(id)?.stop();
+    sessions.get(id)?.stop(message.graceful);
     return;
   }
   const { request, observe } = message;
   if (message.kind === "open") {
-    const session = openProcessStart(request, observe ? forwardOutput(id, observe) : {});
+    const session = openProcessStart(request, {
+      ...(observe ? forwardOutput(id, observe) : {}),
+      onSpawn: (pid) => post({ id, pid }),
+      onStartError: (startError) => post({ id, startError }),
+      onExit: (code, signal) => post({ id, exit: { code, signal } }),
+    });
     sessions.set(id, session);
     void session.exited.then(() => {
       sessions.delete(id);
