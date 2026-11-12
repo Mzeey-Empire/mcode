@@ -224,6 +224,7 @@ function QuestionPanel({ threadId, providerId, composerContainerRef, isAgentRunn
       />
       <div className="flex items-center justify-end gap-2">
         {isAgentRunning && <DockStopButton isStopPending={isStopPending} onStop={onStop} />}
+        <Button variant="ghost" shape="round" onClick={() => clearPlanQuestions(threadId)}>Skip</Button>
         <Button shape="round" disabled={!canAdvance} onClick={advance}>{isLast ? "Submit" : "Next"}</Button>
       </div>
     </div>

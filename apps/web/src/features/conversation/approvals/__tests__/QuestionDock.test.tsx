@@ -234,4 +234,50 @@ describe("QuestionDock", () => {
     expect(dismissPlanQuestions).toHaveBeenCalledWith(THREAD_ID);
     expect(readThreadField(THREAD_ID, (record) => record.planQuestionsStatus)).toBe("idle");
   });
+
+  it("dismisses the batch from the visible Skip button", async () => {
+    const user = setup();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+
+    expect(dismissPlanQuestions).toHaveBeenCalledWith(THREAD_ID);
+    expect(readThreadField(THREAD_ID, (record) => record.planQuestions)).toBeNull();
+  });
+
+  it("restores the questions and answers when the dismissal fails", async () => {
+    dismissPlanQuestions.mockRejectedValueOnce(new Error("offline"));
+    const user = setup();
+    render(<DockHarness />);
+    await elapseGuard();
+    await user.keyboard("1");
+    act(() => useThreadStore.getState().setActiveQuestionIndex(THREAD_ID, 1));
+
+    await user.keyboard("{Escape}");
+    await act(() => vi.advanceTimersByTimeAsync(0));
+
+    expect(readThreadField(THREAD_ID, (record) => record.planQuestions)).toEqual(QUESTIONS);
+    expect(answerOf("q1")?.selectedOptionId).toBe("narrow");
+    expect(readThreadField(THREAD_ID, (record) => record.activeQuestionIndex)).toBe(1);
+    expect(readThreadField(THREAD_ID, (record) => record.planQuestionsStatus)).toBe("pending");
+    expect(await screen.findByText("Which tests?")).toBeTruthy();
+  });
+
+  it("does not restore a dismissed batch over a newer one that came and went before the dismissal failed", async () => {
+    let failDismissal: (error: Error) => void = () => {};
+    dismissPlanQuestions.mockReturnValueOnce(new Promise((_resolve, reject) => { failDismissal = reject; }));
+    const user = setup();
+    render(<DockHarness />);
+    await elapseGuard();
+
+    await user.keyboard("{Escape}");
+    act(() => {
+      useThreadStore.getState().setPlanQuestions(THREAD_ID, [QUESTIONS[1]!]);
+      useThreadStore.getState().markPlanDismissed(THREAD_ID, "assistant-2");
+    });
+    await act(async () => failDismissal(new Error("offline")));
+
+    expect(readThreadField(THREAD_ID, (record) => record.planQuestions)).toBeNull();
+  });
 });

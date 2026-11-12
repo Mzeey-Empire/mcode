@@ -200,9 +200,7 @@ const agentHandlers: AgentRpcHandlerMap = {
       params.thinking,
     );
   },
-  "agent.dismissPlanQuestions": (deps, params) => {
-    deps.planTurnService.dismissQuestions(params.threadId);
-  },
+  "agent.dismissPlanQuestions": (deps, params) => deps.planTurnService.dismissQuestions(params.threadId),
   "agent.child.stop": (deps, params) => deps.subagentRosterService.stop(params),
   "subagent.roster": (deps, params) => deps.subagentRosterService.loadRoster(params),
   "subagent.detail": (deps, params) => deps.subagentRosterService.loadDetail(params),
