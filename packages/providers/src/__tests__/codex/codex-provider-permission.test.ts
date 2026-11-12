@@ -46,10 +46,13 @@ function seedSession(
   };
   const pool = (
     provider as unknown as {
-      runtime: { sessions: Map<string, { state: unknown; pids: number[]; lastUsedAt: number }> };
+      runtime: { sessions: Map<string, { key: { providerId: string; threadId: string }; epoch: number; state: unknown; pids: number[]; lastUsedAt: number }> };
     }
   ).runtime.sessions;
-  pool.set(sessionId, { state: fullState, pids: [], lastUsedAt: (state.lastUsedAt as number) ?? Date.now() });
+  pool.set(sessionId, {
+    key: { providerId: "codex", threadId }, epoch: 1,
+    state: fullState, pids: [], lastUsedAt: (state.lastUsedAt as number) ?? Date.now(),
+  });
   return fullState.server as { kill: ReturnType<typeof vi.fn> };
 }
 
