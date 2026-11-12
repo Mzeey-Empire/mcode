@@ -1,4 +1,3 @@
-import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -17,6 +16,7 @@ import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-execut
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 import { TurnSteerRepo } from "../../steering/persistence/turn-steer-repo.js";
 import { TurnSteerStore } from "../../steering/persistence/turn-steer-store.js";
 import type { SteerableTurn, TurnSteerMessage, TurnSteerRuntime } from "../../steering/turn-steer-runtime-port.js";

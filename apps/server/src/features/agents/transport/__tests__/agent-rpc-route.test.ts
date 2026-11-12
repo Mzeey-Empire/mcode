@@ -307,7 +307,7 @@ describe("routeMessage steer RPCs", () => {
     const steer = vi.fn(async () => ({ status: "delivered", messageId: STEER_ID }));
     await expect(routeMessage(steerRequest(steerParams), steerDeps(steer)))
       .resolves.toEqual({ id: "steer-1", result: { status: "delivered", messageId: STEER_ID } });
-    expect(steer.mock.calls).toEqual([[steerParams]]);
+    expect(steer.mock.calls).toEqual([[steerParams, { sentBy: "user" }]]);
   });
 
   it.each([
