@@ -47,6 +47,7 @@ interface ServerRuntimeManager {
   restart(): Promise<void>;
   restartPlanned?(): Promise<void>;
   forceReplace(): Promise<void>;
+  stopStartingServer(): void;
   stopServerHeldByLock(): Promise<void>;
 }
 
@@ -293,19 +294,20 @@ export class ServerRuntime {
   }
 
   /**
-   * Gracefully stop the owned server before the dev app quits. Packaged builds
+   * Stop the owned server before the dev app quits, forcing a pending start after 10 seconds. Packaged builds
    * keep the detached server alive for fast relaunch; dev mode tears it down so
    * the server (and its provider subprocesses) does not leak between runs.
    */
   async stopServerForDevQuit(): Promise<void> {
     if (this.serverStart) {
       let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        this.serverStart.catch(() => undefined),
-        new Promise<void>((resolve) => {
-          timer = setTimeout(resolve, DEV_QUIT_START_WAIT_MS);
+      const settled = await Promise.race([
+        this.serverStart.then(() => true, () => true),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), DEV_QUIT_START_WAIT_MS);
         }),
       ]).finally(() => clearTimeout(timer));
+      if (!settled) this.serverManager.stopStartingServer();
     }
     await this.serverManager.stopServerHeldByLock();
   }

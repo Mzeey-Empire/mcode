@@ -37,7 +37,7 @@ import {
   findAvailablePort,
   releaseStartupLock,
 } from "./startup.js";
-import { stopServerHeldByLock } from "./shutdown.js";
+import { forceKillServerProcessTree, stopServerHeldByLock } from "./shutdown.js";
 import { readStartupRefusal, ServerStartupRefusedError } from "./startup-failure.js";
 
 /** Interval between server readiness probes. */
@@ -207,6 +207,26 @@ export class ServerManager {
   shutdown(): void {
     if (this._reusedExisting || !this.serverProcess) return;
     this.detachServerProcess();
+  }
+
+  /** Stop a spawned server whose start has not finished, for a quit during startup. */
+  stopStartingServer(): void {
+    const child = this.serverProcess;
+    if (
+      !child ||
+      child === this.ownedServerProcess ||
+      !child.pid ||
+      child.exitCode !== null ||
+      child.signalCode !== null
+    ) return;
+
+    this.plannedExitProcesses.add(child);
+    try {
+      forceKillServerProcessTree(child.pid, this.platform);
+    } catch (error) {
+      this.plannedExitProcesses.delete(child);
+      throw error;
+    }
   }
 
   /** Gracefully stop the in-band lock holder before an application update. */

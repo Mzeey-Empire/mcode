@@ -214,7 +214,7 @@ function readCurrentLock(lockPath: string): ServerLock | null {
 }
 
 /** Kill the server leader and all provider subprocesses that it owns. */
-function forceKillServerProcessTree(pid: number, platform: NodeJS.Platform): void {
+export function forceKillServerProcessTree(pid: number, platform: NodeJS.Platform): void {
   try {
     if (platform === "win32") {
       NodeChildProcess.execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {

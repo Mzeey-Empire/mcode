@@ -1013,6 +1013,49 @@ describe("ServerManager", () => {
   // forceReplace
   // -----------------------------------------------------------------------
 
+  it("stops a spawned server whose start has not finished", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+    const onUnexpectedExit = vi.fn();
+    manager.onUnexpectedExit = onUnexpectedExit;
+
+    try {
+      const startup = manager.start();
+      const rejection = expect(startup).rejects.toThrow(
+        "Server process exited before becoming ready",
+      );
+      await vi.advanceTimersByTimeAsync(0);
+
+      manager.stopStartingServer();
+
+      expect(killSpy).toHaveBeenCalledWith(-12345, "SIGKILL");
+      refs.getExitCallback()!(1);
+      await vi.advanceTimersByTimeAsync(200);
+      await rejection;
+      expect(onUnexpectedExit).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a started server to the lock-file stop", async () => {
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+    try {
+      await manager.start();
+      vi.mocked(NodeChildProcess.execFileSync).mockClear();
+      killSpy.mockClear();
+
+      manager.stopStartingServer();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(NodeChildProcess.execFileSync).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
   it("forceReplace sends POST /shutdown to the running server", async () => {
     // Lock file exists with a running server
     vi.mocked(NodeFS.existsSync).mockReturnValue(true);

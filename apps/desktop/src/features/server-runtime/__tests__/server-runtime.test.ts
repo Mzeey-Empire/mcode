@@ -24,6 +24,7 @@ function createManager(
     isHealthy: vi.fn(async () => true),
     restart: vi.fn(async () => undefined),
     forceReplace: vi.fn(async () => undefined),
+    stopStartingServer: vi.fn(),
     stopServerHeldByLock: vi.fn(async () => undefined),
   };
 }
@@ -109,6 +110,7 @@ describe("ServerRuntime Desktop Window seam", () => {
 
     finishStart({ port: 43123, authToken: "test-token" });
     await quit;
+    expect(manager.stopStartingServer).not.toHaveBeenCalled();
     expect(manager.stopServerHeldByLock).toHaveBeenCalledOnce();
   });
 
@@ -121,11 +123,16 @@ describe("ServerRuntime Desktop Window seam", () => {
     runtime.beginStart();
     const quit = runtime.stopServerForDevQuit();
     await vi.advanceTimersByTimeAsync(9_999);
+    expect(manager.stopStartingServer).not.toHaveBeenCalled();
     expect(manager.stopServerHeldByLock).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(2);
     await quit;
+    expect(manager.stopStartingServer).toHaveBeenCalledOnce();
     expect(manager.stopServerHeldByLock).toHaveBeenCalledOnce();
+    expect(manager.stopStartingServer.mock.invocationCallOrder[0]).toBeLessThan(
+      manager.stopServerHeldByLock.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("recovers a server that exits before lifecycle registration", async () => {
