@@ -62,7 +62,10 @@ const SHELL_METACHAR_RE = /[;&|`$<>"'\n\r]/;
 const RESOLUTION_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** Cached resolution results keyed by trimmed configured path (empty string for auto-discovery). */
-const resolutionCache = new Map<string, { resolution: Promise<CopilotCliResolution>; checkedAt: number }>();
+const resolutionCache = new Map<string, { resolution: CopilotCliResolution; checkedAt: number }>();
+
+/** Discoveries still running, keyed like `resolutionCache`, so concurrent callers share one set of probes. */
+const pendingResolutions = new Map<string, Promise<CopilotCliResolution>>();
 
 /** Semver triplet matcher (matches "1.0.24" in "GitHub Copilot CLI 1.0.24."). */
 const VERSION_RE = /\b(\d+\.\d+\.\d+)(?!\.\d)/;
@@ -269,15 +272,20 @@ export async function resolveCopilotCli(
     return cached.resolution;
   }
 
-  const pending = { resolution: discoverCopilotCli(ctx, io), checkedAt: Infinity };
-  resolutionCache.set(cacheKey, pending);
+  const pending = pendingResolutions.get(cacheKey);
+  if (pending) return pending;
+
+  const discovery = discoverCopilotCli(ctx, io);
+  pendingResolutions.set(cacheKey, discovery);
   try {
-    const resolution = await pending.resolution;
-    pending.checkedAt = Date.now();
+    const resolution = await discovery;
+    // A cache clear during discovery (after a CLI update) makes this result stale.
+    if (pendingResolutions.get(cacheKey) === discovery) {
+      resolutionCache.set(cacheKey, { resolution, checkedAt: Date.now() });
+    }
     return resolution;
-  } catch (error) {
-    if (resolutionCache.get(cacheKey) === pending) resolutionCache.delete(cacheKey);
-    throw error;
+  } finally {
+    if (pendingResolutions.get(cacheKey) === discovery) pendingResolutions.delete(cacheKey);
   }
 }
 
@@ -323,6 +331,7 @@ async function resolveAutoDiscovery(
 /** Clears cached resolution results. Exposed for testing only. */
 export function clearResolutionCache(): void {
   resolutionCache.clear();
+  pendingResolutions.clear();
 }
 
 /**

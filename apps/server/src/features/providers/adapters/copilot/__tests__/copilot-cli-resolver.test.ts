@@ -90,6 +90,29 @@ describe("resolveCopilotCli", () => {
     expect(calls).toBe(1);
   });
 
+  it("does not cache a discovery that finishes after the cache was cleared", async () => {
+    const configured = "/tools/copilot";
+    const staleProbe = Promise.withResolvers<string | null>();
+    const staleIO: CopilotCliResolverIO = {
+      ...fakeIO({ existsExtra: [configured] }),
+      exec: () => staleProbe.promise,
+    };
+    const stale = resolveCopilotCli({ configuredPath: configured }, staleIO);
+    clearResolutionCache();
+    staleProbe.resolve("GitHub Copilot CLI 1.0.57.");
+    await stale;
+
+    const updatedIO = fakeIO({
+      existsExtra: [configured],
+      exec: { [`${configured} --version`]: "GitHub Copilot CLI 1.0.60." },
+    });
+    expect(await resolveCopilotCli({ configuredPath: configured }, updatedIO)).toEqual({
+      source: "configured",
+      entry: configured,
+      version: "1.0.60",
+    });
+  });
+
   it("returns not-found with the @github/copilot install command when nothing resolves", async () => {
     const res = await resolveCopilotCli({}, fakeIO({ platform: "linux" }));
     expect(res.source).toBe("not-found");
