@@ -75,7 +75,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   constructor(private readonly host: ProviderHostPorts, private readonly ports: CopilotProviderPorts, idleTtlMs: number) {
     super();
     this.runtime = new SessionRuntime(this, {
-      providerId: "copilot", occupancy: host.occupancy,
+      providerId: this.id, occupancy: host.occupancy,
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} },
       envService: { getEnv: () => ({ ...host.environment.snapshot() }) },
       processes: host.processes, idleTtlMs, logger,

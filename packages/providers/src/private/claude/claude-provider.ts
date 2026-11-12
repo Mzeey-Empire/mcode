@@ -752,7 +752,7 @@ export class ClaudeProvider
       });
     });
     this.runtime = new SessionRuntime<ClaudeSessionState>(this, {
-      providerId: "claude", occupancy: host.occupancy,
+      providerId: this.id, occupancy: host.occupancy,
       logger,
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       processes: host.processes,

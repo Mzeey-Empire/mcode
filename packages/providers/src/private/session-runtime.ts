@@ -179,7 +179,7 @@ export class SessionRuntime<TState> {
     const sessions = Array.from(this.sessions);
     for (const [sessionId, entry] of sessions) {
       if (this.sessions.get(sessionId) !== entry || isSessionProtected(sessionId)) continue;
-      const verdict = this.evictionVerdict(entry, "memory-pressure");
+      const verdict = this.decideAndRecordEviction(entry, "memory-pressure");
       if (!verdict.evict) continue;
       evicted.push(sessionId);
       this.deps.logger?.info("SessionRuntime evicting non-busy session", { sessionId, reason });
@@ -283,7 +283,7 @@ export class SessionRuntime<TState> {
     const sessions = Array.from(this.sessions);
     for (const [sessionId, entry] of sessions) {
       if (this.sessions.get(sessionId) !== entry) continue;
-      const verdict = this.evictionVerdict(entry, "idle");
+      const verdict = this.decideAndRecordEviction(entry, "idle");
       if (verdict.evict) {
         this.deps.logger?.info("SessionRuntime evicting idle session", { sessionId, reason: verdict.reason });
         await this.stop(sessionId);
@@ -306,7 +306,7 @@ export class SessionRuntime<TState> {
     return { verdict, turnBusy, held: occupancy.held };
   }
 
-  private evictionVerdict(entry: PoolEntry<TState>, mode: OccupancyPolicy["mode"]): OccupancyVerdict {
+  private decideAndRecordEviction(entry: PoolEntry<TState>, mode: OccupancyPolicy["mode"]): OccupancyVerdict {
     const { verdict, turnBusy, held } = this.observeOccupancy(entry, mode);
     if (verdict.evict) {
       const { reason, idleMs, nativeTasks, nativeProtecting } = verdict;
