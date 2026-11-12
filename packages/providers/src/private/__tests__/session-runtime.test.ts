@@ -3,25 +3,55 @@ import { SessionRuntime, type ProtocolAdapter } from "../session-runtime.js";
 import { diag } from "@mcode/shared/diagnostics";
 import type { ProviderSessionOccupancyPort } from "../../host-ports.js";
 
+function epochOccupancy() {
+  const records = new Map<string, { epoch: number; open: boolean }>();
+  const occupancy: ProviderSessionOccupancyPort = {
+    openSession(key) {
+      const id = JSON.stringify([key.providerId, key.threadId]);
+      const previous = records.get(id);
+      if (previous?.open) return previous.epoch;
+      const epoch = (previous?.epoch ?? 0) + 1;
+      records.set(id, { epoch, open: true });
+      return epoch;
+    },
+    closeSession(key, epoch) {
+      const record = records.get(JSON.stringify([key.providerId, key.threadId]));
+      if (record?.epoch === epoch) record.open = false;
+    },
+    nativeChanged: () => {},
+    read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }),
+  };
+  return { records, occupancy };
+}
+
 describe("SessionRuntime", () => {
+  it("closes occupancy for a spawn that finishes between a stop request and its teardown", async () => {
+    const { records, occupancy } = epochOccupancy();
+    let finishSpawn!: (result: { state: string; pids: number[] }) => void;
+    const spawned = new Promise<{ state: string; pids: number[] }>((resolve) => { finishSpawn = resolve; });
+    let spawnCalled!: () => void;
+    const spawning = new Promise<void>((resolve) => { spawnCalled = resolve; });
+    const runtime = new SessionRuntime<string>({
+      spawn: () => { spawnCalled(); return spawned; },
+      isBusy: () => false, isStale: () => false, interrupt: () => {}, close: () => {},
+    }, { providerId: "test", occupancy,
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} },
+      envService: { getEnv: () => ({}) },
+    });
+    try {
+      const acquiring = runtime.acquire({ sessionId: "racing", threadId: "thread", cwd: ".", permissionMode: "default" });
+      await spawning;
+      finishSpawn({ state: "racing", pids: [] });
+      const stopping = runtime.stop("racing");
+      await Promise.allSettled([acquiring, stopping]);
+      expect(records.get(JSON.stringify(["test", "thread"]))).toEqual({ epoch: 1, open: false });
+    } finally {
+      await runtime.shutdown();
+    }
+  });
+
   it("keeps replacement occupancy open when an old session is stopped again during teardown", async () => {
-    const records = new Map<string, { epoch: number; open: boolean }>();
-    const occupancy: ProviderSessionOccupancyPort = {
-      openSession(key) {
-        const id = JSON.stringify([key.providerId, key.threadId]);
-        const previous = records.get(id);
-        if (previous?.open) return previous.epoch;
-        const epoch = (previous?.epoch ?? 0) + 1;
-        records.set(id, { epoch, open: true });
-        return epoch;
-      },
-      closeSession(key, epoch) {
-        const record = records.get(JSON.stringify([key.providerId, key.threadId]));
-        if (record?.epoch === epoch) record.open = false;
-      },
-      nativeChanged: () => {},
-      read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }),
-    };
+    const { records, occupancy } = epochOccupancy();
     let releaseClose!: () => void;
     const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
     let closeStarted!: () => void;
@@ -48,7 +78,6 @@ describe("SessionRuntime", () => {
       await closing;
       expect(records.get(keyId)?.open).toBe(false);
       await runtime.acquire({ ...request, sessionId: "replacement" });
-      // Session ids differ, but both entries share the thread's occupancy key.
       const lateStop = runtime.stop("old");
       releaseClose();
       await Promise.all([stopping, lateStop]);
