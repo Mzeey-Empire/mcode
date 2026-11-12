@@ -94,6 +94,24 @@ describe("ServerRuntime Desktop Window seam", () => {
     expect(relayStarter).toHaveBeenCalledOnce();
   });
 
+  it("stops an early-started server when the dev app quits during startup", async () => {
+    let finishStart!: (value: { port: number; authToken: string }) => void;
+    const start = vi.fn(() => new Promise<{ port: number; authToken: string }>((resolve) => {
+      finishStart = resolve;
+    }));
+    const manager = createManager(43123, start);
+    const runtime = createRuntime(43123, { manager });
+
+    runtime.beginStart();
+    const quit = runtime.stopServerForDevQuit();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(manager.stopServerHeldByLock).not.toHaveBeenCalled();
+
+    finishStart({ port: 43123, authToken: "test-token" });
+    await quit;
+    expect(manager.stopServerHeldByLock).toHaveBeenCalledOnce();
+  });
+
   it("joins an early start instead of starting the server again", async () => {
     const start = vi.fn(async () => ({ port: 43123, authToken: "test-token" }));
     const runtime = createRuntime(43123, {
@@ -257,4 +275,3 @@ describe("ServerRuntime Desktop Window seam", () => {
     await expect(createRuntime(0).getActiveAgentCount()).rejects.toThrow("port is not available");
   });
 });
-

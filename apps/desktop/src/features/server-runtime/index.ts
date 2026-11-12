@@ -281,6 +281,9 @@ export class ServerRuntime {
    * the server (and its provider subprocesses) does not leak between runs.
    */
   async stopServerForDevQuit(): Promise<void> {
+    if (this.serverStart) {
+      await this.serverStart.catch(() => undefined);
+    }
     await this.serverManager.stopServerHeldByLock();
   }
 
