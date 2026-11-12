@@ -134,6 +134,8 @@ export type ClaudeMapOutcome = "none" | "turn_complete" | "result_error";
 export class ClaudeEventMapper {
   private readonly launchLabels = new Map<string, string>();
   private liveTasks: ReadonlyMap<string, NativeBackgroundTask> | null = null;
+  // Ambient tasks keep their first sighting too, so flipping ambient and back cannot restart the native cap.
+  private levelFirstSeenAt = new Map<string, number>();
   private backgroundDirty = false;
   private lastBackgroundTasks = "[]";
   private readonly commandCalls = new Map<string, Extract<AgentEvent, { type: "toolUse" }>>();
@@ -257,7 +259,7 @@ export class ClaudeEventMapper {
    */
   settleBackgroundTask(message: Message): void {
     if (message.type !== "system" || message.subtype !== "task_notification") return;
-    const toolCallId = validIdentity(message.tool_use_id) ?? this.heldCallForTask(validIdentity(message.task_id));
+    const toolCallId = validIdentity(message.tool_use_id) ?? this.heldCallForTask(validIdentity(message.task_id))?.[0];
     const row = toolCallId && this.backgroundTools.get(toolCallId);
     const status = BACKGROUND_TASK_STATUS.get(stringValue(message.status));
     if (!toolCallId || !row || !status) return;
@@ -279,6 +281,7 @@ export class ClaudeEventMapper {
     this.nativeSource = {};
     this.backgroundDirty = true;
     this.liveTasks = new Map();
+    this.levelFirstSeenAt.clear();
     this.launchLabels.clear();
     for (const [toolCallId, row] of this.backgroundTools) {
       this.backgroundTools.delete(toolCallId);
@@ -295,28 +298,35 @@ export class ClaudeEventMapper {
   observeBackgroundLevel(message: Message): void {
     if (message.type !== "system" || message.subtype !== "background_tasks_changed" || !Array.isArray(message.tasks)) return;
     const tasks = new Map<string, NativeBackgroundTask>();
+    const firstSeenAt = new Map<string, number>();
     for (const value of message.tasks) {
       const task = objectValue(value);
       const taskId = validIdentity(task.task_id);
-      if (!taskId || task.ambient === true) continue;
-      tasks.set(taskId, this.levelTask(taskId, task));
+      if (!taskId) continue;
+      const startedAt = this.levelStartedAt(taskId);
+      firstSeenAt.set(taskId, startedAt);
+      if (task.ambient !== true) {
+        tasks.set(taskId, { taskId, startedAt, label: launchLabel(stringValue(task.description) || stringValue(task.task_type)) });
+      }
     }
+    this.levelFirstSeenAt = firstSeenAt;
     this.liveTasks = tasks;
     this.backgroundDirty = true;
   }
 
-  private heldCallForTask(taskId: string | undefined): string | undefined {
-    if (!taskId) return undefined;
-    for (const [toolCallId, row] of this.backgroundTools) {
-      if (row.taskId === taskId) return toolCallId;
-    }
-    return undefined;
+  /** The earlier of the task's first level sighting and its Bash launch. */
+  private levelStartedAt(taskId: string): number {
+    const firstSeenAt = this.levelFirstSeenAt.get(taskId) ?? Date.now();
+    const launchedAt = this.heldCallForTask(taskId)?.[1].startedAt ?? firstSeenAt;
+    return Math.min(firstSeenAt, launchedAt);
   }
 
-  private levelTask(taskId: string, task: Message): NativeBackgroundTask {
-    const row = [...this.backgroundTools.values()].find((held) => held.taskId === taskId);
-    const startedAt = row?.startedAt ?? this.liveTasks?.get(taskId)?.startedAt ?? Date.now();
-    return { taskId, startedAt, label: launchLabel(stringValue(task.description) || stringValue(task.task_type)) };
+  private heldCallForTask(taskId: string | undefined): [toolCallId: string, row: HeldBackgroundCall] | undefined {
+    if (!taskId) return undefined;
+    for (const [toolCallId, row] of this.backgroundTools) {
+      if (row.taskId === taskId) return [toolCallId, row];
+    }
+    return undefined;
   }
 
   /** Notifies only when native background tasks have changed. */
