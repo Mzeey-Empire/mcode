@@ -15,7 +15,7 @@ export function createCopilotLaunchPort(settings: { get(): { provider: { cli: { 
   return { resolve: async () => {
     const env = { ...host.environment.snapshot() };
     let cliPath = settings.get().provider.cli.copilot?.trim() || bundledCliPath(host.runtime);
-    const compatible = resolveCopilotCli({ configuredPath: cliPath }, createNodeResolverIO(env, host.runtime.platform));
+    const compatible = await resolveCopilotCli({ configuredPath: cliPath }, createNodeResolverIO(env, host.runtime.platform));
     if (compatible.source === "not-found") throw new Error(compatible.message);
     cliPath = compatible.entry;
     let githubToken: string | undefined;
@@ -23,9 +23,9 @@ export function createCopilotLaunchPort(settings: { get(): { provider: { cli: { 
     catch { /* The SDK's native authentication remains available without GitHub CLI auth. */ }
     return { cliPath, env, ...(githubToken ? { githubToken } : {}) };
   },
-  describeCli: () => {
+  describeCli: async () => {
     const configured = settings.get().provider.cli.copilot?.trim();
-    const resolution = resolveCopilotCli(
+    const resolution = await resolveCopilotCli(
       { configuredPath: configured || bundledCliPath(host.runtime) },
       createNodeResolverIO({ ...host.environment.snapshot() }, host.runtime.platform),
     );

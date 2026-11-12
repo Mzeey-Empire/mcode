@@ -99,6 +99,14 @@ describe("Copilot public factory", () => {
     provider = createCopilotProvider({ configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host: ports, copilot: { launch: { resolve: launch } } });
   });
   afterEach(async () => { await provider.shutdown().catch(() => {}); });
+  it("awaits CLI discovery when describing provider status", async () => {
+    const facts = { installed: "1.0.57", managedBy: "user" as const, resolvedPath: "/copilot", npmPackage: null };
+    provider = createCopilotProvider({
+      configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host: ports,
+      copilot: { launch: { resolve: launch, describeCli: async () => facts } },
+    });
+    expect((await provider.describeStatus?.())?.cli).toEqual(facts);
+  });
   it("ends errored when held saves exceed the production 64 MiB budget", async () => {
     const held = Promise.withResolvers<void>();
     const submit = ports.events.submit.bind(ports.events);
