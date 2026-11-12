@@ -1407,7 +1407,10 @@ Lightweight inspection and settings only; no command lists.
 
 **Tooltips.** `panel` fill, 1px `border`, `menu` radius, caption text in
 `ink`, 32px minimum height, 32rem maximum width, with a small arrow toward the
-trigger. A tooltip may show the command's shortcut in keycaps. Every icon-only
+trigger. A tooltip may show the command's shortcut in keycaps. A keycap, in
+a tooltip, menu or picker, is a 20px key filled with a 10% tint of its text
+colour, in Caption in the UI font with tabular numerals and no outline, so a
+column of them stays quieter than the labels they serve. Every icon-only
 control has one; native `title` tooltips are not used.
 
 **Dialogs.** Destructive confirmation names the object and cascade. The
