@@ -15,7 +15,7 @@ Segment A meets its budget on both variants. Segment C misses it by 25 ms on var
 
 The totals are not a Phase 1 result. Segment F still switches between about 100 ms and about 1,500 ms from launch to launch on both packages. In this run that slow mode raised the baseline's variant A p50 to 3,268 ms, against 2,886 ms in the Phase 0 receipt. Phase 1 does not touch F.
 
-Segment C's remaining time is not the poll. On variant B, C takes 8 to 31 ms in 9 of 10 launches, which is what a 25 ms poll and a loopback probe cost. On variant A, 6 of 10 launches take 45 to 63 ms, and no server stall of 100 ms or more overlaps C in any of them. The record keeps only stalls of 100 ms or more, so it cannot show what delays the health response in those launches. Server work that starts when the server listens is the likely cause (inferred). In variant B launch 4, a 257 ms server stall starts at listen and makes C 265 ms. Phase 0 recorded the same kind of stall at listen. Segment C is checked again at the end of Phase 2, which works on the server after listen.
+On variant B, C takes 8 to 31 ms in 9 of 10 launches, close to what one 25 ms poll and a loopback probe cost. On variant A, 6 of 10 launches take 45 to 63 ms, and no server stall of 100 ms or more overlaps C in any of them. The record keeps only stalls of 100 ms or more, so it cannot show what delays the health response in those launches. Server work that starts when the server listens is the likely cause (inferred). In variant B launch 4, a 257 ms server stall starts at listen, and C is 265 ms. The [Phase 0 receipt](../2026-11-12-app-startup-baseline/README.md) also recorded a stall at listen. Segment C is checked again at the end of Phase 2, which works on the server after listen.
 
 ## Method
 
