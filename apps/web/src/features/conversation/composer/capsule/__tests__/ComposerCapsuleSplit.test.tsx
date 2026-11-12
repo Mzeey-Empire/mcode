@@ -189,10 +189,16 @@ describe("ComposerCapsuleSplit", () => {
     expect(document.querySelector("[data-slot='tooltip-content']")).not.toBeInTheDocument();
   });
 
+  it("names the reasoning part with its current level, like the model and access parts", async () => {
+    await renderSplit();
+
+    expect(screen.getByRole("button", { name: "Reasoning: High" })).toHaveAttribute("data-capsule-part", "reasoning");
+  });
+
   it("names a part in a tooltip when focus reaches it", async () => {
     await renderSplit();
 
-    act(() => part(/^Model settings/).focus());
+    act(() => part(/^Reasoning: /).focus());
 
     expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent("Reasoning: High");
   });
@@ -203,7 +209,7 @@ describe("ComposerCapsuleSplit", () => {
     await renderSplit();
     await openModelPicker();
 
-    rest(part(/^Model settings/), SWITCH_DWELL_MS);
+    rest(part(/^Reasoning: /), SWITCH_DWELL_MS);
     rest(part(/^Model:/), SWITCH_DWELL_MS);
     await act(async () => {});
 
@@ -217,7 +223,7 @@ describe("ComposerCapsuleSplit", () => {
     await openModelPicker();
     fireEvent.click(screen.getByRole("radio", { name: "Favourites" }));
 
-    rest(part(/^Model settings/), SWITCH_DWELL_MS);
+    rest(part(/^Reasoning: /), SWITCH_DWELL_MS);
     rest(part(/^Model:/), SWITCH_DWELL_MS);
     expect(screen.getByRole("radio", { name: "Favourites" })).toHaveAttribute("aria-checked", "true");
 
@@ -276,7 +282,7 @@ describe("ComposerCapsuleSplit", () => {
     refuseFocusWhileHidden();
     await renderSplit({ selection: { modelId: "gpt-9-fast" } });
 
-    fireEvent.click(part(/^Model settings/));
+    fireEvent.click(part(/^Reasoning: /));
     await act(async () => {});
     frame();
 
@@ -288,7 +294,7 @@ describe("ComposerCapsuleSplit", () => {
     await renderSplit();
     await openModelPicker();
 
-    rest(part(/^Model settings/), SWITCH_DWELL_MS);
+    rest(part(/^Reasoning: /), SWITCH_DWELL_MS);
     // Focus dropped to the page makes Base UI pull it onto the popup a frame later, over the slider.
     expect(realPopup()?.contains(document.activeElement)).toBe(true);
     await act(async () => {});
@@ -342,7 +348,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
   it("changes and persists reasoning while the agent runs", async () => {
     const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
     const onSelectionChange = await renderSplit({ threadId: "thread-1", isProviderLocked: true });
-    openPart(/^Model settings/);
+    openPart(/^Reasoning: /);
 
     const slider = screen.getByLabelText("Reasoning effort");
     expect(slider).toHaveAttribute("aria-valuetext", "High");
@@ -356,7 +362,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
     const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
     registerProviderModels("codex", [{ id: "gpt-9-deep", label: "GPT-9 Deep", providerId: "codex", supportsFastMode: true }]);
     const onSelectionChange = await renderSplit({ threadId: "thread-1", branchFromMessageId: "message-1" });
-    openPart(/^Model settings/);
+    openPart(/^Reasoning: /);
 
     fireEvent.click(screen.getByRole("button", { name: "Fast" }));
 
@@ -366,7 +372,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
 
   it("does not move past the last reasoning level", async () => {
     const onSelectionChange = await renderSplit();
-    openPart(/^Model settings/);
+    openPart(/^Reasoning: /);
 
     fireEvent.keyDown(screen.getByLabelText("Reasoning effort"), { key: "End" });
 
@@ -375,7 +381,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
 
   it("commits the first level when the current level is not on the model's ladder", async () => {
     const onSelectionChange = await renderSplit({ selection: { reasoning: "xhigh" } });
-    openPart(/^Model settings/);
+    openPart(/^Reasoning: /);
 
     const slider = screen.getByLabelText("Reasoning effort");
     expect(slider).toHaveAttribute("aria-valuetext", "X-High");
@@ -386,7 +392,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
 
   it("shows no slider when the model has a single reasoning level", async () => {
     await renderSplit({ reasoningLevels: ["high"] });
-    openPart(/^Model settings/);
+    openPart(/^Reasoning: /);
 
     expect(screen.getByTestId("composer-settings-label")).toHaveTextContent("High");
     expect(screen.queryByLabelText("Reasoning effort")).toBeNull();
@@ -397,7 +403,7 @@ describe("ComposerCapsuleSplit reasoning", () => {
     ["hides the 1M toggle for Haiku", "claude-haiku-4-5", false],
   ] as const)("%s", async (_name, modelId, shown) => {
     await renderSplit({ selection: { provider: "claude", modelId } });
-    openPart(/^Model settings/);
+    openPart(/^Reasoning: /);
 
     expect(screen.queryByRole("button", { name: "1M context" }) !== null).toBe(shown);
   });

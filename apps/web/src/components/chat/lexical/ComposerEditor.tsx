@@ -14,6 +14,7 @@ import { MentionPlugin } from "./MentionPlugin";
 import { SlashCommandPlugin } from "./SlashCommandPlugin";
 import { KeyboardPlugin } from "./KeyboardPlugin";
 import { extractComposerMessage } from "./cursor-utils";
+import type { SlashMenuAria } from "../useSlashCommand";
 
 interface ComposerEditorProps {
   onChange: (text: string, mentions: MessageMention[]) => void;
@@ -51,6 +52,8 @@ interface ComposerEditorProps {
   isPopupOpen?: boolean;
   /** Called when a navigation key is pressed while popup is open. Returns true if handled. */
   onPopupKeyDown?: (key: string) => boolean;
+  /** Points the editor at the slash menu and its highlighted option, so screen readers follow the highlight. */
+  slashMenu?: SlashMenuAria;
 }
 
 const COMPOSER_MIN_HEIGHT = "56px";
@@ -164,6 +167,16 @@ function EditablePlugin({ disabled, focusKey }: { readonly disabled?: boolean; r
   return null;
 }
 
+// The editor stays a multi-line textbox: aria-expanded is not valid there, but these three are (WAI-ARIA 1.2).
+function slashMenuAriaProps(slashMenu: SlashMenuAria | undefined) {
+  if (!slashMenu) return {};
+  return {
+    ariaAutoComplete: "list" as const,
+    ariaControls: slashMenu.expanded ? slashMenu.listboxId : undefined,
+    ariaActiveDescendant: slashMenu.expanded ? slashMenu.activeOptionId : undefined,
+  };
+}
+
 /** Rich text composer with inline mention/slash-command chip support. */
 export function ComposerEditor({
   onChange,
@@ -187,6 +200,7 @@ export function ComposerEditor({
   capsule = false,
   isPopupOpen,
   onPopupKeyDown,
+  slashMenu,
 }: ComposerEditorProps) {
   const internalRef = useRef<LexicalEditor | null>(null);
   const ref = editorRef ?? internalRef;
@@ -224,6 +238,7 @@ export function ComposerEditor({
               id={id}
               aria-label={ariaLabel}
               aria-placeholder={placeholder}
+              {...slashMenuAriaProps(slashMenu)}
               placeholder={
                 <div className={PLACEHOLDER_CLASS[sizing]}>
                   {placeholder}
