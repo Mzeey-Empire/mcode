@@ -343,6 +343,17 @@ describe("ClaudeProvider native background tasks", () => {
     } finally { await provider.shutdown(); }
   });
 
+  it("trusts an empty level report over a launch whose notification has not arrived", async () => {
+    vi.useFakeTimers({ now: 1000 });
+    const { emit, provider, state, changed } = await liveClaudeSession();
+    try {
+      await launchBackgroundBash(emit, { command: "sleep 900", description: "Benchmark" });
+      await emit(levelReport());
+      expect(provider.backgroundTasks(state)).toEqual([]);
+      expect(changed).toHaveBeenCalledTimes(2);
+    } finally { await provider.shutdown(); }
+  });
+
   it("replaces the task set from each level report between turns and leaves out ambient tasks", async () => {
     vi.useFakeTimers({ now: 1000 });
     const { emit, provider, state, changed } = await liveClaudeSession();
