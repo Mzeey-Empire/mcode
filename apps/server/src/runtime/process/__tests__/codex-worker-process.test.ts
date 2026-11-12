@@ -2,7 +2,7 @@ import * as NodeEvents from "node:events";
 import { describe, expect, it } from "vitest";
 import { createWorkerCodexProcessLauncher } from "../../../../../../packages/providers/src/private/codex/codex-worker-process.js";
 import { CodexAppServer } from "../../../../../../packages/providers/src/private/codex/codex-app-server.js";
-import { ProcessStartWorkerClient } from "../process-start-worker-client.js";
+import { createProcessStartWorker, ProcessStartWorkerClient } from "../process-start-worker-client.js";
 
 describe("worker-backed Codex process", () => {
   it("delivers spawn before output, echoes stdin, streams stderr, and exits on terminate", async () => {
@@ -27,6 +27,19 @@ describe("worker-backed Codex process", () => {
       const [code, signal] = await exit;
       expect(code !== null || signal !== null).toBe(true);
     }
+  });
+
+  it("reports a running process as exited when the worker is lost", async () => {
+    let worker: Worker | undefined;
+    const client = new ProcessStartWorkerClient(() => {
+      worker = createProcessStartWorker();
+      return worker;
+    });
+    const child = createWorkerCodexProcessLauncher(client.open)(process.execPath, ["-e", "setTimeout(() => {}, 2000)"], {});
+    await NodeEvents.once(child, "spawn");
+    const exit = NodeEvents.once(child, "exit");
+    worker!.dispatchEvent(new Event("close"));
+    expect(await exit).toEqual([null, null]);
   });
 
   it("completes a catalog-only handshake through worker-backed stdio", async () => {

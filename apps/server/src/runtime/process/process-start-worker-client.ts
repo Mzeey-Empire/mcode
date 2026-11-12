@@ -57,10 +57,24 @@ function deliverOutput(observer: ProcessOutputObserver | undefined, stream: "std
   else observer?.onStderr?.(chunk);
 }
 
-function deliverLifecycle(observer: ProcessOutputObserver, reply: ProcessStartWorkerOutbound): void {
-  if ("pid" in reply) observer.onSpawn?.(reply.pid);
-  else if ("startError" in reply) observer.onStartError?.(reply.startError);
-  else if ("exit" in reply) observer.onExit?.(reply.exit.code, reply.exit.signal);
+/** One open session, and how far its process got, so a lost worker reports the right ending. */
+interface OpenSession {
+  readonly observer: ProcessOutputObserver;
+  readonly resolve: () => void;
+  phase: "starting" | "running" | "ended";
+}
+
+function deliverLifecycle(session: OpenSession, reply: ProcessStartWorkerOutbound): void {
+  if ("pid" in reply) {
+    session.phase = "running";
+    session.observer.onSpawn?.(reply.pid);
+  } else if ("startError" in reply) {
+    session.phase = "ended";
+    session.observer.onStartError?.(reply.startError);
+  } else if ("exit" in reply) {
+    session.phase = "ended";
+    session.observer.onExit?.(reply.exit.code, reply.exit.signal);
+  }
 }
 
 /** Creates the worker thread that starts processes. */
@@ -71,7 +85,7 @@ export class ProcessStartWorkerClient {
   private worker: Worker | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, PendingRun>();
-  private readonly sessions = new Map<number, { observer: ProcessOutputObserver; resolve: () => void }>();
+  private readonly sessions = new Map<number, OpenSession>();
 
   constructor(private readonly createWorker: ProcessStartWorkerFactory = createProcessStartWorker) {}
 
@@ -97,7 +111,7 @@ export class ProcessStartWorkerClient {
   readonly open: ProcessStartOpener = (request, observer) => {
     const worker = this.worker ?? this.start();
     const id = this.nextId++;
-    const exited = new Promise<void>((resolve) => { this.sessions.set(id, { observer, resolve }); });
+    const exited = new Promise<void>((resolve) => { this.sessions.set(id, { observer, resolve, phase: "starting" }); });
     worker.postMessage({
       kind: "open", id, request: { ...request, env: request.env ?? { ...process.env } },
       observe: { stdout: Boolean(observer.onStdout), stderr: Boolean(observer.onStderr), stdinError: Boolean(observer.onStdinError) },
@@ -137,7 +151,7 @@ export class ProcessStartWorkerClient {
       } else if ("stdinError" in reply) session.observer.onStdinError?.(reply.stdinError);
       else if ("output" in reply) {
         deliverOutput(session.observer, reply.output, reply.chunk);
-      } else deliverLifecycle(session.observer, reply);
+      } else deliverLifecycle(session, reply);
       return true;
     }
     return false;
@@ -166,8 +180,11 @@ export class ProcessStartWorkerClient {
     const runs = [...this.pending.values()];
     this.pending.clear();
     for (const run of runs) run.reject(error);
+    // A start error after a process is running would reach listeners that only
+    // expect one before it starts; a running process instead reads as exited.
     for (const session of this.sessions.values()) {
-      session.observer.onStartError?.(error.message);
+      if (session.phase === "starting") session.observer.onStartError?.(error.message);
+      else if (session.phase === "running") session.observer.onExit?.(null, null);
       session.resolve();
     }
     this.sessions.clear();
