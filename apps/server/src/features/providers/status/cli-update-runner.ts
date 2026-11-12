@@ -1,9 +1,9 @@
 import * as NodeChildProcess from "node:child_process";
-import { sharedProcessStartWorkerClient } from "../../../runtime/process/process-start-worker-client.js";
 import * as NodePath from "node:path";
 import which from "which";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { createCliStatusRunner, isSemver, type CliStatusOutcome } from "@mcode/providers";
+import { sharedProcessStartWorkerClient } from "../../../runtime/process/process-start-worker-client.js";
 
 /** The only process boundary used by the updater. Tests supply an in-memory host. */
 export interface CliUpdateProcessHost {

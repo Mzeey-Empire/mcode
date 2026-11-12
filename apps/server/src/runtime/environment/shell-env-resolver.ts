@@ -92,7 +92,6 @@ export class ShellEnvResolver {
       const { stdout: buf } = await this.runProcess({
         command: shell,
         args: ["-ilc", "env -0"],
-        encoding: "buffer",
         timeout: RESOLVE_TIMEOUT_MS,
         maxBuffer: MAX_ENV_BUFFER_BYTES,
       });
@@ -106,7 +105,6 @@ export class ShellEnvResolver {
     const { stdout: text } = await this.runProcess({
       command: shell,
       args: ["-ilc", "env"],
-      encoding: "utf8",
       timeout: RESOLVE_TIMEOUT_MS,
       maxBuffer: MAX_ENV_BUFFER_BYTES,
     });
@@ -132,7 +130,6 @@ export class ShellEnvResolver {
     const { stdout: out } = await this.runProcess({
       command: "powershell.exe",
       args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-      encoding: "utf8",
       timeout: RESOLVE_TIMEOUT_MS,
       maxBuffer: MAX_ENV_BUFFER_BYTES,
     });

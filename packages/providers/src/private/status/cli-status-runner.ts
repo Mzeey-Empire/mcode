@@ -1,6 +1,6 @@
-import type { ProviderProcessRunner } from "../../host-ports.js";
 import * as NodePath from "node:path";
 import which from "which";
+import type { ProviderProcessRunner } from "../../host-ports.js";
 import { isSemver } from "../../version-policy.js";
 
 /** What one CLI status command did. `failed` covers a missing binary, timeout, crash, or rejected path. */
@@ -90,6 +90,8 @@ async function execStatus(
 }
 
 function failureOutcome(error: unknown): CliStatusOutcome {
+  // A numeric code is a normal non-zero exit; a string code (ENOENT, ERR_CHILD_PROCESS_STDIO_MAXBUFFER)
+  // or a signal means the command never gave a usable answer.
   if (error instanceof Error && "code" in error && typeof error.code === "number"
     && !("killed" in error && error.killed) && !("signal" in error && error.signal)) {
     return { kind: "exited", code: error.code, output: failureOutput(error).replace(ANSI_ESCAPE_RE, "") };

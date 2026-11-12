@@ -17,7 +17,6 @@ const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 export interface ProcessStartRequest {
   readonly command: string;
   readonly shell?: boolean;
-  readonly encoding?: "utf8" | "buffer";
   readonly maxBuffer?: number;
   /** Arguments after the command. */
   readonly args: readonly string[];
@@ -67,7 +66,7 @@ async function runBufferedProcessStart(request: ProcessStartRequest): Promise<Pr
     timeout: request.timeout,
     windowsHide: true,
     ...(request.shell !== undefined ? { shell: request.shell } : {}),
-    encoding: request.encoding ?? "utf8",
+    encoding: "utf8",
     ...(request.maxBuffer !== undefined ? { maxBuffer: request.maxBuffer } : {}),
     ...(request.env ? { env: request.env } : {}),
     ...(request.cwd ? { cwd: request.cwd } : {}),
