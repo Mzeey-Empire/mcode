@@ -142,12 +142,15 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   systemNotice?: SystemNoticeMetadata;
 };
 
-/** An opaque receipt for a command effect that can be activated or rolled back. */
-/** Only direct user input extends native-task protection. */
+/**
+ * True only for a turn the user sent. Provider-started turns and coordinator wakes carry no
+ * composer selection and must not reset the user's native-task protection window.
+ */
 export function isUserSentTurn(command: SendMessageCommand): boolean {
   return !command.providerOriginated && !command.delegationWake;
 }
 
+/** An opaque receipt for a command effect that can be activated or rolled back. */
 export type CommandEffectReceipt = GoalCommandEffectReceipt;
 
 /** A runtime admission owned by the AgentService. */

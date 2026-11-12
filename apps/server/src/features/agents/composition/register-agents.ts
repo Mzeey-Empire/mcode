@@ -67,8 +67,7 @@ import { FileService } from "../../projects/files/file-service.js";
 import { WorkspaceEnvironmentService } from "../../projects/index.js";
 import { ProviderAvailabilityService } from "../../providers/availability/provider-availability-service.js";
 import { ModelCacheService } from "../../providers/models/model-cache-service.js";
-import { PROVIDER_TURN_PORT } from "../../providers/composition/provider-host-ports.js";
-import type { ProviderTurnPort } from "@mcode/providers";
+import { PROVIDER_TURN_PORT, type HostTurnSink } from "../../providers/composition/provider-host-ports.js";
 import { SettingsService } from "../../settings/settings-service.js";
 import { TURN_FILE_TRACKER, TurnFileTracker } from "../turns/turn-file-tracker.js";
 import {
@@ -277,7 +276,7 @@ export function registerAgentServices(container: DependencyContainer): void {
   container.register<TurnRuntimeEventControl>(TURN_RUNTIME_EVENT_CONTROL, {
     useFactory: (c) => c.resolve(TurnRuntimeController),
   });
-  container.register<ProviderTurnPort>(PROVIDER_TURN_PORT, {
+  container.register<HostTurnSink>(PROVIDER_TURN_PORT, {
     useFactory: (c) => {
       const turns = c.resolve(TurnRuntimeController);
       const backgroundTools = c.resolve(BackgroundToolSettlementEffect);

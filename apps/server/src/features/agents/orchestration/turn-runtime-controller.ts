@@ -1,4 +1,3 @@
-import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 /**
  * Agent session orchestration service.
  * Manages sending messages to AI providers, tracking active sessions,
@@ -10,6 +9,7 @@ import * as NodeCrypto from "node:crypto";
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { diag } from "@mcode/shared/diagnostics";
+import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { ProviderRuntimeEventSchema, isChildRoutedRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { isSessionEvictable, isTurnSteerCapable } from "@mcode/contracts/providers/interfaces";

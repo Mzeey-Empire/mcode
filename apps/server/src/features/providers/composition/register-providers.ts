@@ -4,7 +4,7 @@ import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupa
 
 import { OpenCodeProvider } from "../adapters/opencode/opencode-provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { createProviderHostPorts, PROVIDER_TURN_PORT, type ProviderHostPortDependencies } from "./provider-host-ports.js";
+import { createProviderHostPorts, PROVIDER_TURN_PORT, type HostTurnSink } from "./provider-host-ports.js";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { McodeMcpServer, McodeProviderPort, McodeSessionAuthority } from "../../mcode-mcp/index.js";
 import { WorkerOwnedTurnRuntime } from "../../agents/execution/worker-owned-turn-runtime.js";
@@ -62,7 +62,7 @@ export function registerProviderAdapters(container: DependencyContainer): void {
       grants: c.resolve(ScopedPreGrantService),
       ingress: c.resolve(ProviderEventIngress),
       eventOwnership: c.resolve(WorkerOwnedTurnRuntime).providerEvents,
-      turns: () => c.resolve<ReturnType<ProviderHostPortDependencies["turns"]>>(PROVIDER_TURN_PORT),
+      turns: () => c.resolve<HostTurnSink>(PROVIDER_TURN_PORT),
     }),
   });
 }

@@ -1,4 +1,3 @@
-import { SessionOccupancyRegistry, type UserMessageStamp } from "../../session-occupancy/session-occupancy-registry.js";
 /**
  * Durable Send now. A steer row is written before the adapter call and Mcode never sends a
  * steered message twice on its own; see `docs/plans/ready-for-build/sections/05-running-turn.md`
@@ -6,6 +5,7 @@ import { SessionOccupancyRegistry, type UserMessageStamp } from "../../session-o
  */
 import * as NodeCrypto from "node:crypto";
 import { inject, injectable } from "tsyringe";
+import { SessionOccupancyRegistry, type UserMessageStamp } from "../../session-occupancy/session-occupancy-registry.js";
 import { logger } from "@mcode/shared";
 import { MAX_HELD_STEERS, type ListHeldSteersResult, type SettleUnknownSteerParams, type SettleUnknownSteerResult, type TurnSteerParams, type TurnSteerResult } from "@mcode/contracts/models/turn-steer";
 import { type SystemNoticeMetadata } from "@mcode/contracts/models/message";

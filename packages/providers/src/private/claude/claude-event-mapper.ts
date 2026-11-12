@@ -812,16 +812,17 @@ export class ClaudeEventMapper {
       ? user.content.map(objectValue).filter((block) => block.type === "tool_result") : [];
     const launched = backgroundLaunch(message, results);
     const executionId = this.callbacks.liveExecutionId();
-    if (launched && executionId) this.holdBackgroundTool(launched.toolCallId, executionId, launched.taskId);
+    if (launched && executionId) this.holdBackgroundTool(launched, executionId);
     else for (const block of results) this.toolResult(block);
     return "none";
   }
   /** An async launch result only acknowledges the start; the call runs on until its task notification. */
-  private holdBackgroundTool(toolCallId: string, executionId: string, taskId?: string): void {
+  private holdBackgroundTool(launch: BackgroundLaunch, executionId: string): void {
+    const { toolCallId, taskId, toolName } = launch;
     this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
     if (!this.backgroundTools.has(toolCallId) && this.backgroundTools.size >= MAX_TRACKED_TOOLS)
       throw new Error("Claude background tool bound exceeded");
-    const label = this.launchLabels.get(toolCallId) ?? "Agent";
+    const label = this.launchLabels.get(toolCallId) ?? toolName;
     this.launchLabels.delete(toolCallId);
     this.backgroundTools.set(toolCallId, { executionId, taskId, startedAt: Date.now(), label });
     this.backgroundDirty = true;
@@ -993,14 +994,21 @@ export class ClaudeEventMapper {
 }
 
 /** The SDK reports an async launch on the message, so it only names a call when the message carries one result. */
-function backgroundLaunch(message: Message, results: readonly Message[]): { toolCallId: string; taskId?: string } | undefined {
+interface BackgroundLaunch { toolCallId: string; taskId?: string; toolName: "Bash" | "Agent" }
+
+/** Bash reports its task as `backgroundTaskId`; a background Agent reports `async_launched` with its agent id. */
+function backgroundLaunch(message: Message, results: readonly Message[]): BackgroundLaunch | undefined {
   const result = objectValue(message.tool_use_result);
-  const bashId = validIdentity(result.backgroundTaskId);
-  if ((!bashId && result.status !== "async_launched") || results.length !== 1) return undefined;
+  const bashTaskId = validIdentity(result.backgroundTaskId);
+  if ((!bashTaskId && result.status !== "async_launched") || results.length !== 1) return undefined;
   const toolCallId = validIdentity(results[0]?.tool_use_id);
-  return toolCallId ? { toolCallId, taskId: bashId ?? validIdentity(result.agentId) } : undefined;
+  if (!toolCallId) return undefined;
+  return bashTaskId
+    ? { toolCallId, taskId: bashTaskId, toolName: "Bash" }
+    : { toolCallId, taskId: validIdentity(result.agentId), toolName: "Agent" };
 }
 
+/** Cuts to the snapshot's 500-unit label limit without splitting a surrogate pair. */
 function launchLabel(value: string): string {
   let end = Math.min(value.length, 500);
   const last = value.charCodeAt(end - 1);

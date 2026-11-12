@@ -235,7 +235,10 @@ export interface ProviderSessionOccupancy { held: boolean; lastActivityAt: numbe
 /** Lifecycle and activity boundary shared by all providers. */
 export interface ProviderSessionOccupancyPort {
   read(key: ProviderSessionKey, now: number): ProviderSessionOccupancy;
+  /** Called once the session is pooled; returns the epoch its later close must name. */
   openSession(key: ProviderSessionKey): number;
+  /** A stale epoch is ignored, so an old session's late teardown cannot close its replacement. */
   closeSession(key: ProviderSessionKey, epoch: number): void;
+  /** The provider's native background task list changed; restarts the idle clock. */
   nativeChanged(key: ProviderSessionKey): void;
 }

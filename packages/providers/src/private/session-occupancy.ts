@@ -13,6 +13,7 @@ export type OccupancyVerdict = ({ evict: false } | { evict: true; reason: Evicti
 /** Facts observed for one pooled session. */
 export interface OccupancyInput {
   now: number;
+  /** The pool's own stamp: spawn, acquire, and recorded usage. */
   clock: number;
   turnBusy: boolean;
   nativeTasks: readonly NativeTaskAge[];
@@ -25,12 +26,16 @@ export function nativeProtectsUntil(task: NativeTaskAge, lastUserTurnAt: number 
 }
 /** Applies protection before considering the idle clock. */
 export function decideOccupancy(input: OccupancyInput): OccupancyVerdict {
-  const nativeProtecting = input.nativeTasks.filter((task) => input.now < nativeProtectsUntil(task, input.occupancy.lastUserTurnAt, input.policy.nativeCapMs)).length;
+  const { now, occupancy, policy } = input;
+  const nativeProtecting = input.nativeTasks.filter(
+    (task) => now < nativeProtectsUntil(task, occupancy.lastUserTurnAt, policy.nativeCapMs),
+  ).length;
   const counts = { nativeTasks: input.nativeTasks.length, nativeProtecting };
-  if (input.turnBusy || input.occupancy.held || nativeProtecting > 0) return { evict: false, ...counts };
-  const idleMs = input.now - Math.max(input.clock, input.occupancy.lastActivityAt ?? input.clock);
-  if (input.policy.mode === "memory-pressure" || idleMs > input.policy.idleTtlMs) {
-    return { evict: true, reason: input.policy.mode, idleMs, ...counts };
+  if (input.turnBusy || occupancy.held || nativeProtecting > 0) return { evict: false, ...counts };
+  const lastActiveAt = Math.max(input.clock, occupancy.lastActivityAt ?? input.clock);
+  const idleMs = now - lastActiveAt;
+  if (policy.mode === "memory-pressure" || idleMs > policy.idleTtlMs) {
+    return { evict: true, reason: policy.mode, idleMs, ...counts };
   }
   return { evict: false, ...counts };
 }

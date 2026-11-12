@@ -64,6 +64,7 @@ import {
 } from "@mcode/thread-orchestration";
 
 import type {
+  NativeBackgroundTask,
   ProtocolAdapter,
   SpawnArgs,
   SpawnResult,
@@ -165,7 +166,8 @@ interface ClaudeSessionState {
   pendingToolUses: Set<string>;
   /**
    * Background calls this SDK process still runs, keyed to the execution that
-   * launched them. They outlive turns, so warm reuse keeps the session busy.
+   * launched them. They outlive turns; they protect the session through
+   * `backgroundTasks`, not `isBusy`, so their protection is capped.
    */
   backgroundTools: Map<string, HeldBackgroundCall>;
   /**
@@ -2000,8 +2002,7 @@ export class ClaudeProvider
 
   /**
    * Eviction guard: a session is busy while its stream has a live turn, while a
-   * tool_use awaits its result, while a background call it launched is still running, OR
-   * while it has a pending permission request the user may still answer (the
+   * tool_use awaits its result, OR while it has a pending permission request the user may still answer (the
    * user could be on another thread). These keep the session out of idle
    * eviction regardless of how long the SDK has been quiet.
    */
@@ -2241,7 +2242,7 @@ export class ClaudeProvider
   }
 
   /** Reports native work independently of turn work. */
-  backgroundTasks(state: ClaudeSessionState) {
+  backgroundTasks(state: ClaudeSessionState): readonly NativeBackgroundTask[] {
     return this.streamStates.get(state.query)?.mapper.backgroundTasks() ?? [];
   }
 

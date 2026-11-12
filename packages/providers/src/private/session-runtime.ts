@@ -1,7 +1,7 @@
 import * as NodeChildProcess from "node:child_process";
 import type { ProviderProcessPort, ProviderSessionKey, ProviderSessionOccupancyPort } from "../host-ports.js";
 import { diag } from "@mcode/shared/diagnostics";
-import { decideOccupancy, NATIVE_TASK_CAP_MS, type NativeTaskAge } from "./session-occupancy.js";
+import { decideOccupancy, NATIVE_TASK_CAP_MS, type NativeTaskAge, type OccupancyPolicy, type OccupancyVerdict } from "./session-occupancy.js";
 
 /** Native background work reported by a provider. */
 export interface NativeBackgroundTask extends NativeTaskAge { taskId: string; label: string }
@@ -59,10 +59,17 @@ interface SessionRuntimeLoggerPort {
 
 interface PoolEntry<TState> {
   key: ProviderSessionKey;
+  /** The occupancy epoch this entry opened; 0 when it was retired before opening. */
   epoch: number;
   state: TState;
   pids: number[];
   lastUsedAt: number;
+}
+
+interface ObservedOccupancy {
+  verdict: OccupancyVerdict;
+  turnBusy: boolean;
+  held: boolean;
 }
 
 class SpawnRetirementFailure extends Error {
@@ -175,13 +182,14 @@ export class SessionRuntime<TState> {
       if (!verdict.evict) continue;
       evicted.push(sessionId);
       this.deps.logger?.info("SessionRuntime evicting non-busy session", { sessionId, reason });
-      await this.stop(sessionId, verdict.reason);
+      await this.stop(sessionId);
     }
     return { before, after: this.sessions.size, evicted };
   }
 
   /** Stops one session and closes a spawn that completes after the stop request. */
-  async stop(sessionId: string, _reason?: string): Promise<void> {
+  async stop(sessionId: string): Promise<void> {
+    // Closed before any await, so a hold or user stamp racing this stop cannot land on a dying session.
     this.closeOccupancy(sessionId);
     const existing = this.teardowns.get(sessionId);
     if (existing) return existing;
@@ -218,15 +226,7 @@ export class SessionRuntime<TState> {
   /** Stops all sessions and rejects later acquisitions. */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
-    for (const entry of this.sessions.values()) {
-      const now = Date.now();
-      const occupancy = this.deps.occupancy.read(entry.key, now);
-      const verdict = decideOccupancy({ now, clock: entry.lastUsedAt, turnBusy: this.adapter.isBusy(entry.state), nativeTasks: this.adapter.backgroundTasks?.(entry.state) ?? [], occupancy, policy: this.policy("idle") });
-      if (!occupancy.held && verdict.nativeProtecting === 0) continue;
-      const counts = { held: occupancy.held, nativeTasks: verdict.nativeTasks, nativeProtecting: verdict.nativeProtecting };
-      diag.emit("session.shutdown-held", { th: entry.key.threadId }, () => counts);
-      this.deps.logger?.warn("SessionRuntime shutting down protected session", { threadId: entry.key.threadId, ...counts });
-    }
+    for (const entry of this.sessions.values()) this.reportProtectedShutdown(entry);
     if (this.evictionTimer) {
       clearInterval(this.evictionTimer);
       this.evictionTimer = null;
@@ -286,28 +286,49 @@ export class SessionRuntime<TState> {
       const verdict = this.evictionVerdict(entry, "idle");
       if (verdict.evict) {
         this.deps.logger?.info("SessionRuntime evicting idle session", { sessionId, reason: verdict.reason });
-        await this.stop(sessionId, verdict.reason);
+        await this.stop(sessionId);
       }
     }
   }
 
-  private policy(mode: "idle" | "memory-pressure") {
-    return { mode, idleTtlMs: this.idleTtlMs, nativeCapMs: this.deps.nativeCapMs ?? NATIVE_TASK_CAP_MS };
-  }
-
-  private evictionVerdict(entry: PoolEntry<TState>, mode: "idle" | "memory-pressure") {
+  /** Reads `now` per entry because the sweeps await a stop between entries. */
+  private observeOccupancy(entry: PoolEntry<TState>, mode: OccupancyPolicy["mode"]): ObservedOccupancy {
     const now = Date.now();
     const occupancy = this.deps.occupancy.read(entry.key, now);
     const turnBusy = this.adapter.isBusy(entry.state);
-    const verdict = decideOccupancy({ now, clock: entry.lastUsedAt, turnBusy, nativeTasks: this.adapter.backgroundTasks?.(entry.state) ?? [], occupancy, policy: this.policy(mode) });
+    const verdict = decideOccupancy({
+      now,
+      clock: entry.lastUsedAt,
+      turnBusy,
+      nativeTasks: this.adapter.backgroundTasks?.(entry.state) ?? [],
+      occupancy,
+      policy: { mode, idleTtlMs: this.idleTtlMs, nativeCapMs: this.deps.nativeCapMs ?? NATIVE_TASK_CAP_MS },
+    });
+    return { verdict, turnBusy, held: occupancy.held };
+  }
+
+  private evictionVerdict(entry: PoolEntry<TState>, mode: OccupancyPolicy["mode"]): OccupancyVerdict {
+    const { verdict, turnBusy, held } = this.observeOccupancy(entry, mode);
     if (verdict.evict) {
       const { reason, idleMs, nativeTasks, nativeProtecting } = verdict;
-      diag.emit("session.evict", { th: entry.key.threadId }, () => ({ reason, idleMs, turnBusy, nativeTasks, nativeProtecting, held: occupancy.held }));
+      diag.emit("session.evict", { th: entry.key.threadId }, () => ({ reason, idleMs, turnBusy, nativeTasks, nativeProtecting, held }));
     }
     return verdict;
   }
 
+  /** Shutdown still stops protected work; this only makes the loss visible until a grace controller exists. */
+  private reportProtectedShutdown(entry: PoolEntry<TState>): void {
+    const { verdict, held } = this.observeOccupancy(entry, "idle");
+    if (!held && verdict.nativeProtecting === 0) return;
+    const counts = { held, nativeTasks: verdict.nativeTasks, nativeProtecting: verdict.nativeProtecting };
+    diag.emit("session.shutdown-held", { th: entry.key.threadId }, () => counts);
+    this.deps.logger?.warn("SessionRuntime shutting down protected session", { threadId: entry.key.threadId, ...counts });
+  }
+
   private async retire(sessionId: string, entry: PoolEntry<TState>): Promise<void> {
+    // stop() closes before it awaits, but a spawn that completes between that close and this teardown
+    // has opened a fresh epoch, so retirement closes the entry's own epoch as well.
+    this.deps.occupancy.closeSession(entry.key, entry.epoch);
     this.unretired.set(sessionId, entry);
     await this.closeEntry(sessionId, entry);
     this.unretired.delete(sessionId);

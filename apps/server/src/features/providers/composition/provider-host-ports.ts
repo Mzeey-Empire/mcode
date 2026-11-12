@@ -1,4 +1,5 @@
 import type {
+  ProviderBackgroundToolSettlement,
   ProviderEventBatch,
   ProviderEventCommitReceipt,
   ProviderHostPorts,
@@ -60,9 +61,16 @@ export interface ProviderHostPortDependencies {
   ingress: ProviderEventIngress;
   eventOwnership?: ProviderEventOwnership;
   /** Resolved per call because the turn owner itself depends on the provider registry. */
-  turns: () => Pick<ProviderTurnPort, "open"> & {
-    settleBackgroundTool(settlement: Omit<Parameters<ProviderTurnPort["settleBackgroundTool"]>[0], "providerId">): Promise<void>;
-  };
+  turns: () => HostTurnSink;
+}
+
+/**
+ * The server's turn owner as the host port sees it. Settlements reach it without a provider id:
+ * the host port uses that id to stamp activity, and startup orphan settlements never have one.
+ */
+export interface HostTurnSink {
+  open: ProviderTurnPort["open"];
+  settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "providerId">): Promise<void>;
 }
 
 /** Injection token for the server service that admits provider-started turns. */
