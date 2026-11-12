@@ -148,9 +148,6 @@ async function submitProviderEvents(
     }));
     throw new Error("Canonical event execution is no longer admitted");
   }
-  for (const providerId of new Set(batch.events.map((draft) => draft.sourceProviderId))) {
-    dependencies.occupancy.touch({ providerId, threadId: batch.threadId });
-  }
   return await submitWorkerEvents(dependencies, route, batch);
 }
 
@@ -160,6 +157,9 @@ async function submitWorkerEvents(
   batch: ProviderEventBatch,
 ): Promise<ProviderEventSubmissionReceipt> {
   const ownedBatch = checkedWorkerBatch(batch, route);
+  for (const providerId of new Set(ownedBatch.events.map((draft) => draft.sourceProviderId))) {
+    dependencies.occupancy.touch({ providerId, threadId: ownedBatch.threadId });
+  }
   const result = await route.submit(ownedBatch);
   if (!matchesWorkerReceipt(ownedBatch, result)) {
     throw new Error("Canonical worker receipt does not match submitted batch");

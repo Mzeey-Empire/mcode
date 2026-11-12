@@ -1,4 +1,3 @@
-import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 import { describe, expect, it, vi } from "vitest";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
@@ -13,6 +12,7 @@ import {
   type ProviderEventOwnershipRoute,
   type WorkerOwnedProviderEventResult,
 } from "../provider-host-ports.js";
+import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -201,8 +201,11 @@ describe("createProviderHostPorts", () => {
       deliveryAttempt: 2,
       submit,
     };
+    const occupancy = new SessionOccupancyRegistry({ now: () => 42 });
+    const key = { providerId: "claude", threadId: batch.threadId };
+    occupancy.openSession(key);
     const ports = createProviderHostPorts({
-      occupancy: new SessionOccupancyRegistry({ now: Date.now }),
+      occupancy,
       events: { commit },
       ingress: { acceptProjectedCommitted },
       eventOwnership: { resolve: () => route },
@@ -210,6 +213,7 @@ describe("createProviderHostPorts", () => {
 
     await expect(ports.events.submit(batch)).rejects.toThrow("does not match execution ownership");
     expect(submit).not.toHaveBeenCalled();
+    expect(occupancy.read(key, 42).lastActivityAt).toBeNull();
     route.deliveryAttempt = 1;
     await expect(ports.events.submit(batch)).rejects.toThrow("receipt does not match submitted batch");
     batch.batchId = undefined;
