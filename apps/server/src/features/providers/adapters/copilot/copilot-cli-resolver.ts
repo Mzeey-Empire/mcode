@@ -65,7 +65,6 @@ const RESOLUTION_CACHE_TTL_MS = 5 * 60 * 1000;
 /** Cached resolution results keyed by trimmed configured path (empty string for auto-discovery). */
 const resolutionCache = new Map<string, { resolution: CopilotCliResolution; checkedAt: number }>();
 
-/** Discoveries still running, keyed like `resolutionCache`, so concurrent callers share one set of probes. */
 const pendingResolutions = new Map<string, Promise<CopilotCliResolution>>();
 
 /** Semver triplet matcher (matches "1.0.24" in "GitHub Copilot CLI 1.0.24."). */
@@ -280,7 +279,6 @@ export async function resolveCopilotCli(
   pendingResolutions.set(cacheKey, discovery);
   try {
     const resolution = await discovery;
-    // A cache clear during discovery (after a CLI update) makes this result stale.
     if (pendingResolutions.get(cacheKey) === discovery) {
       resolutionCache.set(cacheKey, { resolution, checkedAt: Date.now() });
     }

@@ -57,7 +57,6 @@ function deliverOutput(observer: ProcessOutputObserver | undefined, stream: "std
   else observer?.onStderr?.(chunk);
 }
 
-/** One open session, and how far its process got, so a lost worker reports the right ending. */
 interface OpenSession {
   readonly observer: ProcessOutputObserver;
   readonly resolve: () => void;
@@ -172,7 +171,6 @@ export class ProcessStartWorkerClient {
     else run.reject(restoreProcessStartFailure(reply.failure));
   }
 
-  /** Rejects every run the lost worker owned; the next run starts a fresh worker. */
   private fail(worker: Worker, error: Error): void {
     if (this.worker !== worker) return;
     this.worker = null;
@@ -180,8 +178,6 @@ export class ProcessStartWorkerClient {
     const runs = [...this.pending.values()];
     this.pending.clear();
     for (const run of runs) run.reject(error);
-    // A start error after a process is running would reach listeners that only
-    // expect one before it starts; a running process instead reads as exited.
     for (const session of this.sessions.values()) {
       if (session.phase === "starting") session.observer.onStartError?.(error.message);
       else if (session.phase === "running") session.observer.onExit?.(null, null);

@@ -1,8 +1,3 @@
-/**
- * One process run, expressed as plain data so it can run on the
- * calling thread or cross into the process worker unchanged.
- */
-
 import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
@@ -149,7 +144,6 @@ async function runBufferedProcessStart(request: ProcessStartRequest): Promise<Pr
   };
 }
 
-/** Runs a process with streamed output while preserving the buffered result and execFile's error fields. */
 function runObservedProcessStart(request: ProcessStartRequest, observer: ProcessOutputObserver): Promise<ProcessStartResult> {
   const { timeout } = request;
   return new Promise<ProcessStartResult>((resolve, reject) => {
