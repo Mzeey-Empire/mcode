@@ -142,14 +142,16 @@ describe("ServerRuntime Desktop Window seam", () => {
 
   it("reports an early start failure when the window connects", async () => {
     const error = new Error("Server failed to start");
+    const start = vi.fn().mockRejectedValue(error);
     const runtime = createRuntime(43123, {
-      manager: createManager(43123, vi.fn().mockRejectedValue(error)),
+      manager: createManager(43123, start),
     });
 
     runtime.beginStart();
     await new Promise((resolve) => setImmediate(resolve));
 
     await expect(runtime.connectWindow(createWindow())).rejects.toBe(error);
+    expect(start).toHaveBeenCalledOnce();
   });
 
   it("withholds the server URL until the window has its auth cookie and relay", async () => {

@@ -240,6 +240,24 @@ describe("ServerManager", () => {
   // Basic spawn and property tests
   // -----------------------------------------------------------------------
 
+  it("waits longer than one health poll for the server lock", async () => {
+    vi.useFakeTimers();
+    const lockAvailableAt = Date.now() + 300;
+    vi.mocked(NodeFSPromises.readFile).mockReset().mockImplementation(async () => {
+      if (Date.now() < lockAvailableAt) throw refs.missingFile();
+      return LOCK_FILE_JSON;
+    });
+
+    try {
+      const started = manager.start();
+      const result = expect(started).resolves.toEqual({ port: 19600, authToken: "test-auth-token" });
+      await vi.advanceTimersByTimeAsync(400);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts the server by spawning a detached child process", async () => {
     const result = await manager.start();
 
