@@ -59,7 +59,7 @@ describe("resolveCopilotCli", () => {
       exec: () => probe.promise,
     };
     let settled = false;
-    const resolution = Promise.resolve(resolveCopilotCli({ configuredPath: configured }, io)).then((result) => {
+    const resolution = resolveCopilotCli({ configuredPath: configured }, io).then((result) => {
       settled = true;
       return result;
     });

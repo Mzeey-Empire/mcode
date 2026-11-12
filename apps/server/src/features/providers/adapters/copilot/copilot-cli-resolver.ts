@@ -326,7 +326,10 @@ export function clearResolutionCache(): void {
   resolutionCache.clear();
 }
 
-/** Discovery probes must leave the event loop free to serve startup requests. */
+/**
+ * Real adapter: Node fs + async `execFile`. Probes run at startup, so they must
+ * not block the event loop. `shell:true` on win32 resolves `.cmd`/`.ps1` shims.
+ */
 export function createNodeResolverIO(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
