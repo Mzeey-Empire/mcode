@@ -78,7 +78,7 @@ function testProvider(http: FakeHttp) {
   const submitted: unknown[] = [];
   const host = {
     events: { submit: async (batch: unknown) => { submitted.push(batch); return { commit: {}, delivery: { ingress: "queued" } }; } },
-    processes: { attach: () => {}, terminateTree: async () => {} },
+    processes: { run: async () => { throw new Error("opencode-provider-permissions.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
     runtime: { platform: "win32" },
     environment: { snapshot: () => ({}) },
     browser: {},

@@ -578,6 +578,7 @@ function createFakeHost(sink: DeterministicCanonicalSink, calls: string[]): Prov
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
     processes: {
+      run: async () => { throw new Error("harness.ts fixture does not support process runs"); },
       attach: () => calls.push("processes.attach"),
       terminateTree: async () => { calls.push("processes.terminateTree"); },
     },

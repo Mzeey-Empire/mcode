@@ -20,7 +20,7 @@ function createHost(): ProviderHostPorts {
     occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: vi.fn(() => ({})) },
-    processes: { attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
+    processes: { run: async () => { throw new Error("cursor-mcp.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
     browser: {
       stage: vi.fn(() => ({ leaseId: "lease-1", expiresAt: Date.now() + 60_000 })),
       releaseSession: vi.fn(() => 0),

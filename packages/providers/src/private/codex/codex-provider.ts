@@ -583,7 +583,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Reports sign-in from `codex login status`, which honors the same CODEX_HOME sessions use. */
   async describeStatus() {
     const { cliPath } = await this.codexPorts.settings.get();
-    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
+    const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
     return {
       ...await describeCodexAuth(run, cliPath),
       cli: {

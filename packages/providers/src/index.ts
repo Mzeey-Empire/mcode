@@ -42,6 +42,7 @@ export type {
   ProviderMcodeAttachRequest,
   ProviderMcodePort,
   ProviderProcessPort,
+  ProviderProcessRunner,
   ProviderRuntimePort,
   ProviderTurnDeclineReason,
   ProviderTurnOpening,

@@ -1264,7 +1264,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     const host: ProviderHostPorts = {
       occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" }, environment: { snapshot: () => ({}) },
-      processes: { attach: () => {}, terminateTree: async () => {} }, grants: { consume: () => false },
+      processes: { run: async () => { throw new Error("canonical-accepted-progress.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} }, grants: { consume: () => false },
       browser: { stage: () => ({ leaseId: "lease", expiresAt: 1_000 }), releaseSession: () => 0, isConfigured: () => false,
         issue: () => null, refresh: (leaseId) => ({ ok: false, leaseId, reason: "not-found" }),
         release: (leaseId) => ({ leaseId, released: true }), revokeCredential: () => false },

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { checkCodexVersion, clearVersionCache, currentCodexVersion, warmCodexVersionCache, type CodexVersionRunner } from "../codex-version.js";
+import { checkCodexVersion, clearVersionCache, currentCodexVersion, warmCodexVersionCache } from "../codex-version.js";
+import type { ProviderProcessRunner } from "../../../host-ports.js";
 
 describe("Codex version warmup", () => {
   beforeEach(clearVersionCache);
@@ -12,7 +13,7 @@ describe("Codex version warmup", () => {
   });
 
   it("retries a failed probe and keeps a successful cache entry", async () => {
-    const run = vi.fn<CodexVersionRunner>()
+    const run = vi.fn<ProviderProcessRunner>()
       .mockRejectedValueOnce(new Error("unavailable"))
       .mockResolvedValueOnce({ stdout: "codex-cli 0.119.0", stderr: "" })
       .mockResolvedValueOnce({ stdout: "codex-cli 0.120.0", stderr: "" });

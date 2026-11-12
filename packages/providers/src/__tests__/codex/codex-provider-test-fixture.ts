@@ -206,7 +206,7 @@ export class CodexProvider extends PackageCodexProvider {
       occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
       environment: { snapshot: () => environment.getEnv() },
-      processes: { attach: () => undefined, terminateTree: async () => undefined },
+      processes: { run: async () => { throw new Error("codex-provider-test-fixture.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async () => undefined },
       browser: {
         stage: (request) => browser.stage(request),
         releaseSession: (providerId, sessionId) => browser.releaseSession(providerId, sessionId),

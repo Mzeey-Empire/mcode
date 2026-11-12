@@ -29,8 +29,22 @@ export interface ProviderEnvironmentPort {
 /** Supplies immutable facts about the Node runtime that hosts providers. */
 export interface ProviderRuntimePort extends HostRuntime {}
 
-/** Attaches and terminates child process trees without exposing the server process service. */
+/**
+ * Runs buffered UTF-8 probes, rejecting with execFile's code, signal, killed, stdout, and stderr fields.
+ * The server starts these processes off the thread that answers requests because Windows process creation blocks it.
+ */
+export type ProviderProcessRunner = (request: {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly shell?: boolean;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly timeout: number;
+  readonly maxBuffer?: number;
+}) => Promise<{ stdout: string; stderr: string }>;
+
+/** Runs probes, attaches and terminates child process trees without exposing the server process service. */
 export interface ProviderProcessPort {
+  run: ProviderProcessRunner;
   attach(pid: number, description: string): void;
   terminateTree(pid: number): Promise<void>;
 }

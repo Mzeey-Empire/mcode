@@ -15,6 +15,7 @@ import type { EnvService } from "../../../runtime/environment/env-service.js";
 import type { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
 import type { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { killProcessTree } from "../../../runtime/process/containment/process-kill.js";
+import { sharedProcessStartWorkerClient } from "../../../runtime/process/process-start-worker-client.js";
 import type { ProviderEventIngress } from "./provider-event-ingress.js";
 import type { ProjectedCommittedProviderEvent } from "../../agents/execution/execution-worker-handler.js";
 
@@ -84,6 +85,7 @@ export function createProviderHostPorts(
       snapshot: () => dependencies.envService.getEnv(),
     },
     processes: {
+      run: sharedProcessStartWorkerClient().run,
       attach: (pid, description) => {
         if (!dependencies.jobObject.isWindowsJob) return;
         dependencies.jobObject.assign(pid);

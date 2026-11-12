@@ -39,7 +39,7 @@ function createClaudeFixture(port: McodeProviderPort) {
       occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       runtime: hostRuntime,
       environment: { snapshot: () => ({}) },
-      processes: { attach: () => undefined, terminateTree: async () => undefined },
+      processes: { run: async () => { throw new Error("mcode-provider-port.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async () => undefined },
       browser: new BrowserAutomationSessionLease(),
       mcode: port,
       grants: { consume: () => false },

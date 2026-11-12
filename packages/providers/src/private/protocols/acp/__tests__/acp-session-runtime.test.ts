@@ -370,7 +370,7 @@ describe("AcpSessionRuntime", () => {
     const runtime = await AcpSessionRuntime.start({
       waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
-      processes: { attach: vi.fn(), terminateTree },
+      processes: { run: async () => { throw new Error("acp-session-runtime.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree },
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
       transportFactory: async () => ({ child: fakeChild(), connection }),
     });
@@ -449,7 +449,7 @@ describe("AcpSessionRuntime", () => {
     const runtime = await AcpSessionRuntime.start({
       waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
-      processes: { attach: vi.fn(), terminateTree },
+      processes: { run: async () => { throw new Error("acp-session-runtime.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree },
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
       transportFactory: async () => ({ child: fakeChild(), connection }),
       recoveryFailurePolicy: "fail-without-replacement",
@@ -477,7 +477,7 @@ describe("AcpSessionRuntime", () => {
       const runtime = await AcpSessionRuntime.start({
         waitForOutputCapacity: async () => {},
         spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
-        processes: { attach: vi.fn(), terminateTree },
+        processes: { run: async () => { throw new Error("acp-session-runtime.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree },
         callbacks: {
           onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }),
           onSessionUpdate: async (update) => { updates.push(update); },
@@ -525,7 +525,7 @@ describe("AcpSessionRuntime", () => {
     const runtime = await AcpSessionRuntime.start({
       waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
-      processes: { attach: vi.fn(), terminateTree },
+      processes: { run: async () => { throw new Error("acp-session-runtime.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree },
       callbacks: { onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }), onSessionUpdate: async () => {} },
       transportFactory: async () => ({ child, connection }),
     });

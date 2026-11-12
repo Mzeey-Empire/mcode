@@ -12,7 +12,7 @@ function inertHost(platform: NodeJS.Platform) {
     occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform, architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: io },
-    processes: { attach: io, terminateTree: io },
+    processes: { run: async () => { throw new Error("provider-registration.test.ts fixture does not support process runs"); }, attach: io, terminateTree: io },
     browser: {
       stage: io, releaseSession: io, isConfigured: io, issue: io,
       refresh: io, release: io, revokeCredential: io,

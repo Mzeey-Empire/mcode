@@ -17,6 +17,7 @@ function createHostPorts(): ProviderHostPorts {
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: vi.fn(() => ({})) },
     processes: {
+      run: vi.fn(async () => { throw new Error("factories.test.ts fixture does not support process runs"); }),
       attach: vi.fn(),
       terminateTree: vi.fn(async () => undefined),
     },

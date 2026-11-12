@@ -1,4 +1,5 @@
 import * as NodeChildProcess from "node:child_process";
+import type { ProviderProcessRunner } from "../../host-ports.js";
 import { isSemver } from "../../version-policy.js";
 
 /** Shell metacharacters that must not appear in a CLI path passed to `shell: true`. */
@@ -98,14 +99,6 @@ export function checkCodexVersion(
   return success;
 }
 
-/** Runs the buffered version probe outside the provider package. */
-export type CodexVersionRunner = (request: {
-  readonly command: string;
-  readonly args: readonly string[];
-  readonly shell: boolean;
-  readonly timeout: number;
-}) => Promise<{ stdout: string; stderr: string }>;
-
 /**
  * Warms the version cache off the send path with a non-blocking `--version`
  * probe. Call at app startup (and on CLI-path settings changes) so the
@@ -114,7 +107,7 @@ export type CodexVersionRunner = (request: {
  * or contains shell metacharacters; failures are not cached (the send-path
  * check surfaces the user-facing error with fresh state).
  */
-export async function warmCodexVersionCache(cliPath: string, runProcess: CodexVersionRunner): Promise<void> {
+export async function warmCodexVersionCache(cliPath: string, runProcess: ProviderProcessRunner): Promise<void> {
   currentCliPath = cliPath;
   if (SHELL_METACHAR_RE.test(cliPath) || versionCache.has(cliPath)) return;
   try {

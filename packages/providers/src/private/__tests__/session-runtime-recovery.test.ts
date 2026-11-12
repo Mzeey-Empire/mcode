@@ -35,7 +35,7 @@ describe("SessionRuntime recovery", () => {
       interruption.resolve();
       await retired.promise;
     });
-    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { attach: () => undefined, terminateTree } });
+    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { run: async () => { throw new Error("session-runtime-recovery.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree } });
     try {
       await runtime.acquire(request);
       const stopping = runtime.stop(request.sessionId);
@@ -60,7 +60,7 @@ describe("SessionRuntime recovery", () => {
   it("cancels one pending acquisition without cancelling cleanup or another caller", async () => {
     const close = deferred();
     const protocol = adapter((state) => state === 1 ? close.promise : undefined);
-    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { attach: () => undefined, terminateTree: async () => undefined } });
+    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { run: async () => { throw new Error("session-runtime-recovery.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async () => undefined } });
     try {
       await runtime.acquire(request);
       const stopping = runtime.stop(request.sessionId);
@@ -82,7 +82,7 @@ describe("SessionRuntime recovery", () => {
     const protocol = adapter(() => undefined);
     const spawn = vi.fn(async () => { await spawning.promise; return { state: 1, pids: [1] }; });
     protocol.spawn = spawn;
-    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { attach: () => undefined, terminateTree: async () => undefined } });
+    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { run: async () => { throw new Error("session-runtime-recovery.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async () => undefined } });
     try {
       const controller = new AbortController();
       const cancelled = expect(runtime.acquire({ ...request, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
@@ -122,7 +122,7 @@ describe("SessionRuntime recovery", () => {
   it("keeps replacement fenced when owned process termination fails", async () => {
     const protocol = adapter(() => undefined);
     const terminateTree = vi.fn(async () => { throw new Error("process still alive"); });
-    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { attach: () => undefined, terminateTree } });
+    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { run: async () => { throw new Error("session-runtime-recovery.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree } });
     await runtime.acquire(request);
     await expect(runtime.stop(request.sessionId)).rejects.toThrow("retirement failed");
     await expect(runtime.acquire(request)).rejects.toThrow("retirement failed");
@@ -136,7 +136,7 @@ describe("SessionRuntime recovery", () => {
     const terminateTree = vi.fn()
       .mockRejectedValueOnce(new Error("process enumeration timed out"))
       .mockResolvedValue(undefined);
-    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { attach: () => undefined, terminateTree } });
+    const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: { run: async () => { throw new Error("session-runtime-recovery.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree } });
     await runtime.acquire(request);
     await expect(runtime.stop(request.sessionId)).rejects.toThrow("retirement failed");
     expect(await runtime.acquire(request)).toBe(2);
@@ -161,6 +161,7 @@ describe("SessionRuntime recovery", () => {
     let generation = 0;
     protocol.spawn = vi.fn(async () => { await spawning.promise; return { state: ++generation, pids: [generation] }; });
     const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} }, jobObject, envService, processes: {
+      run: async () => { throw new Error("session-runtime-recovery.test.ts fixture does not support process runs"); },
       attach: () => undefined,
       terminateTree: async () => { throw new Error("old process remains alive"); },
     } });
@@ -197,7 +198,7 @@ describe("SessionRuntime recovery", () => {
     const runtime = new SessionRuntime(protocol, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject, envService, idleTtlMs: 1,
       logger: { debug: () => undefined, info: () => undefined, warn },
-      processes: { attach: () => undefined, terminateTree: async () => { throw new Error("process still alive"); } },
+      processes: { run: async () => { throw new Error("session-runtime-recovery.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async () => { throw new Error("process still alive"); } },
     });
     try {
       await runtime.acquire(request);
