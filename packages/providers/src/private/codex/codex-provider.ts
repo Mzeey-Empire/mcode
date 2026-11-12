@@ -836,6 +836,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const result = await warmCodexAppServer(
       cliPath,
       this.host.runtime.platform,
+      this.host.processes.open,
       USAGE_WARMUP_TIMEOUT_MS,
       () => ({ ...this.host.environment.snapshot() }),
     );
