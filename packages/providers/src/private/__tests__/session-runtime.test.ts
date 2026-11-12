@@ -108,7 +108,14 @@ describe("SessionRuntime", () => {
     await runtime.shutdown();
   });
 
-  it.each(["stop", "idle", "pressure", "shutdown"])("closes occupancy synchronously before native teardown: %s", async (path) => {
+  const teardownPaths: Record<string, (runtime: SessionRuntime<{}>) => Promise<unknown>> = {
+    stop: (runtime) => runtime.stop("session"),
+    idle: () => vi.advanceTimersByTimeAsync(60_000),
+    pressure: (runtime) => runtime.evictNonBusy("critical"),
+    shutdown: (runtime) => runtime.shutdown(),
+  };
+
+  it.each(Object.entries(teardownPaths))("closes occupancy synchronously before native teardown: %s", async (path, startTeardown) => {
     vi.useFakeTimers({ now: 0 });
     let open = false;
     let release!: () => void;
@@ -124,7 +131,7 @@ describe("SessionRuntime", () => {
     });
     try {
       await runtime.acquire({ sessionId: "session", threadId: "thread", cwd: ".", permissionMode: "default" });
-      const stopping = path === "idle" ? vi.advanceTimersByTimeAsync(60_000) : path === "pressure" ? runtime.evictNonBusy("critical") : path === "shutdown" ? runtime.shutdown() : runtime.stop("session");
+      const stopping = startTeardown(runtime);
       if (path !== "idle") expect(open).toBe(false);
       release();
       await stopping;
@@ -146,8 +153,36 @@ describe("SessionRuntime", () => {
       await runtime.shutdown();
       expect(closed.sort()).toEqual(["held", "idle"]);
       const reports = emit.mock.calls.filter(([name]) => name === "session.shutdown-held");
-      expect(reports.map(([, context]) => context)).toEqual([{ th: "held" }]);
+      expect(reports.map(([, context, payload]) => [context, payload?.()])).toEqual([
+        [{ th: "held" }, { held: false, nativeTasks: 1, nativeProtecting: 1 }],
+      ]);
     } finally { await runtime.shutdown(); emit.mockRestore(); }
+  });
+
+  it("records the reason and counts of idle and memory-pressure evictions", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const emit = vi.spyOn(diag, "emit");
+    const runtime = new SessionRuntime({
+      spawn: async ({ threadId }) => ({ state: threadId, pids: [] }), isBusy: () => false, isStale: () => false,
+      backgroundTasks: () => [{ taskId: "expired", label: "Expired", startedAt: 0 }],
+      interrupt: () => {}, close: () => {},
+    }, { providerId: "test", idleTtlMs: 30_000, nativeCapMs: 1_000,
+      occupancy: { openSession: () => 1, closeSession: () => {}, nativeChanged: () => {}, read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }) },
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} }, envService: { getEnv: () => ({}) } });
+    try {
+      await runtime.acquire({ sessionId: "pressure", threadId: "pressure", cwd: ".", permissionMode: "default" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await runtime.evictNonBusy("critical");
+      await runtime.acquire({ sessionId: "idle", threadId: "idle", cwd: ".", permissionMode: "default" });
+      await vi.advanceTimersByTimeAsync(55_000);
+      expect(runtime.size).toBe(0);
+      const evictions = emit.mock.calls.filter(([name]) => name === "session.evict");
+      const counts = { turnBusy: false, nativeTasks: 1, nativeProtecting: 0, held: false };
+      expect(evictions.map(([, context, payload]) => [context, payload?.()])).toEqual([
+        [{ th: "pressure" }, { reason: "memory-pressure", idleMs: 5_000, ...counts }],
+        [{ th: "idle" }, { reason: "idle", idleMs: 55_000, ...counts }],
+      ]);
+    } finally { await runtime.shutdown(); emit.mockRestore(); vi.useRealTimers(); }
   });
 
   it("preserves admitted preparation and native busy sessions while evicting an idle peer", async () => {
