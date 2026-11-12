@@ -1204,9 +1204,22 @@ are provider-native, so they show the parent thread's provider.
   access 232px, and the `+` menu 232px. Every part's popover opens in one spot: 8px above the right edge of the
   capsule, covering any tray, so it never moves when content above
   changes. With a popover open, resting 100ms on another part switches to
-  its popover, as in a menu bar. Picking a model that has reasoning levels
-  swaps to the reasoning popover in place. The reasoning part is as wide as
-  the model's widest level, so dragging the bar never resizes the pill. The
+  its popover, as in a menu bar. The model picker is 440px: the model list on
+  the left and a 168px reasoning pane on the right, behind a `border`
+  hairline, listing the highlighted model's levels under a two-line caption
+  ("Reasoning" over the model's full name). A check marks the committed model
+  and level. A hovered row reaches the
+  pane after 100ms, so a pointer crossing rows on its way to the pane keeps
+  it. Right Arrow at the end of the search enters the pane and Left Arrow
+  leaves it. A level sets the model and level and closes; picking a model
+  closes and keeps the level when the model supports it. The reasoning
+  popover lists the same levels, and one click sets the level and closes.
+  It ends with the selected model's options (Fast, 1M context, Thinking) as
+  labelled switch rows under a hairline; they change in place. The model
+  picker leaves them out, because its pane can show a model other than the
+  one they would change. The reasoning part is
+  as wide as the model's widest level, so changing the level never resizes the
+  pill. The
   part whose popover is open keeps the `button-secondary-hover` fill, a step
   above the hover, so it still reads as open while the pointer rests on
   another part. Each part names its

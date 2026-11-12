@@ -24,7 +24,6 @@ export type PartPopoverEvent =
   | { readonly type: "open"; readonly part: CapsulePart }
   /** The pointer rested {@link SWITCH_DWELL_MS} on this part; hover never opens from nothing. */
   | { readonly type: "dwell"; readonly part: CapsulePart }
-  | { readonly type: "modelPicked"; readonly reasoningAvailable: boolean }
   | { readonly type: "query"; readonly text: string }
   | { readonly type: "tab"; readonly tab: string }
   /** Base UI requested close. */
@@ -45,13 +44,9 @@ function whileOpen(
   return state.status === "open" ? next(state) : state;
 }
 
-function chainToReasoning(state: PartPopoverState, reasoningAvailable: boolean): PartPopoverState {
-  return whileOpen(state, (open) => (open.part === "model" && reasoningAvailable ? switchTo(open, "reasoning") : open));
-}
-
 /**
- * Pure transitions. A no-op returns the same state object so React bails out. A model pick without reasoning keeps
- * the state: the host closes through the popover root so the popup pours back, which then dispatches `dismiss`.
+ * Pure transitions. A no-op returns the same state object so React bails out. A pick has no event: the host closes
+ * through the popover root so the popup pours back, which then dispatches `dismiss`.
  */
 export function partPopoverReducer(state: PartPopoverState, event: PartPopoverEvent): PartPopoverState {
   switch (event.type) {
@@ -59,8 +54,6 @@ export function partPopoverReducer(state: PartPopoverState, event: PartPopoverEv
       return switchTo(state, event.part);
     case "dwell":
       return whileOpen(state, (open) => switchTo(open, event.part));
-    case "modelPicked":
-      return chainToReasoning(state, event.reasoningAvailable);
     case "query":
       return whileOpen(state, (open) => ({ ...open, modelQuery: event.text }));
     case "tab":

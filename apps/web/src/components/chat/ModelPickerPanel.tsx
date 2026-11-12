@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { Star } from "lucide-react";
-import { Picker, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
+import { Picker, type PickerDetail, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
+import { ReasoningLevelOptions } from "@/features/conversation/composer/controls/ComposerModelPreferences";
 import {
   MODEL_PROVIDERS,
   findModelById,
+  getReasoningLevels,
   isModelAvailable,
   type ModelProvider,
 } from "@/lib/model-registry";
@@ -433,6 +436,36 @@ export interface ModelPickerPanelProps {
   readonly onSelect: (modelId: string, providerId: string) => void;
   /** Settings for the selected model, shown under the catalog. */
   readonly footer?: ReactNode;
+  /** Shows the highlighted model's reasoning levels in a pane beside the list, so one click picks the model and its level. */
+  readonly reasoning?: ModelPickerReasoning;
+}
+
+/** The current reasoning level and what choosing a level in the pane does. */
+export interface ModelPickerReasoning {
+  readonly current: ReasoningLevel;
+  readonly onChoose: (modelId: string, providerId: string, level: ReasoningLevel) => void;
+}
+
+function ReasoningPane({ option, selected, reasoning }: { readonly option: ModelOption; readonly selected: boolean; readonly reasoning: ModelPickerReasoning }) {
+  const levels = getReasoningLevels(option.providerId, option.modelId);
+  return (
+    <div className="flex flex-col">
+      <p className="flex flex-col px-3 pt-1 pb-1">
+        <span className="text-caption text-muted">Reasoning</span>
+        <span className="text-body-small break-words text-ink">{option.label}</span>
+      </p>
+      {levels.length > 0 ? (
+        <ReasoningLevelOptions
+          levels={levels}
+          checked={selected ? reasoning.current : undefined}
+          label={`Reasoning for ${option.label}`}
+          onChoose={(level) => reasoning.onChoose(option.modelId, option.providerId, level)}
+        />
+      ) : (
+        <p className="px-3 py-1.5 text-caption text-muted">No reasoning levels</p>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -449,6 +482,7 @@ export function ModelPickerPanel({
   onTabChange,
   onSelect,
   footer,
+  reasoning,
 }: ModelPickerPanelProps) {
   const presentation = getSelectedModelPresentation(selectedModelId, selectedProviderId);
   const { displayProvider } = presentation;
@@ -497,6 +531,9 @@ export function ModelPickerPanel({
     return providerModelOptions(provider.id, models, query, legacyExpanded);
   }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab]);
 
+  const selectedKey = presentation.selectedProviderId
+    ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId)
+    : undefined;
   const renderItem = useCallback(
     (option: ModelPickerOption): PickerRow => {
       if (option.kind === "legacy-fold") return legacyFoldRow(option);
@@ -520,6 +557,16 @@ export function ModelPickerPanel({
     },
     [starredKeys, toggleFavorite],
   );
+
+  const detail = useMemo((): PickerDetail<ModelPickerOption> | undefined => {
+    if (!reasoning) return undefined;
+    return {
+      hint: "Right Arrow: reasoning level",
+      render: (option) => option.kind === "model" && !option.endedOn
+        ? <ReasoningPane option={option} selected={optionKey(option.providerId, option.modelId) === selectedKey} reasoning={reasoning} />
+        : null,
+    };
+  }, [reasoning, selectedKey]);
 
   const showTab = useCallback((next: ModelPickerTab) => {
     setActiveTab(next);
@@ -549,16 +596,12 @@ export function ModelPickerPanel({
       items={items}
       total={null}
       status={loading ? "loading" : "ready"}
-      selectedKey={
-        presentation.selectedProviderId
-          ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId)
-          : undefined
-      }
+      selectedKey={selectedKey}
       renderItem={renderItem}
       onSelect={handlePick}
       footer={footer}
+      detail={detail}
       hairlines={false}
-      selectedCheck={false}
     />
   );
 }
