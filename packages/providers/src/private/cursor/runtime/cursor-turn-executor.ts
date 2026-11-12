@@ -179,7 +179,7 @@ export class CursorTurnExecutor {
       }, attempt === 0);
       await this.announcePendingRetry(execution, turnExecutionId);
       await this.preparePromptAttempt(execution.currentEntry, resume, model);
-      const promptAttempt = this.buildPromptAttempt(execution, cursorCfg);
+      const promptAttempt = await this.buildPromptAttempt(execution, cursorCfg);
       try {
         attempt += 1;
         const promptResponse = await execution.currentEntry.acpRuntime.prompt<CursorPromptResponse>({
@@ -239,14 +239,14 @@ export class CursorTurnExecutor {
     entry.stderrTailLines.length = 0;
   }
 
-  private buildPromptAttempt(
+  private async buildPromptAttempt(
     execution: CursorTurnExecutionState,
     cursorCfg: CursorProviderConfig,
-  ): CursorPromptAttempt {
+  ): Promise<CursorPromptAttempt> {
     if (execution.isContinueRetry) {
       return this.buildContinuePromptAttempt(execution);
     }
-    const instructionMarkdown = this.resolvePromptInstructionMarkdown(execution, cursorCfg);
+    const instructionMarkdown = await this.resolvePromptInstructionMarkdown(execution, cursorCfg);
     return {
       blocks: buildCursorAcpPromptBlocks(
         execution.promptMessage,
@@ -275,12 +275,12 @@ export class CursorTurnExecutor {
     };
   }
 
-  private resolvePromptInstructionMarkdown(
+  private async resolvePromptInstructionMarkdown(
     execution: CursorTurnExecutionState,
     cursorCfg: CursorProviderConfig,
-  ): string | undefined {
+  ): Promise<string | undefined> {
     if (!execution.instructionMarkdownReady) {
-      execution.instructionMarkdown = this.resolveInitialInstructionMarkdown(
+      execution.instructionMarkdown = await this.resolveInitialInstructionMarkdown(
         execution.currentEntry,
         cursorCfg,
       );
@@ -295,13 +295,13 @@ export class CursorTurnExecutor {
     return execution.instructionMarkdown;
   }
 
-  private resolveInitialInstructionMarkdown(
+  private async resolveInitialInstructionMarkdown(
     entry: CursorSessionState,
     cursorCfg: CursorProviderConfig,
-  ): string | undefined {
+  ): Promise<string | undefined> {
     const guidance = buildCursorAgentGuidanceMarkdown(entry.cwd);
     const skillsBlock = formatCursorSkillsAndCommandsForPrompt(
-      this.deps.skills.list(entry.cwd, "cursor"),
+      await this.deps.skills.list(entry.cwd, "cursor"),
     );
     const instructionParts = [guidance, skillsBlock].filter(
       (value): value is string => typeof value === "string" && value.length > 0,

@@ -71,7 +71,7 @@ export interface CursorProviderPorts {
     get(): Settings;
   };
   skills: {
-    list(cwd: string, provider: "cursor"): SkillInfo[];
+    list(cwd: string, provider: "cursor"): Promise<SkillInfo[]>;
   };
 }
 

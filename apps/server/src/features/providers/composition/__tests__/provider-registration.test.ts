@@ -75,7 +75,7 @@ const cases: ReadonlyArray<{
       host,
       cursor: {
         settings: { get: () => ({} as Settings) },
-        skills: { list: () => [] },
+        skills: { list: async () => [] },
       },
     }),
     tokens: ["IAgentProvider"],

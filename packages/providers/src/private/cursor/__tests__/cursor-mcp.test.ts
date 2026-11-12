@@ -94,7 +94,7 @@ function startProvider(host: ProviderHostPorts, runtimes: Array<ReturnType<typeo
     if (!next) throw new Error("Unexpected Cursor ACP spawn");
     return next as unknown as AcpSessionRuntime;
   });
-  const provider = new CursorProvider(host, { settings: { get: () => getDefaultSettings() }, skills: { list: () => [] } }, 60_000);
+  const provider = new CursorProvider(host, { settings: { get: () => getDefaultSettings() }, skills: { list: async () => [] } }, 60_000);
   providers.push(provider);
   return provider;
 }

@@ -57,7 +57,7 @@ function createInput(): ProviderFactoryInput {
     copilot: { launch: { resolve: vi.fn(async () => ({ cliPath: "copilot", env: {} })) } },
     cursor: {
       settings: { get: vi.fn(() => ({} as Settings)) },
-      skills: { list: vi.fn(() => []) },
+      skills: { list: vi.fn(async () => []) },
     },
   };
 }

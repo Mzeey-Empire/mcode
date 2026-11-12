@@ -568,7 +568,7 @@ function isUnsupportedCursorAcpResponse(value: unknown): value is { outcome: { o
 function createFakeCursorPorts(): NonNullable<ProviderFactoryInput["cursor"]> {
   return {
     settings: { get: () => undefined as never },
-    skills: { list: () => [] },
+    skills: { list: async () => [] },
   };
 }
 
