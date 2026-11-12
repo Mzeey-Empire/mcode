@@ -1227,8 +1227,10 @@ are provider-native, so they show the parent thread's provider.
   keycap takes `ink`, since `muted` over the key's tint and the row's fill
   falls below AA; a row's star sits before its keycap, so the keycaps form a
   column near the row's end. Too narrow to share a row (a 320px window, or
-  400% zoom), the pane drops under four rows of the list, its text in line
-  with the model names. When the room above the capsule runs short, the list
+  400% zoom), the pane drops under four and a half rows of the list, its
+  text in line with the model names, and shows three and a half levels, so
+  like the list a level cut at an edge under the scroll fade shows there
+  are more. When the room above the capsule runs short, the list
   and pane shrink and scroll under the scroll fade, the pane opening on its
   checked level, which the capsule already names; the footer always shows
   whole. A hovered row reaches the

@@ -381,9 +381,10 @@ interface PickerDetailLayoutProps<T> extends Pick<PickerProps<T>, "tabs" | "acti
 // which leaves the footer in view above the composer.
 const DETAIL_GRID_CLASS = cn(
   // The body rows may shrink, so a picker taller than the room above its anchor scrolls its list and pane and never
-  // clips its footer.
+  // clips its footer. Stacked, the pane is 3.5 rows tall (8px inset plus 3.5 pitches), so like the list's half row a
+  // level cut at an edge under the scroll fade shows there are more.
   "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_16.8rem] grid-rows-[auto_minmax(0,27.9rem)] [grid-template-areas:'search_caption'_'list_pane']",
-  "@max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[auto_14.7rem_auto_minmax(0,1fr)] @max-[340px]/picker-area:[grid-template-areas:'search'_'list'_'caption'_'pane']",
+  "@max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[auto_14.7rem_auto_minmax(0,12.4rem)] @max-[340px]/picker-area:[grid-template-areas:'search'_'list'_'caption'_'pane']",
 );
 
 /**
@@ -392,13 +393,15 @@ const DETAIL_GRID_CLASS = cn(
  * It draws its own edges and insets, so its host's panel has no padding. The pair keeps a fixed height, so moving
  * between rows whose panes differ never resizes the panel.
  */
-// The bottom scroll fade's depth, so a revealed row clears it.
-const SCROLL_FADE_PX = 24;
+// The depth of `scroll-fade-y`'s edge fade (1.5rem at the app's 10px root), so a revealed row clears it.
+const SCROLL_FADE_PX = 15;
 
 /**
  * Scrolls a short pane (a narrow window gives it under five rows) so its checked option shows, since the capsule
  * already names that choice and a pane that hides it reads as if the choice were not offered. The popup learns the
- * room above its anchor after it mounts, so the pane shrinks later; the check runs again on each resize.
+ * room above its anchor after it mounts, so the pane shrinks later; the check runs again on each resize. Each model's
+ * pane starts from its top, so a model with no checked level never inherits the previous one's scroll; a resize only
+ * reveals, so it never undoes the user's own scrolling.
  */
 function useRevealCheckedInPane(paneRef: RefObject<HTMLDivElement | null>, paneItem: unknown): void {
   useLayoutEffect(() => {
@@ -411,6 +414,7 @@ function useRevealCheckedInPane(paneRef: RefObject<HTMLDivElement | null>, paneI
       const overflow = checkedBottom + SCROLL_FADE_PX - pane.clientHeight;
       if (overflow > pane.scrollTop) pane.scrollTop = overflow;
     };
+    pane.scrollTop = 0;
     reveal();
     const observer = new ResizeObserver(reveal);
     observer.observe(pane);
