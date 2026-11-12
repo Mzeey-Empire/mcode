@@ -16,6 +16,9 @@ import {
   type ReliabilityHarnessForwardResult,
 } from "./reliability-harness/control.js";
 
+// A normal start settles within seconds; dev quit must not wait for the 10-minute startup timeout.
+const DEV_QUIT_START_WAIT_MS = 10_000;
+
 interface ServerRuntimeWebContents {
   isDestroyed(): boolean;
   send(channel: string, ...args: unknown[]): void;
@@ -296,7 +299,13 @@ export class ServerRuntime {
    */
   async stopServerForDevQuit(): Promise<void> {
     if (this.serverStart) {
-      await this.serverStart.catch(() => undefined);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        this.serverStart.catch(() => undefined),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, DEV_QUIT_START_WAIT_MS);
+        }),
+      ]).finally(() => clearTimeout(timer));
     }
     await this.serverManager.stopServerHeldByLock();
   }
