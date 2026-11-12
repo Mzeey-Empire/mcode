@@ -48,7 +48,7 @@ export class SessionOccupancyRegistry implements ProviderSessionOccupancyPort {
     this.touch(key);
   }
 
-  /** PR 1 has no declared holds. */
+  /** No caller can declare a hold yet, so `held` is always false. */
   read(key: ProviderSessionKey, _now: number): ProviderSessionOccupancy {
     const record = this.records.get(this.id(key));
     return { held: false, lastActivityAt: record?.lastActivityAt ?? null, lastUserTurnAt: record?.lastUserTurnAt ?? null };

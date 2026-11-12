@@ -256,7 +256,7 @@ export class ClaudeEventMapper {
    */
   settleBackgroundTask(message: Message): void {
     if (message.type !== "system" || message.subtype !== "task_notification") return;
-    const toolCallId = validIdentity(message.tool_use_id) ?? [...this.backgroundTools].find(([, row]) => row.taskId === validIdentity(message.task_id))?.[0];
+    const toolCallId = validIdentity(message.tool_use_id) ?? this.heldCallForTask(validIdentity(message.task_id));
     const row = toolCallId && this.backgroundTools.get(toolCallId);
     const status = BACKGROUND_TASK_STATUS.get(stringValue(message.status));
     if (!toolCallId || !row || !status) return;
@@ -304,6 +304,15 @@ export class ClaudeEventMapper {
     this.backgroundDirty = true;
   }
 
+  /** Bash notifications can omit `tool_use_id`, so the held row is found by its task id. */
+  private heldCallForTask(taskId: string | undefined): string | undefined {
+    if (!taskId) return undefined;
+    for (const [toolCallId, row] of this.backgroundTools) {
+      if (row.taskId === taskId) return toolCallId;
+    }
+    return undefined;
+  }
+
   private levelTask(taskId: string, task: Message): NativeBackgroundTask {
     const row = [...this.backgroundTools.values()].find((held) => held.taskId === taskId);
     const startedAt = row?.startedAt ?? this.liveTasks?.get(taskId)?.startedAt ?? Date.now();
@@ -326,7 +335,8 @@ export class ClaudeEventMapper {
       const oldest = this.launchLabels.keys().next().value;
       if (oldest !== undefined) this.launchLabels.delete(oldest);
     }
-    this.launchLabels.set(toolCallId, launchLabel(stringValue(input.description) || (toolName === "Bash" ? stringValue(input.command) : "") || toolName));
+    const command = toolName === "Bash" ? stringValue(input.command) : "";
+    this.launchLabels.set(toolCallId, launchLabel(stringValue(input.description) || command || toolName));
   }
 
   private settleBackgroundTool(toolCallId: string, executionId: string, status: BackgroundToolStatus, output: string): void {

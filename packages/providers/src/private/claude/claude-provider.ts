@@ -2002,9 +2002,9 @@ export class ClaudeProvider
 
   /**
    * Eviction guard: a session is busy while its stream has a live turn, while a
-   * tool_use awaits its result, OR while it has a pending permission request the user may still answer (the
-   * user could be on another thread). These keep the session out of idle
-   * eviction regardless of how long the SDK has been quiet.
+   * tool_use awaits its result, OR while it has a pending permission request
+   * the user may still answer (the user could be on another thread). These keep
+   * the session out of idle eviction regardless of how long the SDK has been quiet.
    */
   isBusy(state: ClaudeSessionState): boolean {
     if (state.pendingToolUses.size > 0) {

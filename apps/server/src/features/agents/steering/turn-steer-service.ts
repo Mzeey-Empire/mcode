@@ -101,7 +101,8 @@ export class TurnSteerService {
       return Promise.reject(error);
     }
     // Registered before the first await, so a concurrent replay joins this call.
-    const result = this.deliver({ params, payload, inputsHash, turn, stamp: this.occupancy.stamp({ providerId: turn.providerId, threadId: params.threadId }) }, options);
+    const stamp = this.occupancy.stamp({ providerId: turn.providerId, threadId: params.threadId });
+    const result = this.deliver({ params, payload, inputsHash, turn, stamp }, options);
     this.inFlight.set(params.messageId, { inputsHash, result });
     const forget = () => { this.inFlight.delete(params.messageId); };
     result.then(forget, forget);
