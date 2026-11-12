@@ -1030,7 +1030,7 @@ describe("ServerManager", () => {
     await manager.forceReplace();
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "http://localhost:19600/shutdown",
+      "http://127.0.0.1:19600/shutdown",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -1056,7 +1056,7 @@ describe("ServerManager", () => {
     await manager.stopServerHeldByLock();
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "http://localhost:19600/shutdown",
+      "http://127.0.0.1:19600/shutdown",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -1423,7 +1423,7 @@ describe("ServerManager", () => {
       await manager.forceReplace();
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        "http://localhost:19600/shutdown",
+        "http://127.0.0.1:19600/shutdown",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({

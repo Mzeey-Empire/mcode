@@ -257,7 +257,7 @@ describe("ServerRuntime Desktop Window seam", () => {
 
       await expect(createRuntime().getActiveAgentCount()).resolves.toBe(activeAgents);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        "http://localhost:43123/health",
+        "http://127.0.0.1:43123/health",
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     },

@@ -348,7 +348,7 @@ export class ServerRuntime {
   async getActiveAgentCount(): Promise<number> {
     const port = this.serverManager.port;
     if (!port) throw new Error("Server port is not available");
-    const response = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(3_000) });
+    const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(3_000) });
     if (!response.ok) throw new Error(`Health check failed with HTTP ${response.status}`);
     const payload: unknown = await response.json();
     const activeAgents = typeof payload === "object" && payload !== null && "activeAgents" in payload

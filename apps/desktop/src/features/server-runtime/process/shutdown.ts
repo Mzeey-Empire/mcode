@@ -117,7 +117,7 @@ function doesNotOwnExpectedLock(
 /** Request authenticated graceful server shutdown before process-tree fallback. */
 async function requestGracefulShutdown(lock: ServerLock): Promise<void> {
   try {
-    await fetch(`http://localhost:${lock.port}/shutdown`, {
+    await fetch(`http://127.0.0.1:${lock.port}/shutdown`, {
       method: "POST",
       signal: AbortSignal.timeout(5_000),
       headers: {
