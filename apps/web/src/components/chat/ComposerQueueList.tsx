@@ -1,4 +1,5 @@
-import { ArrowUp, CornerDownRight, Paperclip, Pencil, X } from "lucide-react";
+import { Fragment } from "react";
+import { ArrowUp, CornerDownRight, FileText, Paperclip, Pencil, X } from "lucide-react";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { Button, IconButton } from "@/components/ui/button";
 import {
@@ -27,6 +28,11 @@ interface ComposerQueueListProps {
   onSendNow: (message: QueuedMessage) => void;
   /** Hands a queued message to the composer for editing; the parent pops it from the queue. */
   onLoadIntoComposer: (message: QueuedMessage) => void;
+  /**
+   * The queued message open in the composer, or null: where it goes back on save, and the unsent draft set aside
+   * behind the queue meanwhile, which returns to the composer and never sends.
+   */
+  editing?: { readonly originalIndex: number; readonly parkedDraftId: string | null } | null;
 }
 
 /**
@@ -40,6 +46,7 @@ export function ComposerQueueList({
   isEditLocked = false,
   onSendNow,
   onLoadIntoComposer,
+  editing = null,
 }: ComposerQueueListProps) {
   const queue = useQueueStore((s) => s.queues[threadId] ?? EMPTY_QUEUE);
   const providerId = ProviderIdSchema.safeParse(provider);
@@ -49,7 +56,8 @@ export function ComposerQueueList({
   const held = useQueueStore((s) => s.autoDrainSuppressedThreadIds.has(threadId));
   const pauseReason = useQueueStore((s) => s.autoDrainPauseReasons[threadId]);
   const { resume } = useQueuedMessageDispatch(threadId);
-  if (queue.length === 0) return null;
+  if (queue.length === 0 && editing === null) return null;
+  const { slot, position, parkedDraftId } = editingSlot(editing, queue.length);
 
   const canSendNow = (message: QueuedMessage) => !isPaused
     && (route === "send" || (route === "steer" && canSteer && isSteerable(message)));
@@ -72,33 +80,80 @@ export function ComposerQueueList({
         </div>
       ) : null}
       <ul aria-label="Queued messages" className="m-0 list-none p-0">
+        {slot === 0 ? <EditingSlotRow /> : null}
         {queue.map((message, index) => (
-          <li key={message.id} className="flex h-10 items-center gap-2">
-            <span className="flex size-4 shrink-0 items-center justify-center">
-              <CornerDownRight className="size-4 text-muted" aria-hidden />
-            </span>
-            <QueueRowText message={message} />
-            {isDeliveryUnknown(message) ? (
-              <DeliveryUnknownActions
-                position={index + 1}
-                onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
-                onRemove={() => void remove(message)}
-              />
-            ) : (
-              <QueueRowActions
-                position={index + 1}
-                pending={pendingLabel(message)}
-                canSendNow={canSendNow(message)}
-                editLocked={isEditLocked}
-                onSendNow={() => onSendNow(message)}
-                onEdit={() => void edit(message)}
-                onRemove={() => void remove(message)}
-              />
+          <Fragment key={message.id}>
+            {message.id === parkedDraftId ? <ParkedDraftRow message={message} /> : (
+            <li className="flex h-10 items-center gap-2">
+              <span className="flex size-4 shrink-0 items-center justify-center">
+                <CornerDownRight className="size-4 text-muted" aria-hidden />
+              </span>
+              <QueueRowText message={message} />
+              {isDeliveryUnknown(message) ? (
+                <DeliveryUnknownActions
+                  position={position(index)}
+                  onSendAgain={() => void sendHeldSteerAgain(threadId, message)}
+                  onRemove={() => void remove(message)}
+                />
+              ) : (
+                <QueueRowActions
+                  position={position(index)}
+                  pending={pendingLabel(message)}
+                  canSendNow={canSendNow(message)}
+                  editLocked={isEditLocked}
+                  onSendNow={() => onSendNow(message)}
+                  onEdit={() => void edit(message)}
+                  onRemove={() => void remove(message)}
+                />
+              )}
+            </li>
             )}
-          </li>
+            {slot === index + 1 ? <EditingSlotRow /> : null}
+          </Fragment>
         ))}
       </ul>
     </>
+  );
+}
+
+/**
+ * The edited message keeps its slot, so the tray shows which message the composer is editing, and the rows after it
+ * show the positions they will have once it is saved.
+ */
+function editingSlot(editing: ComposerQueueListProps["editing"], length: number) {
+  const slot = editing ? Math.min(editing.originalIndex, length) : null;
+  return {
+    slot,
+    position: (index: number) => (slot !== null && index >= slot ? index + 2 : index + 1),
+    parkedDraftId: editing ? editing.parkedDraftId : null,
+  };
+}
+
+/** Holds the place of the queued message open in the composer. */
+function EditingSlotRow() {
+  return (
+    <li className="flex h-10 items-center gap-2 text-body-small text-muted">
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        <Pencil className="size-4" aria-hidden />
+      </span>
+      Editing
+    </li>
+  );
+}
+
+/**
+ * The unsent draft set aside while a queued message is edited. It is not queued: it returns to the composer when
+ * the edit ends, so it is named "Draft" and offers none of the queue's actions.
+ */
+function ParkedDraftRow({ message }: { readonly message: QueuedMessage }) {
+  return (
+    <li className="flex h-10 items-center gap-2">
+      <span className="flex size-4 shrink-0 items-center justify-center">
+        <FileText className="size-4 text-muted" aria-hidden />
+      </span>
+      <span className="shrink-0 text-body-small text-muted">Draft</span>
+      <QueueRowText message={message} />
+    </li>
   );
 }
 

@@ -1,9 +1,10 @@
 import { createMockApproval, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import React from "react";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Composer } from "../Composer";
+import { extractComposerMessage } from "@/components/chat/lexical";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
@@ -126,6 +127,27 @@ describe("Composer while the approval dock shows", () => {
     expect(screen.queryByTestId("approval-dock")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Add to composer")).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByTestId("composer-add-menu")).not.toBeInTheDocument();
+  });
+
+  it("saves an edited queued message back to its slot while the agent runs", async () => {
+    const user = userEvent.setup();
+    resetThreadStoreForTests({ runningThreadIds: new Set(["thread-1"]) });
+    for (const content of ["first", "second"]) {
+      useQueueStore.getState().enqueue("thread-1", { content, displayContent: content, attachments: [], model: "gpt-5", permissionMode: "full" });
+    }
+    render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+
+    await user.click(screen.getByLabelText("Edit queued message 1"));
+    expect(screen.getByText("Editing a queued message")).toBeInTheDocument();
+    const rows = within(screen.getByRole("list", { name: "Queued messages" })).getAllByRole("listitem");
+    expect(rows[0]).toHaveTextContent("Editing");
+    expect(within(rows[1]!).getByLabelText("Edit queued message 2")).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: "Message Mcode" }), "first edited");
+    vi.mocked(extractComposerMessage).mockReturnValue({ text: "first edited", mentions: [] });
+    onTestFinished(() => void vi.mocked(extractComposerMessage).mockReturnValue({ text: "", mentions: [] }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(useQueueStore.getState().queues["thread-1"]?.map((message) => message.content)).toEqual(["first edited", "second"]));
   });
 
   it("disables editing a queued message while the dock hides the composer input", () => {

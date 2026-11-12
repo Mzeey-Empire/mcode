@@ -122,6 +122,8 @@ export interface PickerProps<T> {
   readonly renderItem: (item: T) => PickerRow;
   /** Offers another tab when this one shows nothing, e.g. "matches in Pull requests". */
   readonly emptySwitch?: { readonly tabId: string; readonly label: string };
+  /** A group the search found nothing in while other groups matched, drawn first as its label over the no-match line. */
+  readonly unmatchedGroup?: string;
   /** Content under the list, set off by a divider, such as a toggle row. */
   readonly footer?: ReactNode;
   /** Set false to separate groups and the footer with space instead of hairlines. Defaults to true. */
@@ -170,6 +172,8 @@ export function Picker<T>(props: PickerProps<T>) {
   const loadMore = useLoadMoreOnce(props, listKey);
   const searchRef = useRef<HTMLInputElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
+  // The list's highlight is virtual focus, so the row the keyboard reached takes the focus ring a pointer row lacks.
+  const [keyboardRow, setKeyboardRow] = useState(false);
 
   const select = (entry: ListRow<T> | undefined) => {
     if (entry && !entry.row.disabled) props.onSelect(entry.item);
@@ -202,6 +206,7 @@ export function Picker<T>(props: PickerProps<T>) {
     if (!paneTarget) return false;
     event.preventDefault();
     pane.follow();
+    setKeyboardRow(false);
     paneTarget.focus();
     return true;
   };
@@ -231,6 +236,7 @@ export function Picker<T>(props: PickerProps<T>) {
   };
 
   const hoverRow = (index: number) => {
+    setKeyboardRow(false);
     pane.lag();
     highlightRow(index);
   };
@@ -245,15 +251,17 @@ export function Picker<T>(props: PickerProps<T>) {
   const leavePane = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "ArrowLeft") return;
     event.preventDefault();
+    setKeyboardRow(true);
     searchRef.current?.focus();
   };
 
   const moveHighlight = (next: number) => {
     if (rows[next] === undefined) return;
     pane.follow();
+    setKeyboardRow(true);
     highlightRow(next);
     // Only keyboard moves scroll; hover highlights must never move the list under the pointer.
-    document.getElementById(optionId(listId, next))?.scrollIntoView?.({ block: "nearest" });
+    revealRow(listId, next);
     if (next >= rows.length - LOAD_MORE_ROWS) loadMore();
   };
 
@@ -265,6 +273,7 @@ export function Picker<T>(props: PickerProps<T>) {
       rows={rows}
       shortcutRows={shortcutRows}
       activeIndex={activeIndex}
+      keyboardRow={keyboardRow}
       selectedKey={selectedKey}
       onHighlight={hoverRow}
       onPick={select}
@@ -273,6 +282,7 @@ export function Picker<T>(props: PickerProps<T>) {
       hairlines={hairlines}
       selectedCheck={selectedCheck}
       fill={props.detail !== undefined}
+      unmatched={props.unmatchedGroup === undefined ? undefined : { label: props.unmatchedGroup, query }}
     />
   ) : null;
   return (
@@ -363,14 +373,17 @@ interface PickerListAreaProps<T> {
 function PickerListArea<T>({ list, detail, paneEntry, paneRef, onKeyDown, onPointerEnter }: PickerListAreaProps<T>) {
   if (!list || !detail) return list;
   return (
-    <div className="grid h-[20.8rem] grid-cols-[minmax(0,1fr)_16.8rem]">
+    // Eight 33px rows less the last gap, so a provider with eight models opens with every Ctrl shortcut in view; the 8px gap
+    // above sits outside the scroller, so the list shows whole rows at every keyboard stop.
+    <div className="mt-2 grid h-[26.3rem] grid-cols-[minmax(0,1fr)_16.8rem]">
       {list}
       <div
         ref={paneRef}
         data-slot="picker-detail"
         onKeyDown={onKeyDown}
         onPointerEnter={onPointerEnter}
-        className="min-h-0 overflow-y-auto border-l border-border p-1"
+        // No right padding: the panel's 8px already sits there, so the pane mirrors the list's 8px outer and 4px inner gutters.
+        className="min-h-0 overflow-y-auto border-l border-border py-1 pl-1"
       >
         {paneEntry ? detail.render(paneEntry.item) : null}
       </div>
@@ -411,7 +424,8 @@ function usePaneRow(activeRowKey: string | null) {
 }
 
 function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>, "tabs" | "activeTab" | "onTabChange">) {
-  if (!tabs || tabs.length === 0) return null;
+  // One tab has no sibling to switch to.
+  if (!tabs || tabs.length < 2) return null;
   const iconOnly = tabs.every((tab) => tab.icon != null);
   return (
     <div className={cn("flex items-center px-0.5 pb-1.5", iconOnly ? "gap-0.5 pt-0.5" : "gap-2")}>
@@ -536,6 +550,35 @@ function optionId(listId: string, index: number): string {
 }
 
 /**
+ * Scrolls the list so row `index` shows with one whole row beyond it, landing the top edge on a row. The browser's
+ * `scrollIntoView` stops mid-row, which leaves a faded sliver of a row at each edge.
+ */
+function revealRow(listId: string, index: number): void {
+  const list = document.getElementById(listId);
+  const row = document.getElementById(optionId(listId, index));
+  if (!list || !row) return;
+  const after = document.getElementById(optionId(listId, index + 1)) ?? row;
+  const top = document.getElementById(optionId(listId, index - 1))?.offsetTop ?? 0;
+  if (top < list.scrollTop) {
+    list.scrollTop = top;
+    return;
+  }
+  const needed = after.offsetTop + after.offsetHeight - list.clientHeight;
+  if (needed > list.scrollTop) list.scrollTop = firstRowTopFrom(listId, index, needed);
+}
+
+/** The top of the first row at or below `offset`, searching up from row `index`. */
+function firstRowTopFrom(listId: string, index: number, offset: number): number {
+  let edge = document.getElementById(optionId(listId, index))?.offsetTop ?? offset;
+  for (let above = index - 1; above >= 0; above -= 1) {
+    const top = document.getElementById(optionId(listId, above))?.offsetTop;
+    if (top === undefined || top < offset) break;
+    edge = top;
+  }
+  return edge;
+}
+
+/**
  * Wraps `onLoadMore` so it fires at most once per page. A page is identified by the list (tab and
  * query) plus the item count, so a fresh list of the same length still gets its second page.
  */
@@ -580,6 +623,8 @@ interface PickerListProps<T> {
   readonly rows: readonly ListRow<T>[];
   readonly shortcutRows: readonly number[];
   readonly activeIndex: number;
+  /** The keyboard, not the pointer, moved the highlight to the active row. */
+  readonly keyboardRow: boolean;
   readonly selectedKey?: string;
   readonly onHighlight: (index: number) => void;
   readonly onPick: (entry: ListRow<T>) => void;
@@ -589,10 +634,11 @@ interface PickerListProps<T> {
   readonly selectedCheck: boolean;
   /** Fills its grid cell instead of capping at five rows, so it matches the detail pane's height. */
   readonly fill: boolean;
+  readonly unmatched?: { readonly label: string; readonly query: string };
 }
 
 function PickerList<T>(props: PickerListProps<T>) {
-  const { listId, listKey, rows, shortcutRows, activeIndex, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck, fill } = props;
+  const { listId, listKey, rows, shortcutRows, activeIndex, keyboardRow, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck, fill, unmatched } = props;
   const listRef = useRef<HTMLUListElement>(null);
 
   const measure = useCallback(() => {
@@ -606,7 +652,7 @@ function PickerList<T>(props: PickerListProps<T>) {
   // never picks a row the user can't see. Later moves scroll from the keyboard handler, never from hover.
   const revealActive = useEffectEvent(() => {
     if (activeIndex === -1) return;
-    document.getElementById(optionId(listId, activeIndex))?.scrollIntoView?.({ block: "nearest" });
+    revealRow(listId, activeIndex);
   });
   // Declared before the measure effect so a new list is measured after it has scrolled.
   useLayoutEffect(() => {
@@ -623,9 +669,10 @@ function PickerList<T>(props: PickerListProps<T>) {
       id={listId}
       role="listbox"
       onScroll={measure}
-      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px pt-2", fill ? "pr-1" : "max-h-[17.2rem]")}
+      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", fill ? "snap-y snap-mandatory pr-1" : "max-h-[17.2rem] pt-2")}
     >
       <SlidingHighlight follow="data-active" />
+      {unmatched ? <PickerUnmatchedGroup {...unmatched} /> : null}
       {rows.map((entry, index) => (
         <Fragment key={entry.row.key}>
           <PickerGroupStart row={entry.row} previous={rows[index - 1]?.row} hairlines={hairlines} />
@@ -634,6 +681,7 @@ function PickerList<T>(props: PickerListProps<T>) {
             row={entry.row}
             digit={shortcutDigit(shortcutRows, index)}
             active={index === activeIndex}
+            keyboard={keyboardRow && index === activeIndex}
             selected={entry.row.key === selectedKey}
             selectedCheck={selectedCheck}
             onHighlight={() => onHighlight(index)}
@@ -646,12 +694,29 @@ function PickerList<T>(props: PickerListProps<T>) {
   );
 }
 
+// A snap point of its own, so a list that snaps to rows can rest with its first heading in view instead of under the fade.
+const GROUP_LABEL_CLASS = "shrink-0 snap-start px-2 pt-2 pb-1 text-caption font-medium text-muted";
+
+/** A group with no matches keeps its label, so a tab whose results all come from other groups still says it found nothing. */
+function PickerUnmatchedGroup({ label, query }: { readonly label: string; readonly query: string }) {
+  return (
+    <>
+      <li role="presentation" data-slot="picker-group-label" className={GROUP_LABEL_CLASS}>
+        {label}
+      </li>
+      <li role="presentation" className="flex h-8 shrink-0 items-center px-2 text-body-small text-muted">
+        Nothing matches “{query}”
+      </li>
+    </>
+  );
+}
+
 /** Marks where a new group begins: its label when it has one, otherwise a divider or a gap. The first group needs a mark only when labelled. */
 function PickerGroupStart({ row, previous, hairlines }: { readonly row: PickerRow; readonly previous: PickerRow | undefined; readonly hairlines: boolean }) {
   if (previous !== undefined && row.group === previous.group) return null;
   if (row.groupLabel) {
     return (
-      <li role="presentation" data-slot="picker-group-label" className="shrink-0 px-2 pt-2 pb-1 text-caption font-medium text-muted">
+      <li role="presentation" data-slot="picker-group-label" className={GROUP_LABEL_CLASS}>
         {row.groupLabel}
       </li>
     );
@@ -675,6 +740,7 @@ interface PickerOptionProps {
   readonly row: PickerRow;
   readonly digit?: number;
   readonly active: boolean;
+  readonly keyboard: boolean;
   readonly selected: boolean;
   readonly selectedCheck: boolean;
   readonly onHighlight: () => void;
@@ -715,7 +781,7 @@ function optionKeyShortcuts(digit: number | undefined, hasAction: boolean): stri
   return [pick, hasAction ? ROW_ACTION_SHORTCUT.aria : undefined].filter(Boolean).join(" ") || undefined;
 }
 
-function PickerOptionItem({ id, row, digit, active, selected, selectedCheck, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
+function PickerOptionItem({ id, row, digit, active, keyboard, selected, selectedCheck, onHighlight, onPick, onRunAction, reason, ...triggerProps }: PickerOptionProps & { readonly reason: string | undefined }) {
   const descriptions = optionDescriptions(id, row, reason, digit);
   return (
     <li
@@ -730,11 +796,12 @@ function PickerOptionItem({ id, row, digit, active, selected, selectedCheck, onH
       aria-describedby={descriptions.describedBy}
       aria-keyshortcuts={descriptions.keyShortcuts}
       data-active={active || undefined}
+      data-keyboard={keyboard || undefined}
       data-selected={selected || undefined}
       // Keeps focus in the search field so typing and arrow keys keep working after a click.
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        "group/option relative flex shrink-0 cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-selected:bg-selected",
+        "group/option relative flex shrink-0 snap-start cursor-pointer select-none items-center gap-2 rounded-sm px-2 text-body-small text-ink data-selected:bg-selected data-keyboard:outline-2 data-keyboard:-outline-offset-2 data-keyboard:outline-focus",
         row.description == null ? "h-8" : "min-h-8 py-1.5",
         row.disabled && "cursor-default opacity-50",
       )}
@@ -804,7 +871,8 @@ function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAc
       }}
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        "flex size-[1.4rem] shrink-0 items-center justify-center rounded-xs [&_svg]:size-[1.4rem]",
+        // A 24px box around the 14px glyph, as DESIGN.md asks of inline row actions.
+        "-mx-[5px] flex size-6 shrink-0 items-center justify-center rounded-xs [&_svg]:size-[1.4rem]",
         // An unpinned action shows only on the highlighted or hovered row, so the list reads as a column of names.
         !action.pinned && "opacity-0 group-hover/option:opacity-100 group-data-active/option:opacity-100",
       )}

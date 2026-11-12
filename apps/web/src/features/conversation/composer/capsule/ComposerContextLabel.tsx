@@ -20,7 +20,7 @@ const TONE_CLASS: Record<ContextLabel["tone"], { readonly text: string; readonly
 };
 
 const LABEL_CLASS =
-  "inline-flex h-8 shrink-0 cursor-default items-center rounded-full pr-1.5 pl-1 text-compact whitespace-nowrap focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+  "inline-flex h-8 shrink-0 cursor-default items-center rounded-full px-[9px] text-compact whitespace-nowrap @max-[680px]/capsule:px-[7px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 function abbreviateTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;

@@ -68,6 +68,8 @@ interface ModelOption {
   readonly label: string;
   /** Catalog subgroup, so the list can divide groups. */
   readonly group?: string;
+  /** Names the group above its first row; a search lists other providers' matches under their names. */
+  readonly groupLabel?: string;
   /** Formatted end date of a model whose subscription access has ended. */
   readonly endedOn?: string;
   /** Favourites mix providers, so their rows name the provider under the model. */
@@ -250,11 +252,13 @@ function useProviderModelCatalog() {
 function useFetchProviderModels(
   activeTab: ModelPickerTab,
   favoritesVisible: readonly ModelFavoriteEntry[],
+  searchedProviders: readonly ModelProvider[],
   fetchModels: (providerId: string) => Promise<void>,
 ): void {
   useEffect(() => {
     if (activeTab !== FAVORITES_TAB) {
       void fetchModels(activeTab);
+      for (const provider of searchedProviders) void fetchModels(provider.id);
       return;
     }
 
@@ -262,7 +266,7 @@ function useFetchProviderModels(
     for (const providerId of providerIds) {
       void fetchModels(providerId);
     }
-  }, [activeTab, favoritesVisible, fetchModels]);
+  }, [activeTab, favoritesVisible, searchedProviders, fetchModels]);
 }
 
 /** The provider tab: the host's when it passes `onTabChange`, otherwise the panel's own. */
@@ -325,6 +329,35 @@ function catalogModelOptions(
   );
 }
 
+function underProviderName(options: readonly ModelPickerOption[], provider: ModelProvider): ModelPickerOption[] {
+  return options.map((option) => ({ ...option, group: `provider:${provider.id}`, groupLabel: provider.name }));
+}
+
+/**
+ * A search on a provider tab also lists every other usable provider's matches, so a model from another provider is one
+ * search away instead of behind its tab. Once results span providers, every group, the tab's own included, carries
+ * its provider's name, and a tab with no matches of its own is named as `unmatched` so the picker still says so.
+ */
+function searchAcrossProviders(
+  active: ModelProvider,
+  own: readonly ModelPickerOption[],
+  providers: readonly ModelProvider[],
+  getModels: (provider: ModelProvider) => ModelProvider["models"],
+  searchQuery: string,
+): ModelSearchResults {
+  const others = providers
+    .filter((provider) => provider.id !== active.id)
+    .flatMap((provider) => underProviderName(catalogModelOptions(provider.id, filterModelsBySearchQuery(getModels(provider), searchQuery)), provider));
+  if (others.length === 0) return { options: own };
+  return { options: [...underProviderName(own, active), ...others], unmatched: own.length === 0 ? active.name : undefined };
+}
+
+interface ModelSearchResults {
+  readonly options: readonly ModelPickerOption[];
+  /** The tab's provider when the search found nothing in it but found other providers' models. */
+  readonly unmatched?: string;
+}
+
 function providerModelOptions(
   providerId: string,
   models: ModelProvider["models"],
@@ -384,7 +417,8 @@ function getPickerTabs(
   });
   if (lockedToProvider) return providerTabs;
   return [
-    { id: FAVORITES_TAB, label: "Favourites", icon: <Star aria-hidden className="size-[1.4rem]" /> },
+    // Lucide's star sits high in its box, so it drops 1px to centre with the provider marks beside it.
+    { id: FAVORITES_TAB, label: "Favourites", icon: <Star aria-hidden className="size-[1.4rem] translate-y-px" /> },
     ...providerTabs,
   ];
 }
@@ -450,19 +484,20 @@ function ReasoningPane({ option, selected, reasoning }: { readonly option: Model
   const levels = getReasoningLevels(option.providerId, option.modelId);
   return (
     <div className="flex flex-col">
-      <p className="flex flex-col px-3 pt-1 pb-1">
+      <p className="flex flex-col px-2 pt-1 pb-2">
         <span className="text-caption text-muted">Reasoning</span>
-        <span className="text-body-small break-words text-ink">{option.label}</span>
+        <span className="text-body-small font-medium break-words text-ink">{option.label}</span>
       </p>
       {levels.length > 0 ? (
         <ReasoningLevelOptions
           levels={levels}
           checked={selected ? reasoning.current : undefined}
+          listInset
           label={`Reasoning for ${option.label}`}
           onChoose={(level) => reasoning.onChoose(option.modelId, option.providerId, level)}
         />
       ) : (
-        <p className="px-3 py-1.5 text-caption text-muted">No reasoning levels</p>
+        <p className="px-2 py-1.5 text-caption text-muted">No reasoning levels</p>
       )}
     </div>
   );
@@ -519,17 +554,24 @@ export function ModelPickerPanel({
     [favorites],
   );
 
+  const searching = tokenizeSearch(query).length > 0;
+  const searchedProviders = useMemo(
+    () => (searching ? getProvidersForLeftRail(providerLocked, displayProvider).filter((provider) => !provider.comingSoon && canUseProvider(provider.id)) : []),
+    [searching, providerLocked, displayProvider, canUseProvider],
+  );
+
   const selectedModelInTab = presentation.selectedProviderId === activeTab ? presentation.normalizedModelId : undefined;
-  const items = useMemo((): ModelPickerOption[] => {
+  const results = useMemo((): ModelSearchResults => {
     if (activeTab === FAVORITES_TAB) {
-      return favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels);
+      return { options: favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels) };
     }
     const provider = MODEL_PROVIDERS.find((entry) => entry.id === activeTab);
-    if (!provider) return [];
+    if (!provider) return { options: [] };
     const models = getModels(provider);
     const legacyExpanded = isLegacyFoldExpanded(legacyFold, models, selectedModelInTab);
-    return providerModelOptions(provider.id, models, query, legacyExpanded);
-  }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab]);
+    const own = providerModelOptions(provider.id, models, query, legacyExpanded);
+    return searchAcrossProviders(provider, own, searchedProviders, getModels, query);
+  }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab, searchedProviders]);
 
   const selectedKey = presentation.selectedProviderId
     ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId)
@@ -543,6 +585,7 @@ export function ModelPickerPanel({
         key,
         name: option.label,
         group: option.group,
+        groupLabel: option.groupLabel,
         disabled: option.endedOn !== undefined,
         disabledReason: option.endedOn && `Subscription access to ${option.label} ended on ${option.endedOn}.`,
         description: option.showProvider ? (
@@ -573,7 +616,7 @@ export function ModelPickerPanel({
     setLegacyFold("auto");
   }, [setActiveTab]);
 
-  useFetchProviderModels(activeTab, favoritesVisible, fetchModels);
+  useFetchProviderModels(activeTab, favoritesVisible, searchedProviders, fetchModels);
 
   const handlePick = (option: ModelPickerOption) => {
     if (option.kind === "legacy-fold") {
@@ -593,7 +636,8 @@ export function ModelPickerPanel({
       query={query}
       onQueryChange={onQueryChange}
       searchPlaceholder="Search models"
-      items={items}
+      items={results.options}
+      unmatchedGroup={results.unmatched}
       total={null}
       status={loading ? "loading" : "ready"}
       selectedKey={selectedKey}

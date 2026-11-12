@@ -42,7 +42,7 @@ function ComposerMode({ mode, iconOnly }: { readonly mode: ComposerModeView; rea
           type="button"
           aria-label={`Remove ${mode.label}`}
           onClick={mode.onRemove}
-          className="grid size-6 place-items-center rounded-full text-muted outline-none hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"
+          className="grid size-6 place-items-center rounded-full text-muted hover:bg-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"
         >
           <X size={12} aria-hidden />
         </button>

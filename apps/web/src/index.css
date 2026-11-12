@@ -121,7 +121,9 @@
   --primary-ink: var(--neutral-50);
   --button-secondary: var(--neutral-100);
   --hover: var(--neutral-100);
-  --muted: var(--neutral-400);
+  /* neutral-400 reads 4.45:1 on the neutral-200 selected fill, which the composer uses, so muted text there fell
+     under its 4.5:1 promise. neutral-400 also draws dark control borders, so light muted takes its own darker step. */
+  --muted: oklch(47% 0.010 260);
   /* Paper's light selected is neutral-100, the same as page and hover, so a
      selected sidebar row would vanish (decisions.md D4). Only selection moves:
      the secondary button keeps neutral-100 so its neutral-200 hover still shows. */
@@ -145,7 +147,8 @@
   --file-reference: oklch(48% 0.080 205);
   --success: var(--sage-600);
   --error: var(--clay-700);
-  --warning: var(--amber-700);
+  /* Off the lamp's hue, as in dark, so the Don't ask key and Low quota beside an amber Send never read as more Sends. */
+  --warning: oklch(46% 0.100 92);
   --info: var(--blue-700);
   --pr-merged: var(--violet-700);
   --selection: color-mix(in oklch, var(--blue-500) 18%, transparent);
@@ -196,7 +199,8 @@
   --file-reference: oklch(80% 0.070 205);
   --success: var(--sage-400);
   --error: var(--clay-400);
-  --warning: var(--amber-400);
+  /* Brass, off the lamp's hue, so the key icon and Low quota beside an amber Send never read as more Sends. */
+  --warning: oklch(82% 0.110 92);
   --info: var(--blue-400);
   --pr-merged: var(--violet-400);
   --selection: color-mix(in oklch, var(--blue-500) 30%, transparent);

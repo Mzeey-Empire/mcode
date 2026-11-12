@@ -10,7 +10,8 @@ import { EntityIcon } from "./EntityToken";
 
 const TRAY_SURFACE_CLASS = "p-2";
 // Floating over the transcript it keeps the rail border, where `panel` alone matches the light canvas.
-const ATTACHED_TRAY_SURFACE_CLASS = "rounded-t-[14px] bg-panel";
+// Matches the composer tray's fill, whose place it takes.
+const ATTACHED_TRAY_SURFACE_CLASS = "rounded-t-[14px] bg-page dark:bg-panel";
 /**
  * In the capsule the menu takes the attachment tray's place and look: the tray's inset, measured inside the capsule's
  * 1px border, and its bottom edge on that border, so the menu and an open tray share one footprint.

@@ -5,3 +5,9 @@
  * `outline-2`.
  */
 export const FOCUS_RING_CLASS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+
+/**
+ * The same ring drawn inside a row of a menu, list or pane. Those rows sit 4px from their container's edge, so a
+ * ring outside the row would touch that edge or a divider beside it.
+ */
+export const FOCUS_RING_INSET_CLASS = "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";

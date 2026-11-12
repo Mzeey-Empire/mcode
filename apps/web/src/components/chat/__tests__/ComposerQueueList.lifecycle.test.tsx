@@ -225,6 +225,21 @@ describe("ComposerQueueList lifecycle", () => {
     expect(screen.getByRole("button", { name: "Remove queued message 1" })).toBeEnabled();
   });
 
+  it("names the draft set aside by an edit and offers none of the queue's actions on it", () => {
+    queueMessage("queued follow-up");
+    queueMessage("half-written draft");
+    const draft = useQueueStore.getState().queues[THREAD_ID]!.at(-1)!;
+    render(
+      <ComposerQueueList threadId={THREAD_ID} provider="cursor" onLoadIntoComposer={vi.fn()} onSendNow={vi.fn()}
+        editing={{ originalIndex: 0, parkedDraftId: draft.id }} />,
+    );
+
+    const draftRow = screen.getByText("half-written draft").closest("li")!;
+    expect(draftRow).toHaveTextContent("Draft");
+    expect(draftRow.querySelectorAll("button")).toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: /^Edit queued message/ })).toHaveLength(1);
+  });
+
   it("sends the chosen row at once when idle and keeps the rest in order", async () => {
     queueMessage("first queued follow-up");
     queueMessage("second queued follow-up");

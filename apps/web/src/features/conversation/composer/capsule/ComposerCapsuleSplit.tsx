@@ -52,14 +52,16 @@ type OpenPartPopover = Extract<PartPopoverState, { status: "open" }>;
 // The access list carries the menu's own 4px padding, so its popover adds none.
 const POPUP_CLASS: Record<CapsulePart, string> = {
   // Wider than other pickers to fit the reasoning pane beside the model list.
-  model: cn(PICKER_PANEL_CLASS, "w-[min(92vw,44rem)] max-h-(--available-height) overflow-y-auto"),
+  // Below 504px the composer, 32px narrower than the window, is narrower than 440px plus its insets, so the picker
+  // takes the composer's width and both its edges meet the composer's instead of sitting a few pixels inside one.
+  model: cn(PICKER_PANEL_CLASS, "w-[44rem] max-[504px]:w-[calc(100vw-3.2rem)] max-h-(--available-height) overflow-y-auto"),
   reasoning: "w-56 p-1",
   access: "w-58 p-0",
 };
 
 // The open part takes the fill a step above the hover, so it still reads as open with the pointer on another part.
 const PART_CLASS =
-  "relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink outline-none aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
+  "group/part relative inline-flex h-8 min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-[9px] text-compact text-ink aria-expanded:bg-button-secondary-hover focus-visible:outline-2 focus-visible:outline-focus @max-[680px]/capsule:px-[7px]";
 
 /** The model part's label below the 680px tier, read against its provider's other models. */
 function narrowLabelOf(model: SelectedModelPresentation, providerId: string): string {
@@ -137,36 +139,14 @@ function FocusOnMount({ selectors, children }: { readonly selectors: readonly st
  */
 function SteadyReasoningLabel({ levels, current }: { readonly levels: readonly ReasoningLevel[]; readonly current: ReasoningLevel }) {
   return (
-    <span className="inline-grid justify-items-center text-muted" data-testid="capsule-reasoning-label">
+    // On the open part's stronger fill, muted drops below AA in dark, so the open label takes ink like the model part.
+    <span className="inline-grid justify-items-center text-muted group-aria-expanded/part:text-ink" data-testid="capsule-reasoning-label">
       {levels.map((level) => (
         <span key={level} className={cn("col-start-1 row-start-1", level !== current && "invisible")} aria-hidden={level !== current || undefined}>
           {formatReasoningLabel(level)}
         </span>
       ))}
     </span>
-  );
-}
-
-function ReasoningBars({ levels, current }: { readonly levels: readonly ReasoningLevel[]; readonly current: ReasoningLevel }) {
-  const filled = levels.indexOf(current) + 1;
-  const step = 16 / levels.length;
-  return (
-    <svg aria-hidden width={14} height={14} viewBox="0 0 18 16" className="hidden @max-[680px]/capsule:block" data-testid="capsule-reasoning-bars">
-      {levels.map((level, index) => {
-        const height = 4 + Math.round((index * 11) / Math.max(1, levels.length - 1));
-        return (
-          <rect
-            key={level}
-            x={1 + index * step}
-            y={15 - height}
-            width={step - 1.2}
-            height={height}
-            rx={1}
-            className={index < filled ? "fill-ink" : "fill-muted/35"}
-          />
-        );
-      })}
-    </svg>
   );
 }
 
@@ -260,19 +240,14 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
           <>
             <ProviderIcon provider={model.iconProviderId} size={14} />
             <span className="min-w-0 text-fade @max-[680px]/capsule:hidden">{model.shortLabel}</span>
-            <span className="hidden min-w-0 text-fade @max-[680px]/capsule:inline @max-[480px]/capsule:hidden">{narrowLabelOf(model, selection.provider)}</span>
+            <span className="hidden min-w-0 text-fade @max-[680px]/capsule:inline">{narrowLabelOf(model, selection.provider)}</span>
           </>
         ))}
         {showReasoning && (
           <>
             <CapsuleDivider />
             {part("reasoning", reasoningLabel, reasoningLabel, reasoningLevels.length > 0
-              ? (
-                <>
-                  <span className="contents @max-[680px]/capsule:hidden"><SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} /></span>
-                  <ReasoningBars levels={reasoningLevels} current={selection.reasoning} />
-                </>
-              )
+              ? <SteadyReasoningLabel levels={reasoningLevels} current={selection.reasoning} />
               : <ComposerModelPreferenceSummary selection={selection} defaults={defaults} reasoningLevels={reasoningLevels} />)}
           </>
         )}
@@ -328,7 +303,8 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
               reasoning: (
                 <FocusOnMount key="reasoning" selectors={REASONING_FOCUS}>
                   <ComposerReasoningLevelList {...preferenceProps} onChosen={close} />
-                  <ComposerModelPreferenceSettings {...preferenceProps} className="mt-1 border-t border-border px-3 pt-1" />
+                  {/* 14px on the right: the check glyph's ink ends 2px inside its box, so the switches end where the checks do. */}
+                  <ComposerModelPreferenceSettings {...preferenceProps} className="mt-1 border-t border-border pt-1 pr-3.5 pl-3" />
                 </FocusOnMount>
               ),
               access: <AccessOptionList key="access" access={access} onChosen={close} />,

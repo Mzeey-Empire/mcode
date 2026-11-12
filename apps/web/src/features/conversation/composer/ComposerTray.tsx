@@ -14,10 +14,15 @@ export interface ComposerTrayProps {
   readonly tiles?: ReactNode;
   /** True while the slash menu covers the tray; its controls are then inert. */
   readonly covered?: boolean;
+  /** True while a queued message is open in the composer; the tray keeps its slot even when nothing else is queued. */
+  readonly editing?: boolean;
 }
 
-/** The panel the tray and the new-thread tab share above the capsule. */
-export const TRAY_SURFACE_CLASS = "mx-(--tray-inset) rounded-t-[14px] bg-panel";
+/**
+ * The panel the tray and the new-thread tab share above the capsule, a step between the page and the capsule's fill.
+ * Light panel matches the light background, so the light tray takes `page` to stay visible.
+ */
+export const TRAY_SURFACE_CLASS = "mx-(--tray-inset) rounded-t-[14px] bg-page dark:bg-panel";
 
 /**
  * Tray look: inset by `--tray-inset` from the capsule, which the slash menu shares, with the panel fill and top corners.
@@ -38,12 +43,12 @@ export function composerTrayClass(covered: boolean): string {
  * tasks, it starts after the task tab's widest extent, so the collapsed tab
  * never covers its rows.
  */
-export function ComposerTray({ threadId, running, queue, tiles, covered = false }: ComposerTrayProps) {
+export function ComposerTray({ threadId, running, queue, tiles, covered = false, editing = false }: ComposerTrayProps) {
   const usageLimit = useUsageLimitTray(threadId, running);
   const hasTaskTab = useTaskProgress(threadId) !== null;
   const hasQueue = useQueueStore((s) => (s.queues[threadId]?.length ?? 0) > 0);
 
-  if (!usageLimit && !hasQueue && !tiles) return null;
+  if (!usageLimit && !hasQueue && !editing && !tiles) return null;
 
   return (
     <div

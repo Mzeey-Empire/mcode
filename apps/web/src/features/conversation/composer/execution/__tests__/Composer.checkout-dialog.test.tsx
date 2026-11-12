@@ -1269,7 +1269,7 @@ describe("Composer checkout confirmation", () => {
     await user.click(screen.getByLabelText("Edit Fix the preview"));
     await user.click(screen.getByLabelText("Remove Product preview · 1 note"));
     await user.type(screen.getByLabelText("Message Mcode"), "Fix the preview without annotations");
-    await user.click(screen.getByLabelText("Queue message"));
+    await user.click(screen.getByLabelText("Save changes"));
 
     await waitFor(() => {
       const queue = useQueueStore.getState().queues[thread.id] ?? [];
@@ -1891,7 +1891,7 @@ describe("Composer checkout confirmation", () => {
     await user.upload(screen.getByTestId("composer-attachment-input"), secondImage);
     await waitFor(() => expect(saveClipboardFile).toHaveBeenCalledTimes(2));
     await user.click(
-      screen.getByLabelText("Discard edits and restore the original queued message"),
+      screen.getByRole("button", { name: "Cancel edit" }),
     );
 
     await act(async () => {
@@ -1940,7 +1940,7 @@ describe("Composer checkout confirmation", () => {
     render(<Composer threadId={thread.id} workspaceId={workspace.id} />);
     await user.click(screen.getByLabelText("Edit Finish the migration"));
     await user.click(
-      screen.getByLabelText("Discard edits and restore the original queued message"),
+      screen.getByRole("button", { name: "Cancel edit" }),
     );
 
     expect(useQueueStore.getState().queues[thread.id]).toEqual([

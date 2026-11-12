@@ -4,6 +4,7 @@ import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
 import { isNativePlanQuestionId, type PlanAnswer, type PlanQuestion } from "@mcode/contracts/models/plan-questions";
 import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { Button } from "@/components/ui/button";
+import { MenuRowCheck } from "@/components/ui/menu-row";
 import { cn } from "@/lib/utils";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import { useThreadStore } from "@/stores/threadStore";
@@ -61,19 +62,21 @@ function OptionRows({ question, selectedRow, focusedRow, freeText, rowRefs, inpu
           type="button"
           tabIndex={row === focusedRow ? 0 : -1}
           aria-pressed={row === selectedRow}
-          className={cn(choiceRowClass(row === focusedRow, false, false))}
+          className={cn(choiceRowClass(row === focusedRow, false, false), row === selectedRow && "bg-selected")}
           onClick={() => onSelect(row)}
           onFocus={() => onSelect(row)}
         >
           <KeyChip index={row} />
           <span className="flex min-w-0 flex-1 flex-col gap-px">
-            <span className={cn("text-sm text-ink", row === selectedRow && "font-medium")}>{option.title}</span>
+            <span className="text-sm text-ink">{option.title}</span>
             {option.recommended && <span className="text-xs text-muted">Recommended</span>}
           </span>
+          {/* Focus follows the pick, so without a mark the ring alone would say which answer is chosen. */}
+          {row === selectedRow ? <MenuRowCheck /> : null}
         </button>
       ))}
       {selectedRow === otherRow ? (
-        <div className={cn(ROW_CLASS, "bg-hover")}>
+        <div className={cn(ROW_CLASS, "bg-selected")}>
           <KeyChip index={otherRow} />
           <input
             ref={inputRef}

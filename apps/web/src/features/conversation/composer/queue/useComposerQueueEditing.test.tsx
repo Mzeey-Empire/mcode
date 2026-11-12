@@ -183,7 +183,7 @@ describe("useComposerQueueEditing with an unsent draft", () => {
     });
   });
 
-  it("queues the unsent draft at the end before editing a queued message", async () => {
+  it("sets the unsent draft aside behind the queue before editing a queued message", async () => {
     enqueue("first");
     const second = enqueue("second");
     const { hook, typeDraft } = setup();
@@ -195,5 +195,38 @@ describe("useComposerQueueEditing with an unsent draft", () => {
     const queued = useQueueStore.getState().queues[THREAD_ID] ?? [];
     expect(queued.map((message) => message.content)).toEqual(["first", "captured draft"]);
     expect(queued[1]?.attachments).toEqual([DRAFT_ATTACHMENT]);
+    expect(hook.result.current.editing?.parkedDraftId).toBe(queued[1]?.id);
+  });
+
+  it("returns the unsent draft to the composer, not the queue, when the edit is cancelled", async () => {
+    enqueue("first");
+    const second = enqueue("second");
+    const { hook, form, typeDraft } = setup();
+    typeDraft();
+    await act(async () => hook.result.current.loadIntoComposer(second));
+
+    act(() => hook.result.current.cancelEdit());
+
+    expect(queuedContents()).toEqual(["first", "second"]);
+    const restored = vi.mocked(form.restore);
+    expect(restored.mock.lastCall?.[0].content).toBe("captured draft");
+    expect(vi.mocked(form.clear).mock.invocationCallOrder[0]).toBeLessThan(restored.mock.invocationCallOrder.at(-1)!);
+  });
+
+  it("returns the unsent draft to the composer once the edited message is saved", async () => {
+    enqueue("first");
+    const second = enqueue("second");
+    const { hook, form, typeDraft } = setup();
+    typeDraft();
+    await act(async () => hook.result.current.loadIntoComposer(second));
+    act(() => {
+      useQueueStore.getState().insertAt(THREAD_ID, 1, { content: "second, edited", displayContent: "second, edited", attachments: [], model: "claude-sonnet-4-6", permissionMode: "full" });
+    });
+
+    act(() => hook.result.current.finishEditing());
+
+    expect(queuedContents()).toEqual(["first", "second, edited"]);
+    expect(vi.mocked(form.restore).mock.lastCall?.[0].content).toBe("captured draft");
+    expect(hook.result.current.editing).toBeNull();
   });
 });

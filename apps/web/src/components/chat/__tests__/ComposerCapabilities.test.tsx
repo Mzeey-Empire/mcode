@@ -160,8 +160,9 @@ describe("composer capabilities", () => {
 
     await user.click(screen.getByRole("button", { name: "Add to composer" }));
 
-    expect(screen.queryByText("Capabilities")).not.toBeInTheDocument();
     expect(await screen.findByRole("menuitem", { name: /Files/ })).toBeVisible();
+    expect(screen.queryAllByRole("menuitemcheckbox")).toHaveLength(0);
+    expect(screen.queryByRole("separator")).toBeNull();
   });
 
   it("returns focus to + when Escape closes the menu", async () => {

@@ -8,8 +8,9 @@ export const ROW_CLASS = "flex min-h-9 w-full items-center gap-2.5 rounded-md px
 
 /** Numbered key hint at the left of a dock row. */
 export function KeyChip({ index }: { readonly index: number }) {
+  // Drawn from its own ink like the shared keycap, so the outline holds on the selected fill, which matches `border`.
   return (
-    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[0.5rem] border border-border px-[0.5rem] font-mono text-caption text-muted">
+    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-[0.5rem] border border-current/22 bg-current/6 px-[0.5rem] font-mono text-caption text-muted">
       {index + 1}
     </span>
   );

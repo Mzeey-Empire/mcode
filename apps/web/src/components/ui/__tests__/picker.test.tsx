@@ -149,32 +149,33 @@ describe("Picker", () => {
     expect(onLoadMore).not.toHaveBeenCalled();
   });
 
-  it("scrolls the selection into view on open and the highlight on arrow keys, but never on hover", () => {
-    // jsdom has no scrollIntoView, so install a spy for this test only.
-    const scrollIntoView = vi.fn();
-    const original = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView");
-    Object.defineProperty(Element.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
-    onTestFinished(() => {
-      if (original) Object.defineProperty(Element.prototype, "scrollIntoView", original);
-      else Reflect.deleteProperty(Element.prototype, "scrollIntoView");
-    });
+  it("scrolls by whole rows to show the highlight and the row past it, but never on hover", () => {
     render(<PagedPicker selectedKey="branch-040" />);
-    expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole("option", { name: "branch-040" }));
-    scrollIntoView.mockClear();
+    const list = screen.getByRole("listbox");
+    const search = screen.getByRole("combobox");
+    const shows = (...names: string[]) =>
+      list.scrollTop % ROW_PX === 0 &&
+      names.every((name) => {
+        const row = screen.getByRole("option", { name });
+        return row.offsetTop >= list.scrollTop && row.offsetTop + row.offsetHeight <= list.scrollTop + list.clientHeight;
+      });
+    expect(shows("branch-040", "branch-041")).toBe(true);
 
-    fireEvent.mouseMove(screen.getByRole("option", { name: "branch-004" }));
-    expect(scrollIntoView).not.toHaveBeenCalled();
-    fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowDown" });
-    expect(scrollIntoView).toHaveBeenCalledOnce();
-    expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole("option", { name: "branch-005" }));
+    const opened = list.scrollTop;
+    fireEvent.mouseMove(screen.getByRole("option", { name: "branch-038" }));
+    expect(list.scrollTop).toBe(opened);
+
+    for (let step = 0; step < 4; step += 1) fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(list.scrollTop).toBeGreaterThan(opened);
+    expect(shows("branch-042", "branch-043")).toBe(true);
+    for (let step = 0; step < 5; step += 1) fireEvent.keyDown(search, { key: "ArrowUp" });
+    expect(shows("branch-036", "branch-037")).toBe(true);
 
     // Clearing a filter starts a new list; the highlight returns to the selection and must be visible again.
-    const search = screen.getByRole("combobox");
     fireEvent.change(search, { target: { value: "branch-04" } });
-    scrollIntoView.mockClear();
     fireEvent.change(search, { target: { value: "" } });
     expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "branch-040" }).id);
-    expect(scrollIntoView.mock.contexts.at(-1)).toBe(screen.getByRole("option", { name: "branch-040" }));
+    expect(shows("branch-040")).toBe(true);
   });
 
   it("does not ask for more while a page is loading", () => {
@@ -351,6 +352,25 @@ describe("Picker", () => {
     expect(screen.getByRole("button", { name: "Use branch-002" })).toHaveFocus();
     await userEvent.keyboard("{ArrowLeft}");
     expect(search).toHaveFocus();
+  });
+
+  it("rings the row the keyboard reached, but not a hovered row or a row whose pane has focus", async () => {
+    render(<PagedPicker detail={BRANCH_DETAIL} />);
+    const search = screen.getByRole("combobox");
+    search.focus();
+    const ringed = () => screen.queryAllByRole("option").filter((option) => option.hasAttribute("data-keyboard")).map((option) => option.textContent);
+    expect(ringed()).toEqual([]);
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(ringed()).toEqual(["branch-002"]);
+
+    await userEvent.keyboard("{ArrowRight}");
+    expect(ringed()).toEqual([]);
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(ringed()).toEqual(["branch-002"]);
+
+    fireEvent.mouseMove(screen.getByRole("option", { name: "branch-004" }));
+    expect(ringed()).toEqual([]);
   });
 
   it("keeps Right Arrow for the caret while it is inside the search text", async () => {

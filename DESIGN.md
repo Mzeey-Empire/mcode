@@ -26,7 +26,7 @@ colors:
   link: "oklch(0.70 0.14 260)" # blue-400
   success: "oklch(0.78 0.13 145)" # sage-400
   error: "oklch(0.78 0.13 25)" # clay-400
-  warning: "oklch(0.80 0.13 75)" # amber-400
+  warning: "oklch(0.82 0.11 92)" # brass, off the lamp's hue
   info: "oklch(0.70 0.14 260)" # blue-400
   pr-merged: "oklch(0.70 0.14 293)" # violet-400
   diff-add-bg: "oklch(0.26 0.035 145)" # sage-900
@@ -35,11 +35,11 @@ colors:
   light-background: "oklch(0.99 0.005 260)" # neutral-50
   light-panel: "oklch(0.99 0.005 260)" # neutral-50
   light-hover: "oklch(0.955 0.005 260)" # neutral-100
-  light-selected: "oklch(0.955 0.005 260)" # neutral-100
+  light-selected: "oklch(0.90 0.005 260)" # neutral-200
   light-border: "oklch(0.90 0.005 260)" # neutral-200
   light-control-border: "oklch(0.65 0.005 260)" # neutral-300
   light-ink: "oklch(0.19 0.005 260)" # neutral-800
-  light-muted: "oklch(0.50 0.010 260)" # neutral-400
+  light-muted: "oklch(0.47 0.010 260)" # a step below neutral-400
   light-primary: "oklch(0.52 0.17 75)" # amber-700
   light-primary-hover: "oklch(0.48 0.17 75)" # amber-800
   light-primary-ink: "oklch(0.99 0.005 260)" # neutral-50
@@ -51,7 +51,7 @@ colors:
   light-link: "oklch(0.50 0.16 260)" # blue-700
   light-success: "oklch(0.52 0.12 145)" # sage-600
   light-error: "oklch(0.52 0.14 25)" # clay-700
-  light-warning: "oklch(0.52 0.17 75)" # amber-700
+  light-warning: "oklch(0.46 0.10 92)" # dark brass, off the lamp's hue
   light-info: "oklch(0.50 0.16 260)" # blue-700
   light-pr-merged: "oklch(0.50 0.16 293)" # violet-700
   light-diff-add-bg: "oklch(0.96 0.035 145)" # sage-100
@@ -496,7 +496,7 @@ Paper defines six 50 to 950 ramps (neutral, amber, blue, sage, clay, violet) on 
 
 ### Neutral
 - **Ink** (`ink`, neutral-100 dark / neutral-800 light): Primary text. Near-white in dark, near-black-cool in light. Never pure `#fff` or `#000`.
-- **Muted** (`muted`, neutral-300 dark / neutral-400 light): Secondary text, meta, captions, resting icons. Holds 4.5:1 on its surfaces; do not push muted text lighter "for elegance."
+- **Muted** (`muted`, neutral-300 dark / 47% neutral light): Secondary text, meta, captions, resting icons. Holds 4.5:1 on its surfaces; do not push muted text lighter "for elegance."
 - **Page** (`page`): The darkest layer, page chrome and the sidebar. Panels sit *above* it.
 - **Background** (`background`): App background and the conversation canvas, one step up from page.
 - **Panel** (`panel`): Menus, popovers, pickers, tooltips, dialogs, and cards.
@@ -515,11 +515,11 @@ token values, never component anatomy, status meaning, or action priority.
 | Background | `background` (neutral-900) | `light-background` (neutral-50) |
 | Panel | `panel` (neutral-800) | `light-panel` (neutral-50) |
 | Hover | `hover` (neutral-700) | `light-hover` (neutral-100) |
-| Selected | `selected` (neutral-600) | `light-selected` (neutral-100) |
+| Selected | `selected` (neutral-600) | `light-selected` (neutral-200) |
 | Border | `border` (neutral-500) | `light-border` (neutral-200) |
 | Control boundary | `control-border` (neutral-400) | `light-control-border` (neutral-300) |
 | Text | `ink` (neutral-100) | `light-ink` (neutral-800) |
-| Muted text | `muted` (neutral-300) | `light-muted` (neutral-400) |
+| Muted text | `muted` (neutral-300) | `light-muted` (47% lightness, a step below neutral-400, so it holds 4.5:1 on `light-selected`) |
 | Primary | `primary` (amber-500) | `light-primary` (amber-700) |
 | Primary hover | `primary-hover` (amber-600) | `light-primary-hover` (amber-800) |
 | Primary text | `primary-ink` (neutral-900) | `light-primary-ink` (neutral-50) |
@@ -531,7 +531,7 @@ token values, never component anatomy, status meaning, or action priority.
 | Link | `link` (blue-400) | `light-link` (blue-700) |
 | Success | `success` (sage-400) | `light-success` (sage-600) |
 | Error | `error` (clay-400) | `light-error` (clay-700) |
-| Warning | `warning` (amber-400) | `light-warning` (amber-700) |
+| Warning | `warning` (brass, off the lamp's hue so a warning never reads as Send) | `light-warning` (dark brass, the same hue) |
 | Information | `info` (blue-400) | `light-info` (blue-700) |
 | Merged PR | `pr-merged` (violet-400) | `light-pr-merged` (violet-700) |
 | Capability | `capability` (owned here) | `light-capability` (owned here) |
@@ -748,7 +748,8 @@ Workspace panes stay square to the app shell.
   `control-border`.
 - Keyboard focus is a 2px `focus` ring with a 2px offset in the surface
   color, drawn outside the control (`shadows.focusRing`). It never changes the
-  control's own size.
+  control's own size. Rows inside a menu, list or pane draw it inside the row
+  instead, because they sit 4px from the container's edge.
 
 ### Shadow vocabulary
 
@@ -1180,10 +1181,9 @@ are provider-native, so they show the parent thread's provider.
   fits the one-row column with 48px to spare, so editing near the wrap point
   does not flip it back and forth.
 - Width tiers are container queries on the capsule. Below 680px the model
-  part shows its short name, the reasoning part shows rising bars (one per
-  level, filled up to the current one), the parts tighten to 7px padding,
-  and the modes show icons only. Below 480px the model part shows only its
-  logo.
+  part shows its short name, the parts tighten to 7px padding, and the modes
+  show icons only. The model and reasoning parts keep their text at every
+  width, so the selection reads without a hover.
 - Plan and Goal, when on, sit beside `+` as modes in a 36px pill with the
   panel fill and the split's 1px by 14px dividers. Each mode is 32px high
   with a 14px icon, its name in Compact, and a 24px remove button; removing it returns
@@ -1197,22 +1197,36 @@ are provider-native, so they show the parent thread's provider.
   Compact with 9px side padding, separated by 1px by 14px `border` dividers,
   and one sliding highlight moves across the parts and over the dividers.
   The model part shows its 14px provider mark and name in `ink`, the
-  reasoning part its level in `muted`, and the access part a 16px icon in
+  reasoning part its level in `muted` (`ink` while its popover is open, where
+  the stronger fill would drop `muted` below AA), and the access part a 16px icon in
   `muted`, or `warning` while Don't ask is on. The context label and the run
   button share the pill after the parts, outside the highlight. Popovers keep
   the prototype widths: the model picker at its own width, reasoning 224px,
   access 232px, and the `+` menu 232px. Every part's popover opens in one spot: 8px above the right edge of the
   capsule, covering any tray, so it never moves when content above
   changes. With a popover open, resting 100ms on another part switches to
-  its popover, as in a menu bar. The model picker is 440px: the model list on
+  its popover, as in a menu bar. The model picker is 440px, or the composer's
+  width when the window leaves less, so both its edges meet the composer's: the model list on
   the left and a 168px reasoning pane on the right, behind a `border`
-  hairline, listing the highlighted model's levels under a two-line caption
-  ("Reasoning" over the model's full name). A check marks the committed model
-  and level. A hovered row reaches the
+  hairline, listing the highlighted model's levels under a two-line caption:
+  "Reasoning" in Caption `muted` over the model's full name in Body small
+  500 `ink`, with 8px before the first level. The pane mirrors the list's
+  gutters (8px to the panel edge, 4px to the hairline) and its 8px row inset. A check marks the committed model
+  and level. The list and pane are eight rows tall (26.3rem), so a provider
+  with eight models opens with Ctrl+1 to Ctrl+8 in view, and the 8px gap
+  above them sits outside the scrolling list, so every keyboard stop shows
+  eight whole rows. A hovered row reaches the
   pane after 100ms, so a pointer crossing rows on its way to the pane keeps
   it. Right Arrow at the end of the search enters the pane and Left Arrow
   leaves it. A level sets the model and level and closes; picking a model
-  closes and keeps the level when the model supports it. The reasoning
+  closes and keeps the level when the model supports it. A search on a
+  provider tab lists that provider's matches first, then each other usable
+  provider's matches, each provider's rows under its name as a group label
+  (the tab's own included once results span providers), so another
+  provider's model and level are a search and one click away. When only
+  other providers match, the tab's provider still heads the list, its label
+  over a muted "Nothing matches" line. Favourites searches only
+  favourites, and a provider-locked thread searches only its provider. The reasoning
   popover lists the same levels, and one click sets the level and closes.
   It ends with the selected model's options (Fast, 1M context, Thinking) as
   labelled switch rows under a hairline; they change in place. The model
@@ -1234,17 +1248,30 @@ are provider-native, so they show the parent thread's provider.
   with a `muted` icon that does not look pressable. While a turn runs with
   an empty draft it is Stop: an `ink` circle with a 12px `background` square
   of 2px radius. While a turn runs with a draft, a file, or an annotation it
-  is Queue, with the Send look. A running thread never shows a second
-  button.
+  is Queue, with the Send look and the tray's queued mark (a corner-down-right
+  arrow), since the tray's Send now keeps the up arrow. A running thread
+  never shows a second button.
+- Editing a queued message while a turn runs puts a one-line caption above
+  the draft, "Editing a queued message" in Caption `muted`, with a ghost
+  "Cancel edit" button at its end, the caption starting at the + glyph's ink
+  and the button's text ending flush with the run button. The run button
+  becomes Save changes, a check in the Send look, and saving returns the
+  message to its place in the queue. Until then the tray keeps that place as
+  a muted "Editing" row with a pencil, so the user can see which message is
+  out for editing. An unsent draft the edit displaced waits behind the queue
+  as a row labelled "Draft" in `muted` before its text, with a page glyph
+  and no actions, and saving or cancelling the edit puts it
+  back in the composer; the queue never sends it.
 - The context label replaces the old ring. It shows nothing below 70% of the
   context window or when the window is unknown. From 70% it reads "72%
   context" in `warning`, and from 90% in `destructive`; below the 680px tier
   it reads only "72%". A low provider quota shows it below 70% in `warning`.
   It sits behind a divider after the access part, 32px high in Compact with
-  tabular numbers, and hover or focus opens the token
+  tabular numbers and the parts' 9px sides (7px below the 680px tier), and hover or focus opens the token
   breakdown card, which adds a "Provider quota: Low" line when quota is low.
 - Trays that belong to the composer (the task row, queued messages, file and
   image tiles) dock flush on its top edge with the panel fill and no border.
+  Light mode uses `page` instead, because light panel matches the background.
   A new thread's tab (Local, the branch) has the same look. With tiles under
   it, the tray squares its top corners, so the tab and the tray read as one
   panel.
@@ -1273,7 +1300,9 @@ are provider-native, so they show the parent thread's provider.
   remove button at its top right, shown on hover or keyboard focus. The tile
   row scrolls sideways with no scrollbar.
 - A request that needs the user (approval, plan questions) docks in place of
-  the composer surface and names the waiting state in the status line.
+  the composer surface and names the waiting state in the status line. A
+  question's picked answer shows a trailing check, because focus follows the
+  pick and the ring alone would be the only sign of it.
 
 ### Tabs and Toolbars
 
@@ -1320,12 +1349,18 @@ top-aligned to the trigger row, never stacked below it.
 **Picker anatomy.** One anatomy for every picker (branch, pull request,
 commit, model, project):
 1. A borderless search row on top.
-2. Segmented tabs under it when the list has sibling sources.
+2. Segmented tabs under it when the list has sibling sources. A single
+   source shows no tab row.
 3. A flat list with no section labels and no per-row type icons or counts.
    The selected row shows a trailing check, with a `muted` tag when it helps
    ("current", "worktree"). About five rows are visible; the list scrolls
-   with top and bottom fades. The highlighted row takes the sliding
-   highlight; the selected row keeps its own `selected` fill.
+   with top and bottom fades. The arrow keys scroll it by whole rows and keep
+   the row past the highlight in view, and a list beside a pane snaps the
+   wheel to row and group heading edges, so no sliver of a row shows and the
+   first heading is never left under the fade. The highlighted row takes the sliding
+   highlight, and a row the arrow keys reached also takes the 2px `focus`
+   ring, so keyboard and pointer focus look like every other control. The
+   selected row keeps its own `selected` fill.
 4. Silent paging: more rows load as the user scrolls, and a `muted` footer
    reads "Showing 50 of 568". A search across all history may read
    "N matches in M commits" instead.
