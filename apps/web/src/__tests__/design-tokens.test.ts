@@ -118,11 +118,15 @@ const DEVIATIONS: Readonly<Record<Theme, Readonly<Record<string, string>>>> = {
     "--selected": paper("--color-neutral-200"),
     // Paper's neutral-400 reads 4.45:1 on the selected fill the composer uses.
     "--muted": "oklch(47% 0.010 260)",
+    // Paper's neutral-200 drew every divider as firmly as a selected row's fill; hairlines sit a step softer.
+    "--border": "oklch(92.5% 0.005 260)",
     // Paper's amber warning shares the run lamp's hue, so warnings read as more Sends.
     "--warning": "oklch(46% 0.100 92)",
   },
   dark: {
     "--warning": "oklch(82% 0.110 92)",
+    // Softer than Paper's neutral-500 for the same reason as the light hairline.
+    "--border": "oklch(25% 0.005 260)",
   },
 };
 
