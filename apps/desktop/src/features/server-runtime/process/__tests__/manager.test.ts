@@ -1069,6 +1069,35 @@ describe("ServerManager", () => {
     );
   });
 
+  it("does not spawn a server when a quit cancels the start during a startup sentinel wait", async () => {
+    vi.useFakeTimers();
+    const sentinelWaitStarted = Promise.withResolvers<void>();
+    const sentinelHeld = () => {
+      throw Object.assign(new Error("Startup sentinel held"), { code: "EEXIST" });
+    };
+    vi.mocked(NodeFS.mkdirSync)
+      .mockImplementationOnce(sentinelHeld)
+      .mockImplementationOnce(() => {
+        sentinelWaitStarted.resolve();
+        sentinelHeld();
+      });
+
+    try {
+      const start = manager.start();
+      const rejection = expect(start).rejects.toThrow(
+        "Server start was cancelled because the app is quitting",
+      );
+      await sentinelWaitStarted.promise;
+      manager.stopStartingServer();
+      await vi.runAllTimersAsync();
+
+      await rejection;
+      expect(NodeChildProcess.spawn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not spawn a server when a quit cancels the start during the port search", async () => {
     const portSearch = Promise.withResolvers<number>();
     const portSearchStarted = Promise.withResolvers<void>();

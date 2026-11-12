@@ -135,6 +135,23 @@ describe("ServerRuntime Desktop Window seam", () => {
     );
   });
 
+  it("still stops the lock holder when stopping a starting server fails during a dev quit", async () => {
+    vi.useFakeTimers();
+    const start = vi.fn(() => new Promise<{ port: number; authToken: string }>(() => undefined));
+    const manager = createManager(43123, start);
+    const error = new Error("Starting server stop failed");
+    manager.stopStartingServer.mockImplementation(() => { throw error; });
+    const runtime = createRuntime(43123, { manager });
+
+    runtime.beginStart();
+    const quit = runtime.stopServerForDevQuit();
+    const rejection = expect(quit).rejects.toBe(error);
+    await vi.advanceTimersByTimeAsync(10_001);
+
+    await rejection;
+    expect(manager.stopServerHeldByLock).toHaveBeenCalledOnce();
+  });
+
   it("recovers a server that exits before lifecycle registration", async () => {
     vi.useFakeTimers();
     const manager = createManager(43123);

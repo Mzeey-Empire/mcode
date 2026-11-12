@@ -299,17 +299,20 @@ export class ServerRuntime {
    * the server (and its provider subprocesses) does not leak between runs.
    */
   async stopServerForDevQuit(): Promise<void> {
-    if (this.serverStart) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const settled = await Promise.race([
-        this.serverStart.then(() => true, () => true),
-        new Promise<boolean>((resolve) => {
-          timer = setTimeout(() => resolve(false), DEV_QUIT_START_WAIT_MS);
-        }),
-      ]).finally(() => clearTimeout(timer));
-      if (!settled) this.serverManager.stopStartingServer();
+    try {
+      if (this.serverStart) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const settled = await Promise.race([
+          this.serverStart.then(() => true, () => true),
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(false), DEV_QUIT_START_WAIT_MS);
+          }),
+        ]).finally(() => clearTimeout(timer));
+        if (!settled) this.serverManager.stopStartingServer();
+      }
+    } finally {
+      await this.serverManager.stopServerHeldByLock();
     }
-    await this.serverManager.stopServerHeldByLock();
   }
 
   /** Restart the server under an explicit harness command without crash recovery. */
