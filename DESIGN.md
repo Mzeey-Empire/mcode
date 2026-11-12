@@ -485,7 +485,7 @@ Paper defines six 50 to 950 ramps (neutral, amber, blue, sage, clay, violet) on 
 ### Secondary
 - **Focus** (`focus`, blue-500 dark / blue-600 light): The keyboard focus ring in both themes. A cooler blue-violet used only for focus affordance, never as a second brand voice.
 - **Link** (`link`, blue-400 dark / blue-700 light): Hyperlinks and link-styled actions. Links are navigational plumbing, not brand moments, so they take the surface's own cool hue at higher chroma rather than borrowing the amber lamp.
-- **Information** (`info`) and **Warning** (`warning`): feedback notices, always paired with an icon and text. Warning also marks two composer states to notice before sending: the context label from 70% and the access part's icon while Don't ask is on.
+- **Information** (`info`) and **Warning** (`warning`): feedback notices, always paired with an icon and text. Warning also marks two composer states to notice before sending: the context label from 70% and the model part's access mark while Don't ask is on.
 - **Merged PR** (`pr-merged`, violet): the merged state of a pull request. Nothing else uses violet.
 - **Capability** (`capability`, orchid): skill, plugin, command and sub-agent tokens in the composer and transcript. A quiet hue so a reference never competes with the lamp.
 - **File reference** (`file-reference`, mist teal): file tokens, which open the file in Files when clicked. Kept apart from `link` so a file reads as part of the workspace, not a web page.
@@ -549,7 +549,7 @@ The control boundary tokens are solid 1px colors, not translucent hints.
 `light-background`. Recheck the light value after any token change.
 
 ### Named Rules
-**The One Lamp Rule.** Filament Amber is Mcode's primary brand color. Each state has at most one amber primary action. Amber also marks a live mode the user turned on (Design mode, an agent acting in the Browser) and a thread that needs the user (the needs-you ring and its label). Everything else is neutral: selected rows, the access-mode picker's selected row, the Plan chip, the access part (its Don't ask icon takes `warning`, not the lamp), the Stop button, toggles, update and notification buttons, and status icons. Links use the link color, never amber. Entity tokens use `capability` or `file-reference`, never amber. Keyboard focus uses the focus blue.
+**The One Lamp Rule.** Filament Amber is Mcode's primary brand color. Each state has at most one amber primary action. Amber also marks a live mode the user turned on (Design mode, an agent acting in the Browser) and a thread that needs the user (the needs-you ring and its label). Everything else is neutral: selected rows, the access-mode picker's selected row, the model picker's rail tab, the Plan chip, the access mark (Don't ask takes `warning`, not the lamp), the Stop button, toggles, update and notification buttons, and status icons. Links use the link color, never amber. Entity tokens use `capability` or `file-reference`, never amber. Keyboard focus uses the focus blue.
 
 **The Earned-Color Rule.** Neutrals are the surface default. A bounded region may carry color to clarify state, ownership, mode, or task posture. Area color must carry meaning.
 
@@ -1172,8 +1172,8 @@ are provider-native, so they show the parent thread's provider.
   and branch selectors; after it, the overview carries mode, branch, and
   tasks.
 - An empty composer is one fully rounded capsule row: `+`, the modes, the
-  draft (one 24px line), then the split pill, which holds model, reasoning,
-  access, the context label, and the run button. The row has 5px padding (6px on the left) and a 4px gap.
+  draft (one 24px line), then the split pill, which holds model and its
+  reasoning level, access, the context label, and the run button. The row has 5px padding (6px on the left) and a 4px gap.
   Once the draft wraps, it takes the full width on top and the controls drop
   to a row below; the radius becomes 22px and the draft scrolls past 240px.
   The capsule also takes two rows whenever the one-row draft column would be
@@ -1182,8 +1182,8 @@ are provider-native, so they show the parent thread's provider.
   does not flip it back and forth.
 - Width tiers are container queries on the capsule. Below 680px the model
   part shows its short name, the parts tighten to 7px padding, and the modes
-  show icons only. The model and reasoning parts keep their text at every
-  width, so the selection reads without a hover.
+  show icons only. The model part keeps its name and level at every width,
+  so the selection reads without a hover.
 - Plan and Goal, when on, sit beside `+` as modes in a 36px pill with the
   panel fill and the split's 1px by 14px dividers. Each mode is 32px high
   with a 14px icon, its name in Compact, and a 24px remove button; removing it returns
@@ -1192,30 +1192,48 @@ are provider-native, so they show the parent thread's provider.
   bare 32px button. The `+` menu toggles Plan and a goal not yet sent. A
   running goal and orchestration stay checked there but turn off only from
   their own chip.
-- Model, reasoning, and access share one 36px rounded pill on the right of
-  the capsule, with the panel fill and 2px padding. Each part is 32px high in
-  Compact with 9px side padding, separated by 1px by 14px `border` dividers,
-  and one sliding highlight moves across the parts and over the dividers.
-  The model part shows its 14px provider mark and name in `ink`, the
-  reasoning part its level in `muted` (`ink` while its popover is open, where
-  the stronger fill would drop `muted` below AA), and the access part a 16px icon in
-  `muted`, or `warning` while Don't ask is on. The context label and the run
-  button share the pill after the parts, outside the highlight. Popovers keep
-  the prototype widths: the model picker at its own width, reasoning 224px,
-  access 232px, and the `+` menu 232px. Every part's popover opens in one spot: 8px above the right edge of the
-  capsule, covering any tray, so it never moves when content above
-  changes. With a popover open, resting 100ms on another part switches to
-  its popover, as in a menu bar. The model picker is 440px, or the composer's
-  width when the window leaves less, so both its edges meet the composer's: the model list on
-  the left and a 168px reasoning pane on the right, behind a `border`
-  hairline, listing the highlighted model's levels under a two-line caption:
-  "Reasoning" in Caption `muted` over the model's full name in Body small
-  500 `ink`, with 8px before the first level. The pane mirrors the list's
-  gutters (8px to the panel edge, 4px to the hairline) and its 8px row inset. A check marks the committed model
-  and level. The list and pane are eight rows tall (26.3rem), so a provider
-  with eight models opens with Ctrl+1 to Ctrl+8 in view, and the 8px gap
-  above them sits outside the scrolling list, so every keyboard stop shows
-  eight whole rows. A hovered row reaches the
+- The model part sits in a 36px rounded pill on the right of the capsule,
+  with the panel fill and 2px padding. It is 32px high in Compact with 9px
+  side padding, under a sliding hover highlight. It shows its 14px provider
+  mark and name in `ink`, then a `·` and the reasoning level in `muted`
+  (`ink` while its picker is open, where the stronger fill would drop
+  `muted` below AA), then a 12px lightning mark while Fast is on, then a
+  12px access mark in `warning` while Don't ask (or Devin's Bypass) is on,
+  so an unsupervised run shows before sending. The level sits at its own
+  width, since it changes only as the picker closes. The context label and
+  the run button share the pill after the part, outside the highlight. The
+  picker opens 8px above the right edge of the capsule, covering any tray,
+  so it never moves when content above changes. The `+` menu is 232px.
+- The model picker is 488px, or the composer's width when the window leaves
+  less, so both its edges meet the composer's. It draws its own edges, in
+  columns that each run its full height behind `border` hairlines: the
+  provider rail, the search over the model list, and a 168px reasoning pane,
+  with a footer across all three. The search row and the pane's caption
+  share one row. The search's hairline is the input's own underline, so it
+  stops at the edges of the list rows below it and turns `focus` while the
+  search has focus. The caption's hairline closes the pane's header and,
+  like the column and footer rules, runs edge to edge. The caption is one line in Caption `muted`:
+  "Reasoning" on the left and the highlighted model's short name on the
+  right, since the rail or group label already names the provider. A name
+  too long for the line drops whole to its own line rather than fading. The
+  model's own default level carries a `Default` tag in Caption `muted`,
+  before any check. A check marks the committed model and level. The list
+  and pane are eight rows tall, so a provider with eight models opens with
+  Ctrl+1 to Ctrl+8 in view. A list narrower than 240px, in a narrow window,
+  hides the keycaps so model names stay whole; the shortcuts still work.
+  The list's 8px insets sit outside the scroller, so every keyboard stop
+  shows eight whole rows. The pane shares the list's 8px top inset and 33px
+  row pitch, so each level sits level with a model row. On a filled row a
+  keycap takes `ink`, since `muted` over the key's tint and the row's fill
+  falls below AA; a row's star sits before its keycap, so the keycaps form a
+  column near the row's end. Too narrow to share a row (a 320px window, or
+  400% zoom), the pane drops under four and a half rows of the list, its
+  text in line with the model names, and shows three and a half levels, so
+  like the list a level cut at an edge under the scroll fade shows there
+  are more. When the room above the capsule runs short, the list
+  and pane shrink and scroll under the scroll fade, the pane opening on its
+  checked level, which the capsule already names; the footer always shows
+  whole. A hovered row reaches the
   pane after 100ms, so a pointer crossing rows on its way to the pane keeps
   it. Right Arrow at the end of the search enters the pane and Left Arrow
   leaves it. A level sets the model and level and closes; picking a model
@@ -1226,18 +1244,26 @@ are provider-native, so they show the parent thread's provider.
   provider's model and level are a search and one click away. When only
   other providers match, the tab's provider still heads the list, its label
   over a muted "Nothing matches" line. Favourites searches only
-  favourites, and a provider-locked thread searches only its provider. The reasoning
-  popover lists the same levels, and one click sets the level and closes.
-  It ends with the selected model's options (Fast, 1M context, Thinking) as
-  labelled switch rows under a hairline; they change in place. The model
-  picker leaves them out, because its pane can show a model other than the
-  one they would change. The reasoning part is
-  as wide as the model's widest level, so changing the level never resizes the
-  pill. The
-  part whose popover is open keeps the `button-secondary-hover` fill, a step
-  above the hover, so it still reads as open while the pointer rests on
-  another part. Each part names its
-  setting in a tooltip, which stays hidden while a popover is open.
+  favourites, and a provider-locked thread searches only its provider.
+- The picker's footer holds what applies to the selected model and the turn,
+  whichever row is highlighted, and changes it in place without closing. On
+  the left: a small pill strip, Standard or Fast, when the model offers
+  Fast, then a toggle for each mode the model offers (Thinking on older
+  Claude models, Ultra on Codex and Ultracode on Claude). On the right:
+  access, with its icon, label and an up chevron, opening the access list
+  (232px) above it; choosing closes only that list. Every control is 26px
+  high in Caption with 12px icons, so the footer reads as one slim bar
+  with a single filled strip. The strip's track and thumb are ink tints
+  (7%, then 10% over it), so they never borrow the hairline or row-fill
+  tokens. A mode off rests as bare `muted` text like access, and on takes
+  the 16% ink fill a chosen speed shows over its track, in the same weight,
+  so "on" looks one way across the footer. The
+  context window is a Settings default, not a per-message choice, so the
+  picker has no 1M option. So every model setting the composer offers is two
+  clicks from the closed capsule: open, then a level, a speed, a mode or
+  access. The open part keeps the `button-secondary-hover` fill, a step
+  above the hover. The part names its settings in a tooltip, which stays
+  hidden while the picker is open.
 - Separate configuration from the draft with tone and spacing, not a stack of
   chips. Use chips only for removable attached entities such as files, images,
   comments, or enabled capabilities. Capability chips such as Plan use the
@@ -1266,7 +1292,7 @@ are provider-native, so they show the parent thread's provider.
   context window or when the window is unknown. From 70% it reads "72%
   context" in `warning`, and from 90% in `destructive`; below the 680px tier
   it reads only "72%". A low provider quota shows it below 70% in `warning`.
-  It sits behind a divider after the access part, 32px high in Compact with
+  It sits behind a divider after the model part, 32px high in Compact with
   tabular numbers and the parts' 9px sides (7px below the 680px tier), and hover or focus opens the token
   breakdown card, which adds a "Provider quota: Low" line when quota is low.
 - Trays that belong to the composer (the task row, queued messages, file and
@@ -1350,7 +1376,13 @@ top-aligned to the trigger row, never stacked below it.
 commit, model, project):
 1. A borderless search row on top.
 2. Segmented tabs under it when the list has sibling sources. A single
-   source shows no tab row.
+   source shows no tab row. Icon tabs, such as the model picker's
+   providers, stand in a rail of 36px squares with 18px marks left of the
+   search instead, behind a `border` hairline, with the search at the top
+   of the column beside it. The rail marks its tab with a 2px `ink` bar on
+   the side facing the list, not a fill, and the other marks keep their
+   brand colours. A second row of icons under the search read as part of the
+   search, so the providers move out of its way.
 3. A flat list with no section labels and no per-row type icons or counts.
    The selected row shows a trailing check, with a `muted` tag when it helps
    ("current", "worktree"). About five rows are visible; the list scrolls
@@ -1563,8 +1595,8 @@ enhances a state change and may not gate rendering.
   distance; releasing past 35% of its width, or a flick, sends it off that
   side in 160ms, otherwise it returns to rest. The stack closes the gap in
   200ms. Close and auto-hide reverse the entry.
-- **Genie.** Popovers fade, with one exception: the composer's model,
-  reasoning, and access popovers pour out of their trigger in 200ms and back
+- **Genie.** Popovers fade, with one exception: the composer's model and
+  access popovers pour out of their trigger in 200ms and back
   into it in 160ms, like a window minimising to the Dock. The popover takes
   focus and keys from the first frame; typing during the pour ends it at once.
   Switching between these popovers swaps them in place without a pour, and

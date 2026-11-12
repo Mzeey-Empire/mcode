@@ -42,6 +42,8 @@ interface SegmentedControlProps {
   readonly fill?: boolean;
   /** Draws a borderless strip of icon segments; each label stays as its segment's accessible name. */
   readonly iconOnly?: boolean;
+  /** Stacks the segments in a column. Only icon strips stack, as a picker's provider rail. */
+  readonly orientation?: "horizontal" | "vertical";
   readonly "aria-label"?: string;
   readonly className?: string;
 }
@@ -73,10 +75,12 @@ const PILL_SEGMENT: Record<SegmentedControlSize, string> = {
 
 type Layout = SegmentedControlVariant | "icon";
 
-function trayClass(layout: Layout, size: SegmentedControlSize): string {
-  // An icon strip sits in a picker's tab row, so it drops the tray and packs tight to fit every provider.
-  if (layout === "icon") return "shrink-0 gap-0.5";
-  if (layout === "pill") return cn("gap-0.5 rounded-full bg-selected p-0.5", PILL_TRAY[size]);
+function trayClass(layout: Layout, size: SegmentedControlSize, vertical: boolean): string {
+  // An icon strip sits in a picker's tab row or rail, so it drops the tray and packs tight to fit every provider.
+  if (layout === "icon") return cn("shrink-0 gap-0.5", vertical && "flex-col");
+  // Ink tints, like the tray below: the track sits one step off any surface and the thumb one step off the track
+  // (together the 16% a pressed footer toggle shows), so neither depends on the hairline or row-fill tokens.
+  if (layout === "pill") return cn("gap-0.5 rounded-full bg-ink/[0.07] p-0.5", PILL_TRAY[size]);
   // Light --panel equals --background and light --field equals --page, so a solid fill vanishes on one
   // of them. An ink tint stays one step off any surface; the 2px inset keeps the corners concentric.
   return cn("gap-0.5 rounded-control bg-ink/[0.07] p-0.5", TRAY_HEIGHT[size]);
@@ -87,14 +91,26 @@ const INACTIVE_TRAY_SEGMENT = "text-muted enabled:hover:text-ink";
 const SEGMENT_BASE =
   "relative inline-flex min-w-0 items-center justify-center gap-2 whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)";
 
-function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean, fill: boolean): string {
-  if (layout === "icon") {
-    return cn(SEGMENT_BASE, "h-7 w-[3rem] shrink-0 rounded-sm text-body-small", isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
-  }
+// A rail marks its tab with a bar on the side facing the content, as a sidebar does, so the marks stand without fills.
+// The bar is ink, not the primary: a selection stays neutral under the One Lamp Rule.
+const RAIL_ACTIVE_SEGMENT = "text-ink after:absolute after:inset-y-2 after:right-0 after:w-0.5 after:rounded-full after:bg-ink";
+
+function iconSegmentClass(isActive: boolean, vertical: boolean): string {
+  if (vertical) return cn(SEGMENT_BASE, "size-9 shrink-0 rounded-sm", isActive ? RAIL_ACTIVE_SEGMENT : INACTIVE_TRAY_SEGMENT);
+  return cn(SEGMENT_BASE, "h-7 w-[3rem] shrink-0 rounded-sm text-body-small", isActive ? "bg-selected font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
+}
+
+function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean, fill: boolean, vertical: boolean): string {
+  if (layout === "icon") return iconSegmentClass(isActive, vertical);
   if (layout === "pill") {
-    return cn(SEGMENT_BASE, "rounded-full", fill ? "flex-1" : "shrink-0", PILL_SEGMENT[size], isActive ? "bg-border text-ink" : "text-muted enabled:hover:text-ink");
+    return cn(SEGMENT_BASE, "rounded-full", fill ? "flex-1" : "shrink-0", PILL_SEGMENT[size], isActive ? "bg-ink/[0.1] text-ink" : "text-muted enabled:hover:text-ink");
   }
   return cn(SEGMENT_BASE, "flex-1 rounded-md px-3 text-body-small", SEGMENT_HEIGHT[size], isActive ? "bg-ink/[0.07] font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
+}
+
+/** An icon strip may stack; every other layout is a row, which a radio group assumes without saying. */
+function stripAxis(iconOnly: boolean, orientation: SegmentedControlProps["orientation"]): "vertical" | undefined {
+  return iconOnly && orientation === "vertical" ? "vertical" : undefined;
 }
 
 /** Keeps a tooltip wrapper sized like the segment it holds. */
@@ -137,10 +153,13 @@ export function SegmentedControl({
   variant = "tray",
   fill = false,
   iconOnly = false,
+  orientation,
   "aria-label": ariaLabel,
   className,
 }: SegmentedControlProps) {
   const layout: Layout = iconOnly ? "icon" : variant;
+  const axis = stripAxis(iconOnly, orientation);
+  const vertical = axis === "vertical";
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const activeIndex = options.findIndex((option) => option.value === value);
   // A disabled button can't take focus, so with no enabled match the first enabled segment takes the tab stop.
@@ -165,10 +184,11 @@ export function SegmentedControl({
       <div
         role="radiogroup"
         aria-label={ariaLabel}
+        aria-orientation={axis}
         onKeyDown={handleKeyDown}
         className={cn(
           "relative items-center",
-          trayClass(layout, size),
+          trayClass(layout, size, vertical),
           fill ? "flex w-full" : "inline-flex",
           className,
         )}
@@ -188,7 +208,7 @@ export function SegmentedControl({
               tabIndex={index === tabStopIndex ? 0 : -1}
               onClick={() => onChange(option.value)}
               className={cn(
-                segmentClass(layout, size, isActive, fill),
+                segmentClass(layout, size, isActive, fill, vertical),
                 FOCUS_RING_CLASS,
                 option.disabled && "cursor-not-allowed opacity-50",
               )}
@@ -215,7 +235,8 @@ export function SegmentedControl({
           return (
             <Tooltip key={option.value}>
               <TooltipTrigger render={<span className={tooltipWrapperClass(layout, fill)} />}>{segment}</TooltipTrigger>
-              <TooltipContent>{option.title}</TooltipContent>
+              {/* A stacked strip is a picker's left rail, so its tooltips open outward instead of over the next segment. */}
+              <TooltipContent side={vertical ? "left" : "top"}>{option.title}</TooltipContent>
             </Tooltip>
           );
         })}

@@ -304,6 +304,17 @@ describe("Picker", () => {
     await waitFor(() => expect(screen.getAllByText("Pull requests").some((node) => !node.hidden && !node.classList.contains("sr-only"))).toBe(true));
   });
 
+  it("stacks icon tabs in a vertical rail that Down Arrow moves through", async () => {
+    render(<PagedPicker tabs={TABS.map((tab) => ({ ...tab, icon: <span>{tab.label[0]}</span> }))} />);
+    const rail = screen.getByRole("radiogroup", { name: "Picker tabs" });
+    expect(rail).toHaveAttribute("aria-orientation", "vertical");
+
+    act(() => screen.getByRole("radio", { name: "Branches" }).focus());
+    await userEvent.keyboard("{ArrowDown}");
+
+    expect(screen.getByRole("radio", { name: "Pull requests" })).toHaveAttribute("aria-checked", "true");
+  });
+
   it("divides rows where the group changes", () => {
     render(<PagedPicker pages={1} renderItem={(branch) => ({ key: branch.name, name: branch.name, group: branch.name < "branch-002" ? "a" : "b" })} />);
     const separators = screen.getByRole("listbox").querySelectorAll("li[role=presentation]");
@@ -330,9 +341,9 @@ describe("Picker", () => {
     const row = screen.getByRole("option", { name: /branch-000/ });
     expect(row).toHaveTextContent("origin");
     expect(row).toHaveAccessibleDescription("Star branch-000 (Ctrl+D)");
-    const button = row.querySelector<HTMLButtonElement>("[data-slot=picker-row-action]");
-    expect(button).toHaveAttribute("tabindex", "-1");
-    await userEvent.click(button as HTMLButtonElement);
+    const button = row.querySelector<HTMLElement>("[data-slot=picker-row-action]");
+    expect(button?.tabIndex).toBe(-1);
+    await userEvent.click(button as HTMLElement);
     expect(onAction).toHaveBeenCalledWith("branch-000");
     expect(onSelect).not.toHaveBeenCalled();
     expect(search).toHaveFocus();
@@ -352,6 +363,31 @@ describe("Picker", () => {
     expect(screen.getByRole("button", { name: "Use branch-002" })).toHaveFocus();
     await userEvent.keyboard("{ArrowLeft}");
     expect(search).toHaveFocus();
+  });
+
+  it("opens each row's pane at its top, whatever the last row's pane was scrolled to", async () => {
+    render(<PagedPicker detail={BRANCH_DETAIL} />);
+    screen.getByRole("combobox").focus();
+    const pane = screen.getByText("Detail of branch-000").closest<HTMLElement>("[data-slot=picker-detail]");
+    if (!pane) throw new Error("no detail pane");
+    pane.scrollTop = 66;
+
+    await userEvent.keyboard("{ArrowDown}");
+
+    expect(screen.getByText("Detail of branch-002")).toBeInTheDocument();
+    expect(pane.scrollTop).toBe(0);
+  });
+
+  it("keeps a row's pane scroll when the list rebuilds that row's item", () => {
+    const { rerender } = render(<PagedPicker detail={BRANCH_DETAIL} />);
+    const pane = screen.getByText("Detail of branch-000").closest<HTMLElement>("[data-slot=picker-detail]");
+    if (!pane) throw new Error("no detail pane");
+    pane.scrollTop = 66;
+
+    rerender(<PagedPicker detail={BRANCH_DETAIL} items={SOURCE.slice(0, PAGE).map((branch) => ({ ...branch }))} />);
+
+    expect(screen.getByText("Detail of branch-000")).toBeInTheDocument();
+    expect(pane.scrollTop).toBe(66);
   });
 
   it("rings the row the keyboard reached, but not a hovered row or a row whose pane has focus", async () => {

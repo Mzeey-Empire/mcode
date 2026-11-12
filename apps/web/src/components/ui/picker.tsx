@@ -83,6 +83,8 @@ export interface PickerDetail<T> {
   readonly hint: string;
   /** The pane for an item. Return null for an item with nothing to show. */
   readonly render: (item: T) => ReactNode;
+  /** The pane's title for an item, level with the search field and sharing its rule, such as the model the pane shows. */
+  readonly caption?: (item: T) => ReactNode;
 }
 
 /** One picker tab, drawn as a segment above the list. */
@@ -155,14 +157,15 @@ interface ListRow<T> {
 
 /**
  * Paper's searchable picker (03b): a search field, optional segmented tabs, a five-row list with
- * scroll fades, and a count footer. It renders the panel body only, so callers choose the surface
- * (popover, dialog or inline); put the search field first so the host's initial focus lands on it.
+ * scroll fades, and a count footer. Icon tabs stand in a rail left of the search instead. It renders the panel body
+ * only, so callers choose the surface (popover, dialog or inline). With text tabs the search field is the first
+ * focusable element, so a host's default initial focus lands on it; with a rail the host must aim it at the search.
  * Focus stays in the search field; the arrow keys move a highlight through the listbox via
  * `aria-activedescendant`, Home and End reach its ends, and Enter picks the highlighted row. With
  * `numberedShortcuts`, Ctrl/Cmd+1..9 pick the first nine selectable rows directly.
  */
 export function Picker<T>(props: PickerProps<T>) {
-  const { query, onQueryChange, searchPlaceholder = "Search", items, renderItem, selectedKey, status, hairlines = true, selectedCheck = true } = props;
+  const { query, onQueryChange, searchPlaceholder = "Search", items, renderItem, selectedKey, hairlines = true, selectedCheck = true } = props;
   const listId = useId();
   const rows = useMemo<ListRow<T>[]>(() => items.map((item) => ({ item, row: renderItem(item) })), [items, renderItem]);
   const shortcutRows = useShortcutRows(rows, props.numberedShortcuts === true);
@@ -285,35 +288,181 @@ export function Picker<T>(props: PickerProps<T>) {
       unmatched={props.unmatchedGroup === undefined ? undefined : { label: props.unmatchedGroup, query }}
     />
   ) : null;
-  return (
-    <div data-slot="picker" className="flex min-w-0 flex-col" onKeyDown={handleNumberShortcut}>
-      <PickerSearchField
-        inputRef={searchRef}
-        listId={listId}
-        query={query}
-        onQueryChange={onQueryChange}
-        placeholder={searchPlaceholder}
-        expanded={hasRows}
-        activeIndex={activeIndex}
+  const search = (
+    <PickerSearchField
+      inputRef={searchRef}
+      listId={listId}
+      query={query}
+      onQueryChange={onQueryChange}
+      placeholder={searchPlaceholder}
+      expanded={hasRows}
+      activeIndex={activeIndex}
+      detail={props.detail}
+      onKeyDown={handleKeyDown}
+    />
+  );
+  const tabs = <PickerTabs tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} />;
+  const listStatus = <PickerListStatus {...props} hasRows={hasRows} listId={listId} />;
+  if (props.detail) {
+    return (
+      <PickerDetailLayout
+        tabs={props.tabs}
+        activeTab={props.activeTab}
+        onTabChange={props.onTabChange}
+        onKeyDown={handleNumberShortcut}
+        search={search}
+        list={<>{tabs}{list}{listStatus}</>}
         detail={props.detail}
-        onKeyDown={handleKeyDown}
-      />
-      <PickerTabs tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} />
-      <PickerListArea
-        list={list}
-        detail={props.detail}
-        paneEntry={rows.find(({ row }) => row.key === pane.key)}
+        paneItem={rows.find(({ row }) => row.key === pane.key)?.item}
+        paneKey={pane.key}
         paneRef={paneRef}
-        onKeyDown={leavePane}
-        onPointerEnter={settlePane}
+        onPaneKeyDown={leavePane}
+        onPanePointerEnter={settlePane}
+        footer={props.footer}
       />
-      {/* A failed page keeps the rows already loaded; only an empty list gives way to the status. */}
-      {typeof status === "object" ? (
-        <PickerFailure status={status} onRetry={props.onRetry} />
-      ) : hasRows ? null : (
-        <PickerEmptyState {...props} listId={listId} />
-      )}
+    );
+  }
+  return (
+    <PickerFrame tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} onKeyDown={handleNumberShortcut}>
+      {search}
+      {tabs}
+      {list}
+      {listStatus}
       <PickerFooter loaded={items.length} total={props.total} countLabel={props.countLabel} footer={props.footer} hairline={hairlines} />
+    </PickerFrame>
+  );
+}
+
+/** A failed page keeps the rows already loaded; only an empty list gives way to the status. */
+function PickerListStatus<T>(props: PickerProps<T> & { readonly hasRows: boolean; readonly listId: string }) {
+  if (typeof props.status === "object") return <PickerFailure status={props.status} onRetry={props.onRetry} />;
+  return props.hasRows ? null : <PickerEmptyState {...props} />;
+}
+
+/** The picker's outer box: a column, or a row with the provider rail beside the column when the tabs are icons. */
+function PickerFrame({
+  tabs,
+  activeTab,
+  onTabChange,
+  onKeyDown,
+  children,
+}: Pick<PickerProps<unknown>, "tabs" | "activeTab" | "onTabChange"> & {
+  readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly children: ReactNode;
+}) {
+  if (!tabs || !drawsTabsAsRail(tabs)) {
+    return (
+      <div data-slot="picker" className="flex min-w-0 flex-col" onKeyDown={onKeyDown}>
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div data-slot="picker" className="flex min-w-0" onKeyDown={onKeyDown}>
+      <PickerRail tabs={tabs} activeTab={activeTab} onTabChange={onTabChange} className="mr-2 pr-1.5" />
+      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+    </div>
+  );
+}
+
+interface PickerDetailLayoutProps<T> extends Pick<PickerProps<T>, "tabs" | "activeTab" | "onTabChange" | "footer"> {
+  readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly search: ReactNode;
+  readonly list: ReactNode;
+  readonly detail: PickerDetail<T>;
+  readonly paneItem: T | undefined;
+  /** The pane's row, so its scroll resets on a move to another row and not when the same row's item is rebuilt. */
+  readonly paneKey: string | null;
+  readonly paneRef: RefObject<HTMLDivElement | null>;
+  readonly onPaneKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  readonly onPanePointerEnter: () => void;
+}
+
+// The list's track is eight 33px rows less the last gap, plus its 8px insets, so a provider with eight models opens with
+// every Ctrl shortcut in view, and the insets sit outside the scroller, so it shows whole rows at every keyboard stop.
+// Too narrow to share a row (a 320px window, or 400% zoom), the pane drops under four and a half rows instead of squeezing
+// the names, which leaves the footer in view above the composer.
+const DETAIL_GRID_CLASS = cn(
+  // The body rows may shrink, so a picker taller than the room above its anchor scrolls its list and pane and never
+  // clips its footer. Stacked, the list shows 4.5 rows inside its insets and the pane 3.5 (its 8px inset scrolls with
+  // it), so in each a row cut at an edge under the scroll fade shows there are more.
+  "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_16.8rem] grid-rows-[auto_minmax(0,27.9rem)] [grid-template-areas:'search_caption'_'list_pane']",
+  "@max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[auto_16.5rem_auto_minmax(0,12.4rem)] @max-[340px]/picker-area:[grid-template-areas:'search'_'list'_'caption'_'pane']",
+);
+
+/**
+ * The picker with a detail pane, in columns: the rail, the search over the list, and the pane under its caption. Each
+ * column runs the panel's full height, the search and the caption share one rule, and the footer spans all three.
+ * It draws its own edges and insets, so its host's panel has no padding. The pair keeps a fixed height, so moving
+ * between rows whose panes differ never resizes the panel.
+ */
+// The depth of `scroll-fade-y`'s edge fade (1.5rem at the app's 10px root), so a revealed row clears it.
+const SCROLL_FADE_PX = 15;
+
+/**
+ * Scrolls a short pane (a narrow window gives it under five rows) so its checked option shows, since the capsule
+ * already names that choice and a pane that hides it reads as if the choice were not offered. The popup learns the
+ * room above its anchor after it mounts, so the pane shrinks later; the check runs again on each resize. Each model's
+ * pane starts from its top, so a model with no checked level never inherits the previous one's scroll; a resize only
+ * reveals, so it never undoes the user's own scrolling.
+ */
+function useRevealCheckedInPane(paneRef: RefObject<HTMLDivElement | null>, paneKey: string | null): void {
+  useLayoutEffect(() => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    const reveal = () => {
+      const checked = pane.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!checked) return;
+      const checkedBottom = checked.getBoundingClientRect().bottom - pane.getBoundingClientRect().top + pane.scrollTop;
+      const overflow = checkedBottom + SCROLL_FADE_PX - pane.clientHeight;
+      if (overflow > pane.scrollTop) pane.scrollTop = overflow;
+    };
+    pane.scrollTop = 0;
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [paneRef, paneKey]);
+}
+
+function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
+  const { tabs, detail, paneItem } = props;
+  useRevealCheckedInPane(props.paneRef, props.paneKey);
+  return (
+    <div data-slot="picker" className="flex min-h-0 min-w-0 flex-col" onKeyDown={props.onKeyDown}>
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {tabs && drawsTabsAsRail(tabs) ? (
+          <PickerRail tabs={tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} className="px-1.5 py-0.5" />
+        ) : null}
+        <div className="@container/picker-area flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className={DETAIL_GRID_CLASS}>
+            {/*
+              The search's rule is the input's own underline, so it stops at the list rows' edges (8px and 4px); the
+              caption's rule closes the pane's header and, like the column and footer rules, runs edge to edge.
+            */}
+            <div className="relative flex min-h-10 items-center pl-2 [grid-area:search] after:absolute after:right-1 after:bottom-0 after:left-2 after:h-px after:bg-border focus-within:after:bg-focus">
+              {props.search}
+            </div>
+            <div className="flex min-h-0 flex-col py-2 pl-2 [grid-area:list]">{props.list}</div>
+            <div
+              onPointerEnter={props.onPanePointerEnter}
+              className="flex min-h-10 items-center border-b border-l border-border pr-4 pl-3 [grid-area:caption] @max-[340px]/picker-area:border-t @max-[340px]/picker-area:border-l-0 @max-[340px]/picker-area:pl-4"
+            >
+              {paneItem === undefined ? null : detail.caption?.(paneItem)}
+            </div>
+            <div
+              ref={props.paneRef}
+              data-slot="picker-detail"
+              onKeyDown={props.onPaneKeyDown}
+              onPointerEnter={props.onPanePointerEnter}
+              className="scroll-fade-y border-l border-border py-2 pr-2 pl-1 [grid-area:pane] @max-[340px]/picker-area:border-l-0 @max-[340px]/picker-area:pl-2"
+            >
+              {paneItem === undefined ? null : detail.render(paneItem)}
+            </div>
+          </div>
+        </div>
+      </div>
+      {props.footer ? <div className="shrink-0 border-t border-border p-2">{props.footer}</div> : null}
     </div>
   );
 }
@@ -357,40 +506,6 @@ function PickerSearchField({ inputRef, listId, query, onQueryChange, placeholder
   );
 }
 
-interface PickerListAreaProps<T> {
-  readonly list: ReactNode;
-  readonly detail: PickerDetail<T> | undefined;
-  readonly paneEntry: ListRow<T> | undefined;
-  readonly paneRef: RefObject<HTMLDivElement | null>;
-  readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
-  readonly onPointerEnter: () => void;
-}
-
-/**
- * The list, beside its detail pane when the picker has one. The pair sits at a fixed height, so moving between rows
- * whose panes differ never resizes the panel.
- */
-function PickerListArea<T>({ list, detail, paneEntry, paneRef, onKeyDown, onPointerEnter }: PickerListAreaProps<T>) {
-  if (!list || !detail) return list;
-  return (
-    // Eight 33px rows less the last gap, so a provider with eight models opens with every Ctrl shortcut in view; the 8px gap
-    // above sits outside the scroller, so the list shows whole rows at every keyboard stop.
-    <div className="mt-2 grid h-[26.3rem] grid-cols-[minmax(0,1fr)_16.8rem]">
-      {list}
-      <div
-        ref={paneRef}
-        data-slot="picker-detail"
-        onKeyDown={onKeyDown}
-        onPointerEnter={onPointerEnter}
-        // No right padding: the panel's 8px already sits there, so the pane mirrors the list's 8px outer and 4px inner gutters.
-        className="min-h-0 overflow-y-auto border-l border-border py-1 pl-1"
-      >
-        {paneEntry ? detail.render(paneEntry.item) : null}
-      </div>
-    </div>
-  );
-}
-
 function caretAtEnd(input: HTMLInputElement): boolean {
   return input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
 }
@@ -423,24 +538,52 @@ function usePaneRow(activeRowKey: string | null) {
   };
 }
 
-function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>, "tabs" | "activeTab" | "onTabChange">) {
-  // One tab has no sibling to switch to.
-  if (!tabs || tabs.length < 2) return null;
-  const iconOnly = tabs.every((tab) => tab.icon != null);
+/**
+ * Icon tabs stand in a rail on the left. Laid out as a row under the search they read as a second row of the same
+ * kind as the search icon and field, so the search lost its place as the top of the picker.
+ */
+function drawsTabsAsRail(tabs: readonly PickerTab[]): boolean {
+  return tabs.length > 1 && tabs.every((tab) => tab.icon != null);
+}
+
+function PickerRail({ tabs, activeTab, onTabChange, className }: Pick<PickerProps<unknown>, "activeTab" | "onTabChange"> & { readonly tabs: readonly PickerTab[]; readonly className: string }) {
   return (
-    <div className={cn("flex items-center px-0.5 pb-1.5", iconOnly ? "gap-0.5 pt-0.5" : "gap-2")}>
+    <div className={cn("shrink-0 border-r border-border", className)}>
       <SegmentedControl
         size="compact"
-        fill={!iconOnly}
-        iconOnly={iconOnly}
+        iconOnly
+        orientation="vertical"
         aria-label="Picker tabs"
         options={tabs.map((tab) => ({
           value: tab.id,
           label: tab.label,
           icon: tab.icon,
           disabled: tab.disabled,
-          // Icon tabs show no text, so every tab names itself on hover; text tabs only explain why they are disabled.
-          title: tab.disabled ? tab.disabledReason : iconOnly ? tab.label : undefined,
+          // An icon shows no text, so every tab names itself on hover; a disabled one says why instead.
+          title: tab.disabled ? tab.disabledReason : tab.label,
+        }))}
+        value={activeTab ?? ""}
+        onChange={(id) => onTabChange?.(id)}
+      />
+    </div>
+  );
+}
+
+function PickerTabs({ tabs, activeTab, onTabChange }: Pick<PickerProps<unknown>, "tabs" | "activeTab" | "onTabChange">) {
+  // One tab has no sibling to switch to, and icon tabs stand in the rail instead.
+  if (!tabs || tabs.length < 2 || drawsTabsAsRail(tabs)) return null;
+  return (
+    <div className="flex items-center gap-2 px-0.5 pb-1.5">
+      <SegmentedControl
+        size="compact"
+        fill
+        aria-label="Picker tabs"
+        options={tabs.map((tab) => ({
+          value: tab.id,
+          label: tab.label,
+          icon: tab.icon,
+          disabled: tab.disabled,
+          title: tab.disabled ? tab.disabledReason : undefined,
         }))}
         value={activeTab ?? ""}
         onChange={(id) => onTabChange?.(id)}
@@ -669,7 +812,7 @@ function PickerList<T>(props: PickerListProps<T>) {
       id={listId}
       role="listbox"
       onScroll={measure}
-      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", fill ? "snap-y snap-mandatory pr-1" : "max-h-[17.2rem] pt-2")}
+      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", fill ? "@container/picker-list snap-y snap-mandatory pr-1" : "max-h-[17.2rem] pt-2")}
     >
       <SlidingHighlight follow="data-active" />
       {unmatched ? <PickerUnmatchedGroup {...unmatched} /> : null}
@@ -832,12 +975,18 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
       </span>
       {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
       <PickerDisclosureChevron expanded={row.expanded} />
+      {/* The action sits before the keycap, so the keycaps form a column near the row's end, not past an empty slot. */}
+      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       {digit !== undefined ? (
-        <span aria-hidden className="shrink-0 text-muted">
+        // A narrow list keeps the name whole and drops the keycap; the chord still works. On a filled row the keycap
+        // takes ink, since muted over the key's tint and the row's fill drops below AA.
+        <span
+          aria-hidden
+          className="shrink-0 text-muted group-data-active/option:text-ink group-data-selected/option:text-ink @max-[240px]/picker-list:hidden"
+        >
           <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
         </span>
       ) : null}
-      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       {selectedCheck ? (
         <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
           {selected ? <CheckIcon className="size-[1.4rem] text-ink" /> : null}
@@ -858,10 +1007,9 @@ function PickerDisclosureChevron({ expanded }: { readonly expanded: boolean | un
 }
 
 function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAction; readonly onRun: () => void }) {
+  // A span, not a button: an option may hold no interactive control. The keyboard runs the action with Ctrl+D instead.
   return (
-    <button
-      type="button"
-      tabIndex={-1}
+    <span
       aria-hidden
       data-slot="picker-row-action"
       onClick={(event) => {
@@ -878,7 +1026,7 @@ function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAc
       )}
     >
       {action.icon}
-    </button>
+    </span>
   );
 }
 
