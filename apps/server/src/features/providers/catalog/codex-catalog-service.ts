@@ -24,6 +24,7 @@ import {
   type CodexCustomPromptDiscoveryResult,
 } from "./codex-custom-prompt-service.js";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
+import { sharedProcessStartWorkerClient } from "../../../runtime/process/process-start-worker-client.js";
 
 const CODEX_CATALOG_IDLE_TTL_MS = 60_000;
 const CODEX_CATALOG_MAX_CONTEXTS = 64;
@@ -710,6 +711,7 @@ export class CodexCatalogService {
   private createCatalogClient(cwd: string | undefined, environment: Record<string, string>): CodexCatalogClient {
     const settings = this.settingsService.get();
     return this.clientFactory.create({
+      open: sharedProcessStartWorkerClient().open,
       cliPath: settings.provider.cli.codex || "codex",
       workingDirectory: cwd ?? process.cwd(),
       platform: this.hostRuntime.platform,

@@ -9,6 +9,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeReadline from "node:readline";
 import * as NodeEvents from "node:events";
+import type * as NodeStream from "node:stream";
 import * as NodePath from "node:path";
 import which from "which";
 import { resolveSubagentDisplayName } from "@mcode/contracts/models/tool-call-record";
@@ -96,7 +97,7 @@ async function resolveCodexAppServerPath(cliPath: string): Promise<string> {
   }
 }
 
-function waitForCodexAppServerSpawn(child: NodeChildProcess.ChildProcess): Promise<Error | null> {
+function waitForCodexAppServerSpawn(child: CodexAppServerProcess): Promise<Error | null> {
   return new Promise<Error | null>((resolve) => {
     child.once("error", (error) => resolve(error));
     child.once("spawn", () => resolve(null));
@@ -239,8 +240,24 @@ export interface CodexApprovalRequest {
  */
 export type CodexApprovalHandler = (request: CodexApprovalRequest) => Promise<unknown>;
 
+/** Process transport used by the app-server, independent of its owning thread. */
+export interface CodexAppServerProcess extends NodeEvents.EventEmitter {
+  readonly pid?: number;
+  readonly stdin: NodeStream.Writable;
+  readonly stdout: NodeStream.Readable;
+  readonly stderr: NodeStream.Readable;
+  kill(signal?: NodeJS.Signals): boolean;
+  terminate?(): Promise<void>;
+}
+
+/** Starts the app-server with piped stdio. */
+export type CodexAppServerProcessLauncher = (
+  command: string, args: readonly string[], options: { shell?: boolean; cwd?: string; env?: NodeJS.ProcessEnv },
+) => CodexAppServerProcess;
+
 /** Options passed to the CodexAppServer constructor. */
 export interface CodexAppServerOptions {
+  processLauncher?: CodexAppServerProcessLauncher;
   /** Path to the codex binary, or `"codex"` to rely on PATH resolution. */
   cliPath: string;
   /** Host platform that determines shell and process-tree behavior. */
@@ -952,7 +969,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   public readonly cliPath: string;
 
   private rpc!: CodexRpcClient;
-  private child!: NodeChildProcess.ChildProcess;
+  private child!: CodexAppServerProcess;
   private killRequested = false;
   /** Kept apart from the RPC client so a pause requested before {@link start} still applies. */
   private outputPaused = false;
@@ -1040,8 +1057,15 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     }
   }
 
-  private spawnAppServer(command: CodexAppServerCommand): NodeChildProcess.ChildProcess {
+  private spawnAppServer(command: CodexAppServerCommand): CodexAppServerProcess {
     const configArgs = (this.options.configOverrides ?? []).flatMap((override) => ["-c", override]);
+    if (this.options.processLauncher) {
+      return this.options.processLauncher(command.cliPath, ["app-server", ...configArgs], {
+        shell: command.needsShell,
+        cwd: this.options.workingDirectory,
+        env: this.options.getSpawnEnv ? this.options.getSpawnEnv() : flattenProcessEnvironment(process.env),
+      });
+    }
     return NodeChildProcess.spawn(command.cliPath, ["app-server", ...configArgs], {
       stdio: ["pipe", "pipe", "pipe"],
       shell: command.needsShell,
@@ -1201,6 +1225,10 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
 
   private async terminateChild(): Promise<void> {
     if (!this.child) return;
+    if (this.child.terminate) {
+      await this.child.terminate();
+      return;
+    }
     if (this.options.platform === "win32") {
       await this.terminateWindowsChild(this.child);
       return;
@@ -1208,7 +1236,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     await this.terminatePosixChild(this.child);
   }
 
-  private async terminateWindowsChild(child: NodeChildProcess.ChildProcess): Promise<void> {
+  private async terminateWindowsChild(child: CodexAppServerProcess): Promise<void> {
     if (child.pid == null) {
       logger.warn("CodexAppServer: child process has no PID, cannot taskkill", { cliPath: this.cliPath });
       return;
@@ -1222,7 +1250,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     }
   }
 
-  private async terminatePosixChild(child: NodeChildProcess.ChildProcess): Promise<void> {
+  private async terminatePosixChild(child: CodexAppServerProcess): Promise<void> {
     child.kill("SIGTERM");
     const exited = await Promise.race([
       new Promise<boolean>((resolve) => child.once("exit", () => resolve(true))),

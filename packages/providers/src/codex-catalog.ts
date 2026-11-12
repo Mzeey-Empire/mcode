@@ -1,6 +1,8 @@
 import type { SelectableProviderAgent } from "@mcode/contracts/providers/capability-catalog";
 import type { SkillInfo } from "@mcode/contracts/skills";
 import { CodexAppServer } from "./private/codex/codex-app-server.js";
+import { createWorkerCodexProcessLauncher } from "./private/codex/codex-worker-process.js";
+import type { ProviderProcessOpener } from "./host-ports.js";
 import {
   discoverCodexStandaloneAgents,
   type DiscoverCodexStandaloneAgentsInput,
@@ -14,6 +16,7 @@ export interface CodexCatalogProcessAttachment {
 
 /** Options for the provider-owned, catalog-only Codex connection. */
 export interface CodexCatalogClientOptions {
+  open: ProviderProcessOpener;
   cliPath: string;
   platform: NodeJS.Platform;
   workingDirectory: string;
@@ -119,6 +122,7 @@ export function createCodexCatalogClient(
     workingDirectory: options.workingDirectory,
     approvalPolicy: "never",
     catalogOnly: true,
+    processLauncher: createWorkerCodexProcessLauncher(options.open),
     ...(options.processAttachment ? { processAttachment: options.processAttachment } : {}),
     ...(options.getSpawnEnv ? { getSpawnEnv: options.getSpawnEnv } : {}),
   });
