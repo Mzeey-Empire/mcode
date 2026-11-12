@@ -6,8 +6,9 @@ import { cn } from "@/lib/utils";
  * `variant="default"` is the muted mono small-caps chip used in the palette and menus.
  * `variant="inline"` adapts to its parent's text color via `currentColor`,
  * so the chip remains legible inside colored containers like a primary button.
- * `variant="keycap"` is Paper's tooltip keycap: a 20px key drawn from `currentColor`,
- * so it reads on any tooltip fill.
+ * `variant="keycap"` is the tooltip, menu and picker keycap: a 20px key filled from `currentColor`,
+ * so it reads on any tooltip fill. It has no outline and uses the UI font, because a column of
+ * outlined monospace keys reads as noise beside the labels it serves.
  * `variant="hint"` is Paper's palette footer key: a filled 20px key in ink.
  */
 export function Kbd({
@@ -22,7 +23,7 @@ export function Kbd({
       data-slot="kbd"
       className={cn(
         variant === "keycap" &&
-          "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-sm border border-current/22 bg-current/6 px-1 font-mono text-caption text-current",
+          "inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-sm bg-current/10 px-1.5 font-sans text-caption tabular-nums text-current",
         variant === "hint" &&
           "inline-flex h-5 shrink-0 items-center justify-center rounded-[0.5rem] bg-selected px-1.5 font-sans text-caption font-medium text-ink",
         (variant === "default" || variant === "inline") &&
