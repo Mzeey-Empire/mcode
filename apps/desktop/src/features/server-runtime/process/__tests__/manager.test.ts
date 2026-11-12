@@ -1056,6 +1056,18 @@ describe("ServerManager", () => {
     }
   });
 
+  it("does not spawn a server after a quit cancels the start", async () => {
+    manager.stopStartingServer();
+
+    await expect(manager.start()).rejects.toThrow(
+      "Server start was cancelled because the app is quitting",
+    );
+    expect(NodeChildProcess.spawn).not.toHaveBeenCalled();
+    expect(NodeFS.rmdirSync).toHaveBeenCalledWith(
+      NodePath.join("/tmp/mcode", "server.starting"),
+    );
+  });
+
   it("forceReplace sends POST /shutdown to the running server", async () => {
     // Lock file exists with a running server
     vi.mocked(NodeFS.existsSync).mockReturnValue(true);

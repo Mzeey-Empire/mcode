@@ -80,6 +80,8 @@ export class ServerManager {
   private readonly plannedExitProcesses = new Set<NodeChildProcess.ChildProcess>();
   private readonly plannedRestartCoordinator = new PlannedRestartCoordinator();
   private inFlightStart: Promise<{ port: number; authToken: string }> | null = null;
+  // Quit during startup is permanent because this manager is not used after quit.
+  private startCancelled = false;
   /** Only the first spawn gets the launch ID, so a server respawned after a crash cannot report as the launch's. */
   private launchServerSpawned = false;
 
@@ -209,8 +211,9 @@ export class ServerManager {
     this.detachServerProcess();
   }
 
-  /** Stop a spawned server whose start has not finished, for a quit during startup. */
+  /** Stop a spawned server whose start has not finished and prevent any later spawn during quit. */
   stopStartingServer(): void {
+    this.startCancelled = true;
     const child = this.serverProcess;
     if (
       !child ||
@@ -300,6 +303,9 @@ export class ServerManager {
 
   /** Find a port, spawn the child, and retain the server lock identity. */
   private async startNewServer(): Promise<{ port: number; authToken: string }> {
+    if (this.startCancelled) {
+      throw new Error("Server start was cancelled because the app is quitting");
+    }
     this._port = await this.findStartupPort();
     this.startupId = NodeCrypto.randomUUID();
     const launchId = this.launchServerSpawned ? undefined : this.launch?.launchId;
