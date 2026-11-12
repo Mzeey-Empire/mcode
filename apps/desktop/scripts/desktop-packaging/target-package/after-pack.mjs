@@ -29,6 +29,13 @@ import {
 import { ensurePackagedConptyRuntime } from "./packaged-node-pty.mjs";
 import { retainTargetTerminalNativeArtifacts } from "../package-validation/terminal-artifact-attestation.mjs";
 
+/** Bundles loaded by Bun's Worker API in the packaged server. */
+export const BUN_WORKER_FILENAMES = [
+  "execution.worker.cjs",
+  "canonical-agent-writer.worker.cjs",
+  "git-process.worker.cjs",
+];
+
 /**
  * @param {import("electron-builder").AfterPackContext} context
  */
@@ -161,11 +168,52 @@ function stageBunRuntime({ appOutDir, electronPlatformName, productFilename, pac
     : NodePath.resolve(appOutDir, "resources");
   const binary = NodePath.resolve(resourcesRoot, "bin", platform === "win32" ? "mcode-bun.exe" : "mcode-bun");
   NodeFS.mkdirSync(NodePath.dirname(binary), { recursive: true });
-  NodeChildProcess.execFileSync(resolveBunExecutable(), [
+  const bunExecutable = resolveBunExecutable();
+  NodeChildProcess.execFileSync(bunExecutable, [
     "build", "--compile", "--bytecode", `--target=bun-${bunPlatform}-${arch}`,
     NodePath.resolve(packagedServerDir, "server.cjs"), "--outfile", binary,
   ], { stdio: "inherit" });
+  // Worker bytecode is version-specific, so it must use the server binary's Bun.
+  buildWorkerBytecode({ packagedServerDir, bunExecutable });
   return binary;
+}
+
+/** Replaces packaged Bun worker bundles with bytecode builds under the same names. */
+export function buildWorkerBytecode({ packagedServerDir, bunExecutable }) {
+  for (const filename of BUN_WORKER_FILENAMES) {
+    if (!NodeFS.existsSync(NodePath.join(packagedServerDir, filename))) {
+      throw new Error(`Missing packaged Bun worker: ${filename}`);
+    }
+  }
+  const temporaryDir = NodeFS.mkdtempSync(NodePath.join(packagedServerDir, ".worker-bytecode-"));
+  try {
+    for (const filename of BUN_WORKER_FILENAMES) {
+      try {
+        NodeChildProcess.execFileSync(bunExecutable, [
+          "build", NodePath.join(packagedServerDir, filename),
+          "--bytecode", "--target=bun", "--format=cjs",
+          "--outdir", temporaryDir, "--entry-naming", "[name].cjs",
+        ], { stdio: "inherit" });
+        NodeFS.accessSync(NodePath.join(temporaryDir, filename));
+        NodeFS.accessSync(NodePath.join(temporaryDir, `${filename}.jsc`));
+      } catch (cause) {
+        throw new Error(`Failed to build packaged Bun worker bytecode: ${filename}`, { cause });
+      }
+    }
+    for (const filename of BUN_WORKER_FILENAMES) {
+      const rebuiltFile = NodePath.join(temporaryDir, filename);
+      const source = NodeFS.readFileSync(rebuiltFile, "utf8");
+      const referencesOriginalMap = [...source.matchAll(/sourceMappingURL\s*=\s*(\S+)/g)]
+        .some((match) => NodePath.basename(match[1]) === `${filename}.map`);
+      NodeFS.renameSync(`${rebuiltFile}.jsc`, NodePath.join(packagedServerDir, `${filename}.jsc`));
+      NodeFS.renameSync(rebuiltFile, NodePath.join(packagedServerDir, filename));
+      if (!referencesOriginalMap) {
+        NodeFS.rmSync(NodePath.join(packagedServerDir, `${filename}.map`), { force: true });
+      }
+    }
+  } finally {
+    NodeFS.rmSync(temporaryDir, { recursive: true, force: true });
+  }
 }
 
 function bunCompileTargetPlatform(platform) {
