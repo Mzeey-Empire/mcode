@@ -1,9 +1,40 @@
-import { describe, it, expect } from "vitest";
+import "reflect-metadata";
+import { describe, it, expect, vi } from "vitest";
+import { ShellEnvResolver } from "../shell-env-resolver.js";
+import type { ProcessStartRunner } from "../../process/process-start.js";
 import {
   flattenProcessEnv,
   parseNewlineDelimitedEnv,
   parseNullDelimitedEnv,
 } from "../shell-env-utils.js";
+
+describe("ShellEnvResolver", () => {
+  it("decodes the registry overlay and retains it after a failed refresh", async () => {
+    const run = vi.fn<ProcessStartRunner>()
+      .mockResolvedValueOnce({ stdout: Buffer.from("PATH=C:/tools\0VALUE=x=y\0").toString("base64"), stderr: "" })
+      .mockRejectedValueOnce(new Error("unavailable"));
+    const resolver = new ShellEnvResolver({ platform: "win32" }, run);
+
+    expect(await resolver.resolveFreshAsync()).toEqual({ PATH: "C:/tools", VALUE: "x=y" });
+    expect(await resolver.resolveFreshAsync()).toEqual({ PATH: "C:/tools", VALUE: "x=y" });
+  });
+
+  it("parses NUL-delimited login shell output", async () => {
+    const run = vi.fn<ProcessStartRunner>().mockResolvedValue({ stdout: "A=one\nline\0B=x=y\0", stderr: "" });
+    const resolver = new ShellEnvResolver({ platform: "linux" }, run);
+
+    expect(await resolver.resolveFreshAsync()).toEqual({ A: "one\nline", B: "x=y" });
+  });
+
+  it("falls back to newline output when env -0 is unsupported", async () => {
+    const run = vi.fn<ProcessStartRunner>()
+      .mockRejectedValueOnce(new Error("unsupported"))
+      .mockResolvedValueOnce({ stdout: "A=1\nB=x=y\n", stderr: "" });
+    const resolver = new ShellEnvResolver({ platform: "darwin" }, run);
+
+    expect(await resolver.resolveFreshAsync()).toEqual({ A: "1", B: "x=y" });
+  });
+});
 
 describe("shell-env-utils", () => {
   describe("parseNullDelimitedEnv", () => {

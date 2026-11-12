@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import * as NodePath from "node:path";
 import {
   resolveCopilotCli,
+  createNodeResolverIO,
   clearResolutionCache,
   formatCopilotNotFoundMessage,
   type CopilotCliResolverIO,
@@ -45,6 +46,25 @@ function withSdkHelp(exec: Record<string, string | null>, entries: string[]): Re
   }
   return out;
 }
+
+describe("createNodeResolverIO", () => {
+  it("trims successful probe output", async () => {
+    const io = createNodeResolverIO({}, "win32", async () => ({ stdout: "  1.0.57\n", stderr: "" }));
+    expect(await io.exec("copilot", ["--version"])).toBe("1.0.57");
+  });
+
+  it("returns null for empty output", async () => {
+    const io = createNodeResolverIO({}, "linux", async () => ({ stdout: " \n", stderr: "" }));
+    expect(await io.exec("copilot", ["--version"])).toBeNull();
+  });
+
+  it("discards output when the probe fails", async () => {
+    const io = createNodeResolverIO({}, "win32", async () => {
+      throw Object.assign(new Error("exit"), { code: 1, stdout: "partial" });
+    });
+    expect(await io.exec("copilot", ["--version"])).toBeNull();
+  });
+});
 
 describe("resolveCopilotCli", () => {
   beforeEach(() => {

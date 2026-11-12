@@ -1,5 +1,6 @@
 import * as NodeFS from "node:fs";
-import * as NodeChildProcess from "node:child_process";
+import { sharedProcessStartWorkerClient } from "../../../../runtime/process/process-start-worker-client.js";
+import type { ProcessStartRunner } from "../../../../runtime/process/process-start.js";
 import * as NodePath from "node:path";
 import { isProviderVersionAtLeast } from "@mcode/providers";
 
@@ -335,12 +336,13 @@ export function clearResolutionCache(): void {
 }
 
 /**
- * Real adapter: Node fs + async `execFile`. Probes run at startup, so they must
+ * Real adapter: Node fs + worker process starts. Probes run at startup, so they must
  * not block the event loop. `shell:true` on win32 resolves `.cmd`/`.ps1` shims.
  */
 export function createNodeResolverIO(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
+  runProcess: ProcessStartRunner = sharedProcessStartWorkerClient().run,
 ): CopilotCliResolverIO {
   return {
     platform,
@@ -352,17 +354,19 @@ export function createNodeResolverIO(
         return null;
       }
     },
-    exec: (command, args) => new Promise((resolve) => {
-      NodeChildProcess.execFile(command, args, {
-        encoding: "utf8",
-        timeout: 5000,
-        windowsHide: true,
-        shell: platform === "win32",
-        env,
-      }, (error, stdout) => {
-        const out = stdout.trim();
-        resolve(error || out.length === 0 ? null : out);
-      });
-    }),
+    exec: async (command, args) => {
+      try {
+        const { stdout } = await runProcess({
+          command,
+          args,
+          timeout: 5000,
+          shell: platform === "win32",
+          env,
+        });
+        return stdout.trim() || null;
+      } catch {
+        return null;
+      }
+    },
   };
 }

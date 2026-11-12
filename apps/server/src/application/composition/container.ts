@@ -46,6 +46,7 @@ import { JobObject } from "../../runtime/process/containment/job-object.js";
 import { WindowsProcessScopeFactory } from "../../runtime/process/containment/windows-process-scope.js";
 import { ProtectedEnvStore } from "../../runtime/environment/protected-env-store.js";
 import { ShellEnvResolver } from "../../runtime/environment/shell-env-resolver.js";
+import { sharedProcessStartWorkerClient } from "../../runtime/process/process-start-worker-client.js";
 import { EnvService } from "../../runtime/environment/env-service.js";
 import { UtilityCompletionService } from "../../shared/completion/utility-completion-service.js";
 import { RecapService } from "../../features/agents/recap/recap-service.js";
@@ -90,6 +91,7 @@ import {
 /** Initialize the DI container with all server dependencies. */
 export async function setupContainer(mcodeDir: string): Promise<typeof container> {
   container.register<HostRuntime>("HostRuntime", { useValue: hostRuntime });
+  container.register("ProcessStartRunner", { useValue: sharedProcessStartWorkerClient().run });
   registerBrowserAutomation(container);
 
   // PtyPidRegistry is registered before the boot-selected legacy Terminal path.
