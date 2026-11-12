@@ -1,7 +1,14 @@
 import * as NodeChildProcess from "node:child_process";
-import type { ProviderProcessPort } from "../host-ports.js";
+import type { ProviderProcessPort, ProviderSessionKey, ProviderSessionOccupancyPort } from "../host-ports.js";
+import { diag } from "@mcode/shared/diagnostics";
+import { decideOccupancy, NATIVE_TASK_CAP_MS, type NativeTaskAge, type OccupancyPolicy, type OccupancyVerdict } from "./session-occupancy.js";
+
+/** Native background work reported by a provider. */
+export interface NativeBackgroundTask extends NativeTaskAge { taskId: string; label: string }
 
 const DEFAULT_IDLE_TTL_MS = 10 * 60 * 1_000;
+/** Occupancy epochs start at 1, so closing this one is always a no-op. */
+const UNOPENED_EPOCH = 0;
 const EVICTION_INTERVAL_MS = 60 * 1_000;
 const GRACEFUL_STOP_TIMEOUT_MS = 5_000;
 
@@ -25,6 +32,7 @@ export interface SpawnResult<TState> {
 export interface ProtocolAdapter<TState> {
   spawn(args: SpawnArgs): Promise<SpawnResult<TState>>;
   isBusy(state: TState): boolean;
+  backgroundTasks?(state: TState): readonly NativeBackgroundTask[];
   /**
    * Runs first when a session is torn down, before {@link interrupt} and {@link close}, so an
    * adapter can stop holding back output that those waits would otherwise sit behind.
@@ -52,9 +60,17 @@ interface SessionRuntimeLoggerPort {
 }
 
 interface PoolEntry<TState> {
+  key: ProviderSessionKey;
+  epoch: number;
   state: TState;
   pids: number[];
   lastUsedAt: number;
+}
+
+interface ObservedOccupancy {
+  verdict: OccupancyVerdict;
+  turnBusy: boolean;
+  held: boolean;
 }
 
 class SpawnRetirementFailure extends Error {
@@ -77,6 +93,9 @@ export class SessionRuntime<TState> {
   constructor(
     private readonly adapter: ProtocolAdapter<TState>,
     private readonly deps: {
+      providerId: string;
+      occupancy: ProviderSessionOccupancyPort;
+      nativeCapMs?: number;
       jobObject: SessionRuntimeJobPort;
       processes?: ProviderProcessPort;
       envService: SessionRuntimeEnvironmentPort;
@@ -159,7 +178,9 @@ export class SessionRuntime<TState> {
     const evicted: string[] = [];
     const sessions = Array.from(this.sessions);
     for (const [sessionId, entry] of sessions) {
-      if (this.sessions.get(sessionId) !== entry || isSessionProtected(sessionId) || this.adapter.isBusy(entry.state)) continue;
+      if (this.sessions.get(sessionId) !== entry || isSessionProtected(sessionId)) continue;
+      const verdict = this.decideAndRecordEviction(entry, "memory-pressure");
+      if (!verdict.evict) continue;
       evicted.push(sessionId);
       this.deps.logger?.info("SessionRuntime evicting non-busy session", { sessionId, reason });
       await this.stop(sessionId);
@@ -169,6 +190,7 @@ export class SessionRuntime<TState> {
 
   /** Stops one session and closes a spawn that completes after the stop request. */
   async stop(sessionId: string): Promise<void> {
+    this.closeOccupancy(sessionId);
     const existing = this.teardowns.get(sessionId);
     if (existing) return existing;
     // Recorded before the work begins so a racing acquire waits instead of
@@ -180,6 +202,11 @@ export class SessionRuntime<TState> {
     } finally {
       if (this.teardowns.get(sessionId) === work) this.teardowns.delete(sessionId);
     }
+  }
+
+  private closeOccupancy(sessionId: string): void {
+    const entry = this.sessions.get(sessionId) ?? this.unretired.get(sessionId);
+    if (entry) this.deps.occupancy.closeSession(entry.key, entry.epoch);
   }
 
   private async performStop(sessionId: string): Promise<void> {
@@ -199,6 +226,7 @@ export class SessionRuntime<TState> {
   /** Stops all sessions and rejects later acquisitions. */
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    for (const entry of this.sessions.values()) this.reportProtectedShutdown(entry);
     if (this.evictionTimer) {
       clearInterval(this.evictionTimer);
       this.evictionTimer = null;
@@ -221,7 +249,7 @@ export class SessionRuntime<TState> {
     const env = this.deps.envService.getEnv();
     const result = await this.adapter.spawn({ ...args, env });
     if (this.shuttingDown || this.stopsDuringSpawn.has(args.sessionId)) {
-      try { await this.retire(args.sessionId, { ...result, lastUsedAt: Date.now() }); }
+      try { await this.retire(args.sessionId, { ...result, lastUsedAt: Date.now(), key: { providerId: this.deps.providerId, threadId: args.threadId }, epoch: UNOPENED_EPOCH }); }
       catch (error) { throw new SpawnRetirementFailure(error); }
       throw new Error(`Provider session stopped during spawn: ${args.sessionId}`);
     }
@@ -235,7 +263,9 @@ export class SessionRuntime<TState> {
         this.deps.jobObject.setDescription(pid, `mcode session ${args.sessionId}`);
       }
     }
-    this.sessions.set(args.sessionId, { ...result, lastUsedAt: Date.now() });
+    const key = { providerId: this.deps.providerId, threadId: args.threadId };
+    const epoch = this.deps.occupancy.openSession(key);
+    this.sessions.set(args.sessionId, { ...result, lastUsedAt: Date.now(), key, epoch });
     return result.state;
   }
 
@@ -250,17 +280,51 @@ export class SessionRuntime<TState> {
   }
 
   private async evictIdle(): Promise<void> {
-    const now = Date.now();
     const sessions = Array.from(this.sessions);
     for (const [sessionId, entry] of sessions) {
-      if (this.sessions.get(sessionId) === entry && now - entry.lastUsedAt > this.idleTtlMs && !this.adapter.isBusy(entry.state)) {
-        this.deps.logger?.info("SessionRuntime evicting idle session", { sessionId });
+      if (this.sessions.get(sessionId) !== entry) continue;
+      const verdict = this.decideAndRecordEviction(entry, "idle");
+      if (verdict.evict) {
+        this.deps.logger?.info("SessionRuntime evicting idle session", { sessionId, reason: verdict.reason });
         await this.stop(sessionId);
       }
     }
   }
 
+  private observeOccupancy(entry: PoolEntry<TState>, mode: OccupancyPolicy["mode"]): ObservedOccupancy {
+    const now = Date.now();
+    const occupancy = this.deps.occupancy.read(entry.key, now);
+    const turnBusy = this.adapter.isBusy(entry.state);
+    const verdict = decideOccupancy({
+      now,
+      clock: entry.lastUsedAt,
+      turnBusy,
+      nativeTasks: this.adapter.backgroundTasks?.(entry.state) ?? [],
+      occupancy,
+      policy: { mode, idleTtlMs: this.idleTtlMs, nativeCapMs: this.deps.nativeCapMs ?? NATIVE_TASK_CAP_MS },
+    });
+    return { verdict, turnBusy, held: occupancy.held };
+  }
+
+  private decideAndRecordEviction(entry: PoolEntry<TState>, mode: OccupancyPolicy["mode"]): OccupancyVerdict {
+    const { verdict, turnBusy, held } = this.observeOccupancy(entry, mode);
+    if (verdict.evict) {
+      const { reason, idleMs, nativeTasks, nativeProtecting } = verdict;
+      diag.emit("session.evict", { th: entry.key.threadId }, () => ({ reason, idleMs, turnBusy, nativeTasks, nativeProtecting, held }));
+    }
+    return verdict;
+  }
+
+  private reportProtectedShutdown(entry: PoolEntry<TState>): void {
+    const { verdict, held } = this.observeOccupancy(entry, "idle");
+    if (!held && verdict.nativeProtecting === 0) return;
+    const counts = { held, nativeTasks: verdict.nativeTasks, nativeProtecting: verdict.nativeProtecting };
+    diag.emit("session.shutdown-held", { th: entry.key.threadId }, () => counts);
+    this.deps.logger?.warn("SessionRuntime shutting down protected session", { threadId: entry.key.threadId, ...counts });
+  }
+
   private async retire(sessionId: string, entry: PoolEntry<TState>): Promise<void> {
+    this.deps.occupancy.closeSession(entry.key, entry.epoch);
     this.unretired.set(sessionId, entry);
     await this.closeEntry(sessionId, entry);
     this.unretired.delete(sessionId);

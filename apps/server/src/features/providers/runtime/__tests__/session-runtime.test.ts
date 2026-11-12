@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { SessionRuntime } from "../session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../session-runtime.js";
+import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 
 /** Per-session state for the fake adapter. */
 interface FakeState {
@@ -44,7 +45,9 @@ const jobObject = { isWindowsJob: false, assign: vi.fn(), setDescription: vi.fn(
 const envService = { getEnv: () => ({ MCODE_TEST: "1" }) } as unknown as import("../../../../runtime/environment/env-service.js").EnvService;
 
 function makeRuntime(adapter: FakeAdapter, idleTtlMs = 1000): SessionRuntime<FakeState> {
-  return new SessionRuntime<FakeState>(adapter, { jobObject, envService, idleTtlMs });
+  return new SessionRuntime<FakeState>(adapter, {
+    providerId: "fake", occupancy: new SessionOccupancyRegistry({ now: Date.now }), jobObject, envService, idleTtlMs,
+  });
 }
 
 const ACQUIRE = { sessionId: "s1", threadId: "t1", cwd: "/repo", permissionMode: "full" };

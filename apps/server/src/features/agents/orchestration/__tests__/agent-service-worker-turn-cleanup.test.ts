@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 import { TurnFileEvidenceLedger } from "../../execution/turn-file-evidence-ledger.js";
 import { bindTurnFileEvidenceLedger } from "../../execution/turn-persisted-publication.js";
 import { listTurnFileEvidence } from "../../turns/persistence/turn-file-evidence-store.js";
@@ -120,6 +121,36 @@ afterEach(async () => {
 }, FIXTURE_CLOSE_TIMEOUT_MS);
 
 describe("AgentService cleanup through production worker composition", { timeout: 30_000 }, () => {
+  it("advances lastUserTurnAt only for an admitted user-sent turn", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const fixture = await openFixture("claude");
+    const occupancy = container.resolve(SessionOccupancyRegistry);
+    const key = { providerId: "claude", threadId: fixture.thread.id };
+    occupancy.openSession(key);
+    expect(occupancy.read(key, now).lastUserTurnAt).toBeNull();
+
+    now += 1_000;
+    const userSentAt = now;
+    const userTurn = await sendTurn(fixture);
+    expect(occupancy.read(key, now).lastUserTurnAt).toBe(userSentAt);
+    await fixture.emit(turnComplete(fixture.thread.id, userTurn.turnExecutionId, "claude"));
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: userTurn.turnExecutionId });
+
+    for (const origin of [{ providerOriginated: true }, { delegationWake: true }]) {
+      now += 1_000;
+      const sentBefore = fixture.sent.length;
+      await fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Continue background work",
+        provider: "claude", model: "claude-sonnet-4-6", permissionMode: "default", ...origin });
+      await vi.waitFor(() => expect(fixture.sent).toHaveLength(sentBefore + 1));
+      expect(occupancy.read(key, now).lastUserTurnAt).toBe(userSentAt);
+      const turn = fixture.sent.at(-1);
+      if (!turn) throw new Error("Provider did not receive the continuation");
+      await fixture.emit(turnComplete(fixture.thread.id, turn.turnExecutionId, "claude"));
+      await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId });
+    }
+  });
+
   it("returns Stop and publishes its ending while capture is wedged, gating the next send for the file check budget", async () => {
     const fixture = await openFixture();
     const snapshots = container.resolve(SnapshotService);
@@ -546,6 +577,8 @@ describe("AgentService cleanup through production worker composition", { timeout
     vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementation(hang);
     const sessions = new SessionRuntime({ spawn: async () => ({ state: {}, pids: [] }), isBusy: () => false,
       interrupt: async () => undefined, close: hang, isStale: () => false }, {
+      providerId: "codex",
+      occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       jobObject: { isWindowsJob: false, assign: () => true, setDescription: () => undefined },
       envService: { getEnv: () => ({}) },
     });

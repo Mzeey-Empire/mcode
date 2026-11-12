@@ -798,6 +798,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       }
     });
     this.runtime = new SessionRuntime<CodexSessionState>(this, {
+      providerId: this.id, occupancy: host.occupancy,
       jobObject: {
         isWindowsJob: false,
         assign: () => false,

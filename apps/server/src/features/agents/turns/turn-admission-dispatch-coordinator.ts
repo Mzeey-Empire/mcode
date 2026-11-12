@@ -142,6 +142,11 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   systemNotice?: SystemNoticeMetadata;
 };
 
+/** Excludes provider-started turns and coordinator wakes. */
+export function isUserSentTurn(command: SendMessageCommand): boolean {
+  return !command.providerOriginated && !command.delegationWake;
+}
+
 /** An opaque receipt for a command effect that can be activated or rolled back. */
 export type CommandEffectReceipt = GoalCommandEffectReceipt;
 
@@ -1080,7 +1085,7 @@ export class TurnAdmissionDispatchCoordinator {
   private async persistThreadSettings(prepared: PreparedCommand): Promise<void> {
     const command = prepared.command;
     // A turn the server or provider started carries no composer selection, so it must not overwrite the user's.
-    if (command.providerOriginated || command.delegationWake) return;
+    if (!isUserSentTurn(command)) return;
     const model = command.model ?? "claude-sonnet-4-6";
     await this.threads.updateSettings(command.threadId, {
       ...this.threadSettings(command, prepared.providerId),

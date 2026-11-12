@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { ProviderTurnOpening } from "@mcode/providers";
@@ -255,6 +255,138 @@ describe("ClaudeProvider provider-started turns", () => {
   });
 });
 
+type SdkMessage = Record<string, unknown>;
+
+/** Opens a user turn on a stream that yields each emitted SDK message and resolves once the provider has handled it. */
+async function liveClaudeSession() {
+  let release!: () => void;
+  let processed: (() => void) | undefined;
+  let message: SdkMessage | null = null;
+  let closed = false;
+  let ready = new Promise<void>((resolve) => { release = resolve; });
+  mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+    const stream = (async function* () {
+      await prompt[Symbol.asyncIterator]().next();
+      yield { type: "system", subtype: "init", session_id: "background-bash" };
+      while (!closed) {
+        await ready;
+        ready = new Promise<void>((resolve) => { release = resolve; });
+        if (message) yield message;
+        processed?.();
+      }
+    })();
+    return Object.assign(stream, { close: () => { closed = true; release(); } });
+  });
+  const settle = vi.fn(async () => {});
+  const host = mockShutdownHost(() => {}, { open: async () => ({ kind: "declined", reason: "busy" }), settleBackgroundTool: settle });
+  const changed = vi.fn();
+  host.occupancy.nativeChanged = changed;
+  const provider = new ClaudeProvider(stubEnvService(), stubJobObject(), undefined, undefined, undefined, host);
+  const spawn = vi.spyOn(provider, "spawn");
+  await sendUserTurn(provider);
+  const spawned = spawn.mock.results[0];
+  if (spawned?.type !== "return") throw new Error("Expected spawned session");
+  const { state } = await spawned.value;
+  const emit = async (next: SdkMessage) => {
+    const done = new Promise<void>((resolve) => { processed = resolve; });
+    message = next;
+    release();
+    await done;
+  };
+  return { emit, provider, state, changed, settle };
+}
+
+const LONG_COMMAND = "x".repeat(499) + "😀" + "x".repeat(99);
+const turnResult = { type: "result", is_error: false, result: "Started", usage: { output_tokens: 1 } };
+const levelReport = (...tasks: SdkMessage[]): SdkMessage => ({ type: "system", subtype: "background_tasks_changed", tasks });
+
+async function launchBackgroundBash(emit: (message: SdkMessage) => Promise<void>, input: SdkMessage): Promise<void> {
+  await emit({ type: "tool_use", id: "BASH_BG", name: "Bash", input });
+  await emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "BASH_BG", content: "Started" }] }, tool_use_result: { backgroundTaskId: "bench" } });
+  await emit(turnResult);
+}
+
+describe("ClaudeProvider native background tasks", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it.each([
+    ["its description", { command: LONG_COMMAND, description: "Benchmark" }, "Benchmark"],
+    ["its command cut at a character boundary", { command: LONG_COMMAND }, "x".repeat(499)],
+  ])("tracks a Bash background launch labelled with %s until its notification settles it", async (_label, input, label) => {
+    vi.useFakeTimers({ now: 1000 });
+    const { emit, provider, state, changed, settle } = await liveClaudeSession();
+    try {
+      await launchBackgroundBash(emit, input);
+      expect(provider.isBusy(state)).toBe(false);
+      expect(provider.backgroundTasks(state)).toEqual([{ taskId: "bench", startedAt: 1000, label }]);
+      expect(changed).toHaveBeenCalledTimes(1);
+      await emit({ type: "system", subtype: "task_notification", task_id: "bench", status: "completed", summary: "Done" });
+      expect(provider.backgroundTasks(state)).toEqual([]);
+      expect(settle).toHaveBeenCalledExactlyOnceWith({ providerId: "claude", threadId: "thread-provider", executionId: USER_EXECUTION_ID, toolCallId: "BASH_BG", status: "completed", output: "Done" });
+      expect(changed).toHaveBeenCalledTimes(2);
+    } finally { await provider.shutdown(); }
+  });
+
+  it("keeps a launched task's start time when level reports repeat it after the launch settles", async () => {
+    vi.useFakeTimers({ now: 1000 });
+    const { emit, provider, state, changed } = await liveClaudeSession();
+    const bench = { task_id: "bench", task_type: "shell", description: "Benchmark" };
+    try {
+      await launchBackgroundBash(emit, { command: "sleep 900", description: "Benchmark" });
+      vi.setSystemTime(2000);
+      await emit(levelReport(bench));
+      await emit({ type: "system", subtype: "task_notification", task_id: "bench", status: "completed", summary: "Done" });
+      vi.setSystemTime(3000);
+      await emit(levelReport(bench));
+      expect(provider.backgroundTasks(state)).toEqual([{ taskId: "bench", startedAt: 1000, label: "Benchmark" }]);
+      expect(changed).toHaveBeenCalledTimes(1);
+    } finally { await provider.shutdown(); }
+  });
+
+  it("trusts an empty level report over a launch whose notification has not arrived", async () => {
+    vi.useFakeTimers({ now: 1000 });
+    const { emit, provider, state, changed } = await liveClaudeSession();
+    try {
+      await launchBackgroundBash(emit, { command: "sleep 900", description: "Benchmark" });
+      await emit(levelReport());
+      expect(provider.backgroundTasks(state)).toEqual([]);
+      expect(changed).toHaveBeenCalledTimes(2);
+    } finally { await provider.shutdown(); }
+  });
+
+  it("replaces the task set from each level report between turns and leaves out ambient tasks", async () => {
+    vi.useFakeTimers({ now: 1000 });
+    const { emit, provider, state, changed } = await liveClaudeSession();
+    const level = levelReport({ task_id: "other", task_type: "shell", description: "Other" }, { task_id: "watch", ambient: true, description: "Watcher" });
+    try {
+      await emit(turnResult);
+      await emit(level);
+      expect(provider.backgroundTasks(state)).toEqual([{ taskId: "other", startedAt: 1000, label: "Other" }]);
+      await emit(level);
+      expect(changed).toHaveBeenCalledTimes(1);
+      await emit(levelReport());
+      expect(provider.backgroundTasks(state)).toEqual([]);
+      expect(changed).toHaveBeenCalledTimes(2);
+    } finally { await provider.shutdown(); }
+  });
+
+  it("keeps a task's first sighting when it turns ambient and back, so the native cap does not restart", async () => {
+    vi.useFakeTimers({ now: 1000 });
+    const { emit, provider, state } = await liveClaudeSession();
+    const task = { task_id: "watch", task_type: "shell", description: "Watcher" };
+    try {
+      await emit(turnResult);
+      await emit(levelReport(task));
+      vi.setSystemTime(2000);
+      await emit(levelReport({ ...task, ambient: true }));
+      expect(provider.backgroundTasks(state)).toEqual([]);
+      vi.setSystemTime(3000);
+      await emit(levelReport(task));
+      expect(provider.backgroundTasks(state)).toEqual([{ taskId: "watch", startedAt: 1000, label: "Watcher" }]);
+    } finally { await provider.shutdown(); }
+  });
+});
+
 describe("ClaudeProvider background agents", () => {
   const userEnded = (events: ProviderRuntimeEvent[]) =>
     events.some(({ event }) => event.type === AgentEventType.Ended && event.turnExecutionId === USER_EXECUTION_ID);
@@ -269,7 +401,7 @@ describe("ClaudeProvider background agents", () => {
     try {
       await sendUserTurn(provider);
       await vi.waitFor(() => expect(settleBackgroundTool).toHaveBeenCalled());
-      expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", executionId: USER_EXECUTION_ID,
+      expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ providerId: "claude", threadId: "thread-provider", executionId: USER_EXECUTION_ID,
         toolCallId: "AGENT_1", status: "completed", output: AGENT_SUMMARY });
       expect(events.find(({ event }) => event.type === AgentEventType.ToolBackgrounded)?.event)
         .toMatchObject({ toolCallId: "AGENT_1", turnExecutionId: USER_EXECUTION_ID });
@@ -309,7 +441,7 @@ describe("ClaudeProvider background agents", () => {
     expect(events.filter(({ event }) => "toolCallId" in event && event.toolCallId === "BASH_1")).toEqual([]);
   });
 
-  it("keeps the session busy while the call runs and stops it when the session shuts down", async () => {
+  it("reports background work separately while the call runs and stops it when the session shuts down", async () => {
     mockQuery.mockImplementation(backgroundAgentQuery(false));
     const events: ProviderRuntimeEvent[] = [];
     const settleBackgroundTool = vi.fn(async () => {});
@@ -319,10 +451,11 @@ describe("ClaudeProvider background agents", () => {
     await vi.waitFor(() => expect(userEnded(events)).toBe(true));
     const spawned = spawn.mock.results[0];
     if (spawned?.type !== "return") throw new Error("Expected the turn to spawn a session");
-    expect(provider.isBusy((await spawned.value).state)).toBe(true);
+    expect(provider.isBusy((await spawned.value).state)).toBe(false);
+    expect(provider.backgroundTasks((await spawned.value).state).map((task) => task.taskId)).toEqual(["agent-1"]);
     await provider.shutdown();
     await vi.waitFor(() => expect(settleBackgroundTool).toHaveBeenCalled());
-    expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", executionId: USER_EXECUTION_ID,
+    expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ providerId: "claude", threadId: "thread-provider", executionId: USER_EXECUTION_ID,
       toolCallId: "AGENT_1", status: "cancelled", output: "Stopped when the Claude session ended." });
     expect(agentResults(events)).toEqual([]);
   });

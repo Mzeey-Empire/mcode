@@ -13,6 +13,7 @@ import { providerProtocolBinding } from "../private/factory.js";
 
 function createHostPorts(): ProviderHostPorts {
   return {
+    occupancy: { read: vi.fn(() => ({ held: false, lastActivityAt: null, lastUserTurnAt: null })), openSession: vi.fn(() => 1), closeSession: vi.fn(), nativeChanged: vi.fn() },
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: vi.fn(() => ({})) },
     processes: {

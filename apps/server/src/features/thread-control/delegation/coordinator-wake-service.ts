@@ -150,7 +150,7 @@ export class CoordinatorWakeService {
     if (this.disposed) return this.deps.tasks.returnNotices(batch.wakeId);
     try {
       const result = await diag.run("delegate.steer", { th: coordinatorId }, () => this.deps.steer.steer({ threadId: coordinatorId,
-        turnExecutionId, messageId: batch.wakeId, content: batch.content }, { systemNotice: batch.systemNotice }), () => ({ wake: batch.wakeId }));
+        turnExecutionId, messageId: batch.wakeId, content: batch.content }, { sentBy: "server", systemNotice: batch.systemNotice }), () => ({ wake: batch.wakeId }));
       if (result.status === "delivered" || result.status === "delivery_unknown") {
         diag.emit("delegate.wake", { th: coordinatorId }, () => ({ outcome: "steered", wake: batch.wakeId, reached: true }));
         await this.deps.tasks.settleNotices(batch.wakeId);

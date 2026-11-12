@@ -35,6 +35,7 @@ import { FileService } from "../../projects/files/file-service.js";
 import { startupEnvironmentFixture } from "../../projects/environment/testing/startup-environment-fixture.js";
 import { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
 import { SettingsService } from "../../settings/settings-service.js";
+import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 import { ModelCacheService } from "../../providers/models/model-cache-service.js";
 import { ModelCacheRepo } from "../../providers/models/persistence/model-cache-repo.js";
 import { ModelSightingsRepo } from "../../providers/status/model-sightings-repo.js";
@@ -288,7 +289,8 @@ async function wakeHarness(f: Fixture) {
       undefined, false, undefined, undefined, undefined, message.messageId, undefined, message.systemNotice ?? undefined);
     await steers.markDelivered(message.messageId);
   } };
-  const steer = new TurnSteerService(steers, runtime, new FileService(f.workspaces, f.threads, f.worktrees, f.executor, f.host));
+  const occupancy = new SessionOccupancyRegistry({ now: Date.now });
+  const steer = new TurnSteerService(steers, runtime, new FileService(f.workspaces, f.threads, f.worktrees, f.executor, f.host), occupancy);
   const sendMessage = async (command: SendMessageCommand) => {
     state.sends += 1;
     if (state.sendGate) await state.sendGate;
@@ -318,7 +320,7 @@ async function wakeHarness(f: Fixture) {
   const messages = () => f.runtime.database.query<{ content: string; system_notice: string }, [string]>(
     "SELECT content, system_notice FROM messages WHERE thread_id = ? AND json_extract(system_notice, '$.kind') = 'delegated-task' ORDER BY rowid",
   ).all(f.coordinator.id);
-  return { wake, state, timers, tick, messages, deps, clock, steers, sendMessage };
+  return { wake, state, timers, tick, messages, deps, clock, steers, sendMessage, occupancy };
 }
 
 describe("Coordinator task notices", { timeout: 30_000 }, () => {
@@ -478,6 +480,22 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     await w.tick();
     expect(w.messages()).toHaveLength(1);
     expect(w.state.sends).toBe(steerable ? 0 : 1);
+  });
+
+  it("steers a result into a running Coordinator without counting it as a user message", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const key = { providerId: "codex", threadId: f.coordinator.id };
+    w.occupancy.openSession(key);
+    await startCoordinator(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toHaveLength(1);
+    expect(w.state.sends).toBe(0);
+    expect(w.occupancy.read(key, Date.now()).lastUserTurnAt).toBeNull();
   });
 
   it("holds a result while the running turn has no task-tool lease, then delivers it as a new turn", async () => {

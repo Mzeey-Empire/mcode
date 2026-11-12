@@ -64,6 +64,7 @@ import {
 } from "@mcode/thread-orchestration";
 
 import type {
+  NativeBackgroundTask,
   ProtocolAdapter,
   SpawnArgs,
   SpawnResult,
@@ -83,6 +84,7 @@ import {
 import {
   ClaudeEventMapper,
   type ClaudeEventMapperCallbacks,
+  type HeldBackgroundCall,
   type ClaudeUsageMetrics,
   type ClaudeEventEvidence,
 } from "./claude-event-mapper.js";
@@ -164,9 +166,9 @@ interface ClaudeSessionState {
   pendingToolUses: Set<string>;
   /**
    * Background calls this SDK process still runs, keyed to the execution that
-   * launched them. They outlive turns, so warm reuse keeps the session busy.
+   * launched them.
    */
-  backgroundTools: Map<string, string>;
+  backgroundTools: Map<string, HeldBackgroundCall>;
   /**
    * True once the first tool call for this sendMessage query has been registered.
    * Distinguishes pre-tool preamble text (pendingToolUses=0, no tool fired yet)
@@ -750,6 +752,7 @@ export class ClaudeProvider
       });
     });
     this.runtime = new SessionRuntime<ClaudeSessionState>(this, {
+      providerId: this.id, occupancy: host.occupancy,
       logger,
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       processes: host.processes,
@@ -1913,7 +1916,7 @@ export class ClaudeProvider
       contextWindowMode: staged.contextWindowMode,
       orchestrationMode: staged.orchestrationMode,
       pendingToolUses: new Set<string>(),
-      backgroundTools: new Map<string, string>(),
+      backgroundTools: new Map<string, HeldBackgroundCall>(),
       hasFiredToolThisTurn: false,
       workspaceId: browser.scope?.workspaceId ?? "unknown-workspace",
       browserPermissionCapability:
@@ -1933,7 +1936,7 @@ export class ClaudeProvider
     query: Query,
     staged: PendingSpawnTurn,
     queue: ReturnType<typeof createPromptQueue>,
-    backgroundTools: Map<string, string>,
+    backgroundTools: Map<string, HeldBackgroundCall>,
   ): void {
     const routing = this.getCanonicalRoutings().get(staged.turnExecutionId);
     if (!routing)
@@ -1998,13 +2001,10 @@ export class ClaudeProvider
 
   /**
    * Eviction guard: a session is busy while its stream has a live turn, while a
-   * tool_use awaits its result, while a background call it launched is still running, OR
-   * while it has a pending permission request the user may still answer (the
-   * user could be on another thread). These keep the session out of idle
-   * eviction regardless of how long the SDK has been quiet.
+   * tool_use awaits its result, or while a permission request is pending.
    */
   isBusy(state: ClaudeSessionState): boolean {
-    if (state.pendingToolUses.size > 0 || state.backgroundTools.size > 0) {
+    if (state.pendingToolUses.size > 0) {
       logger.debug("Skipping eviction: pending tool calls", {
         sessionId: state.sessionId,
         pending: state.pendingToolUses.size,
@@ -2070,7 +2070,7 @@ export class ClaudeProvider
     routing: ClaudeCanonicalEventRouting,
     onConsumed: (handler: (turnExecutionId?: string) => void) => void,
     isResuming: boolean,
-    backgroundTools: Map<string, string>,
+    backgroundTools: Map<string, HeldBackgroundCall>,
   ): void {
     const state = this.createClaudeStreamState(sessionId, routing, isResuming, backgroundTools);
     this.streamStates.set(q, state);
@@ -2093,7 +2093,7 @@ export class ClaudeProvider
     sessionId: string,
     routing: ClaudeCanonicalEventRouting,
     isResuming: boolean,
-    backgroundTools: Map<string, string>,
+    backgroundTools: Map<string, HeldBackgroundCall>,
   ): ClaudeStreamLoopState {
     const threadId = sessionId.startsWith("mcode-")
       ? sessionId.slice(6)
@@ -2154,7 +2154,7 @@ export class ClaudeProvider
         this.suppressSessionStartHooks.delete(threadId),
       liveExecutionId: () => state.endedTurnExecutionId === state.currentTurnExecutionId
         ? undefined : state.currentTurnExecutionId,
-      settleBackgroundTool: (settlement) => this.settleEndedTurnBackgroundTool({ threadId, ...settlement }),
+      settleBackgroundTool: (settlement) => this.settleEndedTurnBackgroundTool({ providerId: this.id, threadId, ...settlement }),
     };
   }
 
@@ -2198,39 +2198,53 @@ export class ClaudeProvider
     state: ClaudeStreamLoopState,
     message: Record<string, unknown>,
   ): Promise<boolean> {
-    diag.emit("claude.stream", { th: state.threadId }, () => summarizeClaudeStreamMessage(message));
-    if (!state.sessionInitialized && message.type !== "result") {
-      state.sessionInitialized = true;
-      this.emit(`_resumeOk:${sessionId}`);
-    }
-    state.mapper.captureSessionIdentity(message, state.sessionInitialized);
-    this.trackClaudeApprovalTask(state, message);
-    rememberProviderTurnNotice(state, message);
-    state.mapper.settleBackgroundTask(message);
-    if (await this.skipUnownedClaudeOutput(sessionId, state, message)) return true;
-    if (isUnpromptedResultWithoutReply(message)) return true;
-    const isResumeFailure = this.isFailedClaudeResume(message, state.sessionInitialized);
-    await this.startClaudeResume(sessionId, state, message, isResumeFailure);
-    if (isResumeFailure) {
-      this.handleFailedClaudeResume(sessionId, state);
-      return false;
-    }
-    if (idlesWithUnansweredSteer(state, message)) {
-      await this.endClaudeTurn(sessionId, state);
+    try {
+      diag.emit("claude.stream", { th: state.threadId }, () => summarizeClaudeStreamMessage(message));
+      if (!state.sessionInitialized && message.type !== "result") {
+        state.sessionInitialized = true;
+        this.emit(`_resumeOk:${sessionId}`);
+      }
+      state.mapper.captureSessionIdentity(message, state.sessionInitialized);
+      this.trackClaudeApprovalTask(state, message);
+      rememberProviderTurnNotice(state, message);
+      state.mapper.observeBackgroundLevel(message);
+      state.mapper.settleBackgroundTask(message);
+      if (await this.skipUnownedClaudeOutput(sessionId, state, message)) return true;
+      if (isUnpromptedResultWithoutReply(message)) return true;
+      const isResumeFailure = this.isFailedClaudeResume(message, state.sessionInitialized);
+      await this.startClaudeResume(sessionId, state, message, isResumeFailure);
+      if (isResumeFailure) {
+        this.handleFailedClaudeResume(sessionId, state);
+        return false;
+      }
+      if (idlesWithUnansweredSteer(state, message)) {
+        await this.endClaudeTurn(sessionId, state);
+        return true;
+      }
+      if (absorbsSteeredSegmentEnd(state, message)) {
+        diag.emit("claude.turn", { th: state.threadId }, () => ({
+          step: "segment-absorbed",
+          terminalReason: typeof message.terminal_reason === "string" ? message.terminal_reason : undefined,
+          steers: [...state.steersAwaitingTurn.keys()],
+        }));
+        state.mapper.closeAbortedSegment(message);
+        return true;
+      }
+      const outcome = await state.mapper.map(message);
+      if (outcome !== "none") await this.endClaudeTurn(sessionId, state);
       return true;
+    } finally {
+      this.flushNativeBackgroundChange(state);
     }
-    if (absorbsSteeredSegmentEnd(state, message)) {
-      diag.emit("claude.turn", { th: state.threadId }, () => ({
-        step: "segment-absorbed",
-        terminalReason: typeof message.terminal_reason === "string" ? message.terminal_reason : undefined,
-        steers: [...state.steersAwaitingTurn.keys()],
-      }));
-      state.mapper.closeAbortedSegment(message);
-      return true;
-    }
-    const outcome = await state.mapper.map(message);
-    if (outcome !== "none") await this.endClaudeTurn(sessionId, state);
-    return true;
+  }
+
+  /** Reports native work independently of turn work. */
+  backgroundTasks(state: ClaudeSessionState): readonly NativeBackgroundTask[] {
+    return this.streamStates.get(state.query)?.mapper.backgroundTasks() ?? [];
+  }
+
+  private flushNativeBackgroundChange(state: ClaudeStreamLoopState): void {
+    state.mapper.flushBackgroundChange(() => this.host.occupancy.nativeChanged({ providerId: this.id, threadId: state.threadId }));
   }
 
   private trackClaudeApprovalTask(state: ClaudeStreamLoopState, message: Record<string, unknown>): void {
@@ -2500,6 +2514,7 @@ export class ClaudeProvider
     this.recentStderr.delete(sessionId);
     // Stop, discard, shutdown and close all end the stream, and the SDK process takes its background calls with it.
     state.mapper.settleAllBackgroundTools();
+    this.flushNativeBackgroundChange(state);
     releaseUnconfirmedSteers(state);
     const suppressedQuery = this.suppressEndedQueries.delete(q);
     const current = this.runtime.get(sessionId);

@@ -5,6 +5,7 @@ import { mockProviderHostRuntime } from "./mock-sdk-query.js";
 /** A deterministic host authority for the extracted adapter tests. */
 export function fixtureHost(overrides: Partial<ProviderHostPorts> = {}): ProviderHostPorts {
   return {
+    occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: mockProviderHostRuntime,
     environment: { snapshot: () => ({}) },
     processes: { attach: () => undefined, terminateTree: async () => undefined },

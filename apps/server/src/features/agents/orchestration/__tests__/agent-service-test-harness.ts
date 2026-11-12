@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 import { observeWorkerPublications } from "./worker-publication-observer.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
@@ -279,6 +280,7 @@ export function createAgentServiceForTest(
   const testContainer = container.createChildContainer();
   const gitRepository = new GitRepositoryService(workspaceRepo, new FakeGitExecutor());
   testContainer.registerInstance(TURN_RUNTIME_PERSISTENCE, runtimePersistence);
+  testContainer.registerInstance(SessionOccupancyRegistry, new SessionOccupancyRegistry({ now: Date.now }));
   testContainer.registerInstance("TurnFileTracker", tracker);
   testContainer.registerInstance("WorkerOwnedTurnRuntime", workers);
   testContainer.registerInstance("ExecutionFileEvidenceCoordinator", new ExecutionFileEvidenceCoordinator(tracker, turnDiffs));

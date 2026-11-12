@@ -241,6 +241,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
           state.child.signalCode !== null || state.cwd !== args.cwd,
       },
       {
+        providerId: this.id, occupancy: host.occupancy,
         jobObject: { isWindowsJob: host.runtime.platform === "win32", assign: () => false, setDescription: () => {} },
         processes: host.processes,
         envService: { getEnv: () => ({ ...host.environment.snapshot() }) },

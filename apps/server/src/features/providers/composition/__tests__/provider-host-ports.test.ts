@@ -12,6 +12,7 @@ import {
   type ProviderEventOwnershipRoute,
   type WorkerOwnedProviderEventResult,
 } from "../provider-host-ports.js";
+import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -105,8 +106,16 @@ function workerCommit(batch: ProviderEventBatch, sequence: number): WorkerOwnedP
 }
 
 describe("createProviderHostPorts", () => {
-  it("adapts the server browser grant to the Provider contract", () => {
+  it("adapts browser grants and attributes late settlements to their source provider", async () => {
+    const occupancy = new SessionOccupancyRegistry({ now: () => 42 });
+    const claude = { providerId: "claude", threadId: "thread-1" };
+    const cursor = { providerId: "cursor", threadId: "thread-1" };
+    occupancy.openSession(claude);
+    occupancy.openSession(cursor);
+    const settled: unknown[] = [];
     const ports = createProviderHostPorts({
+      occupancy,
+      turns: () => ({ settleBackgroundTool: async (value: unknown) => { settled.push(value); } }),
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
       envService: { getEnv: () => ({}) },
       jobObject: { isWindowsJob: false },
@@ -129,9 +138,15 @@ describe("createProviderHostPorts", () => {
       expiresAt: 123,
       allowedOperations: ["inspect"],
     });
+    await ports.turns.settleBackgroundTool({ providerId: "claude", threadId: "thread-1", executionId: EXECUTION_ID, toolCallId: "bash", status: "completed", output: "Done" });
+    expect(occupancy.read(claude, 42).lastActivityAt).toBe(42);
+    expect(occupancy.read(cursor, 42).lastActivityAt).toBeNull();
+    expect(settled).toEqual([{ threadId: "thread-1", executionId: EXECUTION_ID, toolCallId: "bash", status: "completed", output: "Done" }]);
   });
 
   it.each(["claude", "cursor"] as const)("delivers %s worker batches only after ordered commit replies", async (providerId) => {
+    const occupancy = new SessionOccupancyRegistry({ now: () => 42 });
+    for (const id of ["claude", "cursor"]) occupancy.openSession({ providerId: id, threadId: "thread-1" });
     const commit = vi.fn();
     const accepted: string[] = [];
     let acknowledge: ((value: WorkerOwnedProviderEventResult) => void) | undefined;
@@ -148,15 +163,18 @@ describe("createProviderHostPorts", () => {
       submit,
     };
     const ports = createProviderHostPorts({
+      occupancy,
       events: { commit },
       ingress: { acceptProjectedCommitted: (events: WorkerOwnedProviderEventResult["providerEvents"]) =>
         accepted.push(...events.map((event) => event.canonicalReceipt.eventId)) },
       eventOwnership: { resolve: () => route },
     } as never);
     const first = ownedBatch(providerId, 2, 1);
+    first.events = [...first.events, ...ownedBatch(providerId === "claude" ? "cursor" : "claude", 2, 1).events];
     const second = ownedBatch(providerId, 2, 2);
 
     const pending = ports.events.submit(first);
+    for (const id of ["claude", "cursor"]) expect(occupancy.read({ providerId: id, threadId: "thread-1" }, 42).lastActivityAt).toBe(42);
     expect(commit).not.toHaveBeenCalled();
     expect(accepted).toEqual([]);
     acknowledge?.(workerCommit(first, 1));
@@ -183,7 +201,11 @@ describe("createProviderHostPorts", () => {
       deliveryAttempt: 2,
       submit,
     };
+    const occupancy = new SessionOccupancyRegistry({ now: () => 42 });
+    const key = { providerId: "claude", threadId: batch.threadId };
+    occupancy.openSession(key);
     const ports = createProviderHostPorts({
+      occupancy,
       events: { commit },
       ingress: { acceptProjectedCommitted },
       eventOwnership: { resolve: () => route },
@@ -191,6 +213,7 @@ describe("createProviderHostPorts", () => {
 
     await expect(ports.events.submit(batch)).rejects.toThrow("does not match execution ownership");
     expect(submit).not.toHaveBeenCalled();
+    expect(occupancy.read(key, 42).lastActivityAt).toBeNull();
     route.deliveryAttempt = 1;
     await expect(ports.events.submit(batch)).rejects.toThrow("receipt does not match submitted batch");
     batch.batchId = undefined;
@@ -205,6 +228,7 @@ describe("createProviderHostPorts", () => {
     const acceptProjectedCommitted = vi.fn();
     const result = workerCommit(batch, 1);
     const ports = createProviderHostPorts({
+      occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       events: { commit },
       ingress: { acceptProjectedCommitted },
       eventOwnership: { resolve: () => ({
@@ -227,6 +251,10 @@ describe("createProviderHostPorts", () => {
   });
 
   it("propagates worker failure and rejected ownership without a legacy commit", async () => {
+    let now = 42;
+    const occupancy = new SessionOccupancyRegistry({ now: () => now });
+    const key = { providerId: "cursor", threadId: "thread-1" };
+    occupancy.openSession(key);
     const batch = ownedBatch("cursor", 1, 1);
     const commit = vi.fn();
     const submit = vi.fn(() => Promise.reject(new Error("worker unavailable")));
@@ -239,6 +267,7 @@ describe("createProviderHostPorts", () => {
       submit,
     };
     const ports = createProviderHostPorts({
+      occupancy,
       events: { commit },
       ingress: { acceptProjectedCommitted: vi.fn() },
       eventOwnership: { resolve: () => route },
@@ -246,11 +275,13 @@ describe("createProviderHostPorts", () => {
 
     await expect(ports.events.submit(batch)).rejects.toThrow("worker unavailable");
     route = { kind: "rejected" };
+    now = 100;
     const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-refused-"));
     diag.configure({ dir, enabled: true });
     try {
       const refused = { ...batch, events: [...batch.events, ...batch.events] };
       await expect(ports.events.submit(refused)).rejects.toThrow();
+      expect(occupancy.read(key, now).lastActivityAt).toBe(42);
       diag.flushSync();
       const rows = NodeFS.readFileSync(NodePath.join(dir, "t", threadRecordingFileId("thread-1", diag.runId) + ".jsonl"), "utf8")
         .split("\n").flatMap((line) => parseDiagLine(line) ?? []);

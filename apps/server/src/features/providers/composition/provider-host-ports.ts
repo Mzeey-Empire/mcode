@@ -1,4 +1,5 @@
 import type {
+  ProviderBackgroundToolSettlement,
   ProviderEventBatch,
   ProviderEventCommitReceipt,
   ProviderHostPorts,
@@ -7,6 +8,7 @@ import type {
   ProviderTurnPort,
 } from "@mcode/providers";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
+import type { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 import { diag } from "@mcode/shared/diagnostics";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
 import type { EnvService } from "../../../runtime/environment/env-service.js";
@@ -49,6 +51,7 @@ export interface ProviderEventOwnership {
 
 /** Server services used to compose the narrow Provider host-port boundary. */
 export interface ProviderHostPortDependencies {
+  occupancy: SessionOccupancyRegistry;
   runtime: HostRuntime;
   envService: EnvService;
   jobObject: JobObject;
@@ -58,7 +61,13 @@ export interface ProviderHostPortDependencies {
   ingress: ProviderEventIngress;
   eventOwnership?: ProviderEventOwnership;
   /** Resolved per call because the turn owner itself depends on the provider registry. */
-  turns: () => ProviderTurnPort;
+  turns: () => HostTurnSink;
+}
+
+/** Server turn operations accepting settlements without provider identity. */
+export interface HostTurnSink {
+  open: ProviderTurnPort["open"];
+  settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "providerId">): Promise<void>;
 }
 
 /** Injection token for the server service that admits provider-started turns. */
@@ -69,6 +78,7 @@ export function createProviderHostPorts(
   dependencies: ProviderHostPortDependencies,
 ): ProviderHostPorts {
   return {
+    occupancy: dependencies.occupancy,
     runtime: dependencies.runtime,
     environment: {
       snapshot: () => dependencies.envService.getEnv(),
@@ -111,7 +121,11 @@ export function createProviderHostPorts(
     },
     turns: {
       open: (request) => dependencies.turns().open(request),
-      settleBackgroundTool: (settlement) => dependencies.turns().settleBackgroundTool(settlement),
+      settleBackgroundTool: (settlement) => {
+        const { providerId, ...result } = settlement;
+        dependencies.occupancy.touch({ providerId, threadId: result.threadId });
+        return dependencies.turns().settleBackgroundTool(result);
+      },
     },
   };
 }
@@ -143,6 +157,9 @@ async function submitWorkerEvents(
   batch: ProviderEventBatch,
 ): Promise<ProviderEventSubmissionReceipt> {
   const ownedBatch = checkedWorkerBatch(batch, route);
+  for (const providerId of new Set(ownedBatch.events.map((draft) => draft.sourceProviderId))) {
+    dependencies.occupancy.touch({ providerId, threadId: ownedBatch.threadId });
+  }
   const result = await route.submit(ownedBatch);
   if (!matchesWorkerReceipt(ownedBatch, result)) {
     throw new Error("Canonical worker receipt does not match submitted batch");

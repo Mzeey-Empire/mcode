@@ -18,6 +18,7 @@ import { PlanQuestionService } from "../plan-question-service.js";
 import { PlanTurnService } from "../plan-turn-service.js";
 import { planWriteOperations } from "../persistence/plan-write-operations.js";
 import { registerAgentStorageTestProducer } from "../../__tests__/agent-storage-fixture.js";
+import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 
 const { spawn } = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node:child_process", async importOriginal => ({
@@ -69,6 +70,7 @@ function createProvider(child: NativeProcess) {
   spawn.mockImplementation(() => { setImmediate(() => child.emit("spawn")); return child; });
   return createCodexProvider({ configuration: { cliPath: "codex", idleSessionTtlMs: 600_000 },
     host: {
+      occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
       environment: { snapshot: () => ({}) }, processes: { attach: () => {}, terminateTree: async () => {} },
       browser: { stage: () => ({ leaseId: "unused", expiresAt: 0 }), releaseSession: () => 0,
