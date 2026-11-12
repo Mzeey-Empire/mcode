@@ -378,6 +378,18 @@ describe("Picker", () => {
     expect(pane.scrollTop).toBe(0);
   });
 
+  it("keeps a row's pane scroll when the list rebuilds that row's item", () => {
+    const { rerender } = render(<PagedPicker detail={BRANCH_DETAIL} />);
+    const pane = screen.getByText("Detail of branch-000").closest<HTMLElement>("[data-slot=picker-detail]");
+    if (!pane) throw new Error("no detail pane");
+    pane.scrollTop = 66;
+
+    rerender(<PagedPicker detail={BRANCH_DETAIL} items={SOURCE.slice(0, PAGE).map((branch) => ({ ...branch }))} />);
+
+    expect(screen.getByText("Detail of branch-000")).toBeInTheDocument();
+    expect(pane.scrollTop).toBe(66);
+  });
+
   it("rings the row the keyboard reached, but not a hovered row or a row whose pane has focus", async () => {
     render(<PagedPicker detail={BRANCH_DETAIL} />);
     const search = screen.getByRole("combobox");

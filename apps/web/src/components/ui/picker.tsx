@@ -314,6 +314,7 @@ export function Picker<T>(props: PickerProps<T>) {
         list={<>{tabs}{list}{listStatus}</>}
         detail={props.detail}
         paneItem={rows.find(({ row }) => row.key === pane.key)?.item}
+        paneKey={pane.key}
         paneRef={paneRef}
         onPaneKeyDown={leavePane}
         onPanePointerEnter={settlePane}
@@ -370,6 +371,8 @@ interface PickerDetailLayoutProps<T> extends Pick<PickerProps<T>, "tabs" | "acti
   readonly list: ReactNode;
   readonly detail: PickerDetail<T>;
   readonly paneItem: T | undefined;
+  /** The pane's row, so its scroll resets on a move to another row and not when the same row's item is rebuilt. */
+  readonly paneKey: string | null;
   readonly paneRef: RefObject<HTMLDivElement | null>;
   readonly onPaneKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   readonly onPanePointerEnter: () => void;
@@ -377,14 +380,14 @@ interface PickerDetailLayoutProps<T> extends Pick<PickerProps<T>, "tabs" | "acti
 
 // The list's track is eight 33px rows less the last gap, plus its 8px insets, so a provider with eight models opens with
 // every Ctrl shortcut in view, and the insets sit outside the scroller, so it shows whole rows at every keyboard stop.
-// Too narrow to share a row (a 320px window, or 400% zoom), the pane drops under four rows instead of squeezing the names,
-// which leaves the footer in view above the composer.
+// Too narrow to share a row (a 320px window, or 400% zoom), the pane drops under four and a half rows instead of squeezing
+// the names, which leaves the footer in view above the composer.
 const DETAIL_GRID_CLASS = cn(
   // The body rows may shrink, so a picker taller than the room above its anchor scrolls its list and pane and never
-  // clips its footer. Stacked, the pane is 3.5 rows tall (8px inset plus 3.5 pitches), so like the list's half row a
-  // level cut at an edge under the scroll fade shows there are more.
+  // clips its footer. Stacked, the list shows 4.5 rows inside its insets and the pane 3.5 (its 8px inset scrolls with
+  // it), so in each a row cut at an edge under the scroll fade shows there are more.
   "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_16.8rem] grid-rows-[auto_minmax(0,27.9rem)] [grid-template-areas:'search_caption'_'list_pane']",
-  "@max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[auto_14.7rem_auto_minmax(0,12.4rem)] @max-[340px]/picker-area:[grid-template-areas:'search'_'list'_'caption'_'pane']",
+  "@max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[auto_16.5rem_auto_minmax(0,12.4rem)] @max-[340px]/picker-area:[grid-template-areas:'search'_'list'_'caption'_'pane']",
 );
 
 /**
@@ -403,7 +406,7 @@ const SCROLL_FADE_PX = 15;
  * pane starts from its top, so a model with no checked level never inherits the previous one's scroll; a resize only
  * reveals, so it never undoes the user's own scrolling.
  */
-function useRevealCheckedInPane(paneRef: RefObject<HTMLDivElement | null>, paneItem: unknown): void {
+function useRevealCheckedInPane(paneRef: RefObject<HTMLDivElement | null>, paneKey: string | null): void {
   useLayoutEffect(() => {
     const pane = paneRef.current;
     if (!pane) return;
@@ -419,12 +422,12 @@ function useRevealCheckedInPane(paneRef: RefObject<HTMLDivElement | null>, paneI
     const observer = new ResizeObserver(reveal);
     observer.observe(pane);
     return () => observer.disconnect();
-  }, [paneRef, paneItem]);
+  }, [paneRef, paneKey]);
 }
 
 function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
   const { tabs, detail, paneItem } = props;
-  useRevealCheckedInPane(props.paneRef, paneItem);
+  useRevealCheckedInPane(props.paneRef, props.paneKey);
   return (
     <div data-slot="picker" className="flex min-h-0 min-w-0 flex-col" onKeyDown={props.onKeyDown}>
       <div className="flex min-h-0 min-w-0 flex-1">
