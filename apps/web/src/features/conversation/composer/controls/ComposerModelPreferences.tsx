@@ -168,7 +168,7 @@ export function ComposerModelOptions({
   if (!fast && toggles.length === 0) return null;
 
   return (
-    <div role="group" aria-label="Model options" className="flex min-w-0 items-center gap-2">
+    <div role="group" aria-label="Model options" className="flex min-w-0 flex-wrap items-center gap-2 @max-[340px]/picker-footer:gap-1.5">
       {fast && (
         <SegmentedControl
           variant="pill"
