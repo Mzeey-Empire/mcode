@@ -206,6 +206,7 @@ export interface ProviderTurnPort {
 
 /** The final outcome of a background tool call whose launching turn has ended. */
 export interface ProviderBackgroundToolSettlement {
+  providerId: string;
   threadId: string;
   /** Execution of the turn that launched the call, not the turn running now. */
   executionId: string;
@@ -216,6 +217,7 @@ export interface ProviderBackgroundToolSettlement {
 
 /** Narrow server services that Provider implementations can use. */
 export interface ProviderHostPorts {
+  occupancy: ProviderSessionOccupancyPort;
   runtime: ProviderRuntimePort;
   environment: ProviderEnvironmentPort;
   processes: ProviderProcessPort;
@@ -224,4 +226,16 @@ export interface ProviderHostPorts {
   grants: ProviderGrantPort;
   events: ProviderEventSinkPort;
   turns: ProviderTurnPort;
+}
+
+/** Identity of one provider's pooled thread session. */
+export interface ProviderSessionKey { providerId: string; threadId: string }
+/** Server-owned activity and declared protection. */
+export interface ProviderSessionOccupancy { held: boolean; lastActivityAt: number | null; lastUserTurnAt: number | null }
+/** Lifecycle and activity boundary shared by all providers. */
+export interface ProviderSessionOccupancyPort {
+  read(key: ProviderSessionKey, now: number): ProviderSessionOccupancy;
+  openSession(key: ProviderSessionKey): number;
+  closeSession(key: ProviderSessionKey, epoch: number): void;
+  nativeChanged(key: ProviderSessionKey): void;
 }

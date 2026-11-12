@@ -23,7 +23,7 @@ export class BackgroundToolSettlementEffect {
   }
 
   /** Admit the late result immediately against its launching execution. */
-  settle(settlement: ProviderBackgroundToolSettlement): void {
+  settle(settlement: Omit<ProviderBackgroundToolSettlement, "providerId">): void {
     const progress = this.progress();
     const { threadId, executionId, toolCallId, status, output } = settlement;
     progress.acceptLateToolResult(threadId, executionId, { toolCallId, status, output });

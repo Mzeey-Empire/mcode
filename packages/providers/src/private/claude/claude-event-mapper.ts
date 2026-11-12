@@ -5,6 +5,7 @@ import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { type TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { logger } from "@mcode/shared";
 import type { ProviderBackgroundToolSettlement } from "../../host-ports.js";
+import type { NativeBackgroundTask } from "../session-runtime.js";
 import { clampContextWindowToMode } from "./context-window.js";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 import {
@@ -14,6 +15,25 @@ import {
 } from "./claude-failure-classifier.js";
 
 type Message = Record<string, unknown>;
+
+/** A timeline row retained until the native task settles. */
+export interface HeldBackgroundCall {
+  executionId: string;
+  taskId?: string;
+  startedAt: number;
+  label: string;
+}
+
+/** A level report supersedes fallback launch rows. */
+export function effectiveBackgroundTasks(
+  liveTasks: ReadonlyMap<string, NativeBackgroundTask> | null,
+  rows: ReadonlyMap<string, HeldBackgroundCall>,
+): readonly NativeBackgroundTask[] {
+  if (liveTasks) return [...liveTasks.values()];
+  return [...rows.values()].flatMap((row) => row.taskId
+    ? [{ taskId: row.taskId, startedAt: row.startedAt, label: row.label }]
+    : []);
+}
 type Usage = {
   input_tokens?: number;
   output_tokens?: number;
@@ -89,7 +109,7 @@ export interface ClaudeEventMapperCallbacks {
   /** Execution whose turn is open now; undefined between turns. */
   liveExecutionId(): string | undefined;
   /** Settles a background call whose launching turn has already ended. */
-  settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "threadId">): void;
+  settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "threadId" | "providerId">): void;
 }
 
 /** Usage metrics read from a successful Claude result message. */
@@ -111,6 +131,10 @@ export type ClaudeMapOutcome = "none" | "turn_complete" | "result_error";
 
 /** Converts Claude SDK messages to provider-neutral events. */
 export class ClaudeEventMapper {
+  private readonly launchLabels = new Map<string, string>();
+  private liveTasks: ReadonlyMap<string, NativeBackgroundTask> | null = null;
+  private backgroundDirty = false;
+  private lastBackgroundTasks = "[]";
   private readonly commandCalls = new Map<string, Extract<AgentEvent, { type: "toolUse" }>>();
   private readonly deniedCommands = new Set<string>();
   private lastAssistantText = "";
@@ -147,7 +171,7 @@ export class ClaudeEventMapper {
     private readonly threadId: string,
     private readonly callbacks: ClaudeEventMapperCallbacks,
     /** Background calls the SDK process still runs, keyed to the execution that launched them. */
-    private readonly backgroundTools: Map<string, string> = new Map(),
+    private readonly backgroundTools: Map<string, HeldBackgroundCall> = new Map(),
   ) {
     this.handlers = new Map<
       string,
@@ -194,6 +218,7 @@ export class ClaudeEventMapper {
 
   /** Resets only derived attribution when a new queued execution consumes its prompt. */
   resetExecution(): void {
+    this.launchLabels.clear();
     this.commandCalls.clear();
     this.deniedCommands.clear();
     this.toolUseIds.clear();
@@ -231,12 +256,13 @@ export class ClaudeEventMapper {
    */
   settleBackgroundTask(message: Message): void {
     if (message.type !== "system" || message.subtype !== "task_notification") return;
-    const toolCallId = validIdentity(message.tool_use_id);
-    const executionId = toolCallId && this.backgroundTools.get(toolCallId);
+    const toolCallId = validIdentity(message.tool_use_id) ?? [...this.backgroundTools].find(([, row]) => row.taskId === validIdentity(message.task_id))?.[0];
+    const row = toolCallId && this.backgroundTools.get(toolCallId);
     const status = BACKGROUND_TASK_STATUS.get(stringValue(message.status));
-    if (!toolCallId || !executionId || !status) return;
+    if (!toolCallId || !row || !status) return;
     this.backgroundTools.delete(toolCallId);
-    this.settleBackgroundTool(toolCallId, executionId, status, stringValue(message.summary));
+    this.backgroundDirty = true;
+    this.settleBackgroundTool(toolCallId, row.executionId, status, stringValue(message.summary));
   }
 
   /**
@@ -250,10 +276,57 @@ export class ClaudeEventMapper {
   /** Stops every held call because the SDK process that runs them is gone. */
   settleAllBackgroundTools(): void {
     this.nativeSource = {};
-    for (const [toolCallId, executionId] of this.backgroundTools) {
+    this.backgroundDirty = true;
+    this.liveTasks = new Map();
+    this.launchLabels.clear();
+    for (const [toolCallId, row] of this.backgroundTools) {
       this.backgroundTools.delete(toolCallId);
-      this.settleBackgroundTool(toolCallId, executionId, "cancelled", SESSION_ENDED_OUTPUT);
+      this.settleBackgroundTool(toolCallId, row.executionId, "cancelled", SESSION_ENDED_OUTPUT);
     }
+  }
+
+  /** Native occupancy, independent of the turn's timeline rows. */
+  backgroundTasks(): readonly NativeBackgroundTask[] {
+    return effectiveBackgroundTasks(this.liveTasks, this.backgroundTools);
+  }
+
+  /** Replaces membership, excluding ambient watchers. */
+  observeBackgroundLevel(message: Message): void {
+    if (message.type !== "system" || message.subtype !== "background_tasks_changed" || !Array.isArray(message.tasks)) return;
+    const tasks = new Map<string, NativeBackgroundTask>();
+    for (const value of message.tasks) {
+      const task = objectValue(value);
+      const taskId = validIdentity(task.task_id);
+      if (!taskId || task.ambient === true) continue;
+      tasks.set(taskId, this.levelTask(taskId, task));
+    }
+    this.liveTasks = tasks;
+    this.backgroundDirty = true;
+  }
+
+  private levelTask(taskId: string, task: Message): NativeBackgroundTask {
+    const row = [...this.backgroundTools.values()].find((held) => held.taskId === taskId);
+    const startedAt = row?.startedAt ?? this.liveTasks?.get(taskId)?.startedAt ?? Date.now();
+    return { taskId, startedAt, label: launchLabel(stringValue(task.description) || stringValue(task.task_type)) };
+  }
+
+  /** Compares only after a native mutation, once per stream message. */
+  flushBackgroundChange(changed: () => void): void {
+    if (!this.backgroundDirty) return;
+    this.backgroundDirty = false;
+    const next = JSON.stringify([...this.backgroundTasks()].sort((a, b) => a.taskId.localeCompare(b.taskId)));
+    if (next === this.lastBackgroundTasks) return;
+    this.lastBackgroundTasks = next;
+    changed();
+  }
+
+  private rememberLaunchLabel(toolCallId: string, toolName: string, input: Message): void {
+    if (toolName !== "Bash" && toolName !== "Agent") return;
+    if (this.launchLabels.size >= MAX_TRACKED_TOOLS) {
+      const oldest = this.launchLabels.keys().next().value;
+      if (oldest !== undefined) this.launchLabels.delete(oldest);
+    }
+    this.launchLabels.set(toolCallId, launchLabel(stringValue(input.description) || (toolName === "Bash" ? stringValue(input.command) : "") || toolName));
   }
 
   private settleBackgroundTool(toolCallId: string, executionId: string, status: BackgroundToolStatus, output: string): void {
@@ -363,6 +436,7 @@ export class ClaudeEventMapper {
     if (toolCallId && this.toolUseIds.has(toolCallId)) return;
     if (toolCallId) this.registerToolUse(toolCallId);
     const toolName = stringOr(block.name, "unknown");
+    this.rememberLaunchLabel(toolCallId, toolName, objectValue(block.input));
     if (toolName === "Agent" && toolCallId) this.trackSubagentRun(toolCallId, parentToolCallId);
     logger.debug("Claude ToolUse from assistant block", {
       toolId: toolCallId,
@@ -695,6 +769,7 @@ export class ClaudeEventMapper {
       stringOr(message.name, "unknown"),
     );
     const parentToolCallId = parentId(message);
+    this.rememberLaunchLabel(toolCallId, toolName, firstObjectValue(message.tool_input, message.input));
     logger.debug("Claude ToolUse from tool_use message", {
       toolId: toolCallId,
       toolName,
@@ -735,18 +810,21 @@ export class ClaudeEventMapper {
     const user = objectValue(message.message);
     const results = Array.isArray(user.content)
       ? user.content.map(objectValue).filter((block) => block.type === "tool_result") : [];
-    const launched = asyncLaunchId(message, results);
+    const launched = backgroundLaunch(message, results);
     const executionId = this.callbacks.liveExecutionId();
-    if (launched && executionId) this.holdBackgroundTool(launched, executionId);
+    if (launched && executionId) this.holdBackgroundTool(launched.toolCallId, executionId, launched.taskId);
     else for (const block of results) this.toolResult(block);
     return "none";
   }
   /** An async launch result only acknowledges the start; the call runs on until its task notification. */
-  private holdBackgroundTool(toolCallId: string, executionId: string): void {
+  private holdBackgroundTool(toolCallId: string, executionId: string, taskId?: string): void {
     this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
     if (!this.backgroundTools.has(toolCallId) && this.backgroundTools.size >= MAX_TRACKED_TOOLS)
       throw new Error("Claude background tool bound exceeded");
-    this.backgroundTools.set(toolCallId, executionId);
+    const label = this.launchLabels.get(toolCallId) ?? "Agent";
+    this.launchLabels.delete(toolCallId);
+    this.backgroundTools.set(toolCallId, { executionId, taskId, startedAt: Date.now(), label });
+    this.backgroundDirty = true;
     this.emit({ type: AgentEventType.ToolBackgrounded, threadId: this.threadId, toolCallId });
   }
   private streamEvent(message: Message): ClaudeMapOutcome {
@@ -915,9 +993,19 @@ export class ClaudeEventMapper {
 }
 
 /** The SDK reports an async launch on the message, so it only names a call when the message carries one result. */
-function asyncLaunchId(message: Message, results: readonly Message[]): string | undefined {
-  if (objectValue(message.tool_use_result).status !== "async_launched" || results.length !== 1) return undefined;
-  return validIdentity(results[0]?.tool_use_id);
+function backgroundLaunch(message: Message, results: readonly Message[]): { toolCallId: string; taskId?: string } | undefined {
+  const result = objectValue(message.tool_use_result);
+  const bashId = validIdentity(result.backgroundTaskId);
+  if ((!bashId && result.status !== "async_launched") || results.length !== 1) return undefined;
+  const toolCallId = validIdentity(results[0]?.tool_use_id);
+  return toolCallId ? { toolCallId, taskId: bashId ?? validIdentity(result.agentId) } : undefined;
+}
+
+function launchLabel(value: string): string {
+  let end = Math.min(value.length, 500);
+  const last = value.charCodeAt(end - 1);
+  if (end < value.length && last >= 0xD800 && last <= 0xDBFF) end--;
+  return value.slice(0, end);
 }
 function validIdentity(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 && value.length <= 512 ? value : undefined;

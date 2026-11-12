@@ -1,3 +1,4 @@
+import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
 import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -81,6 +82,8 @@ describe("durable Send now", () => {
   let repo: TurnSteerRepo;
   let runtime: FakeTurnRuntime;
   let service: TurnSteerService;
+  let occupancy: SessionOccupancyRegistry;
+  let occupancyNow: number;
 
   beforeEach(() => {
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-turn-steer-"));
@@ -95,7 +98,10 @@ describe("durable Send now", () => {
     writer = new ApplicationDatabaseWriter(dbPath);
     repo = new TurnSteerRepo(db, writer);
     runtime = new FakeTurnRuntime(repo);
-    service = new TurnSteerService(repo, runtime, files());
+    occupancyNow = 100;
+    occupancy = new SessionOccupancyRegistry({ now: () => occupancyNow });
+    occupancy.openSession({ providerId: "claude", threadId: THREAD });
+    service = new TurnSteerService(repo, runtime, files(), occupancy);
   });
 
   afterEach(async () => {
@@ -104,13 +110,39 @@ describe("durable Send now", () => {
     NodeFS.rmSync(directory, { recursive: true, force: true });
   });
 
+  it.each(["user", "server"] as const)("records only user-authored steer activity: %s", async (sentBy) => {
+    const key = { providerId: "claude", threadId: THREAD };
+    await service.steer(steerParams(), { sentBy });
+    const first = occupancy.read(key, Date.now()).lastUserTurnAt;
+    expect(first).toBe(sentBy === "server" ? null : 100);
+    occupancyNow = 200;
+    await service.steer(steerParams(), { sentBy });
+    expect(occupancy.read(key, Date.now()).lastUserTurnAt).toBe(first);
+    expect(runtime.sent).toHaveLength(1);
+  });
+
+  it("ignores a delivery accepted after the session closes and reopens", async () => {
+    const key = { providerId: "claude", threadId: THREAD };
+    const answer = deferred<TurnSteerOutcome>();
+    runtime.respond = () => answer.promise;
+    const delivery = service.steer(steerParams(), { sentBy: "user" });
+    await vi.waitFor(() => expect(runtime.sent).toHaveLength(1));
+    occupancy.closeSession(key, occupancy.openSession(key));
+    occupancy.openSession(key);
+    answer.resolve({ outcome: "accepted" });
+    await delivery;
+    expect(occupancy.read(key, Date.now()).lastUserTurnAt).toBeNull();
+  });
+
   /** A new process on the same database file: new writer, repo, runtime and service, then startup reconcile. */
   async function restart() {
     await writer.close();
     writer = new ApplicationDatabaseWriter(dbPath);
     repo = new TurnSteerRepo(db, writer);
     runtime = new FakeTurnRuntime(repo);
-    service = new TurnSteerService(repo, runtime, files());
+    occupancy = new SessionOccupancyRegistry({ now: Date.now });
+    occupancy.openSession({ providerId: "codex", threadId: THREAD });
+    service = new TurnSteerService(repo, runtime, files(), occupancy);
     return service.reconcileAtStartup();
   }
 
@@ -123,12 +155,12 @@ describe("durable Send now", () => {
 
   async function steerUncertain() {
     runtime.respond = async () => ({ outcome: "unknown", detail: "socket closed" });
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivery_unknown", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "delivery_unknown", messageId: STEER_ID });
   }
 
   it("delivers once and answers a replay after a lost response without calling the provider again", async () => {
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
 
     expect(runtime.sent).toEqual([{ steerId: STEER_ID, message: "Use the staging database instead." }]);
     expect(runtime.saved).toEqual([{ threadId: THREAD, turnExecutionId: EXECUTION, messageId: STEER_ID,
@@ -138,7 +170,7 @@ describe("durable Send now", () => {
   });
 
   it("retains server notice attribution on delivered and uncertain steers", async () => {
-    const options = { systemNotice: { kind: "delegated-task", presentation: "timeline", delegatedTasks: [
+    const options = { sentBy: "server", systemNotice: { kind: "delegated-task", presentation: "timeline", delegatedTasks: [
       { taskId: "task-review", threadId: "child-review", title: "Review", providerId: "codex", status: "completed" },
     ] } } satisfies Parameters<TurnSteerService["steer"]>[1];
     await service.steer(steerParams(), options);
@@ -152,19 +184,23 @@ describe("durable Send now", () => {
     expect(repo.find(uncertain)?.payload.systemNotice).toEqual({ kind: "delegated-task", presentation: "timeline", delegatedTasks: [
       { taskId: "task-review", threadId: "child-review", title: "Review", providerId: "codex", status: "completed" },
     ] });
-    await expect(service.steer(steerParams(), { systemNotice: { kind: "warning", presentation: "timeline" } }))
+    await expect(service.steer(steerParams(), { sentBy: "user", systemNotice: { kind: "warning", presentation: "timeline" } }))
       .rejects.toMatchObject({ code: "INVALID_PARAMS" });
   });
 
   it("answers a steer whose transcript save hangs as delivered, so it is never offered again", async () => {
+    const activity = vi.spyOn(occupancy, "userMessaged");
     const save = deferred<void>();
     runtime.saveGate = save.promise;
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      const result = service.steer(steerParams());
+      const result = service.steer(steerParams(), { sentBy: "user" });
+      const duplicate = service.steer(steerParams(), { sentBy: "user" });
       await runtime.saveStarted.promise;
       await vi.advanceTimersByTimeAsync(TURN_STEER_SAVE_TIMEOUT_MS);
       await expect(result).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+      await expect(duplicate).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+      expect(occupancy.read({ providerId: "claude", threadId: THREAD }, Date.now()).lastUserTurnAt).toBe(100);
     } finally {
       vi.useRealTimers();
     }
@@ -176,8 +212,9 @@ describe("durable Send now", () => {
     save.resolve();
     await expect.poll(() => runtime.saved.length).toBe(1);
     expect(repo.find(STEER_ID)?.state).toBe("delivered");
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
     expect(runtime.sent).toHaveLength(1);
+    expect(activity).toHaveBeenCalledTimes(1);
   });
 
   describe("mentions", () => {
@@ -193,7 +230,7 @@ describe("durable Send now", () => {
 
     it("gives a provider without native mentions the file contents a new turn would get", async () => {
       const mentions = [fileMention("notes.md")];
-      await expect(service.steer(steerParams({ content, mentions })))
+      await expect(service.steer(steerParams({ content, mentions }), { sentBy: "user" }))
         .resolves.toEqual({ status: "delivered", messageId: STEER_ID });
 
       expect(runtime.sent).toEqual([{ steerId: STEER_ID, mentions,
@@ -209,7 +246,7 @@ Roll out region by region.
     it("passes mentions to Codex as they are, since it reads them natively", async () => {
       runtime.providerId = "codex";
       const mentions = [fileMention("notes.md")];
-      await expect(service.steer(steerParams({ content, mentions })))
+      await expect(service.steer(steerParams({ content, mentions }), { sentBy: "user" }))
         .resolves.toEqual({ status: "delivered", messageId: STEER_ID });
 
       expect(runtime.sent).toEqual([{ steerId: STEER_ID, message: content, mentions }]);
@@ -222,7 +259,7 @@ Roll out region by region.
       ["an agent mention on a provider without them",
         { id: "mention-agent", kind: "agent", label: "notes.md", name: "notes", path: "agents/notes.md", range: { start: 7, end: 16 } }],
     ] satisfies Array<[string, MessageMention]>)("refuses %s before writing a row or calling the provider", async (_, mention) => {
-      const steering = service.steer(steerParams({ content, mentions: [mention] }));
+      const steering = service.steer(steerParams({ content, mentions: [mention] }), { sentBy: "user" });
 
       await expect(steering).rejects.toMatchObject({ name: "TurnSteerMentionError", code: "INVALID_PARAMS" });
       expect(runtime.sent).toEqual([]);
@@ -234,9 +271,9 @@ Roll out region by region.
     const answer = deferred<TurnSteerOutcome>();
     runtime.respond = () => answer.promise;
 
-    const first = service.steer(steerParams());
-    const duplicate = service.steer(steerParams());
-    await expect(service.steer(steerParams({ content: "Something else." }))).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    const first = service.steer(steerParams(), { sentBy: "user" });
+    const duplicate = service.steer(steerParams(), { sentBy: "user" });
+    await expect(service.steer(steerParams({ content: "Something else." }), { sentBy: "user" })).rejects.toMatchObject({ code: "INVALID_PARAMS" });
     answer.resolve({ outcome: "accepted" });
 
     await expect(Promise.all([first, duplicate])).resolves.toEqual([
@@ -245,24 +282,24 @@ Roll out region by region.
   });
 
   it("refuses a settled id reused with different inputs", async () => {
-    await service.steer(steerParams());
+    await service.steer(steerParams(), { sentBy: "user" });
 
-    await expect(service.steer(steerParams({ content: "Different text." })))
+    await expect(service.steer(steerParams({ content: "Different text." }), { sentBy: "user" }))
       .rejects.toMatchObject({ name: "TurnSteerConflictError", code: "INVALID_PARAMS" });
-    await expect(service.steer(steerParams({ turnExecutionId: "execution-other" })))
+    await expect(service.steer(steerParams({ turnExecutionId: "execution-other" }), { sentBy: "user" }))
       .rejects.toMatchObject({ name: "TurnSteerConflictError" });
     expect(runtime.sent).toHaveLength(1);
   });
 
   it("holds a steer the provider took when the server died before saving it, and never resends it", async () => {
-    await expect(service.steer(steerParams(), { stopAt: "after-provider-accepted" })).rejects.toBeInstanceOf(TurnSteerFaultStop);
+    await expect(service.steer(steerParams(), { sentBy: "user", stopAt: "after-provider-accepted" })).rejects.toBeInstanceOf(TurnSteerFaultStop);
     expect(repo.find(STEER_ID)?.state).toBe("pending");
 
     await expect(restart()).resolves.toEqual({ unknown: 1, deleted: 0 });
 
     expect(service.listHeldSteers()).toEqual([{ messageId: STEER_ID, threadId: THREAD,
       content: "Use the staging database instead.", state: "delivery_unknown" }]);
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivery_unknown", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "delivery_unknown", messageId: STEER_ID });
     expect(runtime.sent).toEqual([]);
   });
 
@@ -271,7 +308,7 @@ Roll out region by region.
 
     runtime.respond = async () => { throw new Error("connection reset"); };
     const other = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
-    await expect(service.steer(steerParams({ messageId: other }))).resolves.toEqual({ status: "delivery_unknown", messageId: other });
+    await expect(service.steer(steerParams({ messageId: other }), { sentBy: "user" })).resolves.toEqual({ status: "delivery_unknown", messageId: other });
 
     expect(service.listHeldSteers().map((held) => [held.messageId, held.state])).toEqual([
       [STEER_ID, "delivery_unknown"], [other, "delivery_unknown"]]);
@@ -279,24 +316,24 @@ Roll out region by region.
 
   it("answers a steer whose transcript save failed as delivered, since the provider holds it", async () => {
     runtime.saveFails = true;
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
 
     expect(repo.find(STEER_ID)?.state).toBe("delivered");
     expect(service.listHeldSteers()).toEqual([]);
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
     expect(runtime.sent).toHaveLength(1);
   });
 
   it("stores a provider refusal and rethrows it on replay, so nothing is held", async () => {
     runtime.respond = async () => ({ outcome: "rejected", reason: "turn_not_running", detail: "turn finished" });
-    await expect(service.steer(steerParams())).rejects.toMatchObject({ name: "TurnSteerError", code: "turn_not_running" });
-    await expect(service.steer(steerParams())).rejects.toMatchObject({ name: "TurnSteerError", code: "turn_not_running" });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).rejects.toMatchObject({ name: "TurnSteerError", code: "turn_not_running" });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).rejects.toMatchObject({ name: "TurnSteerError", code: "turn_not_running" });
 
     const refused = "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e";
     runtime.respond = async () => ({ outcome: "rejected", reason: "provider", detail: "input too large" });
-    await expect(service.steer(steerParams({ messageId: refused })))
+    await expect(service.steer(steerParams({ messageId: refused }), { sentBy: "user" }))
       .rejects.toMatchObject({ code: "steer_rejected", detail: "input too large" });
-    await expect(service.steer(steerParams({ messageId: refused })))
+    await expect(service.steer(steerParams({ messageId: refused }), { sentBy: "user" }))
       .rejects.toMatchObject({ code: "steer_rejected", detail: "input too large" });
 
     expect(runtime.sent).toHaveLength(2);
@@ -305,17 +342,17 @@ Roll out region by region.
 
   it("checks the running turn before storing anything", async () => {
     runtime.running = null;
-    await expect(service.steer(steerParams())).rejects.toMatchObject({ code: "turn_not_running" });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).rejects.toMatchObject({ code: "turn_not_running" });
 
     runtime.running = { turnExecutionId: "execution-next", steerable: true };
-    await expect(service.steer(steerParams())).rejects.toMatchObject({ code: "turn_not_running" });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).rejects.toMatchObject({ code: "turn_not_running" });
 
     runtime.running = { turnExecutionId: EXECUTION, steerable: false };
-    await expect(service.steer(steerParams())).rejects.toMatchObject({ code: "steer_unsupported" });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).rejects.toMatchObject({ code: "steer_unsupported" });
 
     expect(repo.find(STEER_ID)).toBeNull();
     runtime.running = { turnExecutionId: EXECUTION, steerable: true };
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "delivered", messageId: STEER_ID });
   });
 
   it("removes an uncertain steer once across windows and replays", async () => {
@@ -324,7 +361,7 @@ Roll out region by region.
     await expect(service.settleUnknownSteer({ messageId: STEER_ID, action: "remove" })).resolves.toEqual({ status: "removed" });
     await expect(service.settleUnknownSteer({ messageId: STEER_ID, action: "remove" })).resolves.toEqual({ status: "closed" });
     await expect(service.settleUnknownSteer({ messageId: STEER_ID, action: "send-again" })).resolves.toEqual({ status: "closed" });
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "closed", messageId: STEER_ID });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "closed", messageId: STEER_ID });
     expect(service.listHeldSteers()).toEqual([]);
     expect(runtime.sent).toHaveLength(1);
   });
@@ -343,8 +380,8 @@ Roll out region by region.
     await expect(restart()).resolves.toEqual({ unknown: 0, deleted: 0 });
     expect(service.listHeldSteers()).toEqual([{ messageId: STEER_ID, threadId: THREAD,
       content: "Use the staging database instead.", state: "resend_queued", replacementMessageId: replacement }]);
-    await expect(service.steer(steerParams())).resolves.toEqual({ status: "closed", messageId: STEER_ID });
-    await expect(service.steer(steerParams({ messageId: replacement }))).rejects.toMatchObject({ code: "steer_unsupported" });
+    await expect(service.steer(steerParams(), { sentBy: "user" })).resolves.toEqual({ status: "closed", messageId: STEER_ID });
+    await expect(service.steer(steerParams({ messageId: replacement }), { sentBy: "user" })).rejects.toMatchObject({ code: "steer_unsupported" });
 
     // Turn admission runs this claim inside the transaction that starts the resend's turn.
     const admission = new TurnSteerStore(db);
@@ -355,15 +392,15 @@ Roll out region by region.
     expect(service.listHeldSteers()).toEqual([]);
     await expect(service.settleUnknownSteer({ messageId: STEER_ID, action: "send-again" })).resolves.toEqual({ status: "closed" });
     await expect(service.settleUnknownSteer({ messageId: STEER_ID, action: "remove" })).resolves.toEqual({ status: "closed" });
-    await expect(service.steer(steerParams({ messageId: replacement }))).rejects.toMatchObject({ code: "steer_unsupported" });
+    await expect(service.steer(steerParams({ messageId: replacement }), { sentBy: "user" })).rejects.toMatchObject({ code: "steer_unsupported" });
     expect(runtime.sent).toEqual([]);
   });
 
   it("deletes settled steers past retention at startup and keeps held ones", async () => {
-    await service.steer(steerParams());
+    await service.steer(steerParams(), { sentBy: "user" });
     const held = "4d5e6f7a-8b9c-4d0e-8f1a-2b3c4d5e6f7a";
     runtime.respond = async () => ({ outcome: "unknown", detail: "socket closed" });
-    await service.steer(steerParams({ messageId: held }));
+    await service.steer(steerParams({ messageId: held }), { sentBy: "user" });
     db.prepare("UPDATE turn_steers SET updated_at = ?").run("2020-01-01T00:00:00.000Z");
 
     await expect(restart()).resolves.toEqual({ unknown: 0, deleted: 1 });

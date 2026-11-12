@@ -1,3 +1,4 @@
+import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 /**
  * Agent session orchestration service.
  * Manages sending messages to AI providers, tracking active sessions,
@@ -55,6 +56,7 @@ import {
 } from "../turns/thread-creation-coordinator.js";
 import {
   TurnAdmissionDispatchCoordinator,
+  isUserSentTurn,
   TURN_ADMISSION_DISPATCH_COORDINATOR,
   type CommandEffectReceipt,
   type PreparedTurnDispatch,
@@ -160,6 +162,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Bind the application-owned evidence ledger before work admission. */
   bindFileEvidence(ledger: TurnFileEvidenceLedger): void { this.fileEvidence = ledger; }
   constructor(
+    @inject(SessionOccupancyRegistry) private readonly occupancy: SessionOccupancyRegistry,
     @inject(TURN_RUNTIME_PERSISTENCE)
     private readonly runtimePersistence: TurnRuntimePersistence,
     @inject("TurnFileTracker")
@@ -1722,6 +1725,11 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     await this.awaitEndedTurnRelease(command.threadId);
     const admitted = await this.turnAdmissions.admit(command, this.runtimeAdmissionAuthority(), canReserve);
     if (admitted.kind !== "dispatch") return;
+    if (isUserSentTurn(command)) {
+      const key = { providerId: admitted.providerId, threadId: command.threadId };
+      const stamp = this.occupancy.stamp(key);
+      if (stamp) this.occupancy.userMessaged(key, stamp);
+    }
     await this.dispatchPreparedTurn(admitted);
   }
 

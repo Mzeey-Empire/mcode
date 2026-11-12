@@ -203,6 +203,7 @@ export class CodexProvider extends PackageCodexProvider {
     const observers = new Set<(event: ProviderRuntimeEvent) => void>();
     const delegatedSettingsService = { get: () => settings.get() };
     const host: ProviderHostPorts = {
+      occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
       environment: { snapshot: () => environment.getEnv() },
       processes: { attach: () => undefined, terminateTree: async () => undefined },

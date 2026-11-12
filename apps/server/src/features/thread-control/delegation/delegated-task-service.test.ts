@@ -1,3 +1,4 @@
+import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 import "reflect-metadata";
 import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
@@ -288,7 +289,7 @@ async function wakeHarness(f: Fixture) {
       undefined, false, undefined, undefined, undefined, message.messageId, undefined, message.systemNotice ?? undefined);
     await steers.markDelivered(message.messageId);
   } };
-  const steer = new TurnSteerService(steers, runtime, new FileService(f.workspaces, f.threads, f.worktrees, f.executor, f.host));
+  const steer = new TurnSteerService(steers, runtime, new FileService(f.workspaces, f.threads, f.worktrees, f.executor, f.host), new SessionOccupancyRegistry({ now: Date.now }));
   const sendMessage = async (command: SendMessageCommand) => {
     state.sends += 1;
     if (state.sendGate) await state.sendGate;

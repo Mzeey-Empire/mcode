@@ -1,3 +1,4 @@
+import type { HeldBackgroundCall } from "../claude-event-mapper.js";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
@@ -49,7 +50,7 @@ function nativeSessionEntry(pushMessage: ReturnType<typeof vi.fn>, pendingToolUs
     permissionMode: "default",
     contextWindowMode: undefined,
     pendingToolUses,
-    backgroundTools: new Map<string, string>(),
+    backgroundTools: new Map<string, HeldBackgroundCall>(),
     hasFiredToolThisTurn: false,
   };
 }

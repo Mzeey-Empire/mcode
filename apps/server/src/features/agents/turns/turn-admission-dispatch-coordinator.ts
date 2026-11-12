@@ -143,6 +143,11 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
 };
 
 /** An opaque receipt for a command effect that can be activated or rolled back. */
+/** Only direct user input extends native-task protection. */
+export function isUserSentTurn(command: SendMessageCommand): boolean {
+  return !command.providerOriginated && !command.delegationWake;
+}
+
 export type CommandEffectReceipt = GoalCommandEffectReceipt;
 
 /** A runtime admission owned by the AgentService. */
@@ -1080,7 +1085,7 @@ export class TurnAdmissionDispatchCoordinator {
   private async persistThreadSettings(prepared: PreparedCommand): Promise<void> {
     const command = prepared.command;
     // A turn the server or provider started carries no composer selection, so it must not overwrite the user's.
-    if (command.providerOriginated || command.delegationWake) return;
+    if (!isUserSentTurn(command)) return;
     const model = command.model ?? "claude-sonnet-4-6";
     await this.threads.updateSettings(command.threadId, {
       ...this.threadSettings(command, prepared.providerId),

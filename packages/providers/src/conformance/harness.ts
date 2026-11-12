@@ -368,6 +368,7 @@ function createConformanceSessionRuntime(host: ProviderHostPorts): ConformanceSe
   };
   return {
     runtime: new SessionRuntime(adapter, {
+      providerId: "conformance", occupancy: host.occupancy,
       envService: { getEnv: () => host.environment.snapshot() as Record<string, string> },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       idleTtlMs: 600_000,
@@ -573,6 +574,7 @@ function createFakeCursorPorts(): NonNullable<ProviderFactoryInput["cursor"]> {
 
 function createFakeHost(sink: DeterministicCanonicalSink, calls: string[]): ProviderHostPorts {
   return {
+    occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
     processes: {

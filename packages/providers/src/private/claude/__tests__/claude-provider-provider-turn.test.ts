@@ -256,6 +256,76 @@ describe("ClaudeProvider provider-started turns", () => {
 });
 
 describe("ClaudeProvider background agents", () => {
+  it.each(["described", "long command"])("tracks standalone Bash background work and idle level reports: %s", async (kind) => {
+    vi.useFakeTimers({ now: 1000 });
+    let release!: () => void;
+    let processed!: () => void;
+    let message: Record<string, unknown> | null = null;
+    let closed = false;
+    let ready = new Promise<void>((resolve) => { release = resolve; });
+    const emit = async (next: Record<string, unknown>) => {
+      const done = new Promise<void>((resolve) => { processed = resolve; });
+      message = next;
+      release();
+      await done;
+    };
+    mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+      const stream = (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield { type: "system", subtype: "init", session_id: "background-bash" };
+        while (!closed) {
+          await ready;
+          ready = new Promise<void>((resolve) => { release = resolve; });
+          if (message) yield message;
+          processed?.();
+        }
+      })();
+      return Object.assign(stream, { close: () => { closed = true; release(); } });
+    });
+    const events: ProviderRuntimeEvent[] = [];
+    const settle = vi.fn(async () => {});
+    const host = mockShutdownHost((event) => events.push(event), { open: async () => ({ kind: "declined", reason: "busy" }), settleBackgroundTool: settle });
+    const changed = vi.fn();
+    host.occupancy.nativeChanged = changed;
+    const provider = new ClaudeProvider(stubEnvService(), stubJobObject(), undefined, undefined, undefined, host);
+    const spawn = vi.spyOn(provider, "spawn");
+    try {
+      await sendUserTurn(provider);
+      await emit({ type: "tool_use", id: "BASH_BG", name: "Bash", input: { command: "x".repeat(499) + "😀" + "x".repeat(99), ...(kind === "described" ? { description: "Benchmark" } : {}) } });
+      await emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "BASH_BG", content: "Started" }] }, tool_use_result: { backgroundTaskId: "bench" } });
+      await emit({ type: "result", is_error: false, result: "Started", usage: { output_tokens: 1 } });
+      const spawned = spawn.mock.results[0];
+      if (spawned?.type !== "return") throw new Error("Expected spawned session");
+      const { state } = await spawned.value;
+      const label = kind === "described" ? "Benchmark" : "x".repeat(499);
+      expect(provider.isBusy(state)).toBe(false);
+      expect(provider.backgroundTasks(state)).toEqual([{ taskId: "bench", startedAt: 1000, label }]);
+      expect(changed).toHaveBeenCalledTimes(1);
+      if (kind === "long command") {
+        vi.setSystemTime(2000);
+        await emit({ type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: "bench", task_type: "shell", description: label }] });
+        expect(provider.backgroundTasks(state)).toEqual([{ taskId: "bench", startedAt: 1000, label }]);
+        expect(changed).toHaveBeenCalledTimes(1);
+        await emit({ type: "system", subtype: "background_tasks_changed", tasks: [] });
+      }
+      await emit({ type: "system", subtype: "task_notification", task_id: "bench", status: "completed", summary: "Done" });
+      expect(provider.backgroundTasks(state)).toEqual([]);
+      expect(settle).toHaveBeenCalledExactlyOnceWith({ providerId: "claude", threadId: "thread-provider", executionId: USER_EXECUTION_ID, toolCallId: "BASH_BG", status: "completed", output: "Done" });
+      expect(changed).toHaveBeenCalledTimes(2);
+      const level = { type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: "other", task_type: "shell", description: "Other" }, { task_id: "watch", ambient: true, description: "Watcher" }] };
+      await emit(level);
+      expect(provider.backgroundTasks(state)).toEqual([{ taskId: "other", startedAt: kind === "long command" ? 2000 : 1000, label: "Other" }]);
+      await emit(level);
+      expect(changed).toHaveBeenCalledTimes(3);
+      await emit({ type: "system", subtype: "background_tasks_changed", tasks: [] });
+      expect(provider.backgroundTasks(state)).toEqual([]);
+      expect(changed).toHaveBeenCalledTimes(4);
+    } finally {
+      await provider.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
   const userEnded = (events: ProviderRuntimeEvent[]) =>
     events.some(({ event }) => event.type === AgentEventType.Ended && event.turnExecutionId === USER_EXECUTION_ID);
   const agentResults = (events: ProviderRuntimeEvent[]) =>
@@ -269,7 +339,7 @@ describe("ClaudeProvider background agents", () => {
     try {
       await sendUserTurn(provider);
       await vi.waitFor(() => expect(settleBackgroundTool).toHaveBeenCalled());
-      expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", executionId: USER_EXECUTION_ID,
+      expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ providerId: "claude", threadId: "thread-provider", executionId: USER_EXECUTION_ID,
         toolCallId: "AGENT_1", status: "completed", output: AGENT_SUMMARY });
       expect(events.find(({ event }) => event.type === AgentEventType.ToolBackgrounded)?.event)
         .toMatchObject({ toolCallId: "AGENT_1", turnExecutionId: USER_EXECUTION_ID });
@@ -309,7 +379,7 @@ describe("ClaudeProvider background agents", () => {
     expect(events.filter(({ event }) => "toolCallId" in event && event.toolCallId === "BASH_1")).toEqual([]);
   });
 
-  it("keeps the session busy while the call runs and stops it when the session shuts down", async () => {
+  it("reports background work separately while the call runs and stops it when the session shuts down", async () => {
     mockQuery.mockImplementation(backgroundAgentQuery(false));
     const events: ProviderRuntimeEvent[] = [];
     const settleBackgroundTool = vi.fn(async () => {});
@@ -319,10 +389,11 @@ describe("ClaudeProvider background agents", () => {
     await vi.waitFor(() => expect(userEnded(events)).toBe(true));
     const spawned = spawn.mock.results[0];
     if (spawned?.type !== "return") throw new Error("Expected the turn to spawn a session");
-    expect(provider.isBusy((await spawned.value).state)).toBe(true);
+    expect(provider.isBusy((await spawned.value).state)).toBe(false);
+    expect(provider.backgroundTasks((await spawned.value).state).map((task) => task.taskId)).toEqual(["agent-1"]);
     await provider.shutdown();
     await vi.waitFor(() => expect(settleBackgroundTool).toHaveBeenCalled());
-    expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ threadId: "thread-provider", executionId: USER_EXECUTION_ID,
+    expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({ providerId: "claude", threadId: "thread-provider", executionId: USER_EXECUTION_ID,
       toolCallId: "AGENT_1", status: "cancelled", output: "Stopped when the Claude session ended." });
     expect(agentResults(events)).toEqual([]);
   });

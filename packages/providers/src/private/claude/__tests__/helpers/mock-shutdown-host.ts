@@ -10,6 +10,7 @@ export function mockShutdownHost(
   },
 ): ProviderHostPorts {
   return {
+    occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
     processes: { attach: () => {}, terminateTree: async () => {} },

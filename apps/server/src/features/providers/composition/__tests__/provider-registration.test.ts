@@ -9,6 +9,7 @@ import { registerCursorProvider } from "../cursor-provider-registration.js";
 function inertHost(platform: NodeJS.Platform) {
   const io = vi.fn(() => { throw new Error("Construction must stay inert"); });
   const host: ProviderHostPorts = {
+    occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform, architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: io },
     processes: { attach: io, terminateTree: io },

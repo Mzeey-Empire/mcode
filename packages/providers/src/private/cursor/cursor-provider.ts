@@ -182,6 +182,7 @@ export class CursorProvider
     this.envService = { getEnv: () => ({ ...host.environment.snapshot() }) };
     this.browserAutomationLease = host.browser;
     this.runtime = new SessionRuntime<CursorSessionState>(this, {
+      providerId: "cursor", occupancy: host.occupancy,
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       processes: host.processes,
       envService: { getEnv: () => ({ ...this.host.environment.snapshot() }) },

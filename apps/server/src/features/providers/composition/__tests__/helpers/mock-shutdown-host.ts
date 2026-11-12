@@ -4,6 +4,7 @@ import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/co
 /** Supplies the complete provider host contract without external processes or credentials. */
 export function mockShutdownHost(onEvent: (event: ProviderRuntimeEvent) => void): ProviderHostPorts {
   return {
+    occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
     processes: { attach: () => {}, terminateTree: async () => {} },

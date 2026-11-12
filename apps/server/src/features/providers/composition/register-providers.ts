@@ -1,10 +1,10 @@
 import { Lifecycle, type DependencyContainer } from "tsyringe";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 
 import { OpenCodeProvider } from "../adapters/opencode/opencode-provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { createProviderHostPorts, PROVIDER_TURN_PORT } from "./provider-host-ports.js";
-import type { ProviderTurnPort } from "@mcode/providers";
+import { createProviderHostPorts, PROVIDER_TURN_PORT, type ProviderHostPortDependencies } from "./provider-host-ports.js";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { McodeMcpServer, McodeProviderPort, McodeSessionAuthority } from "../../mcode-mcp/index.js";
 import { WorkerOwnedTurnRuntime } from "../../agents/execution/worker-owned-turn-runtime.js";
@@ -20,6 +20,7 @@ import {
 
 /** Register provider adapters, the provider registry, and provider host ports. */
 export function registerProviderAdapters(container: DependencyContainer): void {
+  container.registerInstance(SessionOccupancyRegistry, new SessionOccupancyRegistry({ now: Date.now }));
   container.register(
     ProviderEventIngress,
     { useClass: ProviderEventIngress },
@@ -47,6 +48,7 @@ export function registerProviderAdapters(container: DependencyContainer): void {
   });
   container.register("ProviderHostPorts", {
     useFactory: (c) => createProviderHostPorts({
+      occupancy: c.resolve(SessionOccupancyRegistry),
       runtime: hostRuntime,
       envService: c.resolve(EnvService),
       jobObject: c.resolve<JobObject>("JobObject"),
@@ -60,7 +62,7 @@ export function registerProviderAdapters(container: DependencyContainer): void {
       grants: c.resolve(ScopedPreGrantService),
       ingress: c.resolve(ProviderEventIngress),
       eventOwnership: c.resolve(WorkerOwnedTurnRuntime).providerEvents,
-      turns: () => c.resolve<ProviderTurnPort>(PROVIDER_TURN_PORT),
+      turns: () => c.resolve<ReturnType<ProviderHostPortDependencies["turns"]>>(PROVIDER_TURN_PORT),
     }),
   });
 }

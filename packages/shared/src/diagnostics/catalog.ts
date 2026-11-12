@@ -227,6 +227,12 @@ export const DIAG_CATALOG = {
     ["th"],
     "When an approval request or resolution was written to sockets, and which `conn`s. It does not confirm a client received it; it separates server delay from time spent waiting on clients or people.",
   ),
+  "session.evict": event<{ reason: "idle" | "memory-pressure"; idleMs: number; turnBusy: boolean; nativeTasks: number; nativeProtecting: number; held: boolean }>()(
+    ["th"], "A pooled session became evictable under its occupancy policy.",
+  ),
+  "session.shutdown-held": event<{ held: boolean; nativeTasks: number; nativeProtecting: number }>()(
+    ["th"], "Shutdown stopped a session with protected background work.",
+  ),
   "turn.recovered": event<{ turn: string; execution: string; incident: string; cause: "app_closed"; reason: string }>()(
     ["th"],
     "An execution that a server start found interrupted by the previous run, and the recovery incident it created.",

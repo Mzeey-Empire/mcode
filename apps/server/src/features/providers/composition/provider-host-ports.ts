@@ -7,6 +7,7 @@ import type {
   ProviderTurnPort,
 } from "@mcode/providers";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
+import type { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 import { diag } from "@mcode/shared/diagnostics";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
 import type { EnvService } from "../../../runtime/environment/env-service.js";
@@ -49,6 +50,7 @@ export interface ProviderEventOwnership {
 
 /** Server services used to compose the narrow Provider host-port boundary. */
 export interface ProviderHostPortDependencies {
+  occupancy: SessionOccupancyRegistry;
   runtime: HostRuntime;
   envService: EnvService;
   jobObject: JobObject;
@@ -58,7 +60,9 @@ export interface ProviderHostPortDependencies {
   ingress: ProviderEventIngress;
   eventOwnership?: ProviderEventOwnership;
   /** Resolved per call because the turn owner itself depends on the provider registry. */
-  turns: () => ProviderTurnPort;
+  turns: () => Pick<ProviderTurnPort, "open"> & {
+    settleBackgroundTool(settlement: Omit<Parameters<ProviderTurnPort["settleBackgroundTool"]>[0], "providerId">): Promise<void>;
+  };
 }
 
 /** Injection token for the server service that admits provider-started turns. */
@@ -69,6 +73,7 @@ export function createProviderHostPorts(
   dependencies: ProviderHostPortDependencies,
 ): ProviderHostPorts {
   return {
+    occupancy: dependencies.occupancy,
     runtime: dependencies.runtime,
     environment: {
       snapshot: () => dependencies.envService.getEnv(),
@@ -111,7 +116,11 @@ export function createProviderHostPorts(
     },
     turns: {
       open: (request) => dependencies.turns().open(request),
-      settleBackgroundTool: (settlement) => dependencies.turns().settleBackgroundTool(settlement),
+      settleBackgroundTool: (settlement) => {
+        const { providerId, ...result } = settlement;
+        dependencies.occupancy.touch({ providerId, threadId: result.threadId });
+        return dependencies.turns().settleBackgroundTool(result);
+      },
     },
   };
 }
@@ -133,6 +142,9 @@ async function submitProviderEvents(
       types: [...new Set(batch.events.map((event) => event.payload.type))].slice(0, 8),
     }));
     throw new Error("Canonical event execution is no longer admitted");
+  }
+  for (const providerId of new Set(batch.events.map((draft) => draft.sourceProviderId))) {
+    dependencies.occupancy.touch({ providerId, threadId: batch.threadId });
   }
   return await submitWorkerEvents(dependencies, route, batch);
 }

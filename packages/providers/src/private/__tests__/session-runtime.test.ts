@@ -1,7 +1,68 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionRuntime, type ProtocolAdapter } from "../session-runtime.js";
+import { diag } from "@mcode/shared/diagnostics";
 
 describe("SessionRuntime", () => {
+  it("never opens occupancy for a session stopped while spawning", async () => {
+    let release!: () => void;
+    const spawning = new Promise<void>((resolve) => { release = resolve; });
+    const openSession = vi.fn(() => 1);
+    const runtime = new SessionRuntime({
+      spawn: async () => { await spawning; return { state: {}, pids: [] }; },
+      isBusy: () => false, isStale: () => false, interrupt: () => {}, close: () => {},
+    }, { providerId: "test", occupancy: { openSession, closeSession: () => {}, nativeChanged: () => {}, read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }) }, jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} }, envService: { getEnv: () => ({}) } });
+    const acquisition = expect(runtime.acquire({ sessionId: "session", threadId: "thread", cwd: ".", permissionMode: "default" })).rejects.toThrow();
+    const stopping = runtime.stop("session");
+    await Promise.resolve();
+    release();
+    await Promise.all([acquisition, stopping]);
+    expect(runtime.size).toBe(0);
+    expect(openSession).not.toHaveBeenCalled();
+    await runtime.shutdown();
+  });
+
+  it.each(["stop", "idle", "pressure", "shutdown"])("closes occupancy synchronously before native teardown: %s", async (path) => {
+    vi.useFakeTimers({ now: 0 });
+    let open = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const adapter: ProtocolAdapter<{}> = {
+      spawn: async () => ({ state: {}, pids: [] }), isBusy: () => false, isStale: () => false,
+      interrupt: () => { expect(open).toBe(false); }, close: () => gate,
+    };
+    const runtime = new SessionRuntime(adapter, {
+      providerId: "test", idleTtlMs: 1,
+      occupancy: { openSession: () => { open = true; return 1; }, closeSession: () => { open = false; }, nativeChanged: () => {}, read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }) },
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} }, envService: { getEnv: () => ({}) },
+    });
+    try {
+      await runtime.acquire({ sessionId: "session", threadId: "thread", cwd: ".", permissionMode: "default" });
+      const stopping = path === "idle" ? vi.advanceTimersByTimeAsync(60_000) : path === "pressure" ? runtime.evictNonBusy("critical") : path === "shutdown" ? runtime.shutdown() : runtime.stop("session");
+      if (path !== "idle") expect(open).toBe(false);
+      release();
+      await stopping;
+      expect(open).toBe(false);
+      expect(runtime.size).toBe(0);
+    } finally { release(); await runtime.shutdown(); vi.useRealTimers(); }
+  });
+
+  it("reports only protected sessions at shutdown and still closes every session", async () => {
+    const emit = vi.spyOn(diag, "emit");
+    const closed: string[] = [];
+    const runtime = new SessionRuntime({
+      spawn: async ({ threadId }) => ({ state: threadId, pids: [] }), isBusy: () => false, isStale: () => false,
+      backgroundTasks: (id) => id === "held" ? [{ taskId: "bench", label: "Bench", startedAt: Date.now() }] : [],
+      interrupt: () => {}, close: (id) => { closed.push(id); },
+    }, { providerId: "test", occupancy: { openSession: () => 1, closeSession: () => {}, nativeChanged: () => {}, read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }) }, jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} }, envService: { getEnv: () => ({}) } });
+    try {
+      for (const id of ["held", "idle"]) await runtime.acquire({ sessionId: id, threadId: id, cwd: ".", permissionMode: "default" });
+      await runtime.shutdown();
+      expect(closed.sort()).toEqual(["held", "idle"]);
+      const reports = emit.mock.calls.filter(([name]) => name === "session.shutdown-held");
+      expect(reports.map(([, context]) => context)).toEqual([{ th: "held" }]);
+    } finally { await runtime.shutdown(); emit.mockRestore(); }
+  });
+
   it("preserves admitted preparation and native busy sessions while evicting an idle peer", async () => {
     const adapter: ProtocolAdapter<{ id: string; busy: boolean }> = {
       spawn: async ({ sessionId }) => ({ state: { id: sessionId, busy: sessionId === "busy" }, pids: [] }),
@@ -10,7 +71,7 @@ describe("SessionRuntime", () => {
       close: vi.fn(),
       isStale: () => false,
     };
-    const runtime = new SessionRuntime(adapter, {
+    const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       envService: { getEnv: () => ({}) },
     });
@@ -39,7 +100,7 @@ describe("SessionRuntime", () => {
       close: vi.fn((state) => state.id === "first" ? closeGate : Promise.resolve()),
       isStale: () => false,
     };
-    const runtime = new SessionRuntime(adapter, {
+    const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       envService: { getEnv: () => ({}) },
     });
@@ -72,7 +133,7 @@ describe("SessionRuntime", () => {
       close: vi.fn((state) => state.id === "first" ? closeGate : Promise.resolve()),
       isStale: () => false,
     };
-    const runtime = new SessionRuntime(adapter, {
+    const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       envService: { getEnv: () => ({}) },
     });
@@ -109,7 +170,7 @@ describe("SessionRuntime", () => {
       close: vi.fn((state) => state.generation === 1 ? closeGate : Promise.resolve()),
       isStale: () => false,
     };
-    const runtime = new SessionRuntime(adapter, {
+    const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       envService: { getEnv: () => ({}) },
     });
@@ -156,7 +217,7 @@ describe("SessionRuntime", () => {
       close: vi.fn(() => new Promise<void>((resolve) => { releaseClose = resolve; })),
       isStale: () => false,
     };
-    const runtime = new SessionRuntime(adapter, {
+    const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       envService: { getEnv: () => ({}) },
     });
@@ -184,7 +245,7 @@ describe("SessionRuntime", () => {
       close: vi.fn((state) => state.id === "peer" ? new Promise<void>((resolve) => { releasePeer = resolve; }) : Promise.resolve()),
       isStale: () => false,
     };
-    const runtime = new SessionRuntime(adapter, {
+    const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       processes: { attach: () => undefined, terminateTree: async (pid) => { if (pid === 401) throw new Error("failed process cleanup"); } },
       envService: { getEnv: () => ({}) },
@@ -210,7 +271,7 @@ describe("SessionRuntime", () => {
     };
     const attach = vi.fn();
     const terminateTree = vi.fn(async () => undefined);
-    const runtime = new SessionRuntime(adapter, {
+    const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
       processes: { attach, terminateTree },
       envService: { getEnv: () => ({}) },

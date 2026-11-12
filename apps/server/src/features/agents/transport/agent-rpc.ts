@@ -163,7 +163,7 @@ const agentHandlers: AgentRpcHandlerMap = {
     }
     return { admitted: await deps.messageRepo.confirmUserMessage(params.threadId, params.messageId) };
   },
-  "agent.steer": (deps, params) => requireTurnSteers(deps).steer(params),
+  "agent.steer": (deps, params) => requireTurnSteers(deps).steer(params, { sentBy: "user" }),
   "agent.listHeldSteers": (deps) => requireTurnSteers(deps).listHeldSteers(),
   "agent.settleUnknownSteer": (deps, params) => requireTurnSteers(deps).settleUnknownSteer(params),
   "turn.retry": (deps, params) => deps.turnRecoveryService.retryErroredTurn(params, (command) =>

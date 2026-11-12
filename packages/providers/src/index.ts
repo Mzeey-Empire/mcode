@@ -50,6 +50,7 @@ export type {
   ProviderTurnRouting,
 } from "./host-ports.js";
 export { providerBrowserPermissionCapability } from "./host-ports.js";
+export type { ProviderSessionKey, ProviderSessionOccupancy, ProviderSessionOccupancyPort } from "./host-ports.js";
 export {
   BoundedToolOutputBuffer,
   TOOL_OUTPUT_ARTIFACT_TTL_MS,

@@ -1,3 +1,4 @@
+import { SessionOccupancyRegistry, type UserMessageStamp } from "../../session-occupancy/session-occupancy-registry.js";
 /**
  * Durable Send now. A steer row is written before the adapter call and Mcode never sends a
  * steered message twice on its own; see `docs/plans/ready-for-build/sections/05-running-turn.md`
@@ -49,6 +50,7 @@ export class TurnSteerFaultStop extends Error {
 
 /** Steer options for fault injection and server-authored message attribution. */
 export interface TurnSteerOptions {
+  readonly sentBy: "user" | "server";
   readonly stopAt?: TurnSteerFaultPoint;
   /** Server-authored attribution retained with the durable steer payload. */
   readonly systemNotice?: SystemNoticeMetadata;
@@ -60,6 +62,7 @@ interface InFlightSteer {
 }
 
 interface NewSteer {
+  readonly stamp: UserMessageStamp | null;
   readonly params: TurnSteerParams;
   readonly payload: TurnSteerPayload;
   readonly inputsHash: string;
@@ -76,10 +79,11 @@ export class TurnSteerService {
     @inject(TurnSteerRepo) private readonly repo: TurnSteerRepo,
     @inject(TurnSteerRuntimePort) private readonly runtime: TurnSteerRuntime,
     @inject(FileService) private readonly files: MentionFiles,
+    @inject(SessionOccupancyRegistry) private readonly occupancy: SessionOccupancyRegistry,
   ) {}
 
   /** Add a message to the running turn. Every thrown `TurnSteerError` means the provider never took it. */
-  steer(params: TurnSteerParams, options: TurnSteerOptions = {}): Promise<TurnSteerResult> {
+  steer(params: TurnSteerParams, options: TurnSteerOptions): Promise<TurnSteerResult> {
     const payload: TurnSteerPayload = { content: params.content, ...(params.mentions ? { mentions: params.mentions } : {}),
       ...(options.systemNotice ? { systemNotice: options.systemNotice } : {}) };
     const inputsHash = hashTurnSteerInputs({ threadId: params.threadId, turnExecutionId: params.turnExecutionId, payload });
@@ -97,7 +101,7 @@ export class TurnSteerService {
       return Promise.reject(error);
     }
     // Registered before the first await, so a concurrent replay joins this call.
-    const result = this.deliver({ params, payload, inputsHash, turn }, options);
+    const result = this.deliver({ params, payload, inputsHash, turn, stamp: this.occupancy.stamp({ providerId: turn.providerId, threadId: params.threadId }) }, options);
     this.inFlight.set(params.messageId, { inputsHash, result });
     const forget = () => { this.inFlight.delete(params.messageId); };
     result.then(forget, forget);
@@ -167,6 +171,12 @@ export class TurnSteerService {
     }
   }
 
+  private recordUserActivity(steer: NewSteer, options: TurnSteerOptions): void {
+    if (options.sentBy === "user" && steer.stamp) {
+      this.occupancy.userMessaged({ providerId: steer.turn.providerId, threadId: steer.params.threadId }, steer.stamp);
+    }
+  }
+
   private async deliver(steer: NewSteer, options: TurnSteerOptions): Promise<TurnSteerResult> {
     const { params, payload, inputsHash, turn } = steer;
     const messageId = params.messageId;
@@ -181,6 +191,7 @@ export class TurnSteerService {
       await this.repo.settle(messageId, { state: "rejected", rejection });
       throw rejectionError(rejection);
     }
+    this.recordUserActivity(steer, options);
     if (outcome.outcome === "unknown") return this.markUnknown(messageId);
     stopAt(options, "after-provider-accepted");
     try {
