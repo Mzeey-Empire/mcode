@@ -360,7 +360,7 @@ describe("Cursor browser MCP configuration", () => {
     provider.envService = { getEnv: vi.fn(() => ({})) };
     provider.host = {
       runtime: TEST_HOST_RUNTIME,
-      processes: { run: async () => { throw new Error("cursor-browser-mcp.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
+      processes: { open: () => { throw new Error("cursor-browser-mcp.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("cursor-browser-mcp.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
     };
     provider.settingsService = { get: vi.fn(() => ({ provider: { cursor: { verboseFailureLogs: false } } })) };
     provider.pendingBrowserContext = new Map();

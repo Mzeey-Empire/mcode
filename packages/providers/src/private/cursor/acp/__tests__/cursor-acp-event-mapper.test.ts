@@ -797,7 +797,7 @@ describe("Cursor ACP client-factory session-update seam", () => {
     const runtime = await AcpSessionRuntime.start({
       waitForOutputCapacity: async () => {},
       spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
-      processes: { run: async () => { throw new Error("cursor-acp-event-mapper.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
+      processes: { open: () => { throw new Error("cursor-acp-event-mapper.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("cursor-acp-event-mapper.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
       callbacks: {
         onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }),
         onSessionUpdate: async (update) => {
@@ -912,7 +912,7 @@ describe("Cursor ACP client-factory session-update seam", () => {
       const runtime = await AcpSessionRuntime.start({
         waitForOutputCapacity: async () => {},
         spawnSpec: { command: "fake", args: [], cwd: ".", env: {} },
-        processes: { run: async () => { throw new Error("cursor-acp-event-mapper.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
+        processes: { open: () => { throw new Error("cursor-acp-event-mapper.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("cursor-acp-event-mapper.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree: vi.fn(async () => undefined) },
         callbacks: {
           onPermissionRequest: async () => ({ outcome: { outcome: "cancelled" } }),
           onSessionUpdate: async (update) => {

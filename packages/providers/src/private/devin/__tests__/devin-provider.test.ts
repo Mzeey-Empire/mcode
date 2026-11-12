@@ -43,7 +43,7 @@ function createHost(): ProviderHostPorts {
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: vi.fn(() => ({ WINDSURF_API_KEY: "test-key" })) },
     processes: {
-      run: async () => { throw new Error("devin-provider.test.ts fixture does not support process runs"); },
+      open: () => { throw new Error("devin-provider.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("devin-provider.test.ts fixture does not support process runs"); },
       attach: vi.fn(),
       terminateTree: vi.fn(async () => undefined),
     },

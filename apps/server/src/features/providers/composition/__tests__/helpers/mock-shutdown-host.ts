@@ -7,7 +7,7 @@ export function mockShutdownHost(onEvent: (event: ProviderRuntimeEvent) => void)
     occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
-    processes: { run: async () => { throw new Error("mock-shutdown-host.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
+    processes: { open: () => { throw new Error("mock-shutdown-host.ts fixture does not support process sessions"); }, run: async () => { throw new Error("mock-shutdown-host.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
     browser: {
       stage: () => ({ leaseId: "shutdown-test", expiresAt: Date.now() + 60_000 }),
       releaseSession: () => 0, isConfigured: () => false, issue: () => null,

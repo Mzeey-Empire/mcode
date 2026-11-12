@@ -86,6 +86,7 @@ export function createProviderHostPorts(
     },
     processes: {
       run: sharedProcessStartWorkerClient().run,
+      open: sharedProcessStartWorkerClient().open,
       attach: (pid, description) => {
         if (!dependencies.jobObject.isWindowsJob) return;
         dependencies.jobObject.assign(pid);

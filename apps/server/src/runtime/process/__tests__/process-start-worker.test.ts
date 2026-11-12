@@ -36,6 +36,58 @@ import { RealGitExecutor } from "../../../features/projects/git/execution/real-g
 
 const PROBE_KEYS = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"] as const;
 
+describe("interactive process worker sessions", () => {
+  it("echoes stdin through the worker and stops without a main-thread process start", async () => {
+    mainThreadStarts.count = 0;
+    let output = "";
+    const session = new ProcessStartWorkerClient().open({
+      command: process.execPath,
+      args: ["-e", "process.stdin.on('data', chunk => process.stdout.write(chunk))"],
+      timeout: 10_000,
+    }, { onStdout: (chunk) => { output += chunk; } });
+    try {
+      session.write("hello worker\n");
+      await vi.waitFor(() => expect(output).toBe("hello worker\n"));
+    } finally {
+      session.stop();
+      session.stop();
+      await session.exited;
+    }
+    session.write("after exit\n");
+    expect(mainThreadStarts.count).toBe(0);
+  });
+
+  it("resolves exited when the binary is missing", async () => {
+    const session = new ProcessStartWorkerClient().open({
+      command: "missing-mcode-session-binary-xyz",
+      args: [],
+      timeout: 10_000,
+    }, {});
+    await expect(session.exited).resolves.toBeUndefined();
+  });
+
+  it.runIf(process.platform === "win32")("stops the descendant of a shell session", async () => {
+    let output = "";
+    const session = new ProcessStartWorkerClient().open({
+      command: `"${process.execPath}"`,
+      args: ["-e", '"console.log(process.pid);setInterval(()=>{},1000)"'],
+      shell: true,
+      timeout: 10_000,
+    }, { onStdout: (chunk) => { output += chunk; } });
+    let pid = 0;
+    try {
+      await vi.waitFor(() => {
+        pid = Number(output.trim());
+        expect(pid).toBeGreaterThan(0);
+      });
+    } finally {
+      session.stop();
+      await session.exited;
+    }
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 5_000 });
+  });
+});
+
 describe("git process execution off the main thread", () => {
   const tempDirs: string[] = [];
 

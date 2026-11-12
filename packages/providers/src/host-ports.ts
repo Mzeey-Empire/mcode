@@ -42,9 +42,20 @@ export type ProviderProcessRunner = (request: {
   readonly maxBuffer?: number;
 }) => Promise<{ stdout: string; stderr: string }>;
 
+/** Opens an interactive process off the request thread because Windows process creation blocks that thread. */
+export type ProviderProcessOpener = (request: Parameters<ProviderProcessRunner>[0], observer: {
+  readonly onStdout?: (chunk: string) => void;
+  readonly onStdinError?: (message: string) => void;
+}) => {
+  write(text: string): void;
+  stop(): void;
+  readonly exited: Promise<void>;
+};
+
 /** Runs probes, attaches and terminates child process trees without exposing the server process service. */
 export interface ProviderProcessPort {
   run: ProviderProcessRunner;
+  open: ProviderProcessOpener;
   attach(pid: number, description: string): void;
   terminateTree(pid: number): Promise<void>;
 }

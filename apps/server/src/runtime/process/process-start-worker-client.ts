@@ -14,6 +14,7 @@ import {
   type ProcessStartFailure,
   type ProcessStartRequest,
   type ProcessStartRunner,
+  type ProcessStartOpener,
 } from "./process-start.js";
 import type { ProcessStartResult } from "./process-start.js";
 
@@ -21,18 +22,23 @@ import type { ProcessStartResult } from "./process-start.js";
 export interface ProcessStartObservedStreams {
   readonly stdout: boolean;
   readonly stderr: boolean;
+  readonly stdinError?: boolean;
 }
 
 /** Main thread to process worker. */
-export interface ProcessStartWorkerInbound {
+export type ProcessStartWorkerInbound = {
+  readonly kind: "run" | "open";
   readonly id: number;
   readonly request: ProcessStartRequest;
   /** Present when the run streams output back as `output` messages before its result. */
   readonly observe?: ProcessStartObservedStreams;
-}
+} | { readonly kind: "write"; readonly id: number; readonly text: string }
+  | { readonly kind: "stop"; readonly id: number };
 
 /** Process worker to main thread. */
 export type ProcessStartWorkerOutbound =
+  | { readonly id: number; readonly exited: true }
+  | { readonly id: number; readonly stdinError: string }
   | { readonly id: number; readonly output: "stdout" | "stderr"; readonly chunk: string }
   | { readonly id: number; readonly ok: true; readonly result: ProcessStartResult }
   | { readonly id: number; readonly ok: false; readonly failure: ProcessStartFailure };
@@ -43,6 +49,11 @@ interface PendingRun {
   readonly reject: (error: Error) => void;
 }
 
+function deliverOutput(observer: ProcessOutputObserver | undefined, stream: "stdout" | "stderr", chunk: string): void {
+  if (stream === "stdout") observer?.onStdout?.(chunk);
+  else observer?.onStderr?.(chunk);
+}
+
 /** Creates the worker thread that starts processes. */
 export type ProcessStartWorkerFactory = () => Worker;
 
@@ -51,6 +62,7 @@ export class ProcessStartWorkerClient {
   private worker: Worker | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, PendingRun>();
+  private readonly sessions = new Map<number, { observer: ProcessOutputObserver; resolve: () => void }>();
 
   constructor(private readonly createWorker: ProcessStartWorkerFactory = createProcessStartWorker) {}
 
@@ -61,6 +73,7 @@ export class ProcessStartWorkerClient {
     // The worker's process.env is a copy taken when it started; send the
     // server's current environment so later PATH or credential changes apply.
     const message: ProcessStartWorkerInbound = {
+      kind: "run",
       id,
       request: { ...request, env: request.env ?? { ...process.env } },
       ...(observer ? { observe: { stdout: Boolean(observer.onStdout), stderr: Boolean(observer.onStderr) } } : {}),
@@ -69,6 +82,34 @@ export class ProcessStartWorkerClient {
       this.pending.set(id, { observer, resolve, reject });
       worker.postMessage(message);
     });
+  };
+
+  /** Opens an interactive process on the same worker used by buffered runs. */
+  readonly open: ProcessStartOpener = (request, observer) => {
+    let worker: Worker;
+    try {
+      worker = this.worker ?? this.start();
+    } catch {
+      return { write: () => {}, stop: () => {}, exited: Promise.resolve() };
+    }
+    const id = this.nextId++;
+    const exited = new Promise<void>((resolve) => { this.sessions.set(id, { observer, resolve }); });
+    worker.postMessage({
+      kind: "open", id, request: { ...request, env: request.env ?? { ...process.env } },
+      observe: { stdout: Boolean(observer.onStdout), stderr: Boolean(observer.onStderr), stdinError: Boolean(observer.onStdinError) },
+    } satisfies ProcessStartWorkerInbound);
+    let stopped = false;
+    return {
+      write: (text) => {
+        if (!stopped && this.sessions.has(id)) worker.postMessage({ kind: "write", id, text } satisfies ProcessStartWorkerInbound);
+      },
+      stop: () => {
+        if (stopped || !this.sessions.has(id)) return;
+        stopped = true;
+        worker.postMessage({ kind: "stop", id } satisfies ProcessStartWorkerInbound);
+      },
+      exited,
+    };
   };
 
   private start(): Worker {
@@ -83,13 +124,29 @@ export class ProcessStartWorkerClient {
     return worker;
   }
 
+  private settleSession(reply: ProcessStartWorkerOutbound): boolean {
+    const session = this.sessions.get(reply.id);
+    if (session) {
+      if ("exited" in reply) {
+        this.sessions.delete(reply.id);
+        session.resolve();
+      } else if ("stdinError" in reply) session.observer.onStdinError?.(reply.stdinError);
+      else if ("output" in reply) {
+        deliverOutput(session.observer, reply.output, reply.chunk);
+      }
+      return true;
+    }
+    return false;
+  }
+
   private settle(reply: ProcessStartWorkerOutbound): void {
+    if (this.settleSession(reply)) return;
+    if ("exited" in reply || "stdinError" in reply) return;
     const run = this.pending.get(reply.id);
     if (!run) return;
     // Worker messages arrive in send order, so every chunk precedes its run's result.
     if ("output" in reply) {
-      if (reply.output === "stdout") run.observer?.onStdout?.(reply.chunk);
-      else run.observer?.onStderr?.(reply.chunk);
+      deliverOutput(run.observer, reply.output, reply.chunk);
       return;
     }
     this.pending.delete(reply.id);
@@ -105,6 +162,8 @@ export class ProcessStartWorkerClient {
     const runs = [...this.pending.values()];
     this.pending.clear();
     for (const run of runs) run.reject(error);
+    for (const session of this.sessions.values()) session.resolve();
+    this.sessions.clear();
   }
 }
 

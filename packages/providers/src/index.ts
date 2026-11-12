@@ -43,6 +43,7 @@ export type {
   ProviderMcodePort,
   ProviderProcessPort,
   ProviderProcessRunner,
+  ProviderProcessOpener,
   ProviderRuntimePort,
   ProviderTurnDeclineReason,
   ProviderTurnOpening,

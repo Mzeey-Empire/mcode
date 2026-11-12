@@ -5,6 +5,7 @@
 
 import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
 /** Buffered UTF-8 output from a short-lived process. */
 export interface ProcessStartResult {
   readonly stdout: string;
@@ -36,7 +37,68 @@ export interface ProcessStartRequest {
 export interface ProcessOutputObserver {
   readonly onStdout?: (chunk: string) => void;
   readonly onStderr?: (chunk: string) => void;
+  readonly onStdinError?: (message: string) => void;
 }
+
+/** An interactive process owned by the thread that starts it. */
+export interface ProcessStartSession {
+  write(text: string): void;
+  stop(): void;
+  readonly exited: Promise<void>;
+}
+
+/** Starts an interactive process without closing stdin after the first write. */
+export type ProcessStartOpener = (
+  request: ProcessStartRequest, observer: ProcessOutputObserver,
+) => ProcessStartSession;
+
+/** Hosts a session on the calling thread, including process-tree termination. */
+export const openProcessStart: ProcessStartOpener = (request, observer) => {
+  let resolveExit!: () => void;
+  const exited = new Promise<void>((resolve) => { resolveExit = resolve; });
+  let ended = false;
+  let stopping = false;
+  let timer: ReturnType<typeof setTimeout>;
+  const finish = () => {
+    if (ended) return;
+    ended = true;
+    clearTimeout(timer);
+    resolveExit();
+  };
+  let child: NodeChildProcess.ChildProcessWithoutNullStreams;
+  const stop = () => {
+    if (ended || stopping) return;
+    stopping = true;
+    // With shell:true, killing cmd.exe alone would orphan the actual process.
+    if (hostRuntime.platform === "win32" && child.pid !== undefined) {
+      NodeChildProcess.execFile("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true }, finish);
+    } else {
+      child.kill("SIGKILL");
+    }
+  };
+  const session: ProcessStartSession = {
+    write: (text) => { if (!ended && !stopping) child.stdin.write(text); },
+    stop,
+    exited,
+  };
+  try {
+    child = NodeChildProcess.spawn(request.command, [...request.args], {
+      windowsHide: true, shell: request.shell, env: request.env, cwd: request.cwd,
+    });
+  } catch {
+    finish();
+    return session;
+  }
+  child.stdin.on("error", (error: Error) => observer.onStdinError?.(error.message));
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (chunk: string) => observer.onStdout?.(chunk));
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => observer.onStderr?.(chunk));
+  child.once("error", finish);
+  child.once("close", () => { if (!stopping || hostRuntime.platform !== "win32") finish(); });
+  timer = setTimeout(stop, request.timeout);
+  return session;
+};
 
 /**
  * Starts one process and resolves its output, or rejects with execFile's failure fields.
