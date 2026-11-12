@@ -9,23 +9,41 @@ vi.mock("electron", () => ({
 
 import { ServerRuntime } from "../index.js";
 
-function createRuntime(
-  port = 43123,
-  overrides: Partial<ConstructorParameters<typeof ServerRuntime>[0]> = {},
-): ServerRuntime {
+type RuntimeDependencies = ConstructorParameters<typeof ServerRuntime>[0];
+
+function createManager(
+  port: number,
+  start: RuntimeDependencies["manager"]["start"] = vi.fn(async () => ({ port, authToken: "test-token" })),
+): RuntimeDependencies["manager"] {
+  return {
+    port,
+    authToken: "test-token",
+    ipcPath: "test-ipc-path",
+    onUnexpectedExit: null,
+    start,
+    isHealthy: vi.fn(async () => true),
+    restart: vi.fn(async () => undefined),
+    forceReplace: vi.fn(async () => undefined),
+    stopServerHeldByLock: vi.fn(async () => undefined),
+  };
+}
+
+function createWindow() {
+  return {
+    isMinimized: () => false,
+    restore: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn(),
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: vi.fn() },
+    once: vi.fn(),
+  };
+}
+
+function createRuntime(port = 43123, overrides: Partial<RuntimeDependencies> = {}): ServerRuntime {
   return new ServerRuntime({
     platform: "linux",
-    manager: {
-      port,
-      authToken: "test-token",
-      ipcPath: "test-ipc-path",
-      onUnexpectedExit: null,
-      start: vi.fn(async () => ({ port, authToken: "test-token" })),
-      isHealthy: vi.fn(async () => true),
-      restart: vi.fn(async () => undefined),
-      forceReplace: vi.fn(async () => undefined),
-      stopServerHeldByLock: vi.fn(async () => undefined),
-    },
+    manager: createManager(port),
     ipcMain: { handle: vi.fn() },
     getMainWindow: () => null,
     dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
@@ -63,21 +81,38 @@ describe("ServerRuntime Desktop Window seam", () => {
     }
   });
 
+  it("joins an early start instead of starting the server again", async () => {
+    const start = vi.fn(async () => ({ port: 43123, authToken: "test-token" }));
+    const runtime = createRuntime(43123, {
+      manager: createManager(43123, start),
+      relayStarter: () => vi.fn(),
+    });
+
+    runtime.beginStart();
+
+    await expect(runtime.connectWindow(createWindow())).resolves.toBe(43123);
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("reports an early start failure when the window connects", async () => {
+    const error = new Error("Server failed to start");
+    const runtime = createRuntime(43123, {
+      manager: createManager(43123, vi.fn().mockRejectedValue(error)),
+    });
+
+    runtime.beginStart();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await expect(runtime.connectWindow(createWindow())).rejects.toBe(error);
+  });
+
   it("withholds the server URL until the window has its auth cookie and relay", async () => {
     vi.useFakeTimers();
     let finishCookieInstallation!: () => void;
     const cookieInstallation = new Promise<void>((resolve) => {
       finishCookieInstallation = resolve;
     });
-    const window = {
-      isMinimized: () => false,
-      restore: vi.fn(),
-      show: vi.fn(),
-      focus: vi.fn(),
-      isDestroyed: () => false,
-      webContents: { isDestroyed: () => false, send: vi.fn() },
-      once: vi.fn(),
-    };
+    const window = createWindow();
     type Handler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
     const handlers = new Map<string, Handler>();
     let cookieInstalled = false;

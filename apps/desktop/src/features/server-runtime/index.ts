@@ -119,6 +119,7 @@ export class ServerRuntime {
   private readonly dependencies: ServerRuntimeDependencies;
   private readonly relayStarter: ServerRuntimeRelayStarter;
   private readonly reliabilityHarnessControlPlane: ReliabilityHarnessControlPlane | null;
+  private serverStart: Promise<number> | null = null;
   private resolveConnectionReady!: () => void;
   private readonly connectionReady = new Promise<void>((resolve) => {
     this.resolveConnectionReady = resolve;
@@ -188,8 +189,20 @@ export class ServerRuntime {
     });
   }
 
+  /** Start the server before the app is ready. {@link connectWindow} reports a failure, because its dialogs need a ready app. */
+  beginStart(): void {
+    // connectWindow awaits the same promise and rethrows the failure.
+    this.start().catch(() => undefined);
+  }
+
+  /** Start the server once and return its listening port. Later callers share the first start, including its failure. */
+  private start(): Promise<number> {
+    this.serverStart ??= this.startServer();
+    return this.serverStart;
+  }
+
   /** Start the server and return its listening port. */
-  private async start(): Promise<number> {
+  private async startServer(): Promise<number> {
     const { port } = await this.serverManager.start();
     await this.reliabilityHarnessControlPlane?.start();
     return port;
