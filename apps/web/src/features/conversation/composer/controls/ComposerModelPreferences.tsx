@@ -148,7 +148,7 @@ function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenc
 
 const SPEED_OPTIONS = [
   { value: "standard", label: "Standard" },
-  { value: "fast", label: "Fast", icon: <Zap aria-hidden className="size-[1.4rem]" /> },
+  { value: "fast", label: "Fast", icon: <Zap aria-hidden className="size-[1.2rem]" /> },
 ] as const;
 
 /**
@@ -181,7 +181,7 @@ export function ComposerModelOptions({
       )}
       {toggles.map(({ label, icon: Icon, on, set }) => (
         // Off, a mode rests as bare text like the access button beside it, so the footer carries one filled strip;
-        // on, it takes the selected fill.
+        // on, it takes the fill a chosen speed shows over its track, so "on" looks the same across the footer.
         <button
           key={label}
           type="button"
@@ -190,7 +190,7 @@ export function ComposerModelOptions({
           className={cn(
             "inline-flex h-[2.6rem] shrink-0 items-center gap-1.5 rounded-full px-2.5 text-caption whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)",
             FOCUS_RING_CLASS,
-            on ? "bg-selected font-medium text-ink" : "text-muted hover:bg-hover hover:text-ink",
+            on ? "bg-ink/[0.16] text-ink" : "text-muted hover:bg-hover hover:text-ink",
           )}
         >
           <Icon aria-hidden className="size-[1.2rem]" />
@@ -223,7 +223,7 @@ export function ReasoningLevelOptions({ levels, checked, defaultLevel, label, on
   const tabbable = checked !== undefined && levels.includes(checked) ? checked : levels[0];
 
   return (
-    <div role="listbox" aria-label={label} onKeyDown={moveOptionFocus} className={cn("relative", MENU_LIST_CLASS, "p-0")}>
+    <div role="listbox" aria-label={label} onKeyDown={moveOptionFocus} className={cn("relative", MENU_LIST_CLASS, "p-0", listInset && "gap-px")}>
       <SlidingHighlight follow={{ pointer: '[role="option"]' }} />
       {levels.map((level) => (
         <button

@@ -1222,8 +1222,14 @@ are provider-native, so they show the parent thread's provider.
   Ctrl+1 to Ctrl+8 in view. A list narrower than 240px, in a narrow window,
   hides the keycaps so model names stay whole; the shortcuts still work.
   The list's 8px insets sit outside the scroller, so every keyboard stop
-  shows eight whole rows. Too narrow to share a row (a 320px window, or
-  400% zoom), the pane drops under four rows of the list. A hovered row reaches the
+  shows eight whole rows. The pane shares the list's 8px top inset and 33px
+  row pitch, so each level sits level with a model row. On a filled row a
+  keycap takes `ink`, since `muted` over the key's tint and the row's fill
+  falls below AA; a row's star sits before its keycap, so the keycaps form a
+  column near the row's end. Too narrow to share a row (a 320px window, or
+  400% zoom), the pane drops under four rows of the list, its text in line
+  with the model names. When the room above the capsule runs short, the list
+  and pane shrink and scroll; the footer always shows whole. A hovered row reaches the
   pane after 100ms, so a pointer crossing rows on its way to the pane keeps
   it. Right Arrow at the end of the search enters the pane and Left Arrow
   leaves it. A level sets the model and level and closes; picking a model
@@ -1243,8 +1249,11 @@ are provider-native, so they show the parent thread's provider.
   access, with its icon, label and an up chevron, opening the access list
   (232px) above it; choosing closes only that list. Every control is 26px
   high in Caption with 12px icons, so the footer reads as one slim bar
-  with a single filled strip: a mode off rests as bare `muted` text like
-  access, and on takes the `selected` fill. The
+  with a single filled strip. The strip's track and thumb are ink tints
+  (7%, then 10% over it), so they never borrow the hairline or row-fill
+  tokens. A mode off rests as bare `muted` text like access, and on takes
+  the 16% ink fill a chosen speed shows over its track, in the same weight,
+  so "on" looks one way across the footer. The
   context window is a Settings default, not a per-message choice, so the
   picker has no 1M option. So every model setting the composer offers is two
   clicks from the closed capsule: open, then a level, a speed, a mode or

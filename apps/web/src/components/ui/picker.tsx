@@ -380,8 +380,10 @@ interface PickerDetailLayoutProps<T> extends Pick<PickerProps<T>, "tabs" | "acti
 // Too narrow to share a row (a 320px window, or 400% zoom), the pane drops under four rows instead of squeezing the names,
 // which leaves the footer in view above the composer.
 const DETAIL_GRID_CLASS = cn(
-  "grid grid-cols-[minmax(0,1fr)_16.8rem] grid-rows-[auto_27.9rem] [grid-template-areas:'search_caption'_'list_pane']",
-  "@max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[auto_14.7rem_auto_auto] @max-[340px]/picker-area:[grid-template-areas:'search'_'list'_'caption'_'pane']",
+  // The body rows may shrink, so a picker taller than the room above its anchor scrolls its list and pane and never
+  // clips its footer.
+  "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_16.8rem] grid-rows-[auto_minmax(0,27.9rem)] [grid-template-areas:'search_caption'_'list_pane']",
+  "@max-[340px]/picker-area:grid-cols-1 @max-[340px]/picker-area:grid-rows-[auto_14.7rem_auto_minmax(0,1fr)] @max-[340px]/picker-area:[grid-template-areas:'search'_'list'_'caption'_'pane']",
 );
 
 /**
@@ -393,12 +395,12 @@ const DETAIL_GRID_CLASS = cn(
 function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
   const { tabs, detail, paneItem } = props;
   return (
-    <div data-slot="picker" className="flex min-w-0 flex-col" onKeyDown={props.onKeyDown}>
-      <div className="flex min-w-0">
+    <div data-slot="picker" className="flex min-h-0 min-w-0 flex-col" onKeyDown={props.onKeyDown}>
+      <div className="flex min-h-0 min-w-0 flex-1">
         {tabs && drawsTabsAsRail(tabs) ? (
           <PickerRail tabs={tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} className="px-1.5 py-0.5" />
         ) : null}
-        <div className="@container/picker-area min-w-0 flex-1">
+        <div className="@container/picker-area flex min-h-0 min-w-0 flex-1 flex-col">
           <div className={DETAIL_GRID_CLASS}>
             {/*
               The search's rule is the input's own underline, so it stops at the list rows' edges (8px and 4px); the
@@ -410,7 +412,7 @@ function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
             <div className="flex min-h-0 flex-col py-2 pl-2 [grid-area:list]">{props.list}</div>
             <div
               onPointerEnter={props.onPanePointerEnter}
-              className="flex min-h-10 items-center border-b border-l border-border px-3 [grid-area:caption] @max-[340px]/picker-area:border-t @max-[340px]/picker-area:border-l-0"
+              className="flex min-h-10 items-center border-b border-l border-border pr-4 pl-3 [grid-area:caption] @max-[340px]/picker-area:border-t @max-[340px]/picker-area:border-l-0 @max-[340px]/picker-area:pl-4"
             >
               {paneItem === undefined ? null : detail.caption?.(paneItem)}
             </div>
@@ -419,14 +421,14 @@ function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
               data-slot="picker-detail"
               onKeyDown={props.onPaneKeyDown}
               onPointerEnter={props.onPanePointerEnter}
-              className="min-h-0 overflow-y-auto border-l border-border py-1 pr-2 pl-1 [grid-area:pane] @max-[340px]/picker-area:border-l-0"
+              className="min-h-0 overflow-y-auto border-l border-border py-2 pr-2 pl-1 [grid-area:pane] @max-[340px]/picker-area:border-l-0 @max-[340px]/picker-area:pl-2"
             >
               {paneItem === undefined ? null : detail.render(paneItem)}
             </div>
           </div>
         </div>
       </div>
-      {props.footer ? <div className="border-t border-border p-2">{props.footer}</div> : null}
+      {props.footer ? <div className="shrink-0 border-t border-border p-2">{props.footer}</div> : null}
     </div>
   );
 }
@@ -939,13 +941,18 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
       </span>
       {row.tag ? <span className="max-w-[60%] min-w-0 text-caption text-fade text-muted">{row.tag}</span> : null}
       <PickerDisclosureChevron expanded={row.expanded} />
+      {/* The action sits before the keycap, so the keycaps form a column near the row's end, not past an empty slot. */}
+      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       {digit !== undefined ? (
-        // A narrow list keeps the name whole and drops the keycap; the chord still works.
-        <span aria-hidden className="shrink-0 text-muted @max-[240px]/picker-list:hidden">
+        // A narrow list keeps the name whole and drops the keycap; the chord still works. On a filled row the keycap
+        // takes ink, since muted over the key's tint and the row's fill drops below AA.
+        <span
+          aria-hidden
+          className="shrink-0 text-muted group-data-active/option:text-ink group-data-selected/option:text-ink @max-[240px]/picker-list:hidden"
+        >
           <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
         </span>
       ) : null}
-      {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
       {selectedCheck ? (
         <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
           {selected ? <CheckIcon className="size-[1.4rem] text-ink" /> : null}

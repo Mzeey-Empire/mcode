@@ -78,7 +78,9 @@ type Layout = SegmentedControlVariant | "icon";
 function trayClass(layout: Layout, size: SegmentedControlSize, vertical: boolean): string {
   // An icon strip sits in a picker's tab row or rail, so it drops the tray and packs tight to fit every provider.
   if (layout === "icon") return cn("shrink-0 gap-0.5", vertical && "flex-col");
-  if (layout === "pill") return cn("gap-0.5 rounded-full bg-selected p-0.5", PILL_TRAY[size]);
+  // Ink tints, like the tray below: the track sits one step off any surface and the thumb one step off the track
+  // (together the 16% a pressed footer toggle shows), so neither depends on the hairline or row-fill tokens.
+  if (layout === "pill") return cn("gap-0.5 rounded-full bg-ink/[0.07] p-0.5", PILL_TRAY[size]);
   // Light --panel equals --background and light --field equals --page, so a solid fill vanishes on one
   // of them. An ink tint stays one step off any surface; the 2px inset keeps the corners concentric.
   return cn("gap-0.5 rounded-control bg-ink/[0.07] p-0.5", TRAY_HEIGHT[size]);
@@ -101,7 +103,7 @@ function iconSegmentClass(isActive: boolean, vertical: boolean): string {
 function segmentClass(layout: Layout, size: SegmentedControlSize, isActive: boolean, fill: boolean, vertical: boolean): string {
   if (layout === "icon") return iconSegmentClass(isActive, vertical);
   if (layout === "pill") {
-    return cn(SEGMENT_BASE, "rounded-full", fill ? "flex-1" : "shrink-0", PILL_SEGMENT[size], isActive ? "bg-border text-ink" : "text-muted enabled:hover:text-ink");
+    return cn(SEGMENT_BASE, "rounded-full", fill ? "flex-1" : "shrink-0", PILL_SEGMENT[size], isActive ? "bg-ink/[0.1] text-ink" : "text-muted enabled:hover:text-ink");
   }
   return cn(SEGMENT_BASE, "flex-1 rounded-md px-3 text-body-small", SEGMENT_HEIGHT[size], isActive ? "bg-ink/[0.07] font-medium text-ink" : INACTIVE_TRAY_SEGMENT);
 }

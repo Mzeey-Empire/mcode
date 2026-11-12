@@ -34,7 +34,8 @@ const REFOCUS_REASONS: ReadonlySet<string> = new Set(["escape-key", "trigger-pre
 // Wider than other pickers to fit the provider rail and the reasoning pane beside the model list. The picker draws its
 // own edges, so the panel has no padding. Below 552px the composer, 32px narrower than the window, is narrower than
 // 488px plus its insets, so the picker takes the composer's width and both its edges meet the composer's.
-const POPUP_CLASS = cn(PICKER_PANEL_CLASS, "w-[48.8rem] p-0 max-[552px]:w-[calc(100vw-3.2rem)] max-h-(--available-height) overflow-y-auto");
+// A column, so when the room above the capsule runs short the picker's body shrinks and scrolls while its footer stays whole.
+const POPUP_CLASS = cn(PICKER_PANEL_CLASS, "flex w-[48.8rem] flex-col p-0 max-[552px]:w-[calc(100vw-3.2rem)] max-h-(--available-height)");
 
 // The open part takes the fill a step above the hover. A pressed part takes it from CSS on pointer-down, a frame before
 // the popover's render can show it.
