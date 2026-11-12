@@ -8,300 +8,321 @@ One discarded warm-up per key.
 
 | Segment | Measured | Unmeasured | p50 ms | p90 ms | p90 budget ms |
 | --- | --- | --- | --- | --- | --- |
-| A | 10 | 0 | 261 | 407 | 300 |
-| B | 10 | 0 | 1316 | 1785 | 1000 |
-| C | 10 | 0 | 89 | 193 | 30 |
-| D | 10 | 0 | 228 | 367 | inside B |
-| E | 10 | 0 | 259 | 390 | 250 |
-| F | 10 | 0 | 777 | 1713 | 150 |
-| total | 10 | 0 | 3268 | 3402 | 2000 |
-
-10 launches; 0 failed and excluded from percentiles; settled 9; unsettled 1; settled unmeasured 0.
-Total p50 budget: 1500 ms. Thread reopened: false.
-RPCs: at most 69 answered and 0 unanswered in one window; 0 dropped past the cap.
-
-Server steps by p90:
-- execution workers ready: p50 686 ms; p90 1001 ms; measured 10; unmeasured 0
-- migration plan read: p50 217 ms; p90 261 ms; measured 10; unmeasured 0
-- bootstrap entered: p50 153 ms; p90 249 ms; measured 10; unmeasured 0
-- orphan cleanup completed: p50 88 ms; p90 122 ms; measured 10; unmeasured 0
-- database writer ready: p50 39 ms; p90 49 ms; measured 10; unmeasured 0
-- terminal checkpoint retirement: p50 21 ms; p90 31 ms; measured 10; unmeasured 0
-- read-only database opened: p50 18 ms; p90 26 ms; measured 10; unmeasured 0
-- auth token resolved: p50 10 ms; p90 17 ms; measured 10; unmeasured 0
-- services resolved: p50 12 ms; p90 16 ms; measured 10; unmeasured 0
-- dependency container initialized: p50 12 ms; p90 14 ms; measured 10; unmeasured 0
-- family child interruption: p50 8 ms; p90 11 ms; measured 10; unmeasured 0
-- stale startup work recovery completed: p50 5 ms; p90 9 ms; measured 10; unmeasured 0
-- orphaned background tools settled: p50 4 ms; p90 7 ms; measured 10; unmeasured 0
-- conversation display materialization completed: p50 5 ms; p90 6 ms; measured 10; unmeasured 0
-- snapshot store ID ensured: p50 3 ms; p90 4 ms; measured 10; unmeasured 0
-- HTTP listener opened: p50 2 ms; p90 4 ms; measured 10; unmeasured 0
-- automatic workspace setup reconciled: p50 2 ms; p90 3 ms; measured 10; unmeasured 0
-- journal import: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
-- approval recovery completed: p50 2 ms; p90 2 ms; measured 10; unmeasured 0
-- external thread control reconciled: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
-- IPC listener opened: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
-- runtime flags resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- schema patches applied: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- terminal checkpoint reopening: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- turn reconciliation: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- native questions recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- interrupted plans recovered: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- resume scheduler started: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- coordinator wake recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- configuration resolved and shutdown marker inspected: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-- abandoned evidence resolved: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-- turn recovery completed: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-
-Stalls and overlapping candidate causes (not proof):
-- Launch 1: 178 ms; offset 2619 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 142 ms; offset 1892 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 122 ms; offset 3489 ms; before usable false; RPCs thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 170 ms; offset 3611 ms; before usable false; RPCs thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 228 ms; offset 4828 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
-- Launch 2: 113 ms; offset 26328 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 2: 109 ms; offset 26751 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 2: 261 ms; offset 28095 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 3: 115 ms; offset 1554 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 4: 123 ms; offset 1610 ms; before usable true; RPCs workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 4: 112 ms; offset 29588 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 5: 114 ms; offset 2150 ms; before usable true; RPCs none; tasks codex version warmup, provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 5: 166 ms; offset 2697 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 6: 154 ms; offset 2361 ms; before usable true; RPCs provider.catalog, settings.get, app.stage, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 6: 227 ms; offset 2515 ms; before usable true; RPCs workspace.icon.resolve, thread.startup.list, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 6: 133 ms; offset 5651 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
-- Launch 6: 101 ms; offset 6916 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
-- Launch 7: 344 ms; offset 2791 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 7: 126 ms; offset 3238 ms; before usable false; RPCs provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 8: 146 ms; offset 1849 ms; before usable true; RPCs app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 9: 275 ms; offset 2740 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 9: 167 ms; offset 3015 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 9: 110 ms; offset 10186 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
-- Launch 10: 145 ms; offset 1566 ms; before usable true; RPCs workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-
-## Variant A, candidate
-
-| Segment | Measured | Unmeasured | p50 ms | p90 ms | p90 budget ms |
-| --- | --- | --- | --- | --- | --- |
-| A | 10 | 0 | 173 | 217 | 300 |
-| B | 10 | 0 | 1285 | 1453 | 1000 |
-| C | 10 | 0 | 45 | 55 | 30 |
-| D | 10 | 0 | 243 | 280 | inside B |
-| E | 10 | 0 | 261 | 303 | 250 |
-| F | 10 | 0 | 101 | 1582 | 150 |
-| total | 10 | 0 | 2367 | 3378 | 2000 |
-
-10 launches; 0 failed and excluded from percentiles; settled 9; unsettled 1; settled unmeasured 0.
-Total p50 budget: 1500 ms. Thread reopened: false.
-RPCs: at most 71 answered and 0 unanswered in one window; 0 dropped past the cap.
-
-Server steps by p90:
-- execution workers ready: p50 630 ms; p90 725 ms; measured 10; unmeasured 0
-- migration plan read: p50 212 ms; p90 243 ms; measured 10; unmeasured 0
-- bootstrap entered: p50 162 ms; p90 181 ms; measured 10; unmeasured 0
-- orphan cleanup completed: p50 91 ms; p90 110 ms; measured 10; unmeasured 0
-- database writer ready: p50 42 ms; p90 47 ms; measured 10; unmeasured 0
-- read-only database opened: p50 19 ms; p90 29 ms; measured 10; unmeasured 0
-- terminal checkpoint retirement: p50 23 ms; p90 26 ms; measured 10; unmeasured 0
-- dependency container initialized: p50 14 ms; p90 16 ms; measured 10; unmeasured 0
-- services resolved: p50 12 ms; p90 16 ms; measured 10; unmeasured 0
-- auth token resolved: p50 12 ms; p90 14 ms; measured 10; unmeasured 0
-- family child interruption: p50 8 ms; p90 10 ms; measured 10; unmeasured 0
-- conversation display materialization completed: p50 4 ms; p90 6 ms; measured 10; unmeasured 0
-- stale startup work recovery completed: p50 5 ms; p90 6 ms; measured 10; unmeasured 0
-- HTTP listener opened: p50 3 ms; p90 6 ms; measured 10; unmeasured 0
-- snapshot store ID ensured: p50 3 ms; p90 5 ms; measured 10; unmeasured 0
-- orphaned background tools settled: p50 4 ms; p90 5 ms; measured 10; unmeasured 0
-- IPC listener opened: p50 1 ms; p90 4 ms; measured 10; unmeasured 0
-- approval recovery completed: p50 2 ms; p90 3 ms; measured 10; unmeasured 0
-- terminal checkpoint reopening: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
-- automatic workspace setup reconciled: p50 2 ms; p90 2 ms; measured 10; unmeasured 0
-- runtime flags resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- schema patches applied: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- journal import: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- turn reconciliation: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- abandoned evidence resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- interrupted plans recovered: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- resume scheduler started: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- coordinator wake recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- external thread control reconciled: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- configuration resolved and shutdown marker inspected: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-- native questions recovered: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-- turn recovery completed: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-
-Stalls and overlapping candidate causes (not proof):
-- Launch 1: 163 ms; offset 1615 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 1: 174 ms; offset 20292 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 2: 106 ms; offset 2222 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 253 ms; offset 2328 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 110 ms; offset 2863 ms; before usable false; RPCs provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 124 ms; offset 3277 ms; before usable false; RPCs provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 3: 215 ms; offset 1891 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 4: 103 ms; offset 1861 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 4: 164 ms; offset 2015 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 5: 202 ms; offset 2045 ms; before usable true; RPCs app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 6: 159 ms; offset 1607 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 7: 169 ms; offset 1798 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 8: 166 ms; offset 2038 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 9: 108 ms; offset 1648 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 9: 189 ms; offset 1756 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 10: 172 ms; offset 1613 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-
-## Variant B, baseline
-
-| Segment | Measured | Unmeasured | p50 ms | p90 ms | p90 budget ms |
-| --- | --- | --- | --- | --- | --- |
-| A | 10 | 0 | 259 | 401 | 300 |
-| B | 10 | 0 | 1060 | 1437 | 1000 |
-| C | 10 | 0 | 79 | 209 | 30 |
-| D | 10 | 0 | 226 | 344 | inside B |
-| E | 10 | 0 | 205 | 656 | 250 |
-| F | 10 | 0 | 1516 | 1712 | 150 |
-| total | 10 | 0 | 3271 | 3361 | 2000 |
-
-10 launches; 0 failed and excluded from percentiles; settled 9; unsettled 1; settled unmeasured 0.
-Total p50 budget: 1500 ms. Thread reopened: false.
-RPCs: at most 73 answered and 0 unanswered in one window; 0 dropped past the cap.
-
-Server steps by p90:
-- execution workers ready: p50 510 ms; p90 736 ms; measured 10; unmeasured 0
-- bootstrap entered: p50 146 ms; p90 217 ms; measured 10; unmeasured 0
-- migration plan read: p50 131 ms; p90 158 ms; measured 10; unmeasured 0
-- orphan cleanup completed: p50 85 ms; p90 128 ms; measured 10; unmeasured 0
-- checkpoint interrupted: p50 40 ms; p90 47 ms; measured 10; unmeasured 0
-- database writer ready: p50 40 ms; p90 44 ms; measured 10; unmeasured 0
-- journal import: p50 26 ms; p90 33 ms; measured 10; unmeasured 0
-- read-only database opened: p50 16 ms; p90 29 ms; measured 10; unmeasured 0
-- services resolved: p50 13 ms; p90 20 ms; measured 10; unmeasured 0
-- dependency container initialized: p50 13 ms; p90 17 ms; measured 10; unmeasured 0
-- auth token resolved: p50 10 ms; p90 13 ms; measured 10; unmeasured 0
-- external thread control reconciled: p50 4 ms; p90 10 ms; measured 10; unmeasured 0
-- interrupted plans recovered: p50 1 ms; p90 9 ms; measured 10; unmeasured 0
-- conversation display materialization completed: p50 4 ms; p90 8 ms; measured 10; unmeasured 0
-- snapshot store ID ensured: p50 3 ms; p90 7 ms; measured 10; unmeasured 0
-- stale startup work recovery completed: p50 5 ms; p90 6 ms; measured 10; unmeasured 0
-- HTTP listener opened: p50 4 ms; p90 6 ms; measured 10; unmeasured 0
-- orphaned background tools settled: p50 4 ms; p90 5 ms; measured 10; unmeasured 0
-- IPC listener opened: p50 1 ms; p90 4 ms; measured 10; unmeasured 0
-- approval recovery completed: p50 1 ms; p90 3 ms; measured 10; unmeasured 0
-- automatic workspace setup reconciled: p50 2 ms; p90 3 ms; measured 10; unmeasured 0
-- terminal checkpoint retirement: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
-- family child interruption: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
-- runtime flags resolved: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- schema patches applied: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- terminal checkpoint reopening: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
-- turn reconciliation: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- abandoned evidence resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- native questions recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- resume scheduler started: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- coordinator wake recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- configuration resolved and shutdown marker inspected: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-- turn recovery completed: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-
-Stalls and overlapping candidate causes (not proof):
-- Launch 1: 144 ms; offset 1589 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 1: 139 ms; offset 13270 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 2: 252 ms; offset 2974 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 3: 762 ms; offset 911 ms; before usable true; RPCs none; tasks provider availability, snapshot pin sweep, codex version warmup, provider usage warmup, provider status, model cache
-- Launch 3: 498 ms; offset 1957 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks snapshot pin sweep, provider usage warmup, provider status, model cache
-- Launch 3: 125 ms; offset 2455 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks snapshot pin sweep, provider usage warmup, provider status, model cache
-- Launch 4: 125 ms; offset 1563 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 5: 136 ms; offset 1869 ms; before usable true; RPCs app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 5: 113 ms; offset 17369 ms; before usable false; RPCs none; tasks none
-- Launch 5: 464 ms; offset 22088 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 5: 194 ms; offset 22653 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 5: 286 ms; offset 22952 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 5: 197 ms; offset 23344 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 6: 214 ms; offset 2712 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 6: 151 ms; offset 2926 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 7: 237 ms; offset 1889 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 7: 139 ms; offset 6621 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
-- Launch 7: 144 ms; offset 6862 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
-- Launch 7: 104 ms; offset 18303 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 7: 275 ms; offset 21648 ms; before usable false; RPCs none; tasks none
-- Launch 7: 124 ms; offset 23241 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 8: 151 ms; offset 1596 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 8: 147 ms; offset 17737 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 9: 171 ms; offset 1645 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.startup.list, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 10: 100 ms; offset 1540 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 10: 146 ms; offset 1640 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 10: 188 ms; offset 13956 ms; before usable false; RPCs provider.catalog; tasks none
-
-## Variant B, candidate
-
-| Segment | Measured | Unmeasured | p50 ms | p90 ms | p90 budget ms |
-| --- | --- | --- | --- | --- | --- |
-| A | 10 | 0 | 191 | 226 | 300 |
-| B | 10 | 0 | 1205 | 1550 | 1000 |
-| C | 10 | 0 | 16 | 31 | 30 |
-| D | 10 | 0 | 223 | 311 | inside B |
-| E | 10 | 0 | 221 | 297 | 250 |
-| F | 10 | 0 | 1022 | 1812 | 150 |
-| total | 10 | 0 | 3300 | 3348 | 2000 |
+| A | 10 | 0 | 255 | 370 | 300 |
+| B | 10 | 0 | 1380 | 1677 | 1000 |
+| C | 10 | 0 | 145 | 195 | 30 |
+| D | 10 | 0 | 236 | 357 | inside B |
+| E | 10 | 0 | 258 | 290 | 250 |
+| F | 10 | 0 | 1175 | 1491 | 150 |
+| total | 10 | 0 | 3269 | 3331 | 2000 |
 
 10 launches; 0 failed and excluded from percentiles; settled 10; unsettled 0; settled unmeasured 0.
 Total p50 budget: 1500 ms. Thread reopened: false.
 RPCs: at most 67 answered and 0 unanswered in one window; 0 dropped past the cap.
 
 Server steps by p90:
-- execution workers ready: p50 566 ms; p90 728 ms; measured 10; unmeasured 0
-- bootstrap entered: p50 172 ms; p90 209 ms; measured 10; unmeasured 0
-- migration plan read: p50 141 ms; p90 175 ms; measured 10; unmeasured 0
-- orphan cleanup completed: p50 99 ms; p90 130 ms; measured 10; unmeasured 0
-- database writer ready: p50 45 ms; p90 54 ms; measured 10; unmeasured 0
-- checkpoint interrupted: p50 42 ms; p90 54 ms; measured 10; unmeasured 0
-- journal import: p50 30 ms; p90 37 ms; measured 10; unmeasured 0
-- read-only database opened: p50 19 ms; p90 28 ms; measured 10; unmeasured 0
-- external thread control reconciled: p50 3 ms; p90 22 ms; measured 10; unmeasured 0
+- execution workers ready: p50 622 ms; p90 829 ms; measured 10; unmeasured 0
+- migration plan read: p50 223 ms; p90 301 ms; measured 10; unmeasured 0
+- bootstrap entered: p50 145 ms; p90 217 ms; measured 10; unmeasured 0
+- orphan cleanup completed: p50 92 ms; p90 129 ms; measured 10; unmeasured 0
+- database writer ready: p50 43 ms; p90 62 ms; measured 10; unmeasured 0
+- terminal checkpoint retirement: p50 24 ms; p90 34 ms; measured 10; unmeasured 0
+- read-only database opened: p50 19 ms; p90 24 ms; measured 10; unmeasured 0
 - services resolved: p50 14 ms; p90 19 ms; measured 10; unmeasured 0
-- dependency container initialized: p50 14 ms; p90 18 ms; measured 10; unmeasured 0
-- auth token resolved: p50 13 ms; p90 16 ms; measured 10; unmeasured 0
-- interrupted plans recovered: p50 6 ms; p90 11 ms; measured 10; unmeasured 0
-- stale startup work recovery completed: p50 5 ms; p90 10 ms; measured 10; unmeasured 0
-- conversation display materialization completed: p50 4 ms; p90 8 ms; measured 10; unmeasured 0
-- orphaned background tools settled: p50 5 ms; p90 7 ms; measured 10; unmeasured 0
-- HTTP listener opened: p50 4 ms; p90 5 ms; measured 10; unmeasured 0
+- dependency container initialized: p50 14 ms; p90 17 ms; measured 10; unmeasured 0
+- auth token resolved: p50 11 ms; p90 15 ms; measured 10; unmeasured 0
+- family child interruption: p50 4 ms; p90 11 ms; measured 10; unmeasured 0
+- stale startup work recovery completed: p50 5 ms; p90 8 ms; measured 10; unmeasured 0
+- HTTP listener opened: p50 4 ms; p90 6 ms; measured 10; unmeasured 0
+- conversation display materialization completed: p50 5 ms; p90 5 ms; measured 10; unmeasured 0
+- orphaned background tools settled: p50 4 ms; p90 5 ms; measured 10; unmeasured 0
 - snapshot store ID ensured: p50 3 ms; p90 4 ms; measured 10; unmeasured 0
-- automatic workspace setup reconciled: p50 2 ms; p90 4 ms; measured 10; unmeasured 0
-- family child interruption: p50 2 ms; p90 3 ms; measured 10; unmeasured 0
+- IPC listener opened: p50 1 ms; p90 4 ms; measured 10; unmeasured 0
+- interrupted plans recovered: p50 1 ms; p90 3 ms; measured 10; unmeasured 0
 - approval recovery completed: p50 2 ms; p90 3 ms; measured 10; unmeasured 0
-- terminal checkpoint retirement: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
-- IPC listener opened: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
+- automatic workspace setup reconciled: p50 2 ms; p90 3 ms; measured 10; unmeasured 0
 - runtime flags resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- schema patches applied: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- schema patches applied: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- journal import: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
 - terminal checkpoint reopening: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- turn reconciliation: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- abandoned evidence resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
 - native questions recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
 - resume scheduler started: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
-- coordinator wake recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- coordinator wake recovered: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- external thread control reconciled: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
 - configuration resolved and shutdown marker inspected: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-- turn reconciliation: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
-- abandoned evidence resolved: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
 - turn recovery completed: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
 
 Stalls and overlapping candidate causes (not proof):
-- Launch 1: 130 ms; offset 1589 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 113 ms; offset 1762 ms; before usable true; RPCs provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 167 ms; offset 1875 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 2: 146 ms; offset 18966 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 2: 105 ms; offset 20166 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 3: 136 ms; offset 1429 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 3: 126 ms; offset 30987 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 4: 257 ms; offset 1753 ms; before usable true; RPCs none; tasks codex version warmup, provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 4: 144 ms; offset 2270 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 4: 238 ms; offset 2414 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 5: 173 ms; offset 1682 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 6: 156 ms; offset 1834 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 7: 106 ms; offset 1543 ms; before usable true; RPCs provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 7: 180 ms; offset 1649 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 7: 170 ms; offset 8204 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
-- Launch 8: 138 ms; offset 1514 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 8: 153 ms; offset 16498 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 9: 124 ms; offset 2022 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 9: 208 ms; offset 2146 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 9: 111 ms; offset 25052 ms; before usable false; RPCs provider.catalog; tasks none
-- Launch 10: 149 ms; offset 2285 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
-- Launch 10: 106 ms; offset 12336 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 1: 114 ms; offset 2036 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 1: 154 ms; offset 2150 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 1: 132 ms; offset 3383 ms; before usable false; RPCs thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 1: 155 ms; offset 23008 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 1: 135 ms; offset 24550 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 1: 111 ms; offset 25916 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 1: 134 ms; offset 28841 ms; before usable false; RPCs none; tasks none
+- Launch 1: 101 ms; offset 28975 ms; before usable false; RPCs none; tasks none
+- Launch 1: 106 ms; offset 29076 ms; before usable false; RPCs none; tasks none
+- Launch 2: 136 ms; offset 1582 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 2: 152 ms; offset 17135 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 3: 220 ms; offset 1893 ms; before usable true; RPCs none; tasks codex version warmup, provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 3: 153 ms; offset 2465 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 4: 160 ms; offset 1840 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 4: 194 ms; offset 5560 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 5: 226 ms; offset 2462 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 5: 184 ms; offset 3259 ms; before usable true; RPCs provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 6: 155 ms; offset 1841 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 6: 201 ms; offset 4047 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 7: 147 ms; offset 2933 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 8: 100 ms; offset 2027 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 8: 189 ms; offset 2127 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 8: 106 ms; offset 5073 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 9: 129 ms; offset 2019 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 9: 189 ms; offset 2148 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 9: 220 ms; offset 11582 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 9: 121 ms; offset 20452 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 10: 167 ms; offset 1876 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 10: 114 ms; offset 16154 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 10: 165 ms; offset 28297 ms; before usable false; RPCs provider.catalog; tasks none
+
+## Variant A, candidate
+
+| Segment | Measured | Unmeasured | p50 ms | p90 ms | p90 budget ms |
+| --- | --- | --- | --- | --- | --- |
+| A | 10 | 0 | 182 | 195 | 300 |
+| B | 10 | 0 | 1288 | 1595 | 1000 |
+| C | 10 | 0 | 51 | 84 | 30 |
+| D | 10 | 0 | 227 | 358 | inside B |
+| E | 10 | 0 | 240 | 312 | 250 |
+| F | 10 | 0 | 1558 | 1735 | 150 |
+| total | 10 | 0 | 3314 | 3379 | 2000 |
+
+10 launches; 0 failed and excluded from percentiles; settled 8; unsettled 2; settled unmeasured 0.
+Total p50 budget: 1500 ms. Thread reopened: false.
+RPCs: at most 68 answered and 0 unanswered in one window; 0 dropped past the cap.
+
+Server steps by p90:
+- execution workers ready: p50 644 ms; p90 768 ms; measured 10; unmeasured 0
+- migration plan read: p50 220 ms; p90 302 ms; measured 10; unmeasured 0
+- bootstrap entered: p50 158 ms; p90 185 ms; measured 10; unmeasured 0
+- orphan cleanup completed: p50 96 ms; p90 141 ms; measured 10; unmeasured 0
+- database writer ready: p50 42 ms; p90 53 ms; measured 10; unmeasured 0
+- read-only database opened: p50 20 ms; p90 29 ms; measured 10; unmeasured 0
+- terminal checkpoint retirement: p50 23 ms; p90 26 ms; measured 10; unmeasured 0
+- services resolved: p50 14 ms; p90 18 ms; measured 10; unmeasured 0
+- dependency container initialized: p50 14 ms; p90 17 ms; measured 10; unmeasured 0
+- auth token resolved: p50 13 ms; p90 14 ms; measured 10; unmeasured 0
+- family child interruption: p50 8 ms; p90 12 ms; measured 10; unmeasured 0
+- stale startup work recovery completed: p50 5 ms; p90 8 ms; measured 10; unmeasured 0
+- conversation display materialization completed: p50 5 ms; p90 6 ms; measured 10; unmeasured 0
+- orphaned background tools settled: p50 4 ms; p90 6 ms; measured 10; unmeasured 0
+- snapshot store ID ensured: p50 3 ms; p90 4 ms; measured 10; unmeasured 0
+- HTTP listener opened: p50 2 ms; p90 4 ms; measured 10; unmeasured 0
+- interrupted plans recovered: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
+- approval recovery completed: p50 2 ms; p90 2 ms; measured 10; unmeasured 0
+- automatic workspace setup reconciled: p50 2 ms; p90 2 ms; measured 10; unmeasured 0
+- IPC listener opened: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
+- runtime flags resolved: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- configuration resolved and shutdown marker inspected: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- schema patches applied: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- journal import: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- terminal checkpoint reopening: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- turn reconciliation: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- abandoned evidence resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- resume scheduler started: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- coordinator wake recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- external thread control reconciled: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- native questions recovered: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
+- turn recovery completed: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
+
+Stalls and overlapping candidate causes (not proof):
+- Launch 1: 158 ms; offset 1601 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 1: 259 ms; offset 3450 ms; before usable false; RPCs provider.catalog, thread.syncPrs; tasks provider usage warmup, snapshot pin sweep
+- Launch 1: 160 ms; offset 5298 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 2: 143 ms; offset 1518 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 2: 170 ms; offset 12769 ms; before usable false; RPCs none; tasks none
+- Launch 2: 162 ms; offset 15032 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 3: 110 ms; offset 1768 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 3: 167 ms; offset 1878 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 3: 242 ms; offset 2964 ms; before usable true; RPCs providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 3: 128 ms; offset 3441 ms; before usable false; RPCs thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 3: 203 ms; offset 20452 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 3: 122 ms; offset 29579 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 4: 152 ms; offset 1630 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 4: 456 ms; offset 26025 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 4: 133 ms; offset 26787 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 5: 181 ms; offset 1812 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 6: 110 ms; offset 2158 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 6: 222 ms; offset 2268 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 7: 114 ms; offset 1825 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 7: 194 ms; offset 1939 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 7: 324 ms; offset 12783 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 8: 140 ms; offset 1775 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 8: 393 ms; offset 11261 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 8: 199 ms; offset 11763 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 8: 133 ms; offset 12064 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 8: 127 ms; offset 12303 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 8: 160 ms; offset 22821 ms; before usable false; RPCs none; tasks none
+- Launch 9: 132 ms; offset 1868 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 9: 246 ms; offset 2000 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 10: 136 ms; offset 2107 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+
+## Variant B, baseline
+
+| Segment | Measured | Unmeasured | p50 ms | p90 ms | p90 budget ms |
+| --- | --- | --- | --- | --- | --- |
+| A | 10 | 0 | 323 | 537 | 300 |
+| B | 10 | 0 | 1466 | 2257 | 1000 |
+| C | 10 | 0 | 115 | 179 | 30 |
+| D | 10 | 0 | 259 | 393 | inside B |
+| E | 10 | 0 | 250 | 462 | 250 |
+| F | 10 | 0 | 570 | 1488 | 150 |
+| total | 10 | 0 | 3264 | 3466 | 2000 |
+
+10 launches; 0 failed and excluded from percentiles; settled 8; unsettled 2; settled unmeasured 0.
+Total p50 budget: 1500 ms. Thread reopened: false.
+RPCs: at most 69 answered and 0 unanswered in one window; 0 dropped past the cap.
+
+Server steps by p90:
+- execution workers ready: p50 706 ms; p90 1364 ms; measured 10; unmeasured 0
+- bootstrap entered: p50 194 ms; p90 283 ms; measured 10; unmeasured 0
+- migration plan read: p50 140 ms; p90 202 ms; measured 10; unmeasured 0
+- orphan cleanup completed: p50 105 ms; p90 136 ms; measured 10; unmeasured 0
+- checkpoint interrupted: p50 45 ms; p90 72 ms; measured 10; unmeasured 0
+- database writer ready: p50 50 ms; p90 61 ms; measured 10; unmeasured 0
+- journal import: p50 31 ms; p90 44 ms; measured 10; unmeasured 0
+- read-only database opened: p50 22 ms; p90 31 ms; measured 10; unmeasured 0
+- services resolved: p50 16 ms; p90 19 ms; measured 10; unmeasured 0
+- interrupted plans recovered: p50 7 ms; p90 18 ms; measured 10; unmeasured 0
+- dependency container initialized: p50 15 ms; p90 17 ms; measured 10; unmeasured 0
+- auth token resolved: p50 11 ms; p90 15 ms; measured 10; unmeasured 0
+- external thread control reconciled: p50 6 ms; p90 13 ms; measured 10; unmeasured 0
+- conversation display materialization completed: p50 5 ms; p90 8 ms; measured 10; unmeasured 0
+- HTTP listener opened: p50 6 ms; p90 8 ms; measured 10; unmeasured 0
+- stale startup work recovery completed: p50 4 ms; p90 6 ms; measured 10; unmeasured 0
+- orphaned background tools settled: p50 5 ms; p90 6 ms; measured 10; unmeasured 0
+- IPC listener opened: p50 2 ms; p90 6 ms; measured 10; unmeasured 0
+- automatic workspace setup reconciled: p50 3 ms; p90 5 ms; measured 10; unmeasured 0
+- snapshot store ID ensured: p50 3 ms; p90 4 ms; measured 10; unmeasured 0
+- approval recovery completed: p50 2 ms; p90 4 ms; measured 10; unmeasured 0
+- family child interruption: p50 2 ms; p90 2 ms; measured 10; unmeasured 0
+- runtime flags resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- configuration resolved and shutdown marker inspected: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- schema patches applied: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- terminal checkpoint reopening: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- terminal checkpoint retirement: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- abandoned evidence resolved: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- native questions recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- resume scheduler started: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- coordinator wake recovered: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- turn reconciliation: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
+- turn recovery completed: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
+
+Stalls and overlapping candidate causes (not proof):
+- Launch 1: 195 ms; offset 2809 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 1: 180 ms; offset 3004 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 2: 146 ms; offset 1802 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 2: 227 ms; offset 15500 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 3: 137 ms; offset 1593 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 4: 115 ms; offset 2863 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 4: 169 ms; offset 3028 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 5: 246 ms; offset 2388 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 5: 132 ms; offset 2634 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 6: 195 ms; offset 2193 ms; before usable true; RPCs settings.get, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 6: 225 ms; offset 3513 ms; before usable false; RPCs provider.catalog, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 7: 132 ms; offset 1626 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 7: 134 ms; offset 8332 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 8: 398 ms; offset 3654 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 8: 239 ms; offset 4052 ms; before usable false; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 9: 160 ms; offset 3412 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 10: 150 ms; offset 1857 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 10: 225 ms; offset 7145 ms; before usable false; RPCs none; tasks snapshot pin sweep
+- Launch 10: 105 ms; offset 7466 ms; before usable false; RPCs none; tasks snapshot pin sweep
+- Launch 10: 410 ms; offset 7571 ms; before usable false; RPCs none; tasks snapshot pin sweep
+- Launch 10: 232 ms; offset 15789 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 10: 262 ms; offset 16358 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 10: 240 ms; offset 21181 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 10: 135 ms; offset 21735 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 10: 144 ms; offset 28216 ms; before usable false; RPCs provider.catalog; tasks none
+
+## Variant B, candidate
+
+| Segment | Measured | Unmeasured | p50 ms | p90 ms | p90 budget ms |
+| --- | --- | --- | --- | --- | --- |
+| A | 10 | 0 | 179 | 236 | 300 |
+| B | 10 | 0 | 1208 | 1625 | 1000 |
+| C | 10 | 0 | 27 | 38 | 30 |
+| D | 10 | 0 | 268 | 1693 | inside B |
+| E | 10 | 0 | 248 | 448 | 250 |
+| F | 10 | 0 | 1254 | 1823 | 150 |
+| total | 10 | 0 | 3290 | 3372 | 2000 |
+
+10 launches; 0 failed and excluded from percentiles; settled 8; unsettled 2; settled unmeasured 0.
+Total p50 budget: 1500 ms. Thread reopened: false.
+RPCs: at most 68 answered and 0 unanswered in one window; 0 dropped past the cap.
+
+Server steps by p90:
+- execution workers ready: p50 605 ms; p90 837 ms; measured 10; unmeasured 0
+- bootstrap entered: p50 167 ms; p90 207 ms; measured 10; unmeasured 0
+- migration plan read: p50 151 ms; p90 187 ms; measured 10; unmeasured 0
+- orphan cleanup completed: p50 100 ms; p90 131 ms; measured 10; unmeasured 0
+- checkpoint interrupted: p50 52 ms; p90 64 ms; measured 10; unmeasured 0
+- database writer ready: p50 47 ms; p90 56 ms; measured 10; unmeasured 0
+- journal import: p50 31 ms; p90 42 ms; measured 10; unmeasured 0
+- read-only database opened: p50 21 ms; p90 27 ms; measured 10; unmeasured 0
+- services resolved: p50 16 ms; p90 19 ms; measured 10; unmeasured 0
+- dependency container initialized: p50 14 ms; p90 17 ms; measured 10; unmeasured 0
+- auth token resolved: p50 13 ms; p90 16 ms; measured 10; unmeasured 0
+- interrupted plans recovered: p50 7 ms; p90 14 ms; measured 10; unmeasured 0
+- conversation display materialization completed: p50 5 ms; p90 10 ms; measured 10; unmeasured 0
+- stale startup work recovery completed: p50 5 ms; p90 10 ms; measured 10; unmeasured 0
+- external thread control reconciled: p50 1 ms; p90 8 ms; measured 10; unmeasured 0
+- orphaned background tools settled: p50 5 ms; p90 6 ms; measured 10; unmeasured 0
+- HTTP listener opened: p50 3 ms; p90 5 ms; measured 10; unmeasured 0
+- snapshot store ID ensured: p50 4 ms; p90 4 ms; measured 10; unmeasured 0
+- automatic workspace setup reconciled: p50 2 ms; p90 3 ms; measured 10; unmeasured 0
+- family child interruption: p50 2 ms; p90 2 ms; measured 10; unmeasured 0
+- approval recovery completed: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
+- IPC listener opened: p50 1 ms; p90 2 ms; measured 10; unmeasured 0
+- runtime flags resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- configuration resolved and shutdown marker inspected: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- schema patches applied: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- terminal checkpoint reopening: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- terminal checkpoint retirement: p50 1 ms; p90 1 ms; measured 10; unmeasured 0
+- turn reconciliation: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- abandoned evidence resolved: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- resume scheduler started: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- coordinator wake recovered: p50 0 ms; p90 1 ms; measured 10; unmeasured 0
+- native questions recovered: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
+- turn recovery completed: p50 0 ms; p90 0 ms; measured 10; unmeasured 0
+
+Stalls and overlapping candidate causes (not proof):
+- Launch 1: 196 ms; offset 2350 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 2: 122 ms; offset 1459 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 2: 216 ms; offset 15481 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 3: 129 ms; offset 1507 ms; before usable true; RPCs app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 3: 159 ms; offset 24687 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 3: 140 ms; offset 26833 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 3: 138 ms; offset 28349 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 3: 126 ms; offset 29405 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 4: 152 ms; offset 2435 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 4: 334 ms; offset 2587 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 4: 116 ms; offset 26683 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 5: 151 ms; offset 1547 ms; before usable true; RPCs workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 5: 133 ms; offset 8991 ms; before usable false; RPCs provider.catalog; tasks snapshot pin sweep
+- Launch 6: 136 ms; offset 1642 ms; before usable true; RPCs app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 6: 197 ms; offset 20796 ms; before usable false; RPCs provider.catalog; tasks none
+- Launch 7: 106 ms; offset 2066 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 7: 243 ms; offset 2172 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 8: 141 ms; offset 4865 ms; before usable true; RPCs approval.listPending; tasks snapshot pin sweep
+- Launch 8: 103 ms; offset 5006 ms; before usable true; RPCs agent.listHeldSteers, thread.listAttention, terminal.listActive; tasks snapshot pin sweep
+- Launch 8: 617 ms; offset 5173 ms; before usable true; RPCs provider.catalog, settings.get; tasks snapshot pin sweep
+- Launch 8: 737 ms; offset 5872 ms; before usable false; RPCs workspace.icon.resolve, thread.syncPrs; tasks snapshot pin sweep
+- Launch 9: 161 ms; offset 2016 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 9: 230 ms; offset 2177 ms; before usable false; RPCs settings.get, app.stage, workspace.icon.resolve, thread.startup.list, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 10: 122 ms; offset 1629 ms; before usable true; RPCs workspace.list, provider.catalog, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
+- Launch 10: 182 ms; offset 1751 ms; before usable true; RPCs settings.get, app.stage, workspace.icon.resolve, thread.syncPrs, providers.listStatus; tasks provider usage warmup, provider status, model cache, snapshot pin sweep
 
 Donor versus fixture statistics:
 
@@ -370,5 +391,5 @@ Donor versus fixture statistics:
 | turn_file_evidence | 129 | 0 | 0 |
 | worktreeThreads | 138 | 0 | 0 |
 | openOrDraftPrThreads | 2 | 0 | 0 |
-| fileBytes | 2010206208 | 105164800 | 105201664 |
+| fileBytes | 2010206208 | 105164800 | 105205760 |
 | freelistCount | 261376 | 0 | 0 |
