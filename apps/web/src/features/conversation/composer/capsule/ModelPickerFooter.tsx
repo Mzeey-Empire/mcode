@@ -34,10 +34,15 @@ function AccessMenu({ access, unsupervised }: Pick<ModelPickerFooterProps, "acce
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
-          <Button variant="ghost" size="compact" aria-label={`Access: ${access.selected.label}`} className="ml-auto shrink-0 px-2 text-body-small text-muted" />
+          <Button
+            variant="ghost"
+            size="compact"
+            aria-label={`Access: ${access.selected.label}`}
+            className="ml-auto h-[2.6rem] shrink-0 gap-1.5 rounded-full px-2.5 text-caption text-muted"
+          />
         }
       >
-        <Icon size={14} className={cn("shrink-0", unsupervised && "text-warning")} />
+        <Icon size={12} className={cn("shrink-0", unsupervised && "text-warning")} />
         {access.selected.label}
         <ChevronUp aria-hidden className="size-[1.2rem]" />
       </PopoverTrigger>

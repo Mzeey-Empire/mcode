@@ -1209,10 +1209,10 @@ are provider-native, so they show the parent thread's provider.
   columns that each run its full height behind `border` hairlines: the
   provider rail, the search over the model list, and a 168px reasoning pane,
   with a footer across all three. The search row and the pane's caption
-  share one row, each underlined by a hairline that stops at the edges of
-  the rows below it, so it reads as part of its column rather than a
-  divider; the search's turns `focus` while it has focus. The column and
-  footer rules run edge to edge. The caption is one line in Caption `muted`:
+  share one row. The search's hairline is the input's own underline, so it
+  stops at the edges of the list rows below it and turns `focus` while the
+  search has focus. The caption's hairline closes the pane's header and,
+  like the column and footer rules, runs edge to edge. The caption is one line in Caption `muted`:
   "Reasoning" on the left and the highlighted model's short name on the
   right, since the rail or group label already names the provider. A name
   too long for the line drops whole to its own line rather than fading. The
@@ -1237,12 +1237,14 @@ are provider-native, so they show the parent thread's provider.
   favourites, and a provider-locked thread searches only its provider.
 - The picker's footer holds what applies to the selected model and the turn,
   whichever row is highlighted, and changes it in place without closing. On
-  the left: a compact segmented Standard or Fast when the model offers Fast,
-  then a toggle for each mode the model offers, drawn as a one-segment tray
-  that reads off and on exactly as an unchosen and a chosen speed do (Thinking on
-  older Claude models, Ultra on Codex and Ultracode on Claude). On the right:
-  access as a ghost button with its icon, label and an up chevron, opening
-  the access list (232px) above it; choosing closes only that list. The
+  the left: a small pill strip, Standard or Fast, when the model offers
+  Fast, then a toggle for each mode the model offers (Thinking on older
+  Claude models, Ultra on Codex and Ultracode on Claude). On the right:
+  access, with its icon, label and an up chevron, opening the access list
+  (232px) above it; choosing closes only that list. Every control is 26px
+  high in Caption with 12px icons, so the footer reads as one slim bar
+  with a single filled strip: a mode off rests as bare `muted` text like
+  access, and on takes the `selected` fill. The
   context window is a Settings default, not a per-message choice, so the
   picker has no 1M option. So every model setting the composer offers is two
   clicks from the closed capsule: open, then a level, a speed, a mode or

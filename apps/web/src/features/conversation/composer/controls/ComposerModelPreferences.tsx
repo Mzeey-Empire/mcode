@@ -171,7 +171,8 @@ export function ComposerModelOptions({
     <div role="group" aria-label="Model options" className="flex min-w-0 items-center gap-2">
       {fast && (
         <SegmentedControl
-          size="compact"
+          variant="pill"
+          size="small"
           aria-label="Speed"
           options={SPEED_OPTIONS}
           value={fast.on ? "fast" : "standard"}
@@ -179,22 +180,22 @@ export function ComposerModelOptions({
         />
       )}
       {toggles.map(({ label, icon: Icon, on, set }) => (
-        // A one-segment tray, so a mode reads off and on exactly as an unchosen and a chosen speed do beside it.
-        <span key={label} className="inline-flex h-control-compact shrink-0 items-center rounded-control bg-ink/[0.07] p-0.5">
-          <button
-            type="button"
-            aria-pressed={on}
-            onClick={() => set(!on)}
-            className={cn(
-              "inline-flex h-7 items-center gap-2 rounded-md px-3 text-body-small whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)",
-              FOCUS_RING_CLASS,
-              on ? "bg-ink/[0.07] font-medium text-ink" : "text-muted hover:text-ink",
-            )}
-          >
-            <Icon aria-hidden className="size-[1.4rem]" />
-            {label}
-          </button>
-        </span>
+        // Off, a mode rests as bare text like the access button beside it, so the footer carries one filled strip;
+        // on, it takes the selected fill.
+        <button
+          key={label}
+          type="button"
+          aria-pressed={on}
+          onClick={() => set(!on)}
+          className={cn(
+            "inline-flex h-[2.6rem] shrink-0 items-center gap-1.5 rounded-full px-2.5 text-caption whitespace-nowrap transition-colors duration-(--duration-fast) ease-(--ease-standard)",
+            FOCUS_RING_CLASS,
+            on ? "bg-selected font-medium text-ink" : "text-muted hover:bg-hover hover:text-ink",
+          )}
+        >
+          <Icon aria-hidden className="size-[1.2rem]" />
+          {label}
+        </button>
       ))}
     </div>
   );
