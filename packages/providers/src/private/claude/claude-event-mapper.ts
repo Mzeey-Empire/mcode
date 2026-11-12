@@ -51,6 +51,7 @@ export interface ClaudeEventEvidence {
   nativeEventId?: string;
 }
 const MAX_TRACKED_TOOLS = 4_096;
+const MAX_LAUNCH_LABEL_UTF16_UNITS = 500;
 /** Contract bound on one `reasoningDelta` text. */
 const MAX_REASONING_DELTA_LENGTH = 65_536;
 // Leaves room for the ":thinking:<index>" suffix inside the contract's 256-char item id bound.
@@ -304,7 +305,6 @@ export class ClaudeEventMapper {
     this.backgroundDirty = true;
   }
 
-  /** Bash notifications can omit `tool_use_id`, so the held row is found by its task id. */
   private heldCallForTask(taskId: string | undefined): string | undefined {
     if (!taskId) return undefined;
     for (const [toolCallId, row] of this.backgroundTools) {
@@ -319,7 +319,7 @@ export class ClaudeEventMapper {
     return { taskId, startedAt, label: launchLabel(stringValue(task.description) || stringValue(task.task_type)) };
   }
 
-  /** Compares only after a native mutation, once per stream message. */
+  /** Notifies only when native background tasks have changed. */
   flushBackgroundChange(changed: () => void): void {
     if (!this.backgroundDirty) return;
     this.backgroundDirty = false;
@@ -1003,10 +1003,12 @@ export class ClaudeEventMapper {
   }
 }
 
-/** The SDK reports an async launch on the message, so it only names a call when the message carries one result. */
 interface BackgroundLaunch { toolCallId: string; taskId?: string; toolName: "Bash" | "Agent" }
 
-/** Bash reports its task as `backgroundTaskId`; a background Agent reports `async_launched` with its agent id. */
+/**
+ * The SDK reports a launch on the message, so it only names a call when the message carries one result.
+ * Bash reports its task as `backgroundTaskId`; a background Agent reports `async_launched` with its agent id.
+ */
 function backgroundLaunch(message: Message, results: readonly Message[]): BackgroundLaunch | undefined {
   const result = objectValue(message.tool_use_result);
   const bashTaskId = validIdentity(result.backgroundTaskId);
@@ -1018,9 +1020,8 @@ function backgroundLaunch(message: Message, results: readonly Message[]): Backgr
     : { toolCallId, taskId: validIdentity(result.agentId), toolName: "Agent" };
 }
 
-/** Cuts to the snapshot's 500-unit label limit without splitting a surrogate pair. */
 function launchLabel(value: string): string {
-  let end = Math.min(value.length, 500);
+  let end = Math.min(value.length, MAX_LAUNCH_LABEL_UTF16_UNITS);
   const last = value.charCodeAt(end - 1);
   if (end < value.length && last >= 0xD800 && last <= 0xDBFF) end--;
   return value.slice(0, end);

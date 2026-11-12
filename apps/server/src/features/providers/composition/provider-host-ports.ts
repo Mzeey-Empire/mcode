@@ -64,10 +64,7 @@ export interface ProviderHostPortDependencies {
   turns: () => HostTurnSink;
 }
 
-/**
- * The server's turn owner as the host port sees it. Settlements reach it without a provider id:
- * the host port uses that id to stamp activity, and startup orphan settlements never have one.
- */
+/** Server turn operations accepting settlements without provider identity. */
 export interface HostTurnSink {
   open: ProviderTurnPort["open"];
   settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "providerId">): Promise<void>;

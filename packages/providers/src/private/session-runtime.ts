@@ -7,6 +7,8 @@ import { decideOccupancy, NATIVE_TASK_CAP_MS, type NativeTaskAge, type Occupancy
 export interface NativeBackgroundTask extends NativeTaskAge { taskId: string; label: string }
 
 const DEFAULT_IDLE_TTL_MS = 10 * 60 * 1_000;
+/** Occupancy epochs start at 1, so closing this one is always a no-op. */
+const UNOPENED_EPOCH = 0;
 const EVICTION_INTERVAL_MS = 60 * 1_000;
 const GRACEFUL_STOP_TIMEOUT_MS = 5_000;
 
@@ -59,7 +61,6 @@ interface SessionRuntimeLoggerPort {
 
 interface PoolEntry<TState> {
   key: ProviderSessionKey;
-  /** The occupancy epoch this entry opened; 0 when it was retired before opening. */
   epoch: number;
   state: TState;
   pids: number[];
@@ -189,7 +190,6 @@ export class SessionRuntime<TState> {
 
   /** Stops one session and closes a spawn that completes after the stop request. */
   async stop(sessionId: string): Promise<void> {
-    // Closed before any await, so a hold or user stamp racing this stop cannot land on a dying session.
     this.closeOccupancy(sessionId);
     const existing = this.teardowns.get(sessionId);
     if (existing) return existing;
@@ -249,7 +249,7 @@ export class SessionRuntime<TState> {
     const env = this.deps.envService.getEnv();
     const result = await this.adapter.spawn({ ...args, env });
     if (this.shuttingDown || this.stopsDuringSpawn.has(args.sessionId)) {
-      try { await this.retire(args.sessionId, { ...result, lastUsedAt: Date.now(), key: { providerId: this.deps.providerId, threadId: args.threadId }, epoch: 0 }); }
+      try { await this.retire(args.sessionId, { ...result, lastUsedAt: Date.now(), key: { providerId: this.deps.providerId, threadId: args.threadId }, epoch: UNOPENED_EPOCH }); }
       catch (error) { throw new SpawnRetirementFailure(error); }
       throw new Error(`Provider session stopped during spawn: ${args.sessionId}`);
     }
@@ -291,7 +291,6 @@ export class SessionRuntime<TState> {
     }
   }
 
-  /** Reads `now` per entry because the sweeps await a stop between entries. */
   private observeOccupancy(entry: PoolEntry<TState>, mode: OccupancyPolicy["mode"]): ObservedOccupancy {
     const now = Date.now();
     const occupancy = this.deps.occupancy.read(entry.key, now);
@@ -316,7 +315,6 @@ export class SessionRuntime<TState> {
     return verdict;
   }
 
-  /** Shutdown still stops protected work; this only makes the loss visible until a grace controller exists. */
   private reportProtectedShutdown(entry: PoolEntry<TState>): void {
     const { verdict, held } = this.observeOccupancy(entry, "idle");
     if (!held && verdict.nativeProtecting === 0) return;
@@ -326,8 +324,6 @@ export class SessionRuntime<TState> {
   }
 
   private async retire(sessionId: string, entry: PoolEntry<TState>): Promise<void> {
-    // stop() closes before it awaits, but a spawn that completes between that close and this teardown
-    // has opened a fresh epoch, so retirement closes the entry's own epoch as well.
     this.deps.occupancy.closeSession(entry.key, entry.epoch);
     this.unretired.set(sessionId, entry);
     await this.closeEntry(sessionId, entry);

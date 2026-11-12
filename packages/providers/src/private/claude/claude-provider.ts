@@ -166,8 +166,7 @@ interface ClaudeSessionState {
   pendingToolUses: Set<string>;
   /**
    * Background calls this SDK process still runs, keyed to the execution that
-   * launched them. They outlive turns; they protect the session through
-   * `backgroundTasks`, not `isBusy`, so their protection is capped.
+   * launched them.
    */
   backgroundTools: Map<string, HeldBackgroundCall>;
   /**
@@ -2002,9 +2001,7 @@ export class ClaudeProvider
 
   /**
    * Eviction guard: a session is busy while its stream has a live turn, while a
-   * tool_use awaits its result, OR while it has a pending permission request
-   * the user may still answer (the user could be on another thread). These keep
-   * the session out of idle eviction regardless of how long the SDK has been quiet.
+   * tool_use awaits its result, or while a permission request is pending.
    */
   isBusy(state: ClaudeSessionState): boolean {
     if (state.pendingToolUses.size > 0) {

@@ -142,10 +142,7 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   systemNotice?: SystemNoticeMetadata;
 };
 
-/**
- * True only for a turn the user sent. Provider-started turns and coordinator wakes carry no
- * composer selection and must not reset the user's native-task protection window.
- */
+/** Excludes provider-started turns and coordinator wakes. */
 export function isUserSentTurn(command: SendMessageCommand): boolean {
   return !command.providerOriginated && !command.delegationWake;
 }
