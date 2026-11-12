@@ -81,6 +81,19 @@ describe("ServerRuntime Desktop Window seam", () => {
     }
   });
 
+  it("attaches the server relay to a window once when the server is ready first", async () => {
+    const relayStarter = vi.fn(() => vi.fn());
+    const runtime = createRuntime(43123, { relayStarter });
+    const window = createWindow();
+
+    runtime.beginStart();
+    await new Promise((resolve) => setImmediate(resolve));
+    runtime.attachWindow(window);
+    await runtime.connectWindow(window);
+
+    expect(relayStarter).toHaveBeenCalledOnce();
+  });
+
   it("joins an early start instead of starting the server again", async () => {
     const start = vi.fn(async () => ({ port: 43123, authToken: "test-token" }));
     const runtime = createRuntime(43123, {
@@ -244,3 +257,4 @@ describe("ServerRuntime Desktop Window seam", () => {
     await expect(createRuntime(0).getActiveAgentCount()).rejects.toThrow("port is not available");
   });
 });
+

@@ -120,6 +120,7 @@ export class ServerRuntime {
   private readonly relayStarter: ServerRuntimeRelayStarter;
   private readonly reliabilityHarnessControlPlane: ReliabilityHarnessControlPlane | null;
   private serverStart: Promise<number> | null = null;
+  private readonly relayWindows = new WeakSet<ServerRuntimeWindow>();
   private resolveConnectionReady!: () => void;
   private readonly connectionReady = new Promise<void>((resolve) => {
     this.resolveConnectionReady = resolve;
@@ -259,9 +260,14 @@ export class ServerRuntime {
   /** Attach the server IPC relay to a window and clean it up after close. */
   attachWindow(window: ServerRuntimeWindow): void {
     if (!this.serverManager.ipcPath) return;
+    if (this.relayWindows.has(window)) return;
 
     const cleanupRelay = this.relayStarter(this.serverManager.ipcPath, window);
-    window.once("closed", cleanupRelay);
+    this.relayWindows.add(window);
+    window.once("closed", () => {
+      this.relayWindows.delete(window);
+      cleanupRelay();
+    });
   }
 
   /** Force-replace the server before an application update or performance cleanup. */
