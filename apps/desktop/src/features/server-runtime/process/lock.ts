@@ -169,7 +169,7 @@ function removeStaleLock(lockPath: string, lock: ServerLock): void {
 async function isHealthyServer(port: number): Promise<boolean> {
   try {
     const response = await fetchWithTimeout(
-      `http://localhost:${port}/health`,
+      `http://127.0.0.1:${port}/health`,
       EXISTING_SERVER_HEALTH_TIMEOUT_MS,
     );
     return response.ok;

@@ -1483,6 +1483,25 @@ describe("ServerManager", () => {
     expect(mockStream.destroy).toHaveBeenCalledOnce();
   });
 
+  it("notices readiness within one 25 ms poll", async () => {
+    vi.useFakeTimers();
+    const readyAt = Date.now() + 30;
+    vi.spyOn(manager, "isHealthy").mockImplementation(async () => Date.now() >= readyAt);
+
+    try {
+      let result: { port: number; authToken: string } | undefined;
+      const startup = manager.start().then((connection) => {
+        result = connection;
+      });
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(result).toEqual({ port: 19600, authToken: "test-auth-token" });
+      await startup;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([318_000, 400_000])(
     "waits for awaited data migration readiness at %ims",
     async (readyAfterMs) => {

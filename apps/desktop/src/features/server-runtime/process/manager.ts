@@ -41,10 +41,13 @@ import { stopServerHeldByLock } from "./shutdown.js";
 import { readStartupRefusal, ServerStartupRefusedError } from "./startup-failure.js";
 
 /** Interval between server readiness probes. */
-const HEALTH_POLL_INTERVAL = 200;
+const HEALTH_POLL_INTERVAL = 25;
 
 /** Number of lock-file reads after readiness passes. */
 const LOCK_READ_ATTEMPTS = 10;
+
+/** Interval between lock-file reads after readiness passes. */
+const LOCK_READ_INTERVAL_MS = 200;
 
 /**
  * Bounds a hung lock read. Health starts the launch record's 120 s usable-frame wait, whose telemetry read needs this
@@ -163,7 +166,7 @@ export class ServerManager {
   async isHealthy(): Promise<boolean> {
     if (!this._port) return false;
     try {
-      const response = await fetch(`http://localhost:${this._port}/health`, {
+      const response = await fetch(`http://127.0.0.1:${this._port}/health`, {
         signal: AbortSignal.timeout(3_000),
       });
       return response.ok;
@@ -291,7 +294,7 @@ export class ServerManager {
       const lock = await readServerLockWithRetry(
         lockFilePath(getMcodeDir()),
         LOCK_READ_ATTEMPTS,
-        HEALTH_POLL_INTERVAL,
+        LOCK_READ_INTERVAL_MS,
         LOCK_READ_TIMEOUT_MS,
       );
       this.applyOwnedServerLock(lock, spawned.child, generation);
