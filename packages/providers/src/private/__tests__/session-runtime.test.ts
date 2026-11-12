@@ -1,8 +1,66 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionRuntime, type ProtocolAdapter } from "../session-runtime.js";
 import { diag } from "@mcode/shared/diagnostics";
+import type { ProviderSessionOccupancyPort } from "../../host-ports.js";
 
 describe("SessionRuntime", () => {
+  it("keeps replacement occupancy open when an old session is stopped again during teardown", async () => {
+    const records = new Map<string, { epoch: number; open: boolean }>();
+    const occupancy: ProviderSessionOccupancyPort = {
+      openSession(key) {
+        const id = JSON.stringify([key.providerId, key.threadId]);
+        const previous = records.get(id);
+        if (previous?.open) return previous.epoch;
+        const epoch = (previous?.epoch ?? 0) + 1;
+        records.set(id, { epoch, open: true });
+        return epoch;
+      },
+      closeSession(key, epoch) {
+        const record = records.get(JSON.stringify([key.providerId, key.threadId]));
+        if (record?.epoch === epoch) record.open = false;
+      },
+      nativeChanged: () => {},
+      read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }),
+    };
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => { releaseClose = resolve; });
+    let closeStarted!: () => void;
+    const closing = new Promise<void>((resolve) => { closeStarted = resolve; });
+    const adapter: ProtocolAdapter<string> = {
+      spawn: async ({ sessionId }) => ({ state: sessionId, pids: [] }),
+      isBusy: () => false, isStale: () => false, interrupt: () => {},
+      close: async (sessionId) => {
+        if (sessionId === "old") {
+          closeStarted();
+          await closeGate;
+        }
+      },
+    };
+    const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy,
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} },
+      envService: { getEnv: () => ({}) },
+    });
+    const request = { threadId: "thread", cwd: ".", permissionMode: "default" };
+    const keyId = JSON.stringify(["test", "thread"]);
+    try {
+      await runtime.acquire({ ...request, sessionId: "old" });
+      const stopping = runtime.stop("old");
+      await closing;
+      expect(records.get(keyId)?.open).toBe(false);
+      await runtime.acquire({ ...request, sessionId: "replacement" });
+      // Session ids differ, but both entries share the thread's occupancy key.
+      const lateStop = runtime.stop("old");
+      releaseClose();
+      await Promise.all([stopping, lateStop]);
+      expect(records.get(keyId)?.open).toBe(true);
+      await runtime.stop("replacement");
+      expect(records.get(keyId)?.open).toBe(false);
+    } finally {
+      releaseClose();
+      await runtime.shutdown();
+    }
+  });
+
   it("never opens occupancy for a session stopped while spawning", async () => {
     let release!: () => void;
     const spawning = new Promise<void>((resolve) => { release = resolve; });
