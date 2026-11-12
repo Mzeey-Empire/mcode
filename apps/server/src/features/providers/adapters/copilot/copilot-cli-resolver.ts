@@ -269,7 +269,6 @@ export async function resolveCopilotCli(
     return cached.resolution;
   }
 
-  // Pending probes must be shared even if discovery takes longer than the cache TTL.
   const pending = { resolution: discoverCopilotCli(ctx, io), checkedAt: Infinity };
   resolutionCache.set(cacheKey, pending);
   try {
