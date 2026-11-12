@@ -42,7 +42,8 @@ function AccessMenu({ access, unsupervised }: Pick<ModelPickerFooterProps, "acce
           />
         }
       >
-        <Icon size={12} className={cn("shrink-0", unsupervised && "text-warning")} />
+        {/* A size class, not the size prop: the compact Button sizes any svg without one to 16px. */}
+        <Icon aria-hidden className={cn("size-[1.2rem] shrink-0", unsupervised && "text-warning")} />
         {access.selected.label}
         <ChevronUp aria-hidden className="size-[1.2rem]" />
       </PopoverTrigger>

@@ -392,8 +392,35 @@ const DETAIL_GRID_CLASS = cn(
  * It draws its own edges and insets, so its host's panel has no padding. The pair keeps a fixed height, so moving
  * between rows whose panes differ never resizes the panel.
  */
+// The bottom scroll fade's depth, so a revealed row clears it.
+const SCROLL_FADE_PX = 24;
+
+/**
+ * Scrolls a short pane (a narrow window gives it under five rows) so its checked option shows, since the capsule
+ * already names that choice and a pane that hides it reads as if the choice were not offered. The popup learns the
+ * room above its anchor after it mounts, so the pane shrinks later; the check runs again on each resize.
+ */
+function useRevealCheckedInPane(paneRef: RefObject<HTMLDivElement | null>, paneItem: unknown): void {
+  useLayoutEffect(() => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    const reveal = () => {
+      const checked = pane.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!checked) return;
+      const checkedBottom = checked.getBoundingClientRect().bottom - pane.getBoundingClientRect().top + pane.scrollTop;
+      const overflow = checkedBottom + SCROLL_FADE_PX - pane.clientHeight;
+      if (overflow > pane.scrollTop) pane.scrollTop = overflow;
+    };
+    reveal();
+    const observer = new ResizeObserver(reveal);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [paneRef, paneItem]);
+}
+
 function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
   const { tabs, detail, paneItem } = props;
+  useRevealCheckedInPane(props.paneRef, paneItem);
   return (
     <div data-slot="picker" className="flex min-h-0 min-w-0 flex-col" onKeyDown={props.onKeyDown}>
       <div className="flex min-h-0 min-w-0 flex-1">
@@ -421,7 +448,7 @@ function PickerDetailLayout<T>(props: PickerDetailLayoutProps<T>) {
               data-slot="picker-detail"
               onKeyDown={props.onPaneKeyDown}
               onPointerEnter={props.onPanePointerEnter}
-              className="min-h-0 overflow-y-auto border-l border-border py-2 pr-2 pl-1 [grid-area:pane] @max-[340px]/picker-area:border-l-0 @max-[340px]/picker-area:pl-2"
+              className="scroll-fade-y border-l border-border py-2 pr-2 pl-1 [grid-area:pane] @max-[340px]/picker-area:border-l-0 @max-[340px]/picker-area:pl-2"
             >
               {paneItem === undefined ? null : detail.render(paneItem)}
             </div>

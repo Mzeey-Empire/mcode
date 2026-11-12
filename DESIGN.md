@@ -1229,7 +1229,9 @@ are provider-native, so they show the parent thread's provider.
   column near the row's end. Too narrow to share a row (a 320px window, or
   400% zoom), the pane drops under four rows of the list, its text in line
   with the model names. When the room above the capsule runs short, the list
-  and pane shrink and scroll; the footer always shows whole. A hovered row reaches the
+  and pane shrink and scroll under the scroll fade, the pane opening on its
+  checked level, which the capsule already names; the footer always shows
+  whole. A hovered row reaches the
   pane after 100ms, so a pointer crossing rows on its way to the pane keeps
   it. Right Arrow at the end of the search enters the pane and Left Arrow
   leaves it. A level sets the model and level and closes; picking a model
