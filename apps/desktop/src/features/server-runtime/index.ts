@@ -121,6 +121,8 @@ export class ServerRuntime {
   private readonly reliabilityHarnessControlPlane: ReliabilityHarnessControlPlane | null;
   private serverStart: Promise<number> | null = null;
   private readonly relayWindows = new WeakSet<ServerRuntimeWindow>();
+  private lifecycleRegistered = false;
+  private exitBeforeLifecycle: { code: number | null } | null = null;
   private resolveConnectionReady!: () => void;
   private readonly connectionReady = new Promise<void>((resolve) => {
     this.resolveConnectionReady = resolve;
@@ -168,6 +170,7 @@ export class ServerRuntime {
       blocker: dependencies.powerSaveBlocker,
       log: (...args) => console.log(...args),
     });
+    this.serverManager.onUnexpectedExit = (code) => this.handleUnexpectedExit(code);
   }
 
   /**
@@ -220,12 +223,23 @@ export class ServerRuntime {
 
   /** Register server crash recovery and sleep-resume health recovery. */
   registerLifecycle(): void {
-    this.serverManager.onUnexpectedExit = (code) => {
-      void this.serverCrashRecovery.handleUnexpectedExit(code);
-    };
+    this.lifecycleRegistered = true;
     this.dependencies.powerMonitor.on("resume", () => {
       void this.serverHealthRecovery.ensureServerRunning();
     });
+    if (this.exitBeforeLifecycle) {
+      const { code } = this.exitBeforeLifecycle;
+      this.exitBeforeLifecycle = null;
+      void this.serverCrashRecovery.handleUnexpectedExit(code);
+    }
+  }
+
+  private handleUnexpectedExit(code: number | null): void {
+    if (!this.lifecycleRegistered) {
+      this.exitBeforeLifecycle = { code };
+      return;
+    }
+    void this.serverCrashRecovery.handleUnexpectedExit(code);
   }
 
   /** Register authenticated server connection IPC handlers. */

@@ -112,6 +112,21 @@ describe("ServerRuntime Desktop Window seam", () => {
     expect(manager.stopServerHeldByLock).toHaveBeenCalledOnce();
   });
 
+  it("recovers a server that exits before lifecycle registration", async () => {
+    vi.useFakeTimers();
+    const manager = createManager(43123);
+    const runtime = createRuntime(43123, { manager });
+
+    runtime.beginStart();
+    await vi.advanceTimersByTimeAsync(0);
+    manager.onUnexpectedExit?.(1);
+    expect(manager.restart).not.toHaveBeenCalled();
+    runtime.registerLifecycle();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(manager.restart).toHaveBeenCalledOnce();
+  });
+
   it("joins an early start instead of starting the server again", async () => {
     const start = vi.fn(async () => ({ port: 43123, authToken: "test-token" }));
     const runtime = createRuntime(43123, {
