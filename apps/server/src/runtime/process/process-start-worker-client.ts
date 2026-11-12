@@ -178,6 +178,8 @@ export class ProcessStartWorkerClient {
     const runs = [...this.pending.values()];
     this.pending.clear();
     for (const run of runs) run.reject(error);
+    // A start error after a process is running would reach listeners that only
+    // expect one before it starts; a running process instead reads as exited.
     for (const session of this.sessions.values()) {
       if (session.phase === "starting") session.observer.onStartError?.(error.message);
       else if (session.phase === "running") session.observer.onExit?.(null, null);

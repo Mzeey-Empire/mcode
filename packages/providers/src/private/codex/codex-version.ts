@@ -125,6 +125,7 @@ export async function warmCodexVersionCache(cliPath: string, runProcess: Provide
       });
     }
   } catch {
+    // Failed probes stay uncached so the send-path check can retry.
   }
 }
 

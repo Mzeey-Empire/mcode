@@ -279,6 +279,7 @@ export async function resolveCopilotCli(
   pendingResolutions.set(cacheKey, discovery);
   try {
     const resolution = await discovery;
+    // A cache clear during discovery (after a CLI update) makes this result stale.
     if (pendingResolutions.get(cacheKey) === discovery) {
       resolutionCache.set(cacheKey, { resolution, checkedAt: Date.now() });
     }
