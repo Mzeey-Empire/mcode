@@ -31,12 +31,7 @@ describe("worker-backed Codex process", () => {
     let terminated = false;
     const termination = child.terminate!().then(() => { terminated = true; });
     try {
-      vi.advanceTimersByTime(8_000);
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(8_000);
       expect(terminated).toBe(true);
     } finally {
       vi.useRealTimers();
