@@ -231,4 +231,15 @@ describe("Desktop Window feature entry point", () => {
       expect(JSON.parse(NodeFS.readFileSync(themeHintPath, "utf8"))).toEqual({ dark: false });
     });
   });
+
+  it("forgets the main window once it closes", () => {
+    desktopWindowFeatureTest.reset();
+    const feature = createDesktopWindowFeature(dependencies());
+    const window = feature.createWindow();
+    expect(feature.getMainWindow()).toBe(window);
+
+    window.emit("closed");
+
+    expect(feature.getMainWindow()).toBeNull();
+  });
 });
