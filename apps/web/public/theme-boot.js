@@ -1,5 +1,4 @@
 // Runs before CSS and the app bundle so the first frame paints in the last used theme.
-// The key and values are shared with apps/web/src/app/use-applied-theme.ts.
 (function () {
   var dark = true;
   try {
