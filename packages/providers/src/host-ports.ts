@@ -29,8 +29,38 @@ export interface ProviderEnvironmentPort {
 /** Supplies immutable facts about the Node runtime that hosts providers. */
 export interface ProviderRuntimePort extends HostRuntime {}
 
-/** Attaches and terminates child process trees without exposing the server process service. */
+/**
+ * Runs buffered UTF-8 probes, rejecting with execFile's code, signal, killed, stdout, and stderr fields.
+ * The server starts these processes off the thread that answers requests because Windows process creation blocks it.
+ */
+export type ProviderProcessRunner = (request: {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly shell?: boolean;
+  readonly cwd?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly timeout: number;
+  readonly maxBuffer?: number;
+}) => Promise<{ stdout: string; stderr: string }>;
+
+/** Opens an interactive process off the request thread because Windows process creation blocks that thread. */
+export type ProviderProcessOpener = (request: Parameters<ProviderProcessRunner>[0], observer: {
+  readonly onSpawn?: (pid: number) => void;
+  readonly onStartError?: (message: string) => void;
+  readonly onExit?: (code: number | null, signal: string | null) => void;
+  readonly onStderr?: (chunk: string) => void;
+  readonly onStdout?: (chunk: string) => void;
+  readonly onStdinError?: (message: string) => void;
+}) => {
+  write(text: string): void;
+  stop(graceful?: boolean): void;
+  readonly exited: Promise<void>;
+};
+
+/** Runs probes, attaches and terminates child process trees without exposing the server process service. */
 export interface ProviderProcessPort {
+  run: ProviderProcessRunner;
+  open: ProviderProcessOpener;
   attach(pid: number, description: string): void;
   terminateTree(pid: number): Promise<void>;
 }

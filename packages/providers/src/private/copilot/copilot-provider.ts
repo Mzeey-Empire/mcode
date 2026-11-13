@@ -589,7 +589,7 @@ export class CopilotProvider extends NodeEvents.EventEmitter implements IAgentPr
   /** Reports sign-in from the SDK's own auth status; a slow or failed SDK reads as unknown. */
   async describeStatus() {
     const auth = await describeCopilotAuth(async () => bounded((await this.getClient()).getAuthStatus(), 5_000, "Copilot auth status"));
-    return { ...auth, cli: this.ports.launch.describeCli?.() };
+    return { ...auth, cli: await this.ports.launch.describeCli?.() };
   }
   /** Invalidates server-owned CLI discovery after an update. */
   clearCliVersionCache(): void {

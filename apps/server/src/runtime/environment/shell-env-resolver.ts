@@ -3,14 +3,11 @@
  * Windows registry machine + user hives, for passing to child processes.
  */
 
-import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
-import * as NodeUtil from "node:util";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { flattenProcessEnv, parseNewlineDelimitedEnv, parseNullDelimitedEnv } from "./shell-env-utils.js";
-
-const execFileAsync = NodeUtil.promisify(NodeChildProcess.execFile);
+import type { ProcessStartRunner } from "../process/process-start.js";
 
 const RESOLVE_TIMEOUT_MS = 5000;
 const MAX_ENV_BUFFER_BYTES = 32 * 1024 * 1024;
@@ -31,7 +28,10 @@ export class ShellEnvResolver {
   private readonly bootEnv: Record<string, string>;
   private readonly platform: NodeJS.Platform;
 
-  constructor(@inject("HostRuntime") hostRuntime: ShellEnvResolverHost) {
+  constructor(
+    @inject("HostRuntime") hostRuntime: ShellEnvResolverHost,
+    @inject("ProcessStartRunner") private readonly runProcess: ProcessStartRunner,
+  ) {
     this.bootEnv = flattenProcessEnv(process.env);
     this.platform = hostRuntime.platform;
   }
@@ -89,26 +89,26 @@ export class ShellEnvResolver {
   private async resolveUnixAsync(): Promise<Record<string, string>> {
     const shell = this.unixLoginShell();
     try {
-      const { stdout: buf } = await execFileAsync(shell, ["-ilc", "env -0"], {
-        encoding: "buffer",
+      const { stdout: buf } = await this.runProcess({
+        command: shell,
+        args: ["-ilc", "env -0"],
         timeout: RESOLVE_TIMEOUT_MS,
         maxBuffer: MAX_ENV_BUFFER_BYTES,
-        windowsHide: true,
       });
-      const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf as string, "utf8");
+      const buffer = Buffer.from(buf, "utf8");
       if (buffer.includes(0)) {
         return parseNullDelimitedEnv(buffer);
       }
     } catch {
       /* macOS/BSD often lack env -0 */
     }
-    const { stdout: text } = await execFileAsync(shell, ["-ilc", "env"], {
-      encoding: "utf8",
+    const { stdout: text } = await this.runProcess({
+      command: shell,
+      args: ["-ilc", "env"],
       timeout: RESOLVE_TIMEOUT_MS,
       maxBuffer: MAX_ENV_BUFFER_BYTES,
-      windowsHide: true,
     });
-    return parseNewlineDelimitedEnv(text as string);
+    return parseNewlineDelimitedEnv(text);
   }
 
   private async resolveWindowsAsync(): Promise<Record<string, string>> {
@@ -127,17 +127,13 @@ export class ShellEnvResolver {
       "[Console]::Out.Write([Convert]::ToBase64String($bytes))",
     ].join("; ");
 
-    const { stdout: out } = await execFileAsync(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-      {
-        encoding: "utf8",
-        timeout: RESOLVE_TIMEOUT_MS,
-        maxBuffer: MAX_ENV_BUFFER_BYTES,
-        windowsHide: true,
-      },
-    );
-    const buf = Buffer.from((out as string).trim(), "base64");
+    const { stdout: out } = await this.runProcess({
+      command: "powershell.exe",
+      args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      timeout: RESOLVE_TIMEOUT_MS,
+      maxBuffer: MAX_ENV_BUFFER_BYTES,
+    });
+    const buf = Buffer.from(out.trim(), "base64");
     return parseNullDelimitedEnv(buf);
   }
 }

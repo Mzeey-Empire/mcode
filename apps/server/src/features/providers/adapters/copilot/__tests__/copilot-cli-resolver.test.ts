@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import * as NodePath from "node:path";
 import {
   resolveCopilotCli,
+  createNodeResolverIO,
   clearResolutionCache,
   formatCopilotNotFoundMessage,
   type CopilotCliResolverIO,
@@ -21,7 +22,7 @@ function fakeIO(opts: {
     platform: opts.platform ?? "linux",
     exists: (p) => existsSet.has(p),
     readFile: (p) => (p in files ? files[p]! : null),
-    exec: (command, args) => {
+    exec: async (command, args) => {
       const key = [command, ...args].join(" ");
       return key in execMap ? execMap[key]! : null;
     },
@@ -46,13 +47,94 @@ function withSdkHelp(exec: Record<string, string | null>, entries: string[]): Re
   return out;
 }
 
+describe("createNodeResolverIO", () => {
+  it("trims successful probe output", async () => {
+    const io = createNodeResolverIO({}, "win32", async () => ({ stdout: "  1.0.57\n", stderr: "" }));
+    expect(await io.exec("copilot", ["--version"])).toBe("1.0.57");
+  });
+
+  it("returns null for empty output", async () => {
+    const io = createNodeResolverIO({}, "linux", async () => ({ stdout: " \n", stderr: "" }));
+    expect(await io.exec("copilot", ["--version"])).toBeNull();
+  });
+
+  it("discards output when the probe fails", async () => {
+    const io = createNodeResolverIO({}, "win32", async () => {
+      throw Object.assign(new Error("exit"), { code: 1, stdout: "partial" });
+    });
+    expect(await io.exec("copilot", ["--version"])).toBeNull();
+  });
+});
+
 describe("resolveCopilotCli", () => {
   beforeEach(() => {
     clearResolutionCache();
   });
 
-  it("returns not-found with the @github/copilot install command when nothing resolves", () => {
-    const res = resolveCopilotCli({}, fakeIO({ platform: "linux" }));
+  it("resolves the Copilot CLI without blocking the event loop", async () => {
+    const configured = "/tools/copilot";
+    const probe = Promise.withResolvers<string | null>();
+    const io: CopilotCliResolverIO = {
+      ...fakeIO({ existsExtra: [configured] }),
+      exec: () => probe.promise,
+    };
+    let settled = false;
+    const resolution = resolveCopilotCli({ configuredPath: configured }, io).then((result) => {
+      settled = true;
+      return result;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    probe.resolve("GitHub Copilot CLI 1.0.57.");
+    await expect(resolution).resolves.toEqual({ source: "configured", entry: configured, version: "1.0.57" });
+  });
+
+  it("shares each probe between concurrent resolutions with the same input", async () => {
+    const configured = "/tools/copilot";
+    const probe = Promise.withResolvers<string | null>();
+    let calls = 0;
+    const io: CopilotCliResolverIO = {
+      ...fakeIO({ existsExtra: [configured] }),
+      exec: () => {
+        calls += 1;
+        return probe.promise;
+      },
+    };
+    const first = resolveCopilotCli({ configuredPath: configured }, io);
+    const second = resolveCopilotCli({ configuredPath: ` ${configured} ` }, io);
+    expect(calls).toBe(1);
+    probe.resolve("GitHub Copilot CLI 1.0.57.");
+    const expected = { source: "configured", entry: configured, version: "1.0.57" };
+    expect(await first).toEqual(expected);
+    expect(await second).toEqual(expected);
+    expect(calls).toBe(1);
+  });
+
+  it("does not cache a discovery that finishes after the cache was cleared", async () => {
+    const configured = "/tools/copilot";
+    const staleProbe = Promise.withResolvers<string | null>();
+    const staleIO: CopilotCliResolverIO = {
+      ...fakeIO({ existsExtra: [configured] }),
+      exec: () => staleProbe.promise,
+    };
+    const stale = resolveCopilotCli({ configuredPath: configured }, staleIO);
+    clearResolutionCache();
+    staleProbe.resolve("GitHub Copilot CLI 1.0.57.");
+    await stale;
+
+    const updatedIO = fakeIO({
+      existsExtra: [configured],
+      exec: { [`${configured} --version`]: "GitHub Copilot CLI 1.0.60." },
+    });
+    expect(await resolveCopilotCli({ configuredPath: configured }, updatedIO)).toEqual({
+      source: "configured",
+      entry: configured,
+      version: "1.0.60",
+    });
+  });
+
+  it("returns not-found with the @github/copilot install command when nothing resolves", async () => {
+    const res = await resolveCopilotCli({}, fakeIO({ platform: "linux" }));
     expect(res.source).toBe("not-found");
     expect(res.entry).toBeNull();
     expect(res.version).toBeNull();
@@ -61,7 +143,7 @@ describe("resolveCopilotCli", () => {
     }
   });
 
-  it("uses the configured path verbatim and probes its version", () => {
+  it("uses the configured path verbatim and probes its version", async () => {
     const configured = "C:/tools/copilot.cmd";
     const io = fakeIO({
       platform: "win32",
@@ -71,11 +153,11 @@ describe("resolveCopilotCli", () => {
         [configured],
       ),
     });
-    const res = resolveCopilotCli({ configuredPath: configured }, io);
+    const res = await resolveCopilotCli({ configuredPath: configured }, io);
     expect(res).toMatchObject({ source: "configured", entry: configured, version: "1.0.25" });
   });
 
-  it("rejects configured versions that cannot substantiate the supported native contract", () => {
+  it("rejects configured versions that cannot substantiate the supported native contract", async () => {
     const configured = "/usr/bin/copilot";
     const io = fakeIO({
       platform: "linux",
@@ -85,30 +167,30 @@ describe("resolveCopilotCli", () => {
         [configured],
       ),
     });
-    const res = resolveCopilotCli({ configuredPath: configured }, io);
+    const res = await resolveCopilotCli({ configuredPath: configured }, io);
     expect(res.source).toBe("not-found");
   });
 
-  it("rejects configured paths with shell metacharacters", () => {
-    const res = resolveCopilotCli({ configuredPath: "copilot.cmd & calc.exe" }, fakeIO({}));
+  it("rejects configured paths with shell metacharacters", async () => {
+    const res = await resolveCopilotCli({ configuredPath: "copilot.cmd & calc.exe" }, fakeIO({}));
     expect(res.source).toBe("not-found");
     if (res.source === "not-found") {
       expect(res.message).toContain("invalid characters");
     }
   });
 
-  it("accepts configured paths with spaces and parentheses", () => {
+  it("accepts configured paths with spaces and parentheses", async () => {
     const configured = "C:\\Program Files (x86)\\GitHub\\copilot\\index.js";
     const io = fakeIO({
       platform: "win32",
       exec: { [`${configured} --version`]: "GitHub Copilot CLI 1.0.57." },
       existsExtra: [configured],
     });
-    const res = resolveCopilotCli({ configuredPath: configured }, io);
+    const res = await resolveCopilotCli({ configuredPath: configured }, io);
     expect(res).toMatchObject({ source: "configured", entry: configured, version: "1.0.57" });
   });
 
-  it("falls through when the configured path is missing and npm-global resolves", () => {
+  it("falls through when the configured path is missing and npm-global resolves", async () => {
     const pkgDir = NodePath.join("/global", "@github", "copilot");
     const entry = NodePath.join(pkgDir, "index.js");
     const io = fakeIO({
@@ -117,11 +199,11 @@ describe("resolveCopilotCli", () => {
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
-    const res = resolveCopilotCli({ configuredPath: "/missing/copilot" }, io);
+    const res = await resolveCopilotCli({ configuredPath: "/missing/copilot" }, io);
     expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.25" });
   });
 
-  it("falls through when the configured path does not respond to --version", () => {
+  it("falls through when the configured path does not respond to --version", async () => {
     const configured = "/usr/bin/copilot";
     const pkgDir = NodePath.join("/global", "@github", "copilot");
     const entry = NodePath.join(pkgDir, "index.js");
@@ -131,16 +213,16 @@ describe("resolveCopilotCli", () => {
       exec: withSdkHelp({ "npm root -g": "/global" }, [entry]),
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
     });
-    const res = resolveCopilotCli({ configuredPath: configured }, io);
+    const res = await resolveCopilotCli({ configuredPath: configured }, io);
     expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.25" });
   });
 
-  it("ignores a blank configured path and falls through", () => {
-    const res = resolveCopilotCli({ configuredPath: "   " }, fakeIO({}));
+  it("ignores a blank configured path and falls through", async () => {
+    const res = await resolveCopilotCli({ configuredPath: "   " }, fakeIO({}));
     expect(res.source).toBe("not-found");
   });
 
-  it("resolves @github/copilot via npm root -g to index.js, version from package.json", () => {
+  it("resolves @github/copilot via npm root -g to index.js, version from package.json", async () => {
     const pkgDir = NodePath.join("/global", "@github", "copilot");
     const entry = NodePath.join(pkgDir, "index.js");
     const io = fakeIO({
@@ -149,11 +231,11 @@ describe("resolveCopilotCli", () => {
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
-    const res = resolveCopilotCli({}, io);
+    const res = await resolveCopilotCli({}, io);
     expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.25" });
   });
 
-  it("accepts 1.x when version qualifies even if --help only lists --acp", () => {
+  it("accepts 1.x when version qualifies even if --help only lists --acp", async () => {
     const pkgDir = NodePath.join("/global", "@github", "copilot");
     const entry = NodePath.join(pkgDir, "index.js");
     const io = fakeIO({
@@ -165,11 +247,11 @@ describe("resolveCopilotCli", () => {
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.56") },
       existsExtra: [entry],
     });
-    const res = resolveCopilotCli({}, io);
+    const res = await resolveCopilotCli({}, io);
     expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.56" });
   });
 
-  it("rejects an SDK-incompatible CLI below the minimum 0.0.x build", () => {
+  it("rejects an SDK-incompatible CLI below the minimum 0.0.x build", async () => {
     const pkgDir = NodePath.join("/global", "@github", "copilot");
     const entry = NodePath.join(pkgDir, "index.js");
     const io = fakeIO({
@@ -181,7 +263,7 @@ describe("resolveCopilotCli", () => {
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("0.0.330") },
       existsExtra: [entry],
     });
-    const res = resolveCopilotCli({}, io);
+    const res = await resolveCopilotCli({}, io);
     expect(res.source).toBe("not-found");
     if (res.source === "not-found") {
       expect(res.message).toContain("0.0.330");
@@ -189,17 +271,17 @@ describe("resolveCopilotCli", () => {
     }
   });
 
-  it("falls through when npm root -g resolves but index.js is absent", () => {
+  it("falls through when npm root -g resolves but index.js is absent", async () => {
     const pkgDir = NodePath.join("/global", "@github", "copilot");
     const io = fakeIO({
       platform: "linux",
       exec: { "npm root -g": "/global" },
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
     });
-    expect(resolveCopilotCli({}, io).source).toBe("not-found");
+    expect((await resolveCopilotCli({}, io)).source).toBe("not-found");
   });
 
-  it("falls through when package.json name is not @github/copilot", () => {
+  it("falls through when package.json name is not @github/copilot", async () => {
     const pkgDir = NodePath.join("/global", "@github", "copilot");
     const entry = NodePath.join(pkgDir, "index.js");
     const io = fakeIO({
@@ -208,14 +290,14 @@ describe("resolveCopilotCli", () => {
       files: { [NodePath.join(pkgDir, "package.json")]: JSON.stringify({ name: "evil-pkg", version: "1.0.0" }) },
       existsExtra: [entry],
     });
-    expect(resolveCopilotCli({}, io).source).toBe("not-found");
+    expect((await resolveCopilotCli({}, io)).source).toBe("not-found");
   });
 
-  it("falls through when npm is unavailable", () => {
-    expect(resolveCopilotCli({}, fakeIO({ platform: "linux" })).source).toBe("not-found");
+  it("falls through when npm is unavailable", async () => {
+    expect((await resolveCopilotCli({}, fakeIO({ platform: "linux" }))).source).toBe("not-found");
   });
 
-  it("follows a win32 .ps1 shim to the adjacent package index.js (PowerShell-aware)", () => {
+  it("follows a win32 .ps1 shim to the adjacent package index.js (PowerShell-aware)", async () => {
     const binDir = NodePath.join("C:/scoop/bin");
     const shim = NodePath.join(binDir, "copilot.ps1");
     const pkgDir = NodePath.join(binDir, "node_modules", "@github", "copilot");
@@ -229,11 +311,11 @@ describe("resolveCopilotCli", () => {
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
-    const res = resolveCopilotCli({}, io);
+    const res = await resolveCopilotCli({}, io);
     expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.25" });
   });
 
-  it("falls back to where.exe on win32 when PowerShell does not resolve copilot", () => {
+  it("falls back to where.exe on win32 when PowerShell does not resolve copilot", async () => {
     const binDir = NodePath.join("C:/tools/bin");
     const shim = NodePath.join(binDir, "copilot.cmd");
     const pkgDir = NodePath.join(binDir, "node_modules", "@github", "copilot");
@@ -244,11 +326,11 @@ describe("resolveCopilotCli", () => {
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
-    const res = resolveCopilotCli({}, io);
+    const res = await resolveCopilotCli({}, io);
     expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.25" });
   });
 
-  it("resolves via posix which, following to the adjacent package index.js", () => {
+  it("resolves via posix which, following to the adjacent package index.js", async () => {
     const binDir = "/usr/local/bin";
     const shim = NodePath.join(binDir, "copilot");
     const pkgDir = NodePath.join(binDir, "node_modules", "@github", "copilot");
@@ -259,18 +341,18 @@ describe("resolveCopilotCli", () => {
       files: { [NodePath.join(pkgDir, "package.json")]: COPILOT_PKG("1.0.25") },
       existsExtra: [entry],
     });
-    const res = resolveCopilotCli({}, io);
+    const res = await resolveCopilotCli({}, io);
     expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.25" });
   });
 
-  it("falls through when the shim has no adjacent package", () => {
+  it("falls through when the shim has no adjacent package", async () => {
     const io = fakeIO({ platform: "linux", exec: { "which copilot": "/usr/local/bin/copilot" } });
-    expect(resolveCopilotCli({}, io).source).toBe("not-found");
+    expect((await resolveCopilotCli({}, io)).source).toBe("not-found");
   });
 
-  it("disambiguates gh copilot when only the gh extension is present", () => {
+  it("disambiguates gh copilot when only the gh extension is present", async () => {
     const io = fakeIO({ platform: "linux", exec: { "gh extension list": "github/gh-copilot  v1.0.0" } });
-    const res = resolveCopilotCli({}, io);
+    const res = await resolveCopilotCli({}, io);
     expect(res.source).toBe("not-found");
     if (res.source === "not-found") {
       expect(res.message).toContain("gh copilot");
@@ -278,28 +360,28 @@ describe("resolveCopilotCli", () => {
     }
   });
 
-  it("omits the gh-copilot note when the extension is absent", () => {
-    const res = resolveCopilotCli({}, fakeIO({ platform: "linux" }));
+  it("omits the gh-copilot note when the extension is absent", async () => {
+    const res = await resolveCopilotCli({}, fakeIO({ platform: "linux" }));
     if (res.source === "not-found") {
       expect(res.message).not.toContain("gh copilot");
     }
   });
 
-  it("reuses cached resolution within the TTL", () => {
+  it("reuses cached resolution within the TTL", async () => {
     const io = fakeIO({ platform: "linux" });
-    const first = resolveCopilotCli({}, io);
-    const second = resolveCopilotCli({}, io);
+    const first = await resolveCopilotCli({}, io);
+    const second = await resolveCopilotCli({}, io);
     expect(first).toEqual(second);
   });
 });
 
 describe("formatCopilotNotFoundMessage", () => {
-  it("includes gh copilot disambiguation when requested", () => {
-    expect(formatCopilotNotFoundMessage(true)).toContain("gh copilot");
+  it("includes gh copilot disambiguation when requested", async () => {
+    expect(await formatCopilotNotFoundMessage(true)).toContain("gh copilot");
   });
 
-  it("omits gh copilot disambiguation when absent", () => {
-    expect(formatCopilotNotFoundMessage(false)).not.toContain("gh copilot");
+  it("omits gh copilot disambiguation when absent", async () => {
+    expect(await formatCopilotNotFoundMessage(false)).not.toContain("gh copilot");
   });
 });
 

@@ -22,6 +22,7 @@ function createHost(): ProviderHostPorts {
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: vi.fn(() => ({})) },
     processes: {
+      open: () => { throw new Error("cursor-session-continuity.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("cursor-session-continuity.test.ts fixture does not support process runs"); },
       attach: vi.fn(),
       terminateTree: vi.fn(async () => undefined),
     },
@@ -134,7 +135,7 @@ describe("CursorProvider session continuity", () => {
     const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
     const ending = Promise.withResolvers<{ stopReason: "end_turn" }>();
     vi.mocked(fake.runtime.prompt).mockImplementation(() => ending.promise);
-    const provider = new CursorProvider(host, { settings: { get: () => getDefaultSettings() }, skills: { list: () => [] } }, 60_000);
+    const provider = new CursorProvider(host, { settings: { get: () => getDefaultSettings() }, skills: { list: async () => [] } }, 60_000);
     const running = provider.sendTurn(turn("prompt", "execution-1"));
     try {
       await vi.waitFor(() => expect(fake.runtime.prompt).toHaveBeenCalledOnce());
@@ -159,7 +160,7 @@ describe("CursorProvider session continuity", () => {
     const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
     const directEvents = vi.fn();
     provider.on("event", directEvents);
@@ -186,7 +187,7 @@ describe("CursorProvider session continuity", () => {
     const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
     const directEvents = vi.fn();
     provider.on("event", directEvents);
@@ -213,7 +214,7 @@ describe("CursorProvider session continuity", () => {
     });
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
 
     try {
@@ -258,7 +259,7 @@ describe("CursorProvider session continuity", () => {
     });
     const provider = new CursorProvider(host, {
       settings: { get: () => settings },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
 
     try {
@@ -287,7 +288,7 @@ describe("CursorProvider session continuity", () => {
     const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(failed.runtime);
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
 
     try {
@@ -325,7 +326,7 @@ describe("CursorProvider session continuity", () => {
       await start.mock.calls[0]![0].callbacks.onSessionUpdate?.(chunk("NEW"));
       return { stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } };
     });
-    const provider = new CursorProvider(host, { settings: { get: () => getDefaultSettings() }, skills: { list: () => [] } }, 60_000);
+    const provider = new CursorProvider(host, { settings: { get: () => getDefaultSettings() }, skills: { list: async () => [] } }, 60_000);
 
     try {
       await provider.sendTurn(turn("prompt", "execution-1", "cursor-session-1"));
@@ -355,7 +356,7 @@ describe("CursorProvider session continuity", () => {
     });
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
     const retryResponse = deferred<{ stopReason: "end_turn"; usage: { inputTokens: number; outputTokens: number } }>();
     let failedEntry: CursorSessionState | undefined;
@@ -446,7 +447,7 @@ describe("CursorProvider session continuity", () => {
     const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
     vi.mocked(fake.runtime.prompt).mockRejectedValue(new RequestError(-32000, "Authentication required"));
 
@@ -488,7 +489,7 @@ describe("CursorProvider session continuity", () => {
     };
     const provider = new CursorProvider(host, {
       settings: { get: () => settings },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
     vi.mocked(first.runtime.prompt).mockRejectedValue(
       new RequestError(-32603, "Internal error", { details: "429 Too Many Requests" }),
@@ -532,7 +533,7 @@ describe("CursorProvider session continuity", () => {
     const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(first.runtime);
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000);
     vi.mocked(first.runtime.prompt).mockImplementation(async () => {
       (provider as unknown as { sdkSessionIds: Map<string, string> }).sdkSessionIds.delete(
@@ -568,7 +569,7 @@ describe("CursorProvider session continuity", () => {
     });
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000, 1_000);
 
     const held = deferred<{ stopReason: string }>();
@@ -608,7 +609,7 @@ describe("CursorProvider session continuity", () => {
     });
     const provider = new CursorProvider(host, {
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
     }, 60_000, 25);
 
     vi.mocked(stuck.runtime.prompt).mockImplementation(async () => await new Promise(() => {}));

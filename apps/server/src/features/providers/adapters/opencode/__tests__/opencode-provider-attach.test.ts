@@ -47,7 +47,7 @@ function setup(serveUrl: string, http: ReturnType<typeof fakeHttp>) {
   const settingsService = { get: () => ({ provider: { cli: { opencode: "" }, opencode: { serveUrl } } }) };
   const events: string[] = [];
   const host = {
-    processes: { attach: () => {}, terminateTree },
+    processes: { open: () => { throw new Error("opencode-provider-attach.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("opencode-provider-attach.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree },
     runtime: { platform: "linux" },
     events: { submit: async (batch: import("@mcode/providers").ProviderEventBatch) => {
       for (const draft of batch.events) {

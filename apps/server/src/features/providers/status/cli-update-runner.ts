@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 import which from "which";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { createCliStatusRunner, isSemver, type CliStatusOutcome } from "@mcode/providers";
+import { sharedProcessStartWorkerClient } from "../../../runtime/process/process-start-worker-client.js";
 
 /** The only process boundary used by the updater. Tests supply an in-memory host. */
 export interface CliUpdateProcessHost {
@@ -62,7 +63,7 @@ const nodeProcessHost: CliUpdateProcessHost = {
   async run(args, timeoutMs) {
     const env = { ...process.env };
     if (args[0] === "prefix") {
-      return createCliStatusRunner({ platform: hostRuntime.platform, env, timeoutMs })("npm", ["prefix", "-g"]);
+      return createCliStatusRunner({ runProcess: sharedProcessStartWorkerClient().run, platform: hostRuntime.platform, env, timeoutMs })("npm", ["prefix", "-g"]);
     }
     const npm = await which("npm", { nothrow: true });
     if (!npm) return { kind: "failed" };

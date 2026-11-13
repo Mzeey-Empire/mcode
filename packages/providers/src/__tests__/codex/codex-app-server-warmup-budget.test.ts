@@ -1,14 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockSpawn, mockWhich } = vi.hoisted(() => ({
-  mockSpawn: vi.fn(),
+const { mockOpen, mockWhich } = vi.hoisted(() => ({
+  mockOpen: vi.fn(),
   mockWhich: vi.fn(),
 }));
-
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  return { ...actual, spawn: mockSpawn };
-});
 
 vi.mock("which", () => ({ default: mockWhich }));
 
@@ -32,7 +27,7 @@ describe("warmCodexAppServer discovery budget", () => {
       }),
     );
 
-    const warmup = warmCodexAppServer("slow-codex", process.platform, 100);
+    const warmup = warmCodexAppServer("slow-codex", process.platform, mockOpen, 100);
     let settled = false;
     void warmup.then(
       () => {
@@ -47,10 +42,10 @@ describe("warmCodexAppServer discovery budget", () => {
 
     expect(settled).toBe(true);
     await expect(warmup).resolves.toEqual({ initialized: false });
-    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockOpen).not.toHaveBeenCalled();
 
     rejectDiscovery(new Error("late discovery failure"));
     await Promise.resolve();
-    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(mockOpen).not.toHaveBeenCalled();
   });
 });

@@ -369,7 +369,7 @@ describe("SessionRuntime", () => {
     };
     const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
-      processes: { attach: () => undefined, terminateTree: async (pid) => { if (pid === 401) throw new Error("failed process cleanup"); } },
+      processes: { open: () => { throw new Error("session-runtime.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("session-runtime.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async (pid) => { if (pid === 401) throw new Error("failed process cleanup"); } },
       envService: { getEnv: () => ({}) },
     });
     for (const sessionId of ["failed", "peer"]) await runtime.acquire({ sessionId, threadId: sessionId, cwd: ".", permissionMode: "default" });
@@ -395,7 +395,7 @@ describe("SessionRuntime", () => {
     const terminateTree = vi.fn(async () => undefined);
     const runtime = new SessionRuntime(adapter, { providerId: "test", occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => undefined },
-      processes: { attach, terminateTree },
+      processes: { open: () => { throw new Error("session-runtime.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("session-runtime.test.ts fixture does not support process runs"); }, attach, terminateTree },
       envService: { getEnv: () => ({}) },
     });
 

@@ -72,7 +72,7 @@ function createProvider(child: NativeProcess) {
     host: {
       occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
-      environment: { snapshot: () => ({}) }, processes: { attach: () => {}, terminateTree: async () => {} },
+      environment: { snapshot: () => ({}) }, processes: { open: () => { throw new Error("native-plan-questions.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("native-plan-questions.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
       browser: { stage: () => ({ leaseId: "unused", expiresAt: 0 }), releaseSession: () => 0,
         isConfigured: () => false, issue: () => null, refresh: () => { throw new Error("Unused browser"); },
         release: leaseId => ({ leaseId, released: false }), revokeCredential: () => false },

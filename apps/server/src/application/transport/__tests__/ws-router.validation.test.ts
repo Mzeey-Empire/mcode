@@ -250,7 +250,7 @@ describe("routeMessage provider.catalog", () => {
     const deps = {
       codexCatalogService,
       providerCatalogService,
-      skillService: { list: vi.fn(() => []) },
+      skillService: { list: vi.fn(async () => []) },
     } as unknown as RouterDeps;
 
     try {
@@ -330,7 +330,7 @@ describe("routeMessage provider.catalog", () => {
     const deps = {
       codexCatalogService,
       providerCatalogService,
-      skillService: { list: vi.fn(() => []) },
+      skillService: { list: vi.fn(async () => []) },
     } as unknown as RouterDeps;
 
     try {
@@ -494,7 +494,7 @@ describe("routeMessage provider.catalog", () => {
     insertWorkspace.run("workspace-2", "Workspace 2", "C:/other");
     const snapshotRepo = new ProviderCatalogSnapshotRepo(db, fixture.writer);
     const providerCatalogService = catalogService(snapshotRepo);
-    const list = vi.fn().mockImplementation((_cwd, _providerId, discoveredSkills = []) => (
+    const list = vi.fn().mockImplementation(async (_cwd, _providerId, discoveredSkills = []) => (
       discoveredSkills
     ));
     const threadLookup = vi.fn();

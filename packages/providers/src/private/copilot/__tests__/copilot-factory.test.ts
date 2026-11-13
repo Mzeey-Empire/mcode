@@ -61,7 +61,7 @@ function host(sink: DeterministicCanonicalSink): ProviderHostPorts {
   return {
     occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
-    environment: { snapshot: vi.fn(() => ({})) }, processes: { attach: vi.fn(), terminateTree: vi.fn(async () => {}) },
+    environment: { snapshot: vi.fn(() => ({})) }, processes: { open: () => { throw new Error("copilot-factory.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("copilot-factory.test.ts fixture does not support process runs"); }, attach: vi.fn(), terminateTree: vi.fn(async () => {}) },
     browser: { stage: vi.fn(() => ({ leaseId: "lease", expiresAt: 1_000 })), releaseSession: vi.fn(() => 0), isConfigured: () => false, issue: () => null, refresh: (leaseId) => ({ ok: false, leaseId, reason: "not-found" }), release: (leaseId) => ({ leaseId, released: true }), revokeCredential: () => false },
     mcode: { attach: vi.fn(async () => null), close: vi.fn(async () => {}) },
     grants: { consume: vi.fn(() => false) }, events: sink,
@@ -99,6 +99,14 @@ describe("Copilot public factory", () => {
     provider = createCopilotProvider({ configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host: ports, copilot: { launch: { resolve: launch } } });
   });
   afterEach(async () => { await provider.shutdown().catch(() => {}); });
+  it("awaits CLI discovery when describing provider status", async () => {
+    const facts = { installed: "1.0.57", managedBy: "user" as const, resolvedPath: "/copilot", npmPackage: null };
+    provider = createCopilotProvider({
+      configuration: { cliPath: "copilot", idleSessionTtlMs: 600_000 }, host: ports,
+      copilot: { launch: { resolve: launch, describeCli: async () => facts } },
+    });
+    expect((await provider.describeStatus?.())?.cli).toEqual(facts);
+  });
   it("ends errored when held saves exceed the production 64 MiB budget", async () => {
     const held = Promise.withResolvers<void>();
     const submit = ports.events.submit.bind(ports.events);

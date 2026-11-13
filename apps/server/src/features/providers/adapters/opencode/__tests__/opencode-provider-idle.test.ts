@@ -31,7 +31,7 @@ function testProvider(http: never) {
   const submitted: unknown[] = [];
   const host = {
     events: { submit: async (batch: unknown) => { submitted.push(batch); return { commit: {}, delivery: { ingress: "queued" } }; } },
-    processes: { attach: () => {}, terminateTree: async () => {} },
+    processes: { open: () => { throw new Error("opencode-provider-idle.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("opencode-provider-idle.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
     runtime: { platform: "win32" },
     environment: { snapshot: () => ({}) },
     browser: {},

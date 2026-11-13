@@ -1,5 +1,6 @@
 import * as NodeFS from "node:fs";
-import * as NodeChildProcess from "node:child_process";
+import { sharedProcessStartWorkerClient } from "../../../../runtime/process/process-start-worker-client.js";
+import type { ProcessStartRunner } from "../../../../runtime/process/process-start.js";
 import * as NodePath from "node:path";
 import { isProviderVersionAtLeast } from "@mcode/providers";
 
@@ -33,7 +34,7 @@ export interface CopilotCliResolverIO {
   /** UTF-8 file contents, or null when unreadable. */
   readFile(p: string): string | null;
   /** Run a command; trimmed stdout, or null on spawn error / non-zero exit. */
-  exec(command: string, args: string[]): string | null;
+  exec(command: string, args: string[]): Promise<string | null>;
   /** Host platform; selects the win32 vs posix PATH branch. */
   platform: NodeJS.Platform;
 }
@@ -52,7 +53,7 @@ export type ResolveContext = CopilotCliResolveContext;
 
 interface Strategy {
   source: CopilotCliSource;
-  resolve(ctx: CopilotCliResolveContext, io: CopilotCliResolverIO): { entry: string; version: string | null } | null;
+  resolve(ctx: CopilotCliResolveContext, io: CopilotCliResolverIO): Promise<{ entry: string; version: string | null } | null>;
 }
 
 /** Shell control characters that must not appear in a CLI path passed to `shell: true`. */
@@ -63,6 +64,8 @@ const RESOLUTION_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** Cached resolution results keyed by trimmed configured path (empty string for auto-discovery). */
 const resolutionCache = new Map<string, { resolution: CopilotCliResolution; checkedAt: number }>();
+
+const pendingResolutions = new Map<string, Promise<CopilotCliResolution>>();
 
 /** Semver triplet matcher (matches "1.0.24" in "GitHub Copilot CLI 1.0.24."). */
 const VERSION_RE = /\b(\d+\.\d+\.\d+)(?!\.\d)/;
@@ -140,10 +143,10 @@ function resolvePackageEntry(
  * metacharacters, null to fall through when the path is missing or unreachable,
  * or a configured resolution when the path exists and responds to `--version`.
  */
-function tryConfiguredPath(
+async function tryConfiguredPath(
   configuredPath: string,
   io: CopilotCliResolverIO,
-): CopilotCliFound | CopilotCliNotFound | null {
+): Promise<CopilotCliFound | CopilotCliNotFound | null> {
   if (SHELL_METACHAR_RE.test(configuredPath)) {
     return {
       source: "not-found",
@@ -155,7 +158,7 @@ function tryConfiguredPath(
     };
   }
   if (!io.exists(configuredPath)) return null;
-  const out = io.exec(configuredPath, ["--version"]);
+  const out = await io.exec(configuredPath, ["--version"]);
   if (!out) return null;
   return { source: "configured", entry: configuredPath, version: parseVersion(out) };
 }
@@ -167,8 +170,8 @@ function tryConfiguredPath(
  */
 const npmGlobalStrategy: Strategy = {
   source: "npm-global",
-  resolve(_ctx, io) {
-    const root = io.exec("npm", ["root", "-g"]);
+  async resolve(_ctx, io) {
+    const root = await io.exec("npm", ["root", "-g"]);
     if (!root) return null;
     return resolvePackageEntry(NodePath.join(root, "@github", "copilot"), io);
   },
@@ -181,17 +184,17 @@ function firstPathLine(output: string | null): string | null {
 }
 
 /** Finds the Copilot command through Windows command resolution. */
-function locateWindowsCopilot(io: CopilotCliResolverIO): string | null {
+async function locateWindowsCopilot(io: CopilotCliResolverIO): Promise<string | null> {
   // `where.exe` cannot see ExternalScript/.ps1 shims; Get-Command can. Prefer
   // it, fall back to `where` for .cmd/.exe shims.
-  const powerShellPath = firstPathLine(io.exec("powershell", ["-NoProfile", "-Command", "(Get-Command copilot).Source"]));
-  return powerShellPath ?? firstPathLine(io.exec("where", ["copilot"]));
+  const powerShellPath = firstPathLine(await io.exec("powershell", ["-NoProfile", "-Command", "(Get-Command copilot).Source"]));
+  return powerShellPath ?? firstPathLine(await io.exec("where", ["copilot"]));
 }
 
 /** Returns the first command source on PATH: PowerShell-aware on win32, `which` on posix. */
-function locateOnPath(io: CopilotCliResolverIO): string | null {
+async function locateOnPath(io: CopilotCliResolverIO): Promise<string | null> {
   if (io.platform === "win32") return locateWindowsCopilot(io);
-  return firstPathLine(io.exec("which", ["copilot"]));
+  return firstPathLine(await io.exec("which", ["copilot"]));
 }
 
 /**
@@ -202,8 +205,8 @@ function locateOnPath(io: CopilotCliResolverIO): string | null {
  */
 const pathShimStrategy: Strategy = {
   source: "path-shim",
-  resolve(_ctx, io) {
-    const shim = locateOnPath(io);
+  async resolve(_ctx, io) {
+    const shim = await locateOnPath(io);
     if (!shim) return null;
     return resolvePackageEntry(NodePath.join(NodePath.dirname(shim), "node_modules", "@github", "copilot"), io);
   },
@@ -213,14 +216,14 @@ const pathShimStrategy: Strategy = {
 const AUTO_STRATEGIES: Strategy[] = [npmGlobalStrategy, pathShimStrategy];
 
 /** Builds the not-found resolution, disambiguating `@github/copilot` from `gh copilot`. */
-function notFound(io: CopilotCliResolverIO): CopilotCliNotFound {
-  const ghExts = io.exec("gh", ["extension", "list"]);
+async function notFound(io: CopilotCliResolverIO): Promise<CopilotCliNotFound> {
+  const ghExts = await io.exec("gh", ["extension", "list"]);
   const hasGhCopilot = ghExts != null && /copilot/i.test(ghExts);
   return {
     source: "not-found",
     entry: null,
     version: null,
-    message: formatCopilotNotFoundMessage(hasGhCopilot),
+    message: await formatCopilotNotFoundMessage(hasGhCopilot),
   };
 }
 
@@ -228,13 +231,13 @@ function notFound(io: CopilotCliResolverIO): CopilotCliNotFound {
  * Returns the user-facing install message when the Copilot CLI cannot be used.
  * When `hasGhCopilot` is omitted, probes `gh extension list` via `io`.
  */
-export function formatCopilotNotFoundMessage(
+export async function formatCopilotNotFoundMessage(
   hasGhCopilot?: boolean,
   io?: CopilotCliResolverIO,
-): string {
+): Promise<string> {
   let ghInstalled = hasGhCopilot;
   if (ghInstalled === undefined && io != null) {
-    const ghExts = io.exec("gh", ["extension", "list"]);
+    const ghExts = await io.exec("gh", ["extension", "list"]);
     ghInstalled = ghExts != null && /copilot/i.test(ghExts);
   }
   ghInstalled ??= false;
@@ -259,29 +262,50 @@ function resolutionCacheKey(ctx: CopilotCliResolveContext): string {
  * message when none succeed. Reports a raw version only; min-version policy is
  * intentionally not handled here (see ADR-0001).
  */
-export function resolveCopilotCli(
+export async function resolveCopilotCli(
   ctx: CopilotCliResolveContext,
   io: CopilotCliResolverIO,
-): CopilotCliResolution {
+): Promise<CopilotCliResolution> {
   const cacheKey = resolutionCacheKey(ctx);
   const cached = resolutionCache.get(cacheKey);
   if (cached && Date.now() - cached.checkedAt < RESOLUTION_CACHE_TTL_MS) {
     return cached.resolution;
   }
 
+  const pending = pendingResolutions.get(cacheKey);
+  if (pending) return pending;
+
+  const discovery = discoverCopilotCli(ctx, io);
+  pendingResolutions.set(cacheKey, discovery);
+  try {
+    const resolution = await discovery;
+    // A cache clear during discovery (after a CLI update) makes this result stale.
+    if (pendingResolutions.get(cacheKey) === discovery) {
+      resolutionCache.set(cacheKey, { resolution, checkedAt: Date.now() });
+    }
+    return resolution;
+  } finally {
+    if (pendingResolutions.get(cacheKey) === discovery) pendingResolutions.delete(cacheKey);
+  }
+}
+
+async function discoverCopilotCli(
+  ctx: CopilotCliResolveContext,
+  io: CopilotCliResolverIO,
+): Promise<CopilotCliResolution> {
   const configured = ctx.configuredPath?.trim();
   let resolution: CopilotCliResolution;
   if (configured) {
-    const configuredResult = tryConfiguredPath(configured, io);
+    const configuredResult = await tryConfiguredPath(configured, io);
     if (configuredResult?.source === "not-found") {
       resolution = configuredResult;
     } else if (configuredResult) {
       resolution = configuredResult;
     } else {
-      resolution = resolveAutoDiscovery(ctx, io);
+      resolution = await resolveAutoDiscovery(ctx, io);
     }
   } else {
-    resolution = resolveAutoDiscovery(ctx, io);
+    resolution = await resolveAutoDiscovery(ctx, io);
   }
 
   if (resolution.source !== "not-found") {
@@ -289,17 +313,16 @@ export function resolveCopilotCli(
     if (outdated) resolution = outdated;
   }
 
-  resolutionCache.set(cacheKey, { resolution, checkedAt: Date.now() });
   return resolution;
 }
 
 /** Runs npm-global and path-shim strategies, falling back to not-found. */
-function resolveAutoDiscovery(
+async function resolveAutoDiscovery(
   ctx: CopilotCliResolveContext,
   io: CopilotCliResolverIO,
-): CopilotCliResolution {
+): Promise<CopilotCliResolution> {
   for (const strategy of AUTO_STRATEGIES) {
-    const r = strategy.resolve(ctx, io);
+    const r = await strategy.resolve(ctx, io);
     if (r) return { source: strategy.source, entry: r.entry, version: r.version };
   }
   return notFound(io);
@@ -308,12 +331,17 @@ function resolveAutoDiscovery(
 /** Clears cached resolution results. Exposed for testing only. */
 export function clearResolutionCache(): void {
   resolutionCache.clear();
+  pendingResolutions.clear();
 }
 
-/** Real adapter: Node fs + spawnSync. `shell:true` on win32 resolves `.cmd`/`.ps1` shims for probes. */
+/**
+ * Real adapter: Node fs + worker process starts. Probes run at startup, so they must
+ * not block the event loop. `shell:true` on win32 resolves `.cmd`/`.ps1` shims.
+ */
 export function createNodeResolverIO(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
+  runProcess: ProcessStartRunner = sharedProcessStartWorkerClient().run,
 ): CopilotCliResolverIO {
   return {
     platform,
@@ -325,17 +353,19 @@ export function createNodeResolverIO(
         return null;
       }
     },
-    exec: (command, args) => {
-      const r = NodeChildProcess.spawnSync(command, args, {
-        encoding: "utf8",
-        timeout: 5000,
-        windowsHide: true,
-        shell: platform === "win32",
-        env,
-      });
-      if (r.error || r.status !== 0) return null;
-      const out = (r.stdout ?? "").trim();
-      return out.length > 0 ? out : null;
+    exec: async (command, args) => {
+      try {
+        const { stdout } = await runProcess({
+          command,
+          args,
+          timeout: 5000,
+          shell: platform === "win32",
+          env,
+        });
+        return stdout.trim() || null;
+      } catch {
+        return null;
+      }
     },
   };
 }

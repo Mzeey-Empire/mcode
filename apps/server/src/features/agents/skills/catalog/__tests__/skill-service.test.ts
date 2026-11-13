@@ -47,13 +47,56 @@ describe("SkillService", () => {
     NodeFS.rmSync(fakeHome, { recursive: true, force: true });
   });
 
-  it("scans commands/*.md as command-kind entries", () => {
+
+  it("lists skills without blocking the event loop", async () => {
+    const skillDir = NodePath.join(fakeHome, ".claude", "skills", "audit");
+    NodeFS.mkdirSync(skillDir, { recursive: true });
+    writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Audit checks" });
+    let settled = false;
+    const pending = Promise.resolve(new SkillService().list()).then((items) => {
+      settled = true;
+      return items;
+    });
+    const settledBeforeImmediate = await new Promise<boolean>((resolve) => {
+      setImmediate(() => resolve(settled));
+    });
+    const items = await pending;
+    expect(settledBeforeImmediate).toBe(false);
+    expect(items.map((item) => item.name)).toEqual(["audit"]);
+  });
+
+  it("shares one scan between concurrent lists for the same directory", async () => {
+    const skillDir = NodePath.join(fakeHome, ".claude", "skills", "audit");
+    NodeFS.mkdirSync(skillDir, { recursive: true });
+    writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Audit checks" });
+    const svc = new SkillService();
+    const first = svc.list(fakeHome);
+    const second = svc.list(fakeHome);
+    const [firstItems, secondItems] = await Promise.all([first, second]);
+    expect(firstItems.map((item) => item.name)).toEqual(["audit"]);
+    expect(secondItems).toEqual(firstItems);
+    expect(secondItems[0]).toBe(firstItems[0]);
+  });
+
+  it("does not cache a scan that finishes after invalidate", async () => {
+    const svc = new SkillService();
+    const pending = svc.list(fakeHome);
+    svc.invalidate();
+    expect(await pending).toEqual([]);
+    const skillDir = NodePath.join(fakeHome, ".claude", "skills", "added");
+    NodeFS.mkdirSync(skillDir, { recursive: true });
+    writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Added after invalidation" });
+    const items = await svc.list(fakeHome);
+    expect(items.map((item) => item.name)).toEqual(["added"]);
+  });
+
+  it("scans commands/*.md as command-kind entries", async () => {
     const cmdDir = NodePath.join(fakeHome, ".claude", "plugins", "cache", "mp", "superpowers", "5.0.7", "commands");
     NodeFS.mkdirSync(cmdDir, { recursive: true });
     writeMd(NodePath.join(cmdDir, "brainstorm.md"), { description: "Brainstorm an idea" });
 
     const svc = new SkillService();
-    const items = svc.list();
+    const items = await svc.list();
 
     const brainstorm = items.find((i) => i.name === "superpowers:brainstorm");
     expect(brainstorm).toBeDefined();
@@ -62,25 +105,25 @@ describe("SkillService", () => {
     expect(brainstorm!.source).toBe("plugin");
   });
 
-  it("scans plugin skills nested under <version>/.claude/skills", () => {
+  it("scans plugin skills nested under <version>/.claude/skills", async () => {
     const skillDir = NodePath.join(fakeHome, ".claude", "plugins", "cache", "mp", "impeccable", "2.1.1", ".claude", "skills", "audit");
     NodeFS.mkdirSync(skillDir, { recursive: true });
     writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Run audit checks" });
 
-    const items = new SkillService().list();
+    const items = await new SkillService().list();
     expect(items.find((i) => i.name === "impeccable:audit")).toMatchObject({
       kind: "skill",
       description: "Run audit checks",
     });
   });
 
-  it("scans project-level <cwd>/.claude/commands/*.md", () => {
+  it("scans project-level <cwd>/.claude/commands/*.md", async () => {
     const cwd = tmp();
     const cmdDir = NodePath.join(cwd, ".claude", "commands");
     NodeFS.mkdirSync(cmdDir, { recursive: true });
     writeMd(NodePath.join(cmdDir, "deploy.md"), { description: "Deploy to staging" });
 
-    const items = new SkillService().list(cwd);
+    const items = await new SkillService().list(cwd);
     const deploy = items.find((i) => i.name === "deploy");
     expect(deploy).toMatchObject({
       kind: "command",
@@ -91,7 +134,7 @@ describe("SkillService", () => {
     NodeFS.rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("dedupes by name with priority user > project > agent > plugin", () => {
+  it("dedupes by name with priority user > project > agent > plugin", async () => {
     const userDir = NodePath.join(fakeHome, ".claude", "skills", "shared");
     const pluginDir = NodePath.join(fakeHome, ".claude", "plugins", "cache", "mp", "p", "1.0.0", "skills", "shared");
     NodeFS.mkdirSync(userDir, { recursive: true });
@@ -99,13 +142,13 @@ describe("SkillService", () => {
     writeMd(NodePath.join(userDir, "SKILL.md"), { description: "User wins" });
     writeMd(NodePath.join(pluginDir, "SKILL.md"), { description: "Plugin loses" });
 
-    const items = new SkillService().list();
+    const items = await new SkillService().list();
     const shared = items.find((i) => i.name === "shared");
     expect(shared!.description).toBe("User wins");
     expect(shared!.source).toBe("user");
   });
 
-  it("skips skill subdirs that lack SKILL.md", () => {
+  it("skips skill subdirs that lack SKILL.md", async () => {
     // Two siblings under the user skills root: one is a real skill, the
     // other is a helper folder (e.g., shared utilities, scaffolding scripts).
     // Without the SKILL.md guard, the helper would surface as an empty
@@ -117,13 +160,13 @@ describe("SkillService", () => {
     writeMd(NodePath.join(realDir, "SKILL.md"), { description: "A real skill" });
     // helperDir intentionally has no SKILL.md.
 
-    const items = new SkillService().list();
+    const items = await new SkillService().list();
     expect(items.find((i) => i.name === "real-skill")).toBeDefined();
     expect(items.find((i) => i.name === "_helpers")).toBeUndefined();
   });
 
-  it("returns empty diagnostics with no error when paths are missing", () => {
-    const diag = new SkillService().diagnose();
+  it("returns empty diagnostics with no error when paths are missing", async () => {
+    const diag = await new SkillService().diagnose();
     expect(diag.errors).toEqual([]);
     expect(diag.scanned.every((s) => s.existed === false || s.entries >= 0)).toBe(true);
   });
@@ -161,29 +204,29 @@ describe("SkillService", () => {
   });
 
   describe("provider-scoped scanning", () => {
-    it("tags skills from ~/.claude/skills with providers=['claude']", () => {
+    it("tags skills from ~/.claude/skills with providers=['claude']", async () => {
       const skillDir = NodePath.join(fakeHome, ".claude", "skills", "my-skill");
       NodeFS.mkdirSync(skillDir, { recursive: true });
       writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Claude skill" });
 
-      const items = new SkillService().list(undefined, "claude");
+      const items = await new SkillService().list(undefined, "claude");
 
       const skill = items.find((i) => i.name === "my-skill");
       expect(skill).toBeDefined();
       expect(skill!.providers).toEqual(["claude"]);
     });
 
-    it("does not expose Codex Skills from the filesystem fallback", () => {
+    it("does not expose Codex Skills from the filesystem fallback", async () => {
       const skillDir = NodePath.join(fakeHome, ".codex", "skills", "codex-skill");
       NodeFS.mkdirSync(skillDir, { recursive: true });
       writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Codex skill" });
 
-      const items = new SkillService().list(undefined, "codex");
+      const items = await new SkillService().list(undefined, "codex");
 
       expect(items.find((i) => i.name === "codex-skill")).toBeUndefined();
     });
 
-    it("does not scan Codex plugin cache Skills", () => {
+    it("does not scan Codex plugin cache Skills", async () => {
       const skillDir = NodePath.join(
         fakeHome,
         ".codex",
@@ -199,11 +242,11 @@ describe("SkillService", () => {
       const skillPath = NodePath.join(skillDir, "SKILL.md");
       writeMd(skillPath, { name: "audit", description: "Run audit checks" });
 
-      const items = new SkillService().list(undefined, "codex");
+      const items = await new SkillService().list(undefined, "codex");
       expect(items.find((i) => i.name === "impeccable:audit")).toBeUndefined();
     });
 
-    it("does not scan bundled Codex runtime plugin Skills", () => {
+    it("does not scan bundled Codex runtime plugin Skills", async () => {
       const skillDir = NodePath.join(
         fakeHome,
         ".cache",
@@ -219,11 +262,11 @@ describe("SkillService", () => {
       NodeFS.mkdirSync(skillDir, { recursive: true });
       writeMd(NodePath.join(skillDir, "SKILL.md"), { name: "documents", description: "Edit documents" });
 
-      const items = new SkillService().list(undefined, "codex");
+      const items = await new SkillService().list(undefined, "codex");
       expect(items.find((i) => i.name === "documents:documents")).toBeUndefined();
     });
 
-    it("extracts Codex plugin names from cache and runtime skill paths", () => {
+    it("extracts Codex plugin names from cache and runtime skill paths", async () => {
       const cacheSkillPath = NodePath.join(
         fakeHome,
         ".codex",
@@ -254,26 +297,26 @@ describe("SkillService", () => {
       expect(codexPluginNameFromSkillPath(runtimeSkillPath, fakeHome)).toBe("documents");
     });
 
-    it("leaves ~/.agents/skills discovery to the native Codex catalog", () => {
+    it("leaves ~/.agents/skills discovery to the native Codex catalog", async () => {
       const skillDir = NodePath.join(fakeHome, ".agents", "skills", "shared-skill");
       NodeFS.mkdirSync(skillDir, { recursive: true });
       writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Shared skill" });
 
       const svc = new SkillService();
 
-      const codexItems = svc.list(undefined, "codex");
+      const codexItems = await svc.list(undefined, "codex");
       expect(codexItems.find((i) => i.name === "shared-skill")).toBeUndefined();
 
       svc.invalidate();
-      const copilotItems = svc.list(undefined, "copilot");
+      const copilotItems = await svc.list(undefined, "copilot");
       expect(copilotItems.find((i) => i.name === "shared-skill")).toBeUndefined();
 
       svc.invalidate();
-      const claudeItems = svc.list(undefined, "claude");
+      const claudeItems = await svc.list(undefined, "claude");
       expect(claudeItems.find((i) => i.name === "shared-skill")).toBeUndefined();
     });
 
-    it("filters by providerId and returns only matching skills", () => {
+    it("filters by providerId and returns only matching skills", async () => {
       const claudeSkillDir = NodePath.join(fakeHome, ".claude", "skills", "claude-only");
       NodeFS.mkdirSync(claudeSkillDir, { recursive: true });
       writeMd(NodePath.join(claudeSkillDir, "SKILL.md"), { description: "Claude only" });
@@ -284,17 +327,17 @@ describe("SkillService", () => {
 
       const svc = new SkillService();
 
-      const claudeItems = svc.list(undefined, "claude");
+      const claudeItems = await svc.list(undefined, "claude");
       expect(claudeItems.find((i) => i.name === "claude-only")).toBeDefined();
       expect(claudeItems.find((i) => i.name === "codex-only")).toBeUndefined();
 
       svc.invalidate();
-      const codexItems = svc.list(undefined, "codex");
+      const codexItems = await svc.list(undefined, "codex");
       expect(codexItems.find((i) => i.name === "codex-only")).toBeUndefined();
       expect(codexItems.find((i) => i.name === "claude-only")).toBeUndefined();
     });
 
-    it("returns all skills when no providerId is given", () => {
+    it("returns all skills when no providerId is given", async () => {
       const claudeSkillDir = NodePath.join(fakeHome, ".claude", "skills", "claude-skill");
       NodeFS.mkdirSync(claudeSkillDir, { recursive: true });
       writeMd(NodePath.join(claudeSkillDir, "SKILL.md"), { description: "Claude" });
@@ -303,14 +346,14 @@ describe("SkillService", () => {
       NodeFS.mkdirSync(codexSkillDir, { recursive: true });
       writeMd(NodePath.join(codexSkillDir, "SKILL.md"), { description: "Codex" });
 
-      const items = new SkillService().list();
+      const items = await new SkillService().list();
 
       expect(items.find((i) => i.name === "claude-skill")).toBeDefined();
       expect(items.find((i) => i.name === "codex-skill")).toBeUndefined();
       expect(items.every((i) => Array.isArray(i.providers))).toBe(true);
     });
 
-    it("deduplicates by name within same provider using source priority", () => {
+    it("deduplicates by name within same provider using source priority", async () => {
       const cwd = tmp();
       try {
         const userSkillDir = NodePath.join(fakeHome, ".claude", "skills", "shared");
@@ -321,7 +364,7 @@ describe("SkillService", () => {
         NodeFS.mkdirSync(projectSkillDir, { recursive: true });
         writeMd(NodePath.join(projectSkillDir, "SKILL.md"), { description: "Project loses" });
 
-        const items = new SkillService().list(cwd, "claude");
+        const items = await new SkillService().list(cwd, "claude");
         const shared = items.find((i) => i.name === "shared");
         expect(shared!.description).toBe("User wins");
         expect(shared!.source).toBe("user");
@@ -330,18 +373,18 @@ describe("SkillService", () => {
       }
     });
 
-    it("leaves Codex custom prompts to the bounded catalog adapter", () => {
+    it("leaves Codex custom prompts to the bounded catalog adapter", async () => {
       const cmdDir = NodePath.join(fakeHome, ".codex", "prompts");
       NodeFS.mkdirSync(cmdDir, { recursive: true });
       const promptPath = NodePath.join(cmdDir, "deploy.md");
       writeMd(promptPath, { description: "Codex deploy prompt" });
 
-      const items = new SkillService().list(undefined, "codex");
+      const items = await new SkillService().list(undefined, "codex");
 
       expect(items.find((i) => i.name === "prompts:deploy")).toBeUndefined();
     });
 
-    it("leaves Codex commands outside the two documented compatibility adapters", () => {
+    it("leaves Codex commands outside the two documented compatibility adapters", async () => {
       const userCommands = NodePath.join(fakeHome, ".agents", "commands");
       const cwd = tmp();
       const projectCommands = NodePath.join(cwd, ".agents", "commands");
@@ -353,7 +396,7 @@ describe("SkillService", () => {
       });
 
       try {
-        const items = new SkillService().list(cwd, "codex");
+        const items = await new SkillService().list(cwd, "codex");
 
         expect(items).toEqual([]);
       } finally {
@@ -361,12 +404,12 @@ describe("SkillService", () => {
       }
     });
 
-    it("tags skills from ~/.cursor/skills with providers=['cursor']", () => {
+    it("tags skills from ~/.cursor/skills with providers=['cursor']", async () => {
       const skillDir = NodePath.join(fakeHome, ".cursor", "skills", "my-cursor-skill");
       NodeFS.mkdirSync(skillDir, { recursive: true });
       writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Cursor user skill" });
 
-      const items = new SkillService().list(undefined, "cursor");
+      const items = await new SkillService().list(undefined, "cursor");
       const skill = items.find((i) => i.name === "my-cursor-skill");
       expect(skill).toMatchObject({
         kind: "skill",
@@ -376,12 +419,12 @@ describe("SkillService", () => {
       });
     });
 
-    it("tags commands from ~/.cursor/commands with providers=['cursor']", () => {
+    it("tags commands from ~/.cursor/commands with providers=['cursor']", async () => {
       const cmdDir = NodePath.join(fakeHome, ".cursor", "commands");
       NodeFS.mkdirSync(cmdDir, { recursive: true });
       writeMd(NodePath.join(cmdDir, "lint.md"), { description: "Cursor lint command" });
 
-      const items = new SkillService().list(undefined, "cursor");
+      const items = await new SkillService().list(undefined, "cursor");
       const cmd = items.find((i) => i.name === "lint");
       expect(cmd).toMatchObject({
         kind: "command",
@@ -391,7 +434,7 @@ describe("SkillService", () => {
       });
     });
 
-    it("scans project-level <cwd>/.cursor/skills and commands for cursor", () => {
+    it("scans project-level <cwd>/.cursor/skills and commands for cursor", async () => {
       const cwd = tmp();
       try {
         const skillDir = NodePath.join(cwd, ".cursor", "skills", "proj-skill");
@@ -402,7 +445,7 @@ describe("SkillService", () => {
         NodeFS.mkdirSync(cmdDir, { recursive: true });
         writeMd(NodePath.join(cmdDir, "ship.md"), { description: "Ship it" });
 
-        const items = new SkillService().list(cwd, "cursor");
+        const items = await new SkillService().list(cwd, "cursor");
         expect(items.find((i) => i.name === "proj-skill")).toMatchObject({
           kind: "skill",
           source: "project",
@@ -418,7 +461,7 @@ describe("SkillService", () => {
       }
     });
 
-    it("cursor plugin cache: scans newest hash dir by mtime, not lexical order", () => {
+    it("cursor plugin cache: scans newest hash dir by mtime, not lexical order", async () => {
       const pluginRoot = NodePath.join(fakeHome, ".cursor", "plugins", "cache", "mp", "myplug");
       /** Lexically last — would win if we wrongly sorted by name instead of mtime. */
       const dirStaleLexLast = NodePath.join(pluginRoot, "zebra-hash");
@@ -436,7 +479,7 @@ describe("SkillService", () => {
       NodeFS.utimesSync(dirStaleLexLast, new Date("2020-06-01"), new Date("2020-06-01"));
       NodeFS.utimesSync(dirFreshLexFirst, new Date("2025-06-01"), new Date("2025-06-01"));
 
-      const items = new SkillService().list(undefined, "cursor");
+      const items = await new SkillService().list(undefined, "cursor");
       const deploy = items.find((i) => i.name === "myplug:deploy");
       expect(deploy).toMatchObject({
         kind: "skill",
@@ -446,7 +489,7 @@ describe("SkillService", () => {
       });
     });
 
-    it("cursor plugin cache: scans workflow-skills alongside skills/", () => {
+    it("cursor plugin cache: scans workflow-skills alongside skills/", async () => {
       const wfDir = NodePath.join(
         fakeHome,
         ".cursor",
@@ -461,7 +504,7 @@ describe("SkillService", () => {
       NodeFS.mkdirSync(wfDir, { recursive: true });
       writeMd(NodePath.join(wfDir, "SKILL.md"), { description: "Workflow skill" });
 
-      const items = new SkillService().list(undefined, "cursor");
+      const items = await new SkillService().list(undefined, "cursor");
       expect(items.find((i) => i.name === "wfplug:analyze")).toMatchObject({
         kind: "skill",
         source: "plugin",
@@ -469,7 +512,7 @@ describe("SkillService", () => {
       });
     });
 
-    it("cursor plugin skills under .cursor/skills are tagged for cursor provider", () => {
+    it("cursor plugin skills under .cursor/skills are tagged for cursor provider", async () => {
       const skillDir = NodePath.join(
         fakeHome,
         ".cursor",
@@ -485,13 +528,13 @@ describe("SkillService", () => {
       NodeFS.mkdirSync(skillDir, { recursive: true });
       writeMd(NodePath.join(skillDir, "SKILL.md"), { description: "Native cursor plugin layout" });
 
-      const items = new SkillService().list(undefined, "cursor");
+      const items = await new SkillService().list(undefined, "cursor");
       expect(items.find((i) => i.name === "native:native-skill")).toMatchObject({
         providers: ["cursor"],
       });
     });
 
-    it("plugin .agents/skills/ is NOT exposed to non-Claude providers", () => {
+    it("plugin .agents/skills/ is NOT exposed to non-Claude providers", async () => {
       // Plugins live under ~/.claude/plugins/ — Claude's own infrastructure.
       // Even if a plugin ships .agents/ subdirs, those don't grant cross-provider access.
       // A user who installed impeccable as a Claude plugin should not see it in Codex/Copilot.
@@ -505,15 +548,15 @@ describe("SkillService", () => {
       const svc = new SkillService();
 
       // Non-Claude providers must not see skills from Claude's plugin cache.
-      const copilotItems = svc.list(undefined, "copilot");
+      const copilotItems = await svc.list(undefined, "copilot");
       expect(copilotItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
 
       svc.invalidate();
-      const codexItems = svc.list(undefined, "codex");
+      const codexItems = await svc.list(undefined, "codex");
       expect(codexItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
     });
 
-    it("plugin .codex/skills/ is NOT exposed to Codex", () => {
+    it("plugin .codex/skills/ is NOT exposed to Codex", async () => {
       // Same rule — .codex/ subdir in a Claude plugin does not make it available to Codex.
       const skillDir = NodePath.join(
         fakeHome, ".claude", "plugins", "cache", "mp", "myplugin", "1.0.0",
@@ -524,11 +567,11 @@ describe("SkillService", () => {
 
       const svc = new SkillService();
 
-      const codexItems = svc.list(undefined, "codex");
+      const codexItems = await svc.list(undefined, "codex");
       expect(codexItems.find((i) => i.name === "myplugin:codex-task")).toBeUndefined();
     });
 
-    it("marketplace plugin: .agents/skills/ is not exposed to non-Claude providers", () => {
+    it("marketplace plugin: .agents/skills/ is not exposed to non-Claude providers", async () => {
       // Marketplace plugins are part of Claude's plugin infrastructure — same rule as
       // the cache. Skills under .agents/ don't grant cross-provider access. The skill
       // name uses the marketplace name as prefix (not ".agents:"), but it's Claude-only.
@@ -542,16 +585,16 @@ describe("SkillService", () => {
       const svc = new SkillService();
 
       // Non-Claude providers must not see it.
-      const copilotItems = svc.list(undefined, "copilot");
+      const copilotItems = await svc.list(undefined, "copilot");
       expect(copilotItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
       expect(copilotItems.find((i) => i.name === ".agents:impeccable")).toBeUndefined();
 
       svc.invalidate();
-      const codexItems = svc.list(undefined, "codex");
+      const codexItems = await svc.list(undefined, "codex");
       expect(codexItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
     });
 
-    it("marketplace plugin: .claude/skills/ produces <marketplace-name>:* prefix for claude only", () => {
+    it("marketplace plugin: .claude/skills/ produces <marketplace-name>:* prefix for claude only", async () => {
       const skillDir = NodePath.join(
         fakeHome, ".claude", "plugins", "marketplaces", "impeccable",
         ".claude", "skills", "audit",
@@ -561,17 +604,17 @@ describe("SkillService", () => {
 
       const svc = new SkillService();
 
-      const claudeItems = svc.list(undefined, "claude");
+      const claudeItems = await svc.list(undefined, "claude");
       expect(claudeItems.find((i) => i.name === "impeccable:audit")).toBeDefined();
       // No .claude:audit prefix — the marketplace dir IS the version root.
       expect(claudeItems.find((i) => i.name === ".claude:audit")).toBeUndefined();
 
       svc.invalidate();
-      const codexItems = svc.list(undefined, "codex");
+      const codexItems = await svc.list(undefined, "codex");
       expect(codexItems.find((i) => i.name === "impeccable:audit")).toBeUndefined();
     });
 
-    it("marketplace plugin: cache and marketplace produce same skill names (dedup collapses them)", () => {
+    it("marketplace plugin: cache and marketplace produce same skill names (dedup collapses them)", async () => {
       // Cache and marketplace both produce "impeccable:adapt" — dedup should keep one.
       const cacheSkillDir = NodePath.join(
         fakeHome, ".claude", "plugins", "cache", "mp", "impeccable", "2.1.1",
@@ -586,7 +629,7 @@ describe("SkillService", () => {
       writeMd(NodePath.join(cacheSkillDir, "SKILL.md"), { description: "Cache version" });
       writeMd(NodePath.join(marketplaceSkillDir, "SKILL.md"), { description: "Marketplace version" });
 
-      const items = new SkillService().list(undefined, "claude");
+      const items = await new SkillService().list(undefined, "claude");
       const matches = items.filter((i) => i.name === "impeccable:adapt");
       expect(matches).toHaveLength(1);
     });
