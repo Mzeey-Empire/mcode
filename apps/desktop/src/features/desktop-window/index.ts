@@ -1,4 +1,6 @@
-import { BrowserWindow, type BrowserWindow as BrowserWindowType } from "electron";
+import { BrowserWindow, ipcMain, type BrowserWindow as BrowserWindowType } from "electron";
+
+import { logger } from "@mcode/shared";
 
 import {
   attachCloseGuard,
@@ -8,6 +10,12 @@ import {
   createWindow,
   type DesktopWindowLifecycleHooks,
 } from "./lifecycle/create-window.js";
+import {
+  readWindowThemeHint,
+  WINDOW_THEME_CHANNEL,
+  windowBackgroundColor,
+  writeWindowThemeHint,
+} from "./lifecycle/window-theme.js";
 import { configureApplicationMenu } from "./menu/application-menu.js";
 import { registerDesktopWindowActionHandler } from "./actions/handlers.js";
 import { installMainWindowNavigationPolicy } from "./navigation/main-window-policy.js";
@@ -25,6 +33,8 @@ export interface DesktopWindowFeatureDependencies {
   readonly lifecycleHooks: DesktopWindowLifecycleHooks;
   /** Active-agent close confirmation dependencies. */
   readonly closeGuard: CloseGuardDependencies;
+  /** JSON file remembering whether the last resolved theme was dark. */
+  readonly windowThemeHintPath: string;
 }
 
 /** The public operations provided by the Desktop Window feature. */
@@ -53,12 +63,22 @@ export function createDesktopWindowFeature(
   });
   registerDesktopWindowActionHandler();
   registerThreadNotificationHandler(() => mainWindow);
+  ipcMain.on(WINDOW_THEME_CHANNEL, (event, dark: unknown) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || typeof dark !== "boolean") return;
+    mainWindow.setBackgroundColor(windowBackgroundColor(dark));
+    writeWindowThemeHint(dependencies.windowThemeHintPath, dark).catch((error: unknown) => {
+      logger.warn("Window theme hint write failed", { error: String(error) });
+    });
+  });
 
   const create = (): BrowserWindowType => {
     const window = createWindow({
       platform: dependencies.platform,
       displayName: dependencies.displayName,
       isDesktopDev: dependencies.isDesktopDev,
+      backgroundColor: windowBackgroundColor(
+        readWindowThemeHint(dependencies.windowThemeHintPath),
+      ),
       hooks: dependencies.lifecycleHooks,
     });
     installMainWindowNavigationPolicy(window);

@@ -70,6 +70,8 @@ export interface CreateWindowDependencies {
   readonly displayName: string;
   /** Return whether the desktop runs in development mode. */
   readonly isDesktopDev: () => boolean;
+  /** Background painted before the page, matching the last used theme. */
+  readonly backgroundColor: string;
   /** Per-window feature hooks. */
   readonly hooks: DesktopWindowLifecycleHooks;
 }
@@ -84,7 +86,7 @@ export function createWindow(
     title: dependencies.displayName,
     icon: getWindowIconPath(dependencies.platform),
     // Keep the window visible from creation: on Windows, ready-to-show can remain pending until the window is shown.
-    backgroundColor: "#0a0a0f",
+    backgroundColor: dependencies.backgroundColor,
     autoHideMenuBar: true,
     ...(dependencies.platform === "darwin"
       ? {

@@ -29,6 +29,8 @@ ipcRenderer.on("window:full-screen", (_event, fullScreen: unknown) => {
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   reportLaunchMark(name: RendererLaunchMark, at: number): void { ipcRenderer.send("launch-mark", name, at); },
+  /** Tell the main process whether the resolved theme is dark, for the window background. */
+  reportWindowTheme(dark: boolean): void { ipcRenderer.send("window:theme", dark); },
   /** Platform facts, full-screen state, and allowlisted native window actions. */
   window: {
     platform: hostRuntime.platform,

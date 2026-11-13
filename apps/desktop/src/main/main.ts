@@ -586,6 +586,7 @@ app.whenReady().then(async () => {
           }),
         quit: () => app.quit(),
       },
+      windowThemeHintPath: NodePath.join(app.getPath("userData"), "window-theme.json"),
     });
 
     registerAttachmentsFeature();

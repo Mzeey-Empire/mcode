@@ -14,7 +14,10 @@ export function useAppliedTheme(theme: Theme, loaded: boolean): void {
     if (!loaded) return;
     localStorage.setItem(THEME_STORAGE_KEY, theme);
     const root = document.documentElement;
-    const applyTheme = (dark: boolean) => root.classList.toggle("dark", dark);
+    const applyTheme = (dark: boolean) => {
+      root.classList.toggle("dark", dark);
+      window.desktopBridge?.reportWindowTheme?.(dark);
+    };
 
     if (theme !== "system") {
       applyTheme(theme === "dark");
