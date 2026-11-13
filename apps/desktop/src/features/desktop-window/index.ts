@@ -1,5 +1,6 @@
-import { BrowserWindow, ipcMain, type BrowserWindow as BrowserWindowType } from "electron";
+import { BrowserWindow, ipcMain, nativeTheme, type BrowserWindow as BrowserWindowType } from "electron";
 
+import { ThemeSchema, type Theme } from "@mcode/contracts/models/settings";
 import { logger } from "@mcode/shared";
 
 import {
@@ -33,7 +34,7 @@ export interface DesktopWindowFeatureDependencies {
   readonly lifecycleHooks: DesktopWindowLifecycleHooks;
   /** Active-agent close confirmation dependencies. */
   readonly closeGuard: CloseGuardDependencies;
-  /** Theme hint available to the main process before the renderer can read localStorage. */
+  /** Theme preference file the main process reads before the renderer can read localStorage. */
   readonly windowThemeHintPath: string;
 }
 
@@ -63,12 +64,25 @@ export function createDesktopWindowFeature(
   });
   registerDesktopWindowActionHandler();
   registerThreadNotificationHandler(() => mainWindow);
-  ipcMain.on(WINDOW_THEME_CHANNEL, (event, dark: unknown) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents || typeof dark !== "boolean") return;
-    mainWindow.setBackgroundColor(windowBackgroundColor(dark));
-    writeWindowThemeHint(dependencies.windowThemeHintPath, dark).catch((error: unknown) => {
+  // Held in memory so a window re-created before the hint write lands still opens in the latest theme.
+  let theme: Theme | null = null;
+  const currentTheme = (): Theme => (theme ??= readWindowThemeHint(dependencies.windowThemeHintPath));
+  const currentBackground = (): string =>
+    windowBackgroundColor(currentTheme(), nativeTheme.shouldUseDarkColors);
+
+  ipcMain.on(WINDOW_THEME_CHANNEL, (event, reported: unknown) => {
+    const parsed = ThemeSchema.safeParse(reported);
+    if (!mainWindow || event.sender !== mainWindow.webContents || !parsed.success) return;
+    const changed = parsed.data !== currentTheme();
+    theme = parsed.data;
+    mainWindow.setBackgroundColor(currentBackground());
+    if (!changed) return;
+    writeWindowThemeHint(dependencies.windowThemeHintPath, parsed.data).catch((error: unknown) => {
       logger.warn("Window theme hint write failed", { error: String(error) });
     });
+  });
+  nativeTheme.on("updated", () => {
+    if (currentTheme() === "system") mainWindow?.setBackgroundColor(currentBackground());
   });
 
   const create = (): BrowserWindowType => {
@@ -76,9 +90,7 @@ export function createDesktopWindowFeature(
       platform: dependencies.platform,
       displayName: dependencies.displayName,
       isDesktopDev: dependencies.isDesktopDev,
-      backgroundColor: windowBackgroundColor(
-        readWindowThemeHint(dependencies.windowThemeHintPath),
-      ),
+      backgroundColor: currentBackground(),
       hooks: dependencies.lifecycleHooks,
     });
     installMainWindowNavigationPolicy(window);

@@ -10,6 +10,7 @@ import type { RendererLaunchMark } from "@mcode/contracts/launch-telemetry";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
 import type { BrowserHistory } from "@mcode/contracts/models/browser-preview";
+import type { Theme } from "@mcode/contracts/models/settings";
 import type { PreviewSurfaceRef } from "../features/preview/surfaces/registry.js";
 import {
   PREVIEW_POPUP_REQUESTED_CHANNEL,
@@ -29,8 +30,8 @@ ipcRenderer.on("window:full-screen", (_event, fullScreen: unknown) => {
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   reportLaunchMark(name: RendererLaunchMark, at: number): void { ipcRenderer.send("launch-mark", name, at); },
-  /** Tell the main process whether the resolved theme is dark, for the window background. */
-  reportWindowTheme(dark: boolean): void { ipcRenderer.send("window:theme", dark); },
+  /** Tell the main process the theme preference, for the window background. */
+  reportWindowTheme(theme: Theme): void { ipcRenderer.send("window:theme", theme); },
   /** Platform facts, full-screen state, and allowlisted native window actions. */
   window: {
     platform: hostRuntime.platform,

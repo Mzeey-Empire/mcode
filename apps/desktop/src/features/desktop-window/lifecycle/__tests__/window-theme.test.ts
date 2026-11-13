@@ -15,18 +15,13 @@ describe("window theme hint", () => {
     NodeFS.rmSync(NodePath.dirname(hintPath), { recursive: true, force: true });
   });
 
-  it("completes overlapping writes and leaves a readable hint", async () => {
-    await expect(Promise.all([
-      writeWindowThemeHint(hintPath, false),
-      writeWindowThemeHint(hintPath, true),
-      writeWindowThemeHint(hintPath, false),
-    ])).resolves.toBeDefined();
-    expect(typeof JSON.parse(NodeFS.readFileSync(hintPath, "utf8")).dark).toBe("boolean");
+  it("completes overlapping writes and keeps the last one", async () => {
+    await Promise.all([
+      writeWindowThemeHint(hintPath, "light"),
+      writeWindowThemeHint(hintPath, "dark"),
+      writeWindowThemeHint(hintPath, "system"),
+    ]);
+    expect(readWindowThemeHint(hintPath)).toBe("system");
     expect(NodeFS.readdirSync(NodePath.dirname(hintPath))).toEqual(["window-theme.json"]);
-  });
-
-  it("reads back the last completed write", async () => {
-    await writeWindowThemeHint(hintPath, false);
-    expect(readWindowThemeHint(hintPath)).toBe(false);
   });
 });
