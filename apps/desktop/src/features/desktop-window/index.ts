@@ -39,7 +39,7 @@ export interface DesktopWindowFeatureDependencies {
 
 /** The public operations provided by the Desktop Window feature. */
 export interface DesktopWindowFeature {
-  /** Return the current main window, if one exists. */
+  /** Return the live main window, or null once it has closed. */
   readonly getMainWindow: () => BrowserWindowType | null;
   /** Create and install one main window. */
   readonly createWindow: () => BrowserWindowType;
@@ -84,6 +84,10 @@ export function createDesktopWindowFeature(
     installMainWindowNavigationPolicy(window);
     attachCloseGuard(window, dependencies.closeGuard);
     mainWindow = window;
+    // A closed window is destroyed; callers must see "no window", not a dead one.
+    window.once("closed", () => {
+      if (mainWindow === window) mainWindow = null;
+    });
     return window;
   };
 

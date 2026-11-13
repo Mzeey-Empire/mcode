@@ -62,6 +62,7 @@ import {
 import {
   createDesktopWindowFeature,
   getWindowIconPath,
+  type DesktopWindowFeature,
   registerExternalUrlHandler,
 } from "../features/desktop-window/index.js";
 import { registerAttachmentsFeature } from "../features/attachments/index.js";
@@ -118,7 +119,12 @@ const HARDWARE_ACCELERATION_MODE = resolveHardwareAccelerationMode(
   process.env,
   readPersistedSettings()?.settings.graphics.hardwareAcceleration ?? null,
 );
-let mainWindow: BrowserWindow | null = null;
+let desktopWindow: DesktopWindowFeature | null = null;
+
+/** The live main window, or null before creation and after it closes. */
+function getMainWindow(): BrowserWindow | null {
+  return desktopWindow?.getMainWindow() ?? null;
+}
 
 /** Channel available only to the maintained frontend performance runner. */
 export const FRONTEND_PERFORMANCE_METRICS_CHANNEL = "performance:get-app-metrics";
@@ -157,7 +163,7 @@ export function getFrontendPerformanceMetrics(): {
     packaged: app.isPackaged,
     accelerationMode: HARDWARE_ACCELERATION_MODE,
     gpuFeatureStatus: app.getGPUFeatureStatus(),
-    devToolsOpen: mainWindow?.webContents.isDevToolsOpened() ?? false,
+    devToolsOpen: getMainWindow()?.webContents.isDevToolsOpened() ?? false,
     processes: app.getAppMetrics().map((metric) => ({
       pid: metric.pid,
       creationTime: metric.creationTime,
@@ -298,7 +304,7 @@ function createRendererCrashReport(
 export function handleRendererCrashReport(
   event: { sender: { id: number } },
   payload: unknown,
-  authorizedSender: unknown = mainWindow?.webContents,
+  authorizedSender: unknown = getMainWindow()?.webContents,
 ): void {
   if (event.sender !== authorizedSender) return;
   const normalized = normalizeRendererCrashReport(payload);
@@ -341,7 +347,7 @@ classifyLaunchBoot(NodePath.join(app.getPath("userData"), "launch-boot.json"), b
   .then((firstSinceBoot) => launchRecord.bootClassified(firstSinceBoot))
   .catch((error: unknown) => logger.warn("Launch boot classification failed", { error: String(error) }));
 ipcMain.on("launch-mark", (event, name: unknown, at: unknown) => {
-  launchRecord.rendererMark(event.sender, mainWindow?.webContents, name, at);
+  launchRecord.rendererMark(event.sender, getMainWindow()?.webContents, name, at);
 });
 
 const serverRuntime = new ServerRuntime({
@@ -352,7 +358,7 @@ const serverRuntime = new ServerRuntime({
   },
   platform: hostRuntime.platform,
   ipcMain,
-  getMainWindow: () => mainWindow,
+  getMainWindow,
   dialog: {
     showMessageBox: (window, options) =>
       dialog.showMessageBox(window as BrowserWindow, options),
@@ -382,13 +388,13 @@ if (!printsVersion) {
 function registerIpcHandlers(): void {
   if (isFrontendPerformanceRun()) {
     ipcMain.handle(FRONTEND_PERFORMANCE_METRICS_CHANNEL, (event) => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
+      if (event.sender !== getMainWindow()?.webContents) {
         throw new Error("Performance metrics require the main renderer");
       }
       return getFrontendPerformanceMetrics();
     });
     ipcMain.handle(FRONTEND_PERFORMANCE_QUIT_CHANNEL, async (event) => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) {
+      if (event.sender !== getMainWindow()?.webContents) {
         throw new Error("Performance cleanup requires the main renderer");
       }
       await serverRuntime.forceReplace();
@@ -402,6 +408,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     "show-open-dialog",
     async (_event, options: Record<string, unknown>) => {
+      const mainWindow = getMainWindow();
       if (!mainWindow) return null;
       const result = await dialog.showOpenDialog(mainWindow, {
         properties: ["openDirectory"],
@@ -428,7 +435,8 @@ function registerIpcHandlers(): void {
 
   // Renderer crash diagnostics are local-only and accepted only from the main app window.
   ipcMain.handle(RENDERER_CRASH_REPORT_CHANNEL, (event, payload: unknown) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const mainWindow = getMainWindow();
+    if (!mainWindow) return;
     handleRendererCrashReport(event, payload, mainWindow.webContents);
   });
 
@@ -462,9 +470,7 @@ function registerIpcHandlers(): void {
   // Registered here (not in setupSpellcheck) so it is only registered once,
   // avoiding "second handler" crashes on macOS window re-creation.
   ipcMain.handle("spellcheck:replace-misspelling", (_event, word: string) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.replaceMisspelling(word);
-    }
+    getMainWindow()?.webContents.replaceMisspelling(word);
   });
 
   // Spellcheck: add word to Chromium's custom dictionary (persists across sessions).
@@ -474,13 +480,11 @@ function registerIpcHandlers(): void {
 
   // Spellcheck: paste via Electron's native webContents.paste() (execCommand is unreliable).
   ipcMain.handle("spellcheck:paste", () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.paste();
-    }
+    getMainWindow()?.webContents.paste();
   });
 
   ipcMain.handle("accessibility:get-support", (event): boolean => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
+    if (event.sender !== getMainWindow()?.webContents) {
       throw new Error("Accessibility support requires the main renderer");
     }
     const supported = app.isAccessibilitySupportEnabled();
@@ -491,14 +495,14 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("app:get-hardware-acceleration", (event) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
+    if (event.sender !== getMainWindow()?.webContents) {
       throw new Error("Hardware acceleration state requires the main renderer");
     }
     return { enabled: HARDWARE_ACCELERATION_MODE === "default" };
   });
 
   ipcMain.handle("app:relaunch", (event) => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
+    if (event.sender !== getMainWindow()?.webContents) {
       throw new Error("Relaunch requires the main renderer");
     }
     app.relaunch();
@@ -564,7 +568,7 @@ app.whenReady().then(async () => {
     if (hostRuntime.platform === "darwin") {
       app.dock?.setIcon(getWindowIconPath(hostRuntime.platform));
     }
-    const desktopWindow = createDesktopWindowFeature({
+    const windows = createDesktopWindowFeature({
       platform: hostRuntime.platform,
       displayName,
       isDesktopDev,
@@ -596,13 +600,13 @@ app.whenReady().then(async () => {
     registerIpcHandlers();
 
     // Create window
-    mainWindow = desktopWindow.createWindow();
+    desktopWindow = windows;
+    windows.createWindow();
     launchRecord.mark("windowCreated");
 
     // macOS: re-create window when dock icon is clicked
     recreateWindowOnActivate = () => {
-      const recreatedWindow = desktopWindow.recreateWindowIfNeeded();
-      if (recreatedWindow) mainWindow = recreatedWindow;
+      windows.recreateWindowIfNeeded();
     };
     app.on("activate", recreateWindowOnActivate);
 
@@ -678,5 +682,3 @@ app.on("before-quit", (event) => {
 app.on("will-quit", () => {
   cleanupApplicationUpdates();
 });
-
-export { mainWindow };
