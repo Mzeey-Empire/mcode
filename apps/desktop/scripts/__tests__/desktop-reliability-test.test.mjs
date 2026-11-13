@@ -71,7 +71,7 @@ describe("packaged reliability cleanup", () => {
     expect(ops.removeRunRoot).toHaveBeenCalledWith("C:/run");
   });
 
-  it("continues Desktop and directory cleanup when server termination fails", async () => {
+  it("continues Desktop cleanup and keeps the directory when server termination fails", async () => {
     const ops = operations({
       readLock: vi.fn().mockReturnValue(lock(903)),
       killPidTree: vi.fn(async () => { throw new Error("server kill failed"); }),
@@ -82,10 +82,10 @@ describe("packaged reliability cleanup", () => {
         expectedServerAuthToken: "a".repeat(64),
         ...ops,
       }),
-    ).rejects.toThrow("Reliability harness cleanup failed");
+    ).rejects.toThrow("Reliability harness cleanup failed; kept C:/run because an owned process may still be running");
 
     expect(ops.killProcessTree).toHaveBeenCalledWith({ pid: 904 }, { graceMs: 500, useProcessGroup: true });
-    expect(ops.removeRunRoot).toHaveBeenCalledWith("C:/run");
+    expect(ops.removeRunRoot).not.toHaveBeenCalled();
   });
 
   it("accepts only a lock carrying the authenticated isolated-run identity", () => {

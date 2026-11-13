@@ -22,14 +22,17 @@ const STARTUP_TIMEOUT_MS = 30_000;
 const RECOVERY_TIMEOUT_MS = 20_000;
 const POLL_INTERVAL_MS = 100;
 
+/** Standard electron-builder executable paths relative to release/. */
+export const PACKAGED_DESKTOP_LAYOUTS = [
+  "win-unpacked/Mcode.exe",
+  "linux-unpacked/mcode-desktop",
+  "mac/Mcode.app/Contents/MacOS/Mcode",
+  "mac-arm64/Mcode.app/Contents/MacOS/Mcode",
+];
+
 /** Locate a packaged Desktop executable in the standard electron-builder output paths. */
 export function findPackagedDesktop() {
-  const candidates = [
-    NodePath.resolve(releaseDir, "win-unpacked/Mcode.exe"),
-    NodePath.resolve(releaseDir, "linux-unpacked/mcode-desktop"),
-    NodePath.resolve(releaseDir, "mac/Mcode.app/Contents/MacOS/Mcode"),
-    NodePath.resolve(releaseDir, "mac-arm64/Mcode.app/Contents/MacOS/Mcode"),
-  ];
+  const candidates = PACKAGED_DESKTOP_LAYOUTS.map((layout) => NodePath.resolve(releaseDir, layout));
   const desktop = candidates.find((candidate) => NodeFS.existsSync(candidate));
   return desktop ? { desktop } : null;
 }
@@ -272,16 +275,16 @@ export async function cleanupOwnedRun(child, dataDir, runRoot, overrides = {}) {
   } catch (error) {
     errors.push(error);
   }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, `Reliability harness cleanup failed; kept ${runRoot} because an owned process may still be running`);
+  }
   try {
     await operations.removeRunRoot(runRoot);
     if (operations.pathExists(runRoot)) {
       throw new Error(`Owned reliability run directory survived cleanup: ${runRoot}`);
     }
   } catch (error) {
-    errors.push(error);
-  }
-  if (errors.length > 0) {
-    throw new AggregateError(errors, "Reliability harness cleanup failed");
+    throw new AggregateError([error], "Reliability harness cleanup failed");
   }
 }
 
