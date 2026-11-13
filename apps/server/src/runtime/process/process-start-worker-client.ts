@@ -121,7 +121,7 @@ export class ProcessStartWorkerClient {
         if (!stopped && this.sessions.has(id)) worker.postMessage({ kind: "write", id, text } satisfies ProcessStartWorkerInbound);
       },
       stop: (graceful) => {
-        if (stopped || !this.sessions.has(id)) return;
+        if (!this.sessions.has(id)) return;
         stopped = true;
         worker.postMessage({ kind: "stop", id, graceful } satisfies ProcessStartWorkerInbound);
       },

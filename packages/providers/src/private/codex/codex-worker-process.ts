@@ -1,5 +1,6 @@
 import * as NodeEvents from "node:events";
 import * as NodeStream from "node:stream";
+import { logger } from "@mcode/shared";
 import type { ProviderProcessOpener } from "../../host-ports.js";
 import type { CodexAppServerProcessLauncher } from "./codex-app-server.js";
 
@@ -20,7 +21,23 @@ export function createWorkerCodexProcessLauncher(open: ProviderProcessOpener): C
     const child = Object.assign(events, metadata, {
       stdin, stdout, stderr,
       kill: (signal?: NodeJS.Signals) => { session.stop(signal === "SIGTERM"); return true; },
-      terminate: async () => { session.stop(true); await session.exited; },
+      terminate: async () => {
+        session.stop(true);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            session.exited,
+            new Promise<void>((resolve) => {
+              timer = setTimeout(() => {
+                logger.warn("Codex app-server termination timed out", { pid: child.pid });
+                resolve();
+              }, 8_000);
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      },
     });
     session = open({ command, args, ...options, timeout: 0 }, {
       onSpawn: (pid) => { child.pid = pid; events.emit("spawn"); },

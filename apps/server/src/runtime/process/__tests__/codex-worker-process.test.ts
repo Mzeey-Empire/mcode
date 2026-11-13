@@ -1,10 +1,75 @@
 import * as NodeEvents from "node:events";
-import { describe, expect, it } from "vitest";
+import * as NodeChildProcess from "node:child_process";
+import { describe, expect, it, vi } from "vitest";
+import { openProcessStart } from "../process-start.js";
 import { createWorkerCodexProcessLauncher } from "../../../../../../packages/providers/src/private/codex/codex-worker-process.js";
 import { CodexAppServer } from "../../../../../../packages/providers/src/private/codex/codex-app-server.js";
 import { createProcessStartWorker, ProcessStartWorkerClient } from "../process-start-worker-client.js";
 
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, execFile: vi.fn(actual.execFile) };
+});
+
+function killTestChild(pid: number | undefined): void {
+  if (pid === undefined) return;
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) throw error;
+  }
+}
+
 describe("worker-backed Codex process", () => {
+  it("bounds termination even when exit confirmation has not arrived", async () => {
+    const child = createWorkerCodexProcessLauncher(new ProcessStartWorkerClient().open)(
+      process.execPath, ["-e", "process.on('SIGTERM', () => {}); process.stdin.resume(); setInterval(() => {}, 1000); console.log('ready');"], {},
+    );
+    const exit = NodeEvents.once(child, "exit");
+    await NodeEvents.once(child.stdout, "data");
+    vi.useFakeTimers();
+    let terminated = false;
+    const termination = child.terminate!().then(() => { terminated = true; });
+    try {
+      vi.advanceTimersByTime(8_000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(terminated).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      await termination;
+      await exit;
+    }
+  }, 10_000);
+
+  it.runIf(process.platform === "win32")("ends the direct child when taskkill fails", async () => {
+    let pid: number | undefined;
+    let ready!: () => void;
+    const started = new Promise<void>((resolve) => { ready = resolve; });
+    const session = openProcessStart({
+      command: process.execPath,
+      args: ["-e", "process.stdin.resume(); setInterval(() => {}, 1000); console.log('ready');"],
+      timeout: 0,
+    }, { onSpawn: (value) => { pid = value; }, onStdout: () => ready() });
+    await started;
+    const execFile = vi.mocked(NodeChildProcess.execFile).mockImplementationOnce((_file, _args, _options, callback) => {
+      callback!(Object.assign(new Error("access denied"), { code: "EACCES" }), "", "");
+      return new NodeChildProcess.ChildProcess();
+    });
+    try {
+      session.stop(true);
+      await vi.waitFor(() => expect(() => process.kill(pid!, 0)).toThrow(), { timeout: 1_000 });
+      await session.exited;
+    } finally {
+      execFile.mockRestore();
+      killTestChild(pid);
+      await session.exited;
+    }
+  });
+
   it("delivers spawn before output, echoes stdin, streams stderr, and exits on terminate", async () => {
     const launch = createWorkerCodexProcessLauncher(new ProcessStartWorkerClient().open);
     const child = launch(process.execPath, ["-e", "process.stderr.write('diagnostic\\n');process.stdin.on('data', c => process.stdout.write(c))"], {});

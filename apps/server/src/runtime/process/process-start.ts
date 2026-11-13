@@ -69,9 +69,15 @@ export const openProcessStart: ProcessStartOpener = (request, observer) => {
   const stop = (graceful = false) => {
     if (ended || stopping) return;
     stopping = true;
+    child.stdin.end();
     // With shell:true, killing cmd.exe alone would orphan the actual process.
     if (hostRuntime.platform === "win32" && child.pid !== undefined) {
-      NodeChildProcess.execFile("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, timeout: 5_000 }, () => {});
+      NodeChildProcess.execFile("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true, timeout: 5_000 }, (error) => {
+        if (error && !ended) {
+          stopping = false;
+          child.kill("SIGKILL");
+        }
+      });
     } else if (graceful) {
       child.kill("SIGTERM");
       killTimer = setTimeout(() => { if (!ended) child.kill("SIGKILL"); }, 3_000);
