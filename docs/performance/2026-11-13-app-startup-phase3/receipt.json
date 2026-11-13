@@ -1,0 +1,4224 @@
+{
+  "settings": "Default settings: fresh data directories have no settings.json, and the app inherits no NODE_ENV and no MCODE_, ELECTRON_ or VITE_ variables.",
+  "warmupFailed": [],
+  "variants": {
+    "A baseline": [
+      {
+        "segments": {
+          "A": 153.2060546875,
+          "B": 483,
+          "C": 25,
+          "D": 198,
+          "E": 201.400146484375,
+          "F": 2410.7998046875,
+          "total": 3282.406005859375
+        },
+        "substeps": {
+          "bootstrap entered": 134,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 144,
+          "schema patches applied": 0,
+          "database writer ready": 35,
+          "read-only database opened": 18,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 12,
+          "services resolved": 15,
+          "orphan cleanup completed": 92,
+          "conversation display materialization completed": 2,
+          "stale startup work recovery completed": 2,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 1,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 0,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 3,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 0,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 4
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 896.2060546875,
+            "durationMs": 179,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 65,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 150.47998046875,
+          "B": 445,
+          "C": 243,
+          "D": 290.89990234375,
+          "E": 238,
+          "F": 66.199951171875,
+          "total": 1429.27978515625
+        },
+        "substeps": {
+          "bootstrap entered": 118,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 132,
+          "schema patches applied": 1,
+          "database writer ready": 31,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 11,
+          "services resolved": 12,
+          "orphan cleanup completed": 87,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 2,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 0,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 3,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 5
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1408.47998046875,
+            "durationMs": 139,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 68,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 202.403076171875,
+          "B": 518,
+          "C": 39,
+          "D": 748.5,
+          "E": 187.900146484375,
+          "F": 2078.800048828125,
+          "total": 3759.703125
+        },
+        "substeps": {
+          "bootstrap entered": 162,
+          "auth token resolved": 9,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 147,
+          "schema patches applied": 0,
+          "database writer ready": 32,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 12,
+          "services resolved": 11,
+          "orphan cleanup completed": 90,
+          "conversation display materialization completed": 4,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 4,
+          "journal import": 1,
+          "terminal checkpoint reopening": 2,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 3,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 5
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1693.403076171875,
+            "durationMs": 161,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 155.02392578125,
+          "B": 498,
+          "C": 30,
+          "D": 248.900146484375,
+          "E": 221.699951171875,
+          "F": 95.599853515625,
+          "total": 1011.223876953125
+        },
+        "substeps": {
+          "bootstrap entered": 131,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 146,
+          "schema patches applied": 0,
+          "database writer ready": 36,
+          "read-only database opened": 19,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 13,
+          "services resolved": 15,
+          "orphan cleanup completed": 98,
+          "conversation display materialization completed": 2,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 1,
+          "journal import": 0,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 5
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 927.02392578125,
+            "durationMs": 155,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 152.14208984375,
+          "B": 508,
+          "C": 17,
+          "D": 253.89990234375,
+          "E": 229.699951171875,
+          "F": 2653.800048828125,
+          "total": 3711.0419921875
+        },
+        "substeps": {
+          "bootstrap entered": 113,
+          "auth token resolved": 9,
+          "runtime flags resolved": 1,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 160,
+          "schema patches applied": 0,
+          "database writer ready": 31,
+          "read-only database opened": 16,
+          "snapshot store ID ensured": 6,
+          "dependency container initialized": 13,
+          "services resolved": 16,
+          "orphan cleanup completed": 117,
+          "conversation display materialization completed": 2,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 4
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1065.14208984375,
+            "durationMs": 147,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 150.610107421875,
+          "B": 477,
+          "C": 17,
+          "D": 246.800048828125,
+          "E": 223.2001953125,
+          "F": 614.89990234375,
+          "total": 1656.81005859375
+        },
+        "substeps": {
+          "bootstrap entered": 113,
+          "auth token resolved": 9,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 137,
+          "schema patches applied": 0,
+          "database writer ready": 31,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 12,
+          "services resolved": 14,
+          "orphan cleanup completed": 106,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 5,
+          "family child interruption": 4,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 1,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 6,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 8
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1044.610107421875,
+            "durationMs": 151,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 206.406005859375,
+          "B": 543,
+          "C": 25,
+          "D": 238.699951171875,
+          "E": 228.400146484375,
+          "F": 2352,
+          "total": 3365.906005859375
+        },
+        "substeps": {
+          "bootstrap entered": 186,
+          "auth token resolved": 10,
+          "runtime flags resolved": 1,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 143,
+          "schema patches applied": 1,
+          "database writer ready": 32,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 12,
+          "services resolved": 12,
+          "orphan cleanup completed": 93,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 2,
+          "journal import": 0,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 9
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1039.406005859375,
+            "durationMs": 141,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 586.126953125,
+          "B": 472,
+          "C": 22,
+          "D": 199,
+          "E": 218.599853515625,
+          "F": 3364.699951171875,
+          "total": 4676.126953125
+        },
+        "substeps": {
+          "bootstrap entered": 133,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 141,
+          "schema patches applied": 0,
+          "database writer ready": 31,
+          "read-only database opened": 16,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 11,
+          "services resolved": 12,
+          "orphan cleanup completed": 91,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 3
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1336.126953125,
+            "durationMs": 152,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 173.193115234375,
+          "B": 537,
+          "C": 22,
+          "D": 287.5,
+          "E": 217.10009765625,
+          "F": 589.800048828125,
+          "total": 1629.09326171875
+        },
+        "substeps": {
+          "bootstrap entered": 131,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 145,
+          "schema patches applied": 0,
+          "database writer ready": 44,
+          "read-only database opened": 25,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 16,
+          "services resolved": 17,
+          "orphan cleanup completed": 118,
+          "conversation display materialization completed": 2,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 0,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 5
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1061.193115234375,
+            "durationMs": 180,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 197.549072265625,
+          "B": 528,
+          "C": 409,
+          "D": 792.199951171875,
+          "E": 164,
+          "F": 2059.10009765625,
+          "total": 3543.84912109375
+        },
+        "substeps": {
+          "bootstrap entered": 143,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 164,
+          "schema patches applied": 0,
+          "database writer ready": 41,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 5,
+          "dependency container initialized": 12,
+          "services resolved": 11,
+          "orphan cleanup completed": 91,
+          "conversation display materialization completed": 4,
+          "stale startup work recovery completed": 6,
+          "execution workers ready": 2,
+          "journal import": 1,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 6
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1500.549072265625,
+            "durationMs": 113,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      }
+    ],
+    "A candidate": [
+      {
+        "segments": {
+          "A": 168.64208984375,
+          "B": 538,
+          "C": 30,
+          "D": 220.099853515625,
+          "E": 261.10009765625,
+          "F": 60,
+          "total": 1080.442138671875
+        },
+        "substeps": {
+          "bootstrap entered": 139,
+          "auth token resolved": 16,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 156,
+          "schema patches applied": 0,
+          "database writer ready": 39,
+          "read-only database opened": 20,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 13,
+          "services resolved": 15,
+          "orphan cleanup completed": 107,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 0,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 2,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 0,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 6
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1016.64208984375,
+            "durationMs": 188,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "settings.get",
+              "app.stage",
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 157.801025390625,
+          "B": 489,
+          "C": 15,
+          "D": 214.89990234375,
+          "E": 224.199951171875,
+          "F": 92.10009765625,
+          "total": 1024.401123046875
+        },
+        "substeps": {
+          "bootstrap entered": 113,
+          "auth token resolved": 9,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 151,
+          "schema patches applied": 1,
+          "database writer ready": 33,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 13,
+          "services resolved": 13,
+          "orphan cleanup completed": 91,
+          "conversation display materialization completed": 13,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 3,
+          "terminal checkpoint retirement": 2,
+          "family child interruption": 2,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 7
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 967.801025390625,
+            "durationMs": 153,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 62,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 170.741943359375,
+          "B": 531,
+          "C": 32,
+          "D": 213.7998046875,
+          "E": 221.5,
+          "F": 70.300048828125,
+          "total": 1047.44189453125
+        },
+        "substeps": {
+          "bootstrap entered": 158,
+          "auth token resolved": 12,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 1,
+          "migration plan read": 143,
+          "schema patches applied": 0,
+          "database writer ready": 36,
+          "read-only database opened": 18,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 13,
+          "services resolved": 14,
+          "orphan cleanup completed": 99,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 1,
+          "journal import": 0,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 4,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 2,
+          "HTTP listener opened": 7
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 996.741943359375,
+            "durationMs": 158,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 63,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 241.958984375,
+          "B": 612,
+          "C": 35,
+          "D": 267.89990234375,
+          "E": 227.199951171875,
+          "F": 66.800048828125,
+          "total": 1204.759033203125
+        },
+        "substeps": {
+          "bootstrap entered": 203,
+          "auth token resolved": 11,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 199,
+          "schema patches applied": 1,
+          "database writer ready": 35,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 13,
+          "services resolved": 13,
+          "orphan cleanup completed": 87,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 2,
+          "HTTP listener opened": 8
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1165.958984375,
+            "durationMs": 191,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 163.2890625,
+          "B": 491,
+          "C": 30,
+          "D": 197.599853515625,
+          "E": 233.5,
+          "F": 87.400146484375,
+          "total": 1028.989013671875
+        },
+        "substeps": {
+          "bootstrap entered": 114,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 160,
+          "schema patches applied": 0,
+          "database writer ready": 32,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 13,
+          "services resolved": 15,
+          "orphan cleanup completed": 95,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 0,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 3,
+          "automatic workspace setup reconciled": 3,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 7
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 965.2890625,
+            "durationMs": 166,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 169.965087890625,
+          "B": 477,
+          "C": 156,
+          "D": 737.800048828125,
+          "E": 210.2998046875,
+          "F": 58.800048828125,
+          "total": 1794.364990234375
+        },
+        "substeps": {
+          "bootstrap entered": 137,
+          "auth token resolved": 9,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 143,
+          "schema patches applied": 1,
+          "database writer ready": 32,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 12,
+          "services resolved": 11,
+          "orphan cleanup completed": 84,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 2,
+          "journal import": 1,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 0,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 6,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 0,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 4
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1730.965087890625,
+            "durationMs": 143,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 151.10693359375,
+          "B": 497,
+          "C": 16,
+          "D": 197.60009765625,
+          "E": 221.39990234375,
+          "F": 91.60009765625,
+          "total": 1001.507080078125
+        },
+        "substeps": {
+          "bootstrap entered": 135,
+          "auth token resolved": 11,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 145,
+          "schema patches applied": 1,
+          "database writer ready": 32,
+          "read-only database opened": 18,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 13,
+          "services resolved": 15,
+          "orphan cleanup completed": 91,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 1,
+          "journal import": 0,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 2,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 3,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 2,
+          "HTTP listener opened": 7
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 924.10693359375,
+            "durationMs": 171,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 63,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 568.89892578125,
+          "B": 490,
+          "C": 15,
+          "D": 198.400146484375,
+          "E": 239.2001953125,
+          "F": 96.89990234375,
+          "total": 1433.4990234375
+        },
+        "substeps": {
+          "bootstrap entered": 135,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 139,
+          "schema patches applied": 0,
+          "database writer ready": 33,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 14,
+          "services resolved": 13,
+          "orphan cleanup completed": 96,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 2,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 4,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 6
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1375.89892578125,
+            "durationMs": 165,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 153.216064453125,
+          "B": 482,
+          "C": 23,
+          "D": 201.10009765625,
+          "E": 224,
+          "F": 66.2998046875,
+          "total": 972.916015625
+        },
+        "substeps": {
+          "bootstrap entered": 125,
+          "auth token resolved": 12,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 144,
+          "schema patches applied": 0,
+          "database writer ready": 32,
+          "read-only database opened": 16,
+          "snapshot store ID ensured": 4,
+          "dependency container initialized": 14,
+          "services resolved": 13,
+          "orphan cleanup completed": 90,
+          "conversation display materialization completed": 4,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 3,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 8
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 935.216064453125,
+            "durationMs": 145,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 207.550048828125,
+          "B": 511,
+          "C": 691,
+          "D": 324.800048828125,
+          "E": 188.7001953125,
+          "F": 52,
+          "total": 1972.250244140625
+        },
+        "substeps": {
+          "bootstrap entered": 167,
+          "auth token resolved": 9,
+          "runtime flags resolved": 1,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 147,
+          "schema patches applied": 0,
+          "database writer ready": 31,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 12,
+          "services resolved": 12,
+          "orphan cleanup completed": 89,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 1,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 4
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1921.550048828125,
+            "durationMs": 144,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      }
+    ],
+    "B baseline": [
+      {
+        "segments": {
+          "A": 164.4560546875,
+          "B": 483,
+          "C": 8,
+          "D": 217.099853515625,
+          "E": 228.7998046875,
+          "F": 2529.300048828125,
+          "total": 3424.055908203125
+        },
+        "substeps": {
+          "bootstrap entered": 136,
+          "auth token resolved": 14,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 1,
+          "migration plan read": 96,
+          "schema patches applied": 0,
+          "database writer ready": 34,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 13,
+          "services resolved": 12,
+          "orphan cleanup completed": 96,
+          "conversation display materialization completed": 7,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 7,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 23,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 1,
+          "interrupted plans recovered": 0,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 8
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 929.4560546875,
+            "durationMs": 135,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 66,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 164.25390625,
+          "B": 435,
+          "C": 50,
+          "D": 473.699951171875,
+          "E": 667.5,
+          "F": 54.89990234375,
+          "total": 1834.65380859375
+        },
+        "substeps": {
+          "bootstrap entered": 114,
+          "auth token resolved": 9,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 80,
+          "schema patches applied": 0,
+          "database writer ready": 30,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 14,
+          "services resolved": 12,
+          "orphan cleanup completed": 89,
+          "conversation display materialization completed": 6,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 1,
+          "journal import": 9,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 24,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 10
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1771.25390625,
+            "durationMs": 148,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 62,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 158.51611328125,
+          "B": 419,
+          "C": 720,
+          "D": 326.5,
+          "E": 227.5,
+          "F": 68.800048828125,
+          "total": 1909.51611328125
+        },
+        "substeps": {
+          "bootstrap entered": 115,
+          "auth token resolved": 9,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 78,
+          "schema patches applied": 0,
+          "database writer ready": 31,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 12,
+          "services resolved": 11,
+          "orphan cleanup completed": 81,
+          "conversation display materialization completed": 6,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 8,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 3,
+          "family child interruption": 2,
+          "checkpoint interrupted": 25,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 1,
+          "interrupted plans recovered": 0,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 5
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1846.51611328125,
+            "durationMs": 170,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 164.573974609375,
+          "B": 473,
+          "C": 22,
+          "D": 206.5,
+          "E": 199.699951171875,
+          "F": 2498.800048828125,
+          "total": 3366.774169921875
+        },
+        "substeps": {
+          "bootstrap entered": 154,
+          "auth token resolved": 11,
+          "runtime flags resolved": 1,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 85,
+          "schema patches applied": 0,
+          "database writer ready": 33,
+          "read-only database opened": 16,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 13,
+          "services resolved": 12,
+          "orphan cleanup completed": 90,
+          "conversation display materialization completed": 4,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 7,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "checkpoint interrupted": 22,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 4
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 901.573974609375,
+            "durationMs": 129,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 248.405029296875,
+          "B": 600,
+          "C": 17,
+          "D": 275.5,
+          "E": 245.800048828125,
+          "F": 84.89990234375,
+          "total": 1206.804931640625
+        },
+        "substeps": {
+          "bootstrap entered": 225,
+          "auth token resolved": 13,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 102,
+          "schema patches applied": 0,
+          "database writer ready": 40,
+          "read-only database opened": 16,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 18,
+          "services resolved": 16,
+          "orphan cleanup completed": 115,
+          "conversation display materialization completed": 2,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 5,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "checkpoint interrupted": 22,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 2,
+          "HTTP listener opened": 5
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1157.405029296875,
+            "durationMs": 171,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 62,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 153.367919921875,
+          "B": 478,
+          "C": 18,
+          "D": 219.800048828125,
+          "E": 215.5,
+          "F": 2541.7998046875,
+          "total": 3426.767822265625
+        },
+        "substeps": {
+          "bootstrap entered": 126,
+          "auth token resolved": 20,
+          "runtime flags resolved": 1,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 98,
+          "schema patches applied": 0,
+          "database writer ready": 33,
+          "read-only database opened": 18,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 17,
+          "services resolved": 15,
+          "orphan cleanup completed": 85,
+          "conversation display materialization completed": 6,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 1,
+          "journal import": 11,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "checkpoint interrupted": 21,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 0,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 6
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 909.367919921875,
+            "durationMs": 151,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 151.85791015625,
+          "B": 471,
+          "C": 29,
+          "D": 203.300048828125,
+          "E": 212.800048828125,
+          "F": 2400.400146484375,
+          "total": 3276.4580078125
+        },
+        "substeps": {
+          "bootstrap entered": 137,
+          "auth token resolved": 10,
+          "runtime flags resolved": 1,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 87,
+          "schema patches applied": 0,
+          "database writer ready": 32,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 12,
+          "services resolved": 15,
+          "orphan cleanup completed": 102,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 5,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 1,
+          "checkpoint interrupted": 24,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 7
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 904.85791015625,
+            "durationMs": 122,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 218.5390625,
+          "B": 535,
+          "C": 20,
+          "D": 246.39990234375,
+          "E": 224.10009765625,
+          "F": 59,
+          "total": 1067.0390625
+        },
+        "substeps": {
+          "bootstrap entered": 212,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 1,
+          "migration plan read": 82,
+          "schema patches applied": 0,
+          "database writer ready": 36,
+          "read-only database opened": 19,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 13,
+          "services resolved": 13,
+          "orphan cleanup completed": 94,
+          "conversation display materialization completed": 2,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 4,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 23,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 6
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1032.5390625,
+            "durationMs": 136,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 62,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 158.194091796875,
+          "B": 457,
+          "C": 21,
+          "D": 194.10009765625,
+          "E": 210.699951171875,
+          "F": 2890.199951171875,
+          "total": 3748.194091796875
+        },
+        "substeps": {
+          "bootstrap entered": 129,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 1,
+          "migration plan read": 85,
+          "schema patches applied": 1,
+          "database writer ready": 32,
+          "read-only database opened": 18,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 13,
+          "services resolved": 13,
+          "orphan cleanup completed": 83,
+          "conversation display materialization completed": 7,
+          "stale startup work recovery completed": 12,
+          "execution workers ready": 1,
+          "journal import": 5,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 22,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 7
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 879.194091796875,
+            "durationMs": 158,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 64,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 166.489013671875,
+          "B": 530,
+          "C": 17,
+          "D": 218.60009765625,
+          "E": 220.10009765625,
+          "F": 2528,
+          "total": 3473.2890625
+        },
+        "substeps": {
+          "bootstrap entered": 150,
+          "auth token resolved": 12,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 1,
+          "migration plan read": 98,
+          "schema patches applied": 1,
+          "database writer ready": 34,
+          "read-only database opened": 23,
+          "snapshot store ID ensured": 4,
+          "dependency container initialized": 14,
+          "services resolved": 16,
+          "orphan cleanup completed": 106,
+          "conversation display materialization completed": 11,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 5,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "checkpoint interrupted": 26,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 10
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 958.489013671875,
+            "durationMs": 165,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 67,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      }
+    ],
+    "B candidate": [
+      {
+        "segments": {
+          "A": 586.4140625,
+          "B": 536,
+          "C": 23,
+          "D": 244.60009765625,
+          "E": 241.10009765625,
+          "F": 112.7998046875,
+          "total": 1520.31396484375
+        },
+        "substeps": {
+          "bootstrap entered": 202,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 91,
+          "schema patches applied": 0,
+          "database writer ready": 35,
+          "read-only database opened": 19,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 13,
+          "services resolved": 13,
+          "orphan cleanup completed": 84,
+          "conversation display materialization completed": 6,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 1,
+          "journal import": 6,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 29,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 0,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 8
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1487.4140625,
+            "durationMs": 121,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 62,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 154.35791015625,
+          "B": 465,
+          "C": 115,
+          "D": 1200.7001953125,
+          "E": 223.60009765625,
+          "F": 80.800048828125,
+          "total": 2212.55810546875
+        },
+        "substeps": {
+          "bootstrap entered": 123,
+          "auth token resolved": 9,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 84,
+          "schema patches applied": 1,
+          "database writer ready": 33,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 13,
+          "services resolved": 14,
+          "orphan cleanup completed": 92,
+          "conversation display materialization completed": 6,
+          "stale startup work recovery completed": 5,
+          "execution workers ready": 1,
+          "journal import": 7,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 7,
+          "checkpoint interrupted": 29,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 6,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 10
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 2157.35791015625,
+            "durationMs": 159,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 520.928955078125,
+          "B": 542,
+          "C": 23,
+          "D": 218.199951171875,
+          "E": 266.800048828125,
+          "F": 106.89990234375,
+          "total": 1485.728759765625
+        },
+        "substeps": {
+          "bootstrap entered": 148,
+          "auth token resolved": 13,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 101,
+          "schema patches applied": 0,
+          "database writer ready": 42,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 14,
+          "services resolved": 17,
+          "orphan cleanup completed": 120,
+          "conversation display materialization completed": 3,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 1,
+          "journal import": 5,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 24,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 1,
+          "interrupted plans recovered": 0,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 2,
+          "automatic workspace setup reconciled": 10,
+          "IPC listener opened": 2,
+          "HTTP listener opened": 6
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1396.928955078125,
+            "durationMs": 219,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 62,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 153.02392578125,
+          "B": 462,
+          "C": 11,
+          "D": 194,
+          "E": 226.10009765625,
+          "F": 104.39990234375,
+          "total": 977.82373046875
+        },
+        "substeps": {
+          "bootstrap entered": 130,
+          "auth token resolved": 11,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 86,
+          "schema patches applied": 0,
+          "database writer ready": 31,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 12,
+          "services resolved": 13,
+          "orphan cleanup completed": 100,
+          "conversation display materialization completed": 5,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 6,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 3,
+          "checkpoint interrupted": 25,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 6
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 933.02392578125,
+            "durationMs": 130,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 154.64990234375,
+          "B": 448,
+          "C": 207,
+          "D": 248.5,
+          "E": 204.7998046875,
+          "F": 73.2001953125,
+          "total": 1320.050048828125
+        },
+        "substeps": {
+          "bootstrap entered": 126,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 79,
+          "schema patches applied": 1,
+          "database writer ready": 30,
+          "read-only database opened": 14,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 11,
+          "services resolved": 11,
+          "orphan cleanup completed": 76,
+          "conversation display materialization completed": 14,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 17,
+          "journal import": 7,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 25,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 4,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 7
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1286.64990234375,
+            "durationMs": 123,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 148.739990234375,
+          "B": 454,
+          "C": 186,
+          "D": 707.5,
+          "E": 210.699951171875,
+          "F": 58.39990234375,
+          "total": 1244.739990234375
+        },
+        "substeps": {
+          "bootstrap entered": 132,
+          "auth token resolved": 11,
+          "runtime flags resolved": 1,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 80,
+          "schema patches applied": 1,
+          "database writer ready": 31,
+          "read-only database opened": 16,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 12,
+          "services resolved": 12,
+          "orphan cleanup completed": 88,
+          "conversation display materialization completed": 7,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 0,
+          "journal import": 12,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 2,
+          "family child interruption": 2,
+          "checkpoint interrupted": 22,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 6
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1190.739990234375,
+            "durationMs": 158,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 194.320068359375,
+          "B": 474,
+          "C": 181,
+          "D": 287.89990234375,
+          "E": 236.800048828125,
+          "F": 64.099853515625,
+          "total": 1426.619873046875
+        },
+        "substeps": {
+          "bootstrap entered": 151,
+          "auth token resolved": 12,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 88,
+          "schema patches applied": 0,
+          "database writer ready": 31,
+          "read-only database opened": 14,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 12,
+          "services resolved": 12,
+          "orphan cleanup completed": 88,
+          "conversation display materialization completed": 4,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 0,
+          "journal import": 10,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 2,
+          "checkpoint interrupted": 25,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 1,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 0,
+          "HTTP listener opened": 9
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1389.320068359375,
+            "durationMs": 149,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 62,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 182.472900390625,
+          "B": 601,
+          "C": 18,
+          "D": 306.199951171875,
+          "E": 243.39990234375,
+          "F": 102.10009765625,
+          "total": 1212.373046875
+        },
+        "substeps": {
+          "bootstrap entered": 154,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 99,
+          "schema patches applied": 0,
+          "database writer ready": 48,
+          "read-only database opened": 25,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 19,
+          "services resolved": 22,
+          "orphan cleanup completed": 142,
+          "conversation display materialization completed": 9,
+          "stale startup work recovery completed": 6,
+          "execution workers ready": 0,
+          "journal import": 9,
+          "terminal checkpoint reopening": 1,
+          "terminal checkpoint retirement": 0,
+          "family child interruption": 2,
+          "checkpoint interrupted": 32,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 0,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 9
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1123.472900390625,
+            "durationMs": 184,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "codex version warmup",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 156.221923828125,
+          "B": 448,
+          "C": 236,
+          "D": 718.60009765625,
+          "E": 200.2001953125,
+          "F": 65.099853515625,
+          "total": 1261.02197265625
+        },
+        "substeps": {
+          "bootstrap entered": 133,
+          "auth token resolved": 11,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 82,
+          "schema patches applied": 0,
+          "database writer ready": 34,
+          "read-only database opened": 17,
+          "snapshot store ID ensured": 3,
+          "dependency container initialized": 12,
+          "services resolved": 12,
+          "orphan cleanup completed": 90,
+          "conversation display materialization completed": 2,
+          "stale startup work recovery completed": 3,
+          "execution workers ready": 1,
+          "journal import": 5,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 23,
+          "turn reconciliation": 1,
+          "abandoned evidence resolved": 0,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 1,
+          "coordinator wake recovered": 0,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 1,
+          "IPC listener opened": 1,
+          "HTTP listener opened": 5
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1214.221923828125,
+            "durationMs": 153,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 61,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      },
+      {
+        "segments": {
+          "A": 160.376953125,
+          "B": 446,
+          "C": 175,
+          "D": 284.89990234375,
+          "E": 209.10009765625,
+          "F": 83.39990234375,
+          "total": 1334.876953125
+        },
+        "substeps": {
+          "bootstrap entered": 125,
+          "auth token resolved": 10,
+          "runtime flags resolved": 0,
+          "configuration resolved and shutdown marker inspected": 0,
+          "migration plan read": 82,
+          "schema patches applied": 1,
+          "database writer ready": 30,
+          "read-only database opened": 15,
+          "snapshot store ID ensured": 2,
+          "dependency container initialized": 12,
+          "services resolved": 12,
+          "orphan cleanup completed": 88,
+          "conversation display materialization completed": 4,
+          "stale startup work recovery completed": 4,
+          "execution workers ready": 2,
+          "journal import": 7,
+          "terminal checkpoint reopening": 0,
+          "terminal checkpoint retirement": 1,
+          "family child interruption": 1,
+          "checkpoint interrupted": 26,
+          "turn reconciliation": 0,
+          "abandoned evidence resolved": 1,
+          "native questions recovered": 0,
+          "interrupted plans recovered": 1,
+          "resume scheduler started": 0,
+          "coordinator wake recovered": 1,
+          "turn recovery completed": 0,
+          "orphaned background tools settled": 5,
+          "approval recovery completed": 2,
+          "external thread control reconciled": 1,
+          "automatic workspace setup reconciled": 2,
+          "IPC listener opened": 6,
+          "HTTP listener opened": 5
+        },
+        "settled": true,
+        "stallAttribution": [
+          {
+            "startAfterT0Ms": 1267.376953125,
+            "durationMs": 189,
+            "beforeUsable": true,
+            "candidateRpcs": [
+              "workspace.icon.resolve",
+              "thread.startup.list",
+              "thread.startup.list",
+              "thread.syncPrs",
+              "providers.listStatus"
+            ],
+            "candidateTasks": [
+              "snapshot pin sweep",
+              "provider usage warmup",
+              "provider status",
+              "model cache"
+            ]
+          }
+        ],
+        "rpcs": {
+          "answered": 62,
+          "unanswered": 0,
+          "dropped": 0
+        },
+        "threadReopened": false,
+        "appVersion": "0.13.0",
+        "failed": false,
+        "invalidRecords": 0
+      }
+    ]
+  },
+  "aggregates": {
+    "A baseline": {
+      "launches": 10,
+      "failed": 0,
+      "segments": {
+        "A": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 155.02392578125,
+          "p90": 206.406005859375
+        },
+        "B": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 498,
+          "p90": 537
+        },
+        "C": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 25,
+          "p90": 243
+        },
+        "D": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 248.900146484375,
+          "p90": 748.5
+        },
+        "E": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 218.599853515625,
+          "p90": 229.699951171875
+        },
+        "F": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2059.10009765625,
+          "p90": 2653.800048828125
+        },
+        "total": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3282.406005859375,
+          "p90": 3759.703125
+        }
+      },
+      "substeps": {
+        "bootstrap entered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 131,
+          "p90": 162
+        },
+        "auth token resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 10,
+          "p90": 10
+        },
+        "runtime flags resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "configuration resolved and shutdown marker inspected": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "migration plan read": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 144,
+          "p90": 160
+        },
+        "schema patches applied": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "database writer ready": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 32,
+          "p90": 41
+        },
+        "read-only database opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 16,
+          "p90": 19
+        },
+        "snapshot store ID ensured": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 5
+        },
+        "dependency container initialized": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 12,
+          "p90": 13
+        },
+        "services resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 12,
+          "p90": 16
+        },
+        "orphan cleanup completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 92,
+          "p90": 117
+        },
+        "conversation display materialization completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 4
+        },
+        "stale startup work recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 4
+        },
+        "execution workers ready": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 2
+        },
+        "journal import": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "terminal checkpoint reopening": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "terminal checkpoint retirement": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "family child interruption": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 2
+        },
+        "turn reconciliation": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "abandoned evidence resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "native questions recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "interrupted plans recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "resume scheduler started": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "coordinator wake recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "turn recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "orphaned background tools settled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 5,
+          "p90": 5
+        },
+        "approval recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2,
+          "p90": 2
+        },
+        "external thread control reconciled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "automatic workspace setup reconciled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2,
+          "p90": 2
+        },
+        "IPC listener opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "HTTP listener opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 5,
+          "p90": 8
+        }
+      },
+      "settled": 10,
+      "unsettled": 0,
+      "settledUnmeasured": 0,
+      "rpcsAnsweredMax": 68,
+      "rpcsUnansweredMax": 0,
+      "rpcsDropped": 0
+    },
+    "A candidate": {
+      "launches": 10,
+      "failed": 0,
+      "segments": {
+        "A": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 168.64208984375,
+          "p90": 241.958984375
+        },
+        "B": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 491,
+          "p90": 538
+        },
+        "C": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 30,
+          "p90": 156
+        },
+        "D": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 213.7998046875,
+          "p90": 324.800048828125
+        },
+        "E": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 224,
+          "p90": 239.2001953125
+        },
+        "F": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 66.800048828125,
+          "p90": 92.10009765625
+        },
+        "total": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1047.44189453125,
+          "p90": 1794.364990234375
+        }
+      },
+      "substeps": {
+        "bootstrap entered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 135,
+          "p90": 167
+        },
+        "auth token resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 10,
+          "p90": 12
+        },
+        "runtime flags resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "configuration resolved and shutdown marker inspected": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "migration plan read": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 145,
+          "p90": 160
+        },
+        "schema patches applied": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "database writer ready": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 32,
+          "p90": 36
+        },
+        "read-only database opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 17,
+          "p90": 18
+        },
+        "snapshot store ID ensured": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2,
+          "p90": 3
+        },
+        "dependency container initialized": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 13,
+          "p90": 14
+        },
+        "services resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 13,
+          "p90": 15
+        },
+        "orphan cleanup completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 91,
+          "p90": 99
+        },
+        "conversation display materialization completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 4
+        },
+        "stale startup work recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 4
+        },
+        "execution workers ready": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "journal import": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "terminal checkpoint reopening": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "terminal checkpoint retirement": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "family child interruption": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 2
+        },
+        "turn reconciliation": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "abandoned evidence resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "native questions recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "interrupted plans recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "resume scheduler started": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "coordinator wake recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "turn recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "orphaned background tools settled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 5,
+          "p90": 5
+        },
+        "approval recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2,
+          "p90": 2
+        },
+        "external thread control reconciled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 4
+        },
+        "automatic workspace setup reconciled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2,
+          "p90": 2
+        },
+        "IPC listener opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 2
+        },
+        "HTTP listener opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 7,
+          "p90": 8
+        }
+      },
+      "settled": 10,
+      "unsettled": 0,
+      "settledUnmeasured": 0,
+      "rpcsAnsweredMax": 63,
+      "rpcsUnansweredMax": 0,
+      "rpcsDropped": 0
+    },
+    "B baseline": {
+      "launches": 10,
+      "failed": 0,
+      "segments": {
+        "A": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 164.25390625,
+          "p90": 218.5390625
+        },
+        "B": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 473,
+          "p90": 535
+        },
+        "C": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 20,
+          "p90": 50
+        },
+        "D": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 218.60009765625,
+          "p90": 326.5
+        },
+        "E": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 220.10009765625,
+          "p90": 245.800048828125
+        },
+        "F": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2400.400146484375,
+          "p90": 2541.7998046875
+        },
+        "total": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3276.4580078125,
+          "p90": 3473.2890625
+        }
+      },
+      "substeps": {
+        "bootstrap entered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 136,
+          "p90": 212
+        },
+        "auth token resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 10,
+          "p90": 14
+        },
+        "runtime flags resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "configuration resolved and shutdown marker inspected": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "migration plan read": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 85,
+          "p90": 98
+        },
+        "schema patches applied": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "database writer ready": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 33,
+          "p90": 36
+        },
+        "read-only database opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 17,
+          "p90": 19
+        },
+        "snapshot store ID ensured": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 3
+        },
+        "dependency container initialized": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 13,
+          "p90": 17
+        },
+        "services resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 13,
+          "p90": 16
+        },
+        "orphan cleanup completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 90,
+          "p90": 106
+        },
+        "conversation display materialization completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 6,
+          "p90": 7
+        },
+        "stale startup work recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 4
+        },
+        "execution workers ready": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "journal import": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 5,
+          "p90": 9
+        },
+        "terminal checkpoint reopening": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "terminal checkpoint retirement": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "family child interruption": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 2
+        },
+        "checkpoint interrupted": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 23,
+          "p90": 25
+        },
+        "turn reconciliation": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "abandoned evidence resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "native questions recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "interrupted plans recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "resume scheduler started": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "coordinator wake recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "turn recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "orphaned background tools settled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 5,
+          "p90": 5
+        },
+        "approval recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 2
+        },
+        "external thread control reconciled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "automatic workspace setup reconciled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2,
+          "p90": 2
+        },
+        "IPC listener opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "HTTP listener opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 6,
+          "p90": 10
+        }
+      },
+      "settled": 10,
+      "unsettled": 0,
+      "settledUnmeasured": 0,
+      "rpcsAnsweredMax": 67,
+      "rpcsUnansweredMax": 0,
+      "rpcsDropped": 0
+    },
+    "B candidate": {
+      "launches": 10,
+      "failed": 0,
+      "segments": {
+        "A": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 156.221923828125,
+          "p90": 520.928955078125
+        },
+        "B": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 462,
+          "p90": 542
+        },
+        "C": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 115,
+          "p90": 207
+        },
+        "D": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 284.89990234375,
+          "p90": 718.60009765625
+        },
+        "E": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 223.60009765625,
+          "p90": 243.39990234375
+        },
+        "F": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 80.800048828125,
+          "p90": 106.89990234375
+        },
+        "total": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1320.050048828125,
+          "p90": 1520.31396484375
+        }
+      },
+      "substeps": {
+        "bootstrap entered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 132,
+          "p90": 154
+        },
+        "auth token resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 10,
+          "p90": 12
+        },
+        "runtime flags resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "configuration resolved and shutdown marker inspected": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "migration plan read": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 84,
+          "p90": 99
+        },
+        "schema patches applied": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "database writer ready": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 31,
+          "p90": 42
+        },
+        "read-only database opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 15,
+          "p90": 19
+        },
+        "snapshot store ID ensured": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 3
+        },
+        "dependency container initialized": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 12,
+          "p90": 14
+        },
+        "services resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 12,
+          "p90": 17
+        },
+        "orphan cleanup completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 88,
+          "p90": 120
+        },
+        "conversation display materialization completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 5,
+          "p90": 9
+        },
+        "stale startup work recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 3,
+          "p90": 5
+        },
+        "execution workers ready": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 2
+        },
+        "journal import": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 7,
+          "p90": 10
+        },
+        "terminal checkpoint reopening": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "terminal checkpoint retirement": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "family child interruption": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 3
+        },
+        "checkpoint interrupted": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 25,
+          "p90": 29
+        },
+        "turn reconciliation": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "abandoned evidence resolved": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "native questions recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "interrupted plans recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "resume scheduler started": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "coordinator wake recovered": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 1
+        },
+        "turn recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "orphaned background tools settled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 5,
+          "p90": 5
+        },
+        "approval recovery completed": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2,
+          "p90": 2
+        },
+        "external thread control reconciled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 1
+        },
+        "automatic workspace setup reconciled": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 2,
+          "p90": 2
+        },
+        "IPC listener opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 1,
+          "p90": 2
+        },
+        "HTTP listener opened": {
+          "measured": 10,
+          "unmeasured": 0,
+          "p50": 6,
+          "p90": 9
+        }
+      },
+      "settled": 10,
+      "unsettled": 0,
+      "settledUnmeasured": 0,
+      "rpcsAnsweredMax": 62,
+      "rpcsUnansweredMax": 0,
+      "rpcsDropped": 0
+    }
+  },
+  "fixtureStats": {
+    "donor": {
+      "tables": {
+        "workspaces": 24,
+        "threads": 290,
+        "messages": 4207,
+        "tool_call_records": 12650,
+        "turn_snapshots": 157,
+        "thread_tasks": 16,
+        "_migrations": 23,
+        "__drizzle_migrations": 110,
+        "provider_model_cache": 6,
+        "hook_executions": 269,
+        "thought_segments": 4749,
+        "pull_request_review_links": 0,
+        "provider_catalog_snapshots": 808,
+        "workspace_worktrees": 303,
+        "thread_control_approvals": 0,
+        "thread_control_audit": 62,
+        "external_thread_control_pairings": 0,
+        "external_thread_control_deliveries": 0,
+        "canonical_agent_events": 221020,
+        "canonical_agent_ingest_checkpoints": 1993,
+        "canonical_agent_items": 118964,
+        "canonical_agent_threads": 282,
+        "canonical_agent_turns": 1993,
+        "canonical_collaboration_actions": 47,
+        "workspace_terminal_preferences": 0,
+        "canonical_legacy_message_provenance": 3779,
+        "canonical_legacy_migration_checkpoints": 1,
+        "terminal_cleanup_ledger": 0,
+        "cleanup_jobs": 0,
+        "workspace_environment_automatic_setup_attempts": 7,
+        "workspace_environment_queued_turns": 18,
+        "workspace_environment_setup_gates": 18,
+        "parent_assistant_text_checkpoint_chunks": 17,
+        "parent_assistant_text_checkpoints": 1,
+        "project_action_runs": 5,
+        "workspace_environment_command_approvals": 0,
+        "workspace_environment_storage_settings": 14,
+        "thread_startups": 286,
+        "turn_diff_snapshots": 33,
+        "canonical_conversation_display_mappings": 20344,
+        "conversation_display_materialization_state": 1,
+        "canonical_writer_operation_receipts": 764,
+        "canonical_writer_live_publication_heads": 95,
+        "canonical_writer_thread_operation_receipts": 0,
+        "store_identity": 1,
+        "plans": 0,
+        "git_commit_requests": 0,
+        "approval_receipts": 0,
+        "turn_steers": 33,
+        "turn_reverts": 0,
+        "provider_model_sightings": 304,
+        "turn_resume_schedules": 0,
+        "plan_implement_requests": 0,
+        "plan_comments": 0,
+        "plan_question_answers": 0,
+        "mcode_schema_compatibility": 1,
+        "thread_provider_sessions": 228,
+        "delegated_tasks": 80,
+        "thread_pull_requests": 2,
+        "canonical_agent_item_content_appends": 0,
+        "turn_file_evidence": 129
+      },
+      "worktreeThreads": 138,
+      "openOrDraftPrThreads": 2,
+      "fileBytes": 2010206208,
+      "freelistCount": 261376
+    },
+    "A": {
+      "tables": {
+        "workspaces": 24,
+        "threads": 26,
+        "messages": 333,
+        "tool_call_records": 2066,
+        "turn_snapshots": 0,
+        "thread_tasks": 0,
+        "_migrations": 0,
+        "__drizzle_migrations": 110,
+        "provider_model_cache": 6,
+        "hook_executions": 4,
+        "thought_segments": 382,
+        "pull_request_review_links": 0,
+        "provider_catalog_snapshots": 808,
+        "workspace_worktrees": 0,
+        "thread_control_approvals": 0,
+        "thread_control_audit": 27,
+        "external_thread_control_pairings": 0,
+        "external_thread_control_deliveries": 0,
+        "canonical_agent_events": 596,
+        "canonical_agent_ingest_checkpoints": 0,
+        "canonical_agent_items": 1863,
+        "canonical_agent_threads": 26,
+        "canonical_agent_turns": 143,
+        "canonical_collaboration_actions": 0,
+        "workspace_terminal_preferences": 0,
+        "canonical_legacy_message_provenance": 331,
+        "canonical_legacy_migration_checkpoints": 1,
+        "terminal_cleanup_ledger": 0,
+        "cleanup_jobs": 0,
+        "workspace_environment_automatic_setup_attempts": 0,
+        "workspace_environment_queued_turns": 0,
+        "workspace_environment_setup_gates": 0,
+        "parent_assistant_text_checkpoint_chunks": 0,
+        "parent_assistant_text_checkpoints": 0,
+        "project_action_runs": 0,
+        "workspace_environment_command_approvals": 0,
+        "workspace_environment_storage_settings": 14,
+        "thread_startups": 0,
+        "turn_diff_snapshots": 0,
+        "canonical_conversation_display_mappings": 1645,
+        "conversation_display_materialization_state": 1,
+        "canonical_writer_operation_receipts": 8,
+        "canonical_writer_live_publication_heads": 2,
+        "canonical_writer_thread_operation_receipts": 0,
+        "store_identity": 0,
+        "plans": 0,
+        "git_commit_requests": 0,
+        "approval_receipts": 0,
+        "turn_steers": 0,
+        "turn_reverts": 0,
+        "provider_model_sightings": 304,
+        "turn_resume_schedules": 0,
+        "plan_implement_requests": 0,
+        "plan_comments": 0,
+        "plan_question_answers": 0,
+        "mcode_schema_compatibility": 1,
+        "thread_provider_sessions": 0,
+        "delegated_tasks": 0,
+        "thread_pull_requests": 0,
+        "canonical_agent_item_content_appends": 0,
+        "turn_file_evidence": 0
+      },
+      "worktreeThreads": 0,
+      "openOrDraftPrThreads": 0,
+      "fileBytes": 105164800,
+      "freelistCount": 0
+    },
+    "B": {
+      "tables": {
+        "workspaces": 24,
+        "threads": 26,
+        "messages": 334,
+        "tool_call_records": 2066,
+        "turn_snapshots": 0,
+        "thread_tasks": 0,
+        "_migrations": 0,
+        "__drizzle_migrations": 110,
+        "provider_model_cache": 6,
+        "hook_executions": 4,
+        "thought_segments": 382,
+        "pull_request_review_links": 0,
+        "provider_catalog_snapshots": 808,
+        "workspace_worktrees": 0,
+        "thread_control_approvals": 0,
+        "thread_control_audit": 27,
+        "external_thread_control_pairings": 0,
+        "external_thread_control_deliveries": 0,
+        "canonical_agent_events": 600,
+        "canonical_agent_ingest_checkpoints": 1,
+        "canonical_agent_items": 1864,
+        "canonical_agent_threads": 26,
+        "canonical_agent_turns": 144,
+        "canonical_collaboration_actions": 0,
+        "workspace_terminal_preferences": 0,
+        "canonical_legacy_message_provenance": 331,
+        "canonical_legacy_migration_checkpoints": 1,
+        "terminal_cleanup_ledger": 0,
+        "cleanup_jobs": 0,
+        "workspace_environment_automatic_setup_attempts": 0,
+        "workspace_environment_queued_turns": 0,
+        "workspace_environment_setup_gates": 0,
+        "parent_assistant_text_checkpoint_chunks": 0,
+        "parent_assistant_text_checkpoints": 0,
+        "project_action_runs": 0,
+        "workspace_environment_command_approvals": 0,
+        "workspace_environment_storage_settings": 14,
+        "thread_startups": 0,
+        "turn_diff_snapshots": 0,
+        "canonical_conversation_display_mappings": 1646,
+        "conversation_display_materialization_state": 1,
+        "canonical_writer_operation_receipts": 8,
+        "canonical_writer_live_publication_heads": 2,
+        "canonical_writer_thread_operation_receipts": 0,
+        "store_identity": 0,
+        "plans": 0,
+        "git_commit_requests": 0,
+        "approval_receipts": 0,
+        "turn_steers": 0,
+        "turn_reverts": 0,
+        "provider_model_sightings": 304,
+        "turn_resume_schedules": 0,
+        "plan_implement_requests": 0,
+        "plan_comments": 0,
+        "plan_question_answers": 0,
+        "mcode_schema_compatibility": 1,
+        "thread_provider_sessions": 0,
+        "delegated_tasks": 0,
+        "thread_pull_requests": 0,
+        "canonical_agent_item_content_appends": 0,
+        "turn_file_evidence": 0
+      },
+      "worktreeThreads": 0,
+      "openOrDraftPrThreads": 0,
+      "fileBytes": 105201664,
+      "freelistCount": 0
+    }
+  }
+}

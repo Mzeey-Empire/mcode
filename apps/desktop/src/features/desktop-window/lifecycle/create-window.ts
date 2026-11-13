@@ -83,8 +83,7 @@ export function createWindow(
     height: 800,
     title: dependencies.displayName,
     icon: getWindowIconPath(dependencies.platform),
-    // Keep window hidden until first paint to eliminate the blank white flash.
-    show: false,
+    // Keep the window visible from creation: on Windows, ready-to-show can remain pending until the window is shown.
     backgroundColor: "#0a0a0f",
     autoHideMenuBar: true,
     ...(dependencies.platform === "darwin"
@@ -150,15 +149,7 @@ export function createWindow(
     if (!allowed) event.preventDefault();
   });
 
-  const showFallback = setTimeout(() => {
-    if (!window.isDestroyed()) window.show();
-  }, 3000);
-  window.once("ready-to-show", () => {
-    dependencies.hooks.onReadyToShow?.();
-    clearTimeout(showFallback);
-    window.show();
-  });
-  window.once("closed", () => clearTimeout(showFallback));
+  window.once("ready-to-show", () => dependencies.hooks.onReadyToShow?.());
 
   if (process.env.ELECTRON_RENDERER_URL) {
     window.loadURL(process.env.ELECTRON_RENDERER_URL);
