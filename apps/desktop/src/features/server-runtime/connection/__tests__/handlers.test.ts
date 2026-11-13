@@ -324,7 +324,10 @@ describe("ServerRuntime entry point", () => {
 
     const cleanupRelay = relayStarter.mock.results[0]?.value;
     expect(relayStarter).toHaveBeenCalledWith("entry-ipc-path", window);
-    expect(window.once).toHaveBeenCalledWith("closed", cleanupRelay);
+    const closeHandler = window.once.mock.calls.find(([event]) => event === "closed")?.[1];
+    if (!closeHandler) throw new Error("Window close handler was not registered");
+    closeHandler();
+    expect(cleanupRelay).toHaveBeenCalledOnce();
   });
 
   it("does not attach an empty IPC path", () => {

@@ -16,6 +16,9 @@ import {
   type ReliabilityHarnessForwardResult,
 } from "./reliability-harness/control.js";
 
+// A normal start settles within seconds; dev quit must not wait for the 10-minute startup timeout.
+const DEV_QUIT_START_WAIT_MS = 10_000;
+
 interface ServerRuntimeWebContents {
   isDestroyed(): boolean;
   send(channel: string, ...args: unknown[]): void;
@@ -44,6 +47,7 @@ interface ServerRuntimeManager {
   restart(): Promise<void>;
   restartPlanned?(): Promise<void>;
   forceReplace(): Promise<void>;
+  stopStartingServer(): void;
   stopServerHeldByLock(): Promise<void>;
 }
 
@@ -119,6 +123,10 @@ export class ServerRuntime {
   private readonly dependencies: ServerRuntimeDependencies;
   private readonly relayStarter: ServerRuntimeRelayStarter;
   private readonly reliabilityHarnessControlPlane: ReliabilityHarnessControlPlane | null;
+  private serverStart: Promise<number> | null = null;
+  private readonly relayWindows = new WeakSet<ServerRuntimeWindow>();
+  private lifecycleRegistered = false;
+  private exitBeforeLifecycle: { code: number | null } | null = null;
   private resolveConnectionReady!: () => void;
   private readonly connectionReady = new Promise<void>((resolve) => {
     this.resolveConnectionReady = resolve;
@@ -166,6 +174,7 @@ export class ServerRuntime {
       blocker: dependencies.powerSaveBlocker,
       log: (...args) => console.log(...args),
     });
+    this.serverManager.onUnexpectedExit = (code) => this.handleUnexpectedExit(code);
   }
 
   /**
@@ -188,8 +197,20 @@ export class ServerRuntime {
     });
   }
 
+  /** Start the server before the app is ready. {@link connectWindow} reports a failure, because its dialogs need a ready app. */
+  beginStart(): void {
+    // connectWindow awaits the same promise and rethrows the failure.
+    this.start().catch(() => undefined);
+  }
+
+  /** Start the server once and return its listening port. Later callers share the first start, including its failure. */
+  private start(): Promise<number> {
+    this.serverStart ??= this.startServer();
+    return this.serverStart;
+  }
+
   /** Start the server and return its listening port. */
-  private async start(): Promise<number> {
+  private async startServer(): Promise<number> {
     const { port } = await this.serverManager.start();
     await this.reliabilityHarnessControlPlane?.start();
     return port;
@@ -206,12 +227,23 @@ export class ServerRuntime {
 
   /** Register server crash recovery and sleep-resume health recovery. */
   registerLifecycle(): void {
-    this.serverManager.onUnexpectedExit = (code) => {
-      void this.serverCrashRecovery.handleUnexpectedExit(code);
-    };
+    this.lifecycleRegistered = true;
     this.dependencies.powerMonitor.on("resume", () => {
       void this.serverHealthRecovery.ensureServerRunning();
     });
+    if (this.exitBeforeLifecycle) {
+      const { code } = this.exitBeforeLifecycle;
+      this.exitBeforeLifecycle = null;
+      void this.serverCrashRecovery.handleUnexpectedExit(code);
+    }
+  }
+
+  private handleUnexpectedExit(code: number | null): void {
+    if (!this.lifecycleRegistered) {
+      this.exitBeforeLifecycle = { code };
+      return;
+    }
+    void this.serverCrashRecovery.handleUnexpectedExit(code);
   }
 
   /** Register authenticated server connection IPC handlers. */
@@ -246,9 +278,14 @@ export class ServerRuntime {
   /** Attach the server IPC relay to a window and clean it up after close. */
   attachWindow(window: ServerRuntimeWindow): void {
     if (!this.serverManager.ipcPath) return;
+    if (this.relayWindows.has(window)) return;
 
     const cleanupRelay = this.relayStarter(this.serverManager.ipcPath, window);
-    window.once("closed", cleanupRelay);
+    this.relayWindows.add(window);
+    window.once("closed", () => {
+      this.relayWindows.delete(window);
+      cleanupRelay();
+    });
   }
 
   /** Force-replace the server before an application update or performance cleanup. */
@@ -257,12 +294,25 @@ export class ServerRuntime {
   }
 
   /**
-   * Gracefully stop the owned server before the dev app quits. Packaged builds
+   * Stop the owned server before the dev app quits, forcing a pending start after 10 seconds. Packaged builds
    * keep the detached server alive for fast relaunch; dev mode tears it down so
    * the server (and its provider subprocesses) does not leak between runs.
    */
   async stopServerForDevQuit(): Promise<void> {
-    await this.serverManager.stopServerHeldByLock();
+    try {
+      if (this.serverStart) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const settled = await Promise.race([
+          this.serverStart.then(() => true, () => true),
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(false), DEV_QUIT_START_WAIT_MS);
+          }),
+        ]).finally(() => clearTimeout(timer));
+        if (!settled) this.serverManager.stopStartingServer();
+      }
+    } finally {
+      await this.serverManager.stopServerHeldByLock();
+    }
   }
 
   /** Restart the server under an explicit harness command without crash recovery. */
@@ -312,7 +362,7 @@ export class ServerRuntime {
   async getActiveAgentCount(): Promise<number> {
     const port = this.serverManager.port;
     if (!port) throw new Error("Server port is not available");
-    const response = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(3_000) });
+    const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(3_000) });
     if (!response.ok) throw new Error(`Health check failed with HTTP ${response.status}`);
     const payload: unknown = await response.json();
     const activeAgents = typeof payload === "object" && payload !== null && "activeAgents" in payload

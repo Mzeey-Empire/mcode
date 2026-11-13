@@ -99,7 +99,8 @@ if (harnessUserDataDir && harnessCapabilityPath && NodePath.isAbsolute(harnessUs
   );
 }
 
-if (shouldPrintVersion(process.argv)) {
+const printsVersion = shouldPrintVersion(process.argv);
+if (printsVersion) {
   console.log(app.getVersion());
   app.exit(0);
 }
@@ -366,6 +367,12 @@ const serverRuntime = new ServerRuntime({
   getCookieStore: () => session.defaultSession.cookies,
   reliabilityHarnessCapabilityPath: process.env.MCODE_RELIABILITY_CAPABILITY_PATH,
 });
+
+// Spawning needs no ready app, so overlap Electron startup; connectWindow reports failures after ready.
+// --version exits before ready and must not leave a detached server behind.
+if (!printsVersion) {
+  serverRuntime.beginStart();
+}
 
 // ---------------------------------------------------------------------------
 // IPC handler registration

@@ -37,14 +37,17 @@ import {
   findAvailablePort,
   releaseStartupLock,
 } from "./startup.js";
-import { stopServerHeldByLock } from "./shutdown.js";
+import { forceKillServerProcessTree, stopServerHeldByLock } from "./shutdown.js";
 import { readStartupRefusal, ServerStartupRefusedError } from "./startup-failure.js";
 
 /** Interval between server readiness probes. */
-const HEALTH_POLL_INTERVAL = 200;
+const HEALTH_POLL_INTERVAL = 25;
 
 /** Number of lock-file reads after readiness passes. */
 const LOCK_READ_ATTEMPTS = 10;
+
+/** Interval between lock-file reads after readiness passes. */
+const LOCK_READ_INTERVAL_MS = 200;
 
 /**
  * Bounds a hung lock read. Health starts the launch record's 120 s usable-frame wait, whose telemetry read needs this
@@ -77,6 +80,8 @@ export class ServerManager {
   private readonly plannedExitProcesses = new Set<NodeChildProcess.ChildProcess>();
   private readonly plannedRestartCoordinator = new PlannedRestartCoordinator();
   private inFlightStart: Promise<{ port: number; authToken: string }> | null = null;
+  // Quit during startup is permanent because this manager is not used after quit.
+  private startCancelled = false;
   /** Only the first spawn gets the launch ID, so a server respawned after a crash cannot report as the launch's. */
   private launchServerSpawned = false;
 
@@ -163,7 +168,7 @@ export class ServerManager {
   async isHealthy(): Promise<boolean> {
     if (!this._port) return false;
     try {
-      const response = await fetch(`http://localhost:${this._port}/health`, {
+      const response = await fetch(`http://127.0.0.1:${this._port}/health`, {
         signal: AbortSignal.timeout(3_000),
       });
       return response.ok;
@@ -204,6 +209,27 @@ export class ServerManager {
   shutdown(): void {
     if (this._reusedExisting || !this.serverProcess) return;
     this.detachServerProcess();
+  }
+
+  /** Stop a spawned server whose start has not finished and prevent any later spawn during quit. */
+  stopStartingServer(): void {
+    this.startCancelled = true;
+    const child = this.serverProcess;
+    if (
+      !child ||
+      child === this.ownedServerProcess ||
+      !child.pid ||
+      child.exitCode !== null ||
+      child.signalCode !== null
+    ) return;
+
+    this.plannedExitProcesses.add(child);
+    try {
+      forceKillServerProcessTree(child.pid, this.platform);
+    } catch (error) {
+      this.plannedExitProcesses.delete(child);
+      throw error;
+    }
   }
 
   /** Gracefully stop the in-band lock holder before an application update. */
@@ -281,6 +307,10 @@ export class ServerManager {
     this.startupId = NodeCrypto.randomUUID();
     const launchId = this.launchServerSpawned ? undefined : this.launch?.launchId;
     this.launchServerSpawned = true;
+    // The quit can arrive while the port search is pending.
+    if (this.startCancelled) {
+      throw new Error("Server start was cancelled because the app is quitting");
+    }
     const spawned = spawnServerProcess(this._port, this.platform, this.startupId, launchId);
     this.launch?.mark("serverSpawned");
     const generation = this.assignServerProcess(spawned.child);
@@ -291,7 +321,7 @@ export class ServerManager {
       const lock = await readServerLockWithRetry(
         lockFilePath(getMcodeDir()),
         LOCK_READ_ATTEMPTS,
-        HEALTH_POLL_INTERVAL,
+        LOCK_READ_INTERVAL_MS,
         LOCK_READ_TIMEOUT_MS,
       );
       this.applyOwnedServerLock(lock, spawned.child, generation);

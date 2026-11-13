@@ -117,7 +117,7 @@ function doesNotOwnExpectedLock(
 /** Request authenticated graceful server shutdown before process-tree fallback. */
 async function requestGracefulShutdown(lock: ServerLock): Promise<void> {
   try {
-    await fetch(`http://localhost:${lock.port}/shutdown`, {
+    await fetch(`http://127.0.0.1:${lock.port}/shutdown`, {
       method: "POST",
       signal: AbortSignal.timeout(5_000),
       headers: {
@@ -214,7 +214,7 @@ function readCurrentLock(lockPath: string): ServerLock | null {
 }
 
 /** Kill the server leader and all provider subprocesses that it owns. */
-function forceKillServerProcessTree(pid: number, platform: NodeJS.Platform): void {
+export function forceKillServerProcessTree(pid: number, platform: NodeJS.Platform): void {
   try {
     if (platform === "win32") {
       NodeChildProcess.execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {

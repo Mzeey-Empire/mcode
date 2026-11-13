@@ -177,6 +177,7 @@ const originalFetch = globalThis.fetch;
 
 import { ServerManager } from "../manager.js";
 import { ServerStartupRefusedError } from "../startup-failure.js";
+import * as Startup from "../startup.js";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
@@ -239,6 +240,24 @@ describe("ServerManager", () => {
   // -----------------------------------------------------------------------
   // Basic spawn and property tests
   // -----------------------------------------------------------------------
+
+  it("waits longer than one health poll for the server lock", async () => {
+    vi.useFakeTimers();
+    const lockAvailableAt = Date.now() + 300;
+    vi.mocked(NodeFSPromises.readFile).mockReset().mockImplementation(async () => {
+      if (Date.now() < lockAvailableAt) throw refs.missingFile();
+      return LOCK_FILE_JSON;
+    });
+
+    try {
+      const started = manager.start();
+      const result = expect(started).resolves.toEqual({ port: 19600, authToken: "test-auth-token" });
+      await vi.advanceTimersByTimeAsync(400);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("starts the server by spawning a detached child process", async () => {
     const result = await manager.start();
@@ -995,6 +1014,113 @@ describe("ServerManager", () => {
   // forceReplace
   // -----------------------------------------------------------------------
 
+  it("stops a spawned server whose start has not finished", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+    const onUnexpectedExit = vi.fn();
+    manager.onUnexpectedExit = onUnexpectedExit;
+
+    try {
+      const startup = manager.start();
+      const rejection = expect(startup).rejects.toThrow(
+        "Server process exited before becoming ready",
+      );
+      await vi.advanceTimersByTimeAsync(0);
+
+      manager.stopStartingServer();
+
+      expect(killSpy).toHaveBeenCalledWith(-12345, "SIGKILL");
+      refs.getExitCallback()!(1);
+      await vi.advanceTimersByTimeAsync(200);
+      await rejection;
+      expect(onUnexpectedExit).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a started server to the lock-file stop", async () => {
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+    try {
+      await manager.start();
+      vi.mocked(NodeChildProcess.execFileSync).mockClear();
+      killSpy.mockClear();
+
+      manager.stopStartingServer();
+
+      expect(killSpy).not.toHaveBeenCalled();
+      expect(NodeChildProcess.execFileSync).not.toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it("does not spawn a server after a quit cancels the start", async () => {
+    manager.stopStartingServer();
+
+    await expect(manager.start()).rejects.toThrow(
+      "Server start was cancelled because the app is quitting",
+    );
+    expect(NodeChildProcess.spawn).not.toHaveBeenCalled();
+    expect(NodeFS.rmdirSync).toHaveBeenCalledWith(
+      NodePath.join("/tmp/mcode", "server.starting"),
+    );
+  });
+
+  it("does not spawn a server when a quit cancels the start during a startup sentinel wait", async () => {
+    vi.useFakeTimers();
+    const sentinelWaitStarted = Promise.withResolvers<void>();
+    const sentinelHeld = () => {
+      throw Object.assign(new Error("Startup sentinel held"), { code: "EEXIST" });
+    };
+    vi.mocked(NodeFS.mkdirSync)
+      .mockImplementationOnce(sentinelHeld)
+      .mockImplementationOnce(() => {
+        sentinelWaitStarted.resolve();
+        sentinelHeld();
+      });
+
+    try {
+      const start = manager.start();
+      const rejection = expect(start).rejects.toThrow(
+        "Server start was cancelled because the app is quitting",
+      );
+      await sentinelWaitStarted.promise;
+      manager.stopStartingServer();
+      await vi.runAllTimersAsync();
+
+      await rejection;
+      expect(NodeChildProcess.spawn).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not spawn a server when a quit cancels the start during the port search", async () => {
+    const portSearch = Promise.withResolvers<number>();
+    const portSearchStarted = Promise.withResolvers<void>();
+    const findPort = vi.spyOn(Startup, "findAvailablePort").mockImplementationOnce(() => {
+      portSearchStarted.resolve();
+      return portSearch.promise;
+    });
+
+    try {
+      const start = manager.start();
+      await portSearchStarted.promise;
+      manager.stopStartingServer();
+      portSearch.resolve(19600);
+
+      await expect(start).rejects.toThrow(
+        "Server start was cancelled because the app is quitting",
+      );
+      expect(NodeChildProcess.spawn).not.toHaveBeenCalled();
+    } finally {
+      findPort.mockRestore();
+    }
+  });
+
   it("forceReplace sends POST /shutdown to the running server", async () => {
     // Lock file exists with a running server
     vi.mocked(NodeFS.existsSync).mockReturnValue(true);
@@ -1012,7 +1138,7 @@ describe("ServerManager", () => {
     await manager.forceReplace();
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "http://localhost:19600/shutdown",
+      "http://127.0.0.1:19600/shutdown",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -1038,7 +1164,7 @@ describe("ServerManager", () => {
     await manager.stopServerHeldByLock();
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      "http://localhost:19600/shutdown",
+      "http://127.0.0.1:19600/shutdown",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
@@ -1405,7 +1531,7 @@ describe("ServerManager", () => {
       await manager.forceReplace();
 
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        "http://localhost:19600/shutdown",
+        "http://127.0.0.1:19600/shutdown",
         expect.objectContaining({
           method: "POST",
           headers: expect.objectContaining({
@@ -1481,6 +1607,25 @@ describe("ServerManager", () => {
 
     await expect(manager.start()).rejects.toThrow("spawn ENOENT");
     expect(mockStream.destroy).toHaveBeenCalledOnce();
+  });
+
+  it("notices readiness within one 25 ms poll", async () => {
+    vi.useFakeTimers();
+    const readyAt = Date.now() + 30;
+    vi.spyOn(manager, "isHealthy").mockImplementation(async () => Date.now() >= readyAt);
+
+    try {
+      let result: { port: number; authToken: string } | undefined;
+      const startup = manager.start().then((connection) => {
+        result = connection;
+      });
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(result).toEqual({ port: 19600, authToken: "test-auth-token" });
+      await startup;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([318_000, 400_000])(
