@@ -78,6 +78,24 @@ beforeEach(() => {
   });
 });
 
+describe("workspace list loaded flag", () => {
+  beforeEach(() => {
+    useWorkspaceStore.setState({ workspacesLoaded: false });
+  });
+
+  it("counts a successful empty workspace answer as loaded", async () => {
+    vi.mocked(mockTransport.listWorkspaces).mockResolvedValueOnce([]);
+    await useWorkspaceStore.getState().loadWorkspaces();
+    expect(useWorkspaceStore.getState().workspacesLoaded).toBe(true);
+  });
+
+  it("does not count a failed workspace answer as loaded", async () => {
+    vi.mocked(mockTransport.listWorkspaces).mockRejectedValueOnce(new Error("offline"));
+    await useWorkspaceStore.getState().loadWorkspaces();
+    expect(useWorkspaceStore.getState().workspacesLoaded).toBe(false);
+  });
+});
+
 describe("workspaceStore pin/remove/touch", () => {
   it("applies PR pushes to a thread outside the active workspace without moving its activity clock", () => {
     const thread = createMockThread({ id: "other-thread", workspace_id: "other-workspace" });

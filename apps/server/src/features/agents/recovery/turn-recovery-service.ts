@@ -21,6 +21,7 @@ import {
 } from "../../handoff/v2/index.js";
 import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
 import { TurnRecoveryError } from "./turn-recovery-error.js";
+import { launchTelemetry } from "../../../runtime/diagnostics/launch-telemetry.js";
 import { chooseResumePath, NativeResumeWatch, RESUME_CONTINUATION_PROMPT, type ResumePathInput } from "./turn-resume.js";
 import type { SendMessageCommand } from "../orchestration/agent-service.js";
 import type { AgentTurnEnding } from "@mcode/contracts/compat/agent-model";
@@ -94,14 +95,21 @@ export class TurnRecoveryService {
    */
   async reconcileOnStartup(): Promise<{ interrupted: string[] }> {
     await this.parentAssistantTextCheckpoints.importRecoveryJournals();
+    launchTelemetry.mark("journal import");
     await this.reopenMaterializableTerminalCheckpoints();
+    launchTelemetry.mark("terminal checkpoint reopening");
     await this.parentAssistantTextCheckpoints.retireTerminalCheckpoints();
+    launchTelemetry.mark("terminal checkpoint retirement");
     await this.canonicalSink.interruptSavedFamilyChildren(UNPROVED_EXECUTION_REASON);
+    launchTelemetry.mark("family child interruption");
     const checkpoints = this.canonicalSink.listUnfinishedCheckpoints();
     if (checkpoints.length === 0) return { interrupted: [] };
     const incident = { id: NodeCrypto.randomUUID(), createdAt: new Date().toISOString() };
     const interrupted: string[] = [];
-    for (const checkpoint of checkpoints) interrupted.push(await this.interruptUnfinishedCheckpoint(checkpoint, incident));
+    for (const checkpoint of checkpoints) {
+      interrupted.push(await this.interruptUnfinishedCheckpoint(checkpoint, incident));
+      launchTelemetry.mark("checkpoint interrupted");
+    }
     return { interrupted };
   }
 

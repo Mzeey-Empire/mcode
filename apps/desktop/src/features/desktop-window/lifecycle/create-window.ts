@@ -41,6 +41,8 @@ function forwardRendererConsoleErrors(window: BrowserWindow): void {
 
 /** Per-window Preview, Spellcheck, and Server Runtime operations. */
 export interface DesktopWindowLifecycleHooks {
+  /** Record the first native ready-to-show event for this launch. */
+  readonly onReadyToShow?: () => void;
   /** Dispose Preview state for a closing window. */
   readonly disposePreviewForWindow: (window: BrowserWindow) => void;
   /** Dispose Browser Automation state for a closing window. */
@@ -152,6 +154,7 @@ export function createWindow(
     if (!window.isDestroyed()) window.show();
   }, 3000);
   window.once("ready-to-show", () => {
+    dependencies.hooks.onReadyToShow?.();
     clearTimeout(showFallback);
     window.show();
   });

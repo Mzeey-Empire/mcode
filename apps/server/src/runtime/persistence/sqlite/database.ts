@@ -6,6 +6,7 @@ import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir, logger } from "@mcode/shared";
+import type { LaunchMark } from "@mcode/contracts/launch-telemetry";
 import { readMigrationFiles } from "drizzle-orm/migrator";
 import { bootstrapDrizzle } from "./bootstrap-drizzle.js";
 import {
@@ -132,9 +133,14 @@ function readSchemaVersion(db: Database): number {
 /** How long a second launcher waits for another process's migration before reporting the database busy. */
 const WRITE_LOCK_WAIT_MS = 30_000;
 
+/** What opening the database reports to launch telemetry: whether migrations ran, and its step marks. */
+export type DatabaseLaunchObservations = { migrated: boolean; marks: LaunchMark[] };
+
 /** Options for a file-backed application database connection. */
 export interface OpenDatabaseOptions {
   dbPath?: string;
+  /** Filled while opening, then returned to the worker host. */
+  launchTelemetry?: DatabaseLaunchObservations;
   migrationBackupSpace?: MigrationBackupSpaceOptions;
   /** How long to wait for another connection's write transaction before refusing as busy. Tests shorten it. */
   writeLockWaitMs?: number;
@@ -168,7 +174,7 @@ function applyPendingMigrations(db: Database, migrationsDir: string): void {
 }
 
 /** The steps of a plan. The caller supplies the transaction: nothing restores the file, so a failure at any step must leave the ledger as it was. */
-function applyPlanSteps(db: Database, plan: ExecutablePlan, catalogue: MigrationCatalogue, databasePath: string): void {
+function applyPlanSteps(db: Database, plan: ExecutablePlan, catalogue: MigrationCatalogue, databasePath: string, telemetry?: DatabaseLaunchObservations): void {
   const dir = catalogue.directory;
   if (plan.kind === "migrate") {
     if (plan.baseline) bootstrapDrizzle(db, dir);
@@ -177,9 +183,14 @@ function applyPlanSteps(db: Database, plan: ExecutablePlan, catalogue: Migration
       assertLedgerMigratable(db, catalogue, databasePath);
     }
     applyPendingMigrations(db, dir);
+    telemetry?.marks.push({ name: "migrations applied", at: Date.now() });
   }
   applySchemaPatches(db, dir);
-  if (plan.kind === "migrate") assertLedgerUsable(db, catalogue, databasePath);
+  telemetry?.marks.push({ name: "schema patches applied", at: Date.now() });
+  if (plan.kind === "migrate") {
+    assertLedgerUsable(db, catalogue, databasePath);
+    telemetry?.marks.push({ name: "ledger verified", at: Date.now() });
+  }
 }
 
 function applyPlan(db: Database, plan: ExecutablePlan, catalogue: MigrationCatalogue, databasePath: string): void {
@@ -229,11 +240,15 @@ function applyUnderWriteLock(
   progress.schemaVersionBeforeMigrations = readSchemaVersion(db);
   const inspection = inspectDatabase(db);
   const plan = planFor(inspection, catalogue, databasePath);
+  const telemetry = opts?.launchTelemetry;
+  telemetry?.marks.push({ name: "migration plan read", at: Date.now() });
   if (plan.kind === "migrate" && hasApplicationTables(inspection)) {
     progress.backupPath = createMigrationBackup(databasePath, opts?.migrationBackupSpace);
+    telemetry?.marks.push({ name: "migration backup created", at: Date.now() });
   }
   progress.migrating = plan.kind === "migrate";
-  applyPlanSteps(db, plan, catalogue, databasePath);
+  if (telemetry) telemetry.migrated = progress.migrating;
+  applyPlanSteps(db, plan, catalogue, databasePath, telemetry);
 }
 
 /** Only a failure of the migration itself is `migration-failed`: the file is as it was, and the backup is the way back. */

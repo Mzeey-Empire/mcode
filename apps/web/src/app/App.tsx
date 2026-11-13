@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { reportLaunchMark } from "@/transport/launch-marks";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { SidebarResizeSeam } from "@/components/sidebar/SidebarResizeSeam";
 import { ChatView } from "@/features/conversation";
@@ -478,6 +479,7 @@ function isValidLocation(location: NavigationLocation): boolean {
 
 /** Root application component. Initializes WS transport and push listeners. */
 export function App() {
+  useLayoutEffect(() => { reportLaunchMark("reactCommitted"); }, []);
   const isDesktop = Boolean(window.desktopBridge?.window);
   const theme = useSettingsStore((s) => s.settings.appearance.theme);
   const [settingsOpen, setSettingsOpen] = useState(false);

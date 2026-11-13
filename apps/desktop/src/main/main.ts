@@ -1,5 +1,3 @@
-const STARTUP_TIME = performance.now();
-
 /**
  * Electron main process entry point.
  * Thin shell that spawns the Mcode server as a child process and
@@ -20,10 +18,11 @@ import {
   shell,
 } from "electron";
 import { autoUpdater } from "electron-updater";
+import * as NodeOS from "node:os";
 import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import { getLogPath, getMcodeDir, getRecentLogs, logger } from "@mcode/shared";
+import { appendLogSync, getLogPath, getMcodeDir, getRecentLogs, logger } from "@mcode/shared";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { appDisplayName, resolveBuildStage } from "@mcode/contracts/build-stage";
 
@@ -33,6 +32,8 @@ import {
 import { ServerRuntime } from "../features/server-runtime/index.js";
 import { ServerStartupRefusedError } from "../features/server-runtime/process/startup-failure.js";
 import { showStartupRefusalDialog } from "../features/server-runtime/startup-refusal-dialog.js";
+import { createLaunchRecord } from "../features/launch-record/launch-record.js";
+import { classifyLaunchBoot } from "../features/launch-record/boot-history.js";
 import {
   initializeApplicationUpdates,
   cleanupApplicationUpdates,
@@ -66,6 +67,11 @@ import {
 import { registerAttachmentsFeature } from "../features/attachments/index.js";
 import { isDesktopDev } from "./is-desktop-dev.js";
 import { shouldPrintVersion } from "./cli-args.js";
+
+// Imports evaluate before any statement here, wherever they sit in the file,
+// so this marks the end of main's module loading.
+const MAIN_MODULE_START = Date.now();
+const launchId = crypto.randomUUID();
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
 // from the installed prod build. Without this, both share %APPDATA%/Mcode/
@@ -311,7 +317,38 @@ export function handleRendererCrashReport(
     componentStackTruncated: normalized.componentStackTruncated,
   });
 }
+const bootAt = Date.now() - NodeOS.uptime() * 1000;
+const launchRecord = createLaunchRecord({
+  launchId,
+  appVersion: app.getVersion(),
+  t0: process.getCreationTime(),
+  bootAt,
+  mainModuleStart: MAIN_MODULE_START,
+  now: Date.now,
+  setTimeout,
+  clearTimeout,
+  fetch: (usableAt) => serverRuntime.fetchLaunchTelemetry(usableAt),
+  write: (record) => {
+    try {
+      appendLogSync("Launch record", record);
+    } catch (error) {
+      logger.warn("Launch record write failed", { launchId: record.launchId, error: String(error) });
+    }
+  },
+});
+classifyLaunchBoot(NodePath.join(app.getPath("userData"), "launch-boot.json"), bootAt)
+  .then((firstSinceBoot) => launchRecord.bootClassified(firstSinceBoot))
+  .catch((error: unknown) => logger.warn("Launch boot classification failed", { error: String(error) }));
+ipcMain.on("launch-mark", (event, name: unknown, at: unknown) => {
+  launchRecord.rendererMark(event.sender, mainWindow?.webContents, name, at);
+});
+
 const serverRuntime = new ServerRuntime({
+  launch: {
+    launchId,
+    mark: (name) => launchRecord.mark(name),
+    healthy: (serverMode) => launchRecord.serverHealthy(serverMode),
+  },
   platform: hostRuntime.platform,
   ipcMain,
   getMainWindow: () => mainWindow,
@@ -510,10 +547,8 @@ app.setAboutPanelOptions({ applicationName: displayName });
 process.title = displayName.replace(/^Mcode/, "Mcode Desktop");
 
 app.whenReady().then(async () => {
+  launchRecord.mark("whenReady");
   try {
-    console.log(
-      `[perf] App ready: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
-    );
     console.log(
       `[perf] V8 snapshot: ${globalThis.__v8Snapshot ? "loaded" : "not available"}`,
     );
@@ -526,6 +561,7 @@ app.whenReady().then(async () => {
       displayName,
       isDesktopDev,
       lifecycleHooks: {
+        onReadyToShow: () => launchRecord.mark("readyToShow"),
         disposePreviewForWindow,
         disposeBrowserAutomationForWindow,
         hardenPreviewWebviewAttachment,
@@ -552,19 +588,9 @@ app.whenReady().then(async () => {
 
     // Create window
     mainWindow = desktopWindow.createWindow();
-    mainWindow.once("ready-to-show", () => {
-      console.log(
-        `[perf] Window shown: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
-      );
-    });
-    console.log(
-      `[perf] Window created: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
-    );
+    launchRecord.mark("windowCreated");
 
     const port = await serverRuntime.connectWindow(mainWindow);
-    console.log(
-      `[perf] Server ready: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
-    );
     console.log(`Server started on port ${port}`);
 
     serverRuntime.registerLifecycle();
@@ -593,10 +619,8 @@ app.whenReady().then(async () => {
       getActiveAgentCount: () => serverRuntime.getActiveAgentCount(),
     });
 
-    console.log(
-      `[perf] Startup complete: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`,
-    );
   } catch (error) {
+    launchRecord.failed();
     if (error instanceof ServerStartupRefusedError) {
       console.error("Server refused to start", error.refusal);
       await showStartupRefusalDialog(error.refusal, { dialog, shell, clipboard, dataDir: getMcodeDir() });
@@ -625,6 +649,7 @@ app.on("window-all-closed", () => {
 // will-quit does not, so the async stop must hook here and re-quit afterwards.
 let devServerStopInitiated = false;
 app.on("before-quit", (event) => {
+  launchRecord.quit();
   if (!isDesktopDev() || devServerStopInitiated) return;
   devServerStopInitiated = true;
   event.preventDefault();

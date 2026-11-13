@@ -1,5 +1,5 @@
 // Logging
-export { logger, getLogPath, getRecentLogs } from "./logging/index.js";
+export { logger, appendLogSync, getLogPath, getRecentLogs } from "./logging/index.js";
 
 // Paths
 export { getMcodeDir, spillWorkspaceDirSegment } from "./paths/index.js";

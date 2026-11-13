@@ -5,6 +5,7 @@
  */
 
 import { app } from "electron";
+import { SERVER_STARTUP_TIMEOUT_MS, type LaunchRecord, type MainLaunchMark } from "@mcode/contracts/launch-telemetry";
 import type * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -42,17 +43,25 @@ import { readStartupRefusal, ServerStartupRefusedError } from "./startup-failure
 /** Interval between server readiness probes. */
 const HEALTH_POLL_INTERVAL = 200;
 
-/**
- * Maximum server startup time, including an awaited local conversation-data
- * migration before the server can report readiness.
- */
-const STARTUP_TIMEOUT_MS = 10 * 60_000;
-
 /** Number of lock-file reads after readiness passes. */
 const LOCK_READ_ATTEMPTS = 10;
 
+/**
+ * Bounds a hung lock read. Health starts the launch record's 120 s usable-frame wait, whose telemetry read needs this
+ * lock's token, so startup must fail well before that wait ends.
+ */
+const LOCK_READ_TIMEOUT_MS = 10_000;
+
 /** Port band for the desktop mode active when Electron loads this module. */
 const { min: PORT_MIN, max: PORT_MAX } = getServerPortBand();
+
+/** The app launch a spawned server records, and where server start milestones go. */
+export type ServerLaunchHooks = {
+  launchId: string;
+  mark(name: MainLaunchMark): void;
+  /** Reports health before the window connects. */
+  healthy(serverMode: LaunchRecord["serverMode"]): void;
+};
 
 /** Manages the lifecycle of the detached Mcode server process. */
 export class ServerManager {
@@ -68,11 +77,13 @@ export class ServerManager {
   private readonly plannedExitProcesses = new Set<NodeChildProcess.ChildProcess>();
   private readonly plannedRestartCoordinator = new PlannedRestartCoordinator();
   private inFlightStart: Promise<{ port: number; authToken: string }> | null = null;
+  /** Only the first spawn gets the launch ID, so a server respawned after a crash cannot report as the launch's. */
+  private launchServerSpawned = false;
 
   /** Callback invoked when the current server exits without a planned shutdown. */
   onUnexpectedExit: ((code: number | null) => void) | null = null;
 
-  constructor(private readonly platform: NodeJS.Platform) {}
+  constructor(private readonly platform: NodeJS.Platform, private readonly launch?: ServerLaunchHooks) {}
 
   /** The port the server is listening on. */
   get port(): number {
@@ -260,6 +271,7 @@ export class ServerManager {
     this._authToken = existing.authToken;
     this._ipcPath = existing.ipcPath;
     this._reusedExisting = !ownsExistingServer;
+    this.launch?.healthy(this._reusedExisting ? "reused" : "spawned");
     return { port: this._port, authToken: this._authToken };
   }
 
@@ -267,15 +279,20 @@ export class ServerManager {
   private async startNewServer(): Promise<{ port: number; authToken: string }> {
     this._port = await this.findStartupPort();
     this.startupId = NodeCrypto.randomUUID();
-    const spawned = spawnServerProcess(this._port, this.platform, this.startupId);
+    const launchId = this.launchServerSpawned ? undefined : this.launch?.launchId;
+    this.launchServerSpawned = true;
+    const spawned = spawnServerProcess(this._port, this.platform, this.startupId, launchId);
+    this.launch?.mark("serverSpawned");
     const generation = this.assignServerProcess(spawned.child);
     this.registerSpawnedServer(spawned.child, spawned.stderrStream, generation);
     try {
-      await this.waitForReady(STARTUP_TIMEOUT_MS);
+      await this.waitForReady(SERVER_STARTUP_TIMEOUT_MS);
+      this.launch?.healthy("spawned");
       const lock = await readServerLockWithRetry(
         lockFilePath(getMcodeDir()),
         LOCK_READ_ATTEMPTS,
         HEALTH_POLL_INTERVAL,
+        LOCK_READ_TIMEOUT_MS,
       );
       this.applyOwnedServerLock(lock, spawned.child, generation);
       return { port: this._port, authToken: this._authToken };

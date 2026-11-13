@@ -282,6 +282,66 @@ describe("ServerManager", () => {
     }
   });
 
+  it("marks a new server spawned, then reports it healthy, for this launch", async () => {
+    const events: string[] = [];
+    manager = new ServerManager(TEST_PLATFORM, {
+      launchId: crypto.randomUUID(),
+      mark: (name) => events.push(name),
+      healthy: (serverMode) => events.push(`healthy ${serverMode}`),
+    });
+
+    await manager.start();
+
+    expect(events).toEqual(["serverSpawned", "healthy spawned"]);
+  });
+
+  it("fails startup 10 seconds after health when the lock read hangs, so no launch read goes out without a token", async () => {
+    const events: string[] = [];
+    manager = new ServerManager(TEST_PLATFORM, {
+      launchId: crypto.randomUUID(),
+      mark: vi.fn(),
+      healthy: (serverMode) => events.push(`healthy ${serverMode}`),
+    });
+    vi.mocked(NodeFSPromises.readFile).mockReset().mockReturnValue(new Promise(() => {}) as never);
+    vi.useFakeTimers();
+
+    try {
+      let settled = false;
+      const starting = manager.start().finally(() => { settled = true; });
+      const failure = expect(starting).rejects.toThrow("Server lock file not read within 10000ms");
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(events).toEqual(["healthy spawned"]);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await failure;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(manager.authToken).toBe("");
+  });
+
+  it("gives the launch ID to the first server only, so a respawned server cannot report the launch", async () => {
+    const launchId = crypto.randomUUID();
+    manager = new ServerManager(TEST_PLATFORM, { launchId, mark: vi.fn(), healthy: vi.fn() });
+    await manager.start();
+    vi.spyOn(manager, "stopServerHeldByLock").mockResolvedValue();
+    vi.mocked(NodeFSPromises.readFile).mockResolvedValue(LOCK_FILE_JSON as never);
+    vi.useFakeTimers();
+
+    try {
+      const restart = manager.restart();
+      await vi.advanceTimersByTimeAsync(500);
+      await restart;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const spawnedLaunchIds = vi.mocked(NodeChildProcess.spawn).mock.calls
+      .map((call) => (call[2] as { env: Record<string, string> }).env.MCODE_LAUNCH_ID);
+    expect(spawnedLaunchIds).toEqual([launchId, ""]);
+  });
+
   it("calls unref() on the child process after spawning", async () => {
     await manager.start();
     expect(refs.mockChildProcess.unref).toHaveBeenCalledOnce();
@@ -1727,6 +1787,22 @@ describe("ServerManager", () => {
     expect(result.port).toBe(19600);
     expect(result.authToken).toBe("test-auth-token");
     expect(manager.reusedExisting).toBe(true);
+  });
+
+  it("reports a reused server healthy for this launch without a spawn mark", async () => {
+    const events: string[] = [];
+    manager = new ServerManager(TEST_PLATFORM, {
+      launchId: crypto.randomUUID(),
+      mark: (name) => events.push(name),
+      healthy: (serverMode) => events.push(`healthy ${serverMode}`),
+    });
+    vi.mocked(NodeFS.readFileSync).mockReset().mockReturnValueOnce(LOCK_FILE_JSON);
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true as never);
+
+    await manager.start();
+    killSpy.mockRestore();
+
+    expect(events).toEqual(["healthy reused"]);
   });
 
   it("does not probe or reuse an existing server with an invalid PID", async () => {

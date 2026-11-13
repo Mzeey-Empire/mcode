@@ -58,6 +58,18 @@ export const logger = winston.createLogger({
   ],
 });
 
+/**
+ * Appends one info entry, in the logger's JSON shape, to the file the logger rotates into today. The logger writes
+ * through a stream, so an entry it takes while the process quits can be lost; this one lands before it returns.
+ */
+export function appendLogSync(message: string, meta: Record<string, unknown>): void {
+  const now = new Date();
+  // Local calendar date, matching winston-daily-rotate-file's default naming.
+  const stamp = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((part) => String(part).padStart(2, "0")).join("-");
+  const entry = { level: "info", message, ...meta, timestamp: now.toISOString() };
+  NodeFS.appendFileSync(NodePath.join(resolveLogDir(), `mcode.log.${stamp}`), `${JSON.stringify(entry)}\n`);
+}
+
 /** Get the absolute path to the log directory. */
 export function getLogPath(): string {
   return resolveLogDir();
