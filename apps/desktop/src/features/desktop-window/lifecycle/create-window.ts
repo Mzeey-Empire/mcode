@@ -83,8 +83,8 @@ export function createWindow(
     height: 800,
     title: dependencies.displayName,
     icon: getWindowIconPath(dependencies.platform),
-    // Keep window hidden until first paint to eliminate the blank white flash.
-    show: false,
+    // Shown at once: a window created hidden on Windows often draws no frame until it is shown, so waiting for
+    // ready-to-show held launches for the whole fallback. The background colour keeps the first frame dark.
     backgroundColor: "#0a0a0f",
     autoHideMenuBar: true,
     ...(dependencies.platform === "darwin"
@@ -150,15 +150,7 @@ export function createWindow(
     if (!allowed) event.preventDefault();
   });
 
-  const showFallback = setTimeout(() => {
-    if (!window.isDestroyed()) window.show();
-  }, 3000);
-  window.once("ready-to-show", () => {
-    dependencies.hooks.onReadyToShow?.();
-    clearTimeout(showFallback);
-    window.show();
-  });
-  window.once("closed", () => clearTimeout(showFallback));
+  window.once("ready-to-show", () => dependencies.hooks.onReadyToShow?.());
 
   if (process.env.ELECTRON_RENDERER_URL) {
     window.loadURL(process.env.ELECTRON_RENDERER_URL);
