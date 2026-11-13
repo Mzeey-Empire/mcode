@@ -20,7 +20,8 @@ describe("theme boot script", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  it("stays dark with no cached preference", async () => {
+  it("paints dark with no cached preference", async () => {
+    document.documentElement.className = "";
     await runBootScript(false);
     expect(document.documentElement.classList.contains("dark")).toBe(true);
   });
