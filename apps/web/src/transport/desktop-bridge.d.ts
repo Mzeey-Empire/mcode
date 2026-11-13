@@ -452,6 +452,11 @@ interface DesktopBridge {
   /** Report a renderer launch milestone to the desktop host. */
   reportLaunchMark(name: RendererLaunchMark, at: number): void;
   /**
+   * Report whether the resolved theme is dark so the window background matches.
+   * Optional: older desktop builds do not expose it.
+   */
+  reportWindowTheme?(dark: boolean): void;
+  /**
    * Verify the server is reachable; the main process silently restarts it if
    * not. Optional: older desktop builds may not expose it, so call sites use
    * optional chaining.
