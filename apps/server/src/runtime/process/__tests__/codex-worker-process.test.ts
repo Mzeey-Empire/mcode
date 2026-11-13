@@ -20,6 +20,21 @@ function killTestChild(pid: number | undefined): void {
   }
 }
 
+// A killed child whose worker was terminated is never reaped, so on Linux and
+// macOS it stays in the process table as a zombie that a signal-0 probe still finds.
+function isProcessRunning(pid: number): boolean {
+  if (process.platform === "win32") {
+    try {
+      return process.kill(pid, 0);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ESRCH") return false;
+      throw error;
+    }
+  }
+  const state = NodeChildProcess.spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim();
+  return state !== "" && !state.startsWith("Z");
+}
+
 describe("worker-backed Codex process", () => {
   it("bounds termination even when exit confirmation has not arrived", async () => {
     const child = createWorkerCodexProcessLauncher(new ProcessStartWorkerClient().open)(
@@ -76,7 +91,7 @@ describe("worker-backed Codex process", () => {
     const stdout = NodeEvents.once(child.stdout, "data");
     try {
       await NodeEvents.once(child, "spawn");
-      expect(process.kill(child.pid!, 0)).toBe(true);
+      expect(isProcessRunning(child.pid!)).toBe(true);
       child.stdin.write("hello worker\n");
       expect(String((await stdout)[0])).toBe("hello worker\n");
       expect(String((await stderr)[0])).toBe("diagnostic\n");
@@ -101,15 +116,15 @@ describe("worker-backed Codex process", () => {
     let replacement: ReturnType<typeof launch> | undefined;
     try {
       await NodeEvents.once(child, "spawn");
-      expect(process.kill(child.pid!, 0)).toBe(true);
+      expect(isProcessRunning(child.pid!)).toBe(true);
       const lostWorker = worker!;
       const exit = NodeEvents.once(child, "exit");
       lostWorker.dispatchEvent(new Event("close"));
       expect(await exit).toEqual([null, null]);
-      await vi.waitFor(() => expect(() => process.kill(child.pid!, 0)).toThrow(), { timeout: 1_000 });
+      await vi.waitFor(() => expect(isProcessRunning(child.pid!)).toBe(false), { timeout: 1_000 });
       replacement = launch(process.execPath, ["-e", script], {});
       await NodeEvents.once(replacement, "spawn");
-      expect(process.kill(replacement.pid!, 0)).toBe(true);
+      expect(isProcessRunning(replacement.pid!)).toBe(true);
       expect(worker).not.toBe(lostWorker);
     } finally {
       killTestChild(child.pid);
