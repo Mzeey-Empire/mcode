@@ -2,6 +2,8 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { Theme } from "@mcode/contracts/models/settings";
+
 import { THEME_STORAGE_KEY, useAppliedTheme } from "../use-applied-theme";
 
 describe("useAppliedTheme", () => {
@@ -30,20 +32,39 @@ describe("useAppliedTheme", () => {
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 
-  it("reports the resolved theme to the desktop window, following the system", () => {
-    const systemScheme = new EventTarget();
-    vi.spyOn(window, "matchMedia").mockReturnValue(
-      Object.assign(systemScheme, { matches: true }) as unknown as MediaQueryList,
-    );
+  it("follows the system in system mode and stops following once the preference changes", () => {
+    const systemScheme = mockSystemScheme(true);
     const reportWindowTheme = vi.fn();
     Object.defineProperty(window, "desktopBridge", {
       configurable: true,
       value: { reportWindowTheme },
     });
 
-    renderHook(() => useAppliedTheme("system", true));
+    const { rerender } = renderHook(({ theme }) => useAppliedTheme(theme, true), {
+      initialProps: { theme: "system" as Theme },
+    });
     systemScheme.dispatchEvent(Object.assign(new Event("change"), { matches: false }));
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
 
-    expect(reportWindowTheme.mock.calls).toEqual([[true], [false]]);
+    rerender({ theme: "dark" });
+    systemScheme.dispatchEvent(Object.assign(new Event("change"), { matches: false }));
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(reportWindowTheme.mock.calls).toEqual([["system"], ["dark"]]);
+  });
+
+  it("still applies the theme when storage rejects the cache write", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    renderHook(() => useAppliedTheme("light", true));
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
   });
 });
+
+function mockSystemScheme(dark: boolean): EventTarget {
+  const systemScheme = new EventTarget();
+  vi.spyOn(window, "matchMedia").mockReturnValue(
+    Object.assign(systemScheme, { matches: dark }) as unknown as MediaQueryList,
+  );
+  return systemScheme;
+}

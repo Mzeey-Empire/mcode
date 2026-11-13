@@ -90,6 +90,16 @@ const desktopWindowFeatureTest = vi.hoisted(() => {
     setApplicationMenu: vi.fn(),
   };
   const shell = { openExternal: vi.fn(() => Promise.resolve()) };
+  const nativeThemeListeners: Listener[] = [];
+  const nativeTheme = {
+    shouldUseDarkColors: true,
+    on: vi.fn((event: string, listener: Listener) => {
+      if (event === "updated") nativeThemeListeners.push(listener);
+    }),
+    emit: (event: string) => {
+      if (event === "updated") for (const listener of nativeThemeListeners) listener();
+    },
+  };
   const ipcMain = {
     handle: vi.fn((channel: string, handler: Listener) => handlers.set(channel, handler)),
     on: vi.fn((channel: string, listener: Listener) => ipcListeners.set(channel, listener)),
@@ -100,6 +110,7 @@ const desktopWindowFeatureTest = vi.hoisted(() => {
     BrowserWindow: FakeBrowserWindow,
     menu,
     shell,
+    nativeTheme,
     ipcMain,
     handlers,
     ipcListeners,
@@ -109,6 +120,8 @@ const desktopWindowFeatureTest = vi.hoisted(() => {
       ipcListeners.clear();
       windows.length = 0;
       nextWindowId = 1;
+      nativeThemeListeners.length = 0;
+      nativeTheme.shouldUseDarkColors = true;
       vi.clearAllMocks();
     },
   };
@@ -119,6 +132,7 @@ vi.mock("electron", () => ({
   BrowserWindow: desktopWindowFeatureTest.BrowserWindow,
   Menu: desktopWindowFeatureTest.menu,
   shell: desktopWindowFeatureTest.shell,
+  nativeTheme: desktopWindowFeatureTest.nativeTheme,
   ipcMain: desktopWindowFeatureTest.ipcMain,
   Notification: class { static isSupported = () => false; },
 }));
@@ -198,22 +212,29 @@ describe("Desktop Window feature entry point", () => {
     expect(deps.lifecycleHooks.attachServerWindow).toHaveBeenCalledTimes(2);
   });
 
-  it("opens the window in the light background when the last theme was light", () => {
+  it.each([
+    ["light", true, "#fafcff"],
+    ["dark", false, "#0c0d0f"],
+    ["system", false, "#fafcff"],
+    ["system", true, "#0c0d0f"],
+  ])("opens the window for a %s preference (system dark: %s)", (theme, systemDark, background) => {
     desktopWindowFeatureTest.reset();
-    NodeFS.writeFileSync(themeHintPath, JSON.stringify({ dark: false }));
+    desktopWindowFeatureTest.nativeTheme.shouldUseDarkColors = systemDark;
+    NodeFS.writeFileSync(themeHintPath, JSON.stringify({ theme }));
     const window = createDesktopWindowFeature(dependencies()).createWindow();
-    expect(window.options.backgroundColor).toBe("#fafcff");
+    expect(window.options.backgroundColor).toBe(background);
   });
 
   it.each([
     ["missing", undefined],
     ["malformed", "{not json"],
-    ["not a boolean", JSON.stringify({ dark: "no" })],
+    ["not a theme", JSON.stringify({ theme: "sepia" })],
   ])("opens the window dark when the theme hint is %s", (_case, contents) => {
     desktopWindowFeatureTest.reset();
+    desktopWindowFeatureTest.nativeTheme.shouldUseDarkColors = false;
     if (contents !== undefined) NodeFS.writeFileSync(themeHintPath, contents);
     const window = createDesktopWindowFeature(dependencies()).createWindow();
-    expect(window.options.backgroundColor).toBe("#0a0a0f");
+    expect(window.options.backgroundColor).toBe("#0c0d0f");
   });
 
   it("repaints and persists a theme reported by the main window only", async () => {
@@ -221,15 +242,41 @@ describe("Desktop Window feature entry point", () => {
     const window = createDesktopWindowFeature(dependencies()).createWindow();
     const report = desktopWindowFeatureTest.ipcListeners.get("window:theme")!;
 
-    report({ sender: {} }, false);
-    report({ sender: window.webContents }, "light");
+    report({ sender: {} }, "light");
+    report({ sender: window.webContents }, "sepia");
     expect(window.setBackgroundColor).not.toHaveBeenCalled();
 
-    report({ sender: window.webContents }, false);
+    report({ sender: window.webContents }, "light");
     expect(window.setBackgroundColor).toHaveBeenCalledWith("#fafcff");
     await vi.waitFor(() => {
-      expect(JSON.parse(NodeFS.readFileSync(themeHintPath, "utf8"))).toEqual({ dark: false });
+      expect(JSON.parse(NodeFS.readFileSync(themeHintPath, "utf8"))).toEqual({ theme: "light" });
     });
+  });
+
+  it("re-creates the window in the latest reported theme before its hint is written", () => {
+    desktopWindowFeatureTest.reset();
+    const feature = createDesktopWindowFeature(dependencies());
+    const window = feature.createWindow();
+    desktopWindowFeatureTest.ipcListeners.get("window:theme")!({ sender: window.webContents }, "light");
+    window.emit("closed");
+
+    expect(feature.createWindow().options.backgroundColor).toBe("#fafcff");
+  });
+
+  it("follows the system appearance only in system mode", () => {
+    desktopWindowFeatureTest.reset();
+    desktopWindowFeatureTest.nativeTheme.shouldUseDarkColors = true;
+    const window = createDesktopWindowFeature(dependencies()).createWindow();
+    const report = desktopWindowFeatureTest.ipcListeners.get("window:theme")!;
+
+    report({ sender: window.webContents }, "system");
+    desktopWindowFeatureTest.nativeTheme.shouldUseDarkColors = false;
+    desktopWindowFeatureTest.nativeTheme.emit("updated");
+    expect(window.setBackgroundColor).toHaveBeenLastCalledWith("#fafcff");
+
+    report({ sender: window.webContents }, "dark");
+    desktopWindowFeatureTest.nativeTheme.emit("updated");
+    expect(window.setBackgroundColor).toHaveBeenLastCalledWith("#0c0d0f");
   });
 
   it("forgets the main window once it closes", () => {
