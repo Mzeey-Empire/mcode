@@ -83,8 +83,7 @@ export function createWindow(
     height: 800,
     title: dependencies.displayName,
     icon: getWindowIconPath(dependencies.platform),
-    // Shown at once: a window created hidden on Windows often draws no frame until it is shown, so waiting for
-    // ready-to-show held launches for the whole fallback. The background colour keeps the first frame dark.
+    // Keep the window visible from creation: on Windows, ready-to-show can remain pending until the window is shown.
     backgroundColor: "#0a0a0f",
     autoHideMenuBar: true,
     ...(dependencies.platform === "darwin"
