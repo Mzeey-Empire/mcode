@@ -66,18 +66,25 @@ export function createDesktopWindowFeature(
   registerThreadNotificationHandler(() => mainWindow);
   // Held in memory so a window re-created before the hint write lands still opens in the latest theme.
   let theme: Theme | null = null;
-  const currentTheme = (): Theme => (theme ??= readWindowThemeHint(dependencies.windowThemeHintPath));
+  // The preference the hint file holds once queued writes land, or null when a write failed.
+  let savedTheme: Theme | null = null;
+  const currentTheme = (): Theme => {
+    if (theme === null) theme = savedTheme = readWindowThemeHint(dependencies.windowThemeHintPath);
+    return theme;
+  };
   const currentBackground = (): string =>
     windowBackgroundColor(currentTheme(), nativeTheme.shouldUseDarkColors);
 
   ipcMain.on(WINDOW_THEME_CHANNEL, (event, reported: unknown) => {
     const parsed = ThemeSchema.safeParse(reported);
     if (!mainWindow || event.sender !== mainWindow.webContents || !parsed.success) return;
-    const changed = parsed.data !== currentTheme();
+    currentTheme();
     theme = parsed.data;
     mainWindow.setBackgroundColor(currentBackground());
-    if (!changed) return;
+    if (parsed.data === savedTheme) return;
+    savedTheme = parsed.data;
     writeWindowThemeHint(dependencies.windowThemeHintPath, parsed.data).catch((error: unknown) => {
+      if (savedTheme === parsed.data) savedTheme = null;
       logger.warn("Window theme hint write failed", { error: String(error) });
     });
   });

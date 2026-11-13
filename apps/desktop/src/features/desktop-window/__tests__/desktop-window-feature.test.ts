@@ -141,6 +141,8 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import { logger } from "@mcode/shared";
+
 import { createDesktopWindowFeature } from "../index.js";
 
 let themeHintPath = "";
@@ -253,6 +255,23 @@ describe("Desktop Window feature entry point", () => {
     });
   });
 
+  it("retries a failed hint write when the same theme is reported again", async () => {
+    desktopWindowFeatureTest.reset();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const missingDirectoryHint = NodePath.join(NodePath.dirname(themeHintPath), "later", "window-theme.json");
+    const window = createDesktopWindowFeature({ ...dependencies(), windowThemeHintPath: missingDirectoryHint }).createWindow();
+    const report = desktopWindowFeatureTest.ipcListeners.get("window:theme")!;
+
+    report({ sender: window.webContents }, "light");
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+    NodeFS.mkdirSync(NodePath.dirname(missingDirectoryHint));
+    report({ sender: window.webContents }, "light");
+
+    await vi.waitFor(() => {
+      expect(JSON.parse(NodeFS.readFileSync(missingDirectoryHint, "utf8"))).toEqual({ theme: "light" });
+    });
+  });
+
   it("re-creates the window in the latest reported theme before its hint is written", () => {
     desktopWindowFeatureTest.reset();
     const feature = createDesktopWindowFeature(dependencies());
@@ -275,8 +294,9 @@ describe("Desktop Window feature entry point", () => {
     expect(window.setBackgroundColor).toHaveBeenLastCalledWith("#fafcff");
 
     report({ sender: window.webContents }, "dark");
+    window.setBackgroundColor.mockClear();
     desktopWindowFeatureTest.nativeTheme.emit("updated");
-    expect(window.setBackgroundColor).toHaveBeenLastCalledWith("#0c0d0f");
+    expect(window.setBackgroundColor).not.toHaveBeenCalled();
   });
 
   it("forgets the main window once it closes", () => {
