@@ -1031,6 +1031,8 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
     await service.implement(request(next));
     await untilDispatched();
     await agent.stopSession(threadId, { by: "user" });
+    // Stop returns before provider retirement releases the turn's mutation reservation.
+    await expect.poll(() => runtime.reservations.get(threadId)).toBeUndefined();
     await expect(service.implement(request(next))).rejects.toMatchObject({ code: "plan_read_only" });
   });
 });

@@ -71,6 +71,7 @@ afterEach(() => {
   resetThreadStoreForTests();
   setThreadSubscriptions.mockClear();
   loadConversationPage.mockReset();
+  vi.useRealTimers();
 });
 
 it("reloads a leased non-active transcript after recovery invalidates its pending fetch", async () => {
@@ -118,6 +119,8 @@ it("reloads a leased non-active transcript after recovery invalidates its pendin
 });
 
 it("reloads the selected transcript when recovery requested before selection invalidates its first load", async () => {
+  // Keep deferred older-history prefetch outside the recovery request count.
+  vi.useFakeTimers();
   clearRecordCache();
   useWorkspaceStore.setState({ threads: [createMockThread({ id: THREAD })] });
   const pages: Array<(page: ConversationPage) => void> = [];
