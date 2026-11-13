@@ -175,6 +175,7 @@ describe("Desktop Window feature entry point", () => {
     themeHintPath = NodePath.join(directory, "window-theme.json");
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     NodeFS.rmSync(NodePath.dirname(themeHintPath), { recursive: true, force: true });
   });
 
