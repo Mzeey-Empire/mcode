@@ -8,6 +8,7 @@
  */
 
 import { serverModuleUrl } from "../environment/server-module-url.js";
+import { logger } from "@mcode/shared";
 import {
   restoreProcessStartFailure,
   type ProcessOutputObserver,
@@ -60,19 +61,28 @@ function deliverOutput(observer: ProcessOutputObserver | undefined, stream: "std
 interface OpenSession {
   readonly observer: ProcessOutputObserver;
   readonly resolve: () => void;
-  phase: "starting" | "running" | "ended";
+  state: { readonly phase: "starting" | "ended" } | { readonly phase: "running"; readonly pid: number };
 }
 
 function deliverLifecycle(session: OpenSession, reply: ProcessStartWorkerOutbound): void {
   if ("pid" in reply) {
-    session.phase = "running";
+    session.state = { phase: "running", pid: reply.pid };
     session.observer.onSpawn?.(reply.pid);
   } else if ("startError" in reply) {
-    session.phase = "ended";
+    session.state = { phase: "ended" };
     session.observer.onStartError?.(reply.startError);
   } else if ("exit" in reply) {
-    session.phase = "ended";
+    session.state = { phase: "ended" };
     session.observer.onExit?.(reply.exit.code, reply.exit.signal);
+  }
+}
+
+function endLostWorkerProcess(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") return;
+    logger.warn("Failed to end process after process worker loss", { pid, error: String(error) });
   }
 }
 
@@ -110,7 +120,7 @@ export class ProcessStartWorkerClient {
   readonly open: ProcessStartOpener = (request, observer) => {
     const worker = this.worker ?? this.start();
     const id = this.nextId++;
-    const exited = new Promise<void>((resolve) => { this.sessions.set(id, { observer, resolve, phase: "starting" }); });
+    const exited = new Promise<void>((resolve) => { this.sessions.set(id, { observer, resolve, state: { phase: "starting" } }); });
     worker.postMessage({
       kind: "open", id, request: { ...request, env: request.env ?? { ...process.env } },
       observe: { stdout: Boolean(observer.onStdout), stderr: Boolean(observer.onStderr), stdinError: Boolean(observer.onStdinError) },
@@ -181,8 +191,11 @@ export class ProcessStartWorkerClient {
     // A start error after a process is running would reach listeners that only
     // expect one before it starts; a running process instead reads as exited.
     for (const session of this.sessions.values()) {
-      if (session.phase === "starting") session.observer.onStartError?.(error.message);
-      else if (session.phase === "running") session.observer.onExit?.(null, null);
+      if (session.state.phase === "starting") session.observer.onStartError?.(error.message);
+      else if (session.state.phase === "running") {
+        endLostWorkerProcess(session.state.pid);
+        session.observer.onExit?.(null, null);
+      }
       session.resolve();
     }
     this.sessions.clear();

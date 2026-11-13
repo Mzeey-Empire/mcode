@@ -100,11 +100,26 @@ describe("worker-backed Codex process", () => {
       worker = createProcessStartWorker();
       return worker;
     });
-    const child = createWorkerCodexProcessLauncher(client.open)(process.execPath, ["-e", "setTimeout(() => {}, 2000)"], {});
-    await NodeEvents.once(child, "spawn");
-    const exit = NodeEvents.once(child, "exit");
-    worker!.dispatchEvent(new Event("close"));
-    expect(await exit).toEqual([null, null]);
+    const launch = createWorkerCodexProcessLauncher(client.open);
+    const script = "process.stdin.resume(); setInterval(() => {}, 1000);";
+    const child = launch(process.execPath, ["-e", script], {});
+    let replacement: ReturnType<typeof launch> | undefined;
+    try {
+      await NodeEvents.once(child, "spawn");
+      expect(process.kill(child.pid!, 0)).toBe(true);
+      const lostWorker = worker!;
+      const exit = NodeEvents.once(child, "exit");
+      lostWorker.dispatchEvent(new Event("close"));
+      expect(await exit).toEqual([null, null]);
+      await vi.waitFor(() => expect(() => process.kill(child.pid!, 0)).toThrow(), { timeout: 1_000 });
+      replacement = launch(process.execPath, ["-e", script], {});
+      await NodeEvents.once(replacement, "spawn");
+      expect(process.kill(replacement.pid!, 0)).toBe(true);
+      expect(worker).not.toBe(lostWorker);
+    } finally {
+      killTestChild(child.pid);
+      await replacement?.terminate?.();
+    }
   });
 
   it("completes a catalog-only handshake through worker-backed stdio", async () => {
