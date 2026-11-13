@@ -53,6 +53,7 @@ import { SignInTerminalDialog } from "@/features/providers/SignInTerminalDialog"
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { ShellChromeProvider } from "@/components/shell/shell-chrome-context";
 import { installWindowChrome } from "@/components/shell/window-chrome";
+import { useAppliedTheme } from "./use-applied-theme";
 import {
   useNavigationHistoryStore,
   type NavigationHistoryState,
@@ -482,6 +483,7 @@ export function App() {
   useLayoutEffect(() => { reportLaunchMark("reactCommitted"); }, []);
   const isDesktop = Boolean(window.desktopBridge?.window);
   const theme = useSettingsStore((s) => s.settings.appearance.theme);
+  const settingsLoaded = useSettingsStore((s) => s.loaded);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("model");
@@ -918,21 +920,7 @@ export function App() {
     return () => desktopWindow.offCommand?.(listener);
   }, []);
 
-  // Apply theme
-  useEffect(() => {
-    const root = document.documentElement;
-    const applyTheme = (dark: boolean) => root.classList.toggle("dark", dark);
-
-    if (theme === "system") {
-      const mq = window.matchMedia("(prefers-color-scheme: dark)");
-      applyTheme(mq.matches);
-      const handler = (e: MediaQueryListEvent) => applyTheme(e.matches);
-      mq.addEventListener("change", handler);
-      return () => mq.removeEventListener("change", handler);
-    } else {
-      applyTheme(theme === "dark");
-    }
-  }, [theme]);
+  useAppliedTheme(theme, settingsLoaded);
 
   return (
     <AppLayout
