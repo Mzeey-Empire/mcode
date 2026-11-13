@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { THEME_STORAGE_KEY } from "../use-applied-theme";
 
-// A plain path keeps TypeScript from typing the classic script; the import runs it as the page would.
 const BOOT_SCRIPT = "../../../public/theme-boot.js";
 
 async function runBootScript(systemDark: boolean): Promise<void> {

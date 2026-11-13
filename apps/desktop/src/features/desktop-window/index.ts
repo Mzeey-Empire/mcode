@@ -33,7 +33,7 @@ export interface DesktopWindowFeatureDependencies {
   readonly lifecycleHooks: DesktopWindowLifecycleHooks;
   /** Active-agent close confirmation dependencies. */
   readonly closeGuard: CloseGuardDependencies;
-  /** JSON file remembering whether the last resolved theme was dark. */
+  /** Theme hint available to the main process before the renderer can read localStorage. */
   readonly windowThemeHintPath: string;
 }
 
@@ -84,7 +84,6 @@ export function createDesktopWindowFeature(
     installMainWindowNavigationPolicy(window);
     attachCloseGuard(window, dependencies.closeGuard);
     mainWindow = window;
-    // A closed window is destroyed; callers must see "no window", not a dead one.
     window.once("closed", () => {
       if (mainWindow === window) mainWindow = null;
     });

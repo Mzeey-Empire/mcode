@@ -5,9 +5,8 @@ import type { Theme } from "@mcode/contracts/models/settings";
 export const THEME_STORAGE_KEY = "mcode-theme";
 
 /**
- * Apply the theme preference to `<html>` and remember it for the next launch.
- * Before settings load, the store holds the default ("system"), so acting then
- * would undo the boot script's cached theme and overwrite the stored preference.
+ * After settings load, apply and cache the theme preference and report the resolved theme to the desktop host.
+ * Waiting matters: until then the store holds the default ("system"), which would undo and overwrite the cache.
  */
 export function useAppliedTheme(theme: Theme, loaded: boolean): void {
   useEffect(() => {

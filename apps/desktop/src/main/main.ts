@@ -121,7 +121,6 @@ const HARDWARE_ACCELERATION_MODE = resolveHardwareAccelerationMode(
 );
 let desktopWindow: DesktopWindowFeature | null = null;
 
-/** The live main window, or null before creation and after it closes. */
 function getMainWindow(): BrowserWindow | null {
   return desktopWindow?.getMainWindow() ?? null;
 }
