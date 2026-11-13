@@ -217,10 +217,11 @@ export class ServerRuntime {
   }
 
   /** Start the server and prepare the window's authenticated connection before releasing renderer requests. */
-  async connectWindow(window: ServerRuntimeWindow): Promise<number> {
+  async connectWindow(): Promise<number> {
     const port = await this.start();
     await this.installAuthCookie();
-    this.attachWindow(window);
+    const window = this.dependencies.getMainWindow();
+    if (window && !window.isDestroyed()) this.attachWindow(window);
     this.resolveConnectionReady();
     return port;
   }

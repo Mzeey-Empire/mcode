@@ -597,16 +597,16 @@ app.whenReady().then(async () => {
     mainWindow = desktopWindow.createWindow();
     launchRecord.mark("windowCreated");
 
-    const port = await serverRuntime.connectWindow(mainWindow);
-    console.log(`Server started on port ${port}`);
-
-    serverRuntime.registerLifecycle();
-
     // macOS: re-create window when dock icon is clicked
     app.on("activate", () => {
       const recreatedWindow = desktopWindow.recreateWindowIfNeeded();
       if (recreatedWindow) mainWindow = recreatedWindow;
     });
+
+    const port = await serverRuntime.connectWindow();
+    console.log(`Server started on port ${port}`);
+
+    serverRuntime.registerLifecycle();
 
     // Initialize updates after the server and main window dependencies exist.
     initializeApplicationUpdates({
