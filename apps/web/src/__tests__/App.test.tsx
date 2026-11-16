@@ -229,6 +229,16 @@ describe("App", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows Settings content while the right panel is maximized", async () => {
+    useUiStore.setState({ rightPanelMaximized: true });
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const main = await screen.findByRole("main");
+    expect(await within(main).findByRole("heading", { name: "Models & providers", level: 1 })).toBeInTheDocument();
+  });
+
   function installDesktopWindow(isDevelopment: boolean) {
     let commandListener: ((command: string) => void) | undefined;
     const perform = vi.fn().mockResolvedValue(undefined);

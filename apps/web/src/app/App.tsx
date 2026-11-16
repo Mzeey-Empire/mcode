@@ -214,9 +214,9 @@ function AppPrimarySurface(props: Pick<
 
 function AppMainSurface(props: Pick<
   AppLayoutProps,
-  "rightPanelMaximized" | "showPullRequests" | "showNewThreadCanvas" | "settingsOpen" | "settingsSection" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
+  "rightPanelMaximized" | "showPullRequests" | "showNewThreadCanvas" | "showProjectlessCanvas" | "settingsOpen" | "settingsSection" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
 > & { mainRef: (element: HTMLElement | null) => void }) {
-  if (props.rightPanelMaximized && !props.showPullRequests) return null;
+  if (props.rightPanelMaximized && isRightPanelMounted(props)) return null;
   const useFlexibleWidth = props.showNewThreadCanvas || props.settingsOpen || props.showPullRequests;
   return (
     <main
