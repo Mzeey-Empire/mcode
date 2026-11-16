@@ -215,9 +215,14 @@ export class ServerManager {
   stopStartingServer(): void {
     this.startCancelled = true;
     const child = this.serverProcess;
+    if (!child || child === this.ownedServerProcess) return;
+
+    this.killAsPlannedExit(child);
+  }
+
+  /** Kill a live child's process tree without triggering crash recovery. */
+  private killAsPlannedExit(child: NodeChildProcess.ChildProcess): void {
     if (
-      !child ||
-      child === this.ownedServerProcess ||
       !child.pid ||
       child.exitCode !== null ||
       child.signalCode !== null
@@ -327,7 +332,7 @@ export class ServerManager {
       this.applyOwnedServerLock(lock, spawned.child, generation);
       return { port: this._port, authToken: this._authToken };
     } catch (error) {
-      this.clearFailedStartup(spawned.child, spawned.stderrStream, generation);
+      this.stopFailedStartup(spawned.child, spawned.stderrStream, generation);
       throw error;
     }
   }
@@ -368,8 +373,8 @@ export class ServerManager {
     });
   }
 
-  /** Release references and the stderr stream when readiness never succeeds. */
-  private clearFailedStartup(
+  /** Release references and stop the child when startup fails. */
+  private stopFailedStartup(
     child: NodeChildProcess.ChildProcess,
     stderrStream: NodeFS.WriteStream | undefined,
     generation: number,
@@ -382,6 +387,12 @@ export class ServerManager {
     }
     this.detachServerProcess();
     stderrStream?.end();
+    try {
+      this.killAsPlannedExit(child);
+    } catch (error) {
+      // Preserve the startup error the caller rethrows because it is the cause the user needs to see.
+      console.error("[server-manager] Failed to stop the server after its start failed", { pid: child.pid }, error);
+    }
   }
 
   /** Apply the lock data written by a newly ready server. */
