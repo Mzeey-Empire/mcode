@@ -141,7 +141,7 @@ describe("SubagentDetailTab", () => {
   });
 
   it("explains a meta-tier entry and reveals the reply that carries its result", async () => {
-    setLayoutMeasurements(1200, 1200);
+    setLayoutMeasurements(1200);
     useWorkspaceStore.setState({ activeWorkspaceId: "workspace-1", activeThreadId: "thread-1" });
     useUiStore.setState({ rightPanelMaximized: true, rightPanelMaximizedByLayout: false });
     await renderTab([entry({ provider: "cursor", tier: "meta" })]);

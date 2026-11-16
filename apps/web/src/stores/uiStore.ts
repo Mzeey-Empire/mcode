@@ -1,12 +1,4 @@
 import { create } from "zustand";
-import {
-  canFitInlineSidebar,
-  getContentRowWidth,
-  getOuterRowWidth,
-  minContentWidthForSideBySidePanel,
-} from "@/lib/composer-layout";
-import { COMPOSER_MIN_WIDTH, useDiffStore } from "@/stores/diffStore";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 
 /** Top-level content surface displayed beside the application sidebar. */
 export type PrimarySurface = "chat" | "pullRequests";
@@ -17,13 +9,6 @@ interface UiState {
   primarySurface: PrimarySurface;
   /** Whether the sidebar is collapsed. */
   sidebarCollapsed: boolean;
-  /** Whether the layout guard, not the user, collapsed the sidebar. */
-  sidebarCollapsedByLayout: boolean;
-  /**
-   * When true the project tree is open as a left-anchored floating panel rather
-   * than a docked column (composer-first cramped layouts).
-   */
-  sidebarFloating: boolean;
   /** Whether the shortcut help dialog is open. */
   shortcutHelpOpen: boolean;
   /**
@@ -38,18 +23,12 @@ interface UiState {
   /** Select the top-level content surface. */
   setPrimarySurface: (surface: PrimarySurface) => void;
 
-  /** Toggle sidebar collapsed state (expands floating when inline will not fit). */
+  /** Toggle the docked project tree open or collapsed. */
   toggleSidebar: () => void;
-  /** Expand the project tree inline when there is room, otherwise as a float. */
+  /** Open the docked project tree; the chat column narrows to make room. */
   expandSidebar: () => void;
-  /** Keep the open project tree visible as a floating panel. */
-  floatSidebar: () => void;
-  /** Collapse the project tree and exit floating mode. */
-  collapseSidebar: (source?: "user" | "layout") => void;
-  /** Restore a sidebar that was collapsed only to protect the layout. */
-  restoreSidebarFromLayoutCollapse: () => void;
-  /** Dismiss the floating project tree without changing docked expand state. */
-  closeFloatingSidebar: () => void;
+  /** Collapse the project tree. */
+  collapseSidebar: () => void;
   /** Set shortcut help dialog open state. */
   setShortcutHelpOpen: (open: boolean) => void;
   /** Toggle the right panel between maximized (full content area) and side-by-side. */
@@ -58,27 +37,10 @@ interface UiState {
   setRightPanelMaximized: (maximized: boolean, source?: "user" | "layout") => void;
 }
 
-/** Minimum content-row width needed given the current right-panel visibility. */
-function contentNeedForSidebarDock(rightPanelMaximized: boolean): number {
-  const { activeWorkspaceId, activeThreadId } = useWorkspaceStore.getState();
-  if (!activeWorkspaceId) return COMPOSER_MIN_WIDTH;
-
-  const diff = useDiffStore.getState();
-  const panelVisible = diff.getRightPanelVisible(activeWorkspaceId, activeThreadId);
-  const panelInline = panelVisible && !rightPanelMaximized;
-  if (!panelInline) return COMPOSER_MIN_WIDTH;
-
-  return minContentWidthForSideBySidePanel(
-    diff.getRightPanel(activeWorkspaceId, activeThreadId).width,
-  );
-}
-
 /** Zustand store for global UI toggle state. Command palette state lives in commandPaletteStore. */
 export const useUiStore = create<UiState>((set, get) => ({
   primarySurface: "chat",
   sidebarCollapsed: false,
-  sidebarCollapsedByLayout: false,
-  sidebarFloating: false,
   shortcutHelpOpen: false,
   rightPanelMaximized: false,
   rightPanelMaximizedByLayout: false,
@@ -95,27 +57,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (get().sidebarCollapsed) get().expandSidebar();
     else get().collapseSidebar();
   },
-  expandSidebar: () => {
-    const contentNeed = contentNeedForSidebarDock(get().rightPanelMaximized);
-    const inline =
-      canFitInlineSidebar(getOuterRowWidth(), contentNeed) &&
-      getContentRowWidth() >= contentNeed;
-    set({ sidebarCollapsed: false, sidebarCollapsedByLayout: false, sidebarFloating: !inline });
-  },
-  floatSidebar: () =>
-    set({ sidebarCollapsed: false, sidebarCollapsedByLayout: false, sidebarFloating: true }),
-  collapseSidebar: (source = "user") =>
-    set({
-      sidebarCollapsed: true,
-      sidebarCollapsedByLayout: source === "layout",
-      sidebarFloating: false,
-    }),
-  restoreSidebarFromLayoutCollapse: () => {
-    if (!get().sidebarCollapsedByLayout) return;
-    set({ sidebarCollapsed: false, sidebarCollapsedByLayout: false, sidebarFloating: false });
-  },
-  closeFloatingSidebar: () =>
-    set({ sidebarFloating: false, sidebarCollapsed: true, sidebarCollapsedByLayout: false }),
+  expandSidebar: () => set({ sidebarCollapsed: false }),
+  collapseSidebar: () => set({ sidebarCollapsed: true }),
   setShortcutHelpOpen: (open) =>
     set({ shortcutHelpOpen: open }),
   toggleRightPanelMaximized: () =>

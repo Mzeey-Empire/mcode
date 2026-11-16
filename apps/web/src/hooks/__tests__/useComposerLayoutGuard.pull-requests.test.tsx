@@ -1,8 +1,11 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useComposerLayoutGuard } from "../useComposerLayoutGuard";
 import { useUiStore } from "@/stores/uiStore";
+import { useDiffStore } from "@/stores/diffStore";
+import { setLayoutMeasurements } from "@/lib/composer-layout";
+import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 
 let resizeCallback: ResizeObserverCallback | null = null;
 let frameCallback: FrameRequestCallback | null = null;
@@ -18,37 +21,31 @@ class ResizeObserverMock implements ResizeObserver {
 }
 
 function LayoutHarness({
-  outerWidth,
   contentWidth,
   showPullRequests = true,
   showLanding = true,
   activeWorkspaceId = null,
+  activeThreadId = null,
 }: {
-  outerWidth: number;
   contentWidth: number;
   showPullRequests?: boolean;
   showLanding?: boolean;
   activeWorkspaceId?: string | null;
+  activeThreadId?: string | null;
 }) {
-  const outerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  if (!outerRef.current) outerRef.current = document.createElement("div");
   if (!contentRef.current) contentRef.current = document.createElement("div");
-  Object.defineProperty(outerRef.current, "clientWidth", {
-    configurable: true,
-    value: outerWidth,
-  });
   Object.defineProperty(contentRef.current, "clientWidth", {
     configurable: true,
     value: contentWidth,
   });
 
-  useComposerLayoutGuard(outerRef, contentRef, {
+  useComposerLayoutGuard(contentRef, {
     settingsOpen: false,
     showLanding,
     showPullRequests,
     activeWorkspaceId,
-    activeThreadId: null,
+    activeThreadId,
   });
   return null;
 }
@@ -62,7 +59,7 @@ function triggerResize(): void {
   });
 }
 
-describe("useComposerLayoutGuard responsive sidebar", () => {
+describe("useComposerLayoutGuard responsive layout", () => {
   beforeEach(() => {
     resizeCallback = null;
     frameCallback = null;
@@ -75,91 +72,75 @@ describe("useComposerLayoutGuard responsive sidebar", () => {
     useUiStore.setState({
       primarySurface: "pullRequests",
       sidebarCollapsed: false,
-      sidebarCollapsedByLayout: false,
-      sidebarFloating: false,
       rightPanelMaximized: false,
       rightPanelMaximizedByLayout: false,
     });
+    useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {} });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("floats a docked sidebar at narrow widths and restores it inline when room returns", async () => {
-    const view = render(<LayoutHarness outerWidth={420} contentWidth={188} />);
-
-    await waitFor(() =>
-      expect(useUiStore.getState()).toMatchObject({
-        sidebarCollapsed: false,
-        sidebarCollapsedByLayout: false,
-        sidebarFloating: true,
-      }),
-    );
-
-    view.rerender(<LayoutHarness outerWidth={1_440} contentWidth={1_440} />);
+  it.each([
+    { surface: "pull requests", showPullRequests: true, showLanding: true, activeWorkspaceId: null },
+    { surface: "projectless landing", showPullRequests: false, showLanding: true, activeWorkspaceId: null },
+    { surface: "new-thread canvas", showPullRequests: false, showLanding: false, activeWorkspaceId: "workspace-1" },
+  ])("keeps an open sidebar docked on a narrow $surface", (props) => {
+    render(<LayoutHarness contentWidth={188} {...props} />);
     triggerResize();
 
-    await waitFor(() =>
-      expect(useUiStore.getState()).toMatchObject({
-        sidebarCollapsed: false,
-        sidebarCollapsedByLayout: false,
-        sidebarFloating: false,
-      }),
-    );
+    expect(useUiStore.getState().sidebarCollapsed).toBe(false);
   });
 
-  it("does not restore a sidebar the user collapsed", () => {
-    useUiStore.setState({
-      sidebarCollapsed: true,
-      sidebarCollapsedByLayout: false,
-      sidebarFloating: false,
-    });
+  it("maximizes an inline right panel that no longer fits beside the composer, leaving the sidebar docked", () => {
+    setLayoutMeasurements(1_200);
+    showRightPanelAdaptive("workspace-1", "thread-1");
 
-    render(<LayoutHarness outerWidth={1_440} contentWidth={1_440} />);
-
-    expect(useUiStore.getState()).toMatchObject({
-      sidebarCollapsed: true,
-      sidebarCollapsedByLayout: false,
-    });
-  });
-
-  it("floats the open sidebar when a new-thread canvas becomes narrow", async () => {
     render(
       <LayoutHarness
-        outerWidth={420}
-        contentWidth={188}
+        contentWidth={700}
         showPullRequests={false}
         showLanding={false}
         activeWorkspaceId="workspace-1"
+        activeThreadId="thread-1"
       />,
     );
 
-    await waitFor(() =>
-      expect(useUiStore.getState()).toMatchObject({
-        sidebarCollapsed: false,
-        sidebarCollapsedByLayout: false,
-        sidebarFloating: true,
-      }),
-    );
+    expect(useUiStore.getState()).toMatchObject({
+      rightPanelMaximized: true,
+      rightPanelMaximizedByLayout: true,
+      sidebarCollapsed: false,
+    });
   });
 
-  it("floats the open sidebar when the projectless landing canvas becomes narrow", async () => {
-    render(
-      <LayoutHarness
-        outerWidth={420}
-        contentWidth={188}
-        showPullRequests={false}
-      />,
-    );
+  function renderWideningThreadLayout(): void {
+    setLayoutMeasurements(1_200);
+    showRightPanelAdaptive("workspace-1", "thread-1");
+    const props = {
+      showPullRequests: false,
+      showLanding: false,
+      activeWorkspaceId: "workspace-1",
+      activeThreadId: "thread-1",
+    };
+    const { rerender } = render(<LayoutHarness contentWidth={700} {...props} />);
+    rerender(<LayoutHarness contentWidth={3_000} {...props} />);
+    triggerResize();
+  }
 
-    await waitFor(() =>
-      expect(useUiStore.getState()).toMatchObject({
-        sidebarCollapsed: false,
-        sidebarCollapsedByLayout: false,
-        sidebarFloating: true,
-      }),
-    );
-    expect(resizeCallback).not.toBeNull();
+  it("restores a panel the layout maximized once the composer and panel fit again", () => {
+    useUiStore.getState().setRightPanelMaximized(true, "layout");
+
+    renderWideningThreadLayout();
+
+    expect(useUiStore.getState().rightPanelMaximized).toBe(false);
+  });
+
+  it("keeps a panel the user maximized after the content row widens", () => {
+    useUiStore.getState().setRightPanelMaximized(true);
+
+    renderWideningThreadLayout();
+
+    expect(useUiStore.getState().rightPanelMaximized).toBe(true);
   });
 });

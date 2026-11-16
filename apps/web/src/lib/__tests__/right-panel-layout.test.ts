@@ -12,7 +12,7 @@ describe("right-panel-layout", () => {
   beforeEach(() => {
     useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {} });
     useUiStore.setState({ rightPanelMaximized: false, rightPanelMaximizedByLayout: false });
-    setLayoutMeasurements(1200, 1200);
+    setLayoutMeasurements(1200);
   });
 
   it("recomputes auto-owned panel width from the current chat row on each open", () => {
@@ -23,7 +23,7 @@ describe("right-panel-layout", () => {
     });
 
     hideRightPanelAdaptive("ws-1", "thread-1");
-    setLayoutMeasurements(1000, 1000);
+    setLayoutMeasurements(1000);
     showRightPanelAdaptive("ws-1", "thread-1");
 
     expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
@@ -37,7 +37,7 @@ describe("right-panel-layout", () => {
     useDiffStore.getState().setRightPanelWidth("ws-1", "thread-1", 520, "user");
 
     hideRightPanelAdaptive("ws-1", "thread-1");
-    setLayoutMeasurements(1400, 1400);
+    setLayoutMeasurements(1400);
     showRightPanelAdaptive("ws-1", "thread-1");
 
     expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
@@ -57,7 +57,7 @@ describe("right-panel-layout", () => {
   });
 
   it("hides the panel to show the chat when both cannot fit", () => {
-    setLayoutMeasurements(700, 700);
+    setLayoutMeasurements(700);
     showRightPanelAdaptive("ws-1", "thread-1");
     expect(useUiStore.getState().rightPanelMaximized).toBe(true);
 

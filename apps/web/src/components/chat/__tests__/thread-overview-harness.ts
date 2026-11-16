@@ -135,5 +135,5 @@ export function resetThreadOverviewState(): void {
   useOverviewStore.setState({ closedSubjects: new Set(), overlaySubject: null, requestedSubject: null });
   useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {} });
   useProjectActionStore.setState({ runsByThread: {} });
-  setLayoutMeasurements(1200, 1200);
+  setLayoutMeasurements(1200);
 }
