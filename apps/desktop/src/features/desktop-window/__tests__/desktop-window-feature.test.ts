@@ -273,7 +273,7 @@ describe("Desktop Window feature entry point", () => {
     });
   });
 
-  it("re-creates the window in the latest reported theme before its hint is written", () => {
+  it("re-creates the window in the latest reported theme before its hint is written", async () => {
     desktopWindowFeatureTest.reset();
     const feature = createDesktopWindowFeature(dependencies());
     const window = feature.createWindow();
@@ -281,9 +281,13 @@ describe("Desktop Window feature entry point", () => {
     window.emit("closed");
 
     expect(feature.createWindow().options.backgroundColor).toBe("#fafcff");
+    // afterEach deletes the hint's directory, so a write still in flight would fail and log after the file ends.
+    await vi.waitFor(() => {
+      expect(JSON.parse(NodeFS.readFileSync(themeHintPath, "utf8"))).toEqual({ theme: "light" });
+    });
   });
 
-  it("follows the system appearance only in system mode", () => {
+  it("follows the system appearance only in system mode", async () => {
     desktopWindowFeatureTest.reset();
     desktopWindowFeatureTest.nativeTheme.shouldUseDarkColors = true;
     const window = createDesktopWindowFeature(dependencies()).createWindow();
@@ -298,6 +302,9 @@ describe("Desktop Window feature entry point", () => {
     window.setBackgroundColor.mockClear();
     desktopWindowFeatureTest.nativeTheme.emit("updated");
     expect(window.setBackgroundColor).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(JSON.parse(NodeFS.readFileSync(themeHintPath, "utf8"))).toEqual({ theme: "dark" });
+    });
   });
 
   it("forgets the main window once it closes", () => {
