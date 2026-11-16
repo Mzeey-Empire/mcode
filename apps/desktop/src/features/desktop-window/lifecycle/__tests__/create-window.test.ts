@@ -87,7 +87,7 @@ describe("Desktop Window creation", () => {
     vi.useRealTimers();
   });
 
-  it("creates a hidden secure window with the current non-macOS title-bar options", () => {
+  it("creates a visible secure window with the current non-macOS title-bar options", () => {
     const hooks = createHooks();
 
     createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks });
@@ -97,7 +97,6 @@ describe("Desktop Window creation", () => {
       width: 1200,
       icon: NodePath.join("C:/mcode", "build", "icon.png"),
       height: 800,
-      show: false,
       backgroundColor: "#0a0a0f",
       autoHideMenuBar: true,
       titleBarStyle: "hidden",
@@ -162,22 +161,16 @@ describe("Desktop Window creation", () => {
     ]);
   });
 
-  it("shows on first paint and clears the fallback timer", () => {
-    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks: createHooks() });
+  it("is visible from creation, so the launch never waits for first paint to show it", () => {
+    const onReadyToShow = vi.fn();
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks: { ...createHooks(), onReadyToShow } });
 
+    const options = createWindowTest.BrowserWindow.mock.calls[0][0] as Record<string, any>;
+    expect(options.show ?? true).toBe(true);
+    vi.advanceTimersByTime(10_000);
     createWindowTest.emit("ready-to-show");
-    expect(createWindowTest.window.show).toHaveBeenCalledOnce();
-    vi.advanceTimersByTime(3000);
-    expect(createWindowTest.window.show).toHaveBeenCalledOnce();
-  });
-
-  it("shows after the bounded fallback when first paint does not occur", () => {
-    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, hooks: createHooks() });
-
-    vi.advanceTimersByTime(2999);
+    expect(onReadyToShow).toHaveBeenCalledOnce();
     expect(createWindowTest.window.show).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(createWindowTest.window.show).toHaveBeenCalledOnce();
   });
 
   it("loads the development URL and opens restricted DevTools in development", () => {

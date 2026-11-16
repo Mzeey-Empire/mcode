@@ -84,15 +84,78 @@ describe("ServerRuntime Desktop Window seam", () => {
 
   it("attaches the server relay to a window once when the server is ready first", async () => {
     const relayStarter = vi.fn(() => vi.fn());
-    const runtime = createRuntime(43123, { relayStarter });
     const window = createWindow();
+    const runtime = createRuntime(43123, { relayStarter, getMainWindow: () => window });
 
     runtime.beginStart();
     await new Promise((resolve) => setImmediate(resolve));
     runtime.attachWindow(window);
-    await runtime.connectWindow(window);
+    await runtime.connectWindow();
 
     expect(relayStarter).toHaveBeenCalledOnce();
+  });
+
+  it("attaches the relay to the replacement window when the startup window closes", async () => {
+    let finishStart!: (value: { port: number; authToken: string }) => void;
+    const manager = createManager(43123, () => new Promise((resolve) => {
+      finishStart = resolve;
+    }));
+    manager.ipcPath = "";
+    const window = createWindow();
+    let closed = false;
+    window.isDestroyed = () => closed;
+    let mainWindow = window;
+    const attachedWindows: unknown[] = [];
+    const runtime = createRuntime(43123, {
+      platform: "darwin",
+      manager,
+      getMainWindow: () => mainWindow,
+      relayStarter: (_ipcPath, attachedWindow) => {
+        if (attachedWindow.isDestroyed()) throw new Error("Cannot attach a closed window");
+        attachedWindows.push(attachedWindow);
+        return vi.fn();
+      },
+    });
+
+    const connecting = runtime.connectWindow();
+    closed = true;
+    const replacement = createWindow();
+    mainWindow = replacement;
+    runtime.attachWindow(replacement);
+    expect(attachedWindows).toEqual([]);
+
+    manager.ipcPath = "test-ipc-path";
+    finishStart({ port: 43123, authToken: "test-token" });
+
+    await expect(connecting).resolves.toBe(43123);
+    expect(attachedWindows).toEqual([replacement]);
+  });
+
+  it.each(["absent", "destroyed"])("resolves without attaching a relay when the main window is %s at server readiness", async (state) => {
+    let finishStart!: (value: { port: number; authToken: string }) => void;
+    const manager = createManager(43123, () => new Promise((resolve) => {
+      finishStart = resolve;
+    }));
+    const window = createWindow();
+    let mainWindow: ReturnType<typeof createWindow> | null = window;
+    const attachedWindows: unknown[] = [];
+    const runtime = createRuntime(43123, {
+      platform: "darwin",
+      manager,
+      getMainWindow: () => mainWindow,
+      relayStarter: (_ipcPath, attachedWindow) => {
+        attachedWindows.push(attachedWindow);
+        return vi.fn();
+      },
+    });
+
+    const connecting = runtime.connectWindow();
+    window.isDestroyed = () => true;
+    mainWindow = state === "absent" ? null : window;
+    finishStart({ port: 43123, authToken: "test-token" });
+
+    await expect(connecting).resolves.toBe(43123);
+    expect(attachedWindows).toEqual([]);
   });
 
   it("stops an early-started server when the dev app quits during startup", async () => {
@@ -176,7 +239,7 @@ describe("ServerRuntime Desktop Window seam", () => {
 
     runtime.beginStart();
 
-    await expect(runtime.connectWindow(createWindow())).resolves.toBe(43123);
+    await expect(runtime.connectWindow()).resolves.toBe(43123);
     expect(start).toHaveBeenCalledOnce();
   });
 
@@ -190,7 +253,7 @@ describe("ServerRuntime Desktop Window seam", () => {
     runtime.beginStart();
     await new Promise((resolve) => setImmediate(resolve));
 
-    await expect(runtime.connectWindow(createWindow())).rejects.toBe(error);
+    await expect(runtime.connectWindow()).rejects.toBe(error);
     expect(start).toHaveBeenCalledOnce();
   });
 
@@ -236,7 +299,7 @@ describe("ServerRuntime Desktop Window seam", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(resolved).toBe(false);
 
-    const connecting = runtime.connectWindow(window);
+    const connecting = runtime.connectWindow();
     await vi.advanceTimersByTimeAsync(0);
     expect(cookieSet).toHaveBeenCalledOnce();
     expect(resolved).toBe(false);

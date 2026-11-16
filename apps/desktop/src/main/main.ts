@@ -555,6 +555,7 @@ process.title = displayName.replace(/^Mcode/, "Mcode Desktop");
 
 app.whenReady().then(async () => {
   launchRecord.mark("whenReady");
+  let recreateWindowOnActivate: (() => void) | undefined;
   try {
     console.log(
       `[perf] V8 snapshot: ${globalThis.__v8Snapshot ? "loaded" : "not available"}`,
@@ -597,16 +598,17 @@ app.whenReady().then(async () => {
     mainWindow = desktopWindow.createWindow();
     launchRecord.mark("windowCreated");
 
-    const port = await serverRuntime.connectWindow(mainWindow);
+    // macOS: re-create window when dock icon is clicked
+    recreateWindowOnActivate = () => {
+      const recreatedWindow = desktopWindow.recreateWindowIfNeeded();
+      if (recreatedWindow) mainWindow = recreatedWindow;
+    };
+    app.on("activate", recreateWindowOnActivate);
+
+    const port = await serverRuntime.connectWindow();
     console.log(`Server started on port ${port}`);
 
     serverRuntime.registerLifecycle();
-
-    // macOS: re-create window when dock icon is clicked
-    app.on("activate", () => {
-      const recreatedWindow = desktopWindow.recreateWindowIfNeeded();
-      if (recreatedWindow) mainWindow = recreatedWindow;
-    });
 
     // Initialize updates after the server and main window dependencies exist.
     initializeApplicationUpdates({
@@ -628,6 +630,8 @@ app.whenReady().then(async () => {
 
   } catch (error) {
     launchRecord.failed();
+    // A window opened from the Dock behind the failure dialog would wait for a server that never connects.
+    if (recreateWindowOnActivate) app.off("activate", recreateWindowOnActivate);
     if (error instanceof ServerStartupRefusedError) {
       console.error("Server refused to start", error.refusal);
       await showStartupRefusalDialog(error.refusal, { dialog, shell, clipboard, dataDir: getMcodeDir() });

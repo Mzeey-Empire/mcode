@@ -264,7 +264,7 @@ describe("ServerRuntime entry point", () => {
   });
 
   it("starts through the manager and returns its port", async () => {
-    await expect(runtime.connectWindow(window)).resolves.toBe(43210);
+    await expect(runtime.connectWindow()).resolves.toBe(43210);
     expect(manager.start).toHaveBeenCalledOnce();
   });
 
@@ -290,7 +290,7 @@ describe("ServerRuntime entry point", () => {
 
   it("registers authenticated handlers and routes busy state through power control", async () => {
     runtime.registerConnectionHandlers();
-    await runtime.connectWindow(window);
+    await runtime.connectWindow();
 
     const getServerUrl = handlers.get("get-server-url");
     const setBusy = handlers.get("set-server-busy");
@@ -313,7 +313,7 @@ describe("ServerRuntime entry point", () => {
   });
 
   it("installs the current connection cookie and attaches relay cleanup", async () => {
-    await runtime.connectWindow(window);
+    await runtime.connectWindow();
     expect(cookieSet).toHaveBeenCalledWith({
       url: "http://localhost:43210",
       name: "mcode-auth",
