@@ -855,9 +855,8 @@ export class CanonicalAcceptedProgress {
     if (!thread) return undefined;
     if (thread.head) thread.stopIntent = { executionId: thread.head.execution.executionId, stop };
     if (!thread.exit && endingAwaitsSave(thread)) await this.waitForSaved(threadId).catch(() => undefined);
-    const current = this.threads.get(threadId);
-    const exit = current?.exit;
-    if (!exit || !current.head || !sameExecution(exit.execution, current.head.execution)) return undefined;
+    const exit = headExit(this.threads.get(threadId));
+    if (!exit) return undefined;
     exit.stop = stop;
     await exit.firstAttempt;
     const status = this.canonical.loadTurnByExecution(exit.execution.executionId)?.status;
@@ -1426,17 +1425,8 @@ export class CanonicalAcceptedProgress {
           await this.stopUnsavedAgent?.(exit.execution).catch((error: unknown) => logger.warn("Unsaved turn agent stop failed", {
             threadId, error: error instanceof Error ? error.message : String(error) }));
         }
-        const receipt = await this.writer.interruptWorkerLoss({ execution: exit.execution, lease,
-          reason: exit.stop ? "Stopped while Mcode could not save the turn's output." : "Mcode could not save the turn's output.",
-          recoveryIncidentId: workerLossIncidentId({ execution: exit.execution, lease }),
-          unsavedOutput: exit.stop ? { stop: exit.stop } : {} }, (events) => this.observeCommitted(events));
-        if (receipt.kind === "committed" || (receipt.kind === "conflict" && receipt.recoveryState)) {
-          if (receipt.kind !== "committed") logger.warn("Unsaved turn ending was not written", { threadId,
-            executionId: exit.execution.executionId, recoveryState: receipt.recoveryState });
-          return { lease, receipt };
-        }
-        logger.warn("Unsaved turn ending was refused while its turn is still running; retrying", { threadId,
-          executionId: exit.execution.executionId, receipt: receipt.kind, retryInMs: delayMs });
+        const ending = await this.attemptUnsavedEnding(threadId, exit, lease, delayMs);
+        if (ending) return ending;
       } catch (error) {
         logger.warn("Unsaved turn ending could not be saved; retrying", { threadId, executionId: exit.execution.executionId,
           retryInMs: delayMs, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
@@ -1444,6 +1434,25 @@ export class CanonicalAcceptedProgress {
       exit.markAttempted();
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
+  }
+
+  /** Undefined when the writer refused the ending while its turn still runs, so the caller retries. */
+  private async attemptUnsavedEnding(threadId: string, exit: UnsavedTurnExit, lease: ExecutionLease,
+    retryInMs: number): Promise<UnsavedTurnEnding | undefined> {
+    const { execution, stop } = exit;
+    const receipt = await this.writer.interruptWorkerLoss({ execution, lease,
+      reason: stop ? "Stopped while Mcode could not save the turn's output." : "Mcode could not save the turn's output.",
+      recoveryIncidentId: workerLossIncidentId({ execution, lease }),
+      unsavedOutput: stop ? { stop } : {} }, (events) => this.observeCommitted(events));
+    if (receipt.kind === "committed") return { lease, receipt };
+    if (receipt.kind === "conflict" && receipt.recoveryState) {
+      logger.warn("Unsaved turn ending was not written", { threadId, executionId: execution.executionId,
+        recoveryState: receipt.recoveryState });
+      return { lease, receipt };
+    }
+    logger.warn("Unsaved turn ending was refused while its turn is still running; retrying", { threadId,
+      executionId: execution.executionId, receipt: receipt.kind, retryInMs });
+    return undefined;
   }
 
   /** The writer's lease for the exit's execution while its turn is still Running in storage, so its ending is owed. */
@@ -1795,6 +1804,12 @@ function headWithDroppedOutput(thread: ProgressThread): ExecutionIdentity | unde
   const dropped = thread.owner.recoveryCut().retained.some((batch) => sameExecution(batch.execution, head))
     || (thread.live !== undefined && sameExecution(thread.live.operation.execution, head));
   return dropped ? head : undefined;
+}
+
+function headExit(thread: ProgressThread | undefined): UnsavedTurnExit | undefined {
+  const exit = thread?.exit;
+  const head = thread?.head?.execution;
+  return exit && head && sameExecution(exit.execution, head) ? exit : undefined;
 }
 
 function endingAwaitsSave(thread: ProgressThread): boolean {
