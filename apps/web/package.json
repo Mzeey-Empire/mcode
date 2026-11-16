@@ -11,7 +11,8 @@
     "typecheck": "tsc-rs --noEmit",
     "test": "vitest run",
     "bench": "vitest bench --run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "brand:write": "bun scripts/write-brand-marks.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.8.0",

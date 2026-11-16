@@ -1,39 +1,117 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">Mcode layered route cutout mark</title>
-  <desc id="desc">A transparent Mcode mark with stacked worktree layers and an amber active route.</desc>
+  <title id="title">Mcode layered circuit mark</title>
+  <desc id="desc">A transparent Mcode mark: three stacked worktree layers. The top layer carries a chip with amber live traces, and its other traces are cut through it.</desc>
+  <!-- Same art and construction as apps/web/public/brand/mcode-layered-route-cutout.svg; see the
+       comment there. -->
   <defs>
     <linearGradient id="topLayer" x1="153" y1="145" x2="353" y2="343" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#3a414c" />
       <stop offset="1" stop-color="#2c333e" />
     </linearGradient>
-    <linearGradient id="midLayer" x1="151" y1="192" x2="354" y2="390" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#303946" />
-      <stop offset="1" stop-color="#242d38" />
+    <linearGradient id="midLayer" x1="151" y1="196.71" x2="354" y2="394.71" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#353e4a" />
+      <stop offset="1" stop-color="#2a323d" />
     </linearGradient>
-    <linearGradient id="lowLayer" x1="151" y1="226" x2="354" y2="424" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#28313d" />
-      <stop offset="1" stop-color="#1d2631" />
+    <linearGradient id="lowLayer" x1="151" y1="242.43" x2="354" y2="440.43" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#323a46" />
+      <stop offset="1" stop-color="#272f3a" />
     </linearGradient>
-    <linearGradient id="route" x1="249" y1="279" x2="374" y2="219" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ff9515" />
-      <stop offset="1" stop-color="#ffad25" />
-    </linearGradient>
-    <path id="slab" d="M256 124c13 0 26 8 41 19l116 83c17 12 17 28 0 40l-116 83c-15 11-28 18-41 18s-26-7-41-18L99 266c-17-12-17-28 0-40l116-83c15-11 28-19 41-19Z" />
+    <path id="slab" d="M225.74 135.35A52 52 0 0 1 286.26 135.35L415.89 228.11A22 22 0 0 1 415.89 263.89L286.26 356.65A52 52 0 0 1 225.74 356.65L96.11 263.89A22 22 0 0 1 96.11 228.11Z" />
+    <mask id="gapBelowTop" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="600">
+      <rect width="512" height="600" fill="#fff" />
+      <g fill="#000">
+        <use href="#slab" />
+        <use href="#slab" transform="translate(0 11.43)" />
+        <rect x="86" y="246" width="340" height="11.43" />
+      </g>
+    </mask>
+    <mask id="gapBelowMid" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="600">
+      <rect width="512" height="600" fill="#fff" />
+      <g fill="#000">
+        <use href="#slab" transform="translate(0 45.71)" />
+        <use href="#slab" transform="translate(0 57.14)" />
+        <rect x="86" y="291.71" width="340" height="11.43" />
+      </g>
+    </mask>
+    <clipPath id="faceClip">
+      <use href="#slab" />
+    </clipPath>
+    <mask id="traceCuts" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="600">
+      <rect width="512" height="600" fill="#fff" />
+      <g clip-path="url(#faceClip)">
+        <g transform="matrix(0.9245 -0.6615 0.9245 0.6615 256 246)">
+          <g fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <g transform="rotate(0)"><path d="M30 -18H36L70.2 -52.2H78.19999999999999"/><path d="M30 -12H36L58.8 -34.8H100"/><path d="M30 0H36L36 0H100"/><path d="M30 12H36L58.8 34.8H100"/><path d="M30 18H36L70.2 52.2H78.19999999999999"/>
+          </g>
+          <g transform="rotate(90)"><path d="M30 -18H36L70.2 -52.2H100"/><path d="M30 -12H36L58.8 -34.8H70"/><path d="M30 -6H36L47.4 -17.4H100"/><path d="M30 0H36L36 0H58"/><path d="M30 6H36L47.4 17.4H100"/><path d="M30 12H36L58.8 34.8H82"/><path d="M30 18H36L70.2 52.2H100"/>
+          </g>
+          <g transform="rotate(180)"><path d="M30 -18H36L70.2 -52.2H78.19999999999999"/><path d="M30 -12H36L58.8 -34.8H100"/><path d="M30 -6H36L47.4 -17.4H55.4"/><path d="M30 6H36L47.4 17.4H76"/><path d="M30 12H36L58.8 34.8H100"/><path d="M30 18H36L70.2 52.2H78.19999999999999"/>
+          </g>
+          <g transform="rotate(270)"><path d="M30 -18H36L70.2 -52.2H100"/><path d="M30 -6H36L47.4 -17.4H100"/><path d="M30 0H36L36 0H72"/><path d="M30 6H36L47.4 17.4H100"/><path d="M30 12H36L58.8 34.8H66.8"/><path d="M30 18H36L70.2 52.2H100"/>
+          </g>
+          </g>
+          <g transform="rotate(0)"><circle cx="78.19999999999999" cy="-52.2" r="3" fill="#000"/><circle cx="78.19999999999999" cy="52.2" r="3" fill="#000"/>
+          </g>
+          <g transform="rotate(90)"><circle cx="70" cy="-34.8" r="3" fill="#000"/><circle cx="58" cy="0" r="3" fill="#000"/><circle cx="82" cy="34.8" r="3" fill="#000"/>
+          </g>
+          <g transform="rotate(180)"><circle cx="78.19999999999999" cy="-52.2" r="3" fill="#000"/><circle cx="55.4" cy="-17.4" r="3" fill="#000"/><circle cx="76" cy="17.4" r="3" fill="#000"/><circle cx="78.19999999999999" cy="52.2" r="3" fill="#000"/>
+          </g>
+          <g transform="rotate(270)"><circle cx="72" cy="0" r="3" fill="#000"/><circle cx="66.8" cy="34.8" r="3" fill="#000"/>
+          </g>
+          <g stroke="#000" stroke-width="2.16" stroke-linecap="butt">
+          <g transform="rotate(0)"><path d="M24 -18H30"/><path d="M24 -12H30"/><path d="M24 -6H30"/><path d="M24 0H30"/><path d="M24 6H30"/><path d="M24 12H30"/><path d="M24 18H30"/>
+          </g>
+          <g transform="rotate(90)"><path d="M24 -18H30"/><path d="M24 -12H30"/><path d="M24 -6H30"/><path d="M24 0H30"/><path d="M24 6H30"/><path d="M24 12H30"/><path d="M24 18H30"/>
+          </g>
+          <g transform="rotate(180)"><path d="M24 -18H30"/><path d="M24 -12H30"/><path d="M24 -6H30"/><path d="M24 0H30"/><path d="M24 6H30"/><path d="M24 12H30"/><path d="M24 18H30"/>
+          </g>
+          <g transform="rotate(270)"><path d="M24 -18H30"/><path d="M24 -12H30"/><path d="M24 -6H30"/><path d="M24 0H30"/><path d="M24 6H30"/><path d="M24 12H30"/><path d="M24 18H30"/>
+          </g>
+          </g>
+        </g>
+      </g>
+    </mask>
+    <filter id="traceGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
   </defs>
 
-  <!-- Scale mark up for dock/taskbar parity; UI uses the unscaled web SVG. -->
-  <g transform="translate(256 286) scale(1.3) translate(-256 -286)">
-    <g>
-      <use href="#slab" transform="translate(0 82)" fill="url(#lowLayer)" />
-      <use href="#slab" transform="translate(0 48)" fill="url(#midLayer)" />
-      <use href="#slab" fill="url(#topLayer)" />
+  <!-- Scale mark up for dock/taskbar parity; UI uses the unscaled web SVG.
+       The art spans y 126-458, so it scales about its centre (291.72) and moves to the canvas centre.
+       Masks and the clip use the art's coordinates because they inherit this transform. -->
+  <g transform="translate(256 256) scale(1.3) translate(-256 -291.72)">
+    <g mask="url(#gapBelowMid)">
+      <use href="#slab" transform="translate(0 91.43)" fill="url(#lowLayer)" />
     </g>
+    <g mask="url(#gapBelowTop)">
+      <use href="#slab" transform="translate(0 45.71)" fill="url(#midLayer)" />
+    </g>
+    <use href="#slab" fill="url(#topLayer)" mask="url(#traceCuts)" />
 
-    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M181 277h72" stroke="#111822" stroke-width="16" />
-      <path d="M253 277 304 226h54" stroke="url(#route)" stroke-width="16" />
+    <g clip-path="url(#faceClip)">
+      <g transform="matrix(0.9245 -0.6615 0.9245 0.6615 256 246)">
+        <g filter="url(#traceGlow)" opacity="0.9">
+        <g fill="none" stroke="#e19100" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <g transform="rotate(0)"><path d="M30 -6H36L47.4 -17.4H78"/><path d="M30 6H36L47.4 17.4H68"/>
+        </g>
+        <g transform="rotate(180)"><path d="M30 0H36L36 0H100"/>
+        </g>
+        <g transform="rotate(270)"><path d="M30 -12H36L58.8 -34.8H66.8"/>
+        </g>
+        </g>
+        </g>
+        <g fill="none" stroke="#e19100" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <g transform="rotate(0)"><path d="M30 -6H36L47.4 -17.4H78"/><path d="M30 6H36L47.4 17.4H68"/>
+        </g>
+        <g transform="rotate(180)"><path d="M30 0H36L36 0H100"/>
+        </g>
+        <g transform="rotate(270)"><path d="M30 -12H36L58.8 -34.8H66.8"/>
+        </g>
+        </g>
+        <g transform="rotate(0)"><circle cx="78" cy="-17.4" r="3.84" fill="#ffc04d"/><circle cx="68" cy="17.4" r="3.84" fill="#ffc04d"/>
+        </g>
+        <g transform="rotate(270)"><circle cx="66.8" cy="-34.8" r="3.84" fill="#ffc04d"/>
+        </g>
+        <rect x="-24" y="-24" width="48" height="48" rx="3" fill="#0f141c" stroke="#e19100" stroke-width="1.6"/><circle cx="16" cy="-16" r="2.6" fill="#e19100"/>
+      </g>
     </g>
-    <circle cx="181" cy="277" r="17" fill="#111822" />
-    <circle cx="358" cy="226" r="23" fill="#ffa31d" />
   </g>
 </svg>

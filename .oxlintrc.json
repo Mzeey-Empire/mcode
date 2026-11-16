@@ -138,7 +138,7 @@
       }
     },
     {
-      "files": ["apps/web/src/**/EditorIcons.tsx", "apps/web/src/**/ProviderIcons.tsx", "apps/web/src/lib/file-icons.tsx", "apps/web/src/lib/material-icons.ts", "apps/web/src/features/projects/actions/action-icons.ts", "apps/web/src/components/chat/ImageAttachmentLightbox.tsx"],
+      "files": ["apps/web/src/**/EditorIcons.tsx", "apps/web/src/**/ProviderIcons.tsx", "apps/web/src/lib/file-icons.tsx", "apps/web/src/lib/material-icons.ts", "apps/web/src/features/projects/actions/action-icons.ts", "apps/web/src/components/chat/ImageAttachmentLightbox.tsx", "apps/web/src/components/brand/mark/palette.ts"],
       "rules": {
         "mcode/no-raw-color": "off"
       }
