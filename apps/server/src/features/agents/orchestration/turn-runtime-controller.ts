@@ -752,7 +752,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         await this.retireWorkerProvider(provider, execution, deliveryAttempt);
       }
       await this.requireWorkerRuntime().providerEvents.retire(execution);
-      await this.requireWorkerRuntime().owner.release(execution);
+      // A saving exit that released the worker first ends the turn through `handleWorkerRecovery`.
+      if (!await this.requireWorkerRuntime().owner.release(execution)) return;
       this.requireWorkerFiles().retire(execution.threadId, execution.executionId, deliveryAttempt);
       this.lifecycles.end(execution, active);
       this.trackSessionEnded(execution.threadId, execution.executionId);

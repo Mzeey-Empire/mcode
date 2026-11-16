@@ -101,8 +101,8 @@ export class WorkerOwnedTurnRuntime {
     const owned = this.owner.current(execution.threadId);
     if (!owned || !sameExecution(owned.execution, execution) || !sameLease(owned.lease, lease)) return;
     if (receipt.kind !== "committed" && (receipt.kind !== "conflict" || receipt.recoveryState !== "already-terminal")) return;
-    await this.owner.releaseRecovered(execution, receipt);
-    this.onRecovered?.(execution, outcome);
+    // An ordinary release already under way ends the turn itself once it has freed the worker.
+    if (await this.owner.releaseRecovered(execution, receipt)) this.onRecovered?.(execution, outcome);
   }
 
   /** Connect durable plan publication to thread hydration and background attention. */
@@ -135,8 +135,7 @@ export class WorkerOwnedTurnRuntime {
     if (receipt.kind !== "accepted" && receipt.kind !== "committed" && (receipt.kind !== "conflict" || receipt.recoveryState !== "already-terminal")) {
       throw new Error("Rejected execution has no durable recovery evidence");
     }
-    await this.owner.releaseRecovered(execution, receipt);
-    this.onRecovered?.(execution);
+    if (await this.owner.releaseRecovered(execution, receipt)) this.onRecovered?.(execution);
   }
 
   /** Wait for the writer and every initial slot before accepting a provider turn. */

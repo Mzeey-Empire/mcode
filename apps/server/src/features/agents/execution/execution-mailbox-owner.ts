@@ -12,6 +12,8 @@ interface OwnedExecution {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   started: boolean;
+  /** The release command under way for this execution; a second release waits for it instead of sending another. */
+  release?: Promise<void>;
 }
 
 /** Claims one mailbox before a parent turn can be written or sent to a provider. */
@@ -70,28 +72,55 @@ export class ExecutionMailboxOwner {
     return this.submitOwned(owner, { kind: "stop", requestId });
   }
 
-  /** Release the slot only after finalization and its release command have settled. */
-  async release(execution: ExecutionIdentity): Promise<void> {
+  /**
+   * Release the slot only after finalization and its release command have settled. Resolves false when another
+   * release of this execution released it, so that release's caller owns ending the turn.
+   */
+  async release(execution: ExecutionIdentity): Promise<boolean> {
     const owner = this.requireOwner(execution);
-    const result = await this.submitOwned(owner, { kind: "release" });
-    if (result.kind !== "released" || !this.scheduler.release(owner.execution, owner.lease)) {
-      throw new Error(`Execution release was not acknowledged: ${execution.executionId}`);
-    }
-    this.active.delete(execution.threadId);
+    return this.releaseOnce(owner, { kind: "release" }, "Execution release was not acknowledged");
   }
 
-  /** Release an execution using writer evidence validated by its exact worker lease. */
-  async releaseRecovered(execution: ExecutionIdentity, recovery: ExecutionRecoveryReceipt): Promise<void> {
+  /**
+   * Release an execution using writer evidence validated by its exact worker lease. Resolves false when another
+   * release of this execution released it, so that release's caller owns ending the turn.
+   */
+  async releaseRecovered(execution: ExecutionIdentity, recovery: ExecutionRecoveryReceipt): Promise<boolean> {
     const owner = this.requireOwner(execution);
     if (recovery.operationId !== `${owner.lease.leaseId}:worker-lost`
       || recovery.kind === "conflict" && recovery.recoveryState !== "already-terminal") {
       throw new Error("Recovered release has no matching durable evidence");
     }
-    const result = await this.submitOwned(owner, { kind: "release", recovery });
-    if (result.kind !== "released" || !this.scheduler.release(owner.execution, owner.lease)) {
-      throw new Error(`Recovered execution release was not acknowledged: ${execution.executionId}`);
+    return this.releaseOnce(owner, { kind: "release", recovery }, "Recovered execution release was not acknowledged");
+  }
+
+  /**
+   * A turn's ordinary release and its saving exit can both release it at once. The worker drops the execution on the
+   * first release command, so a second command is refused, and while it is pending the first cannot free the slot.
+   * A caller that finds a release under way waits for it, and sends its own only if that one failed.
+   */
+  private async releaseOnce(owner: OwnedExecution, command: Extract<ExecutionWorkCommand, { kind: "release" }>,
+    unacknowledged: string): Promise<boolean> {
+    while (owner.release) {
+      if (await owner.release.then(() => true, () => false)) return false;
     }
-    this.active.delete(execution.threadId);
+    owner.release = this.submitRelease(owner, command, unacknowledged);
+    try {
+      await owner.release;
+    } catch (error) {
+      owner.release = undefined;
+      throw error;
+    }
+    return true;
+  }
+
+  private async submitRelease(owner: OwnedExecution, command: Extract<ExecutionWorkCommand, { kind: "release" }>,
+    unacknowledged: string): Promise<void> {
+    const result = await this.submitOwned(owner, command);
+    if (result.kind !== "released" || !this.scheduler.release(owner.execution, owner.lease)) {
+      throw new Error(`${unacknowledged}: ${owner.execution.executionId}`);
+    }
+    this.active.delete(owner.execution.threadId);
   }
 
   /** Forget a worker-lost execution only after the recovery coordinator released its lease. */
