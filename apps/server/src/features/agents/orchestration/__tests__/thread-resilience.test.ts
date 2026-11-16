@@ -349,6 +349,26 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     await expectSavingExit(active, turn.turnExecutionId, fault);
   });
 
+  it("S1g releases a mid-turn exit's worker when reloading the thread after its ending fails", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved before the refusal", isFinalResponse: false }));
+    const fault = refuse(plan, threadWrite(active.thread.id), writerFailures.identity, { times: "always", pinOperation: true });
+    const recover = active.canonical.recoverThread.bind(active.canonical);
+    let reloadFailed = false;
+    vi.spyOn(active.canonical, "recoverThread").mockImplementation((...args) => {
+      if (!reloadFailed && active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status === "Interrupted") {
+        reloadFailed = true;
+        throw new Error("thread reload failed");
+      }
+      return recover(...args);
+    });
+    await active.deliver(event({ type: "toolUse", threadId: active.thread.id, toolCallId: "refused-1", toolName: "Bash", toolInput: { command: "ls" } }));
+    await fault.reached;
+    await retryTicks(active);
+    expect(reloadFailed).toBe(true);
+    await expectSavingExit(active, turn.turnExecutionId, fault);
+  });
+
   it("S2 answers Stop honestly while the ending cannot be saved, then saves the user's Stop", async () => {
     const { active, turn } = await refusedFinish(writerFailures.full, { failure: writerFailures.full, times: "always" });
     const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
