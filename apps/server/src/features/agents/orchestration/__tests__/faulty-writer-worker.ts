@@ -11,7 +11,13 @@ export const writerFailures = {
   identity: { name: "Error", message: "Invalid accepted semantic operation" },
   content: { name: rejection.name, message: rejection.message, code: rejection.code, contentRejection: rejection.reason },
   busy: { name: "Error", message: "database is locked", code: "SQLITE_BUSY" },
+  full: { name: "Error", message: "database or disk is full", code: "SQLITE_FULL" },
 } satisfies Record<string, WriterFailure>;
+
+/** Match the direct write of a turn's ending, which skips the accepted save queue. */
+export function endingWrite(threadId: string): Match {
+  return (request) => request.kind === "semantic-worker-loss" && request.input.execution.threadId === threadId;
+}
 
 /** Match accepted canonical storage for one conversation. */
 export function threadWrite(threadId: string): Match {
