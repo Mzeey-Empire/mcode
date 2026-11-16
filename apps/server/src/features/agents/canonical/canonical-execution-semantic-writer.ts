@@ -29,7 +29,7 @@ import type {
   ParentLiveEffects,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
-import { CanonicalAgentStore } from "./canonical-agent-store.js";
+import { CanonicalAgentStore, EXECUTION_HEAD_KIND, EXECUTION_HEAD_OPERATION_ID } from "./canonical-agent-store.js";
 import { AcceptedContentRejected } from "./accepted-save-failure.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
@@ -53,8 +53,8 @@ import {
   type ParentAssistantTextCheckpointResult,
 } from "../turns/parent-assistant-text-checkpoint-store.js";
 
-const HEAD_ID = "semantic:head";
-const HEAD_KIND = "semantic-head";
+const HEAD_ID = EXECUTION_HEAD_OPERATION_ID;
+const HEAD_KIND = EXECUTION_HEAD_KIND;
 const PUBLICATION_KIND = "semantic-publication";
 const ACKNOWLEDGED_PUBLICATION_KIND = "semantic-publication-acknowledged";
 const PENDING_FINISH_KIND = "semantic:finish-pending";

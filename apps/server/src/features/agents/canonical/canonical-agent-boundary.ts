@@ -155,6 +155,11 @@ export class CanonicalAgentBoundary {
     return this.reader.loadTurnByExecution(...args);
   }
 
+  /** Load the lease the canonical writer's head holds for an execution, which a worker-loss ending must match. */
+  loadExecutionLease(...args: Parameters<CanonicalAgentStore["loadExecutionLease"]>): ReturnType<CanonicalAgentStore["loadExecutionLease"]> {
+    return this.reader.loadExecutionLease(...args);
+  }
+
   /** Load the accepted user anchor owned by the exact parent execution. */
   loadParentTurnUserMessage(executionId: string): ReturnType<CanonicalAgentStore["loadParentTurnUserMessage"]> {
     return this.reader.loadParentTurnUserMessage(executionId);
