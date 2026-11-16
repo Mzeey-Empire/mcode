@@ -1,0 +1,3 @@
+# The art module writes these files; its drift test compares exact bytes, so keep LF on every checkout.
+apps/web/public/brand/*.svg text eol=lf
+apps/desktop/build/icon.svg text eol=lf

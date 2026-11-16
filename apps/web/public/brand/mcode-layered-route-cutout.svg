@@ -38,12 +38,12 @@
         <rect x="86" y="291.71" width="340" height="11.43" />
       </g>
     </mask>
-    <clipPath id="face">
+    <clipPath id="faceClip">
       <use href="#slab" />
     </clipPath>
     <mask id="traceCuts" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="600">
       <rect width="512" height="600" fill="#fff" />
-      <g clip-path="url(#face)">
+      <g clip-path="url(#faceClip)">
         <g transform="matrix(0.9245 -0.6615 0.9245 0.6615 256 246)">
           <g fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
           <g transform="rotate(0)"><path d="M30 -18H36L70.2 -52.2H78.19999999999999"/><path d="M30 -12H36L58.8 -34.8H100"/><path d="M30 0H36L36 0H100"/><path d="M30 12H36L58.8 34.8H100"/><path d="M30 18H36L70.2 52.2H78.19999999999999"/>
@@ -88,7 +88,7 @@
   </g>
   <use href="#slab" fill="url(#topLayer)" mask="url(#traceCuts)" />
 
-  <g clip-path="url(#face)">
+  <g clip-path="url(#faceClip)">
     <g transform="matrix(0.9245 -0.6615 0.9245 0.6615 256 246)">
       <g filter="url(#traceGlow)" opacity="0.9">
       <g fill="none" stroke="#e19100" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
