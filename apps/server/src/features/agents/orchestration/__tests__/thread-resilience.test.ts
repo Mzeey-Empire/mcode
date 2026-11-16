@@ -12,6 +12,24 @@ const K = 5;
 let fixture: Fixture | undefined;
 let clearFault: (() => void) | undefined;
 
+type Settlement<T> = { status: "pending" } | { status: "fulfilled"; value: T } | { status: "rejected"; error: unknown };
+
+async function settleWithinTicks<T>(active: Fixture, promise: Promise<T>, maxSteps = K): Promise<Settlement<T>> {
+  const outcome: { result: Settlement<T> } = { result: { status: "pending" } };
+  void promise.then(
+    (value) => { outcome.result = { status: "fulfilled", value }; },
+    (error: unknown) => { outcome.result = { status: "rejected", error }; },
+  );
+  // Next sends await file evidence collection's SNAPSHOT_CAPTURE_BUDGET_MS timer.
+  for (let step = 0; step < maxSteps && outcome.result.status === "pending"; step += 1) {
+    await vi.advanceTimersByTimeAsync(30_001);
+    await active.writer.barrier();
+    await NodeTimersPromises.setImmediate();
+    await active.writer.barrier();
+  }
+  return outcome.result;
+}
+
 async function retryTicks(active: Fixture, count = K): Promise<void> {
   for (let tick = 0; tick < count; tick += 1) {
     await vi.advanceTimersByTimeAsync(30_001);
@@ -77,29 +95,25 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-describe("thread resilience without model tokens", () => {
+describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
   it("S1 ends a refused terminal save and admits another send", async () => {
     await knownStall("refused save leaves the turn Running", async () => {
       const { active, turn } = await refusedFinish();
       await retryTicks(active);
       const saved = active.canonical.loadTurnByExecution(turn.turnExecutionId);
-      const [next] = await Promise.allSettled([send(active)]);
-      const admitted = next?.status === "fulfilled";
+      const next = await settleWithinTicks(active, send(active));
+      const admitted = next.status === "fulfilled";
       expectInvariant(terminal(active, turn.turnExecutionId) && saved?.ending && admitted,
-        `Refused save: status=${saved?.status}, ending=${JSON.stringify(saved?.ending)}, nextSendAdmitted=${admitted}`);
+        `Refused save: status=${saved?.status}, ending=${JSON.stringify(saved?.ending)}, nextSend=${next.status}, error=${next.status === "rejected" ? String(next.error) : "none"}`);
     });
   });
 
   it("S2 accepts Stop after an unsaved finish", async () => {
     await knownStall("Stop refused after an unsaved finish", async () => {
       const { active, turn } = await refusedFinish();
-      let settled = false;
-      let stopError: unknown;
-      let result: Awaited<ReturnType<typeof active.requestStop>> | undefined;
-      void active.requestStop().then((value) => { settled = true; result = value; }, (error: unknown) => { settled = true; stopError = error; });
-      await retryTicks(active);
-      expectInvariant(settled && !stopError && result?.status !== "error" && terminal(active, turn.turnExecutionId),
-        `Stop: settled=${settled}, result=${JSON.stringify(result)}, error=${String(stopError)}, turn=${active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status}`);
+      const stop = await settleWithinTicks(active, active.requestStop());
+      expectInvariant(stop.status === "fulfilled" && stop.value.status !== "error" && terminal(active, turn.turnExecutionId),
+        `Stop: status=${stop.status}, result=${stop.status === "fulfilled" ? JSON.stringify(stop.value) : "none"}, error=${stop.status === "rejected" ? String(stop.error) : "none"}, turn=${active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status}`);
     });
   });
 
@@ -112,7 +126,8 @@ describe("thread resilience without model tokens", () => {
     await fault.reached;
     expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
     expect(active.messages.listByThread(active.thread.id, 100).messages.filter((message) => message.role === "assistant").map((message) => message.content)).toEqual(["Saved exactly once"]);
-    await send(active);
+    const next = await settleWithinTicks(active, send(active));
+    expect(next).toMatchObject({ status: "fulfilled" });
   });
 
   it("S4 replaces rejected content and admits another send", async () => {
@@ -123,7 +138,8 @@ describe("thread resilience without model tokens", () => {
     await finish(active, event);
     await fault.reached;
     expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
-    await send(active);
+    const next = await settleWithinTicks(active, send(active));
+    expect(next).toMatchObject({ status: "fulfilled" });
   });
 
   it("S5 rethrows harness errors", async () => {

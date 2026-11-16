@@ -28,12 +28,10 @@ export function terminalWrite(threadId: string, turnId: string): Match {
 interface Rule {
   match: Match;
   remaining: number | "always";
-  failure?: WriterFailure;
+  failure: WriterFailure;
   active: boolean;
-  released: boolean;
   reached: Promise<void>;
   markReached: () => void;
-  held: Array<() => void>;
 }
 
 /** A fault plan survives worker replacement while each factory call creates a fresh wrapper. */
@@ -45,19 +43,12 @@ export class WriterFaultPlan {
     return this.arm(match, options.times, failure);
   }
 
-  /** Hold real replies until released, preserving their original contents. */
-  hold(match: Match) { return this.arm(match, "always"); }
-
-  private arm(match: Match, remaining: number | "always", failure?: WriterFailure) {
+  private arm(match: Match, remaining: number | "always", failure: WriterFailure) {
     let markReached!: () => void;
     const reached = new Promise<void>((resolve) => { markReached = resolve; });
-    const rule: Rule = { match, remaining, failure, active: true, released: false, reached, markReached, held: [] };
+    const rule: Rule = { match, remaining, failure, active: true, reached, markReached };
     this.rules.push(rule);
-    const release = () => {
-      rule.released = true;
-      for (const deliver of rule.held.splice(0)) deliver();
-    };
-    return { reached, release, clear: () => { rule.active = false; release(); } };
+    return { reached, clear: () => { rule.active = false; } };
   }
 
   /** Create an independently owned real worker attached to this plan. */
@@ -67,15 +58,11 @@ export class WriterFaultPlan {
 class FaultyWriterWorker extends EventTarget implements DatabaseWriterWorker {
   onmessage: DatabaseWriterWorker["onmessage"] = null;
   onerror: DatabaseWriterWorker["onerror"] = null;
-  private readonly held = new Map<string, Rule>();
 
   constructor(private readonly worker: Worker, private readonly rules: Rule[]) {
     super();
     worker.onmessage = (event: MessageEvent<ApplicationDatabaseWriterResponse>) => {
-      const rule = this.held.get(event.data.requestId);
-      this.held.delete(event.data.requestId);
-      if (rule?.active && !rule.released) rule.held.push(() => this.onmessage?.(event));
-      else this.onmessage?.(event);
+      this.onmessage?.(event);
     };
     worker.onerror = (event) => this.onerror?.(event);
     worker.addEventListener("close", () => this.dispatchEvent(new Event("close")));
@@ -86,11 +73,6 @@ class FaultyWriterWorker extends EventTarget implements DatabaseWriterWorker {
     if (!rule) { this.worker.postMessage(request); return; }
     rule.markReached();
     if (rule.remaining !== "always") rule.remaining -= 1;
-    if (!rule.failure) {
-      this.held.set(request.requestId, rule);
-      this.worker.postMessage(request);
-      return;
-    }
     const failure = rule.failure;
     const response: ApplicationDatabaseWriterResponse = request.kind === "ordinary-write" || request.kind === "query-only-policy"
       ? { kind: "ordinary-failed", requestId: request.requestId, name: request.name, failure }
