@@ -1,3 +1,9 @@
+/**
+ * Error code of writer backpressure, a refusal before the write reached SQLite. The code survives a failure's
+ * rebuild across a worker boundary, where the error's class does not.
+ */
+export const WRITER_ADMISSION_FULL_CODE = "MCODE_WRITER_ADMISSION_FULL";
+
 /** Error code that marks a save the writer refused because of the batch's own contents. */
 export const ACCEPTED_CONTENT_REJECTED_CODE = "MCODE_ACCEPTED_CONTENT_REJECTED";
 
@@ -45,7 +51,9 @@ export function isThreadSaveBlocked(error: unknown): boolean {
 
 /** Classify a failed save by the codes on its error and `cause` chain. */
 export function classifySaveFailure(error: Error): SaveFailureClass {
-  if (findCode(error, (code) => /^SQLITE_(BUSY|LOCKED)/.test(code))) return "transient";
+  if (findCode(error, (code) => /^SQLITE_(BUSY|LOCKED)/.test(code) || code === WRITER_ADMISSION_FULL_CODE)) {
+    return "transient";
+  }
   if (findCode(error, (code) => code === ACCEPTED_CONTENT_REJECTED_CODE)) return "content";
   return "environment";
 }

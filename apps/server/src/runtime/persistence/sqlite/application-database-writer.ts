@@ -7,7 +7,7 @@ import type { DatabaseLaunchObservations } from "./database.js";
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { DatabaseStartupRefusal } from "./startup-refusal.js";
-import { AcceptedContentRejected } from "../../../features/agents/canonical/accepted-save-failure.js";
+import { AcceptedContentRejected, WRITER_ADMISSION_FULL_CODE } from "../../../features/agents/canonical/accepted-save-failure.js";
 import { serverModuleUrl } from "../../environment/server-module-url.js";
 import type { DatabaseWriteOperation } from "./database-write-operation.js";
 import type { ApplicationDatabaseWriterRequest, ApplicationDatabaseWriterResponse } from "./application-database-writer-protocol.js";
@@ -35,7 +35,9 @@ interface PendingWrite {
 }
 
 /** Admission failed before the operation reached SQLite. */
-export class DatabaseWriterAdmissionFull extends Error {}
+export class DatabaseWriterAdmissionFull extends Error {
+  readonly code = WRITER_ADMISSION_FULL_CODE;
+}
 
 /** The worker disappeared after dispatch; this ordinary mutation must not be blindly retried. */
 export class DatabaseWriteOutcomeUnknown extends Error {}

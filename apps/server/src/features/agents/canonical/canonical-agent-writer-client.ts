@@ -1,4 +1,4 @@
-import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { ApplicationDatabaseWriter, DatabaseWriterAdmissionFull } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
@@ -291,7 +291,7 @@ export class CanonicalAgentWriterClient {
   ): Promise<CanonicalWriterResponse> {
     if (this.stopping || (this.closing && !allowDuringClose)) return Promise.reject(new Error("Canonical writer closed"));
     if (request.kind === "ack-operations") return this.databaseWriter.sendCanonical(request, onPublication);
-    if (this.pendingWrites >= MAX_PENDING_WRITES) return Promise.reject(new Error("Canonical writer admission is full"));
+    if (this.pendingWrites >= MAX_PENDING_WRITES) return Promise.reject(new DatabaseWriterAdmissionFull("Canonical writer admission is full"));
     this.pendingWrites++;
     return this.databaseWriter.sendCanonical(request, onPublication).finally(() => { this.pendingWrites--; });
   }
