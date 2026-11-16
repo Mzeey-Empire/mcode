@@ -70,12 +70,20 @@ export const AgentStopDispatchStateSchema = z.enum([
 /** Provider dispatch boundary observed while servicing a user stop. */
 export type AgentStopDispatchState = z.infer<typeof AgentStopDispatchStateSchema>;
 
+/**
+ * How an agent.stop RPC ended. "ending-not-saved" means the agent was stopped but the turn's cancelled ending could
+ * not be written yet; the server keeps retrying it and the turn stays Running in storage until the write lands.
+ */
+export const AgentStopStatusSchema = z.enum(["cancelled", "already-terminal", "ending-not-saved"]);
+/** How an agent.stop RPC ended. */
+export type AgentStopStatus = z.infer<typeof AgentStopStatusSchema>;
+
 /** Authoritative result returned by an agent.stop RPC. */
 export const AgentStopResultSchema = lazySchema(() => z.object({
   threadId: z.string().min(1),
   turnExecutionId: TurnExecutionIdSchema.nullable(),
   snapshot: TurnRuntimeSnapshotSchema(),
-  status: z.enum(["cancelled", "already-terminal"]),
+  status: AgentStopStatusSchema,
   dispatchState: AgentStopDispatchStateSchema,
 }).strict());
 /** Authoritative result returned by an agent.stop RPC. */
