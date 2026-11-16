@@ -20,12 +20,16 @@ async function settleWithinTicks<T>(active: Fixture, promise: Promise<T>, maxSte
     (value) => { outcome.result = { status: "fulfilled", value }; },
     (error: unknown) => { outcome.result = { status: "rejected", error }; },
   );
-  // Next sends await file evidence collection's SNAPSHOT_CAPTURE_BUDGET_MS timer.
+  // The next send waits for the previous turn's file-evidence collection, which runs a real git process.
+  // Each step also gives real time so a healthy send does not look stuck and a fixed known stall does not stay marked.
   for (let step = 0; step < maxSteps && outcome.result.status === "pending"; step += 1) {
     await vi.advanceTimersByTimeAsync(30_001);
     await active.writer.barrier();
     await NodeTimersPromises.setImmediate();
     await active.writer.barrier();
+    await vi.waitFor(() => {
+      if (outcome.result.status === "pending") throw new Error("pending");
+    }, { timeout: 1_000, interval: 10 }).catch(() => undefined);
   }
   return outcome.result;
 }
