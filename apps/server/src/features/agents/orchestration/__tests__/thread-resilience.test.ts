@@ -14,13 +14,23 @@ let fixture: Fixture | undefined;
 let clearFault: (() => void) | undefined;
 
 type Settlement<T> = { status: "pending" } | { status: "fulfilled"; value: T } | { status: "rejected"; error: unknown };
+type Tracked<T> = { result: Settlement<T> };
 
-async function settleWithinTicks<T>(active: Fixture, promise: Promise<T>, maxSteps = K): Promise<Settlement<T>> {
-  const outcome: { result: Settlement<T> } = { result: { status: "pending" } };
+/** Records the outcome from the moment the promise exists, so a rejection before the test awaits it is not unhandled. */
+function track<T>(promise: Promise<T>): Tracked<T> {
+  const outcome: Tracked<T> = { result: { status: "pending" } };
   void promise.then(
     (value) => { outcome.result = { status: "fulfilled", value }; },
     (error: unknown) => { outcome.result = { status: "rejected", error }; },
   );
+  return outcome;
+}
+
+function settleWithinTicks<T>(active: Fixture, promise: Promise<T>, maxSteps = K): Promise<Settlement<T>> {
+  return settleTrackedWithinTicks(active, track(promise), maxSteps);
+}
+
+async function settleTrackedWithinTicks<T>(active: Fixture, outcome: Tracked<T>, maxSteps = K): Promise<Settlement<T>> {
   // The next send waits for the previous turn's file-evidence collection, which runs a real git process.
   // Each step also gives real time so a healthy send does not look stuck and a fixed known stall does not stay marked.
   for (let step = 0; step < maxSteps && outcome.result.status === "pending"; step += 1) {
@@ -74,7 +84,7 @@ async function finish(active: Fixture, event: (input: AgentEvent) => AgentEvent,
   await deliverTurnComplete(active, event);
   if (!unsaved) {
     await retryTicks(active);
-    await active.workers.progress?.waitForSaved(active.thread.id);
+    await waitForSavedWithinBound(active, "finish save");
   }
   await deliverEnded(active, event);
 }
@@ -83,6 +93,19 @@ async function finish(active: Fixture, event: (input: AgentEvent) => AgentEvent,
 function settled<T>(operation: string, result: Settlement<T>): Exclude<Settlement<T>, { status: "pending" }> {
   if (result.status === "pending") throw new Error(`harness: ${operation} did not settle within the bound`);
   return result;
+}
+
+/** A save that never settles fails here by name instead of as the 30 s test timeout. */
+async function waitForSavedWithinBound(active: Fixture, operation: string): Promise<void> {
+  const progress = active.workers.progress;
+  if (!progress) return;
+  const saved = settled(operation, await settleWithinTicks(active, progress.waitForSaved(active.thread.id)));
+  if (saved.status === "rejected") throw saved.error;
+}
+
+function assistantReplies(active: Fixture): string[] {
+  return active.messages.listByThread(active.thread.id, 100).messages
+    .filter((message) => message.role === "assistant").map((message) => message.content);
 }
 
 async function refusedFinish() {
@@ -105,9 +128,13 @@ afterEach(async () => {
   try {
     clearFault?.();
     if (fixture) {
-      await retryTicks(fixture);
-      await fixture.workers.progress?.waitForSaved(fixture.thread.id);
-      await fixture.close();
+      try {
+        await retryTicks(fixture);
+        await waitForSavedWithinBound(fixture, "teardown save");
+      } finally {
+        // A failed settle must still release the worker, database, environment overrides and temp directory.
+        await fixture.close();
+      }
     }
   } finally {
     // A failing close must not leave fake timers or mocks active for the next test.
@@ -149,15 +176,16 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     clearFault = fault.clear;
     await active.deliver(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved exactly once", isFinalResponse: true }));
     // Armed before any retry fires: a busy refusal misread as permanent would reject this waiter with ThreadSaveBlockedError.
-    const waiter = active.workers.progress?.waitForSaved(active.thread.id);
-    if (!waiter) throw new Error("harness: worker fixture has no accepted progress owner");
+    const progress = active.workers.progress;
+    if (!progress) throw new Error("harness: worker fixture has no accepted progress owner");
+    const waiter = track(progress.waitForSaved(active.thread.id));
     await deliverTurnComplete(active, event);
-    const saved = settled("save waiter", await settleWithinTicks(active, waiter));
+    const saved = settled("save waiter", await settleTrackedWithinTicks(active, waiter));
     expect(saved).toMatchObject({ status: "fulfilled" });
     expect(fault.hits).toBe(3);
     await deliverEnded(active, event);
     expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
-    expect(active.messages.listByThread(active.thread.id, 100).messages.filter((message) => message.role === "assistant").map((message) => message.content)).toEqual(["Saved exactly once"]);
+    expect(assistantReplies(active)).toEqual(["Saved exactly once"]);
     const next = await settleWithinTicks(active, send(active));
     expect(next).toMatchObject({ status: "fulfilled" });
   });
@@ -174,15 +202,20 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     // One refusal, then the replacement: a content rejection retried like a busy one would be refused again.
     expect(fault.hits).toBe(1);
     expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
-    const markers = active.db.query<{ envelope_json: string }, []>(
-      "SELECT envelope_json FROM canonical_agent_events WHERE envelope_json LIKE '%ingest.content-replaced%'").all()
+    // Exactly once: lost text or a replacement that saved the reply again would both show here.
+    expect(assistantReplies(active)).toEqual(["Rejected text"]);
+    const markers = active.db.query<{ envelope_json: string }, [string]>(
+      "SELECT envelope_json FROM canonical_agent_events WHERE thread_id = ? AND envelope_json LIKE '%ingest.content-replaced%'")
+      .all(active.thread.id)
       .map((row) => JSON.parse(row.envelope_json).payload);
     expect(markers).toEqual([
       { type: "ingest.content-replaced", operationId: expect.any(String), reason: writerFailures.content.contentRejection },
     ]);
     const rejectedOperationId: string = markers[0].operationId;
-    const receipts = active.db.query<{ operation_id: string }, [string]>(
-      "SELECT operation_id FROM canonical_writer_operation_receipts WHERE operation_id LIKE ? || '%'").all(rejectedOperationId)
+    // A literal prefix compare, because LIKE would read `_` or `%` in an operation id as a wildcard.
+    const receipts = active.db.query<{ operation_id: string }, [string, string]>(
+      "SELECT operation_id FROM canonical_writer_operation_receipts WHERE substr(operation_id, 1, length(?)) = ?")
+      .all(rejectedOperationId, rejectedOperationId)
       .map((row) => row.operation_id);
     expect(receipts).toContain(`${rejectedOperationId}:replaced`);
     expect(receipts).not.toContain(rejectedOperationId);
