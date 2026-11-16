@@ -1,12 +1,14 @@
 import { CanonicalAgentStore } from "./canonical-agent-store.js";
+import { endingOutcome } from "./canonical-parent-turn-lifecycle.js";
 import { PlanImplementStore } from "../planning/persistence/plan-implement-store.js";
 import { PlanCommentStore } from "../planning/persistence/plan-comment-store.js";
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { TurnFileEffectSummarySchema } from "@mcode/contracts/models/file-effect";
-import { type InterruptionCause } from "@mcode/contracts/compat/agent-model";
+import { type InterruptionCause, type TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import { type StoredAttachment } from "@mcode/contracts/models/attachment";
+import { type Message } from "@mcode/contracts/models/message";
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { z } from "zod";
 import { isToolCallActive } from "@mcode/contracts/models/tool-call-record";
@@ -161,7 +163,18 @@ export interface LostParentExecutionInput {
   recoveryIncidentId: string;
   endedAt?: string;
   assignedMessageId?: string;
+  /** Set when Mcode dropped output it showed but could not save; the ending then carries a notice saying so. */
+  unsavedOutput?: UnsavedTurnOutput;
 }
+
+/** A turn ended because its output could not be saved, and who, if anyone, stopped it on purpose. */
+export interface UnsavedTurnOutput {
+  /** The user's Stop, recorded instead of the saving failure so the turn ends cancelled by them. */
+  readonly stop?: TurnStopCause;
+}
+
+/** The timeline notice saved with the ending of a turn whose shown output was dropped. */
+const UNSAVED_OUTPUT_NOTICE = "Some output shown during this turn wasn't saved, so it won't appear after a reload.";
 
 /** Writer-local semantic operations with cloneable inputs and durable receipts. */
 export class CanonicalParentTurnWrite {
@@ -217,6 +230,7 @@ export class CanonicalParentTurnWrite {
     const text = existingAssistant || assignedAssistant ? "" : this.assistantTextCheckpoints.restore(input.executionId);
     const assistant = existingAssistant ?? assignedAssistant ?? this.stageRecoveredAssistant(input, text, recoveredNarrative.length);
     this.canonical.markUnresolvedCodexChildDeliveriesUnknown(input.executionId);
+    const ending = this.unsavedOutputEnding(input);
     const result = this.canonical.interruptUnfinishedExecution(
       input.executionId,
       input.reason,
@@ -228,10 +242,19 @@ export class CanonicalParentTurnWrite {
       recoveredNarrative,
       input.recoveryIncidentId,
       input.endedAt,
+      ending,
     );
     if (result.outcome !== "committed") throw new Error(`Parent interruption did not commit: ${input.executionId}`);
-    this.threads.recordTurnOutcome(input.threadId, "interrupted", input.endedAt ?? new Date().toISOString());
+    this.threads.recordTurnOutcome(input.threadId, endingOutcome(ending), input.endedAt ?? new Date().toISOString());
     return result;
+  }
+
+  /** The user's Stop and the dropped-output notice an unsaved turn's ending carries; nothing for a plain loss. */
+  private unsavedOutputEnding({ threadId, unsavedOutput }: LostParentExecutionInput): { stop?: TurnStopCause; notice?: Message } {
+    if (!unsavedOutput) return {};
+    const notice = this.messages.createSystemNotice(threadId, UNSAVED_OUTPUT_NOTICE,
+      this.messages.getLatestSequenceIncludingInternal(threadId) + 1, { kind: "warning", presentation: "timeline", scope: "turn" });
+    return { ...(unsavedOutput.stop ? { stop: unsavedOutput.stop } : {}), notice };
   }
 
   private assignedAssistantForLoss(

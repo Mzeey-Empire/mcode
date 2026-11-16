@@ -89,6 +89,10 @@ export class CanonicalExecutionWriterPort implements ExecutionSemanticWriter {
   async interruptWorkerLoss(input: LostExecutionInterruption): Promise<ExecutionWriteReceipt> {
     const progress = this.progress;
     if (!progress) return this.writer.interruptWorkerLoss(input, this.publish);
+    // Accepted progress is fenced while it ends this turn itself, so a lost worker's ending goes to storage directly.
+    if (progress.endingUnsavedTurn(input.execution)) {
+      return this.writer.interruptWorkerLoss(input, (events) => progress.observeCommitted(events));
+    }
     const accepted = progress.interruptWorkerLoss(input);
     if (accepted.kind !== "conflict" || accepted.recoveryState !== "not-started") return accepted;
     return this.fenced(input.execution.threadId,

@@ -233,7 +233,30 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     workerRuntime?.providerEvents.bindCommandPreparation((execution, batch) => this.prepareWorkerEvent(execution, batch));
     workerRuntime?.providerEvents.bindCommitted((execution, result) => this.applyWorkerReceipt(execution, result));
     workerRuntime?.bindRecovered((execution) => this.handleWorkerRecovery(execution));
+    workerRuntime?.bindUnsavedAgentStop((execution) => this.stopUnsavedAgent(execution));
     this.eventPublication.registerPipelineStart(() => this.initializeProviderEvents());
+  }
+
+  /**
+   * Stop the agent of a turn whose output can no longer be saved, before its ending is written. A turn whose finish
+   * was refused has already left the worker, so its provider session is stopped through the registry. Bounded, so a
+   * wedged provider cannot hold the turn open.
+   */
+  private async stopUnsavedAgent(execution: ExecutionIdentity): Promise<void> {
+    if (this.turnRuntime.snapshot(execution.threadId)?.turnExecutionId !== execution.executionId) return;
+    const active = this.lifecycles.workerFor(execution);
+    const providerId = this.activeProviderId(execution.threadId);
+    const provider = active?.provider ?? (providerId ? this.providerRegistry.resolve(providerId) : undefined);
+    if (!provider) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.resolve(provider.stopSession(`mcode-${execution.threadId}`)),
+        new Promise<void>((resolve) => { timer = setTimeout(resolve, PROVIDER_STOP_SETTLE_TIMEOUT_MS); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Retain a turn's release promises while test ingress drains, even after its lifecycle ends. */
@@ -1232,6 +1255,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * and evicts the pooled session in the background.
    */
   private async stopSessionInternal(threadId: string, stop: TurnStopCause): Promise<AgentStopResult> {
+    const unsaved = await this.stopUnsavedTurn(threadId, stop);
+    if (unsaved) return unsaved;
     const prepared = this.prepareStop(threadId, stop);
     if (isRunningRuntime(prepared.runtime) && prepared.dispatchState === "not-dispatched") {
       this.lifecycles.recordStopBeforeSend(threadId, prepared.runtime.turnExecutionId!, prepared.stop);
@@ -1249,6 +1274,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       });
     });
     return this.finalizeStoppedTurn(prepared);
+  }
+
+  /** Answer Stop for a turn whose unsaved output is being dropped, whose agent that exit already stops. */
+  private async stopUnsavedTurn(threadId: string, stop: TurnStopCause): Promise<AgentStopResult | undefined> {
+    const status = await this.workerRuntime?.progress?.stopUnsavedTurn(threadId, stop);
+    return status ? { ...this.alreadyTerminal(this.prepareStop(threadId, stop)), status } : undefined;
   }
 
   private async stopWorkerSession(prepared: PreparedStop): Promise<AgentStopResult> {

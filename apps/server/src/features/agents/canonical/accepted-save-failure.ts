@@ -7,7 +7,7 @@ export const WRITER_ADMISSION_FULL_CODE = "MCODE_WRITER_ADMISSION_FULL";
 /** Error code that marks a save the writer refused because of the batch's own contents. */
 export const ACCEPTED_CONTENT_REJECTED_CODE = "MCODE_ACCEPTED_CONTENT_REJECTED";
 
-/** How an accepted save failure is handled: retried, replaced, or reported while retries continue. */
+/** How an accepted save failure is handled: retried a bounded number of times, replaced, or ended at once. */
 export type SaveFailureClass = "transient" | "content" | "environment";
 
 /**
@@ -27,8 +27,8 @@ export class AcceptedContentRejected extends Error {
 export const THREAD_SAVE_BLOCKED_CODE = "THREAD_SAVE_BLOCKED";
 
 /**
- * A new turn command refused because an earlier save of the thread cannot complete. Later saves wait behind
- * the failed one in order, so the thread accepts no new turn until the save succeeds or the server restarts.
+ * A new turn command refused because an earlier save of the thread could not complete. The thread accepts no new
+ * turn until Mcode has dropped the unsaved output and written the ending of the turn that produced it.
  */
 export class ThreadSaveBlockedError extends Error {
   override readonly name = "ThreadSaveBlockedError";
@@ -36,7 +36,7 @@ export class ThreadSaveBlockedError extends Error {
 
   constructor(cause: Error) {
     // The hint leads and the reason is capped so both survive the execution worker's 2,000-character message limit.
-    super("This thread cannot save new work. Restart Mcode to recover it. "
+    super("This thread is ending a turn whose output could not be saved. Try again in a moment. "
       + `The earlier save failed: ${(cause.message || cause.name).slice(0, 1_000)}`, { cause });
   }
 }

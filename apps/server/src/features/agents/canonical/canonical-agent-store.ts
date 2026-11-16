@@ -2080,6 +2080,7 @@ export class CanonicalAgentStore {
     recoveredNarrative: readonly ParentNarrativeRecoveryItem[] = [],
     recoveryIncidentId?: string,
     endedAt?: string,
+    ending: Pick<ParentTurnInterruptionInput, "stop" | "notice"> = {},
   ): CanonicalAgentCommitResult {
     return this.parentLifecycle.interrupt({
       executionId,
@@ -2090,6 +2091,7 @@ export class CanonicalAgentStore {
       recoveredNarrative,
       recoveryIncidentId,
       endedAt,
+      ...ending,
     } satisfies ParentTurnInterruptionInput);
   }
 

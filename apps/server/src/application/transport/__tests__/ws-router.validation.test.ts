@@ -1917,16 +1917,16 @@ describe("mapRouteError for refused turn admission", () => {
     const response = mapRouteError(request, restoreExecutionWriterFailure(executionWriterFailure(refusal)));
 
     expect(response.error).toMatchObject({ code: "THREAD_SAVE_BLOCKED",
-      message: expect.stringMatching(/Restart Mcode.*Canonical writer write-failed: SemanticConflict/) });
+      message: expect.stringMatching(/Try again in a moment.*Canonical writer write-failed: SemanticConflict/) });
     expect(error).not.toHaveBeenCalled();
   });
 
-  it("keeps the restart hint when a blocked save's reason is longer than the worker's message limit", () => {
+  it("keeps the retry hint when a blocked save's reason is longer than the worker's message limit", () => {
     const refusal = new ThreadSaveBlockedError(new Error(`Canonical writer write-failed: ${"x".repeat(8_000)}`));
 
     const response = mapRouteError(request, restoreExecutionWriterFailure(executionWriterFailure(refusal)));
 
-    expect(response.error?.message).toMatch(/^This thread cannot save new work\. Restart Mcode to recover it\. .*Canonical writer write-failed: x+/);
+    expect(response.error?.message).toMatch(/^This thread is ending a turn whose output could not be saved\. Try again in a moment\. .*Canonical writer write-failed: x+/);
   });
 
   it("logs a writer failure that crossed the execution worker with its original name and stack", () => {

@@ -9,9 +9,9 @@ import { ExecutionMailboxOwner } from "./execution-mailbox-owner.js";
 import { ExecutionMailboxScheduler, type ExecutionMailboxLimits } from "./execution-mailbox-scheduler.js";
 import { ExecutionProviderEventOwnership } from "./execution-provider-event-ownership.js";
 import { ExecutionThreadWorkerPort } from "./execution-worker-port.js";
-import type { ExecutionIdentity, ExecutionLease } from "./execution-mailbox-protocol.js";
+import { sameExecution, sameLease, type ExecutionIdentity, type ExecutionLease } from "./execution-mailbox-protocol.js";
 import { ExecutionWorkerLossCoordinator, workerLossIncidentId } from "./execution-worker-loss-coordinator.js";
-import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
+import type { ExecutionWorkCommand, ExecutionWorkerResult, ExecutionWriteReceipt } from "./execution-worker-handler.js";
 import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import type { CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
@@ -80,11 +80,29 @@ export class WorkerOwnedTurnRuntime {
     this.owner = new ExecutionMailboxOwner(this.scheduler, (execution, lease) => this.writerPort.abandonStart(execution, lease));
     this.providerEvents = new ExecutionProviderEventOwnership(this.owner);
     this.progress?.bindPermanentFailure(async (execution) => this.recoverRejected(execution));
+    this.progress?.bindUnsavedTurnEnded(async (execution, lease, receipt) => this.releaseUnsavedTurn(execution, lease, receipt));
   }
 
   /** Notify the runtime controller only after writer-backed worker-loss recovery releases the lease. */
   bindRecovered(onRecovered: (execution: ExecutionIdentity) => void): void {
     this.onRecovered = onRecovered;
+  }
+
+  /** Let accepted progress stop the agent of a turn it is ending because the turn's output could not be saved. */
+  bindUnsavedAgentStop(stopAgent: (execution: ExecutionIdentity) => Promise<void>): void {
+    this.progress?.bindUnsavedAgentStop(stopAgent);
+  }
+
+  /**
+   * Release the worker's lease once an unsaved turn's ending is settled in storage. A turn whose finish was refused
+   * has usually been released already; one that failed mid-turn still holds its worker.
+   */
+  private async releaseUnsavedTurn(execution: ExecutionIdentity, lease: ExecutionLease, receipt: ExecutionWriteReceipt): Promise<void> {
+    const owned = this.owner.current(execution.threadId);
+    if (!owned || !sameExecution(owned.execution, execution) || !sameLease(owned.lease, lease)) return;
+    if (receipt.kind !== "committed" && (receipt.kind !== "conflict" || receipt.recoveryState !== "already-terminal")) return;
+    await this.owner.releaseRecovered(execution, receipt);
+    this.onRecovered?.(execution);
   }
 
   /** Connect durable plan publication to thread hydration and background attention. */

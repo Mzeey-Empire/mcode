@@ -40,7 +40,7 @@ import { matchesCodexSystemIntents } from "./codex-system-intents.js";
 import { endingFromAdapterFailure } from "./turn-ending.js";
 import { admittedSessionId } from "../turns/completed-turn-watermark.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
-import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput } from "./canonical-parent-turn-write.js";
+import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput, type UnsavedTurnOutput } from "./canonical-parent-turn-write.js";
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
 import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 import { HookExecutionStore as HookExecutionRepo } from "../events/persistence/hook-execution-store.js";
@@ -211,6 +211,8 @@ export interface LostExecutionInterruption {
   readonly lease: ExecutionLease;
   readonly reason: string;
   readonly recoveryIncidentId: string;
+  /** Set when the turn ends because accepted progress dropped output it could not save. */
+  readonly unsavedOutput?: UnsavedTurnOutput;
 }
 
 /**
@@ -368,6 +370,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const result = this.turns.interruptLostExecution({ ...input.execution,
       // A lost worker means Mcode could no longer save the provider's output.
       reason: input.reason, cause: "saving_stopped", recoveryIncidentId: input.recoveryIncidentId,
+      ...(input.unsavedOutput ? { unsavedOutput: input.unsavedOutput } : {}),
       ...(current.assignedMessageId ? { assignedMessageId: current.assignedMessageId } : {}) });
     const receipt = committed(operation, result.durableThrough);
     const sequences = this.bufferedPublication?.flatMap((batch) => batch.map((event) => event.acceptedSequence)) ?? [];
