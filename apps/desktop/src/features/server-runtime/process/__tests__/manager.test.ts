@@ -192,9 +192,11 @@ import { SERVER_HEAP_DEFAULT_MB, SERVER_HEAP_LEGACY_DEFAULT_MB } from "@mcode/co
 
 describe("ServerManager", () => {
   let manager: ServerManager;
+  let killSpy: ReturnType<typeof vi.spyOn<typeof process, "kill">>;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
     vi.mocked(NodeChildProcess.execFileSync).mockReset().mockReturnValue("/test/bun\n");
     refs.resetExitCallback();
     manager = new ServerManager(TEST_PLATFORM);
@@ -228,6 +230,7 @@ describe("ServerManager", () => {
 
   afterEach(() => {
     manager.shutdown();
+    killSpy.mockRestore();
     globalThis.fetch = originalFetch;
     delete process.env.MCODE_SERVER_HEAP_MB;
     refs.setIsPackaged(false);
@@ -1130,8 +1133,8 @@ describe("ServerManager", () => {
     const killSpy = vi
       .spyOn(process, "kill")
       .mockImplementationOnce(() => true as never); // alive check
-    // Second kill(0) throws to break poll loop
-    killSpy.mockImplementationOnce(() => {
+    // Keep both the process and its group absent during shutdown polling.
+    killSpy.mockImplementation(() => {
       throw new Error("ESRCH");
     });
 
@@ -1157,7 +1160,7 @@ describe("ServerManager", () => {
     const killSpy = vi
       .spyOn(process, "kill")
       .mockImplementationOnce(() => true as never);
-    killSpy.mockImplementationOnce(() => {
+    killSpy.mockImplementation(() => {
       throw new Error("ESRCH");
     });
 
@@ -1468,7 +1471,7 @@ describe("ServerManager", () => {
     const killSpy = vi
       .spyOn(process, "kill")
       .mockImplementationOnce(() => true as never)
-      .mockImplementationOnce(() => {
+      .mockImplementation(() => {
         const error = Object.assign(new Error("ESRCH"), { code: "ESRCH" });
         throw error;
       });
@@ -1679,6 +1682,60 @@ describe("ServerManager", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("a start that fails while its child is still running", () => {
+    let onUnexpectedExit: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      onUnexpectedExit = vi.fn();
+      manager.onUnexpectedExit = onUnexpectedExit;
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("stops the child as a planned exit when readiness times out", async () => {
+      vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
+
+      const rejection = expect(manager.start()).rejects.toThrow("Server did not become ready within 600s");
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await rejection;
+
+      expect(killSpy).toHaveBeenCalledWith(-12345, "SIGKILL");
+      refs.getExitCallback()!(null);
+      expect(onUnexpectedExit).not.toHaveBeenCalled();
+    });
+
+    it("reports both the startup failure and a failure to stop the child", async () => {
+      killSpy.mockImplementation((pid) => {
+        if (pid === -12345) {
+          throw Object.assign(new Error("Permission denied"), { code: "EPERM" });
+        }
+        return true;
+      });
+      vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
+
+      const rejection = expect(manager.start()).rejects.toThrow(
+        /Server did not become ready within 600s[\s\S]*Failed to terminate server process tree 12345/,
+      );
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await rejection;
+    });
+
+    it("stops the child as a planned exit when its lock never becomes readable", async () => {
+      vi.mocked(NodeFSPromises.readFile).mockReset().mockImplementation(async () => refs.missingFile());
+
+      const rejection = expect(manager.start()).rejects.toThrow("Server lock file not available after health check passed");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await rejection;
+
+      expect(killSpy).toHaveBeenCalledWith(-12345, "SIGKILL");
+      refs.getExitCallback()!(null);
+      expect(onUnexpectedExit).not.toHaveBeenCalled();
+    });
   });
 
   it("stops waiting when the child exits during delayed readiness", async () => {
