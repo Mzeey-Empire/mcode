@@ -2146,6 +2146,25 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT id FROM tool_call_records WHERE id = 'queued-tool'").get()).toBeNull();
   });
 
+  it("reopens the thread after an unsaved exit even when reloading it from storage fails", async () => {
+    await send(1, start("codex"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "Original", isFinalResponse: true })] });
+    await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 2, "turnComplete")],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    await send(4, { kind: "release" });
+    db.run("CREATE TRIGGER fail_late_hook BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.operation_id = 'late-hook:blocked-hook' BEGIN SELECT RAISE(ABORT, 'late hook save unavailable'); END");
+    progress.acceptLateHook(execution.threadId, execution.executionId, { id: "blocked-hook", hookName: "Stop", toolName: null,
+      phase: "stop", payload: "{}", durationMs: 10, didBlock: false, startedAt: NOW, endedAt: NOW, sortOrder: 1 });
+    // Armed after admission, which itself seeds the evicted owner from storage, so only the exit's reload fails.
+    const reload = vi.spyOn(MainCanonicalAgentBoundary.prototype, "recoverThread").mockImplementationOnce(() => { throw new Error("database is locked"); });
+    await admitsCommands();
+    expect(reload).toHaveBeenCalled();
+    db.run("DROP TRIGGER fail_late_hook");
+    expect(turnStatus()).toEqual({ status: "Completed" });
+  });
+
   it("rejects an empty terminal hook without attaching it to a prior assistant response", async () => {
     await send(1, start("codex"));
     await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete")],
