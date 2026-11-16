@@ -226,6 +226,24 @@ describe("ComposerCapsuleSplit", () => {
     expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-wide", provider: "codex", reasoning: "xhigh" });
   });
 
+  it("folds away the levels a hovered model lacks, and the arrow keys skip them", async () => {
+    await renderSplit();
+    await openModelPicker();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    const deep = screen.getByRole("listbox", { name: "Reasoning for GPT-9 Deep" });
+    expect(within(deep).getAllByRole("option").map((option) => option.textContent)).toEqual(["Low", "Medium", "High"]);
+    const typing = user.keyboard("{ArrowRight}{ArrowDown}");
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    await typing;
+    expect(within(deep).getByRole("option", { name: "Low" })).toHaveFocus();
+
+    fireEvent.mouseMove(screen.getByRole("option", { name: "GPT-9 Wide" }));
+    act(() => vi.advanceTimersByTime(PANE_SETTLE_MS));
+    const wide = screen.getByRole("listbox", { name: "Reasoning for GPT-9 Wide" });
+    expect(within(wide).getAllByRole("option").map((option) => option.textContent)).toEqual(["Low", "Medium", "High", "X-High"]);
+  });
+
   it("closes on a model pick, keeping a level the model supports", async () => {
     const onSelectionChange = await renderSplit();
     await openModelPicker();
@@ -383,6 +401,55 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     await openModelPicker();
 
     expect(within(pane("GPT-9 Deep")).queryByRole("option", { selected: true })).toBeNull();
+  });
+
+  it("keeps the last model's pane while the highlight crosses Show more and Show less", async () => {
+    serveModels([
+      { id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: ["low", "medium", "high"] },
+      { id: "gpt-8-old", name: "GPT-8 Old", supportedReasoningEfforts: ["low", "high"], lifecycle: "legacy" },
+    ]);
+    await renderSplit();
+    await openModelPicker();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    async function press(keys: string): Promise<void> {
+      const typing = user.keyboard(keys);
+      await act(() => vi.advanceTimersByTimeAsync(100));
+      await typing;
+    }
+    function expectHighlighted(name: RegExp): void {
+      const search = screen.getByRole("combobox", { name: "Search models" });
+      expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name }).id);
+    }
+
+    expect(pane("GPT-9 Deep")).toBeInTheDocument();
+    await press("{ArrowDown}");
+    expectHighlighted(/Show more/);
+    expect(pane("GPT-9 Deep")).toBeInTheDocument();
+
+    await press("{Enter}");
+    expect(pane("GPT-8 Old")).toBeInTheDocument();
+    await press("{ArrowDown}");
+    expectHighlighted(/Show less/);
+    expect(pane("GPT-8 Old")).toBeInTheDocument();
+  });
+
+  it("shows the model above Show more once the fold closes over the selected legacy model", async () => {
+    serveModels([
+      { id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: ["low", "medium", "high"] },
+      { id: "gpt-8-old", name: "GPT-8 Old", supportedReasoningEfforts: ["low", "high"], lifecycle: "legacy" },
+    ]);
+    await renderSplit({ selection: { modelId: "gpt-8-old" } });
+    await openModelPicker();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const search = screen.getByRole("combobox", { name: "Search models" });
+
+    expect(pane("GPT-8 Old")).toBeInTheDocument();
+    const typing = user.keyboard("{ArrowDown}{Enter}");
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    await typing;
+
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: /Show more/ }).id);
+    expect(pane("GPT-9 Deep")).toBeInTheDocument();
   });
 
   it("leaves the context window to Settings, even for a model with a 1M option", () => {

@@ -14,11 +14,11 @@ const MOVE_KEYS: Readonly<Record<string, (index: number, count: number) => numbe
 
 /**
  * Moves focus among a listbox's options as a menu does: the arrow keys wrap and Home and End reach the ends. Bind it
- * to the listbox's `onKeyDown`.
+ * to the listbox's `onKeyDown`. Options inside an inert (folded) region are skipped, since they cannot take focus.
  */
 export function moveOptionFocus(event: KeyboardEvent<HTMLElement>): void {
   const move = MOVE_KEYS[event.key];
-  const options = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')];
+  const options = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="option"]')].filter((option) => !option.closest("[inert]"));
   if (!move || options.length === 0) return;
   event.preventDefault();
   const current = options.findIndex((option) => option === document.activeElement);

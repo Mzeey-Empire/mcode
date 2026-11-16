@@ -419,24 +419,24 @@ describe("ModelSelector", () => {
       await waitFor(() => expect(optionNames()[0]).toBe("Claude Opus 5.5"));
     }
 
-    it("folds legacy models behind a counted row that reveals and hides them in place", async () => {
+    it("folds legacy models behind a Show more row that reveals them, with Show less after them", async () => {
       const onSelect = vi.fn();
       await openClaudeTab("claude-opus-5-5", onSelect);
 
-      expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5", "Legacy models2"]);
-      const fold = screen.getByRole("option", { name: /Legacy models/ });
+      expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5", "Show more"]);
+      const fold = screen.getByRole("option", { name: "Show more" });
       expect(fold).toHaveAttribute("aria-expanded", "false");
 
       await userEvent.click(fold);
       expect(optionNames()).toEqual([
-        "Claude Opus 5.5", "Claude Sonnet 5.5", "Legacy models2", "Claude Opus 5", "Claude Sonnet 5",
+        "Claude Opus 5.5", "Claude Sonnet 5.5", "Claude Opus 5", "Claude Sonnet 5", "Show less",
       ]);
-      expect(screen.getByRole("option", { name: /Legacy models/ })).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("option", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
       expect(onSelect).not.toHaveBeenCalled();
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("option", { name: /Legacy models/ }));
-      expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5", "Legacy models2"]);
+      await userEvent.click(screen.getByRole("option", { name: "Show less" }));
+      expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5", "Show more"]);
     });
 
     it("opens the fold with Enter from the search field", async () => {
@@ -448,10 +448,23 @@ describe("ModelSelector", () => {
       expect(screen.getByRole("option", { name: /Claude Opus 5$/ })).toBeInTheDocument();
     });
 
+    it("keeps the keyboard where it was: on the first revealed model, then on Show more after closing", async () => {
+      await openClaudeTab("claude-opus-5-5");
+      await waitFor(() => expect(screen.getByRole("combobox")).toHaveFocus());
+      const active = () => document.getElementById(screen.getByRole("combobox").getAttribute("aria-activedescendant") ?? "");
+
+      await userEvent.keyboard("{End}{Enter}");
+      expect(active()).toHaveTextContent(/^Claude Opus 5(?!\.)/);
+
+      await userEvent.keyboard("{End}{Enter}");
+      expect(optionNames()).toEqual(["Claude Opus 5.5", "Claude Sonnet 5.5", "Show more"]);
+      expect(active()).toHaveTextContent("Show more");
+    });
+
     it("gives the numbered shortcuts to models, not to the fold row", async () => {
       const onSelect = vi.fn();
       await openClaudeTab("claude-opus-5-5", onSelect);
-      await userEvent.click(screen.getByRole("option", { name: /Legacy models/ }));
+      await userEvent.click(screen.getByRole("option", { name: "Show more" }));
 
       await userEvent.keyboard("{Control>}3{/Control}");
 
@@ -463,7 +476,7 @@ describe("ModelSelector", () => {
 
       const selected = screen.getByRole("option", { selected: true });
       expect(selected).toHaveTextContent("Claude Sonnet 5");
-      expect(screen.getByRole("option", { name: /Legacy models/ })).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("option", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
     });
 
     it("lists matching legacy models unfolded while searching", async () => {
@@ -473,7 +486,7 @@ describe("ModelSelector", () => {
 
       // The tab's own matches lead; other providers' matches follow under their names.
       expect(optionNames().slice(0, 2)).toEqual(["Claude Sonnet 5.5", "Claude Sonnet 5"]);
-      expect(screen.queryByRole("option", { name: /Legacy models/ })).toBeNull();
+      expect(screen.queryByRole("option", { name: /^Show (more|less)$/ })).toBeNull();
     });
 
     it("shows no fold for a catalog without legacy models", async () => {

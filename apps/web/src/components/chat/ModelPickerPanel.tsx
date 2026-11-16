@@ -3,6 +3,7 @@ import { Star } from "lucide-react";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { Picker, type PickerDetail, type PickerRow, type PickerRowAction, type PickerTab } from "@/components/ui/picker";
 import { ReasoningLevelOptions } from "@/features/conversation/composer/controls/ComposerModelPreferences";
+import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
   MODEL_PROVIDERS,
   findModelById,
@@ -77,18 +78,16 @@ interface ModelOption {
   readonly showProvider: boolean;
 }
 
-/** The row at the end of a provider tab that shows or hides its legacy models. */
+/** The last row of a provider tab: Show more reveals its legacy models above it, and Show less hides them again. */
 interface LegacyFoldOption {
   readonly kind: "legacy-fold";
   readonly providerId: string;
-  readonly count: number;
   readonly expanded: boolean;
+  /** The group of the current models above, so no group gap opens between them and the fold. */
+  readonly group: string | undefined;
 }
 
 type ModelPickerOption = ModelOption | LegacyFoldOption;
-
-/** Divides the legacy fold and the models behind it from the current models above. */
-const LEGACY_GROUP = "legacy";
 
 /**
  * The fold follows the selected model until the user toggles it: `auto` opens it only when the
@@ -372,9 +371,13 @@ function providerModelOptions(
   const currentOptions = catalogModelOptions(providerId, models.filter((model) => !isLegacyModel(model)));
   const legacyModels = models.filter(isLegacyModel);
   if (legacyModels.length === 0) return currentOptions;
-  const fold: LegacyFoldOption = { kind: "legacy-fold", providerId, count: legacyModels.length, expanded: legacyExpanded };
-  const legacyOptions = legacyExpanded ? catalogModelOptions(providerId, legacyModels, LEGACY_GROUP) : [];
-  return [...currentOptions, fold, ...legacyOptions];
+  // The fold row already marks where the legacy models start, so they join the last current group instead of opening a
+  // group of their own, which would draw an empty gap above them.
+  const group = currentOptions.at(-1)?.group;
+  const fold: LegacyFoldOption = { kind: "legacy-fold", providerId, expanded: legacyExpanded, group };
+  if (!legacyExpanded) return [...currentOptions, fold];
+  // Show less closes the list, so it sits after the legacy models rather than above them.
+  return [...currentOptions, ...catalogModelOptions(providerId, legacyModels, group), fold];
 }
 
 function accessEndedOn(model: ModelProvider["models"][number]): string | undefined {
@@ -439,11 +442,12 @@ function favoriteAction(
 
 function legacyFoldRow(option: LegacyFoldOption): PickerRow {
   return {
-    key: `${option.providerId}:legacy-fold`,
-    name: "Legacy models",
-    tag: String(option.count),
+    // The row moves to the end when it opens. A key per state hands the highlight to the row that takes its slot (the
+    // first legacy model on open, Show more on close), so Enter never leaves the keyboard on a row scrolled out of view.
+    key: `${option.providerId}:legacy-fold:${option.expanded ? "open" : "closed"}`,
+    name: option.expanded ? "Show less" : "Show more",
     expanded: option.expanded,
-    group: LEGACY_GROUP,
+    group: option.group,
   };
 }
 
@@ -482,14 +486,17 @@ export interface ModelPickerReasoning {
 }
 
 /**
- * The pane's title. The rail or the search group already names the provider, so it uses the short name. A name too long
- * for the line drops whole to a line of its own instead of fading, so the pane always says which model it shows.
+ * The pane's title: the model whose levels it shows. The levels say what the pane is for, and the rail or the search
+ * group already names the provider, so it is the short name alone. A long name wraps rather than fading, so the pane
+ * always says which model it shows. Keyed by model, it fades in on each change instead of the text jumping.
  */
 function ReasoningCaption({ option }: { readonly option: ModelOption }) {
   return (
-    <p className="flex min-w-0 flex-1 flex-wrap items-baseline justify-between gap-x-2 py-1 text-caption text-muted">
-      <span>Reasoning</span>
-      <span className="min-w-0 break-words">{getSelectedModelPresentation(option.modelId, option.providerId).shortLabel}</span>
+    <p
+      key={optionKey(option.providerId, option.modelId)}
+      className="min-w-0 flex-1 py-1 text-body-small break-words text-ink transition-opacity duration-(--duration-standard) ease-(--ease-standard) starting:opacity-0 motion-reduce:transition-none"
+    >
+      {getSelectedModelPresentation(option.modelId, option.providerId).shortLabel}
     </p>
   );
 }
@@ -497,18 +504,22 @@ function ReasoningCaption({ option }: { readonly option: ModelOption }) {
 function ReasoningPane({ option, selected, reasoning }: { readonly option: ModelOption; readonly selected: boolean; readonly reasoning: ModelPickerReasoning }) {
   const levels = getReasoningLevels(option.providerId, option.modelId);
   const declaredDefault = findProviderModel(option.providerId, option.modelId)?.defaultReasoningLevel;
-  return levels.length > 0 ? (
-        <ReasoningLevelOptions
-          levels={levels}
-          checked={selected ? reasoning.current : undefined}
-          defaultLevel={levels.find((level) => level === declaredDefault)}
-          listInset
-          label={`Reasoning for ${option.label}`}
-          onChoose={(level) => reasoning.onChoose(option.modelId, option.providerId, level)}
-        />
-      ) : (
+  // A model without levels keeps the list mounted and folded, so moving to or from it folds the rows like any other move.
+  return (
+    <>
+      <ReasoningLevelOptions
+        levels={levels}
+        checked={selected ? reasoning.current : undefined}
+        defaultLevel={levels.find((level) => level === declaredDefault)}
+        listInset
+        label={`Reasoning for ${option.label}`}
+        onChoose={(level) => reasoning.onChoose(option.modelId, option.providerId, level)}
+      />
+      <AnimatedCollapsible open={levels.length === 0}>
         <p className="px-2 py-1.5 text-caption text-muted">No reasoning levels</p>
-      );
+      </AnimatedCollapsible>
+    </>
+  );
 }
 
 /**
