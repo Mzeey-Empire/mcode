@@ -82,6 +82,36 @@ describe("ExecutionMailboxOwner", () => {
     scheduler.shutdown();
   });
 
+  it("frees the worker slot when a command arrives while a release is under way", async () => {
+    const worker = new WorkerPort();
+    const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
+      workerCount: 1,
+      limits: { maxPending: 8, maxPendingBytes: 128_000, reservedControl: 2, reservedControlBytes: 16_000,
+        maxPerExecutionPending: 8, maxPerExecutionBytes: 128_000,
+        reservedPerExecutionControl: 2, reservedPerExecutionControlBytes: 16_000 },
+      createWorker: () => worker, onWorkerLost: () => {},
+    });
+    const owner = new ExecutionMailboxOwner(scheduler);
+    const starting = owner.start({ execution, ownerEpoch: 1, providerId: "codex", parentTurn });
+    worker.reply(0, { kind: "committed", operationId: `${worker.requests[0]?.lease.leaseId}:1`, durableRevision: 1 });
+    await starting;
+    const admittedFirst = owner.submit(execution, { kind: "checkpoint", phase: "running", nativeCursor: null });
+    const released = owner.release(execution);
+    const late = Promise.resolve().then(() => owner.stop(execution, "stop-after-release"));
+    const lateOutcome = late.then(() => "admitted", () => "refused");
+    await Promise.resolve();
+    worker.reply(1, { kind: "committed", operationId: `${worker.requests[1]?.lease.leaseId}:2`, durableRevision: 1 });
+    await expect(admittedFirst).resolves.toMatchObject({ kind: "committed" });
+    expect(worker.requests[2]?.command.kind).toBe("release");
+    worker.reply(2, { kind: "released" });
+    await expect(released).resolves.toBe(true);
+    expect(await lateOutcome).toBe("refused");
+    expect(scheduler.depth().activeExecutions).toBe(0);
+    // A release that finds the execution already released was not the one that freed it.
+    await expect(owner.release(execution)).resolves.toBe(false);
+    scheduler.shutdown();
+  });
+
   it("claims before durable start and admits Stop behind earlier commands", async () => {
     const worker = new WorkerPort();
     const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({

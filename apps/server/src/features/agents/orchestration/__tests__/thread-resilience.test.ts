@@ -7,6 +7,7 @@ import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { MessageSchema } from "@mcode/contracts/models/message";
 import { isThreadSaveBlocked } from "../../canonical/accepted-save-failure.js";
 import type { WriterFailure } from "../../canonical/canonical-agent-writer-protocol.js";
+import { listTurnFileEvidence } from "../../turns/persistence/turn-file-evidence-store.js";
 import { WriterFaultPlan, endingWrite, originalWrite, terminalWrite, threadWrite, writerFailures } from "./faulty-writer-worker.js";
 import { InvariantViolation, expectInvariant, knownStall } from "./known-stall.js";
 import { openWorkerServiceFixture, openWorkerTurnFixture } from "./worker-turn-fixture.js";
@@ -250,6 +251,98 @@ function overlapWorkerReleases(active: Fixture): { readonly overlapped: boolean 
   return { get overlapped() { return overlapped; } };
 }
 
+/**
+ * Makes the saving exit's worker release start before the turn's ordinary release asks for the same execution.
+ * `under-way` holds the exit's release reply until the ordinary release has asked; `finished` makes the ordinary
+ * release ask only after the exit's release has freed the worker.
+ */
+function exitReleasesFirst(active: Fixture, mode: "under-way" | "finished"): { readonly ordered: boolean } {
+  const { scheduler, owner } = active.workers;
+  let exitStarted!: () => void;
+  const exitStart = new Promise<void>((resolve) => { exitStarted = resolve; });
+  let exitFinished!: () => void;
+  const exitFinish = new Promise<void>((resolve) => { exitFinished = resolve; });
+  let ordinaryAsked!: () => void;
+  const ordinaryAsk = new Promise<void>((resolve) => { ordinaryAsked = resolve; });
+  let ordered = false;
+  const submit = scheduler.submit.bind(scheduler);
+  const releaseRecovered = owner.releaseRecovered.bind(owner);
+  const exitSpy = vi.spyOn(owner, "releaseRecovered").mockImplementation((...args) => {
+    exitSpy.mockRestore();
+    const holdSpy = vi.spyOn(scheduler, "submit").mockImplementation((input) => {
+      holdSpy.mockRestore();
+      const admitted = submit(input);
+      if (mode !== "under-way" || admitted.kind !== "admitted") return admitted;
+      return { ...admitted, completion: ordinaryAsk.then(() => admitted.completion) };
+    });
+    const released = releaseRecovered(...args);
+    holdSpy.mockRestore();
+    exitStarted();
+    void released.then(exitFinished, exitFinished);
+    return released;
+  });
+  const release = owner.release.bind(owner);
+  const ordinarySpy = vi.spyOn(owner, "release").mockImplementation(async (execution) => {
+    ordinarySpy.mockRestore();
+    await (mode === "under-way" ? exitStart : exitFinish);
+    ordered = true;
+    const released = release(execution);
+    ordinaryAsked();
+    return released;
+  });
+  clearFaults.push(() => { exitSpy.mockRestore(); ordinarySpy.mockRestore(); exitStarted(); exitFinished(); ordinaryAsked(); });
+  return { get ordered() { return ordered; } };
+}
+
+/** Holds a Stop while it waits for the agent's events to drain, as a slow agent does, until `open` runs. */
+function holdStopDrain(active: Fixture): { readonly reached: boolean; open(): void } {
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  let reached = false;
+  const fence = active.provider.fenceCanonicalTurnEvents;
+  const spy = vi.spyOn(active.provider, "fenceCanonicalTurnEvents").mockImplementation(async (routing, options) => {
+    if (!options?.discardQueued) return fence(routing, options);
+    spy.mockRestore();
+    reached = true;
+    await gate;
+  });
+  clearFaults.push(() => { spy.mockRestore(); open(); });
+  return { get reached() { return reached; }, open: () => open() };
+}
+
+/** Holds the saving exit's worker release reply until Stop asks the worker to stop the same execution. */
+function holdExitReleaseUntilStopCommand(active: Fixture): { readonly submitted: boolean } {
+  const { scheduler, owner } = active.workers;
+  let openHold!: () => void;
+  const stopAsked = new Promise<void>((resolve) => { openHold = resolve; });
+  let submitted = false;
+  const submit = scheduler.submit.bind(scheduler);
+  const holdSpy = vi.spyOn(scheduler, "submit").mockImplementation((input) => {
+    const admitted = submit(input);
+    const exitRelease = input.command.kind === "release" && "recovery" in input.command && input.command.recovery;
+    if (!exitRelease || admitted.kind !== "admitted") return admitted;
+    holdSpy.mockRestore();
+    submitted = true;
+    return { ...admitted, completion: stopAsked.then(() => admitted.completion) };
+  });
+  const stop = owner.stop.bind(owner);
+  const stopSpy = vi.spyOn(owner, "stop").mockImplementation((...args) => {
+    stopSpy.mockRestore();
+    // Opened right after admission: the owner reads the release reply in microtasks, before the worker can answer Stop.
+    try { return stop(...args); } finally { openHold(); }
+  });
+  clearFaults.push(() => { holdSpy.mockRestore(); stopSpy.mockRestore(); openHold(); });
+  return { get submitted() { return submitted; } };
+}
+
+/**
+ * The turn's file-change evidence as clients load it; it stays `tracking` until the turn's ending is saved. The
+ * fixture's directory is not a Git repository and the turn changes no files, so saved evidence is `untracked`.
+ */
+function fileEvidenceState(active: Fixture, executionId: string): string | undefined {
+  return listTurnFileEvidence(active.db, { threadId: active.thread.id, executionId })[0]?.evidence.state;
+}
+
 async function expectStoppedExit(active: Fixture, executionId: string) {
   expect(active.canonical.loadTurnByExecution(executionId)).toMatchObject({ status: "Cancelled", ending: { outcome: "cancelled", stop: { by: "user" } } });
   expect(unsavedOutputNotices(active)).toEqual([expect.stringMatching(/wasn't saved/)]);
@@ -486,6 +579,85 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     await fault.reached;
     await retryTicks(active);
     if (!releases.overlapped) throw new Error("harness: the saving exit did not release while the worker release was held");
+    await expectStoppedExit(active, turn.turnExecutionId);
+  });
+
+  it("S2 admits the next send when a stopped turn's saving exit releases it and its worker release joins", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
+    const fault = refuse(plan, terminalWrite(active.thread.id, turn.turnId), writerFailures.full, { times: "always", pinOperation: true });
+    const releases = exitReleasesFirst(active, "under-way");
+    const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+    expect(stop).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
+    await fault.reached;
+    await retryTicks(active);
+    if (!releases.ordered) throw new Error("harness: the worker release did not join the saving exit's release");
+    await expectStoppedExit(active, turn.turnExecutionId);
+    await vi.waitFor(() => expect(fileEvidenceState(active, turn.turnExecutionId)).toBe("untracked"));
+  });
+
+  it("S2 saves a stopped turn's file evidence when its worker release wins over the saving exit", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
+    const fault = refuse(plan, terminalWrite(active.thread.id, turn.turnId), writerFailures.full, { times: "always", pinOperation: true });
+    const releases = overlapWorkerReleases(active);
+    const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+    expect(stop).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
+    await fault.reached;
+    await retryTicks(active);
+    if (!releases.overlapped) throw new Error("harness: the saving exit did not release while the worker release was held");
+    await expectStoppedExit(active, turn.turnExecutionId);
+    await vi.waitFor(() => expect(fileEvidenceState(active, turn.turnExecutionId)).toBe("untracked"));
+  });
+
+  it("S2 saves a stopped turn's file evidence when its worker was released before the saving exit ended it", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
+    const fault = refuse(plan, terminalWrite(active.thread.id, turn.turnId), writerFailures.full, { times: "always", pinOperation: true });
+    const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+    expect(stop).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
+    await fault.reached;
+    // No fake time passes, so the refused save has not given up and the exit has not started.
+    await vi.waitFor(() => expect(active.workers.owner.current(active.thread.id)).toBeUndefined(), { timeout: 10_000, interval: 10 });
+    await retryTicks(active);
+    await expectStoppedExit(active, turn.turnExecutionId);
+    await vi.waitFor(() => expect(fileEvidenceState(active, turn.turnExecutionId)).toBe("untracked"));
+  });
+
+  it("S2 answers Stop when the saving exit's worker release finished before Stop released the worker", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
+    const drain = holdStopDrain(active);
+    const stop = track(active.requestStop());
+    await vi.waitFor(() => expect(drain.reached).toBe(true));
+    const fault = refuse(plan, terminalWrite(active.thread.id, turn.turnId), writerFailures.full, { times: "always", pinOperation: true });
+    await deliverTurnComplete(active, event);
+    await fault.reached;
+    await retryTicks(active);
+    await untilRuntimeReleased(active);
+    drain.open();
+    const answered = settled("Stop", await settleTrackedWithinTicks(active, stop));
+    if (answered.status === "rejected") throw answered.error;
+    expect(answered.value.status).toBe("already-terminal");
+    await expectStoppedExit(active, turn.turnExecutionId);
+  });
+
+  it("S2 ends a stopped turn whose Stop reaches the worker while the saving exit is releasing it", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved before Stop", isFinalResponse: false }));
+    const drain = holdStopDrain(active);
+    const stop = track(active.requestStop());
+    await vi.waitFor(() => expect(drain.reached).toBe(true));
+    const exitRelease = holdExitReleaseUntilStopCommand(active);
+    const fault = refuse(plan, threadWrite(active.thread.id), writerFailures.full, { times: "always", pinOperation: true });
+    await active.deliver(event({ type: "toolUse", threadId: active.thread.id, toolCallId: "full-1", toolName: "Bash", toolInput: { command: "ls" } }));
+    await fault.reached;
+    for (let tick = 0; tick < K && !exitRelease.submitted; tick += 1) await retryTicks(active, 1);
+    if (!exitRelease.submitted) throw new Error("harness: the saving exit did not release the worker within the bound");
+    drain.open();
+    const answered = settled("Stop", await settleTrackedWithinTicks(active, stop));
+    if (answered.status === "rejected") throw answered.error;
+    expect(answered.value.status).toBe("already-terminal");
     await expectStoppedExit(active, turn.turnExecutionId);
   });
 
