@@ -74,7 +74,7 @@ describe("CursorTurnExecutor", () => {
     } as unknown as CursorSessionState;
     const executor = new CursorTurnExecutor({
       settings: { get: () => settings },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
       publishEvent: (_entry, event) => published.push(event),
       bindTurnRouting: (boundEntry, routing) => {
         routeBindings.push({ state: boundEntry.activeTurnState!, routing });
@@ -148,7 +148,7 @@ describe("CursorTurnExecutor", () => {
     const replaceAfterTransientFailure = vi.fn(async () => undefined);
     const executor = new CursorTurnExecutor({
       settings: { get: () => settings },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
       publishEvent: (_entry, event) => published.push(event),
       bindTurnRouting: () => undefined,
       openLogicalSession: vi.fn(async () => true),
@@ -196,7 +196,7 @@ describe("CursorTurnExecutor", () => {
     } as unknown as CursorSessionState;
     const executor = new CursorTurnExecutor({
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
       publishEvent: (_entry, event) => published.push(event),
       bindTurnRouting: () => undefined,
       openLogicalSession: vi.fn(async () => true),
@@ -251,7 +251,7 @@ describe("CursorTurnExecutor", () => {
     } as unknown as CursorSessionState;
     const executor = new CursorTurnExecutor({
       settings: { get: () => getDefaultSettings() },
-      skills: { list: () => [] },
+      skills: { list: async () => [] },
       publishEvent: (_entry, event) => published.push(event),
       bindTurnRouting: () => undefined,
       openLogicalSession: vi.fn(async () => true),

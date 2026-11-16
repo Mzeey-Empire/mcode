@@ -372,7 +372,7 @@ describe("authenticated WebSocket provider catalog", () => {
     ) => input.refresh());
     const deps = makeMinimalDeps({
       skillService: {
-        list: vi.fn(() => [{
+        list: vi.fn(async () => [{
           name: "review",
           description: "Review changes",
           kind: "skill",

@@ -3046,7 +3046,7 @@ export class ClaudeProvider
   /** Reports sign-in from Anthropic credential variables or `claude auth status`. */
   async describeStatus() {
     const env = this.host.environment.snapshot();
-    const run = createCliStatusRunner({ platform: this.requireHostRuntime().platform, env });
+    const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.requireHostRuntime().platform, env });
     const cliPath = this.configuration.cliPath;
     const bundled = cliPath === "claude";
     return {

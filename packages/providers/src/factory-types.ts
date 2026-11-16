@@ -37,7 +37,7 @@ export interface CopilotProviderPorts {
   launch: {
     resolve(): Promise<{ cliPath: string; env: Record<string, string>; githubToken?: string }>;
     /** Reports resolver-owned version and install source without starting the SDK. */
-    describeCli?(): ProviderCliFacts;
+    describeCli?(): Promise<ProviderCliFacts>;
     /** Clears resolver caches after a successful npm update. */
     clearCliVersionCache?(): void;
   };
@@ -71,7 +71,7 @@ export interface CursorProviderPorts {
     get(): Settings;
   };
   skills: {
-    list(cwd: string, provider: "cursor"): SkillInfo[];
+    list(cwd: string, provider: "cursor"): Promise<SkillInfo[]>;
   };
 }
 

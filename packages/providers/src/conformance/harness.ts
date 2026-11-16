@@ -568,7 +568,7 @@ function isUnsupportedCursorAcpResponse(value: unknown): value is { outcome: { o
 function createFakeCursorPorts(): NonNullable<ProviderFactoryInput["cursor"]> {
   return {
     settings: { get: () => undefined as never },
-    skills: { list: () => [] },
+    skills: { list: async () => [] },
   };
 }
 
@@ -578,6 +578,7 @@ function createFakeHost(sink: DeterministicCanonicalSink, calls: string[]): Prov
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
     processes: {
+      open: () => { throw new Error("harness.ts fixture does not support process sessions"); }, run: async () => { throw new Error("harness.ts fixture does not support process runs"); },
       attach: () => calls.push("processes.attach"),
       terminateTree: async () => { calls.push("processes.terminateTree"); },
     },

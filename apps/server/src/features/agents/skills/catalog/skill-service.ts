@@ -6,7 +6,8 @@
  */
 
 import { injectable } from "tsyringe";
-import * as NodeFS from "node:fs";
+import type * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import { logger } from "@mcode/shared";
@@ -35,9 +36,9 @@ const SOURCE_PRIORITY: Record<SkillSource, number> = {
 };
 
 /** Extract `description:` from the leading YAML frontmatter of a markdown file. */
-function readSkillFileMetadata(filePath: string): SkillFileMetadata {
+async function readSkillFileMetadata(filePath: string): Promise<SkillFileMetadata> {
   try {
-    return skillFileMetadata(NodeFS.readFileSync(filePath, "utf-8"));
+    return skillFileMetadata(await NodeFSPromises.readFile(filePath, "utf-8"));
   } catch {
     return { name: undefined, description: "" };
   }
@@ -59,15 +60,15 @@ function frontmatterValue(match: RegExpExecArray): string {
 }
 
 /** Extract `description:` from the leading YAML frontmatter of a markdown file. */
-function readDescription(filePath: string): string {
-  return readSkillFileMetadata(filePath).description;
+async function readDescription(filePath: string): Promise<string> {
+  return (await readSkillFileMetadata(filePath)).description;
 }
 
 /** Read a directory, recording each scan attempt in diagnostics. Never throws. */
-function scanDir(ctx: ScanContext, dir: string): NodeFS.Dirent[] {
+async function scanDir(ctx: ScanContext, dir: string): Promise<NodeFS.Dirent[]> {
   let entries: NodeFS.Dirent[];
   try {
-    entries = NodeFS.readdirSync(dir, { withFileTypes: true });
+    entries = await NodeFSPromises.readdir(dir, { withFileTypes: true });
     ctx.diag.scanned.push({ path: dir, existed: true, entries: entries.length });
     return entries;
   } catch (err) {
@@ -82,22 +83,31 @@ function scanDir(ctx: ScanContext, dir: string): NodeFS.Dirent[] {
   }
 }
 
+async function skillFileExists(filePath: string): Promise<boolean> {
+  try {
+    await NodeFSPromises.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Walk a flat skills directory: each subdir with `SKILL.md` is a skill. */
-function scanSkillsDir(
+async function scanSkillsDir(
   ctx: ScanContext,
   dir: string,
   prefix: string,
   source: SkillSource,
   providers: string[],
-): void {
-  for (const entry of scanDir(ctx, dir)) {
+): Promise<void> {
+  for (const entry of await scanDir(ctx, dir)) {
     if (!entry.isDirectory()) continue;
     // Only treat a subdir as a skill if it has SKILL.md. Helper folders
     // (e.g., `_shared/`, `node_modules/`) and partially installed plugin
     // dirs would otherwise become empty slash-command entries.
     const skillFile = NodePath.join(dir, entry.name, "SKILL.md");
-    if (!NodeFS.existsSync(skillFile)) continue;
-    const metadata = readSkillFileMetadata(skillFile);
+    if (!(await skillFileExists(skillFile))) continue;
+    const metadata = await readSkillFileMetadata(skillFile);
     const name = prefix ? `${prefix}:${entry.name}` : entry.name;
     ctx.out.push({
       name,
@@ -113,20 +123,20 @@ function scanSkillsDir(
 }
 
 /** Walk a flat commands directory: each *.md is a command. */
-function scanCommandsDir(
+async function scanCommandsDir(
   ctx: ScanContext,
   dir: string,
   prefix: string,
   source: SkillSource,
   providers: string[],
-): void {
-  for (const entry of scanDir(ctx, dir)) {
+): Promise<void> {
+  for (const entry of await scanDir(ctx, dir)) {
     if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
     const baseName = entry.name.slice(0, -3);
     const name = prefix ? `${prefix}:${baseName}` : baseName;
     ctx.out.push({
       name,
-      description: readDescription(NodePath.join(dir, entry.name)),
+      description: await readDescription(NodePath.join(dir, entry.name)),
       kind: "command",
       source,
       providers,
@@ -147,17 +157,17 @@ function scanCommandsDir(
  * the user to place skills in the provider-specific user directories (`~/.codex/`,
  * `~/.agents/`, etc.) explicitly.
  */
-function scanPluginVersionDir(
+async function scanPluginVersionDir(
   ctx: ScanContext,
   versionDir: string,
   pluginName: string,
   providers: string[],
-): void {
+): Promise<void> {
   // Both bare and `.claude`-prefixed shapes are observed in the wild.
   for (const sub of ["", ".claude"]) {
     const base = sub ? NodePath.join(versionDir, sub) : versionDir;
-    scanSkillsDir(ctx, NodePath.join(base, "skills"), pluginName, "plugin", providers);
-    scanCommandsDir(ctx, NodePath.join(base, "commands"), pluginName, "plugin", providers);
+    await scanSkillsDir(ctx, NodePath.join(base, "skills"), pluginName, "plugin", providers);
+    await scanCommandsDir(ctx, NodePath.join(base, "commands"), pluginName, "plugin", providers);
   }
 }
 
@@ -166,19 +176,19 @@ function scanPluginVersionDir(
 const VERSION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** Walk plugin cache: cache/<marketplace>/<plugin>/<version>/. */
-function scanPluginCacheDir(ctx: ScanContext, cacheDir: string, providers: string[]): void {
-  for (const mp of scanDir(ctx, cacheDir)) {
+async function scanPluginCacheDir(ctx: ScanContext, cacheDir: string, providers: string[]): Promise<void> {
+  for (const mp of await scanDir(ctx, cacheDir)) {
     if (!mp.isDirectory()) continue;
     const mpDir = NodePath.join(cacheDir, mp.name);
-    for (const plugin of scanDir(ctx, mpDir)) {
+    for (const plugin of await scanDir(ctx, mpDir)) {
       if (!plugin.isDirectory()) continue;
       const pluginDir = NodePath.join(mpDir, plugin.name);
-      const versions = scanDir(ctx, pluginDir)
+      const versions = (await scanDir(ctx, pluginDir))
         .filter((e) => e.isDirectory())
         .map((e) => e.name)
         .sort(VERSION_COLLATOR.compare);
       if (versions.length === 0) continue;
-      scanPluginVersionDir(ctx, NodePath.join(pluginDir, versions[versions.length - 1]), plugin.name, providers);
+      await scanPluginVersionDir(ctx, NodePath.join(pluginDir, versions[versions.length - 1]), plugin.name, providers);
     }
   }
 }
@@ -193,12 +203,12 @@ function scanPluginCacheDir(ctx: ScanContext, cacheDir: string, providers: strin
  * as separate "plugins" would produce wrong prefixes (e.g. ".agents:adapt" instead
  * of "impeccable:adapt") and duplicate entries alongside the cache scan.
  */
-function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string, providers: string[]): void {
-  for (const mp of scanDir(ctx, marketplacesDir)) {
+async function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string, providers: string[]): Promise<void> {
+  for (const mp of await scanDir(ctx, marketplacesDir)) {
     if (!mp.isDirectory()) continue;
     const mpDir = NodePath.join(marketplacesDir, mp.name);
     // Use the marketplace name as the plugin prefix; the dir itself is the version dir.
-    scanPluginVersionDir(ctx, mpDir, mp.name, providers);
+    await scanPluginVersionDir(ctx, mpDir, mp.name, providers);
   }
 }
 
@@ -234,58 +244,58 @@ export function codexPluginNameFromSkillPath(filePath: string, home = NodeOS.hom
  * Extends Claude-shaped layouts with Cursor-native `.cursor/skills`,
  * `.cursor/commands`, and peer `workflow-skills/` trees.
  */
-function scanCursorPluginVersionDir(
+async function scanCursorPluginVersionDir(
   ctx: ScanContext,
   versionDir: string,
   pluginName: string,
   providers: string[],
-): void {
-  scanPluginVersionDir(ctx, versionDir, pluginName, providers);
+): Promise<void> {
+  await scanPluginVersionDir(ctx, versionDir, pluginName, providers);
   const cursorBase = NodePath.join(versionDir, ".cursor");
-  scanSkillsDir(ctx, NodePath.join(cursorBase, "skills"), pluginName, "plugin", providers);
-  scanCommandsDir(ctx, NodePath.join(cursorBase, "commands"), pluginName, "plugin", providers);
-  scanSkillsDir(ctx, NodePath.join(versionDir, "workflow-skills"), pluginName, "plugin", providers);
-  scanSkillsDir(ctx, NodePath.join(cursorBase, "workflow-skills"), pluginName, "plugin", providers);
+  await scanSkillsDir(ctx, NodePath.join(cursorBase, "skills"), pluginName, "plugin", providers);
+  await scanCommandsDir(ctx, NodePath.join(cursorBase, "commands"), pluginName, "plugin", providers);
+  await scanSkillsDir(ctx, NodePath.join(versionDir, "workflow-skills"), pluginName, "plugin", providers);
+  await scanSkillsDir(ctx, NodePath.join(cursorBase, "workflow-skills"), pluginName, "plugin", providers);
 }
 
 /**
  * Walk Cursor plugin caches (`~/.cursor/plugins/cache`, `local`): cache/<mp>/<plugin>/<hash>/.
  * Version dirs are opaque hashes (not semver); pick the newest by directory mtime.
  */
-function scanCursorPluginCacheDir(ctx: ScanContext, cacheDir: string, providers: string[]): void {
-  for (const mp of scanDir(ctx, cacheDir)) {
+async function scanCursorPluginCacheDir(ctx: ScanContext, cacheDir: string, providers: string[]): Promise<void> {
+  for (const mp of await scanDir(ctx, cacheDir)) {
     if (!mp.isDirectory()) continue;
-    scanCursorPluginMarketplace(ctx, NodePath.join(cacheDir, mp.name), providers);
+    await scanCursorPluginMarketplace(ctx, NodePath.join(cacheDir, mp.name), providers);
   }
 }
 
-function scanCursorPluginMarketplace(ctx: ScanContext, marketplaceDir: string, providers: string[]): void {
-  for (const plugin of scanDir(ctx, marketplaceDir)) {
+async function scanCursorPluginMarketplace(ctx: ScanContext, marketplaceDir: string, providers: string[]): Promise<void> {
+  for (const plugin of await scanDir(ctx, marketplaceDir)) {
     if (!plugin.isDirectory()) continue;
-    scanCursorPlugin(ctx, NodePath.join(marketplaceDir, plugin.name), plugin.name, providers);
+    await scanCursorPlugin(ctx, NodePath.join(marketplaceDir, plugin.name), plugin.name, providers);
   }
 }
 
-function scanCursorPlugin(ctx: ScanContext, pluginDir: string, pluginName: string, providers: string[]): void {
-  const newestVersion = newestCursorPluginVersion(pluginDir, scanDir(ctx, pluginDir));
+async function scanCursorPlugin(ctx: ScanContext, pluginDir: string, pluginName: string, providers: string[]): Promise<void> {
+  const newestVersion = await newestCursorPluginVersion(pluginDir, await scanDir(ctx, pluginDir));
   if (newestVersion) {
-    scanCursorPluginVersionDir(ctx, NodePath.join(pluginDir, newestVersion), pluginName, providers);
+    await scanCursorPluginVersionDir(ctx, NodePath.join(pluginDir, newestVersion), pluginName, providers);
   }
 }
 
-function newestCursorPluginVersion(pluginDir: string, entries: NodeFS.Dirent[]): string | undefined {
+async function newestCursorPluginVersion(pluginDir: string, entries: NodeFS.Dirent[]): Promise<string | undefined> {
   let newest: { name: string; mtime: number } | undefined;
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const candidate = cursorPluginVersionMtime(pluginDir, entry.name);
+    const candidate = await cursorPluginVersionMtime(pluginDir, entry.name);
     if (!newest || candidate.mtime > newest.mtime) newest = candidate;
   }
   return newest?.name;
 }
 
-function cursorPluginVersionMtime(pluginDir: string, name: string): { name: string; mtime: number } {
+async function cursorPluginVersionMtime(pluginDir: string, name: string): Promise<{ name: string; mtime: number }> {
   try {
-    return { name, mtime: NodeFS.statSync(NodePath.join(pluginDir, name)).mtimeMs };
+    return { name, mtime: (await NodeFSPromises.stat(NodePath.join(pluginDir, name))).mtimeMs };
   } catch {
     // A cache entry can disappear between directory listing and stat.
     return { name, mtime: 0 };
@@ -368,6 +378,8 @@ export class SkillService {
   /** Cached result; null means cold or invalidated. */
   private cache: SkillInfo[] | null = null;
   private cachedCwd: string | undefined = undefined;
+  private scanGeneration = 0;
+  private pendingScans = new Map<string | undefined, ReturnType<SkillService["scan"]>>();
   private subscribers = new Set<() => void>();
 
   /**
@@ -376,26 +388,43 @@ export class SkillService {
    * that id are returned. Deduplication by name (higher-priority source wins)
    * is applied per filtered set, so the same name can coexist across providers.
    */
-  list(cwd?: string, providerId?: string): SkillInfo[] {
+  async list(cwd?: string, providerId?: string): Promise<SkillInfo[]> {
     if (this.cache && this.cachedCwd === cwd) {
       return this.filterAndDedup(this.cache, providerId);
     }
-    const result = this.scan(cwd);
-    this.cache = result.items;
-    this.cachedCwd = cwd;
-    return this.filterAndDedup(result.items, providerId);
+    let pending = this.pendingScans.get(cwd);
+    if (!pending) {
+      pending = this.scanAndCache(cwd);
+      this.pendingScans.set(cwd, pending);
+    }
+    try {
+      const result = await pending;
+      return this.filterAndDedup(result.items, providerId);
+    } finally {
+      if (this.pendingScans.get(cwd) === pending) this.pendingScans.delete(cwd);
+    }
   }
 
   /** Force a full rescan and return per-path diagnostics. Provider-agnostic. */
-  diagnose(cwd?: string): SkillDiagnostics {
-    const result = this.scan(cwd);
-    this.cache = result.items;
-    this.cachedCwd = cwd;
+  async diagnose(cwd?: string): Promise<SkillDiagnostics> {
+    const result = await this.scanAndCache(cwd);
     return result.diag;
+  }
+
+  private async scanAndCache(cwd?: string): ReturnType<SkillService["scan"]> {
+    const generation = this.scanGeneration;
+    const result = await this.scan(cwd);
+    if (generation === this.scanGeneration) {
+      this.cache = result.items;
+      this.cachedCwd = cwd;
+    }
+    return result;
   }
 
   /** Clear the in-memory cache and notify subscribers. Subscriber errors are isolated. */
   invalidate(): void {
+    this.scanGeneration++;
+    this.pendingScans.clear();
     this.cache = null;
     this.cachedCwd = undefined;
     for (const cb of this.subscribers) {
@@ -438,7 +467,7 @@ export class SkillService {
     return Array.from(seen.values());
   }
 
-  private scan(cwd?: string): { items: SkillInfo[]; diag: SkillDiagnostics } {
+  private async scan(cwd?: string): Promise<{ items: SkillInfo[]; diag: SkillDiagnostics }> {
     const home = NodeOS.homedir();
     const claudeDir = NodePath.join(home, ".claude");
     const cursorDir = NodePath.join(home, ".cursor");
@@ -450,20 +479,20 @@ export class SkillService {
     const roots = buildScanRoots(home, cwd);
     for (const root of roots) {
       if (root.kind === "skills" || root.kind === "both") {
-        scanSkillsDir(ctx, root.path, "", root.source, root.providers);
+        await scanSkillsDir(ctx, root.path, "", root.source, root.providers);
       }
       if (root.kind === "commands" || root.kind === "both") {
-        scanCommandsDir(ctx, root.path, root.prefix ?? "", root.source, root.providers);
+        await scanCommandsDir(ctx, root.path, root.prefix ?? "", root.source, root.providers);
       }
     }
 
     // Claude plugin infrastructure (semver-sorted cache + marketplace checkouts)
-    scanPluginCacheDir(ctx, NodePath.join(claudeDir, "plugins", "cache"), ["claude"]);
-    scanPluginMarketplaceDir(ctx, NodePath.join(claudeDir, "plugins", "marketplaces"), ["claude"]);
+    await scanPluginCacheDir(ctx, NodePath.join(claudeDir, "plugins", "cache"), ["claude"]);
+    await scanPluginMarketplaceDir(ctx, NodePath.join(claudeDir, "plugins", "marketplaces"), ["claude"]);
 
     // Cursor plugin installs (mtime-selected hash dirs under ~/.cursor/plugins)
-    scanCursorPluginCacheDir(ctx, NodePath.join(cursorDir, "plugins", "cache"), ["cursor"]);
-    scanCursorPluginCacheDir(ctx, NodePath.join(cursorDir, "plugins", "local"), ["cursor"]);
+    await scanCursorPluginCacheDir(ctx, NodePath.join(cursorDir, "plugins", "cache"), ["cursor"]);
+    await scanCursorPluginCacheDir(ctx, NodePath.join(cursorDir, "plugins", "local"), ["cursor"]);
 
     return { items: ctx.out, diag: ctx.diag };
   }

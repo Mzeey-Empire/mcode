@@ -151,6 +151,7 @@ import { TurnFileEvidenceLedger } from "../../features/agents/execution/turn-fil
 import { bindTurnFileEvidenceLedger } from "../../features/agents/execution/turn-persisted-publication.js";
 import { SettingsService } from "../../features/settings/settings-service.js";
 import { warmCodexProviderVersion } from "@mcode/providers";
+import { sharedProcessStartWorkerClient } from "../../runtime/process/process-start-worker-client.js";
 import { SkillWatcherService } from "../../features/agents/skills/catalog/skill-watcher-service.js";
 import { MemoryPressureService } from "../../runtime/memory/memory-pressure-service.js";
 import { WorkspaceRepo } from "../../features/projects/persistence/workspace-repo.js";
@@ -544,7 +545,7 @@ function warmCodexVersionGate(s = settingsService.get()): void {
   const cliPath = s.provider.cli.codex || "codex";
   if (cliPath === warmedCodexPath) return;
   warmedCodexPath = cliPath;
-  void launchTelemetry.trackLaunchTask("codex version warmup", warmCodexProviderVersion(cliPath)).then(() => {
+  void launchTelemetry.trackLaunchTask("codex version warmup", warmCodexProviderVersion(cliPath, sharedProcessStartWorkerClient().run)).then(() => {
     broadcast("providers.availability", providerAvailability.listAvailability());
   });
 }

@@ -276,7 +276,7 @@ export class CursorProvider
 
   /** Reports sign-in from `cursor-agent status`, trying the same binaries sessions spawn. */
   async describeStatus() {
-    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
+    const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
     const binaries = cursorCliProbeBinaries(this.cursorPorts.settings.get());
     const facts = await describeCursorAuth(run, binaries);
     for (const binary of binaries) {

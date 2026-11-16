@@ -1,4 +1,5 @@
 import * as NodeChildProcess from "node:child_process";
+import type { ProviderProcessRunner } from "../../host-ports.js";
 import { isSemver } from "../../version-policy.js";
 
 /** Shell metacharacters that must not appear in a CLI path passed to `shell: true`. */
@@ -106,30 +107,26 @@ export function checkCodexVersion(
  * or contains shell metacharacters; failures are not cached (the send-path
  * check surfaces the user-facing error with fresh state).
  */
-export function warmCodexVersionCache(cliPath: string): Promise<void> {
+export async function warmCodexVersionCache(cliPath: string, runProcess: ProviderProcessRunner): Promise<void> {
   currentCliPath = cliPath;
-  if (SHELL_METACHAR_RE.test(cliPath) || versionCache.has(cliPath)) {
-    return Promise.resolve();
+  if (SHELL_METACHAR_RE.test(cliPath) || versionCache.has(cliPath)) return;
+  try {
+    const { stdout, stderr } = await runProcess({
+      command: cliPath,
+      args: ["--version"],
+      shell: true,
+      timeout: 5000,
+    });
+    const version = parseVersion(stdout + stderr);
+    if (version !== null) {
+      versionCache.set(cliPath, {
+        result: { ok: true, version },
+        checkedAt: Date.now(),
+      });
+    }
+  } catch {
+    // Failed probes stay uncached so the send-path check can retry.
   }
-  return new Promise((resolve) => {
-    NodeChildProcess.execFile(
-      cliPath,
-      ["--version"],
-      { shell: true, timeout: 5000, windowsHide: true, encoding: "utf8" },
-      (err, stdout, stderr) => {
-        if (err == null) {
-          const version = parseVersion((stdout ?? "") + (stderr ?? ""));
-          if (version !== null) {
-            versionCache.set(cliPath, {
-              result: { ok: true, version },
-              checkedAt: Date.now(),
-            });
-          }
-        }
-        resolve();
-      },
-    );
-  });
 }
 
 /** Clears installed versions after an update, and isolates version-check tests. */

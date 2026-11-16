@@ -1,6 +1,6 @@
-import * as NodeChildProcess from "node:child_process";
 import * as NodePath from "node:path";
 import which from "which";
+import type { ProviderProcessRunner } from "../../host-ports.js";
 import { isSemver } from "../../version-policy.js";
 
 /** What one CLI status command did. `failed` covers a missing binary, timeout, crash, or rejected path. */
@@ -13,6 +13,7 @@ export type CliStatusRunner = (binary: string, args: readonly string[]) => Promi
 
 /** Options for {@link createCliStatusRunner}. */
 export interface CliStatusRunnerOptions {
+  runProcess: ProviderProcessRunner;
   platform: NodeJS.Platform;
   env: Readonly<Record<string, string | undefined>>;
   timeoutMs?: number;
@@ -67,38 +68,39 @@ function needsWindowsShim(resolved: string, platform: NodeJS.Platform): boolean 
   return platform === "win32" && /\.(cmd|bat)$/i.test(resolved);
 }
 
-function execStatus(
+async function execStatus(
   file: string,
   args: readonly string[],
   shell: boolean,
   options: CliStatusRunnerOptions,
 ): Promise<CliStatusOutcome> {
-  return new Promise((resolve) => {
-    NodeChildProcess.execFile(
-      file,
-      [...args],
-      {
-        env: { ...options.env },
-        shell,
-        timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        maxBuffer: MAX_OUTPUT_BYTES,
-        windowsHide: true,
-        encoding: "utf8",
-      },
-      (error, stdout, stderr) => {
-        resolve(toOutcome(error, `${stdout}\n${stderr}`));
-      },
-    );
-  });
+  try {
+    const { stdout, stderr } = await options.runProcess({
+      command: file,
+      args: [...args],
+      env: { ...options.env },
+      shell,
+      timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxBuffer: MAX_OUTPUT_BYTES,
+    });
+    return { kind: "exited", code: 0, output: `${stdout}\n${stderr}`.replace(ANSI_ESCAPE_RE, "") };
+  } catch (error: unknown) {
+    return failureOutcome(error);
+  }
 }
 
-function toOutcome(error: NodeChildProcess.ExecFileException | null, output: string): CliStatusOutcome {
-  const text = output.replace(ANSI_ESCAPE_RE, "");
-  if (!error) return { kind: "exited", code: 0, output: text };
+function failureOutcome(error: unknown): CliStatusOutcome {
   // A numeric code is a normal non-zero exit; a string code (ENOENT, ERR_CHILD_PROCESS_STDIO_MAXBUFFER)
   // or a signal means the command never gave a usable answer.
-  if (typeof error.code === "number" && !error.killed && !error.signal) {
-    return { kind: "exited", code: error.code, output: text };
+  if (error instanceof Error && "code" in error && typeof error.code === "number"
+    && !("killed" in error && error.killed) && !("signal" in error && error.signal)) {
+    return { kind: "exited", code: error.code, output: failureOutput(error).replace(ANSI_ESCAPE_RE, "") };
   }
   return { kind: "failed" };
+}
+
+function failureOutput(error: Error): string {
+  const stdout = "stdout" in error && typeof error.stdout === "string" ? error.stdout : "";
+  const stderr = "stderr" in error && typeof error.stderr === "string" ? error.stderr : "";
+  return `${stdout}\n${stderr}`;
 }

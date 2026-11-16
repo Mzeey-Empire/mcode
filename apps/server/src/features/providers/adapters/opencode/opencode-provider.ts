@@ -476,7 +476,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
    */
   async describeStatus(): Promise<ProviderStatusFacts> {
     if (this.settingsService.get().provider.opencode.serveUrl) return { auth: { state: "unknown" } };
-    const run = createCliStatusRunner({ platform: this.host.runtime.platform, env: this.envService.getEnv() });
+    const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.host.runtime.platform, env: this.envService.getEnv() });
     const cliPath = this.cliPath();
     return { ...await describeOpenCodeAuth(run, cliPath), cli: {
       installed: await readCliStatusVersion(run, cliPath),

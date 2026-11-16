@@ -42,7 +42,7 @@ describe("buildServerRuntimeBundles", () => {
       "features/terminal/host/pty-host-entry.js",
       "features/agents/canonical/canonical-agent-writer.worker.js",
       "features/agents/execution/execution.worker.js",
-      "features/projects/git/execution/git-process.worker.js",
+      "runtime/process/process-start.worker.js",
     ];
     for (const entryFile of entryFiles) {
       const entryPath = NodePath.join(fixtureServerRoot, "dist-tsc", entryFile);
@@ -58,7 +58,7 @@ describe("buildServerRuntimeBundles", () => {
       ptyHostOutFile,
       NodePath.join(outDir, "canonical-agent-writer.worker.cjs"),
       NodePath.join(outDir, "execution.worker.cjs"),
-      NodePath.join(outDir, "git-process.worker.cjs"),
+      NodePath.join(outDir, "process-start.worker.cjs"),
     ];
     await buildServerRuntimeBundles({
       serverRoot: fixtureServerRoot,
@@ -84,7 +84,7 @@ describe("buildServerRuntimeBundles", () => {
       "pty-host.cjs",
       "canonical-agent-writer.worker.cjs",
       "execution.worker.cjs",
-      "git-process.worker.cjs",
+      "process-start.worker.cjs",
     ].map((fileName) =>
       NodeURL.pathToFileURL(
         NodePath.join(resourcesRoot, "app.asar.unpacked", "dist", "server", fileName),

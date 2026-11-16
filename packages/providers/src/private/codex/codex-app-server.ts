@@ -9,6 +9,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeReadline from "node:readline";
 import * as NodeEvents from "node:events";
+import type * as NodeStream from "node:stream";
 import * as NodePath from "node:path";
 import which from "which";
 import { resolveSubagentDisplayName } from "@mcode/contracts/models/tool-call-record";
@@ -16,6 +17,7 @@ import { type TurnFailureKind } from "@mcode/contracts/compat/agent-model";
 import { type TurnSteerOutcome } from "@mcode/contracts/providers/interfaces";
 import { logger } from "@mcode/shared";
 import type { McodeInstructionSection } from "@mcode/thread-orchestration";
+import type { ProviderProcessOpener } from "../../host-ports.js";
 import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
 import { CodexRpcClient, CodexRpcResponseError, CodexTransportError } from "./codex-rpc-client.js";
 import { listCodexModels } from "./codex-models.js";
@@ -95,7 +97,7 @@ async function resolveCodexAppServerPath(cliPath: string): Promise<string> {
   }
 }
 
-function waitForCodexAppServerSpawn(child: NodeChildProcess.ChildProcess): Promise<Error | null> {
+function waitForCodexAppServerSpawn(child: CodexAppServerProcess): Promise<Error | null> {
   return new Promise<Error | null>((resolve) => {
     child.once("error", (error) => resolve(error));
     child.once("spawn", () => resolve(null));
@@ -238,8 +240,24 @@ export interface CodexApprovalRequest {
  */
 export type CodexApprovalHandler = (request: CodexApprovalRequest) => Promise<unknown>;
 
+/** Process transport used by the app-server, independent of its owning thread. */
+export interface CodexAppServerProcess extends NodeEvents.EventEmitter {
+  readonly pid?: number;
+  readonly stdin: NodeStream.Writable;
+  readonly stdout: NodeStream.Readable;
+  readonly stderr: NodeStream.Readable;
+  kill(signal?: NodeJS.Signals): boolean;
+  terminate?(): Promise<void>;
+}
+
+/** Starts the app-server with piped stdio. */
+export type CodexAppServerProcessLauncher = (
+  command: string, args: readonly string[], options: { shell?: boolean; cwd?: string; env?: NodeJS.ProcessEnv },
+) => CodexAppServerProcess;
+
 /** Options passed to the CodexAppServer constructor. */
 export interface CodexAppServerOptions {
+  processLauncher?: CodexAppServerProcessLauncher;
   /** Path to the codex binary, or `"codex"` to rely on PATH resolution. */
   cliPath: string;
   /** Host platform that determines shell and process-tree behavior. */
@@ -801,6 +819,7 @@ export interface CodexAppServerWarmupResult {
 export async function warmCodexAppServer(
   cliPath: string,
   platform: NodeJS.Platform,
+  open: ProviderProcessOpener,
   timeoutMs = 20_000,
   getSpawnEnv?: () => Record<string, string>,
 ): Promise<CodexAppServerWarmupResult> {
@@ -833,19 +852,6 @@ export async function warmCodexAppServer(
     platform === "win32" && resolvedCliPath.toLowerCase().endsWith(".cmd");
 
   return await new Promise<CodexAppServerWarmupResult>((resolve) => {
-    let child: NodeChildProcess.ChildProcess;
-    try {
-      child = NodeChildProcess.spawn(resolvedCliPath, ["app-server"], {
-        stdio: ["pipe", "pipe", "ignore"],
-        shell: needsShell,
-        env: getSpawnEnv ? getSpawnEnv() : flattenProcessEnvironment(process.env),
-        windowsHide: true,
-      });
-    } catch {
-      resolve({ initialized: false });
-      return;
-    }
-
     let settled = false;
     let initialized = false;
     let latestRateLimitsPayload: unknown;
@@ -853,15 +859,7 @@ export async function warmCodexAppServer(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      // taskkill reaps the whole tree on Windows; with shell:true a plain
-      // kill() would only hit cmd.exe and orphan the codex child.
-      if (platform === "win32" && child.pid != null) {
-        void import("node:child_process").then(({ execFile }) => {
-          execFile("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true }, () => {});
-        });
-      } else {
-        child.kill("SIGKILL");
-      }
+      session.stop();
       resolve(result);
     };
 
@@ -869,18 +867,8 @@ export async function warmCodexAppServer(
       () => finish({ initialized, rateLimitsPayload: latestRateLimitsPayload }),
       remainingBudgetMs(),
     );
-    child.once("error", () => finish({ initialized, rateLimitsPayload: latestRateLimitsPayload }));
-    child.once("exit", () => finish({ initialized, rateLimitsPayload: latestRateLimitsPayload }));
-
-    // A dead child's stdin emits 'error' (EPIPE); without a listener the throw
-    // becomes an uncaught exception that kills the whole server process.
-    child.stdin!.on("error", (error: Error) => {
-      logger.warn("Codex app-server stdin error during warm-up", { error: error.message });
-    });
-
     let buffer = "";
-    child.stdout!.setEncoding("utf8");
-    child.stdout!.on("data", (chunk: string) => {
+    const onStdout = (chunk: string) => {
       buffer += chunk;
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
@@ -900,8 +888,8 @@ export async function warmCodexAppServer(
           if (msg.id === 1) {
             initialized = true;
             logger.info("Codex app-server warm-up completed", { cliPath });
-            child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
-            child.stdin!.write(
+            session.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
+            session.write(
               JSON.stringify({
                 jsonrpc: "2.0",
                 id: 2,
@@ -919,21 +907,35 @@ export async function warmCodexAppServer(
           // ignore non-JSON output
         }
       }
-    });
+    };
 
-    child.once("spawn", () => {
-      child.stdin!.write(
-        JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: {
-            clientInfo: { name: "mcode", version: "1.0.0" },
-            capabilities: { experimentalApi: true },
-          },
-        }) + "\n",
-      );
-    });
+    let session: ReturnType<ProviderProcessOpener>;
+    try {
+      session = open({
+        command: resolvedCliPath, args: ["app-server"], shell: needsShell,
+        env: getSpawnEnv ? getSpawnEnv() : flattenProcessEnvironment(process.env),
+        timeout: remainingBudgetMs(),
+      }, {
+        onStdout,
+        onStdinError: (message) => logger.warn("Codex app-server stdin error during warm-up", { error: message }),
+      });
+    } catch {
+      clearTimeout(timer);
+      resolve({ initialized: false });
+      return;
+    }
+    void session.exited.then(() => finish({ initialized, rateLimitsPayload: latestRateLimitsPayload }));
+    session.write(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          clientInfo: { name: "mcode", version: "1.0.0" },
+          capabilities: { experimentalApi: true },
+        },
+      }) + "\n",
+    );
   });
 }
 
@@ -967,7 +969,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
   public readonly cliPath: string;
 
   private rpc!: CodexRpcClient;
-  private child!: NodeChildProcess.ChildProcess;
+  private child!: CodexAppServerProcess;
   private killRequested = false;
   /** Kept apart from the RPC client so a pause requested before {@link start} still applies. */
   private outputPaused = false;
@@ -1055,8 +1057,15 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     }
   }
 
-  private spawnAppServer(command: CodexAppServerCommand): NodeChildProcess.ChildProcess {
+  private spawnAppServer(command: CodexAppServerCommand): CodexAppServerProcess {
     const configArgs = (this.options.configOverrides ?? []).flatMap((override) => ["-c", override]);
+    if (this.options.processLauncher) {
+      return this.options.processLauncher(command.cliPath, ["app-server", ...configArgs], {
+        shell: command.needsShell,
+        cwd: this.options.workingDirectory,
+        env: this.options.getSpawnEnv ? this.options.getSpawnEnv() : flattenProcessEnvironment(process.env),
+      });
+    }
     return NodeChildProcess.spawn(command.cliPath, ["app-server", ...configArgs], {
       stdio: ["pipe", "pipe", "pipe"],
       shell: command.needsShell,
@@ -1216,6 +1225,10 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
 
   private async terminateChild(): Promise<void> {
     if (!this.child) return;
+    if (this.child.terminate) {
+      await this.child.terminate();
+      return;
+    }
     if (this.options.platform === "win32") {
       await this.terminateWindowsChild(this.child);
       return;
@@ -1223,7 +1236,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     await this.terminatePosixChild(this.child);
   }
 
-  private async terminateWindowsChild(child: NodeChildProcess.ChildProcess): Promise<void> {
+  private async terminateWindowsChild(child: CodexAppServerProcess): Promise<void> {
     if (child.pid == null) {
       logger.warn("CodexAppServer: child process has no PID, cannot taskkill", { cliPath: this.cliPath });
       return;
@@ -1237,7 +1250,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     }
   }
 
-  private async terminatePosixChild(child: NodeChildProcess.ChildProcess): Promise<void> {
+  private async terminatePosixChild(child: CodexAppServerProcess): Promise<void> {
     child.kill("SIGTERM");
     const exited = await Promise.race([
       new Promise<boolean>((resolve) => child.once("exit", () => resolve(true))),

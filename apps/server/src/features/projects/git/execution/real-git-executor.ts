@@ -6,8 +6,8 @@
  */
 
 import * as NodeWorkerThreads from "node:worker_threads";
-import { runGitProcess, type GitProcessRunner } from "./git-process.js";
-import { sharedGitProcessWorkerClient } from "./git-process-worker-client.js";
+import { runProcessStart, type ProcessStartRunner } from "../../../../runtime/process/process-start.js";
+import { sharedProcessStartWorkerClient } from "../../../../runtime/process/process-start-worker-client.js";
 import type { GitExecutor, GitExecOptions, GitExecResult } from "./types.js";
 
 /** Noop used to suppress unhandled-rejection warnings on queue chains. */
@@ -124,9 +124,9 @@ export class RealGitExecutor implements GitExecutor {
    * worker; worker threads, such as the execution worker, start them inline.
    */
   constructor(
-    private readonly runProcess: GitProcessRunner = NodeWorkerThreads.isMainThread
-      ? sharedGitProcessWorkerClient().run
-      : runGitProcess,
+    private readonly runProcess: ProcessStartRunner = NodeWorkerThreads.isMainThread
+      ? sharedProcessStartWorkerClient().run
+      : runProcessStart,
   ) {}
 
   /**
@@ -186,6 +186,7 @@ export class RealGitExecutor implements GitExecutor {
     const { onStdout, onStderr } = opts;
     const observed = onStdout || onStderr;
     return await this.runProcess({
+      command: "git",
       args,
       timeout: opts.timeout ?? RealGitExecutor.DEFAULT_TIMEOUT,
       ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),

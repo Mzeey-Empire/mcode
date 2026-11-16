@@ -146,7 +146,7 @@ interface ProviderCatalogRefreshData {
   readonly freshness?: ProviderCatalogFreshness;
 }
 
-function buildCatalogSnapshot(
+async function buildCatalogSnapshot(
   deps: ProviderRouterDeps,
   params: ProviderCatalogRequest,
   context: ProviderCatalogContext,
@@ -156,7 +156,7 @@ function buildCatalogSnapshot(
   return buildProviderCatalogSnapshot({
     providerId: params.providerId,
     context,
-    skills: catalogSkills(deps, params, cwd, catalog),
+    skills: await catalogSkills(deps, params, cwd, catalog),
     entries: catalog?.plugins,
     agents: catalog?.agents,
     diagnostics: catalog?.diagnostics,
@@ -164,34 +164,34 @@ function buildCatalogSnapshot(
   });
 }
 
-function catalogSkills(
+async function catalogSkills(
   deps: ProviderRouterDeps,
   params: ProviderCatalogRequest,
   cwd: string | undefined,
   catalog?: ProviderCatalogRefreshData,
-): SkillInfo[] {
+): Promise<SkillInfo[]> {
   return catalog
     ? [...catalog.skills, ...(catalog.prompts ?? [])]
-    : deps.skillService.list(cwd, params.providerId);
+    : await deps.skillService.list(cwd, params.providerId);
 }
 
 async function refreshProviderCatalog(
   deps: ProviderRouterDeps,
   params: ProviderCatalogRequest,
   cwd: string | undefined,
-  buildSnapshot: (catalog?: ProviderCatalogRefreshData) => ReturnType<typeof buildProviderCatalogSnapshot>,
+  buildSnapshot: (catalog?: ProviderCatalogRefreshData) => Promise<ReturnType<typeof buildProviderCatalogSnapshot>>,
 ) {
   if (params.providerId === "devin") {
     const catalog = await deps.devinCatalogService.refresh(cwd);
     return {
-      snapshot: buildSnapshot(catalog),
+      snapshot: await buildSnapshot(catalog),
       confirmedEntryKinds: catalog.skillsAvailable ? ["skill"] as const : [],
     };
   }
   if (params.providerId !== "codex") return buildSnapshot();
   const catalog = await deps.codexCatalogService.refresh(cwd);
   return {
-    snapshot: buildSnapshot(catalog),
+    snapshot: await buildSnapshot(catalog),
     confirmedEntryKinds: confirmedCodexEntryKinds(catalog),
   };
 }

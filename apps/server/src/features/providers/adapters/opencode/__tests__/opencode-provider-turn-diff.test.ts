@@ -9,7 +9,7 @@ function testProvider(http: never, pool: OpenCodeServerPool) {
   const envService = { getEnv: () => ({}) };
   const host = {
     events: { submit: async () => ({ commit: {}, delivery: { ingress: "queued" } }) },
-    processes: { attach: () => {}, terminateTree: async () => {} },
+    processes: { open: () => { throw new Error("opencode-provider-turn-diff.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("opencode-provider-turn-diff.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
     runtime: { platform: "win32" },
     environment: { snapshot: () => ({}) },
     browser: {},
