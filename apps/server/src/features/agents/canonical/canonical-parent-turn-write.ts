@@ -173,7 +173,6 @@ export interface UnsavedTurnOutput {
   readonly stop?: TurnStopCause;
 }
 
-/** The timeline notice saved with the ending of a turn whose shown output was dropped. */
 const UNSAVED_OUTPUT_NOTICE = "Some output shown during this turn wasn't saved, so it won't appear after a reload.";
 
 /** Writer-local semantic operations with cloneable inputs and durable receipts. */
@@ -249,7 +248,6 @@ export class CanonicalParentTurnWrite {
     return result;
   }
 
-  /** The user's Stop and the dropped-output notice an unsaved turn's ending carries; nothing for a plain loss. */
   private unsavedOutputEnding({ threadId, unsavedOutput }: LostParentExecutionInput): { stop?: TurnStopCause; notice?: Message } {
     if (!unsavedOutput) return {};
     const notice = this.messages.createSystemNotice(threadId, UNSAVED_OUTPUT_NOTICE,

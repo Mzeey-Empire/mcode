@@ -254,7 +254,6 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
   function recovery(identity = execution) {
     return progress.recover(identity.threadId, { conversationRevision: 0, rosterRevision: 0 });
   }
-  /** Wait until the thread admits a turn command again, which happens once a failed save's exit has finished. */
   async function admitsCommands(threadId = execution.threadId) {
     await expect.poll(() => progress.beforeDurableCommand(threadId).then(() => true, () => false)).toBe(true);
     progress.cancelDurableCommand(threadId);

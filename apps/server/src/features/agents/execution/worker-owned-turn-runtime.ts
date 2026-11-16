@@ -96,10 +96,7 @@ export class WorkerOwnedTurnRuntime {
     this.progress?.bindUnsavedAgentStop(stopAgent);
   }
 
-  /**
-   * Release the worker's lease once an unsaved turn's ending is settled in storage. A turn whose finish was refused
-   * has usually been released already; one that failed mid-turn still holds its worker.
-   */
+  /** A turn whose finish was refused has usually been released already; one that failed mid-turn still holds its worker. */
   private async releaseUnsavedTurn(...[execution, lease, receipt, outcome]: Parameters<UnsavedTurnEnded>): Promise<void> {
     const owned = this.owner.current(execution.threadId);
     if (!owned || !sameExecution(owned.execution, execution) || !sameLease(owned.lease, lease)) return;

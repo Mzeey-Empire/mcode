@@ -240,10 +240,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     this.eventPublication.registerPipelineStart(() => this.initializeProviderEvents());
   }
 
-  /**
-   * Stop the agent of a turn whose output can no longer be saved, the way a user's Stop does. A turn whose finish was
-   * refused has already left the worker, so its provider is resolved through the registry.
-   */
+  /** A turn whose finish was refused has already left the worker, so its provider is resolved through the registry. */
   private async stopUnsavedAgent(execution: ExecutionIdentity): Promise<void> {
     const { threadId } = execution;
     const runtime = this.turnRuntime.snapshot(threadId);
@@ -1273,7 +1270,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     return this.finalizeStoppedTurn(prepared);
   }
 
-  /** Answer Stop for a turn whose unsaved output is being dropped, whose agent that exit already stops. */
+  /** No provider stop here: the unsaved-turn exit already stops the agent. */
   private async stopUnsavedTurn(threadId: string, stop: TurnStopCause): Promise<AgentStopResult | undefined> {
     const status = await this.workerRuntime?.progress?.stopUnsavedTurn(threadId, stop);
     return status ? { ...this.alreadyTerminal(this.prepareStop(threadId, stop)), status } : undefined;

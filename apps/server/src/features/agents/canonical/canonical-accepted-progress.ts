@@ -124,7 +124,6 @@ interface ProgressThread {
   readonly answeredPlanMessages: Set<string>;
   collaboration?: AcceptedCodexCollaboration;
   features: ReturnType<CanonicalAgentBoundary["loadAcceptedFeatureSeed"]> & { compacting: boolean };
-  /** The turn being ended because its saving cannot continue; admission stays fenced until the exit finishes. */
   exit?: UnsavedTurnExit;
   /** The user's latest Stop, kept so an exit that starts after the Stop was answered still saves it. */
   stopIntent?: { readonly executionId: string; readonly stop: TurnStopCause };
@@ -134,9 +133,8 @@ interface UnsavedTurnExit {
   /** The execution whose ending is owed; storage decides whether its turn is still running and holds its lease. */
   readonly execution: ExecutionIdentity;
   readonly error: Error;
-  /** The user's Stop, once it arrives; the ending then records it instead of the saving failure. */
+  /** Recorded by the ending in place of the saving failure. */
   stop?: TurnStopCause;
-  /** Settles once the first attempt to write the ending has finished, whatever its outcome. */
   readonly firstAttempt: Promise<void>;
   readonly markAttempted: () => void;
 }
@@ -153,7 +151,6 @@ export type UnsavedTurnEnded = (execution: ExecutionIdentity, lease: ExecutionLe
 /** How a Stop resolved for a turn whose ending is owed because its saving could not continue. */
 export type UnsavedTurnStop = "cancelled" | "already-terminal" | "ending-not-saved";
 
-/** Retries of an unsaved turn's ending start one second apart and double up to this cap. */
 const UNSAVED_ENDING_MAX_RETRY_MS = 30_000;
 const UNSAVED_ENDING_FIRST_RETRY_MS = 1_000;
 
@@ -1370,11 +1367,7 @@ export class CanonicalAcceptedProgress {
     thread.waiters.clear();
   }
 
-  /**
-   * Fence the thread now, inside the scheduler's failure callback, so nothing is admitted or retried behind the
-   * failed save. The exit itself runs outside that callback: it waits for the scheduler's in-flight write, which is
-   * the very write reporting this failure.
-   */
+  /** The exit runs outside this failure callback because it waits for the in-flight write reporting the failure. */
   private startUnsavedTurnExit(thread: ProgressThread, batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>, error: Error): void {
     if (thread.exit) return;
     const threadId = batch.execution.threadId;
@@ -1391,11 +1384,7 @@ export class CanonicalAcceptedProgress {
       threadId, executionId: exit.execution.executionId, error: describeSaveFailure(failure instanceof Error ? failure : new Error(String(failure))) }));
   }
 
-  /**
-   * Drop everything the thread could not save, stop its agent, then end its turn in storage with a notice that
-   * output was lost. The ending goes straight to the writer, because the accepted queue it would otherwise join is
-   * the one that failed.
-   */
+  /** The ending goes straight to the writer, because the accepted queue it would otherwise join is the one that failed. */
   private async endUnsavedTurn(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit): Promise<void> {
     let ending: UnsavedTurnEnding | undefined;
     try {
@@ -1460,7 +1449,6 @@ export class CanonicalAcceptedProgress {
     return this.canonical.loadExecutionLease(exit.execution.executionId) ?? undefined;
   }
 
-  /** Reload the dropped owner from storage unless the ending's own commit already did, then lift the fence. */
   private finishUnsavedTurnExit(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit,
     receipt: ExecutionWriteReceipt | undefined): void {
     if (thread.exit !== exit) return;
@@ -1790,20 +1778,14 @@ function operationInputHash(operation: ExecutionSemanticOperation): string {
   return hash.update("]").digest("hex");
 }
 
-/**
- * Output the agent sends while its turn is being ended joins the output already dropped: it is neither shown nor
- * saved. Refusing it instead would fail the agent's delivery for a turn that is already ending.
- */
+/** Dropped rather than refused, because refusing would fail the agent's delivery for a turn already ending. */
 function droppedReceipt(thread: ProgressThread, operation: ExecutionSemanticOperation): ExecutionAcceptedReceipt {
   const accepted = thread.owner.recoveryCut().accepted;
   return { kind: "accepted", operationId: operation.operationId, progressPosition: accepted,
     acceptedThrough: accepted.sequence, eventCount: 0 };
 }
 
-/**
- * The head execution when the thread's queued or live output includes some of it. Dropping that output desyncs
- * the head from storage, so its turn must end, whichever execution's save failed.
- */
+/** Dropping the head's queued or live output desyncs it from storage, so its turn ends whichever save failed. */
 function headWithDroppedOutput(thread: ProgressThread): ExecutionIdentity | undefined {
   const head = thread.head?.execution;
   if (!head) return undefined;
@@ -1812,7 +1794,6 @@ function headWithDroppedOutput(thread: ProgressThread): ExecutionIdentity | unde
   return dropped ? head : undefined;
 }
 
-/** The head turn's ending is shown but not yet saved, and saves are still queued for it. */
 function endingAwaitsSave(thread: ProgressThread): boolean {
   const turnId = thread.head?.execution.turnId;
   return turnId !== undefined && thread.durableState.turns[turnId]?.status === "Running"

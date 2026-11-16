@@ -11,10 +11,7 @@ interface PendingSave<WriteIntent> {
   readonly batch: AcceptedProgressBatch<WriteIntent>;
   attempts: number;
   retryAt: number;
-  /**
-   * A receipt observer failed or the save was reported exhausted; only an explicit retry may run this head again.
-   * An exhausted save's owner ends the turn and discards the queue, so a background retry would only race that exit.
-   */
+  /** Only an explicit retry runs this head again, so a background retry cannot race an exhausted save's exit. */
   failed: boolean;
   replacing?: Error;
 }

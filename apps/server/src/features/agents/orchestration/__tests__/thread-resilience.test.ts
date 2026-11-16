@@ -150,7 +150,6 @@ function canonicalEventCount(active: Fixture, type: string): number {
     .get(active.thread.id, type)?.count ?? 0;
 }
 
-/** A saving exit ends the turn once, keeps what was already saved, says output was lost, and stops the agent. */
 async function expectSavingExit(active: Fixture, executionId: string, fault: { readonly hits: number }) {
   expect(active.canonical.loadTurnByExecution(executionId)).toMatchObject({ status: "Interrupted", ending: { outcome: "interrupted", cause: "saving_stopped" } });
   expect(canonicalEventCount(active, "turn.interrupted")).toBe(1);
@@ -173,10 +172,7 @@ function ownedExecution(active: Fixture): OwnedExecution {
   return owned.execution;
 }
 
-/**
- * Delivers a provider event for an execution through the worker's event port, as a provider that never saw the
- * fence would. The fixture's own `deliver` drops fenced executions, so it cannot show what the server does.
- */
+/** Bypasses the fixture's `deliver`, which drops fenced executions and so cannot show what the server does. */
 function deliverLate(active: Fixture, execution: OwnedExecution, event: AgentEvent, sequence: number): Promise<unknown> {
   const itemId = `late:${execution.executionId}:item:${sequence}`;
   const eventId = `late:${execution.executionId}:event:${sequence}`;
@@ -195,7 +191,6 @@ function deliverLate(active: Fixture, execution: OwnedExecution, event: AgentEve
   });
 }
 
-/** A Stop the user gave before saving stopped is the saved ending, with the notice, and the thread takes a new send. */
 async function expectStoppedExit(active: Fixture, executionId: string) {
   expect(active.canonical.loadTurnByExecution(executionId)).toMatchObject({ status: "Cancelled", ending: { outcome: "cancelled", stop: { by: "user" } } });
   expect(unsavedOutputNotices(active)).toEqual([expect.stringMatching(/wasn't saved/)]);
