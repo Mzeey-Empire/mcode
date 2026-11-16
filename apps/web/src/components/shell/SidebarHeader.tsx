@@ -1,4 +1,5 @@
 import { McodeLogo } from "@/components/brand/McodeLogo";
+import { useOpenThreadsRowState } from "@/features/thread-attention/thread-rollup";
 import { useUiStore } from "@/stores/uiStore";
 import { HistoryButtons, SidebarToggleButton, TrafficLightsReserve } from "./ShellControls";
 import { windowChromeKind } from "./window-chrome";
@@ -11,11 +12,12 @@ const SHOW_WORDMARK = windowChromeKind(
 /** Top row of the sidebar: lights slot, toggle, logo, drag space, back and forward. */
 export function SidebarHeader() {
   const collapseSidebar = useUiStore((s) => s.collapseSidebar);
+  const appState = useOpenThreadsRowState();
   return (
     <header data-testid="sidebar-header" className="window-drag flex h-row-comfortable shrink-0 items-center gap-1 px-1.5 select-none">
       <TrafficLightsReserve />
       <SidebarToggleButton label="Collapse sidebar" onClick={() => collapseSidebar()} />
-      <McodeLogo markOnly={!SHOW_WORDMARK} />
+      <McodeLogo markOnly={!SHOW_WORDMARK} state={appState.kind} />
       <div className="min-w-0 flex-1 self-stretch" />
       <HistoryButtons />
     </header>

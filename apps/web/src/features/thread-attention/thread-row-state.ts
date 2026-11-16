@@ -27,18 +27,22 @@ export interface ThreadRowFacts {
   setup: ThreadRowSetup;
   /** The thread is open in a visible, focused window, so its outcome is already in view. */
   onScreen: boolean;
+  /** Optimistic creation failed; the placeholder keeps its pending startup until the user retries or dismisses it. */
+  createFailed: boolean;
 }
 
 const needsYou = (label: NeedsYouLabel): ThreadRowState => ({ kind: "needs-you", label });
 
 /**
- * Picks the row state. A blocking question outranks a running turn because
+ * Picks the row state. A failed create outranks everything because the server
+ * never created the thread, so nothing on it can run or wait. A blocking question outranks a running turn because
  * the turn cannot progress without the user; a plan only matters once the turn
  * that wrote it stops. Settled outcomes show only until the user sees them.
  * Delegated tasks still running after the thread's own turn keep it running,
  * below anything that needs the user and above an unseen settled outcome.
  */
 export function deriveThreadRowState(facts: ThreadRowFacts): ThreadRowState {
+  if (facts.createFailed) return { kind: "failed" };
   const live = liveRowState(facts);
   if (live) return live;
   const settled = settledRowState(facts);
