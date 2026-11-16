@@ -219,6 +219,37 @@ function failStatusReads(active: Fixture, executionId: string, failing: (status:
   return { restore: () => spy.mockRestore() };
 }
 
+/**
+ * Holds the reply to the turn's ordinary worker release until the saving exit asks to release the same execution, so
+ * both releases are under way at once. Without the hold this overlap happens only by timing, under CPU load.
+ */
+function overlapWorkerReleases(active: Fixture): { readonly overlapped: boolean } {
+  const { scheduler, owner } = active.workers;
+  let openHold!: () => void;
+  const exitReleasing = new Promise<void>((resolve) => { openHold = resolve; });
+  let held = false;
+  let overlapped = false;
+  const submit = scheduler.submit.bind(scheduler);
+  const holdSpy = vi.spyOn(scheduler, "submit").mockImplementation((input) => {
+    const admitted = submit(input);
+    const ordinaryRelease = input.command.kind === "release" && !("recovery" in input.command && input.command.recovery);
+    if (!ordinaryRelease || admitted.kind !== "admitted") return admitted;
+    held = true;
+    holdSpy.mockRestore();
+    return { ...admitted, completion: exitReleasing.then(() => admitted.completion) };
+  });
+  const releaseRecovered = owner.releaseRecovered.bind(owner);
+  const exitSpy = vi.spyOn(owner, "releaseRecovered").mockImplementation((...args) => {
+    exitSpy.mockRestore();
+    overlapped = held;
+    const released = releaseRecovered(...args);
+    openHold();
+    return released;
+  });
+  clearFaults.push(() => { holdSpy.mockRestore(); exitSpy.mockRestore(); openHold(); });
+  return { get overlapped() { return overlapped; } };
+}
+
 async function expectStoppedExit(active: Fixture, executionId: string) {
   expect(active.canonical.loadTurnByExecution(executionId)).toMatchObject({ status: "Cancelled", ending: { outcome: "cancelled", stop: { by: "user" } } });
   expect(unsavedOutputNotices(active)).toEqual([expect.stringMatching(/wasn't saved/)]);
@@ -442,6 +473,19 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     expect(stop).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
     await fault.reached;
     await retryTicks(active);
+    await expectStoppedExit(active, turn.turnExecutionId);
+  });
+
+  it("S2 admits the next send when a stopped turn's worker release and its saving exit release it at once", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
+    const fault = refuse(plan, terminalWrite(active.thread.id, turn.turnId), writerFailures.full, { times: "always", pinOperation: true });
+    const releases = overlapWorkerReleases(active);
+    const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+    expect(stop).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
+    await fault.reached;
+    await retryTicks(active);
+    if (!releases.overlapped) throw new Error("harness: the saving exit did not release while the worker release was held");
     await expectStoppedExit(active, turn.turnExecutionId);
   });
 
