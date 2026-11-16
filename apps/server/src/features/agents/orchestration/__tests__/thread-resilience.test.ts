@@ -164,6 +164,37 @@ async function expectSavingExit(active: Fixture, executionId: string, fault: { r
   expect(next).toMatchObject({ status: "fulfilled" });
 }
 
+type OwnedExecution = NonNullable<ReturnType<Fixture["workers"]["owner"]["current"]>>["execution"];
+
+/** The running turn's routing, kept so a test can deliver for it after the exit released it. */
+function ownedExecution(active: Fixture): OwnedExecution {
+  const owned = active.workers.owner.current(active.thread.id);
+  if (!owned) throw new Error("harness: no running execution owns the thread");
+  return owned.execution;
+}
+
+/**
+ * Delivers a provider event for an execution through the worker's event port, as a provider that never saw the
+ * fence would. The fixture's own `deliver` drops fenced executions, so it cannot show what the server does.
+ */
+function deliverLate(active: Fixture, execution: OwnedExecution, event: AgentEvent, sequence: number): Promise<unknown> {
+  const itemId = `late:${execution.executionId}:item:${sequence}`;
+  const eventId = `late:${execution.executionId}:event:${sequence}`;
+  const now = new Date().toISOString();
+  return active.host.events.submit({
+    ...execution, deliveryAttempt: 1, batchId: eventId, phase: "running",
+    events: [{
+      eventId, sourceProviderId: active.provider.id, sourceIdentities: [], sourceSequence: 1_000 + sequence,
+      providerTimestamp: now, routing: { ...execution, itemId },
+      payload: { type: "item.recorded", item: {
+        id: itemId, threadId: active.thread.id, turnId: execution.turnId, kind: "system",
+        providerIdentities: [], createdAt: now, updatedAt: now,
+        payload: { projection: "providerRuntimeEvent", runtimeEvent: { event } },
+      } },
+    }],
+  });
+}
+
 /** A Stop the user gave before saving stopped is the saved ending, with the notice, and the thread takes a new send. */
 async function expectStoppedExit(active: Fixture, executionId: string) {
   expect(active.canonical.loadTurnByExecution(executionId)).toMatchObject({ status: "Cancelled", ending: { outcome: "cancelled", stop: { by: "user" } } });
@@ -318,6 +349,30 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     expect(stop).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
     await fault.reached;
     await retryTicks(active);
+    await expectStoppedExit(active, turn.turnExecutionId);
+  });
+
+  it("S2 keeps a stopped turn ended when the agent's late text and completion arrive after the exit", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
+    const execution = ownedExecution(active);
+    const fault = refuse(plan, terminalWrite(active.thread.id, turn.turnId), writerFailures.full, { times: "always", pinOperation: true });
+    const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+    expect(stop).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
+    await fault.reached;
+    await retryTicks(active);
+    expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Cancelled");
+    const late = [
+      event({ type: "textDelta", threadId: active.thread.id, delta: "Late reply", isFinalResponse: true }),
+      event({ type: "turnComplete", threadId: active.thread.id, reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0, providerId: "codex" }),
+      event({ type: "ended", threadId: active.thread.id }),
+    ];
+    for (const [index, lateEvent] of late.entries()) {
+      settled("late delivery", await settleWithinTicks(active, deliverLate(active, execution, lateEvent, index)));
+    }
+    await retryTicks(active);
+    expect(assistantReplies(active)).toEqual(["Reply before Stop"]);
+    expect(canonicalEventCount(active, "turn.completed")).toBe(0);
     await expectStoppedExit(active, turn.turnExecutionId);
   });
 
