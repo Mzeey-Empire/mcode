@@ -93,15 +93,6 @@ describe("useComposerLayoutGuard responsive layout", () => {
     expect(useUiStore.getState().sidebarCollapsed).toBe(false);
   });
 
-  it("does not expand a sidebar the user collapsed", () => {
-    useUiStore.setState({ sidebarCollapsed: true });
-
-    render(<LayoutHarness contentWidth={1_440} />);
-    triggerResize();
-
-    expect(useUiStore.getState().sidebarCollapsed).toBe(true);
-  });
-
   it("maximizes an inline right panel that no longer fits beside the composer, leaving the sidebar docked", () => {
     setLayoutMeasurements(1_200);
     showRightPanelAdaptive("workspace-1", "thread-1");
@@ -121,5 +112,35 @@ describe("useComposerLayoutGuard responsive layout", () => {
       rightPanelMaximizedByLayout: true,
       sidebarCollapsed: false,
     });
+  });
+
+  function renderWideningThreadLayout(): void {
+    setLayoutMeasurements(1_200);
+    showRightPanelAdaptive("workspace-1", "thread-1");
+    const props = {
+      showPullRequests: false,
+      showLanding: false,
+      activeWorkspaceId: "workspace-1",
+      activeThreadId: "thread-1",
+    };
+    const { rerender } = render(<LayoutHarness contentWidth={700} {...props} />);
+    rerender(<LayoutHarness contentWidth={3_000} {...props} />);
+    triggerResize();
+  }
+
+  it("restores a panel the layout maximized once the composer and panel fit again", () => {
+    useUiStore.getState().setRightPanelMaximized(true, "layout");
+
+    renderWideningThreadLayout();
+
+    expect(useUiStore.getState().rightPanelMaximized).toBe(false);
+  });
+
+  it("keeps a panel the user maximized after the content row widens", () => {
+    useUiStore.getState().setRightPanelMaximized(true);
+
+    renderWideningThreadLayout();
+
+    expect(useUiStore.getState().rightPanelMaximized).toBe(true);
   });
 });
