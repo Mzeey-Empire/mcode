@@ -143,7 +143,7 @@ function sight(threadId: string): Sighting {
   const { byThreadId, onScreenThreadId } = threadAttentionStore.getState();
   const attention = byThreadId[threadId];
   const thread = findThread(threadId);
-  const state = readThreadRowState(threadId, thread?.clientPreparing === true);
+  const state = readThreadRowState(threadId, thread?.clientPreparing === true, thread?.clientError != null);
   // A deleted thread keeps its attention facts but has nothing left to open.
   const event = thread ? eventOf(state, attention) : null;
   return { thread, state, event, facts: factsOf(attention), onScreen: onScreenThreadId === threadId };

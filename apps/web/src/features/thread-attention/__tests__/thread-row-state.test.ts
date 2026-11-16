@@ -33,7 +33,7 @@ function attention({
 }
 
 function facts(overrides: Partial<ThreadRowFacts>): ThreadRowFacts {
-  return { attention: undefined, running: false, setup: null, onScreen: false, ...overrides };
+  return { attention: undefined, running: false, setup: null, onScreen: false, createFailed: false, ...overrides };
 }
 
 const QUIET: ThreadRowState = { kind: "quiet" };
@@ -95,6 +95,7 @@ describe("deriveThreadRowState", () => {
     ["delegating over unseen failed", facts({ attention: attention({ outcome: "errored", delegating: true }) }), RUNNING],
     ["unseen interrupted over delegating", facts({ attention: attention({ outcome: "interrupted", delegating: true }) }), interrupted],
     ["plan ready over delegating", facts({ attention: attention({ waiting: "plan", outcome: "completed", delegating: true }) }), plan],
+    ["failed create over running and approval", facts({ createFailed: true, running: true, attention: attention({ waiting: "approval" }) }), FAILED],
     ["delegating stays running while on screen", facts({ onScreen: true, attention: attention({ outcome: "completed", delegating: true }) }), RUNNING],
   ])("%s", (_name, input, expected) => {
     expect(deriveThreadRowState(input)).toEqual(expected);

@@ -18,16 +18,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
-import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
-import { threadRowLook, threadRowSetup, threadStartupRecord } from "@/features/thread-attention/thread-row-presentation";
-import { deriveThreadRowState, rollUpThreadRowStates, type ThreadRowState } from "@/features/thread-attention/thread-row-state";
-import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
+import { threadRowLook } from "@/features/thread-attention/thread-row-presentation";
+import { useRolledUpThreadRowState } from "@/features/thread-attention/thread-rollup";
+import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
 import { getCiVisual } from "@/lib/ci-status";
 import { FILE_EXPLORER_ID } from "@/lib/resolveDefaultOpenInApp";
 import { cn } from "@/lib/utils";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useThreadDraftStore } from "@/stores/threadDraftStore";
-import { getExecutingThreadIds, useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import type { Workspace } from "@/transport/types";
@@ -42,8 +40,7 @@ type ProjectItem = Extract<SidebarItem, { kind: "project" }>;
 /** Which edge of a project header a dragged project would land on. */
 export type DropEdge = "top" | "bottom";
 
-const QUIET_ROW_STATE: ThreadRowState = { kind: "quiet" };
-const NO_THREADS: readonly WorkspaceThread[] = [];
+const NO_THREADS: readonly WorkspaceThread[] = Object.freeze([]);
 
 function workspaceThreads(threads: readonly WorkspaceThread[], workspaceId: string): readonly WorkspaceThread[] {
   const owned = threads.filter((thread) => thread.workspace_id === workspaceId);
@@ -52,26 +49,6 @@ function workspaceThreads(threads: readonly WorkspaceThread[], workspaceId: stri
 
 function inScope(thread: WorkspaceThread, scope: SidebarScope): boolean {
   return scope === "completed" ? thread.user_completed_at !== null : thread.user_completed_at === null;
-}
-
-/** The highest-priority state among a collapsed project's threads, read from the shared row-state stores. */
-function useCollapsedStatus(threads: readonly WorkspaceThread[], collapsed: boolean): ThreadRowState {
-  const executing = useThreadStore(useShallow(getExecutingThreadIds));
-  const pendingStartup = useWorkspaceStore((state) => state.pendingStartupByThreadId);
-  const attention = threadAttentionStore((state) => state.byThreadId);
-  const onScreenThreadId = threadAttentionStore((state) => state.onScreenThreadId);
-  const startups = useThreadStartupStore(useShallow((state) => ({
-    recordsByStartupId: state.recordsByStartupId,
-    startupIdByThreadId: state.startupIdByThreadId,
-  })));
-  if (!collapsed) return QUIET_ROW_STATE;
-  const running = new Set(executing);
-  return rollUpThreadRowStates(threads.map((thread) => deriveThreadRowState({
-    attention: attention[thread.id],
-    running: running.has(thread.id) || pendingStartup[thread.id] !== undefined || thread.clientPreparing === true,
-    setup: threadRowSetup(threadStartupRecord(startups, thread.id)),
-    onScreen: onScreenThreadId === thread.id,
-  })));
 }
 
 type SortableAttributes = ReturnType<typeof useSortable>["attributes"];
@@ -139,7 +116,7 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
   // Only headers roll up CI, so only they subscribe; a checks poll must not re-render thread rows.
   const checksById = useWorkspaceStore((state) => state.checksById);
   const scope = useSidebarScope();
-  const collapsedStatus = useCollapsedStatus(threads, item.collapsed);
+  const collapsedStatus = useRolledUpThreadRowState(item.collapsed ? threads : NO_THREADS);
   if (!workspace) return null;
   return (
     <>

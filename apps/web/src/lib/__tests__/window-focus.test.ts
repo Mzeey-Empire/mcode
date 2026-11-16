@@ -19,4 +19,20 @@ describe("startMotionGate", () => {
     window.dispatchEvent(new Event("focus"));
     expect(document.documentElement.dataset.motion).toBe("live");
   });
+
+  it("pauses motion while the tab is hidden and resumes it when visible", () => {
+    let visibility: DocumentVisibilityState = "visible";
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
+    startMotionGate();
+    expect(document.documentElement.dataset.motion).toBe("live");
+
+    visibility = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(document.documentElement.dataset.motion).toBe("paused");
+
+    visibility = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(document.documentElement.dataset.motion).toBe("live");
+  });
 });

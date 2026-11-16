@@ -24,7 +24,8 @@ vi.mock("@/stores/uiStore", () => ({
 }));
 
 vi.mock("@/features/projects/state/workspaceStore", () => ({
-  useWorkspaceStore: Object.assign(vi.fn(), {
+  // The header's app-wide mark selects the open threads and their pending startups.
+  useWorkspaceStore: Object.assign(vi.fn((select: (state: object) => unknown) => select({ threads: [], pendingStartupByThreadId: {} })), {
     getState: () => ({ beginNewThread: hoisted.beginNewThread }),
   }),
 }));

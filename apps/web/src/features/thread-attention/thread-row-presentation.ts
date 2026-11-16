@@ -69,17 +69,17 @@ export function threadStartupRecord(state: ThreadStartupMaps, threadId: string):
  * and startup from the shared stores, so a palette result, an expanded row and
  * a collapsed project roll-up never disagree about one thread.
  */
-export function useThreadRowState(threadId: string, preparing = false): ThreadRowState {
+export function useThreadRowState(threadId: string, preparing = false, createFailed = false): ThreadRowState {
   const attention = threadAttentionStore((state) => state.byThreadId[threadId]);
   const onScreen = threadAttentionStore((state) => state.onScreenThreadId === threadId);
   const executing = useThreadStore((state) => isThreadExecuting(threadId, state));
   const startupPending = useWorkspaceStore((state) => state.pendingStartupByThreadId[threadId] !== undefined);
   const setup = useThreadStartupStore((state) => threadRowSetup(threadStartupRecord(state, threadId)));
-  return deriveThreadRowState({ attention, running: executing || startupPending || preparing, setup, onScreen });
+  return deriveThreadRowState({ attention, running: executing || startupPending || preparing, setup, onScreen, createFailed });
 }
 
 /** Reads a thread's row state outside React from the same facts as {@link useThreadRowState}. */
-export function readThreadRowState(threadId: string, preparing = false): ThreadRowState {
+export function readThreadRowState(threadId: string, preparing = false, createFailed = false): ThreadRowState {
   const { byThreadId, onScreenThreadId } = threadAttentionStore.getState();
   const startupPending = useWorkspaceStore.getState().pendingStartupByThreadId[threadId] !== undefined;
   return deriveThreadRowState({
@@ -87,5 +87,6 @@ export function readThreadRowState(threadId: string, preparing = false): ThreadR
     running: isThreadExecuting(threadId, useThreadStore.getState()) || startupPending || preparing,
     setup: threadRowSetup(threadStartupRecord(useThreadStartupStore.getState(), threadId)),
     onScreen: onScreenThreadId === threadId,
+    createFailed,
   });
 }

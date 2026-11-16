@@ -78,7 +78,7 @@ function ThreadRow({ thread, workspace, depth, showProject, ctx }: { thread: Wor
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
   const isRunning = useThreadStore((s) => isThreadExecuting(thread.id, s));
   const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
-  const rowState = useThreadRowState(thread.id, thread.clientPreparing === true);
+  const rowState = useThreadRowState(thread.id, thread.clientPreparing === true, thread.clientError != null);
   const completion = useCompletionStore((s) => s.entries.get(thread.id));
   const presentation = createThreadRowPresentation(thread, rowState, ctx, startupPending, isActive, completion);
   const lifecycle = useThreadLifecycleActions({
