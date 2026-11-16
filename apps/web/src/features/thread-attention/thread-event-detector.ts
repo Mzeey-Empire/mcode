@@ -1,12 +1,13 @@
 import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
+import { isWindowFocused } from "@/lib/window-focus";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useUiStore } from "@/stores/uiStore";
-import { isWindowFocused, threadAttentionStore } from "./thread-attention-store";
+import { threadAttentionStore } from "./thread-attention-store";
 import { readThreadRowState } from "./thread-row-presentation";
 import type { NeedsYouLabel, ThreadRowState } from "./thread-row-state";
 

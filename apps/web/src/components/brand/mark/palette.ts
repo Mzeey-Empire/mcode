@@ -22,3 +22,9 @@ export const MASK_KEEP = "#fff";
 
 /** Mask luminance that cuts what it covers. */
 export const MASK_CUT = "#000";
+
+/** A live trace with no current: the quiet and loading states, and a failed trace under its stubs. */
+export const UNLIT = "#4a5361";
+
+/** Chip outline while no current flows: the quiet, loading and failed states. */
+export const CHIP_OUTLINE = "#2a3240";

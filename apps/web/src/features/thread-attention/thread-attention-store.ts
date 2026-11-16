@@ -2,14 +2,10 @@ import { create } from "zustand";
 import type { SeenMark, ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { isWindowFocused } from "@/lib/window-focus";
 
 /** A thread must remain focused and visible this long before its rendered outcome is seen. */
 export const ACKNOWLEDGE_SEEN_DWELL_MS = 150;
-
-/** Whether the user is looking at this Mcode window: visible and holding focus. */
-export function isWindowFocused(): boolean {
-  return document.visibilityState === "visible" && document.hasFocus();
-}
 
 interface ThreadAttentionState {
   byThreadId: Record<string, ThreadAttention>;
