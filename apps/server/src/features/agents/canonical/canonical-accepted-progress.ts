@@ -1399,15 +1399,7 @@ export class CanonicalAcceptedProgress {
       thread.live?.cancelTimer();
       thread.live = undefined;
       thread.owner.discard();
-      const lease = this.endingStillOwed(threadId, thread, exit);
-      if (!lease) {
-        logger.warn("Unsaved progress belongs to no running turn; dropped it without an ending", { threadId,
-          executionId: exit.execution.executionId });
-        return;
-      }
-      await this.stopUnsavedAgent?.(exit.execution).catch((error: unknown) => logger.warn("Unsaved turn agent stop failed", {
-        threadId, error: error instanceof Error ? error.message : String(error) }));
-      ending = await this.writeUnsavedEnding(threadId, thread, exit, lease);
+      ending = await this.writeUnsavedEnding(threadId, thread, exit);
     } finally {
       exit.markAttempted();
       this.finishUnsavedTurnExit(threadId, thread, exit, ending?.receipt);
@@ -1415,34 +1407,49 @@ export class CanonicalAcceptedProgress {
     if (ending) await this.onUnsavedTurnEnded?.(exit.execution, ending.lease, ending.receipt);
   }
 
-  private async writeUnsavedEnding(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit,
-    initialLease: ExecutionLease): Promise<UnsavedTurnEnding | undefined> {
-    let lease: ExecutionLease | undefined = initialLease;
+  /**
+   * Retry until the ending is settled or its turn no longer runs in storage. Each attempt rereads the writer's lease,
+   * so a conflict from a lease the writer no longer holds is retried with the one it checks.
+   */
+  private async writeUnsavedEnding(threadId: string, thread: ProgressThread,
+    exit: UnsavedTurnExit): Promise<UnsavedTurnEnding | undefined> {
+    let agentStopped = false;
     for (let delayMs = UNSAVED_ENDING_FIRST_RETRY_MS; ; delayMs = Math.min(delayMs * 2, UNSAVED_ENDING_MAX_RETRY_MS)) {
+      if (this.closing || this.threads.get(threadId) !== thread) return undefined;
       try {
+        const lease = this.owedEndingLease(exit);
+        if (!lease) {
+          logger.warn("Unsaved progress belongs to no running turn; dropped it without an ending", { threadId,
+            executionId: exit.execution.executionId });
+          return undefined;
+        }
+        if (!agentStopped) {
+          agentStopped = true;
+          await this.stopUnsavedAgent?.(exit.execution).catch((error: unknown) => logger.warn("Unsaved turn agent stop failed", {
+            threadId, error: error instanceof Error ? error.message : String(error) }));
+        }
         const receipt = await this.writer.interruptWorkerLoss({ execution: exit.execution, lease,
           reason: exit.stop ? "Stopped while Mcode could not save the turn's output." : "Mcode could not save the turn's output.",
           recoveryIncidentId: workerLossIncidentId({ execution: exit.execution, lease }),
           unsavedOutput: exit.stop ? { stop: exit.stop } : {} }, (events) => this.observeCommitted(events));
-        if (receipt.kind !== "committed") {
-          logger.warn("Unsaved turn ending was not written", { threadId, executionId: exit.execution.executionId,
-            receipt: receipt.kind, recoveryState: receipt.kind === "conflict" ? receipt.recoveryState : undefined });
+        if (receipt.kind === "committed" || (receipt.kind === "conflict" && receipt.recoveryState)) {
+          if (receipt.kind !== "committed") logger.warn("Unsaved turn ending was not written", { threadId,
+            executionId: exit.execution.executionId, recoveryState: receipt.recoveryState });
+          return { lease, receipt };
         }
-        return { lease, receipt };
+        logger.warn("Unsaved turn ending was refused while its turn is still running; retrying", { threadId,
+          executionId: exit.execution.executionId, receipt: receipt.kind, retryInMs: delayMs });
       } catch (error) {
-        exit.markAttempted();
         logger.warn("Unsaved turn ending could not be saved; retrying", { threadId, executionId: exit.execution.executionId,
           retryInMs: delayMs, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
       }
+      exit.markAttempted();
       await new Promise((resolve) => setTimeout(resolve, delayMs));
-      lease = this.endingStillOwed(threadId, thread, exit);
-      if (!lease) return undefined;
     }
   }
 
   /** The writer's lease for the exit's execution while its turn is still Running in storage, so its ending is owed. */
-  private endingStillOwed(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit): ExecutionLease | undefined {
-    if (this.closing || this.threads.get(threadId) !== thread) return undefined;
+  private owedEndingLease(exit: UnsavedTurnExit): ExecutionLease | undefined {
     if (this.canonical.loadTurnByExecution(exit.execution.executionId)?.status !== "Running") return undefined;
     return this.canonical.loadExecutionLease(exit.execution.executionId) ?? undefined;
   }
