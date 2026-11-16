@@ -139,28 +139,6 @@ describe("AcceptedSaveScheduler", () => {
     }
   });
 
-  it("gives an exhausted head a fresh attempt on close, then writes the text queued behind it", async () => {
-    const progress = owner("one");
-    const writes: string[] = [];
-    let blocked = true;
-    const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
-      writes.push(batch.operationId);
-      if (blocked) throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
-      return receipt(batch);
-    } }, maxAttempts: 1, retryDelayMs: 1_000, classify: classifySaveFailure,
-    onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
-    onFailure: async (_batch, failure) => { progress.recordFailure(failure); } });
-    scheduler.enqueue(accepted(progress, "one", "visible-a"));
-    scheduler.enqueue(accepted(progress, "one", "visible-b"));
-    await scheduler.settle();
-    expect(progress.savingState().kind).toBe("failed");
-    blocked = false;
-    await scheduler.close();
-    expect(writes).toEqual(["visible-a", "visible-a", "visible-b"]);
-    expect(scheduler.depth().pending).toBe(0);
-    expect(progress.savingState().kind).toBe("saved");
-  });
-
   it("starts no save attempt after its close deadline and leaves the unwritten saves queued", async () => {
     vi.useFakeTimers();
     try {
@@ -191,18 +169,23 @@ describe("AcceptedSaveScheduler", () => {
     }
   });
 
-  describe("with an environment failure", () => {
+  describe("with a failure that exhausts the save", () => {
     afterEach(() => { vi.useRealTimers(); });
 
-    it("keeps retrying the head after reporting it exhausted, without blocking a peer", async () => {
+    // The owner of an exhausted save ends the turn and drops its queue, so a background retry would only race it.
+    it.each([
+      ["a busy database past its attempts", Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" }), 2],
+      ["a full disk", Object.assign(new Error("database or disk is full"), { code: "SQLITE_FULL" }), 1],
+    ])("stops writing the head after %s, without blocking a peer", async (_name, refusal, attempts) => {
       vi.useFakeTimers();
       const one = owner("one");
       const two = owner("two");
-      let diskFull = true;
-      const full = Object.assign(new Error("database or disk is full"), { code: "SQLITE_FULL" });
+      let refusing = true;
+      const writes: string[] = [];
       const failures: ProgressSaveFailure[] = [];
       const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
-        if (batch.execution.threadId === "one" && diskFull) throw full; return receipt(batch);
+        writes.push(batch.operationId);
+        if (batch.execution.threadId === "one" && refusing) throw refusal; return receipt(batch);
       } }, maxAttempts: 2, retryDelayMs: 1_000, classify: classifySaveFailure,
       onSaved: async (batch, saved) => { (batch.execution.threadId === "one" ? one : two).acknowledge(saved); },
       onFailure: async (_batch, failed) => { failures.push(failed); one.recordFailure(failed); } });
@@ -211,18 +194,37 @@ describe("AcceptedSaveScheduler", () => {
       scheduler.enqueue(a);
       scheduler.enqueue(b);
       scheduler.enqueue(accepted(two, "two", "two:1"));
-      await vi.advanceTimersByTimeAsync(0);
-      expect(one.savingState()).toMatchObject({ kind: "failed", error: full });
-      expect(two.savingState().kind).toBe("saved");
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(failures.length).toBeGreaterThan(2);
-      expect(failures.every((failure) => failure.exhausted)).toBe(true);
+      expect(two.savingState().kind).toBe("saved");
+      expect(failures.map((failure) => failure.exhausted)).toEqual([...Array(attempts - 1).fill(false), true]);
+      refusing = false;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(writes.filter((id) => id === "a")).toHaveLength(attempts);
+      expect(one.savingState()).toMatchObject({ kind: "failed", error: refusal });
       expect(one.recoveryCut().retained).toEqual([a, b]);
-      diskFull = false;
-      await vi.advanceTimersByTimeAsync(30_000);
-      expect(one.savingState().kind).toBe("saved");
-      expect(scheduler.depth()).toMatchObject({ pending: 0, threads: 0 });
+      await scheduler.discardThread("one");
       await scheduler.close();
+      expect(writes).not.toContain("b");
+    });
+
+    it("leaves an exhausted head unwritten on close", async () => {
+      const progress = owner("one");
+      const writes: string[] = [];
+      let blocked = true;
+      const scheduler = new AcceptedSaveScheduler<string>({ writer: { append: async (batch) => {
+        writes.push(batch.operationId);
+        if (blocked) throw Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+        return receipt(batch);
+      } }, maxAttempts: 1, retryDelayMs: 1_000, classify: classifySaveFailure,
+      onSaved: async (_batch, saved) => { progress.acknowledge(saved); },
+      onFailure: async (_batch, failure) => { progress.recordFailure(failure); } });
+      scheduler.enqueue(accepted(progress, "one", "visible-a"));
+      scheduler.enqueue(accepted(progress, "one", "visible-b"));
+      await scheduler.settle();
+      blocked = false;
+      await scheduler.close();
+      expect(writes).toEqual(["visible-a"]);
+      expect(scheduler.depth().pending).toBe(2);
     });
   });
 

@@ -13,7 +13,7 @@ import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient as SharedCanonicalAgentWriterClient, CanonicalWriterAcknowledgementCapacity } from "../canonical-agent-writer-client.js";
-import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { ApplicationDatabaseWriter, DatabaseWriterAdmissionFull } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { workspaceWriteOperations } from "../../../projects/persistence/workspace-write-operations.js";
 import { CanonicalAgentWriterReceipts } from "../canonical-agent-writer-receipts.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
@@ -944,7 +944,7 @@ describe("canonical SQLite writer", () => {
     let locked = true;
     try {
       const accepted = Array.from({ length: 64 }, (_, index) => activeWriter.commit(`queued-${index}`, batch));
-      await expect(activeWriter.commit("overflow", batch)).rejects.toThrow("Canonical writer admission is full");
+      await expect(activeWriter.commit("overflow", batch)).rejects.toBeInstanceOf(DatabaseWriterAdmissionFull);
       db.run("ROLLBACK");
       locked = false;
       const results = await Promise.all(accepted);
