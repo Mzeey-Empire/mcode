@@ -699,6 +699,7 @@ specific:
 | More actions | `Ellipsis` |
 | Expand or next | `ChevronRight` |
 | Collapse or disclose | `ChevronDown` |
+| List fold: show rows below, then hide them | `ChevronDown`, then `ChevronUp` |
 | Back | `ArrowLeft` |
 | Submit or send | `ArrowUp` |
 | Retry or refresh | `RotateCw` |
@@ -1212,12 +1213,22 @@ are provider-native, so they show the parent thread's provider.
   share one row. The search's hairline is the input's own underline, so it
   stops at the edges of the list rows below it and turns `focus` while the
   search has focus. The caption's hairline closes the pane's header and,
-  like the column and footer rules, runs edge to edge. The caption is one line in Caption `muted`:
-  "Reasoning" on the left and the highlighted model's short name on the
-  right, since the rail or group label already names the provider. A name
-  too long for the line drops whole to its own line rather than fading. The
-  model's own default level carries a `Default` tag in Caption `muted`,
-  before any check. A check marks the committed model and level. The list
+  like the column and footer rules, runs edge to edge. The caption is the
+  pane's title: the highlighted model's short name alone, left-aligned in
+  Body small `ink`, since the levels say what the pane is for and the rail
+  or group label already names the provider. A long name wraps rather than
+  fading, and the name fades in when the pane moves to another model. On
+  the list's "Show more" or "Show less" row, which has no levels, the pane
+  keeps the model it showed. The model's own default level carries a
+  `Default` tag in Caption `muted`, before any check. A check marks the
+  committed model and level. When the pane moves to another model, levels
+  both models offer hold still, levels the new model lacks fold shut, new
+  ones fold open, and the tag and check fade onto their new rows. A model
+  with no levels folds its rows away and shows "No reasoning levels". A
+  provider with older models folds them behind a "Show more" row in the
+  same group, with no gap or divider; opening it reveals them, and the row
+  becomes "Show less" after the last of them. Its chevron points down while
+  closed and up while open. The list
   and pane are eight rows tall, so a provider with eight models opens with
   Ctrl+1 to Ctrl+8 in view. A list narrower than 240px, in a narrow window,
   hides the keycaps so model names stay whole; the shortcuts still work.

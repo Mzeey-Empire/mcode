@@ -7,6 +7,7 @@ import {
   normalizeReasoningLevelForModel,
   orderReasoningLevels,
   reasoningLevelAtOrBelow,
+  supportsThinkingToggle,
 } from "../index.js";
 
 describe("isXhighEffortModel", () => {
@@ -267,6 +268,20 @@ describe("normalizeReasoningLevelForModel", () => {
     it("resolves dated variants without being shadowed by the 5.0 base IDs", () => {
       expect(normalizeReasoningLevelForModel("claude-sonnet-5-5-20270101", "xhigh")).toBe("xhigh");
       expect(normalizeReasoningLevelForModel("claude-fable-5-1-20270101", "xhigh")).toBe("xhigh");
+    });
+  });
+
+  describe("Claude Fable 5.2 and Haiku 5.5 (supports all tiers)", () => {
+    it.each(["claude-fable-5-2", "claude-haiku-5-5"])("passes xhigh and max through for %s", (modelId) => {
+      expect(supportsEffortParameter(modelId)).toBe(true);
+      expect(normalizeReasoningLevelForModel(modelId, "max")).toBe("max");
+      expect(normalizeReasoningLevelForModel(modelId, "xhigh")).toBe("xhigh");
+      expect(supportsThinkingToggle(modelId)).toBe(false);
+    });
+
+    it("keeps Haiku 4.5 on its thinking toggle without effort", () => {
+      expect(supportsEffortParameter("claude-haiku-4-5")).toBe(false);
+      expect(supportsThinkingToggle("claude-haiku-4-5")).toBe(true);
     });
   });
 

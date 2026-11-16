@@ -1,5 +1,6 @@
 import { MENU_LIST_CLASS, MENU_ROW_CLASS, MenuRowBody } from "@/components/ui/menu-row";
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
+import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { Brain, Network, Zap, type LucideIcon } from "lucide-react";
 import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
 import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
@@ -7,6 +8,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { findProviderModel, supportsThinkingToggle } from "@/lib/model-registry";
+import { TIER_LADDER } from "@mcode/shared/model-effort";
 import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
 import { resolveComposerCapabilities } from "../composer-capabilities";
@@ -215,37 +217,45 @@ export interface ReasoningLevelOptionsProps {
   readonly listInset?: boolean;
 }
 
+// Mounting fades in, so the Default tag and the check ease onto their new row when the pane moves to another model.
+const FADE_IN_CLASS = "transition-opacity duration-(--duration-standard) ease-(--ease-standard) starting:opacity-0 motion-reduce:transition-none";
+
 /**
  * Reasoning levels as a single-choice listbox: the arrow keys wrap, and Enter, Space or a click chooses. Focus enters
  * on the checked level, or the first when none is checked.
+ *
+ * Every level of the ladder stays mounted and the ones `levels` lacks fold shut, so when the pane moves to another
+ * model the levels both share hold still and the rest fold in or out, instead of the whole list swapping in one frame.
  */
 export function ReasoningLevelOptions({ levels, checked, defaultLevel, label, onChoose, listInset = false }: ReasoningLevelOptionsProps) {
   const tabbable = checked !== undefined && levels.includes(checked) ? checked : levels[0];
 
   return (
-    <div role="listbox" aria-label={label} onKeyDown={moveOptionFocus} className={cn("relative", MENU_LIST_CLASS, "p-0", listInset && "gap-px")}>
+    <div role="listbox" aria-label={label} onKeyDown={moveOptionFocus} className={cn("relative", MENU_LIST_CLASS, "p-0")}>
       <SlidingHighlight follow={{ pointer: '[role="option"]' }} />
-      {levels.map((level) => (
-        <button
-          key={level}
-          type="button"
-          role="option"
-          aria-selected={level === checked}
-          tabIndex={level === tabbable ? 0 : -1}
-          onClick={() => onChoose(level)}
-          className={cn(MENU_ROW_CLASS, listInset && "px-2")}
-        >
-          <MenuRowBody
-            label={formatReasoningLabel(level)}
-            trailing={
-              level === defaultLevel ? (
-                // The hidden comma keeps the name from running together as "HighDefault" while it still holds the visible text.
-                <span className="text-caption text-muted"><span className="sr-only">,</span>{" Default"}</span>
-              ) : undefined
-            }
-            checked={level === checked}
-          />
-        </button>
+      {TIER_LADDER.map((level) => (
+        <AnimatedCollapsible key={level} open={levels.includes(level)}>
+          <button
+            type="button"
+            role="option"
+            aria-selected={level === checked}
+            tabIndex={level === tabbable ? 0 : -1}
+            onClick={() => onChoose(level)}
+            // The gap lives in the row, so a folded level leaves no gap behind. The check is the row's only icon.
+            className={cn(MENU_ROW_CLASS, listInset && "mb-px px-2", "[&_svg]:transition-opacity [&_svg]:duration-(--duration-standard) [&_svg]:starting:opacity-0 motion-reduce:[&_svg]:transition-none")}
+          >
+            <MenuRowBody
+              label={formatReasoningLabel(level)}
+              trailing={
+                level === defaultLevel ? (
+                  // The hidden comma keeps the name from running together as "HighDefault" while it still holds the visible text.
+                  <span className={cn("text-caption text-muted", FADE_IN_CLASS)}><span className="sr-only">,</span>{" Default"}</span>
+                ) : undefined
+              }
+              checked={level === checked}
+            />
+          </button>
+        </AnimatedCollapsible>
       ))}
     </div>
   );

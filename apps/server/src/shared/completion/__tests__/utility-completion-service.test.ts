@@ -99,7 +99,7 @@ describe("UtilityCompletionService", () => {
     expect(result.provider).toBe("claude");
   });
 
-  it("uses provider-specific default model when utility.id is empty", async () => {
+  it("runs the default Claude model, Haiku 5.5, at low effort when utility.id is empty", async () => {
     const provider = mockProvider(true);
     registry = {
       resolve: vi.fn().mockReturnValue(provider),
@@ -110,17 +110,18 @@ describe("UtilityCompletionService", () => {
       utilityId: "",
     });
     const svc = new UtilityCompletionService(settings, registry, availability);
-    await svc.complete("prompt", "/tmp");
+    const result = await svc.complete("prompt", "/tmp");
 
     expect(provider.complete).toHaveBeenCalledWith(
       "prompt",
-      "claude-haiku-4-5-20251001",
+      "claude-haiku-5-5",
       "/tmp",
-      {},
+      { reasoningLevel: "low" },
     );
+    expect(result.model).toBe("claude-haiku-5-5");
   });
 
-  it("passes optional completion options to the provider", async () => {
+  it("keeps the caller's reasoning level over the default model's", async () => {
     const provider = mockProvider(true);
     registry = {
       resolve: vi.fn().mockReturnValue(provider),
@@ -128,13 +129,13 @@ describe("UtilityCompletionService", () => {
 
     const settings = mockSettingsService({ utilityProvider: "claude" });
     const svc = new UtilityCompletionService(settings, registry, availability);
-    await svc.complete("prompt", "/tmp", { reasoningLevel: "low" });
+    await svc.complete("prompt", "/tmp", { reasoningLevel: "high" });
 
     expect(provider.complete).toHaveBeenCalledWith(
       "prompt",
-      "claude-haiku-4-5-20251001",
+      "claude-haiku-5-5",
       "/tmp",
-      { reasoningLevel: "low" },
+      { reasoningLevel: "high" },
     );
   });
 });

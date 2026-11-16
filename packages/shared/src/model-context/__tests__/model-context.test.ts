@@ -32,6 +32,11 @@ describe("MODEL_CONTEXT_WINDOWS_EXTENDED", () => {
     expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-sonnet-5-5"]).toBe(1_000_000);
     expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-fable-5-1"]).toBe(1_000_000);
   });
+  it("exposes 1M for Fable 5.2 and Haiku 5.5, but not Haiku 4.5", () => {
+    expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-fable-5-2"]).toBe(1_000_000);
+    expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-haiku-5-5"]).toBe(1_000_000);
+    expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-haiku-4-5"]).toBeUndefined();
+  });
   it("exposes 1M for Opus 5", () => {
     expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-5"]).toBe(1_000_000);
   });

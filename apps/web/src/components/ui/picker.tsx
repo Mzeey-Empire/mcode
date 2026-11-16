@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, SearchIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, SearchIcon } from "lucide-react";
 
 import { formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
@@ -48,7 +48,10 @@ export interface PickerRow {
   readonly description?: ReactNode;
   /** A secondary action on the row, such as starring it. Running it never picks the row. */
   readonly action?: PickerRowAction;
-  /** Makes the row a disclosure whose pick shows or hides the rows after it, drawn with a chevron. */
+  /**
+   * Makes the row a disclosure, drawn with a chevron. Closed, its pick reveals rows below it; open, it sits after the
+   * rows it revealed and its pick hides them again.
+   */
   readonly expanded?: boolean;
   /** Rows sharing a group sit together; a divider marks where the group changes. */
   readonly group?: string;
@@ -76,7 +79,7 @@ export interface PickerRowAction {
 /**
  * A pane beside the list that shows the highlighted row's details, such as a model's reasoning levels. Right Arrow at
  * the end of the search text focuses the pane's element with `tabindex="0"`, and Left Arrow in the pane returns to the
- * search.
+ * search. A highlighted disclosure row keeps the pane of the row shown before it.
  */
 export interface PickerDetail<T> {
   /** Read on the search field, so a screen reader learns the pane exists, such as "Right Arrow: reasoning level". */
@@ -172,6 +175,7 @@ export function Picker<T>(props: PickerProps<T>) {
   const listKey = `${props.activeTab ?? ""}\u0000${query}`;
   const { activeRowKey, activeIndex, setHighlight } = useActiveRow(rows, listKey, selectedKey);
   const pane = usePaneRow(activeRowKey);
+  const paneRow = useShownPaneRow(rows, pane.key, selectedKey);
   const loadMore = useLoadMoreOnce(props, listKey);
   const searchRef = useRef<HTMLInputElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
@@ -313,8 +317,8 @@ export function Picker<T>(props: PickerProps<T>) {
         search={search}
         list={<>{tabs}{list}{listStatus}</>}
         detail={props.detail}
-        paneItem={rows.find(({ row }) => row.key === pane.key)?.item}
-        paneKey={pane.key}
+        paneItem={paneRow.item}
+        paneKey={paneRow.key}
         paneRef={paneRef}
         onPaneKeyDown={leavePane}
         onPanePointerEnter={settlePane}
@@ -421,7 +425,12 @@ function useRevealCheckedInPane(paneRef: RefObject<HTMLDivElement | null>, paneK
     reveal();
     const observer = new ResizeObserver(reveal);
     observer.observe(pane);
-    return () => observer.disconnect();
+    // A pane whose rows fold in or out (the reasoning levels do) moves the checked row only once the fold ends.
+    pane.addEventListener("transitionend", reveal);
+    return () => {
+      observer.disconnect();
+      pane.removeEventListener("transitionend", reveal);
+    };
   }, [paneRef, paneKey]);
 }
 
@@ -536,6 +545,25 @@ function usePaneRow(activeRowKey: string | null) {
       return held ?? activeRowKey;
     },
   };
+}
+
+/**
+ * The row the detail pane draws for the pane's key. A disclosure row has no details of its own, and blanking the pane as
+ * the pointer crosses it reads as a glitch, so it keeps the row shown before it. Once that row is filtered or folded
+ * away it shows the selected row, and once that is gone too, the nearest ordinary row above the disclosure row.
+ */
+function useShownPaneRow<T>(rows: readonly ListRow<T>[], paneKey: string | null, selectedKey: string | undefined): { readonly key: string | null; readonly item: T | undefined } {
+  const lastShownKey = useRef<string | null>(null);
+  const find = (key: string | null | undefined) => (key == null ? undefined : rows.find(({ row }) => row.key === key));
+  const current = find(paneKey);
+  const shown = current?.row.expanded === undefined
+    ? current
+    : (find(lastShownKey.current) ?? find(selectedKey) ?? rows.slice(0, rows.indexOf(current)).reverse().find(({ row }) => row.expanded === undefined));
+  const key = shown?.row.key ?? null;
+  useEffect(() => {
+    if (key !== null) lastShownKey.current = key;
+  });
+  return { key, item: shown?.item };
 }
 
 /**
@@ -998,7 +1026,7 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
 
 function PickerDisclosureChevron({ expanded }: { readonly expanded: boolean | undefined }) {
   if (expanded === undefined) return null;
-  const Chevron = expanded ? ChevronDownIcon : ChevronRightIcon;
+  const Chevron = expanded ? ChevronUpIcon : ChevronDownIcon;
   return (
     <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center text-muted">
       <Chevron className="size-[1.4rem]" />

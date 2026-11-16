@@ -16,9 +16,10 @@ describe("Claude model lifecycle", () => {
   const lifecycleOf = (id: string) => CLAUDE_STATIC_MODELS.find((row) => row.id === id)?.lifecycle ?? "current";
 
   it("folds the previous generation away and keeps the newest of each family current", () => {
-    expect(["claude-opus-5", "claude-sonnet-5"].map(lifecycleOf)).toEqual(["legacy", "legacy"]);
-    expect(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"].map(lifecycleOf))
-      .toEqual(["current", "current", "current"]);
+    expect(["claude-opus-5", "claude-sonnet-5", "claude-fable-5-1", "claude-haiku-4-5"].map(lifecycleOf))
+      .toEqual(["legacy", "legacy", "legacy", "legacy"]);
+    expect(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-haiku-5-5"].map(lifecycleOf))
+      .toEqual(["current", "current", "current", "current"]);
   });
 
   it("marks a dated discovery snapshot of a legacy model without folding a newer sibling", () => {

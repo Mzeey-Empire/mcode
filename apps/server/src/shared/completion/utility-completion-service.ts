@@ -2,13 +2,22 @@ import { injectable, inject } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { isCompletionCapable } from "@mcode/contracts/providers/interfaces";
 import type { CompletionOptions, IProviderRegistry, ProviderId } from "@mcode/contracts/providers/interfaces";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { SettingsService } from "../../features/settings/settings-service.js";
 import { ProviderAvailabilityService } from "../../features/providers/availability/provider-availability-service.js";
 
-/** Per-provider default model IDs for utility tasks. */
-const UTILITY_MODEL_DEFAULTS: Record<string, string> = {
-  claude: "claude-haiku-4-5-20251001",
-  copilot: "gpt-4.1-mini",
+interface UtilityModelDefault {
+  readonly id: string;
+  /** Used when the caller sets no level, so a short task never waits on the model's own default effort. */
+  readonly reasoningLevel?: ReasoningLevel;
+}
+
+const CLAUDE_UTILITY_DEFAULT: UtilityModelDefault = { id: "claude-haiku-5-5", reasoningLevel: "low" };
+
+/** Per-provider default models for utility tasks, used when the settings name no utility model. */
+const UTILITY_MODEL_DEFAULTS: Record<string, UtilityModelDefault> = {
+  claude: CLAUDE_UTILITY_DEFAULT,
+  copilot: { id: "gpt-4.1-mini" },
 };
 
 /** Neither the configured utility provider nor the Claude fallback can run completions. */
@@ -70,9 +79,14 @@ export class UtilityCompletionService {
       }
     }
 
-    model = model || UTILITY_MODEL_DEFAULTS[provider] || "claude-haiku-4-5-20251001";
-
-    const text = await agent.complete(prompt, model, cwd, options);
+    if (model) {
+      const text = await agent.complete(prompt, model, cwd, options);
+      return { text, provider, model };
+    }
+    const fallback = UTILITY_MODEL_DEFAULTS[provider] ?? CLAUDE_UTILITY_DEFAULT;
+    model = fallback.id;
+    const reasoningLevel = options.reasoningLevel ?? fallback.reasoningLevel;
+    const text = await agent.complete(prompt, model, cwd, reasoningLevel === undefined ? options : { ...options, reasoningLevel });
     return { text, provider, model };
   }
 
