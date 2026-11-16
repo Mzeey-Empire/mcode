@@ -126,6 +126,8 @@ interface ProgressThread {
   features: ReturnType<CanonicalAgentBoundary["loadAcceptedFeatureSeed"]> & { compacting: boolean };
   /** The turn being ended because its saving cannot continue; admission stays fenced until the exit finishes. */
   exit?: UnsavedTurnExit;
+  /** The user's latest Stop, kept so an exit that starts after the Stop was answered still saves it. */
+  stopIntent?: { readonly executionId: string; readonly stop: TurnStopCause };
 }
 
 interface UnsavedTurnExit {
@@ -841,12 +843,13 @@ export class CanonicalAcceptedProgress {
 
   /**
    * Record a Stop on a turn whose ending is owed because its saving could not continue. Answers undefined when no
-   * such turn exists, so the ordinary Stop applies. A Stop that arrives while saving is still being retried waits
-   * for that retry: if it fails, the exit starts and records the Stop.
+   * such turn exists, so the ordinary Stop applies. The Stop is recorded first, so an exit that starts later, after
+   * a retry this Stop waits for or after the ordinary Stop's own ending fails to save, still saves it.
    */
   async stopUnsavedTurn(threadId: string, stop: TurnStopCause): Promise<UnsavedTurnStop | undefined> {
     const thread = this.threads.get(threadId);
     if (!thread) return undefined;
+    if (thread.head) thread.stopIntent = { executionId: thread.head.execution.executionId, stop };
     if (!thread.exit && endingAwaitsSave(thread)) await this.waitForSaved(threadId).catch(() => undefined);
     const current = this.threads.get(threadId);
     const exit = current?.exit;
@@ -1373,7 +1376,9 @@ export class CanonicalAcceptedProgress {
     const threadId = batch.execution.threadId;
     let markAttempted!: () => void;
     const firstAttempt = new Promise<void>((resolve) => { markAttempted = resolve; });
-    const exit: UnsavedTurnExit = { execution: headWithDroppedOutput(thread) ?? batch.execution, error, firstAttempt, markAttempted };
+    const execution = headWithDroppedOutput(thread) ?? batch.execution;
+    const stop = thread.stopIntent?.executionId === execution.executionId ? thread.stopIntent.stop : undefined;
+    const exit: UnsavedTurnExit = { execution, error, ...(stop ? { stop } : {}), firstAttempt, markAttempted };
     thread.exit = exit;
     thread.commandPending = true;
     this.rejectWaiters(thread, threadId, error);
