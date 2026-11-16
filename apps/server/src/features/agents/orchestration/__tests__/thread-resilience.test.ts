@@ -159,8 +159,17 @@ async function expectSavingExit(active: Fixture, executionId: string, fault: { r
   await retryTicks(active);
   // A dropped batch is never written again, so the fault stops being reached.
   expect(fault.hits).toBe(hits);
+  await untilRuntimeReleased(active);
   const next = await settleWithinTicks(active, send(active));
   expect(next).toMatchObject({ status: "fulfilled" });
+}
+
+/**
+ * The ending is visible in storage before the worker release finishes, and a send in that gap is refused as busy.
+ * The wait is bounded, so a release that never finishes still fails the test.
+ */
+async function untilRuntimeReleased(active: Fixture): Promise<void> {
+  await vi.waitFor(() => expect(active.service.runtimeAccess().activeCount()).toBe(0), { timeout: 10_000, interval: 10 });
 }
 
 type OwnedExecution = NonNullable<ReturnType<Fixture["workers"]["owner"]["current"]>>["execution"];
@@ -213,6 +222,7 @@ function failStatusReads(active: Fixture, executionId: string, failing: (status:
 async function expectStoppedExit(active: Fixture, executionId: string) {
   expect(active.canonical.loadTurnByExecution(executionId)).toMatchObject({ status: "Cancelled", ending: { outcome: "cancelled", stop: { by: "user" } } });
   expect(unsavedOutputNotices(active)).toEqual([expect.stringMatching(/wasn't saved/)]);
+  await untilRuntimeReleased(active);
   const next = await settleWithinTicks(active, send(active));
   expect(next).toMatchObject({ status: "fulfilled" });
 }
