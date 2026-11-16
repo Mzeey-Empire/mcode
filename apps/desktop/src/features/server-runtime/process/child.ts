@@ -25,15 +25,16 @@ export function getServerPortBand(): ServerPortBand {
 
 /**
  * Spawn the detached server. `startupId` is passed as `MCODE_STARTUP_ID` so a failed start can
- * name this spawn in `startup-failure.json`.
+ * name this spawn in `startup-failure.json`. `launchId` is passed as `MCODE_LAUNCH_ID` so the server
+ * records the launch window that this app launch's record reads back; empty leaves it disabled.
  */
-export function spawnServerProcess(port: number, platform: NodeJS.Platform, startupId: string): SpawnedServerProcess {
+export function spawnServerProcess(port: number, platform: NodeJS.Platform, startupId: string, launchId = ""): SpawnedServerProcess {
   const paths = getServerPaths(platform);
   const stderrStream = createServerStderrStream();
   try {
     const child = NodeChildProcess.spawn(paths.bunBinary, [paths.entry], {
       cwd: paths.cwd,
-      env: createServerEnvironment(paths, port, platform, startupId),
+      env: createServerEnvironment(paths, port, platform, startupId, launchId),
       detached: true,
       windowsHide: true,
       // A direct file handle preserves the final error even if the child exits immediately;
@@ -107,7 +108,7 @@ function resolveBunRuntimeExecutable(candidate: string): string {
   return runtimeExecutable;
 }
 
-function createServerEnvironment(paths: ServerPaths, port: number, platform: NodeJS.Platform, startupId: string): Record<string, string> {
+function createServerEnvironment(paths: ServerPaths, port: number, platform: NodeJS.Platform, startupId: string, launchId: string): Record<string, string> {
   const { ELECTRON_RUN_AS_NODE: _electronRunAsNode, ...parentEnvironment } = process.env;
   const env: Record<string, string> = {
     ...(parentEnvironment as Record<string, string>),
@@ -119,6 +120,7 @@ function createServerEnvironment(paths: ServerPaths, port: number, platform: Nod
     MCODE_TEMP_DIR: app.getPath("temp"),
     MCODE_VERSION: app.getVersion(),
     MCODE_STARTUP_ID: startupId,
+    MCODE_LAUNCH_ID: launchId,
   };
   if (app.isPackaged) {
     env.MCODE_PACKAGED_RESOURCES_ROOT = process.resourcesPath;

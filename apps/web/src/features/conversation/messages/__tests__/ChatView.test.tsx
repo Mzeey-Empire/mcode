@@ -208,6 +208,7 @@ import {
 } from "@/lib/thread-switch-telemetry";
 import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
 import { ChatView } from "../ChatView";
+import { transcriptShown } from "@/transport/launch-marks";
 import { KEPT_ALIVE_THREAD_COUNT } from "../chat-view/useChatViewState";
 
 /** Build a minimal Thread fixture. */
@@ -638,6 +639,26 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("conversation-transition-shell")).toHaveAttribute("data-thread-id", "thread-2");
     expect(screen.queryByTestId("conversation-loading")).not.toBeInTheDocument();
     for (const el of screen.queryAllByTestId("message-list")) expect(el).not.toBeVisible();
+  });
+
+  it("tells the launch check a reopened thread's transcript is shown only once its history loads", () => {
+    const thread = makeThread({ id: "thread-2", title: "Thread 2" });
+    setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] }));
+    chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1" });
+
+    const { rerender } = render(<ChatView />);
+    expect(transcriptShown(thread.id)).toBe(false);
+
+    const record = { ...createEmptyThreadRecord(), messages: [createMockMessage({ id: "thread-2-message", thread_id: thread.id })] };
+    chatViewThreadMockRef.current = defaultThreadState({
+      currentThreadId: thread.id,
+      activeRecord: record,
+      records: new Map([[thread.id, record]]),
+    });
+    act(() => rerender(<ChatView />));
+
+    expect(transcriptShown(thread.id)).toBe(true);
+    expect(transcriptShown("thread-1")).toBe(false);
   });
 
   it("keeps startup progress visible while the durable thread hydrates", () => {

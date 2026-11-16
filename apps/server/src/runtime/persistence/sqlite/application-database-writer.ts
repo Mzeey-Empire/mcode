@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 import * as NodeV8 from "node:v8";
 import { publishThreadActivity } from "../../../features/thread-control/persistence/thread-activity.js";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { DatabaseLaunchObservations } from "./database.js";
 import type { CanonicalWriterRequest, CanonicalWriterResponse } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { SEMANTIC_PUBLICATION_PAGE_SIZE } from "../../../features/agents/canonical/canonical-agent-writer-protocol.js";
 import { DatabaseStartupRefusal } from "./startup-refusal.js";
@@ -54,6 +55,7 @@ export interface DatabaseWriterWorker extends EventTarget {
 
 /** Owns one bounded FIFO and the application's only writable runtime connection. */
 export class ApplicationDatabaseWriter {
+  private bootstrapObservationsValue: DatabaseLaunchObservations = { migrated: false, marks: [] };
   private worker: DatabaseWriterWorker | undefined;
   private readonly queue: PendingWrite[] = [];
   private retainedBytes = 0;
@@ -73,6 +75,11 @@ export class ApplicationDatabaseWriter {
   ) {
     if (!NodePath.isAbsolute(dbPath)) throw new Error("Database writer path must be absolute");
     this.ready = this.startWorker();
+  }
+
+  /** Bootstrap observations supplied after ready. */
+  get bootstrapObservations(): DatabaseLaunchObservations {
+    return this.bootstrapObservationsValue;
   }
 
   /** Wait until the writable connection is ready without blocking the server event loop. */
@@ -228,7 +235,10 @@ export class ApplicationDatabaseWriter {
   }
 
   private receiveOpen(response: ApplicationDatabaseWriterResponse): void {
-    if (response.kind === "opened") this.initialize?.resolve();
+    if (response.kind === "opened") {
+      this.bootstrapObservationsValue = response.launchTelemetry;
+      this.initialize?.resolve();
+    }
     else this.initialize?.reject(responseError(response));
     this.initialize = undefined;
   }

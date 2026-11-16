@@ -27,6 +27,7 @@ import { pruneStaleToolOutputArtifacts } from "@mcode/providers";
 import { ThreadControlMutationReservationService } from "../index.js";
 import { ThreadDeletionTeardownService } from "../lifecycle/thread-deletion-teardown-service.js";
 import { CleanupActionRunner } from "./cleanup-action-runner.js";
+import { launchTelemetry } from "../../../runtime/diagnostics/launch-telemetry.js";
 import { DATABASE_WRITER_MAX_PENDING, DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
 /** How often to check for due cleanup jobs (ms). */
@@ -105,7 +106,7 @@ export class CleanupWorker {
     if (removedArtifacts > 0) {
       logger.info("Pruned stale tool-output artifacts", { removed: removedArtifacts });
     }
-    void this.reconcileOnStartup().catch((err) => {
+    void launchTelemetry.trackLaunchTask("cleanup startup reconciliation", this.reconcileOnStartup()).catch((err) => {
       logger.error("CleanupWorker startup reconciliation errored", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -149,7 +150,7 @@ export class CleanupWorker {
   /** Run a single poll cycle. Exported for testing. */
   async poll(): Promise<void> {
     if (this.running || this.stopped) return;
-    const pollPromise = this.runPoll();
+    const pollPromise = launchTelemetry.trackLaunchTask("cleanup poll", this.runPoll());
     this.pollPromise = pollPromise;
     try {
       await pollPromise;

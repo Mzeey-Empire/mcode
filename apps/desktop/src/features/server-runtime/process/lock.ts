@@ -250,8 +250,28 @@ function restoreQuarantinedLock(
   }
 }
 
-/** Read a newly written lock file until its auth token is available. */
+/** Read a new lock until its auth token is available; fail at the deadline even if a read hangs. */
 export async function readServerLockWithRetry(
+  lockPath: string,
+  maxAttempts: number,
+  intervalMs: number,
+  timeoutMs: number,
+): Promise<ServerLock> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error(`Server lock file not read within ${timeoutMs}ms after health check passed`)),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([pollServerLock(lockPath, maxAttempts, intervalMs), timeout]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function pollServerLock(
   lockPath: string,
   maxAttempts: number,
   intervalMs: number,

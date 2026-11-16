@@ -1,3 +1,4 @@
+import type { RendererLaunchMark } from "@mcode/contracts/launch-telemetry";
 import type { AttachmentMeta, OpenInApp } from "./types";
 import type { BrowserAutomationControllerState, BrowserAutomationHostDispatch, BrowserAutomationHostDispatchTarget, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import type { BrowserHistory, McodeBrowserCapture } from "@mcode/contracts/models/browser-preview";
@@ -448,6 +449,8 @@ interface DesktopBridge {
   };
   /** Return the URL and IPC path of the local mcode server. */
   getServerUrl(): Promise<{ url: string; ipcPath: string }>;
+  /** Report a renderer launch milestone to the desktop host. */
+  reportLaunchMark(name: RendererLaunchMark, at: number): void;
   /**
    * Verify the server is reachable; the main process silently restarts it if
    * not. Optional: older desktop builds may not expose it, so call sites use

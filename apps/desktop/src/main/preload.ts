@@ -6,6 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
+import type { RendererLaunchMark } from "@mcode/contracts/launch-telemetry";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
 import type { BrowserHistory } from "@mcode/contracts/models/browser-preview";
@@ -27,6 +28,7 @@ ipcRenderer.on("window:full-screen", (_event, fullScreen: unknown) => {
 });
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  reportLaunchMark(name: RendererLaunchMark, at: number): void { ipcRenderer.send("launch-mark", name, at); },
   /** Platform facts, full-screen state, and allowlisted native window actions. */
   window: {
     platform: hostRuntime.platform,

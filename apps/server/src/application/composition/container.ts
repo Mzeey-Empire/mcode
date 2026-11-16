@@ -4,6 +4,7 @@
  */
 
 import "reflect-metadata";
+import { launchTelemetry } from "../../runtime/diagnostics/launch-telemetry.js";
 import type { Database } from "bun:sqlite";
 import { container, Lifecycle } from "tsyringe";
 import { hostRuntime, type HostRuntime } from "@mcode/shared/node/host-runtime";
@@ -127,8 +128,13 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
   let storeId: StoreId;
   try {
     await databaseWriter.whenReady();
+    launchTelemetry.setMigrated(databaseWriter.bootstrapObservations.migrated);
+    launchTelemetry.appendMarks(databaseWriter.bootstrapObservations.marks);
+    launchTelemetry.mark("database writer ready");
     db = openReadOnlyDatabase(dbPath);
+    launchTelemetry.mark("read-only database opened");
     storeId = await ensureSnapshotStoreId(databaseWriter, dbPath, hostRuntime.platform);
+    launchTelemetry.mark("snapshot store ID ensured");
   } catch (error) {
     try { await databaseWriter.close(); }
     catch (closeError) { throw new AggregateError([error, closeError], "Database owner initialization and cleanup failed"); }

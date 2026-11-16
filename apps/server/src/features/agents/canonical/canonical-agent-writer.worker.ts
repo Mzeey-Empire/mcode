@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { applySQLiteConnectionPolicy } from "../../../runtime/persistence/sqlite/sqlite-connection-policy.js";
-import { openDatabase as openBootstrapDatabase } from "../../../runtime/persistence/sqlite/database.js";
+import { openDatabase as openBootstrapDatabase, type DatabaseLaunchObservations } from "../../../runtime/persistence/sqlite/database.js";
 import { DatabaseStartupRefusal, rootCauseMessage } from "../../../runtime/persistence/sqlite/startup-refusal.js";
 import { CanonicalAgentStore } from "./canonical-agent-store.js";
 import { CanonicalProviderCommitProjector } from "./canonical-provider-projection.js";
@@ -30,6 +30,7 @@ import { DatabaseQueryOnlyRequestSchema, OrdinaryDatabaseWriteRequestSchema, typ
 import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 
 let db: Database | undefined;
+let launchTelemetry: DatabaseLaunchObservations = { migrated: false, marks: [] };
 let ordinaryHandlers: ReadonlyMap<string, (input: unknown) => unknown> | undefined;
 let boundary: CanonicalAgentStore | undefined;
 let providerProjector: CanonicalProviderCommitProjector | undefined;
@@ -43,7 +44,7 @@ function openDatabase(dbPath: string, bootstrap = false): void {
   if (boundary || !NodePath.isAbsolute(dbPath) || (!bootstrap && !NodeFS.existsSync(dbPath))) {
     throw new Error("Canonical writer requires an existing absolute database path");
   }
-  const connection = bootstrap ? openBootstrapDatabase({ dbPath }) : new Database(dbPath, { strict: true, readwrite: true });
+  const connection = bootstrap ? openBootstrapDatabase({ dbPath, launchTelemetry }) : new Database(dbPath, { strict: true, readwrite: true });
   try {
     applySQLiteConnectionPolicy(connection, true);
     ordinaryHandlers = applicationDatabaseHandlers(connection);
@@ -115,7 +116,7 @@ async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterR
   if (request.kind === "open") {
     try {
       openDatabase(request.dbPath, request.bootstrap);
-      return { ...correlation, kind: "opened" };
+      return { ...correlation, kind: "opened", launchTelemetry };
     } catch (error) {
       return { ...correlation, kind: "failed", reason: "open-failed", failure: describeFailure(error) };
     }

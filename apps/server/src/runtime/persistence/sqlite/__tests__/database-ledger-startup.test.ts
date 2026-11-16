@@ -7,7 +7,7 @@ import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { logger } from "@mcode/shared";
-import { openDatabase, type OpenDatabaseOptions } from "../database.js";
+import { openDatabase, type DatabaseLaunchObservations, type OpenDatabaseOptions } from "../database.js";
 import { assertLedgerUsable, classifyLedger, inspectDatabase } from "../ledger-guard.js";
 import { getMigrationCatalogue, loadMigrationCatalogue, migrationsFolderForDrizzle } from "../migration-catalogue.js";
 import { floorUpsertStatement } from "../migration-contract-steps.js";
@@ -239,7 +239,8 @@ describe("openDatabase ledger guard", () => {
     const oldPath = databaseBehindCatalogue();
     expect(backupsOf(directory)).toEqual([]);
 
-    const db = openDatabase({ dbPath: oldPath });
+    const observations: DatabaseLaunchObservations = { migrated: false, marks: [] };
+    const db = openDatabase({ dbPath: oldPath, launchTelemetry: observations });
     try {
       expect(() => assertLedgerUsable(db, getMigrationCatalogue(), oldPath)).not.toThrow();
       expect(db.query("SELECT count(*) AS count FROM __drizzle_migrations").get()).toEqual({ count: catalogue.entries.length });
@@ -247,6 +248,10 @@ describe("openDatabase ledger guard", () => {
       db.close(true);
     }
     expect(backupsOf(directory)).toHaveLength(1);
+    expect(observations.migrated).toBe(true);
+    expect(observations.marks.map((mark) => mark.name)).toEqual([
+      "migration plan read", "migration backup created", "migrations applied", "schema patches applied", "ledger verified",
+    ]);
   });
 
   it("restores the 0042 receipt the previous release left out, then migrates on", () => {

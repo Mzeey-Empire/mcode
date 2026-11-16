@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { loggerInfo } = vi.hoisted(() => ({ loggerInfo: vi.fn() }));
+const { loggerInfo } = vi.hoisted(() => {
+  Object.defineProperty(process, "getCreationTime", {
+    configurable: true,
+    value: () => 1_786_536_000_000,
+  });
+  return { loggerInfo: vi.fn() };
+});
 
 vi.mock("electron", () => ({
   app: {

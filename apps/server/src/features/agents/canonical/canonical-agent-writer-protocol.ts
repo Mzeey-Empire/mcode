@@ -1,4 +1,5 @@
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { DatabaseLaunchObservations } from "../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentRevision } from "@mcode/contracts/models/canonical-agent-reconnect";
 import type { StartupRefusal } from "@mcode/contracts/startup-failure";
 import type { SavedProgressReceipt } from "../execution/thread-progress-types.js";
@@ -89,7 +90,7 @@ export type CanonicalWriterRequest =
   | (Correlation & { kind: "close" });
 
 export type CanonicalWriterResponse =
-  | (Correlation & { kind: "opened" })
+  | (Correlation & { kind: "opened"; launchTelemetry: DatabaseLaunchObservations })
   | (Correlation & { kind: "committed"; receipt: CanonicalProviderWriteReceipt })
   | (Correlation & { kind: "accepted-appended"; result: CanonicalAcceptedWriteReceipt })
   | (Correlation & { kind: "semantic-publication"; events: readonly CanonicalAgentEventEnvelope[] })

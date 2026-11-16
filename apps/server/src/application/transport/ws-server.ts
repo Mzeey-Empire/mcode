@@ -18,6 +18,7 @@ import { addClient, removeClient } from "./push.js";
 import { handleBinaryUpload } from "../../features/attachments/transport/binary-upload.js";
 import { extractToken, buildAuthCookie, matchesAuthToken } from "./auth.js";
 import { handleWorkspaceImageRequest } from "../../features/projects/files/transport/workspace-image-route.js";
+import { handleLaunchTelemetryRequest } from "./launch-telemetry-route.js";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir } from "@mcode/shared";
@@ -26,6 +27,7 @@ import { EXTERNAL_THREAD_CONTROL_MCP_PATH } from "../../features/thread-control/
 import { MCODE_MCP_PATH, type McodeMcpServer } from "../../features/mcode-mcp/index.js";
 import type { ReliabilityHarnessAdapter } from "../../runtime/reliability-harness/control.js";
 import { requestClient } from "../../runtime/diagnostics/request-client.js";
+import { launchTelemetry, type LaunchRpc } from "../../runtime/diagnostics/launch-telemetry.js";
 import { diag } from "@mcode/shared/diagnostics";
 import type { ExecutionMailboxDepth } from "../../features/agents/execution/execution-mailbox-scheduler.js";
 
@@ -91,7 +93,7 @@ interface WsMessageContext {
   readonly deps: WsServerDeps;
   readonly resolveCurrentBrowserAutomationAuthorization: () => BrowserAutomationHostConnectionAuthorization | null;
   readonly admission: RequestAdmission;
-  pendingBinaryHeader: BinaryUploadHeader | null;
+  pendingUpload: PendingUpload | null;
 }
 
 class RequestAdmission {
@@ -175,6 +177,7 @@ export function createWsServer(deps: WsServerDeps): {
     if (handleSpecialHttpRequest(req, res, requestPath, deps, wss, admission)) return;
     if (handleHealthRequest(req, res, deps)) return;
     if (handleShutdownRequest(req, res, deps)) return;
+    if (handleLaunchTelemetryRequest(req, res, deps.authToken)) return;
     if (handleAttachmentRequest(req, res, deps)) return;
     if (handleWorkspaceImageRequest(req, res, deps)) return;
 
@@ -264,7 +267,7 @@ export function createWsServer(deps: WsServerDeps): {
       deps,
       resolveCurrentBrowserAutomationAuthorization,
       admission,
-      pendingBinaryHeader: null,
+      pendingUpload: null,
     };
 
     ws.on("message", (data: Buffer | string, isBinary: boolean) => handleWsMessage(data, isBinary, messageContext));
@@ -499,15 +502,16 @@ function handleWsMessage(data: Buffer | string, isBinary: boolean, context: WsMe
 
 function rejectWsMessage(data: Buffer | string, isBinary: boolean, context: WsMessageContext): void {
   if (isBinary) {
-    const header = context.pendingBinaryHeader;
-    context.pendingBinaryHeader = null;
-    if (header) sendShutdownResponse(context.ws, header.id);
+    const pending = context.pendingUpload;
+    context.pendingUpload = null;
+    if (pending) sendShutdownResponse(context.ws, pending.header.id, pending.launchRpc);
     else context.ws.close(1012, "Server is shutting down");
     return;
   }
   const raw = typeof data === "string" ? data : data.toString("utf-8");
   const header = parseBinaryUploadHeader(raw);
-  sendShutdownResponse(context.ws, header?.id ?? parseWsRequestId(raw));
+  const launchRpc = launchRpcFor(header?.method ?? parseRequestMethod(raw), Date.now());
+  sendShutdownResponse(context.ws, header?.id ?? parseWsRequestId(raw), launchRpc);
 }
 
 function parseWsRequestId(raw: string): string {
@@ -519,45 +523,44 @@ function parseWsRequestId(raw: string): string {
   }
 }
 
-function sendShutdownResponse(ws: WebSocket, id: string | number | null): void {
-  sendWsJson(ws, { id, error: { code: "SERVER_SHUTTING_DOWN", message: "Server is shutting down" } });
+function sendShutdownResponse(ws: WebSocket, id: string | number | null, launchRpc?: LaunchRpc): void {
+  sendWsJson(ws, { id, error: { code: "SERVER_SHUTTING_DOWN", message: "Server is shutting down" } }, undefined, launchRpc);
 }
 
 /** Routes a binary terminal frame or a binary file-upload frame. */
 async function handleBinaryWsMessage(bytes: Buffer, context: WsMessageContext): Promise<void> {
-  const header = context.pendingBinaryHeader;
-  context.pendingBinaryHeader = null;
-  if (!header) {
+  const pending = context.pendingUpload;
+  context.pendingUpload = null;
+  if (!pending) {
     logger.warn("Received binary frame with no pending upload header");
     return;
   }
-  await handleFileUploadFrame(header, bytes, context.ws);
+  sendWsJson(context.ws, await fileUploadResponse(pending.header, bytes), undefined, pending.launchRpc);
 }
 
-/** Handles a clipboard file-upload frame after its text header. */
-async function handleFileUploadFrame(header: BinaryUploadHeader, bytes: Buffer, ws: WebSocket): Promise<void> {
+/** Saves a clipboard file-upload frame after its text header and returns the response for its client. */
+async function fileUploadResponse(header: BinaryUploadHeader, bytes: Buffer): Promise<WebSocketResponse> {
   if (header.method !== "clipboard.saveFile") {
     logger.warn("Unsupported binary upload method", { method: header.method });
-    sendWsJson(ws, {
+    return {
       id: header.id,
       error: { code: "UNSUPPORTED_METHOD", message: `Binary upload not supported for method: ${header.method}` },
-    });
-    return;
+    };
   }
   const metadata = readUploadMetadata(header);
   if (!metadata) {
     logger.warn("Binary upload header missing required meta fields");
-    sendWsJson(ws, {
+    return {
       id: header.id,
       error: { code: "INVALID_UPLOAD", message: "meta.mimeType and meta.fileName are required strings" },
-    });
-    return;
+    };
   }
   try {
-    const result = await handleBinaryUpload(metadata, bytes);
-    sendWsJson(ws, { id: header.id, result });
+    return { id: header.id, result: await handleBinaryUpload(metadata, bytes) };
   } catch (error) {
-    handleFileUploadFailure(header.id, error, ws);
+    const message = describeError(error);
+    logger.error("Binary upload failed", { error: message });
+    return { id: header.id, error: { code: "UPLOAD_FAILED", message } };
   }
 }
 
@@ -568,11 +571,15 @@ function readUploadMetadata(header: BinaryUploadHeader): { mimeType: string; fil
   return { mimeType, fileName };
 }
 
-/** Reports a binary upload failure to the initiating WebSocket client. */
-function handleFileUploadFailure(id: string | number | null, error: unknown, ws: WebSocket): void {
-  const message = describeError(error);
-  logger.error("Binary upload failed", { error: message });
-  sendWsJson(ws, { id, error: { code: "UPLOAD_FAILED", message } });
+/** An upload header waiting for its binary frame. Its request is timed from the header's arrival. */
+type PendingUpload = { header: BinaryUploadHeader; launchRpc?: LaunchRpc };
+
+/**
+ * Opens the launch-window RPC for a request, which must be answered through `sendWsJson` or it is reported unanswered.
+ * Unregistered methods fold into `unknown` so clients cannot grow the window's label set.
+ */
+function launchRpcFor(method: string | null, startAt: number): LaunchRpc | undefined {
+  return launchTelemetry.openRpc(method !== null && Object.hasOwn(WS_METHODS(), method) ? method : "unknown", startAt);
 }
 
 /** Sends JSON only while the WebSocket remains open. Returns whether delivery was accepted for sending. */
@@ -580,10 +587,12 @@ function sendWsJson(
   ws: WebSocket,
   value: unknown,
   onSendComplete?: (error?: Error) => void,
+  launchRpc?: LaunchRpc,
 ): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
   try {
     const payload = JSON.stringify(value);
+    if (launchRpc) launchTelemetry.answerRpc(launchRpc, Buffer.byteLength(payload));
     if (onSendComplete) ws.send(payload, onSendComplete);
     else ws.send(payload);
     return true;
@@ -615,40 +624,41 @@ function parseBinaryUploadHeader(raw: string): BinaryUploadHeader | null {
 
 /** Replaces a pending upload header and reports the abandoned upload. */
 function replacePendingUploadHeader(header: BinaryUploadHeader, context: WsMessageContext): void {
-  const previous = context.pendingBinaryHeader;
+  const previous = context.pendingUpload;
   if (previous) {
-    logger.warn("Binary upload header overwritten; previous upload abandoned", { staleId: previous.id });
+    logger.warn("Binary upload header overwritten; previous upload abandoned", { staleId: previous.header.id });
     sendWsJson(context.ws, {
-      id: previous.id,
+      id: previous.header.id,
       error: { code: "UPLOAD_ABANDONED", message: "Upload header was overwritten by a subsequent upload" },
-    });
+    }, undefined, previous.launchRpc);
   }
-  context.pendingBinaryHeader = header;
+  context.pendingUpload = { header, launchRpc: launchRpcFor(header.method, Date.now()) };
 }
 
 /** Routes a regular JSON-RPC frame and returns its response to the same client. */
 async function routeWsMessage(raw: string, context: WsMessageContext): Promise<void> {
-  const terminalCreateMethod = parseTerminalCreateMethod(raw);
+  const method = parseRequestMethod(raw);
+  const launchRpc = launchRpcFor(method, Date.now());
+  const terminalCreateMethod = method && isTerminalCreateMethod(method) ? method : null;
   const response = await routeMessage(raw, context.deps, {
     client: context.ws,
     connection: context.connection,
     browserAutomationAuthorization: context.resolveCurrentBrowserAutomationAuthorization(),
   });
-  await sendWsResponse(terminalCreateMethod, response, context);
+  await sendWsResponse(terminalCreateMethod, response, context, launchRpc);
 }
 
-type TerminalCreateMethod = DisconnectedTerminalCreate["method"];
-
-/** Reads the only create methods that may allocate a Terminal resource. */
-function parseTerminalCreateMethod(raw: string): TerminalCreateMethod | null {
+/** Reads a request's method name, or null when the frame is not a valid request. */
+function parseRequestMethod(raw: string): string | null {
   try {
     const parsed = WebSocketRequestSchema().safeParse(JSON.parse(raw));
-    if (!parsed.success) return null;
-    return isTerminalCreateMethod(parsed.data.method) ? parsed.data.method : null;
+    return parsed.success ? parsed.data.method : null;
   } catch {
     return null;
   }
 }
+
+type TerminalCreateMethod = DisconnectedTerminalCreate["method"];
 
 function isTerminalCreateMethod(method: string): method is TerminalCreateMethod {
   return method === "terminal.create";
@@ -659,18 +669,19 @@ async function sendWsResponse(
   method: TerminalCreateMethod | null,
   response: WebSocketResponse,
   context: WsMessageContext,
+  launchRpc?: LaunchRpc,
 ): Promise<void> {
   if (!method) {
-    sendWsJson(context.ws, response);
+    sendWsJson(context.ws, response, undefined, launchRpc);
     return;
   }
   const create = disconnectedTerminalCreateFromResponse(method, response);
   if (!create) {
-    sendWsJson(context.ws, response);
+    sendWsJson(context.ws, response, undefined, launchRpc);
     return;
   }
   const delivered = await new Promise<boolean>((resolve) => {
-    const accepted = sendWsJson(context.ws, response, (error) => resolve(!error));
+    const accepted = sendWsJson(context.ws, response, (error) => resolve(!error), launchRpc);
     if (!accepted) resolve(false);
   });
   if (!delivered) await cleanupDisconnectedTerminalCreate(create, context);

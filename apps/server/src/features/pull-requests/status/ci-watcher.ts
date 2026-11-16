@@ -2,6 +2,7 @@ import { logger } from "@mcode/shared";
 import type { GithubService, PullRequestWatchSnapshot } from "../github/github-service.js";
 import type { ChecksStatus } from "@mcode/contracts/github";
 import type { Thread } from "@mcode/contracts/models/thread";
+import { launchTelemetry } from "../../../runtime/diagnostics/launch-telemetry.js";
 
 /** Internal tracking entry for one thread and linked PR. */
 export interface WatchEntry {
@@ -218,7 +219,7 @@ export class CiWatcherService {
     this.activeTimer = setInterval(async () => {
       if (this.activeTicking) return;
       this.activeTicking = true;
-      try { await this.poll([...this.active.values()]); } finally { this.activeTicking = false; }
+      try { await launchTelemetry.trackLaunchTask("CI active poll", this.poll([...this.active.values()])); } finally { this.activeTicking = false; }
     }, ACTIVE_INTERVAL_MS);
   }
 
@@ -232,7 +233,7 @@ export class CiWatcherService {
     this.passiveTimer = setInterval(async () => {
       if (this.passiveTicking) return;
       this.passiveTicking = true;
-      try { await this.poll([...this.passive.values()]); } finally { this.passiveTicking = false; }
+      try { await launchTelemetry.trackLaunchTask("CI passive poll", this.poll([...this.passive.values()])); } finally { this.passiveTicking = false; }
     }, PASSIVE_INTERVAL_MS);
   }
 

@@ -1,3 +1,4 @@
+import * as NodeHTTP from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({
@@ -42,10 +43,24 @@ function createRuntime(
 
 describe("ServerRuntime Desktop Window seam", () => {
   const originalFetch = globalThis.fetch;
+  const servers: NodeHTTP.Server[] = [];
+
+  async function listen(handler: NodeHTTP.RequestListener): Promise<number> {
+    const server = NodeHTTP.createServer(handler);
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Test server has no port");
+    return address.port;
+  }
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.useRealTimers();
+    for (const server of servers.splice(0)) {
+      server.closeAllConnections();
+      server.close();
+    }
   });
 
   it("withholds the server URL until the window has its auth cookie and relay", async () => {
@@ -114,6 +129,40 @@ describe("ServerRuntime Desktop Window seam", () => {
       relayIpcPath: "test-ipc-path",
     });
     await expect(connecting).resolves.toBe(43123);
+  });
+
+  it("holds the launch-telemetry read until the server answers and sends the connection credential", async () => {
+    const requests: NodeHTTP.IncomingMessage[] = [];
+    const answers: Array<() => void> = [];
+    const port = await listen((request, response) => {
+      requests.push(request);
+      answers.push(() => response.end(JSON.stringify({ held: true })));
+    });
+    let settled = false;
+
+    const read = createRuntime(port).fetchLaunchTelemetry(1_000).finally(() => { settled = true; });
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]?.url).toBe("/__mcode/launch-telemetry?usableAt=1000");
+    expect(requests[0]?.headers.authorization).toBe("Bearer test-token");
+    expect(settled).toBe(false);
+    answers[0]?.();
+    const response = await read;
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ held: true });
+  });
+
+  it.each([
+    ["drops the connection", (request: NodeHTTP.IncomingMessage) => request.socket.destroy()],
+    ["cuts its answer short", (_request: NodeHTTP.IncomingMessage, response: NodeHTTP.ServerResponse) => {
+      response.writeHead(200, { "Content-Length": "100" });
+      response.write("{");
+      setImmediate(() => response.socket?.destroy());
+    }],
+  ])("fails the launch-telemetry read when the server %s", async (_name, handler) => {
+    const port = await listen(handler);
+
+    await expect(createRuntime(port).fetchLaunchTelemetry()).rejects.toThrow();
   });
 
   it.each([0, 1, 42])(

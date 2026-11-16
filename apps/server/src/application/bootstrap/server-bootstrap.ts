@@ -4,6 +4,7 @@
  */
 
 import { setupContainer } from "../composition/container.js";
+import { launchTelemetry } from "../../runtime/diagnostics/launch-telemetry.js";
 import { runStartupOrExit, startupFailureTarget } from "./startup-failure.js";
 import { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { createWsServer } from "../transport/ws-server.js";
@@ -202,6 +203,7 @@ export async function startServer(): Promise<void> {
 const startupStartedAt = performance.now();
 /** Records completed startup boundaries without environment values or credentials. */
 function recordStartupCheckpoint(stage: string): void {
+  launchTelemetry.mark(stage);
   logger.info("Server startup checkpoint completed", {
     stage, pid: process.pid, elapsedMs: Math.round(performance.now() - startupStartedAt),
   });
@@ -260,6 +262,7 @@ function resolveAuthToken(): string {
 }
 
 const AUTH_TOKEN = resolveAuthToken();
+launchTelemetry.mark("auth token resolved");
 
 /**
  * Parses MCODE_SINGLE_INSTANCE once at server boot.
@@ -290,6 +293,7 @@ logger.info("Single-instance dev mode resolved", {
   instanceTokenPresent: INSTANCE_TOKEN !== null,
   worktreeIdentityPresent: WORKTREE_IDENTITY !== null,
 });
+launchTelemetry.mark("runtime flags resolved");
 
 function readPreviousPid(): number | undefined {
   try {
@@ -507,12 +511,12 @@ let lastProviderUsageWarmupSnapshot = JSON.stringify(settingsService.get().provi
 settingsService.on("change", (next) => {
   diag.configure({ enabled: next.diagnostics.recording });
   if (next.provider.cli.cursor !== lastCliPathsForModelCache.cursor) {
-    void modelCacheService.invalidate("cursor").catch((error: unknown) => {
+    void launchTelemetry.trackLaunchTask("model cache invalidation", modelCacheService.invalidate("cursor")).catch((error: unknown) => {
       logger.error("Failed to invalidate Cursor model cache", { error });
     });
   }
   if (next.provider.cli.copilot !== lastCliPathsForModelCache.copilot) {
-    void modelCacheService.invalidate("copilot").catch((error: unknown) => {
+    void launchTelemetry.trackLaunchTask("model cache invalidation", modelCacheService.invalidate("copilot")).catch((error: unknown) => {
       logger.error("Failed to invalidate Copilot model cache", { error });
     });
   }
@@ -523,7 +527,7 @@ settingsService.on("change", (next) => {
   const nextProviderUsageWarmupSnapshot = JSON.stringify(next.provider);
   if (nextProviderUsageWarmupSnapshot !== lastProviderUsageWarmupSnapshot) {
     lastProviderUsageWarmupSnapshot = nextProviderUsageWarmupSnapshot;
-    providerUsageWarmup.warmEnabledProviders(true);
+    void launchTelemetry.trackLaunchTask("provider usage warmup", providerUsageWarmup.warmEnabledProviders(true));
   }
 });
 
@@ -540,7 +544,7 @@ function warmCodexVersionGate(s = settingsService.get()): void {
   const cliPath = s.provider.cli.codex || "codex";
   if (cliPath === warmedCodexPath) return;
   warmedCodexPath = cliPath;
-  void warmCodexProviderVersion(cliPath).then(() => {
+  void launchTelemetry.trackLaunchTask("codex version warmup", warmCodexProviderVersion(cliPath)).then(() => {
     broadcast("providers.availability", providerAvailability.listAvailability());
   });
 }
@@ -762,18 +766,17 @@ providerAvailability.onChange((list) => {
 // CJS via esbuild, which does not support top-level await. Fire-and-forget
 // is safe here — onChange broadcasts during verify, and the final snapshot
 // is broadcast after verifyAllEnabled resolves.
-providerAvailability
-  .verifyAllEnabled()
+launchTelemetry.trackLaunchTask("provider availability", providerAvailability.verifyAllEnabled())
   .then(() => {
     broadcast("providers.availability", providerAvailability.listAvailability());
     // Warm the Codex version gate at boot so the first send never pays a
     // blocking `codex --version` spawnSync.
     warmCodexVersionGate();
-    providerUsageWarmup.warmEnabledProviders(true);
-    void providerStatus.refresh();
+    void launchTelemetry.trackLaunchTask("provider usage warmup", providerUsageWarmup.warmEnabledProviders(true));
+    void launchTelemetry.trackLaunchTask("provider status", providerStatus.refresh());
     setInterval(() => void providerStatus.refresh(), PROVIDER_STATUS_REFRESH_MS).unref();
     const modelProviders = startupModelProviderIds(providerAvailability.listAvailability());
-    void modelCacheService.refreshProviders(modelProviders).catch((err: unknown) => {
+    void launchTelemetry.trackLaunchTask("model cache", modelCacheService.refreshProviders(modelProviders)).catch((err: unknown) => {
       logger.warn("Model cache startup refresh failed", {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -886,11 +889,11 @@ skillWatcherService.registerDebouncedInvalidateListener(() => {
 function seedCiWatcher(allWorkspaces: ReturnType<typeof workspaceRepo.listAll>): void {
   const workspacePaths = new Map(allWorkspaces.map((ws) => [ws.id, ws.path]));
   const allThreads = threadRepo.listAll().filter((thread) => thread.user_completed_at === null);
-  ciWatcherService.seed(
+  launchTelemetry.trackLaunchTask("CI watcher seed", ciWatcherService.seed(
     allThreads,
     workspacePaths,
     (threadId) => allThreads.find((t) => t.id === threadId)?.workspace_id ?? null,
-  ).catch((err) => {
+  )).catch((err) => {
     logger.warn("CiWatcher seed failed", { error: String(err) });
   });
 }
@@ -1033,6 +1036,7 @@ function listen(port: number): void {
       process.exit(1);
     },
     onListening: (listeningPort) => {
+      launchTelemetry.listen();
       externalThreadControlMcpRuntime.setPort(listeningPort);
       logger.info(`Mcode server started on ${HOST}:${listeningPort}`);
       recordStartupCheckpoint("HTTP listener opened");
@@ -1157,19 +1161,25 @@ async function bootstrapServer(): Promise<void> {
       },
     });
     await recoverTurnsAtStartup();
+    launchTelemetry.mark("turn reconciliation");
     await fileEvidenceLedger.resolveAbandoned(undefined, "restarted");
+    launchTelemetry.mark("abandoned evidence resolved");
     await planTurnService.recoverNativeQuestions();
+    launchTelemetry.mark("native questions recovered");
     await planService.recoverInterrupted();
+    launchTelemetry.mark("interrupted plans recovered");
     planImplementStartupObserver.start();
     settleActionObserver.start();
     await turnResumeScheduler.start();
+    launchTelemetry.mark("resume scheduler started");
     coordinatorWakeReady = true;
     await coordinatorWake.recoverAtStartup();
+    launchTelemetry.mark("coordinator wake recovered");
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
     recordStartupCheckpoint("orphaned background tools settled");
     // Pin settlement does git work, which must not delay startup.
-    snapshotRefPins.runInBackground(sweepSnapshotPins);
+    snapshotRefPins.runInBackground(() => launchTelemetry.trackLaunchTask("snapshot pin sweep", sweepSnapshotPins()));
     await threadControlService.recoverApprovals();
     recordStartupCheckpoint("approval recovery completed");
     await externalThreadControlMcpRuntime.reconcileOnStartup();
@@ -1325,6 +1335,7 @@ async function shutdown(): Promise<void> {
 
   // 10. Await WS and HTTP server close so pending handshakes can finish
   shutdownCoordinator.setPhase("close HTTP and WebSocket servers");
+  launchTelemetry.endNow();
   const wssClose = new Promise<void>((res, rej) => {
     wss.close((err) => (err ? rej(err) : res()));
   });

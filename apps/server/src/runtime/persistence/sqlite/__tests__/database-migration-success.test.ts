@@ -7,7 +7,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { openDatabase } from "../database.js";
+import { openDatabase, type DatabaseLaunchObservations } from "../database.js";
 
 const MIGRATIONS_THROUGH_0041 = "0041_index_completed_thread_cleanup";
 const SUBAGENT_IDENTITY_MIGRATION = "0042_supreme_terrax";
@@ -104,6 +104,21 @@ describe("successful database migration recovery", () => {
     directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-migration-success-"));
     databasePath = NodePath.join(directory, "mcode.db");
     process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = NodePath.join(process.cwd(), "drizzle");
+  });
+
+  it("reports whether bootstrap applied migrations", () => {
+    const first: DatabaseLaunchObservations = { migrated: false, marks: [] };
+    openDatabase({ dbPath: databasePath, launchTelemetry: first }).close(true);
+    expect(first.migrated).toBe(true);
+    expect(first.marks.map((mark) => mark.name)).toEqual([
+      "migration plan read", "migrations applied", "schema patches applied", "ledger verified",
+    ]);
+    const current: DatabaseLaunchObservations = { migrated: false, marks: [] };
+    openDatabase({ dbPath: databasePath, launchTelemetry: current }).close(true);
+    expect(current.migrated).toBe(false);
+    expect(current.marks.map((mark) => mark.name)).toEqual([
+      "migration plan read", "schema patches applied",
+    ]);
   });
 
   it("adds nullable thread activity without a backfill", () => {

@@ -1,4 +1,5 @@
 import type { McodeTransport } from "./types";
+import { reportLaunchMark } from "./launch-marks";
 import { createWsTransport } from "./ws-transport";
 import { ipcPushClient } from "./ipc-push-client";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -156,7 +157,9 @@ let transport: (McodeTransport & { close(): void; waitForConnection(timeoutMs: n
 async function resolveServerUrl(): Promise<{ url: string; ipcPath: string }> {
   if (window.desktopBridge?.getServerUrl) {
     try {
-      return await window.desktopBridge.getServerUrl();
+      const connection = await window.desktopBridge.getServerUrl();
+      reportLaunchMark("urlReceived");
+      return connection;
     } catch {
       // fall through
     }
