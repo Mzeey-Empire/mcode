@@ -2120,6 +2120,32 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(affected).toEqual([]);
   });
 
+  it("ends the running turn when an older late hook's failed save drops the work queued behind it", async () => {
+    await send(1, start("codex"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "Original", isFinalResponse: true })] });
+    await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 2, "turnComplete")],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    await send(4, { kind: "release" });
+    const next = { ...execution, turnId: "next-turn", executionId: "00000000-0000-4000-8000-000000000125" };
+    const nextLease = { ...lease, leaseId: "next-lease" };
+    await send(1, start("codex", next), next, nextLease);
+    db.run("CREATE TRIGGER fail_late_hook BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.operation_id = 'late-hook:blocked-hook' BEGIN SELECT RAISE(ABORT, 'late hook save unavailable'); END");
+    holdWrites();
+    progress.acceptLateHook(execution.threadId, execution.executionId, { id: "blocked-hook", hookName: "Stop", toolName: null,
+      phase: "stop", payload: "{}", durationMs: 10, didBlock: false, startedAt: NOW, endedAt: NOW, sortOrder: 1 });
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "toolUse",
+      { toolCallId: "queued-tool", toolName: "Read", toolInput: { file_path: "file.txt" } }, next)] }, next, nextLease)).result.kind).toBe("accepted");
+    release?.();
+    await admitsCommands();
+    db.run("DROP TRIGGER fail_late_hook");
+    expect(turnStatus(next.turnId)).toEqual({ status: "Interrupted" });
+    expect(unsavedNotices()).toHaveLength(1);
+    expect(turnStatus()).toEqual({ status: "Completed" });
+    expect(db.prepare("SELECT id FROM tool_call_records WHERE id = 'queued-tool'").get()).toBeNull();
+  });
+
   it("rejects an empty terminal hook without attaching it to a prior assistant response", async () => {
     await send(1, start("codex"));
     await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 1, "turnComplete")],
