@@ -9,23 +9,42 @@ vi.mock("electron", () => ({
 
 import { ServerRuntime } from "../index.js";
 
-function createRuntime(
-  port = 43123,
-  overrides: Partial<ConstructorParameters<typeof ServerRuntime>[0]> = {},
-): ServerRuntime {
+type RuntimeDependencies = ConstructorParameters<typeof ServerRuntime>[0];
+
+function createManager(
+  port: number,
+  start: RuntimeDependencies["manager"]["start"] = vi.fn(async () => ({ port, authToken: "test-token" })),
+): RuntimeDependencies["manager"] {
+  return {
+    port,
+    authToken: "test-token",
+    ipcPath: "test-ipc-path",
+    onUnexpectedExit: null,
+    start,
+    isHealthy: vi.fn(async () => true),
+    restart: vi.fn(async () => undefined),
+    forceReplace: vi.fn(async () => undefined),
+    stopStartingServer: vi.fn(),
+    stopServerHeldByLock: vi.fn(async () => undefined),
+  };
+}
+
+function createWindow() {
+  return {
+    isMinimized: () => false,
+    restore: vi.fn(),
+    show: vi.fn(),
+    focus: vi.fn(),
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: vi.fn() },
+    once: vi.fn(),
+  };
+}
+
+function createRuntime(port = 43123, overrides: Partial<RuntimeDependencies> = {}): ServerRuntime {
   return new ServerRuntime({
     platform: "linux",
-    manager: {
-      port,
-      authToken: "test-token",
-      ipcPath: "test-ipc-path",
-      onUnexpectedExit: null,
-      start: vi.fn(async () => ({ port, authToken: "test-token" })),
-      isHealthy: vi.fn(async () => true),
-      restart: vi.fn(async () => undefined),
-      forceReplace: vi.fn(async () => undefined),
-      stopServerHeldByLock: vi.fn(async () => undefined),
-    },
+    manager: createManager(port),
     ipcMain: { handle: vi.fn() },
     getMainWindow: () => null,
     dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
@@ -63,21 +82,125 @@ describe("ServerRuntime Desktop Window seam", () => {
     }
   });
 
+  it("attaches the server relay to a window once when the server is ready first", async () => {
+    const relayStarter = vi.fn(() => vi.fn());
+    const runtime = createRuntime(43123, { relayStarter });
+    const window = createWindow();
+
+    runtime.beginStart();
+    await new Promise((resolve) => setImmediate(resolve));
+    runtime.attachWindow(window);
+    await runtime.connectWindow(window);
+
+    expect(relayStarter).toHaveBeenCalledOnce();
+  });
+
+  it("stops an early-started server when the dev app quits during startup", async () => {
+    let finishStart!: (value: { port: number; authToken: string }) => void;
+    const start = vi.fn(() => new Promise<{ port: number; authToken: string }>((resolve) => {
+      finishStart = resolve;
+    }));
+    const manager = createManager(43123, start);
+    const runtime = createRuntime(43123, { manager });
+
+    runtime.beginStart();
+    const quit = runtime.stopServerForDevQuit();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(manager.stopServerHeldByLock).not.toHaveBeenCalled();
+
+    finishStart({ port: 43123, authToken: "test-token" });
+    await quit;
+    expect(manager.stopStartingServer).not.toHaveBeenCalled();
+    expect(manager.stopServerHeldByLock).toHaveBeenCalledOnce();
+  });
+
+  it("stops the lock holder when an early start does not settle during a dev quit", async () => {
+    vi.useFakeTimers();
+    const start = vi.fn(() => new Promise<{ port: number; authToken: string }>(() => undefined));
+    const manager = createManager(43123, start);
+    const runtime = createRuntime(43123, { manager });
+
+    runtime.beginStart();
+    const quit = runtime.stopServerForDevQuit();
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(manager.stopStartingServer).not.toHaveBeenCalled();
+    expect(manager.stopServerHeldByLock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(2);
+    await quit;
+    expect(manager.stopStartingServer).toHaveBeenCalledOnce();
+    expect(manager.stopServerHeldByLock).toHaveBeenCalledOnce();
+    expect(manager.stopStartingServer.mock.invocationCallOrder[0]).toBeLessThan(
+      manager.stopServerHeldByLock.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("still stops the lock holder when stopping a starting server fails during a dev quit", async () => {
+    vi.useFakeTimers();
+    const start = vi.fn(() => new Promise<{ port: number; authToken: string }>(() => undefined));
+    const manager = createManager(43123, start);
+    const error = new Error("Starting server stop failed");
+    manager.stopStartingServer.mockImplementation(() => { throw error; });
+    const runtime = createRuntime(43123, { manager });
+
+    runtime.beginStart();
+    const quit = runtime.stopServerForDevQuit();
+    const rejection = expect(quit).rejects.toBe(error);
+    await vi.advanceTimersByTimeAsync(10_001);
+
+    await rejection;
+    expect(manager.stopServerHeldByLock).toHaveBeenCalledOnce();
+  });
+
+  it("recovers a server that exits before lifecycle registration", async () => {
+    vi.useFakeTimers();
+    const manager = createManager(43123);
+    const runtime = createRuntime(43123, { manager });
+
+    runtime.beginStart();
+    await vi.advanceTimersByTimeAsync(0);
+    manager.onUnexpectedExit?.(1);
+    expect(manager.restart).not.toHaveBeenCalled();
+    runtime.registerLifecycle();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(manager.restart).toHaveBeenCalledOnce();
+  });
+
+  it("joins an early start instead of starting the server again", async () => {
+    const start = vi.fn(async () => ({ port: 43123, authToken: "test-token" }));
+    const runtime = createRuntime(43123, {
+      manager: createManager(43123, start),
+      relayStarter: () => vi.fn(),
+    });
+
+    runtime.beginStart();
+
+    await expect(runtime.connectWindow(createWindow())).resolves.toBe(43123);
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("reports an early start failure when the window connects", async () => {
+    const error = new Error("Server failed to start");
+    const start = vi.fn().mockRejectedValue(error);
+    const runtime = createRuntime(43123, {
+      manager: createManager(43123, start),
+    });
+
+    runtime.beginStart();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await expect(runtime.connectWindow(createWindow())).rejects.toBe(error);
+    expect(start).toHaveBeenCalledOnce();
+  });
+
   it("withholds the server URL until the window has its auth cookie and relay", async () => {
     vi.useFakeTimers();
     let finishCookieInstallation!: () => void;
     const cookieInstallation = new Promise<void>((resolve) => {
       finishCookieInstallation = resolve;
     });
-    const window = {
-      isMinimized: () => false,
-      restore: vi.fn(),
-      show: vi.fn(),
-      focus: vi.fn(),
-      isDestroyed: () => false,
-      webContents: { isDestroyed: () => false, send: vi.fn() },
-      once: vi.fn(),
-    };
+    const window = createWindow();
     type Handler = (event: { sender: unknown }, ...args: unknown[]) => unknown;
     const handlers = new Map<string, Handler>();
     let cookieInstalled = false;
@@ -174,7 +297,7 @@ describe("ServerRuntime Desktop Window seam", () => {
 
       await expect(createRuntime().getActiveAgentCount()).resolves.toBe(activeAgents);
       expect(globalThis.fetch).toHaveBeenCalledWith(
-        "http://localhost:43123/health",
+        "http://127.0.0.1:43123/health",
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     },

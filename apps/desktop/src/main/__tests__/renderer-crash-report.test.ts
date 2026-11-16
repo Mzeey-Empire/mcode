@@ -85,6 +85,7 @@ vi.mock("../../features/open-in/index.js", () => ({ registerOpenInHandlers: vi.f
 vi.mock("../../features/server-runtime/index.js", () => ({
   ServerRuntime: class {
     start = vi.fn();
+    beginStart = vi.fn();
     registerLifecycle = vi.fn();
     registerConnectionHandlers = vi.fn();
     installAuthCookie = vi.fn();
