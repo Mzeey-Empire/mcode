@@ -1681,6 +1681,48 @@ describe("ServerManager", () => {
     }
   });
 
+  describe("a start that fails while its child is still running", () => {
+    let killSpy: ReturnType<typeof vi.spyOn>;
+    let onUnexpectedExit: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      killSpy = vi.spyOn(process, "kill").mockReturnValue(true);
+      onUnexpectedExit = vi.fn();
+      manager.onUnexpectedExit = onUnexpectedExit;
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      killSpy.mockRestore();
+    });
+
+    it("stops the child as a planned exit when readiness times out", async () => {
+      vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
+
+      const rejection = expect(manager.start()).rejects.toThrow("Server did not become ready within 600s");
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await rejection;
+
+      expect(killSpy).toHaveBeenCalledWith(-12345, "SIGKILL");
+      refs.getExitCallback()!(null);
+      expect(onUnexpectedExit).not.toHaveBeenCalled();
+    });
+
+    it("stops the child as a planned exit when its lock never becomes readable", async () => {
+      vi.mocked(NodeFSPromises.readFile).mockReset().mockImplementation(async () => refs.missingFile());
+
+      const rejection = expect(manager.start()).rejects.toThrow("Server lock file not available after health check passed");
+      // Ten lock reads, 200 ms apart.
+      await vi.advanceTimersByTimeAsync(2_000);
+      await rejection;
+
+      expect(killSpy).toHaveBeenCalledWith(-12345, "SIGKILL");
+      refs.getExitCallback()!(null);
+      expect(onUnexpectedExit).not.toHaveBeenCalled();
+    });
+  });
+
   it("stops waiting when the child exits during delayed readiness", async () => {
     vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
     vi.useFakeTimers();
