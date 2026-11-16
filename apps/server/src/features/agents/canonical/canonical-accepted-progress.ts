@@ -860,7 +860,19 @@ export class CanonicalAcceptedProgress {
     if (!exit) return undefined;
     exit.stop = stop;
     await exit.firstAttempt;
-    const status = this.canonical.loadTurnByExecution(exit.execution.executionId)?.status;
+    return this.unsavedTurnStop(threadId, exit);
+  }
+
+  /** A status that cannot be read leaves the ending not known to be saved. */
+  private unsavedTurnStop(threadId: string, exit: UnsavedTurnExit): UnsavedTurnStop {
+    let status: string | undefined;
+    try {
+      status = this.canonical.loadTurnByExecution(exit.execution.executionId)?.status;
+    } catch (error) {
+      logger.warn("Stop could not read whether the unsaved turn's ending was saved", { threadId,
+        executionId: exit.execution.executionId, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+      return "ending-not-saved";
+    }
     if (status === "Running") return "ending-not-saved";
     return status === "Cancelled" ? "cancelled" : "already-terminal";
   }
@@ -1410,7 +1422,9 @@ export class CanonicalAcceptedProgress {
    */
   private async writeUnsavedEnding(threadId: string, thread: ProgressThread,
     exit: UnsavedTurnExit): Promise<UnsavedTurnEnding | undefined> {
-    let agentStopped = false;
+    if (this.closing || this.threads.get(threadId) !== thread) return undefined;
+    // Stopped before any storage read, so a failing read cannot keep the agent running.
+    await this.stopExitAgent(threadId, exit);
     for (let delayMs = UNSAVED_ENDING_FIRST_RETRY_MS; ; delayMs = Math.min(delayMs * 2, UNSAVED_ENDING_MAX_RETRY_MS)) {
       if (this.closing || this.threads.get(threadId) !== thread) return undefined;
       try {
@@ -1419,11 +1433,6 @@ export class CanonicalAcceptedProgress {
           logger.warn("Unsaved progress belongs to no running turn; dropped it without an ending", { threadId,
             executionId: exit.execution.executionId });
           return undefined;
-        }
-        if (!agentStopped) {
-          agentStopped = true;
-          await this.stopUnsavedAgent?.(exit.execution).catch((error: unknown) => logger.warn("Unsaved turn agent stop failed", {
-            threadId, error: error instanceof Error ? error.message : String(error) }));
         }
         const ending = await this.attemptUnsavedEnding(threadId, exit, lease, delayMs);
         if (ending) return ending;
@@ -1434,6 +1443,12 @@ export class CanonicalAcceptedProgress {
       exit.markAttempted();
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
+  }
+
+  /** The stop only reaches an agent still running the exit's execution, so an exit for an ended turn stops nothing. */
+  private async stopExitAgent(threadId: string, exit: UnsavedTurnExit): Promise<void> {
+    await this.stopUnsavedAgent?.(exit.execution).catch((error: unknown) => logger.warn("Unsaved turn agent stop failed", {
+      threadId, error: error instanceof Error ? error.message : String(error) }));
   }
 
   /** Undefined when the writer refused the ending while its turn still runs, so the caller retries. */
