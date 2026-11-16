@@ -143,6 +143,8 @@ interface UnsavedTurnEnding {
   readonly lease: ExecutionLease;
   readonly receipt: ExecutionWriteReceipt;
   readonly outcome: UnsavedTurnOutcome;
+  /** False when the commit's own reload of the thread failed, so the exit reloads it before lifting the fence. */
+  readonly reloaded: boolean;
 }
 
 /** How storage ended a turn whose saving stopped: the user's Stop, or the saving failure itself. */
@@ -1410,7 +1412,7 @@ export class CanonicalAcceptedProgress {
       ending = await this.writeUnsavedEnding(threadId, thread, exit);
     } finally {
       exit.markAttempted();
-      this.finishUnsavedTurnExit(threadId, thread, exit, ending?.receipt);
+      this.finishUnsavedTurnExit(threadId, thread, exit, ending?.reloaded === true);
     }
     if (!ending) return;
     await this.onUnsavedTurnEnded?.(exit.execution, ending.lease, ending.receipt, ending.outcome);
@@ -1455,16 +1457,28 @@ export class CanonicalAcceptedProgress {
   private async attemptUnsavedEnding(threadId: string, exit: UnsavedTurnExit, lease: ExecutionLease,
     retryInMs: number): Promise<UnsavedTurnEnding | undefined> {
     const { execution, stop } = exit;
+    let reloaded = true;
+    // A throwing publication would turn this committed ending into a rejected write, and the retry would then find
+    // the turn already ended and never release its worker.
+    const observeEnding = (events: readonly CanonicalAgentEventEnvelope[]) => {
+      try {
+        this.observeCommitted(events);
+      } catch (error) {
+        reloaded = false;
+        logger.error("Unsaved turn ending was saved but its thread could not be reloaded", { threadId,
+          executionId: execution.executionId, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+      }
+    };
     const receipt = await this.writer.interruptWorkerLoss({ execution, lease,
       reason: stop ? "Stopped while Mcode could not save the turn's output." : "Mcode could not save the turn's output.",
       recoveryIncidentId: workerLossIncidentId({ execution, lease }),
-      unsavedOutput: stop ? { stop } : {} }, (events) => this.observeCommitted(events));
-    if (receipt.kind === "committed") return { lease, receipt, outcome: stop ? "cancelled" : "interrupted" };
+      unsavedOutput: stop ? { stop } : {} }, observeEnding);
+    if (receipt.kind === "committed") return { lease, receipt, outcome: stop ? "cancelled" : "interrupted", reloaded };
     if (receipt.kind === "conflict" && receipt.recoveryState) {
       logger.warn("Unsaved turn ending was not written", { threadId, executionId: execution.executionId,
         recoveryState: receipt.recoveryState });
       const outcome = receipt.recoveryState === "already-terminal" ? this.terminalOutcome(threadId, execution) : "interrupted";
-      return { lease, receipt, outcome };
+      return { lease, receipt, outcome, reloaded: false };
     }
     logger.warn("Unsaved turn ending was refused while its turn is still running; retrying", { threadId,
       executionId: execution.executionId, receipt: receipt.kind, retryInMs });
@@ -1488,12 +1502,11 @@ export class CanonicalAcceptedProgress {
     return this.canonical.loadExecutionLease(exit.execution.executionId) ?? undefined;
   }
 
-  private finishUnsavedTurnExit(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit,
-    receipt: ExecutionWriteReceipt | undefined): void {
+  private finishUnsavedTurnExit(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit, reloaded: boolean): void {
     if (thread.exit !== exit) return;
     const current = !this.closing && this.threads.get(threadId) === thread;
     try {
-      if (current && receipt?.kind !== "committed") this.reloadFromStorage(threadId, thread, []);
+      if (current && !reloaded) this.reloadFromStorage(threadId, thread, []);
     } catch (error) {
       // The next durable command reloads the thread from storage again, so admitting it is the way to recover.
       logger.error("Unsaved turn exit could not reload its thread", { threadId,
