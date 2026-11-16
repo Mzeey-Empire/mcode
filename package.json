@@ -58,6 +58,7 @@
     "knip": "^6.33.0",
     "opensrc": "0.7.3",
     "oxlint": "^1.80.0",
+    "tsc-rs": "0.8.0",
     "turbo": "^2.5.0"
   },
   "packageManager": "bun@1.4.0",

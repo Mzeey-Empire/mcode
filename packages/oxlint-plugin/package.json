@@ -9,7 +9,7 @@
   "scripts": {
     "build": "bun build ./src/index.ts --target=node --format=esm --outfile=./dist/index.mjs",
     "test": "bun run build && node --input-type=module --eval \"const { startVitest } = await import('vitest/node'); await startVitest('test', [], { run: true })\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc-rs --noEmit"
   },
   "dependencies": {
     "@oxlint/plugins": "^1.80.0"

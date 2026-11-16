@@ -158,7 +158,7 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 - The flags keep output short so failures are not truncated: passing tests print a dot, while failing tests keep their diff, stack trace, and console output. If a failure needs more context, rerun that file without the flags.
 - Do not use `bun test`: it invokes Bun's native test runner and bypasses the workspace Vitest configuration.
 - Lint and complexity check, on the files you changed: `bun run lint <file> [<file> ...]`. It runs oxlint with the Mcode rules.
-- Type check each workspace you changed: `bun run --cwd <workspace> typecheck`. Each workspace pins its own TypeScript; a root `bunx tsc` downloads a different major version.
+- Type check each workspace you changed: `bun run --cwd <workspace> typecheck`. It runs `tsc-rs`, a Rust port of the TypeScript 7 checker pinned at the root, so a root `bunx tsc` checks with different rules. TypeScript 7 loads no `@types` package a tsconfig does not list in `types`, so a workspace that uses Node globals lists `"node"` there.
 - Do not run repo wide checks, CI owns the full test suite
 - When a CI job fails, find its failing tests with [docs/agents/ci-failures.md](docs/agents/ci-failures.md) instead of downloading the whole log.
 - When a thread is stuck or a flow is slow, diagnose it from its recording with [the diagnose-thread skill](.agents/skills/diagnose-thread/SKILL.md) instead of reproducing it.

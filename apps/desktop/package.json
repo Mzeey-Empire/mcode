@@ -13,7 +13,7 @@
     "dev": "bun scripts/dev-electron.mjs",
     "build": "bun scripts/build-main.mjs",
     "prod": "NODE_ENV=production bun run build && bun scripts/prod-electron.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc-rs --noEmit",
     "rebuild": "electron-rebuild -f",
     "dist": "bun run build && bun scripts/desktop-packaging/target-package/generate-snapshot.mjs && electron-builder --publish never",
     "dist:no-snapshot": "bun run build && electron-builder --publish never",
