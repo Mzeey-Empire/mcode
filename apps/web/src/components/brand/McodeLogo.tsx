@@ -1,6 +1,5 @@
 import { cn } from "@/lib/utils";
-
-const LOGO_SRC = `${import.meta.env.BASE_URL}brand/mcode-layered-route-cutout.svg`;
+import { McodeMark } from "./mark/McodeMark";
 
 /** Named size classes for each Mcode logo surface. */
 export const MCODE_LOGO_SCALES = {
@@ -31,15 +30,7 @@ export function McodeLogo({ variant = "sidebar", markOnly = false }: McodeLogoPr
         scale.root,
       )}
     >
-      <img
-        src={LOGO_SRC}
-        alt="Mcode"
-        draggable={false}
-        className={cn(
-          "shrink-0 object-contain",
-          scale.mark,
-        )}
-      />
+      <McodeMark state="quiet" className={cn("shrink-0", scale.mark)} />
       {!markOnly && (
         <div
           aria-hidden="true"

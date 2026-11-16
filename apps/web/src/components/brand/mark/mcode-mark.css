@@ -1,0 +1,227 @@
+/*
+ * Motion for the inline Mcode mark (markSvg) and the startup preloader (preloaderHtml).
+ *
+ * An element's base style is its state's resting frame; animations only play the way in. A loop's
+ * base is its still frame, a one-shot's base is its final frame. Reduced motion and pausing are
+ * therefore both `animation: none`, and always land on a correct frame.
+ *
+ * Cost: no `filter` on an animated element or its ancestors, and only opacity, transform,
+ * stroke-dashoffset animate; stroke-width relayouts the SVG every frame. Loops step at about
+ * 12 values a second, because an unchanged step skips paint while a smooth loop repaints at the
+ * display's refresh rate. Vite inlines this file into index.html so the
+ * preloader animates on first paint; nothing imports it.
+ */
+
+.mcode-mark {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.mcode-mark .flow {
+  stroke-dasharray: 0.14 1.3;
+  stroke-dashoffset: 0.14;
+}
+.mcode-mark .fill {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 0;
+}
+.mcode-mark .fillg {
+  opacity: 0;
+}
+
+.mcode-mark[data-state="loading"] .flow {
+  animation: mcode-flow-fast 1.6s steps(19) infinite;
+}
+.mcode-mark[data-state="loading"] .breathe > * {
+  animation: mcode-breathe 1.6s steps(19) infinite;
+}
+
+/* Motion off rests running, needs-you and finished on different frames: running keeps one packet mid-trace,
+   needs-you dims the circuit so the bright chip waits alone, finished rests with the whole board faintly lit. */
+/* `backwards` holds each packet on its hidden first keyframe through its stagger delay; without it the
+   resting packet would sit mid-trace, then jump to the start when its animation begins. */
+.mcode-mark[data-state="running"] .flow {
+  stroke-dashoffset: -0.45;
+  animation: mcode-flow 2.4s steps(29) infinite backwards;
+}
+
+.mcode-mark[data-state="needs-you"] .lit {
+  opacity: 0.4;
+}
+.mcode-mark[data-state="needs-you"] .call .edge {
+  animation: mcode-call 1.4s steps(17) infinite;
+}
+.mcode-mark[data-state="needs-you"] .call .pin {
+  animation: mcode-call 1.4s steps(17) infinite reverse;
+}
+
+.mcode-mark[data-state="boot"] .L0 {
+  animation: mcode-drop-low 1.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.mcode-mark[data-state="boot"] .L1 {
+  animation: mcode-drop-mid 1.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.mcode-mark[data-state="boot"] .L2 {
+  animation: mcode-drop-top 1.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.mcode-mark[data-state="boot"] .fill {
+  animation: mcode-boot-fill 1.6s ease-out;
+}
+.mcode-mark[data-state="boot"] .fillg {
+  animation: mcode-boot-fill-fade 1.6s linear;
+}
+.mcode-mark[data-state="boot"] :is(.lit, .edge, .pin) {
+  animation: mcode-boot-lit 1.6s linear;
+}
+
+.mcode-mark[data-state="finished"] .fill {
+  animation: mcode-finished-fill 1.4s ease-out;
+}
+.mcode-mark[data-state="finished"] .fillg {
+  opacity: 0.3;
+  animation: mcode-finished-fill-fade 1.4s linear;
+}
+.mcode-mark[data-state="finished"] :is(.lit, .edge, .pin) {
+  animation: mcode-finished-lit 1.4s linear;
+}
+
+.mcode-mark[data-state="failed"] :is(.lit, .die) {
+  opacity: 0;
+  animation: mcode-flicker 1.2s linear;
+}
+.mcode-mark[data-state="failed"] .stub {
+  animation: mcode-stub 1.2s linear;
+}
+
+@keyframes mcode-flow {
+  0% { stroke-dashoffset: 0.14; }
+  60%, 100% { stroke-dashoffset: -1; }
+}
+@keyframes mcode-flow-fast {
+  0% { stroke-dashoffset: 0.14; }
+  100% { stroke-dashoffset: -1; }
+}
+@keyframes mcode-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+@keyframes mcode-call {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+/* The lower slabs start tucked under the top one, so the low slab's cut-away never shows as a stray V. */
+@keyframes mcode-drop-top {
+  0% { transform: translateY(-24px); opacity: 0; }
+  17%, 100% { transform: none; opacity: 1; }
+}
+@keyframes mcode-drop-mid {
+  0% { transform: translateY(calc(-1 * var(--mark-step))); opacity: 0; }
+  16% { opacity: 0; }
+  17%, 20% { transform: translateY(calc(-1 * var(--mark-step))); opacity: 1; }
+  40%, 100% { transform: none; opacity: 1; }
+}
+@keyframes mcode-drop-low {
+  0% { transform: translateY(calc(-2 * var(--mark-step))); opacity: 0; }
+  16% { opacity: 0; }
+  17%, 29% { transform: translateY(calc(-2 * var(--mark-step))); opacity: 1; }
+  51%, 100% { transform: none; opacity: 1; }
+}
+@keyframes mcode-boot-fill {
+  0%, 51% { stroke-dashoffset: 1; }
+  83%, 100% { stroke-dashoffset: 0; }
+}
+@keyframes mcode-boot-fill-fade {
+  0%, 88% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes mcode-boot-lit {
+  0%, 80% { opacity: 0; }
+  100% { opacity: 1; }
+}
+@keyframes mcode-finished-fill {
+  0%, 10% { stroke-dashoffset: 1; }
+  55%, 100% { stroke-dashoffset: 0; }
+}
+@keyframes mcode-finished-fill-fade {
+  0%, 65% { opacity: 1; }
+  100% { opacity: 0.3; }
+}
+@keyframes mcode-finished-lit {
+  0%, 48% { opacity: 0; }
+  74%, 100% { opacity: 1; }
+}
+@keyframes mcode-flicker {
+  0%, 50% { opacity: 1; }
+  56% { opacity: 0.15; }
+  64% { opacity: 1; }
+  72% { opacity: 0.1; }
+  81% { opacity: 0.8; }
+  92%, 100% { opacity: 0; }
+}
+@keyframes mcode-stub {
+  0%, 83% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* In dev, Vite injects index.css from JS, so the preloader paints first without the theme
+   variables, the 62.5% root font size or the body reset. Fixed positioning, px sizes and the
+   fallbacks (index.css's light and dark values) keep that first frame identical to the themed one. */
+.mcode-preloader {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--background, oklch(99% 0.005 260));
+  color: var(--muted, oklch(47% 0.01 260));
+  font-family: var(--font-sans, "Public Sans Variable", "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif);
+}
+:root.dark .mcode-preloader {
+  background: var(--background, oklch(16% 0.005 260));
+  color: var(--muted, oklch(65% 0.005 260));
+}
+.mcode-preloader-mark {
+  display: grid;
+  width: 64px;
+  height: 64px;
+}
+.mcode-preloader-mark > .mcode-mark {
+  grid-area: 1 / 1;
+}
+.mcode-preloader-mark > [data-state="boot"] {
+  opacity: 0;
+  animation: mcode-pre-shown 1.6s step-end;
+}
+.mcode-preloader-mark > [data-state="loading"] {
+  animation: mcode-pre-hidden 1.6s step-end;
+}
+.mcode-preloader p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 16px;
+  animation: mcode-pre-text 1.6s ease-out;
+}
+@keyframes mcode-pre-shown {
+  0%, 100% { opacity: 1; }
+}
+@keyframes mcode-pre-hidden {
+  0%, 100% { opacity: 0; }
+}
+@keyframes mcode-pre-text {
+  0%, 75% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mcode-mark *,
+  .mcode-preloader * {
+    /* Important because every animation rule above is more specific than this one. */
+    animation: none !important;
+  }
+}
+:root[data-motion="paused"] .mcode-mark:is([data-state="loading"], [data-state="running"], [data-state="needs-you"]) * {
+  animation: none;
+}

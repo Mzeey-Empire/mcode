@@ -8,10 +8,13 @@ import { AppErrorBoundary } from "./app/AppErrorBoundary";
 import { initRendererErrorReporting } from "./app/renderer-error-reporting";
 import { initTransport } from "./transport";
 import { initDesktopPowerReporting } from "./lib/desktop-power";
+import { startMotionGate } from "./lib/window-focus";
+import { markSvg } from "./components/brand/mark/mark-svg";
 import { reportLaunchMark, observeUsableLaunch } from "./transport/launch-marks";
 import { useWorkspaceStore } from "./features/projects/state/workspaceStore";
 import "./index.css";
 
+startMotionGate();
 reportLaunchMark("scriptsEvaluated");
 
 /** Render an error fallback when transport initialization fails. */
@@ -19,6 +22,10 @@ function renderTransportError(root: HTMLElement, error: unknown): void {
   const message =
     error instanceof Error ? error.message : String(error);
   root.innerHTML = "";
+
+  const mark = document.createElement("div");
+  mark.style.cssText = "width:6.4rem;height:6.4rem;";
+  mark.innerHTML = markSvg("failed", "boot-error");
 
   const container = document.createElement("div");
   container.style.cssText =
@@ -40,38 +47,12 @@ function renderTransportError(root: HTMLElement, error: unknown): void {
     "color:var(--ink);cursor:pointer;font-size:1.4rem;line-height:1.6rem;font-weight:500;";
   button.addEventListener("click", () => window.location.reload());
 
-  container.append(heading, detail, button);
+  container.append(mark, heading, detail, button);
   root.appendChild(container);
-}
-
-/** Show a loading indicator while the transport connects. */
-function renderConnecting(container: HTMLElement): void {
-  const el = document.createElement("div");
-  el.style.cssText =
-    "display:flex;flex-direction:column;align-items:center;justify-content:center;" +
-    "height:100vh;font-family:var(--font-sans);color:var(--muted);background:var(--background);gap:1.2rem;";
-
-  const spinner = document.createElement("div");
-  spinner.style.cssText =
-    "width:2.4rem;height:2.4rem;border:0.2rem solid var(--border);border-top-color:var(--muted);" +
-    "border-radius:50%;animation:spin 0.8s linear infinite;";
-
-  const style = document.createElement("style");
-  style.textContent = "@keyframes spin{to{transform:rotate(360deg)}}";
-
-  const label = document.createElement("p");
-  label.textContent = "Connecting to server...";
-  label.style.cssText = "margin:0;font-size:1.4rem;line-height:1.6rem;";
-
-  el.append(spinner, label);
-  container.append(style, el);
 }
 
 const root = document.getElementById("root")!;
 initRendererErrorReporting();
-
-// Show loading state immediately so the screen is never blank.
-renderConnecting(root);
 
 const transportReady = initTransport();
 observeUsableLaunch(useWorkspaceStore, transportReady);
@@ -87,7 +68,7 @@ transportReady
     // Desktop only: report running turns / open terminals to the main
     // process so it can hold a power save blocker while the server is busy.
     initDesktopPowerReporting();
-    root.innerHTML = "";
+    // The preloader from index.html stays until React's first commit replaces #root's children.
     createRoot(root).render(
       <StrictMode>
         <AppErrorBoundary>

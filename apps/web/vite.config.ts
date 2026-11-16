@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { preloaderHtml } from "./src/components/brand/mark/mark-svg";
 
 const analyze = process.env.ANALYZE === "true" || process.env.ANALYZE === "1";
 const performanceMode = process.env.VITE_MCODE_PERFORMANCE_MODE;
@@ -51,9 +52,30 @@ function mcodeRuntimeContractPlugin(): Plugin {
   };
 }
 
+const PRELOADER_SLOT = "<!-- mcode:preloader -->";
+
+/**
+ * Puts the animated mark in index.html with its CSS inlined, so the preloader paints and moves
+ * before any script or stylesheet loads, in dev and in the build.
+ */
+function mcodePreloaderPlugin(): Plugin {
+  return {
+    name: "mcode-preloader",
+    transformIndexHtml(html) {
+      if (!html.includes(PRELOADER_SLOT)) throw new Error(`index.html is missing the ${PRELOADER_SLOT} slot`);
+      const css = NodeFS.readFileSync(NodePath.resolve(__dirname, "src/components/brand/mark/mcode-mark.css"), "utf8");
+      return {
+        html: html.replace(PRELOADER_SLOT, preloaderHtml()),
+        tags: [{ tag: "style", children: css, injectTo: "head" }],
+      };
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     mcodeRuntimeContractPlugin(),
+    mcodePreloaderPlugin(),
     // React Compiler auto-memoizes components and hooks at build time, so manual
     // React.memo / useMemo / useCallback become redundant. Runs as a Babel pass
     // inside @vitejs/plugin-react; React 19 ships the runtime it emits against.

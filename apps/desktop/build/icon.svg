@@ -1,8 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
   <title id="title">Mcode layered circuit mark</title>
   <desc id="desc">A transparent Mcode mark: three stacked worktree layers. The top layer carries a chip with amber live traces, and its other traces are cut through it.</desc>
-  <!-- Same art and construction as apps/web/public/brand/mcode-layered-route-cutout.svg; see the
-       comment there. -->
+  <!-- Construction: one slab, a rhombus with true circular fillets (52 top and bottom, 22 at the
+       sides), stacked 45.71 units apart. Each gap is the slab above swept 11.43 units down, so gaps
+       and layers keep the slab's own curves. The circuit is drawn flat in a 200 x 200 square and the
+       matrix projects it onto the top face, so traces, pads and the chip sit in the slab's perspective.
+       The grey traces are a mask on the top slab, so the background shows through them in any theme.
+       Generated from apps/web/src/components/brand/mark/. -->
   <defs>
     <linearGradient id="topLayer" x1="153" y1="145" x2="353" y2="343" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#3a414c" />
@@ -74,7 +78,7 @@
     <filter id="traceGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
   </defs>
 
-  <!-- Scale mark up for dock/taskbar parity; UI uses the unscaled web SVG.
+  <!-- Scale mark up for dock/taskbar parity; the UI draws the unscaled mark inline.
        The art spans y 126-458, so it scales about its centre (291.72) and moves to the canvas centre.
        Masks and the clip use the art's coordinates because they inherit this transform. -->
   <g transform="translate(256 256) scale(1.3) translate(-256 -291.72)">
