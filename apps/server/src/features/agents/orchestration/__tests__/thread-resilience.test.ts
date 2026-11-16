@@ -191,6 +191,25 @@ function deliverLate(active: Fixture, execution: OwnedExecution, event: AgentEve
   });
 }
 
+/** A Stop sent before the scheduler gives up on the refused save takes the ordinary path, not the exit's. */
+async function untilExitStarts(active: Fixture, execution: OwnedExecution): Promise<void> {
+  const progress = active.workers.progress;
+  if (!progress) throw new Error("harness: worker fixture has no accepted progress owner");
+  for (let tick = 0; tick < K && !progress.endingUnsavedTurn(execution); tick += 1) await retryTicks(active, 1);
+  if (!progress.endingUnsavedTurn(execution)) throw new Error("harness: the saving exit did not start within the bound");
+}
+
+/** Makes reading one execution's turn from storage throw whenever its saved status matches, until restored. */
+function failStatusReads(active: Fixture, executionId: string, failing: (status: string) => boolean): { restore: () => void } {
+  const read = active.canonical.loadTurnByExecution.bind(active.canonical);
+  const spy = vi.spyOn(active.canonical, "loadTurnByExecution").mockImplementation((id) => {
+    const turn = read(id);
+    if (id === executionId && turn && failing(turn.status)) throw new Error("turn status read failed");
+    return turn;
+  });
+  return { restore: () => spy.mockRestore() };
+}
+
 async function expectStoppedExit(active: Fixture, executionId: string) {
   expect(active.canonical.loadTurnByExecution(executionId)).toMatchObject({ status: "Cancelled", ending: { outcome: "cancelled", stop: { by: "user" } } });
   expect(unsavedOutputNotices(active)).toEqual([expect.stringMatching(/wasn't saved/)]);
@@ -318,6 +337,18 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     await expectSavingExit(active, turn.turnExecutionId, { hits: 0 });
   });
 
+  it("S1f releases a mid-turn exit's worker when the ended turn cannot be read back", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved before the refusal", isFinalResponse: false }));
+    const fault = refuse(plan, threadWrite(active.thread.id), writerFailures.identity, { times: "always", pinOperation: true });
+    const reads = failStatusReads(active, turn.turnExecutionId, (status) => status === "Interrupted");
+    await active.deliver(event({ type: "toolUse", threadId: active.thread.id, toolCallId: "refused-1", toolName: "Bash", toolInput: { command: "ls" } }));
+    await fault.reached;
+    await retryTicks(active);
+    reads.restore();
+    await expectSavingExit(active, turn.turnExecutionId, fault);
+  });
+
   it("S2 answers Stop honestly while the ending cannot be saved, then saves the user's Stop", async () => {
     const { active, turn } = await refusedFinish(writerFailures.full, { failure: writerFailures.full, times: "always" });
     const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
@@ -338,11 +369,13 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
 
   it("S2 labels the runtime cancelled when a Stop is saved as a mid-turn exit's ending", async () => {
     const { active, plan, turn, event } = await start();
+    const execution = ownedExecution(active);
     await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved before the disk filled", isFinalResponse: false }));
     const fault = refuse(plan, threadWrite(active.thread.id), writerFailures.full, { times: "always", pinOperation: true });
     refuse(plan, endingWrite(active.thread.id), writerFailures.full, { times: "always" });
     await active.deliver(event({ type: "toolUse", threadId: active.thread.id, toolCallId: "full-1", toolName: "Bash", toolInput: { command: "ls" } }));
     await fault.reached;
+    await untilExitStarts(active, execution);
     const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
     expect(stop).toMatchObject({ status: "fulfilled", value: { status: "ending-not-saved" } });
     for (const clear of clearFaults) clear();
@@ -351,6 +384,24 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     await vi.waitFor(() => expect(active.service.runtimeAccess().runtimeSnapshots()).toContainEqual(expect.objectContaining({
       threadId: active.thread.id, turnExecutionId: turn.turnExecutionId, phase: "cancelled",
     })));
+  });
+
+  it("S2 stops the agent and answers Stop as not saved while the running turn cannot be read", async () => {
+    const { active, plan, turn, event } = await start();
+    const execution = ownedExecution(active);
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved before the disk filled", isFinalResponse: false }));
+    const fault = refuse(plan, threadWrite(active.thread.id), writerFailures.full, { times: "always", pinOperation: true });
+    const reads = failStatusReads(active, turn.turnExecutionId, (status) => status === "Running");
+    await active.deliver(event({ type: "toolUse", threadId: active.thread.id, toolCallId: "full-1", toolName: "Bash", toolInput: { command: "ls" } }));
+    await fault.reached;
+    await untilExitStarts(active, execution);
+    const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+    expect(stop).toMatchObject({ status: "fulfilled", value: { status: "ending-not-saved" } });
+    expect(active.provider.stopSession).toHaveBeenCalled();
+    reads.restore();
+    for (const clear of clearFaults) clear();
+    await retryTicks(active);
+    await expectStoppedExit(active, turn.turnExecutionId);
   });
 
   it("S2 saves a Stop answered before its cancelled ending's save failed as the user's Stop", async () => {
