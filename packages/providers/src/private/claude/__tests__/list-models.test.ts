@@ -56,7 +56,7 @@ describe("listClaudeModels", () => {
 
   it("returns ProviderModelInfo[] filtered to claude models", async () => {
     const result = await listClaudeModels();
-    expect(result).toHaveLength(13);
+    expect(result).toHaveLength(15);
     expect(result[0]).toEqual<ProviderModelInfo>({
       id: "claude-opus-5-5",
       name: "Claude Opus 5.5",
@@ -84,6 +84,7 @@ describe("listClaudeModels", () => {
       name: "Claude Haiku 4.5",
       contextWindow: 200_000,
       supportsReasoning: false,
+      lifecycle: "legacy",
     });
   });
 
@@ -116,11 +117,12 @@ describe("listClaudeModels", () => {
   it("returns the complete static catalog when ANTHROPIC_API_KEY is missing", async () => {
     delete process.env.ANTHROPIC_API_KEY;
     const result = await listClaudeModels();
-    expect(result).toHaveLength(11);
+    expect(result).toHaveLength(13);
     expect(result.map((model) => model.id)).toEqual([
       "claude-opus-5-5",
       "claude-opus-5",
       "claude-sonnet-5-5",
+      "claude-fable-5-2",
       "claude-fable-5-1",
       "claude-fable-5",
       "claude-sonnet-5",
@@ -128,6 +130,7 @@ describe("listClaudeModels", () => {
       "claude-opus-4-7",
       "claude-opus-4-6",
       "claude-sonnet-4-6",
+      "claude-haiku-5-5",
       "claude-haiku-4-5",
     ]);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -161,7 +164,7 @@ describe("listClaudeModels", () => {
     fetchSpy.mockRejectedValueOnce(new Error("network unavailable"));
     const result = await listClaudeModels();
     await listClaudeModels();
-    expect(result).toHaveLength(11);
+    expect(result).toHaveLength(13);
     expect(result[0]?.id).toBe("claude-opus-5-5");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
@@ -174,7 +177,7 @@ describe("listClaudeModels", () => {
     });
     const result = await listClaudeModels();
     await listClaudeModels();
-    expect(result).toHaveLength(11);
+    expect(result).toHaveLength(13);
     expect(result[0]?.id).toBe("claude-opus-5-5");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
@@ -185,7 +188,7 @@ describe("listClaudeModels", () => {
       json: () => Promise.reject(new SyntaxError("invalid JSON")),
     });
     const result = await listClaudeModels();
-    expect(result).toHaveLength(11);
+    expect(result).toHaveLength(13);
     expect(result[0]?.id).toBe("claude-opus-5-5");
   });
 
@@ -197,7 +200,7 @@ describe("listClaudeModels", () => {
     const result = await listClaudeModels();
 
     expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(result).toHaveLength(13);
+    expect(result).toHaveLength(15);
     dateSpy.mockRestore();
   });
 

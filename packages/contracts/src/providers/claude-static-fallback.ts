@@ -3,12 +3,14 @@ import type { ProviderModelInfo } from "./models.js";
 /** Claude models superseded by a newer release in the same family. The picker folds these away. */
 const CLAUDE_LEGACY_MODEL_IDS: ReadonlySet<string> = new Set([
   "claude-opus-5",
+  "claude-fable-5-1",
   "claude-fable-5",
   "claude-sonnet-5",
   "claude-opus-4-8",
   "claude-opus-4-7",
   "claude-opus-4-6",
   "claude-sonnet-4-6",
+  "claude-haiku-4-5",
 ]);
 
 /** Snapshot suffix the Anthropic Models API appends to an alias, e.g. `-20250514`. */
@@ -29,6 +31,7 @@ export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = ([
     ["claude-opus-5-5", "Claude Opus 5.5"],
     ["claude-opus-5", "Claude Opus 5"],
     ["claude-sonnet-5-5", "Claude Sonnet 5.5"],
+    ["claude-fable-5-2", "Claude Fable 5.2"],
     ["claude-fable-5-1", "Claude Fable 5.1"],
     ["claude-fable-5", "Claude Fable 5"],
     ["claude-sonnet-5", "Claude Sonnet 5"],
@@ -55,6 +58,16 @@ export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = ([
     supportedReasoningEfforts: ["low", "medium", "high", "max"],
     defaultReasoningEffort: "high",
   })),
+  {
+    id: "claude-haiku-5-5",
+    name: "Claude Haiku 5.5",
+    contextWindow: 1_000_000,
+    contextWindowOptions: ["200k", "1m"],
+    supportsReasoning: true,
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    // Anthropic defaults Haiku 5.5 to medium effort, one level below the other Claude 5 models.
+    defaultReasoningEffort: "medium",
+  },
   {
     id: "claude-haiku-4-5",
     name: "Claude Haiku 4.5",

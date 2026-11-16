@@ -13,6 +13,7 @@ export const MODEL_CONTEXT_WINDOWS_DEFAULT: Readonly<Record<string, number>> = {
   "claude-opus-5-5": 200_000,
   "claude-opus-5": 200_000,
   "claude-sonnet-5-5": 200_000,
+  "claude-fable-5-2": 200_000,
   "claude-fable-5-1": 200_000,
   "claude-fable-5": 200_000,
   "claude-sonnet-5": 200_000,
@@ -20,6 +21,7 @@ export const MODEL_CONTEXT_WINDOWS_DEFAULT: Readonly<Record<string, number>> = {
   "claude-opus-4-7": 200_000,
   "claude-opus-4-6": 200_000,
   "claude-sonnet-4-6": 200_000,
+  "claude-haiku-5-5": 200_000,
   "claude-haiku-4-5": 200_000,
 };
 
@@ -33,6 +35,7 @@ export const MODEL_CONTEXT_WINDOWS_EXTENDED: Readonly<Record<string, number>> = 
   "claude-opus-5-5": 1_000_000,
   "claude-opus-5": 1_000_000,
   "claude-sonnet-5-5": 1_000_000,
+  "claude-fable-5-2": 1_000_000,
   "claude-fable-5-1": 1_000_000,
   "claude-fable-5": 1_000_000,
   "claude-sonnet-5": 1_000_000,
@@ -40,6 +43,7 @@ export const MODEL_CONTEXT_WINDOWS_EXTENDED: Readonly<Record<string, number>> = 
   "claude-opus-4-7": 1_000_000,
   "claude-opus-4-6": 1_000_000,
   "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-5-5": 1_000_000,
 };
 
 /**

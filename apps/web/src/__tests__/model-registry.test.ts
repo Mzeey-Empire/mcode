@@ -95,10 +95,10 @@ describe("pickProviderModelsForSettings", () => {
 });
 
 describe("ModelRegistry", () => {
-  it("MODEL_PROVIDERS contains Claude with 11 models", () => {
+  it("MODEL_PROVIDERS contains Claude with 13 models", () => {
     const claude = MODEL_PROVIDERS.find((p) => p.id === "claude");
     expect(claude).toBeTruthy();
-    expect(claude?.models).toHaveLength(11);
+    expect(claude?.models).toHaveLength(13);
     expect(claude?.comingSoon).toBe(false);
   });
 
