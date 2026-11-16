@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeTimersPromises from "node:timers/promises";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
-import { WriterFaultPlan, terminalWrite, threadWrite, writerFailures } from "./faulty-writer-worker.js";
-import { expectInvariant, knownStall } from "./known-stall.js";
+import { isThreadSaveBlocked } from "../../canonical/accepted-save-failure.js";
+import { WriterFaultPlan, originalWrite, terminalWrite, threadWrite, writerFailures } from "./faulty-writer-worker.js";
+import { InvariantViolation, expectInvariant, knownStall } from "./known-stall.js";
 import { openWorkerServiceFixture } from "./worker-turn-fixture.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
@@ -61,20 +62,34 @@ function send(active: Fixture) {
   return active.service.sendMessage({ threadId: active.thread.id, content: "Continue", provider: "codex", model: "gpt-5", permissionMode: "default" });
 }
 
+function deliverTurnComplete(active: Fixture, event: (input: AgentEvent) => AgentEvent) {
+  return active.deliver(event({ type: "turnComplete", threadId: active.thread.id, reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0, providerId: "codex" }));
+}
+
+function deliverEnded(active: Fixture, event: (input: AgentEvent) => AgentEvent) {
+  return active.deliver(event({ type: "ended", threadId: active.thread.id }));
+}
+
 async function finish(active: Fixture, event: (input: AgentEvent) => AgentEvent, unsaved = false) {
-  await active.deliver(event({ type: "turnComplete", threadId: active.thread.id, reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0, providerId: "codex" }));
+  await deliverTurnComplete(active, event);
   if (!unsaved) {
     await retryTicks(active);
     await active.workers.progress?.waitForSaved(active.thread.id);
   }
-  await active.deliver(event({ type: "ended", threadId: active.thread.id }));
+  await deliverEnded(active, event);
+}
+
+/** A bounded wait that never settled is a broken harness, not a reproduced stall. */
+function settled<T>(operation: string, result: Settlement<T>): Exclude<Settlement<T>, { status: "pending" }> {
+  if (result.status === "pending") throw new Error(`harness: ${operation} did not settle within the bound`);
+  return result;
 }
 
 async function refusedFinish() {
   const context = await start();
   const { active, plan, turn, event } = context;
   await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "A deterministic reply", isFinalResponse: true }));
-  const fault = plan.refuse(terminalWrite(active.thread.id, turn.turnId), writerFailures.identity, { times: "always" });
+  const fault = plan.refuse(terminalWrite(active.thread.id, turn.turnId), writerFailures.identity, { times: "always", pinOperation: true });
   clearFault = fault.clear;
   await finish(active, event, true);
   await fault.reached;
@@ -87,37 +102,44 @@ function terminal(active: Fixture, executionId: string) {
 }
 
 afterEach(async () => {
-  clearFault?.();
-  if (fixture) {
-    await retryTicks(fixture);
-    await fixture.workers.progress?.waitForSaved(fixture.thread.id);
-    await fixture.close();
+  try {
+    clearFault?.();
+    if (fixture) {
+      await retryTicks(fixture);
+      await fixture.workers.progress?.waitForSaved(fixture.thread.id);
+      await fixture.close();
+    }
+  } finally {
+    // A failing close must not leave fake timers or mocks active for the next test.
+    fixture = undefined;
+    clearFault = undefined;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   }
-  fixture = undefined;
-  clearFault = undefined;
-  vi.useRealTimers();
-  vi.restoreAllMocks();
 });
 
 describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
   it("S1 ends a refused terminal save and admits another send", async () => {
-    await knownStall("refused save leaves the turn Running", async () => {
+    await knownStall("refused save leaves the turn Running", /turn Running with no ending; next send refused as save-blocked/, async () => {
       const { active, turn } = await refusedFinish();
       await retryTicks(active);
+      const next = settled("next send", await settleWithinTicks(active, send(active)));
+      // Any other refusal is not this stall, so it surfaces as the failure it is. The send's refusal reaches the
+      // caller rebuilt across the execution worker, so it is recognised by its code, not its class.
+      if (next.status === "rejected" && !isThreadSaveBlocked(next.error)) throw next.error;
       const saved = active.canonical.loadTurnByExecution(turn.turnExecutionId);
-      const next = await settleWithinTicks(active, send(active));
-      const admitted = next.status === "fulfilled";
-      expectInvariant(terminal(active, turn.turnExecutionId) && saved?.ending && admitted,
-        `Refused save: status=${saved?.status}, ending=${JSON.stringify(saved?.ending)}, nextSend=${next.status}, error=${next.status === "rejected" ? String(next.error) : "none"}`);
+      expectInvariant(terminal(active, turn.turnExecutionId) && saved?.ending && next.status === "fulfilled",
+        `Refused save: turn ${saved?.status} with${saved?.ending ? "" : " no"} ending; next send ${next.status === "rejected" ? "refused as save-blocked" : "admitted"}`);
     });
   });
 
   it("S2 accepts Stop after an unsaved finish", async () => {
-    await knownStall("Stop refused after an unsaved finish", async () => {
+    await knownStall("Stop refused after an unsaved finish", /Stop answered already-terminal while the database turn is Running/, async () => {
       const { active, turn } = await refusedFinish();
-      const stop = await settleWithinTicks(active, active.requestStop());
-      expectInvariant(stop.status === "fulfilled" && stop.value.status !== "error" && terminal(active, turn.turnExecutionId),
-        `Stop: status=${stop.status}, result=${stop.status === "fulfilled" ? JSON.stringify(stop.value) : "none"}, error=${stop.status === "rejected" ? String(stop.error) : "none"}, turn=${active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status}`);
+      const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+      if (stop.status === "rejected") throw stop.error;
+      expectInvariant(terminal(active, turn.turnExecutionId),
+        `Stop answered ${stop.value.status} while the database turn is ${active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status}`);
     });
   });
 
@@ -126,8 +148,14 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     const fault = plan.refuse(threadWrite(active.thread.id), writerFailures.busy, { times: 3 });
     clearFault = fault.clear;
     await active.deliver(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved exactly once", isFinalResponse: true }));
-    await finish(active, event);
-    await fault.reached;
+    // Armed before any retry fires: a busy refusal misread as permanent would reject this waiter with ThreadSaveBlockedError.
+    const waiter = active.workers.progress?.waitForSaved(active.thread.id);
+    if (!waiter) throw new Error("harness: worker fixture has no accepted progress owner");
+    await deliverTurnComplete(active, event);
+    const saved = settled("save waiter", await settleWithinTicks(active, waiter));
+    expect(saved).toMatchObject({ status: "fulfilled" });
+    expect(fault.hits).toBe(3);
+    await deliverEnded(active, event);
     expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
     expect(active.messages.listByThread(active.thread.id, 100).messages.filter((message) => message.role === "assistant").map((message) => message.content)).toEqual(["Saved exactly once"]);
     const next = await settleWithinTicks(active, send(active));
@@ -136,22 +164,47 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
 
   it("S4 replaces rejected content and admits another send", async () => {
     const { active, plan, turn, event } = await start();
-    const fault = plan.refuse(threadWrite(active.thread.id), writerFailures.content, { times: 1 });
+    // Content rejection is permanent, so the original finish is refused on every attempt and only its replacement
+    // can save. The replacement still keeps the events, so the reply text stays; what it drops is the finish's own
+    // contents, and it leaves a marker so the saved history says the operation lost them.
+    const fault = plan.refuse(originalWrite(terminalWrite(active.thread.id, turn.turnId)), writerFailures.content, { times: "always", pinOperation: true });
     clearFault = fault.clear;
     await active.deliver(event({ type: "textDelta", threadId: active.thread.id, delta: "Rejected text", isFinalResponse: true }));
     await finish(active, event);
-    await fault.reached;
+    // One refusal, then the replacement: a content rejection retried like a busy one would be refused again.
+    expect(fault.hits).toBe(1);
     expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Completed");
+    const markers = active.db.query<{ envelope_json: string }, []>(
+      "SELECT envelope_json FROM canonical_agent_events WHERE envelope_json LIKE '%ingest.content-replaced%'").all()
+      .map((row) => JSON.parse(row.envelope_json).payload);
+    expect(markers).toEqual([
+      { type: "ingest.content-replaced", operationId: expect.any(String), reason: writerFailures.content.contentRejection },
+    ]);
+    const rejectedOperationId: string = markers[0].operationId;
+    const receipts = active.db.query<{ operation_id: string }, [string]>(
+      "SELECT operation_id FROM canonical_writer_operation_receipts WHERE operation_id LIKE ? || '%'").all(rejectedOperationId)
+      .map((row) => row.operation_id);
+    expect(receipts).toContain(`${rejectedOperationId}:replaced`);
+    expect(receipts).not.toContain(rejectedOperationId);
     const next = await settleWithinTicks(active, send(active));
     expect(next).toMatchObject({ status: "fulfilled" });
   });
 
   it("S5 rethrows harness errors", async () => {
     const error = new Error("Harness broke");
-    await expect(knownStall("example", async () => { throw error; })).rejects.toBe(error);
+    await expect(knownStall("example", /./, async () => { throw error; })).rejects.toBe(error);
+  });
+
+  it("S5 rethrows an invariant violation that is not the known stall", async () => {
+    const violation = new InvariantViolation("A different invariant broke");
+    await expect(knownStall("example", /expected signature/, async () => { throw violation; })).rejects.toBe(violation);
+  });
+
+  it("S5 accepts the known stall's own violation", async () => {
+    await expect(knownStall("example", /expected signature/, async () => { expectInvariant(false, "the expected signature"); })).resolves.toBeUndefined();
   });
 
   it("S5 rejects a fixed stall", async () => {
-    await expect(knownStall("example", async () => undefined)).rejects.toThrow('Known stall is fixed: remove knownStall("example")');
+    await expect(knownStall("example", /./, async () => undefined)).rejects.toThrow('Known stall is fixed: remove knownStall("example")');
   });
 });

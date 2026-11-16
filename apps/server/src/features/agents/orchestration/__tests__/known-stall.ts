@@ -8,12 +8,15 @@ export function expectInvariant(condition: unknown, message: string): asserts co
   if (!condition) throw new InvariantViolation(message);
 }
 
-/** Keep a reproduced stall green until the product fix requires removing its marker. */
-export async function knownStall(reason: string, scenario: () => Promise<void>): Promise<void> {
+/**
+ * Keep a reproduced stall green until the product fix requires removing its marker. The stall passes only when it
+ * fails with its own signature, so a different failure, or a different invariant, is never mistaken for it.
+ */
+export async function knownStall(reason: string, expected: RegExp, scenario: () => Promise<void>): Promise<void> {
   try {
     await scenario();
   } catch (error) {
-    if (error instanceof InvariantViolation) return;
+    if (error instanceof InvariantViolation && expected.test(error.message)) return;
     throw error;
   }
   throw new Error(`Known stall is fixed: remove knownStall("${reason}")`);

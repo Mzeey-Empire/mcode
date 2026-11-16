@@ -25,13 +25,31 @@ export function terminalWrite(threadId: string, turnId: string): Match {
     && request.input.compatibility?.mutation.kind === "finish-live-event";
 }
 
+/** Narrow a match to the original write of a batch, leaving its replacement for rejected content unmatched. */
+export function originalWrite(match: Match): Match {
+  return (request) => match(request) && request.kind === "append-accepted" && request.input.replaced === undefined;
+}
+
 interface Rule {
   match: Match;
   remaining: number | "always";
   failure: WriterFailure;
+  /** When set, the rule refuses only the operation of the first request it matched. */
+  pinOperation: boolean;
+  pinnedOperationId?: string;
+  hits: number;
   active: boolean;
   reached: Promise<void>;
   markReached: () => void;
+}
+
+interface RefuseOptions {
+  times: number | "always";
+  /**
+   * Refuse only the first matched operation from then on. A real refusal is deterministic for one operation, so a
+   * product fix that writes a fresh operation instead of resending the stuck one must not be refused as well.
+   */
+  pinOperation?: boolean;
 }
 
 /** A fault plan survives worker replacement while each factory call creates a fresh wrapper. */
@@ -39,16 +57,13 @@ export class WriterFaultPlan {
   private readonly rules: Rule[] = [];
 
   /** Refuse matching requests before they reach SQLite. */
-  refuse(match: Match, failure: WriterFailure, options: { times: number | "always" }) {
-    return this.arm(match, options.times, failure);
-  }
-
-  private arm(match: Match, remaining: number | "always", failure: WriterFailure) {
+  refuse(match: Match, failure: WriterFailure, options: RefuseOptions) {
     let markReached!: () => void;
     const reached = new Promise<void>((resolve) => { markReached = resolve; });
-    const rule: Rule = { match, remaining, failure, active: true, reached, markReached };
+    const rule: Rule = { match, remaining: options.times, failure, pinOperation: options.pinOperation ?? false, hits: 0,
+      active: true, reached, markReached };
     this.rules.push(rule);
-    return { reached, clear: () => { rule.active = false; } };
+    return { reached, clear: () => { rule.active = false; }, get hits() { return rule.hits; } };
   }
 
   /** Create an independently owned real worker attached to this plan. */
@@ -69,8 +84,11 @@ class FaultyWriterWorker extends EventTarget implements DatabaseWriterWorker {
   }
 
   postMessage(request: ApplicationDatabaseWriterRequest): void {
-    const rule = this.rules.find((candidate) => candidate.active && candidate.remaining !== 0 && candidate.match(request));
+    const rule = this.rules.find((candidate) => candidate.active && candidate.remaining !== 0 && candidate.match(request)
+      && (!candidate.pinOperation || candidate.pinnedOperationId === undefined || candidate.pinnedOperationId === operationIdOf(request)));
     if (!rule) { this.worker.postMessage(request); return; }
+    if (rule.pinOperation) rule.pinnedOperationId ??= operationIdOf(request);
+    rule.hits += 1;
     rule.markReached();
     if (rule.remaining !== "always") rule.remaining -= 1;
     const failure = rule.failure;
@@ -78,8 +96,13 @@ class FaultyWriterWorker extends EventTarget implements DatabaseWriterWorker {
       ? { kind: "ordinary-failed", requestId: request.requestId, name: request.name, failure }
       : { kind: "failed", requestId: request.requestId, operationId: request.operationId,
         executionId: request.executionId, reason: "write-failed", failure };
-    queueMicrotask(() => this.onmessage?.(new MessageEvent("message", { data: response })));
+    // A real worker's reply arrives as a message event on a later macrotask, never within the posting call's microtasks.
+    setImmediate(() => this.onmessage?.(new MessageEvent("message", { data: response })));
   }
 
   terminate(): void { this.worker.terminate(); }
+}
+
+function operationIdOf(request: ApplicationDatabaseWriterRequest): string | undefined {
+  return "operationId" in request ? request.operationId : undefined;
 }
