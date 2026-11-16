@@ -235,7 +235,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     });
     workerRuntime?.providerEvents.bindCommandPreparation((execution, batch) => this.prepareWorkerEvent(execution, batch));
     workerRuntime?.providerEvents.bindCommitted((execution, result) => this.applyWorkerReceipt(execution, result));
-    workerRuntime?.bindRecovered((execution) => this.handleWorkerRecovery(execution));
+    workerRuntime?.bindRecovered((execution, outcome) => this.handleWorkerRecovery(execution, outcome));
     workerRuntime?.bindUnsavedAgentStop((execution) => this.stopUnsavedAgent(execution));
     this.eventPublication.registerPipelineStart(() => this.initializeProviderEvents());
   }
@@ -827,7 +827,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       logger.warn("Abandoned file evidence sweep failed", { threadId, error: String(error) }));
   }
 
-  private handleWorkerRecovery(execution: ExecutionIdentity): void {
+  private handleWorkerRecovery(execution: ExecutionIdentity, outcome: "cancelled" | "interrupted" = "interrupted"): void {
     this.fileEvidence?.tracked(execution, "lost");
     this.fileEvidence?.terminalSaved(execution);
     void this.resolveAbandonedEvidence(execution.threadId);
@@ -838,7 +838,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (this.lifecycles.worker(execution.threadId) !== active) return;
     this.lifecycles.end(execution);
     if (active) this.recoverWorkerProvider(active);
-    this.turnRuntime.terminalize(execution.threadId, execution.executionId, "interrupted");
+    this.turnRuntime.terminalize(execution.threadId, execution.executionId, outcome);
     this.trackSessionEnded(execution.threadId, execution.executionId);
     this.clearTurnDispatch(execution.threadId);
     this.clearTurnEndedState(execution.threadId);

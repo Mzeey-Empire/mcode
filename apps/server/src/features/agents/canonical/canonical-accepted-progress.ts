@@ -146,6 +146,10 @@ interface UnsavedTurnEnding {
   readonly receipt: ExecutionWriteReceipt;
 }
 
+/** Runs once an unsaved turn's ending is settled in storage, with the outcome storage recorded for it. */
+export type UnsavedTurnEnded = (execution: ExecutionIdentity, lease: ExecutionLease, receipt: ExecutionWriteReceipt,
+  outcome: "cancelled" | "interrupted") => Promise<void>;
+
 /** How a Stop resolved for a turn whose ending is owed because its saving could not continue. */
 export type UnsavedTurnStop = "cancelled" | "already-terminal" | "ending-not-saved";
 
@@ -189,7 +193,7 @@ export class CanonicalAcceptedProgress {
   private readonly savingPublisher: SavingStatusPublisher;
   private onPermanentFailure: ((execution: ExecutionIdentity, error: Error) => Promise<void>) | undefined;
   private stopUnsavedAgent: ((execution: ExecutionIdentity) => Promise<void>) | undefined;
-  private onUnsavedTurnEnded: ((execution: ExecutionIdentity, lease: ExecutionLease, receipt: ExecutionWriteReceipt) => Promise<void>) | undefined;
+  private onUnsavedTurnEnded: UnsavedTurnEnded | undefined;
   private pendingSaved: readonly CanonicalAcceptedWriteReceipt[] = [];
   private closing = false;
   private readonly deletingThreads = new Set<string>();
@@ -831,7 +835,7 @@ export class CanonicalAcceptedProgress {
   }
 
   /** Bind what runs once an unsaved turn's ending is settled in storage, such as releasing its worker's lease. */
-  bindUnsavedTurnEnded(callback: (execution: ExecutionIdentity, lease: ExecutionLease, receipt: ExecutionWriteReceipt) => Promise<void>): void {
+  bindUnsavedTurnEnded(callback: UnsavedTurnEnded): void {
     this.onUnsavedTurnEnded = callback;
   }
 
@@ -1404,7 +1408,9 @@ export class CanonicalAcceptedProgress {
       exit.markAttempted();
       this.finishUnsavedTurnExit(threadId, thread, exit, ending?.receipt);
     }
-    if (ending) await this.onUnsavedTurnEnded?.(exit.execution, ending.lease, ending.receipt);
+    if (!ending) return;
+    const outcome = this.canonical.loadTurnByExecution(exit.execution.executionId)?.status === "Cancelled" ? "cancelled" : "interrupted";
+    await this.onUnsavedTurnEnded?.(exit.execution, ending.lease, ending.receipt, outcome);
   }
 
   /**
