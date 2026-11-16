@@ -41,6 +41,7 @@ import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.j
 import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/provider-host-ports.js";
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
+import type { UnsavedTurnOutcome } from "../canonical/canonical-accepted-progress.js";
 import type { DataOnlyParentTurnFinishInput } from "../canonical/canonical-parent-turn-write.js";
 import { observedProviderRetries, persistTurnFailure, providerFailureTerminal, type TurnEndingCause } from "../canonical/turn-ending.js";
 import { TurnEventPipeline, type TurnLifecycleControl } from "../turns/turn-event-pipeline.js";
@@ -824,7 +825,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       logger.warn("Abandoned file evidence sweep failed", { threadId, error: String(error) }));
   }
 
-  private handleWorkerRecovery(execution: ExecutionIdentity, outcome: "cancelled" | "interrupted" = "interrupted"): void {
+  private handleWorkerRecovery(execution: ExecutionIdentity, outcome: UnsavedTurnOutcome = "interrupted"): void {
     this.fileEvidence?.tracked(execution, "lost");
     this.fileEvidence?.terminalSaved(execution);
     void this.resolveAbandonedEvidence(execution.threadId);

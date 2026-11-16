@@ -12,7 +12,7 @@ import { ExecutionThreadWorkerPort } from "./execution-worker-port.js";
 import { sameExecution, sameLease, type ExecutionIdentity, type ExecutionLease } from "./execution-mailbox-protocol.js";
 import { ExecutionWorkerLossCoordinator, workerLossIncidentId } from "./execution-worker-loss-coordinator.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
-import { CanonicalAcceptedProgress, type UnsavedTurnEnded } from "../canonical/canonical-accepted-progress.js";
+import { CanonicalAcceptedProgress, type UnsavedTurnEnded, type UnsavedTurnOutcome } from "../canonical/canonical-accepted-progress.js";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import type { CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { PlanFileWriter } from "../planning/plan-file-writer.js";
@@ -41,7 +41,7 @@ export class WorkerOwnedTurnRuntime {
   readonly providerEvents: ExecutionProviderEventOwnership;
   private readonly initialWorkers: ExecutionThreadWorkerPort[] = [];
   private readonly rejectedRecoveries = new Map<string, Promise<void>>();
-  private onRecovered: ((execution: ExecutionIdentity, outcome?: "cancelled" | "interrupted") => void) | undefined;
+  private onRecovered: ((execution: ExecutionIdentity, outcome?: UnsavedTurnOutcome) => void) | undefined;
   private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
 
   constructor(
@@ -87,7 +87,7 @@ export class WorkerOwnedTurnRuntime {
    * Notify the runtime controller only after writer-backed worker-loss recovery releases the lease. The outcome is
    * the one storage saved; worker loss always saves an interruption.
    */
-  bindRecovered(onRecovered: (execution: ExecutionIdentity, outcome?: "cancelled" | "interrupted") => void): void {
+  bindRecovered(onRecovered: (execution: ExecutionIdentity, outcome?: UnsavedTurnOutcome) => void): void {
     this.onRecovered = onRecovered;
   }
 

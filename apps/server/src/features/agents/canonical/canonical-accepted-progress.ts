@@ -144,9 +144,12 @@ interface UnsavedTurnEnding {
   readonly receipt: ExecutionWriteReceipt;
 }
 
+/** How storage ended a turn whose saving stopped: the user's Stop, or the saving failure itself. */
+export type UnsavedTurnOutcome = "cancelled" | "interrupted";
+
 /** Runs once an unsaved turn's ending is settled in storage, with the outcome storage recorded for it. */
 export type UnsavedTurnEnded = (execution: ExecutionIdentity, lease: ExecutionLease, receipt: ExecutionWriteReceipt,
-  outcome: "cancelled" | "interrupted") => Promise<void>;
+  outcome: UnsavedTurnOutcome) => Promise<void>;
 
 /** How a Stop resolved for a turn whose ending is owed because its saving could not continue. */
 export type UnsavedTurnStop = "cancelled" | "already-terminal" | "ending-not-saved";
