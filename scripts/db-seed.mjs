@@ -117,7 +117,8 @@ function removeAbandonedBuilds(dbDir, targetPath) {
   }
 }
 
-function buildFilteredCopy(sourcePath, temporaryPath, limits) {
+/** Builds and filters a private copy without publishing it into a runtime. */
+export function buildFilteredCopy(sourcePath, temporaryPath, limits) {
   const donor = new Database(sourcePath, { readonly: true });
   try {
     donor.run(`VACUUM INTO '${temporaryPath.replaceAll("'", "''")}'`);

@@ -178,7 +178,7 @@ function selectKeptRows(db, maxWorkspaces, maxFamilies) {
  * Groups threads into families (forks, subagents, delegation) within one workspace and returns the
  * families with no live member. Legacy threads.status is not liveness: only canonical state is.
  */
-function buildStoppedFamilies(db) {
+export function buildStoppedFamilies(db) {
   const rows = db
     .query(
       `SELECT t.id, t.workspace_id, t.updated_at, t.parent_thread_id, t.delegation_coordinator_thread_id,
