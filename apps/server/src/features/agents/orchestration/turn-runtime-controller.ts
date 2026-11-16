@@ -102,6 +102,9 @@ type PreparedStop = {
   stop: TurnStopCause;
 };
 
+/** The session a provider stop targets, and the turn whose runtime must still be current to evict it. */
+type StopTarget = Pick<PreparedStop, "threadId" | "sessionId" | "providerId" | "runtime">;
+
 type UnsentWorkerTerminal = { outcome: "errored" } | { outcome: "cancelled"; stop: TurnStopCause };
 
 /** Read-only runtime state available to server-owned diagnostics and recovery infrastructure. */
@@ -238,25 +241,19 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /**
-   * Stop the agent of a turn whose output can no longer be saved, before its ending is written. A turn whose finish
-   * was refused has already left the worker, so its provider session is stopped through the registry. Bounded, so a
-   * wedged provider cannot hold the turn open.
+   * Stop the agent of a turn whose output can no longer be saved, the way a user's Stop does. A turn whose finish was
+   * refused has already left the worker, so its provider is resolved through the registry.
    */
   private async stopUnsavedAgent(execution: ExecutionIdentity): Promise<void> {
-    if (this.turnRuntime.snapshot(execution.threadId)?.turnExecutionId !== execution.executionId) return;
-    const active = this.lifecycles.workerFor(execution);
-    const providerId = this.activeProviderId(execution.threadId);
-    const provider = active?.provider ?? (providerId ? this.providerRegistry.resolve(providerId) : undefined);
+    const { threadId } = execution;
+    const runtime = this.turnRuntime.snapshot(threadId);
+    if (runtime?.turnExecutionId !== execution.executionId) return;
+    const providerId = this.activeProviderId(threadId);
+    const provider = this.lifecycles.workerFor(execution)?.provider
+      ?? (providerId ? this.providerRegistry.resolve(providerId) : undefined);
     if (!provider) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        Promise.resolve(provider.stopSession(`mcode-${execution.threadId}`)),
-        new Promise<void>((resolve) => { timer = setTimeout(resolve, PROVIDER_STOP_SETTLE_TIMEOUT_MS); }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
+    await this.stopWorkerProvider({ threadId, sessionId: `mcode-${threadId}`, ...(providerId ? { providerId } : {}), runtime },
+      provider);
   }
 
   /** Retain a turn's release promises while test ingress drains, even after its lifecycle ends. */
@@ -1380,7 +1377,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       status: "cancelled", dispatchState: prepared.dispatchState };
   }
 
-  private async stopWorkerProvider(prepared: PreparedStop, provider: IAgentProvider): Promise<void> {
+  private async stopWorkerProvider(prepared: StopTarget, provider: IAgentProvider): Promise<void> {
     void Promise.resolve(this.featureEffects.stopDescendants(prepared.threadId)).catch((error: unknown) => {
       logger.warn("Worker-owned descendant stop failed", { threadId: prepared.threadId,
         error: error instanceof Error ? error.message : String(error) });
@@ -1462,7 +1459,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Drop a pooled session whose provider ignored cancellation so the next turn respawns fresh. */
-  private evictUnresponsiveSession(prepared: PreparedStop): void {
+  private evictUnresponsiveSession(prepared: StopTarget): void {
     const providerId = prepared.providerId;
     if (!providerId) return;
     if (this.turnRuntime.snapshot(prepared.threadId)?.turnExecutionId !== prepared.runtime.turnExecutionId) return;
