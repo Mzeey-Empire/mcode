@@ -9,7 +9,7 @@
     "test": "bun --bun ./node_modules/vitest/vitest.mjs run",
     "bench": "bun --bun ./node_modules/vitest/vitest.mjs bench --run",
     "test:durations": "bun --bun ./node_modules/vitest/vitest.mjs run --reporter=dot --reporter=./scripts/test-duration-reporter.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc-rs --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

@@ -20,7 +20,7 @@
     "./turn-admission": "./src/turn-admission/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc-rs --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
