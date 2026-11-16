@@ -164,6 +164,14 @@ async function expectSavingExit(active: Fixture, executionId: string, fault: { r
   expect(next).toMatchObject({ status: "fulfilled" });
 }
 
+/** A Stop the user gave before saving stopped is the saved ending, with the notice, and the thread takes a new send. */
+async function expectStoppedExit(active: Fixture, executionId: string) {
+  expect(active.canonical.loadTurnByExecution(executionId)).toMatchObject({ status: "Cancelled", ending: { outcome: "cancelled", stop: { by: "user" } } });
+  expect(unsavedOutputNotices(active)).toEqual([expect.stringMatching(/wasn't saved/)]);
+  const next = await settleWithinTicks(active, send(active));
+  expect(next).toMatchObject({ status: "fulfilled" });
+}
+
 afterEach(async () => {
   try {
     for (const clear of clearFaults) clear();
@@ -295,6 +303,29 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     const next = await settleWithinTicks(active, send(active));
     expect(next).toMatchObject({ status: "fulfilled" });
     expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Cancelled");
+  });
+
+  it("S2 saves a Stop answered before its cancelled ending's save failed as the user's Stop", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
+    const fault = refuse(plan, terminalWrite(active.thread.id, turn.turnId), writerFailures.full, { times: "always", pinOperation: true });
+    const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+    expect(stop).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
+    await fault.reached;
+    await retryTicks(active);
+    await expectStoppedExit(active, turn.turnExecutionId);
+  });
+
+  it("S2 saves a Stop that waited out a retrying ending save as the user's Stop", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
+    const fault = refuse(plan, terminalWrite(active.thread.id, turn.turnId), writerFailures.busy, { times: "always", pinOperation: true });
+    await finish(active, event, true);
+    await fault.reached;
+    const stop = track(active.requestStop());
+    const answered = settled("Stop", await settleTrackedWithinTicks(active, stop, 2 * K));
+    expect(answered).toMatchObject({ status: "fulfilled", value: { status: "cancelled" } });
+    await expectStoppedExit(active, turn.turnExecutionId);
   });
 
   it("S3 recovers from three busy text writes without duplicating text", async () => {
