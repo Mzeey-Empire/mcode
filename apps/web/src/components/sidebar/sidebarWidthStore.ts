@@ -15,9 +15,9 @@ export const SIDEBAR_DEFAULT_WIDTH = 304;
 export const SIDEBAR_RESIZE_STEP = 8;
 
 /**
- * Widest the sidebar may be in a window `viewportWidth` px wide. The layout
- * guard floats the sidebar once the chat column drops below the composer
- * minimum, so a wider drag would make the sidebar jump out of the dock.
+ * Widest the sidebar may be in a window `viewportWidth` px wide. The clamp
+ * leaves the composer its minimum width when the window has room, so dragging
+ * the docked sidebar wider never squeezes the chat column below it.
  */
 export function sidebarMaxWidth(viewportWidth: number): number {
   return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, viewportWidth - COMPOSER_MIN_WIDTH));

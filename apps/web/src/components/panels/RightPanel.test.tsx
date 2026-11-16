@@ -225,7 +225,7 @@ describe("RightPanel", () => {
     });
     useProjectActionStore.setState({ runsByThread: {} });
     useUiStore.setState({ rightPanelMaximized: false });
-    setLayoutMeasurements(1200, 1200);
+    setLayoutMeasurements(1200);
   });
 
   afterEach(() => cleanup());

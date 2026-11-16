@@ -125,17 +125,13 @@ describe("App", () => {
     useUiStore.setState({
       primarySurface: "chat",
       sidebarCollapsed: false,
-      sidebarCollapsedByLayout: false,
-      sidebarFloating: false,
     });
   });
 
   it("renders the sidebar logo", async () => {
     render(<App />);
     await waitFor(() => {
-      const sidebar =
-        screen.queryByTestId("sidebar-docked") ??
-        screen.getByTestId("sidebar-floating");
+      const sidebar = screen.getByTestId("sidebar-docked");
       expect(
         within(sidebar).getByRole("img", { name: "Mcode" }),
       ).toBeInTheDocument();
@@ -177,84 +173,14 @@ describe("App", () => {
     expect(within(screen.getByRole("main")).queryByRole("img", { name: "Mcode" })).toBeNull();
   });
 
-  it("renders the floating sidebar at the stored sidebar width", () => {
-    useUiStore.setState({
-      sidebarCollapsed: false,
-      sidebarCollapsedByLayout: false,
-      sidebarFloating: true,
-    });
-
+  it("renders the docked sidebar at the stored sidebar width", () => {
     useSidebarWidthStore.getState().setWidth(256);
 
     render(<App />);
 
-    const floatingSidebar = screen.getByTestId("sidebar-floating");
-    expect(floatingSidebar.firstElementChild).toHaveStyle({ width: "256px" });
+    const dockedSidebar = screen.getByTestId("sidebar-docked");
+    expect(dockedSidebar.firstElementChild?.firstElementChild).toHaveStyle({ width: "256px" });
     useSidebarWidthStore.getState().resetWidth();
-  });
-
-  it("retains the floating sidebar during its pointer-inert exit", async () => {
-    vi.useFakeTimers();
-    vi.spyOn(window, "matchMedia").mockImplementation(
-      (query) =>
-        ({
-          matches: false,
-          media: query,
-          onchange: null,
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          dispatchEvent: vi.fn(),
-        }) as MediaQueryList,
-    );
-    useUiStore.setState({
-      sidebarCollapsed: false,
-      sidebarCollapsedByLayout: false,
-      sidebarFloating: true,
-    });
-
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Close project tree" }));
-
-    const backdrop = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Close project tree"]',
-    );
-    const floatingSidebar = screen.getByTestId("sidebar-floating");
-    if (!backdrop) throw new Error("Floating sidebar backdrop was not retained");
-    expect(backdrop).toHaveAttribute("aria-hidden", "true");
-    expect(backdrop).toHaveAttribute("inert");
-    expect(floatingSidebar).toHaveAttribute("aria-hidden", "true");
-    expect(floatingSidebar).toHaveAttribute("inert");
-
-    await act(async () => vi.advanceTimersByTimeAsync(200));
-    expect(screen.queryByTestId("sidebar-floating")).not.toBeInTheDocument();
-  });
-
-  it("removes the floating sidebar immediately with reduced motion", () => {
-    vi.spyOn(window, "matchMedia").mockImplementation(
-      (query) =>
-        ({
-          matches: query === "(prefers-reduced-motion: reduce)",
-          media: query,
-          onchange: null,
-          addListener: vi.fn(),
-          removeListener: vi.fn(),
-          addEventListener: vi.fn(),
-          removeEventListener: vi.fn(),
-          dispatchEvent: vi.fn(),
-        }) as MediaQueryList,
-    );
-    useUiStore.setState({
-      sidebarCollapsed: false,
-      sidebarCollapsedByLayout: false,
-      sidebarFloating: true,
-    });
-
-    render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Close project tree" }));
-
-    expect(screen.queryByTestId("sidebar-floating")).not.toBeInTheDocument();
   });
 
   it("retains the collapsed docked sidebar without allowing interaction", () => {

@@ -6,20 +6,12 @@ import {
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
 
-/** Gap between the project tree and the chat/panel row in App.tsx. */
-export const LAYOUT_COLUMN_GAP_PX = 0;
-
 /** Live measurements from App layout refs; updated by {@link setLayoutMeasurements}. */
 let measuredContentRowWidth = 0;
-let measuredOuterRowWidth = 0;
 
-/**
- * Publishes the current content-row and outer-row widths for layout decisions
- * outside React render (panel open, sidebar expand).
- */
-export function setLayoutMeasurements(contentRowWidth: number, outerRowWidth: number): void {
+/** Publishes the current content-row width for layout decisions outside React render (panel open). */
+export function setLayoutMeasurements(contentRowWidth: number): void {
   measuredContentRowWidth = contentRowWidth;
-  measuredOuterRowWidth = outerRowWidth;
   useLayoutStore.getState().setContentRowWidth(contentRowWidth);
 }
 
@@ -29,25 +21,11 @@ export function getContentRowWidth(): number {
   return Math.max(COMPOSER_MIN_WIDTH, window.innerWidth - useSidebarWidthStore.getState().width);
 }
 
-/** Width of the row that may include an inline project tree, or a fallback before mount. */
-export function getOuterRowWidth(): number {
-  if (measuredOuterRowWidth > 0) return measuredOuterRowWidth;
-  return window.innerWidth;
-}
-
 /**
  * Minimum content-row width for composer + inline panel at the given stored width.
  */
 export function minContentWidthForSideBySidePanel(panelWidth: number): number {
   return COMPOSER_MIN_WIDTH + PANEL_SPLIT_GAP_PX + Math.max(PANEL_MIN_WIDTH, panelWidth);
-}
-
-/**
- * Minimum outer-row width to dock the project tree inline at its current width
- * while reserving `contentNeed` pixels for the chat/panel row.
- */
-export function minOuterWidthForInlineSidebar(contentNeed: number): number {
-  return contentNeed + LAYOUT_COLUMN_GAP_PX + useSidebarWidthStore.getState().width;
 }
 
 /** Whether the content row can host composer and an inline panel side by side. */
@@ -102,8 +80,3 @@ export const OVERVIEW_CANVAS_RESERVE_CSS = `clamp(0px, calc(var(--container-read
 
 /** Narrowest chat canvas that docks the card and still leaves the composer its minimum width. */
 export const OVERVIEW_DOCK_MIN_CANVAS = 896;
-
-/** Whether the project tree can dock inline beside a content row of `contentNeed` px. */
-export function canFitInlineSidebar(outerRowWidth: number, contentNeed: number): boolean {
-  return outerRowWidth >= minOuterWidthForInlineSidebar(contentNeed);
-}

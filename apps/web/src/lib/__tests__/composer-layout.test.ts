@@ -1,11 +1,8 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
-  LAYOUT_COLUMN_GAP_PX,
-  canFitInlineSidebar,
   canFitSideBySidePanel,
   minContentWidthForSideBySidePanel,
-  minOuterWidthForInlineSidebar,
   OVERVIEW_CANVAS_RESERVE,
   OVERVIEW_CANVAS_RESERVE_CSS,
   OVERVIEW_DOCK_MIN_CANVAS,
@@ -14,7 +11,6 @@ import {
   READING_RAIL_WIDTH,
 } from "@/lib/composer-layout";
 import { COMPOSER_MIN_WIDTH, PANEL_MIN_WIDTH, PANEL_SPLIT_GAP_PX } from "@/stores/diffStore";
-import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
 
 describe("composer-layout", () => {
   it("computes side-by-side minimum from composer, divider, and panel width", () => {
@@ -24,21 +20,6 @@ describe("composer-layout", () => {
     expect(minContentWidthForSideBySidePanel(100)).toBe(
       COMPOSER_MIN_WIDTH + PANEL_SPLIT_GAP_PX + PANEL_MIN_WIDTH,
     );
-  });
-
-  it("computes inline sidebar minimum from content need and the live sidebar width", () => {
-    // The sidebar clamp reads the window width, which the node environment lacks.
-    vi.stubGlobal("window", { innerWidth: 1440 });
-    useSidebarWidthStore.getState().resetWidth();
-    expect(minOuterWidthForInlineSidebar(600)).toBe(600 + LAYOUT_COLUMN_GAP_PX + 304);
-
-    useSidebarWidthStore.getState().setWidth(220);
-    expect(minOuterWidthForInlineSidebar(600)).toBe(600 + LAYOUT_COLUMN_GAP_PX + 220);
-
-    useSidebarWidthStore.getState().setWidth(340);
-    expect(minOuterWidthForInlineSidebar(600)).toBe(600 + LAYOUT_COLUMN_GAP_PX + 340);
-    useSidebarWidthStore.getState().resetWidth();
-    vi.unstubAllGlobals();
   });
 
   it("reports side-by-side fit from content-row width", () => {
@@ -84,9 +65,4 @@ describe("composer-layout", () => {
     }
   });
 
-  it("reports inline sidebar fit from outer-row width", () => {
-    const need = minOuterWidthForInlineSidebar(COMPOSER_MIN_WIDTH);
-    expect(canFitInlineSidebar(need, COMPOSER_MIN_WIDTH)).toBe(true);
-    expect(canFitInlineSidebar(need - 1, COMPOSER_MIN_WIDTH)).toBe(false);
-  });
 });

@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useReducer,
   useState,
   useRef,
   lazy,
@@ -91,14 +90,8 @@ type AppLayoutProps = {
   isDesktop: boolean;
   navigationHistory: NavigationHistoryState;
   navigateHistory: (direction: "back" | "forward") => void;
-  outerRowRef: RefObject<HTMLDivElement | null>;
   contentRowRef: RefObject<HTMLDivElement | null>;
-  floatingBackdropRef: RefObject<HTMLButtonElement | null>;
-  floatingSidebarRef: RefObject<HTMLDivElement | null>;
-  sidebarFloating: boolean;
   dockedSidebarVisible: boolean;
-  floatingSidebarRendered: boolean;
-  floatingSidebarExiting: boolean;
   rightPanelMaximized: boolean;
   showNewThreadCanvas: boolean;
   showProjectlessCanvas: boolean;
@@ -111,63 +104,6 @@ type AppLayoutProps = {
   setPullRequestTab: (tab: PullRequestHistoryTab) => void;
   closeSettings: () => void;
 };
-
-type FloatingSidebarTransition = "hidden" | "visible" | "exiting";
-
-function floatingSidebarTransitionReducer(
-  _state: FloatingSidebarTransition,
-  transition: FloatingSidebarTransition,
-): FloatingSidebarTransition {
-  return transition;
-}
-
-function blurFloatingSidebarFocus(
-  backdropRef: RefObject<HTMLButtonElement | null>,
-  sidebarRef: RefObject<HTMLDivElement | null>,
-): void {
-  const activeElement = document.activeElement;
-  if (!(activeElement instanceof HTMLElement)) return;
-  if (!backdropRef.current?.contains(activeElement) && !sidebarRef.current?.contains(activeElement)) {
-    return;
-  }
-  activeElement.blur();
-}
-
-function useFloatingSidebarTransition(
-  open: boolean,
-  backdropRef: RefObject<HTMLButtonElement | null>,
-  sidebarRef: RefObject<HTMLDivElement | null>,
-) {
-  const [transition, dispatchTransition] = useReducer(
-    floatingSidebarTransitionReducer,
-    open ? "visible" : "hidden",
-  );
-
-  useEffect(() => {
-    if (open) {
-      if (transition !== "visible") dispatchTransition("visible");
-      return;
-    }
-    if (transition === "hidden") return;
-    if (transition === "exiting") {
-      const exitTimer = window.setTimeout(() => dispatchTransition("hidden"), 200);
-      return () => window.clearTimeout(exitTimer);
-    }
-
-    blurFloatingSidebarFocus(backdropRef, sidebarRef);
-
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      dispatchTransition("hidden");
-      return;
-    }
-    dispatchTransition("exiting");
-  }, [backdropRef, open, sidebarRef, transition]);
-
-  return {
-    rendered: transition !== "hidden",
-    exiting: transition === "exiting",
-  };
-}
 
 function DockedSidebar({
   visible,
@@ -212,60 +148,6 @@ function DockedSidebar({
         <SidebarResizeSeam />
       </div>
     </div>
-  );
-}
-
-function FloatingSidebar({
-  backdropRef,
-  sidebarRef,
-  exiting,
-  settingsSection,
-  setSettingsOpen,
-  setSettingsSection,
-  closeSettings,
-}: {
-  backdropRef: RefObject<HTMLButtonElement | null>;
-  sidebarRef: RefObject<HTMLDivElement | null>;
-  exiting: boolean;
-  settingsSection: SettingsSection;
-  setSettingsOpen: (open: boolean) => void;
-  setSettingsSection: (section: SettingsSection) => void;
-  closeSettings: () => void;
-}) {
-  return (
-    <>
-      <button
-        ref={backdropRef}
-        type="button"
-        aria-label="Close project tree"
-        aria-hidden={exiting}
-        inert={exiting}
-        className={`fixed inset-0 z-(--layer-modal-backdrop) bg-ink/10 backdrop-blur-xs duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
-          exiting ? "pointer-events-none animate-out fade-out-0" : "animate-in fade-in-0"
-        }`}
-        onClick={() => useUiStore.getState().closeFloatingSidebar()}
-      />
-      <div
-        ref={sidebarRef}
-        data-testid="sidebar-floating"
-        aria-hidden={exiting}
-        inert={exiting}
-        className={`fixed top-1.5 bottom-1.5 left-1.5 z-(--layer-modal) flex overflow-hidden rounded-lg bg-page shadow-floating ring-1 ring-border/40 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none ${
-          exiting
-            ? "pointer-events-none animate-out fade-out-0 slide-out-to-left-4 duration-200"
-            : "animate-in fade-in-0 slide-in-from-left-4 duration-250"
-        }`}
-      >
-        <Sidebar
-          className="max-w-none"
-          settingsOpen={false}
-          settingsSection={settingsSection}
-          onSettingsSection={setSettingsSection}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onCloseSettings={closeSettings}
-        />
-      </div>
-    </>
   );
 }
 
@@ -397,33 +279,20 @@ function AppLayout(props: AppLayoutProps) {
     <TerminalPoolSlotProvider>
       <TooltipProvider delay={400}>
         <ShellChromeProvider
-          sidebarDocked={props.dockedSidebarVisible && !props.sidebarFloating}
+          sidebarDocked={props.dockedSidebarVisible}
           canGoBack={props.navigationHistory.canGoBack(isValidLocation)}
           canGoForward={props.navigationHistory.canGoForward(isValidLocation)}
         >
         <div className="flex h-screen flex-col overflow-hidden bg-page text-ink">
-          <div ref={props.outerRowRef} className="flex flex-1 overflow-hidden">
-            {!props.sidebarFloating && (
-              <DockedSidebar
-                visible={props.dockedSidebarVisible}
-                settingsOpen={props.settingsOpen}
-                settingsSection={props.settingsSection}
-                setSettingsOpen={props.setSettingsOpen}
-                setSettingsSection={props.setSettingsSection}
-                closeSettings={props.closeSettings}
-              />
-            )}
-            {props.floatingSidebarRendered && (
-              <FloatingSidebar
-                backdropRef={props.floatingBackdropRef}
-                sidebarRef={props.floatingSidebarRef}
-                exiting={props.floatingSidebarExiting}
-                settingsSection={props.settingsSection}
-                setSettingsOpen={props.setSettingsOpen}
-                setSettingsSection={props.setSettingsSection}
-                closeSettings={props.closeSettings}
-              />
-            )}
+          <div className="flex flex-1 overflow-hidden">
+            <DockedSidebar
+              visible={props.dockedSidebarVisible}
+              settingsOpen={props.settingsOpen}
+              settingsSection={props.settingsSection}
+              setSettingsOpen={props.setSettingsOpen}
+              setSettingsSection={props.setSettingsSection}
+              closeSettings={props.closeSettings}
+            />
             <div
               ref={props.contentRowRef}
               data-testid="content-row"
@@ -488,7 +357,6 @@ export function App() {
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("model");
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
-  const sidebarFloating = useUiStore((s) => s.sidebarFloating);
   const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
   const primarySurface = useUiStore((s) => s.primarySurface);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
@@ -497,29 +365,16 @@ export function App() {
   const navigationHistory = useNavigationHistoryStore();
   const [pullRequestTab, setPullRequestTab] =
     useState<PullRequestHistoryTab>("summary");
-  const outerRowRef = useRef<HTMLDivElement>(null);
   const contentRowRef = useRef<HTMLDivElement>(null);
-  const floatingBackdropRef = useRef<HTMLButtonElement>(null);
-  const floatingSidebarRef = useRef<HTMLDivElement>(null);
   const showNewThreadCanvas = activeThreadId === null;
   const showProjectlessCanvas =
     showNewThreadCanvas && activeWorkspaceId === null;
   const showPullRequests = primarySurface === "pullRequests" && !settingsOpen;
   const dockedSidebarVisible =
     !sidebarCollapsed || (settingsOpen && !isDesktop);
-  const floatingSidebarOpen =
-    sidebarFloating && !sidebarCollapsed && !settingsOpen;
-  const {
-    rendered: floatingSidebarRendered,
-    exiting: floatingSidebarExiting,
-  } = useFloatingSidebarTransition(
-    floatingSidebarOpen,
-    floatingBackdropRef,
-    floatingSidebarRef,
-  );
   useIdleReclamation();
 
-  useComposerLayoutGuard(outerRowRef, contentRowRef, {
+  useComposerLayoutGuard(contentRowRef, {
     settingsOpen,
     showLanding: showProjectlessCanvas,
     showPullRequests,
@@ -527,10 +382,9 @@ export function App() {
     activeThreadId,
   });
 
-  // Settings uses a docked project tree; undock the float when entering settings.
   useEffect(() => {
     if (settingsOpen) {
-      useUiStore.setState({ sidebarFloating: false, sidebarCollapsed: false });
+      useUiStore.setState({ sidebarCollapsed: false });
     }
   }, [settingsOpen]);
 
@@ -927,14 +781,8 @@ export function App() {
       isDesktop={isDesktop}
       navigationHistory={navigationHistory}
       navigateHistory={navigateHistory}
-      outerRowRef={outerRowRef}
       contentRowRef={contentRowRef}
-      floatingBackdropRef={floatingBackdropRef}
-      floatingSidebarRef={floatingSidebarRef}
-      sidebarFloating={sidebarFloating}
       dockedSidebarVisible={dockedSidebarVisible}
-      floatingSidebarRendered={floatingSidebarRendered}
-      floatingSidebarExiting={floatingSidebarExiting}
       rightPanelMaximized={rightPanelMaximized}
       showNewThreadCanvas={showNewThreadCanvas}
       showProjectlessCanvas={showProjectlessCanvas}
