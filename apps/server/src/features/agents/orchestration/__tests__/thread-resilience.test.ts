@@ -341,6 +341,23 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)?.status).toBe("Cancelled");
   });
 
+  it("S2 labels the runtime cancelled when a Stop is saved as a mid-turn exit's ending", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved before the disk filled", isFinalResponse: false }));
+    const fault = refuse(plan, threadWrite(active.thread.id), writerFailures.full, { times: "always", pinOperation: true });
+    refuse(plan, endingWrite(active.thread.id), writerFailures.full, { times: "always" });
+    await active.deliver(event({ type: "toolUse", threadId: active.thread.id, toolCallId: "full-1", toolName: "Bash", toolInput: { command: "ls" } }));
+    await fault.reached;
+    const stop = settled("Stop", await settleWithinTicks(active, active.requestStop()));
+    expect(stop).toMatchObject({ status: "fulfilled", value: { status: "ending-not-saved" } });
+    for (const clear of clearFaults) clear();
+    await retryTicks(active);
+    expect(active.canonical.loadTurnByExecution(turn.turnExecutionId)).toMatchObject({ status: "Cancelled", ending: { outcome: "cancelled", stop: { by: "user" } } });
+    await vi.waitFor(() => expect(active.service.runtimeAccess().runtimeSnapshots()).toContainEqual(expect.objectContaining({
+      threadId: active.thread.id, turnExecutionId: turn.turnExecutionId, phase: "cancelled",
+    })));
+  });
+
   it("S2 saves a Stop answered before its cancelled ending's save failed as the user's Stop", async () => {
     const { active, plan, turn, event } = await start();
     await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
