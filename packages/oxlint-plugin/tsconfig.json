@@ -8,6 +8,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noEmit": true,
+    "types": ["node"],
     "rootDir": "src"
   },
   "include": ["src"],

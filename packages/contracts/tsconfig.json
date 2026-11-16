@@ -17,6 +17,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noEmit": true,
+    "types": ["node"],
     "rootDir": "src",
     "outDir": "dist",
     "incremental": true,
