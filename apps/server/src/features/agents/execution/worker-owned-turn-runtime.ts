@@ -42,6 +42,7 @@ export class WorkerOwnedTurnRuntime {
   private readonly initialWorkers: ExecutionThreadWorkerPort[] = [];
   private readonly rejectedRecoveries = new Map<string, Promise<void>>();
   private onRecovered: ((execution: ExecutionIdentity, outcome?: UnsavedTurnOutcome) => void) | undefined;
+  private onUnsavedEndingSettled: ((execution: ExecutionIdentity) => void) | undefined;
   private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
 
   constructor(
@@ -96,13 +97,22 @@ export class WorkerOwnedTurnRuntime {
     this.progress?.bindUnsavedAgentStop(stopAgent);
   }
 
+  /**
+   * Settle what a saving exit's ending owes when another release, not the exit's, freed the turn's worker. That
+   * release ends the turn, but the exit discarded the save that would have published the ending.
+   */
+  bindUnsavedEndingSettled(onSettled: (execution: ExecutionIdentity) => void): void {
+    this.onUnsavedEndingSettled = onSettled;
+  }
+
   /** A turn whose finish was refused has usually been released already; one that failed mid-turn still holds its worker. */
   private async releaseUnsavedTurn(...[execution, lease, receipt, outcome]: Parameters<UnsavedTurnEnded>): Promise<void> {
-    const owned = this.owner.current(execution.threadId);
-    if (!owned || !sameExecution(owned.execution, execution) || !sameLease(owned.lease, lease)) return;
     if (receipt.kind !== "committed" && (receipt.kind !== "conflict" || receipt.recoveryState !== "already-terminal")) return;
-    // An ordinary release already under way ends the turn itself once it has freed the worker.
-    if (await this.owner.releaseRecovered(execution, receipt)) this.onRecovered?.(execution, outcome);
+    const owned = this.owner.current(execution.threadId);
+    const holdsLease = owned !== undefined && sameExecution(owned.execution, execution) && sameLease(owned.lease, lease);
+    // Only the release that freed the worker ends the turn; the ending is saved either way.
+    if (holdsLease && await this.owner.releaseRecovered(execution, receipt)) this.onRecovered?.(execution, outcome);
+    else this.onUnsavedEndingSettled?.(execution);
   }
 
   /** Connect durable plan publication to thread hydration and background attention. */

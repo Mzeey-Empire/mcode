@@ -35,7 +35,8 @@ import { TurnRuntimeRegistry } from "../turns/turn-runtime.js";
 import type { TurnOutcome } from "../turns/turn-outcome.js";
 import { ProviderEventIngress } from "../../providers/composition/provider-event-ingress.js";
 import { ExecutionFileEvidenceCoordinator } from "../execution/execution-file-evidence-coordinator.js";
-import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import { sameExecution, type ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import { ExecutionReleaseUnderWay } from "../execution/execution-mailbox-owner.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/execution-worker-handler.js";
 import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.js";
 import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/provider-host-ports.js";
@@ -237,6 +238,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     workerRuntime?.providerEvents.bindCommandPreparation((execution, batch) => this.prepareWorkerEvent(execution, batch));
     workerRuntime?.providerEvents.bindCommitted((execution, result) => this.applyWorkerReceipt(execution, result));
     workerRuntime?.bindRecovered((execution, outcome) => this.handleWorkerRecovery(execution, outcome));
+    workerRuntime?.bindUnsavedEndingSettled((execution) => this.settleRecoveredEvidence(execution));
     workerRuntime?.bindUnsavedAgentStop((execution) => this.stopUnsavedAgent(execution));
     this.eventPublication.registerPipelineStart(() => this.initializeProviderEvents());
   }
@@ -826,9 +828,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       logger.warn("Abandoned file evidence sweep failed", { threadId, error: String(error) }));
   }
 
-  private handleWorkerRecovery(execution: ExecutionIdentity, outcome: UnsavedTurnOutcome = "interrupted"): void {
+  /** A recovered ending is saved without the publication that normally marks the turn's file evidence saved. */
+  private settleRecoveredEvidence(execution: ExecutionIdentity): void {
     this.fileEvidence?.tracked(execution, "lost");
     this.fileEvidence?.terminalSaved(execution);
+  }
+
+  private handleWorkerRecovery(execution: ExecutionIdentity, outcome: UnsavedTurnOutcome = "interrupted"): void {
+    this.settleRecoveredEvidence(execution);
     void this.resolveAbandonedEvidence(execution.threadId);
     // Recovery has committed the interruption, so the baseline pin can settle.
     this.settlePinsInBackground(execution);
@@ -1308,11 +1315,25 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     try {
       return await this.completeWorkerStop(prepared, active, drained);
     } catch (error) {
-      await this.requireWorkerRuntime().recoverRejected(active.execution);
-      throw error;
+      return await this.failWorkerStop(prepared, active.execution, error);
     } finally {
       active.stopInProgress = false;
     }
+  }
+
+  /**
+   * When another release, the saving exit's, freed the worker, that release ends the turn and Stop has nothing left
+   * to do; a release still under way counts only once it succeeds. Otherwise recovery ends the turn.
+   */
+  private async failWorkerStop(prepared: PreparedStop, execution: ExecutionIdentity, error: unknown): Promise<AgentStopResult> {
+    const worker = this.requireWorkerRuntime();
+    const owned = worker.owner.current(execution.threadId);
+    const releasedByAnother = error instanceof ExecutionReleaseUnderWay
+      ? await error.released.then(() => true, () => false)
+      : !owned || !sameExecution(owned.execution, execution);
+    if (releasedByAnother) return this.alreadyTerminal(prepared);
+    await worker.recoverRejected(execution);
+    throw error;
   }
 
   private async completeWorkerStop(
