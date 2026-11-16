@@ -5,6 +5,7 @@ import type { BrowserHistory, McodeBrowserCapture } from "@mcode/contracts/model
 import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
 import type { BrowserPerfCounters, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import type { PreviewPageStatus } from "@mcode/contracts/models/preview-page-status";
+import type { Theme } from "@mcode/contracts/models/settings";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =
@@ -451,6 +452,11 @@ interface DesktopBridge {
   getServerUrl(): Promise<{ url: string; ipcPath: string }>;
   /** Report a renderer launch milestone to the desktop host. */
   reportLaunchMark(name: RendererLaunchMark, at: number): void;
+  /**
+   * Report the theme preference so the window background matches.
+   * Optional: older desktop builds do not expose it.
+   */
+  reportWindowTheme?(theme: Theme): void;
   /**
    * Verify the server is reachable; the main process silently restarts it if
    * not. Optional: older desktop builds may not expose it, so call sites use
