@@ -4,12 +4,15 @@ import * as NodePath from "node:path";
 import { describe, expect, it, beforeAll, afterAll, beforeEach } from "vitest";
 import {
   BoundedToolOutputBuffer,
+  TOOL_OUTPUT_HEAD_BYTES,
   TOOL_OUTPUT_PREVIEW_BYTES,
   boundToolOutput,
   pruneStaleToolOutputArtifacts,
   resolveToolOutputArtifactPath,
   toolOutputWireBytes,
 } from "@mcode/providers";
+
+const TOOL_OUTPUT_TAIL_BYTES = TOOL_OUTPUT_PREVIEW_BYTES - TOOL_OUTPUT_HEAD_BYTES;
 
 describe("bounded tool output", () => {
   let originalDataDir: string | undefined;
@@ -146,7 +149,7 @@ describe("bounded tool output", () => {
   });
 
   it("keeps an escaped character that exceeds the remaining head capacity", () => {
-    const output = "a".repeat(96 * 1024 - 1) + "\n" + "b".repeat(32 * 1024 - 1);
+    const output = "a".repeat(TOOL_OUTPUT_HEAD_BYTES - 1) + "\n" + "b".repeat(TOOL_OUTPUT_TAIL_BYTES - 1);
     const result = boundToolOutput({ threadId: "thread-1", toolCallId: "head-boundary", output });
 
     expect(result.output === output).toBe(true);
@@ -154,8 +157,8 @@ describe("bounded tool output", () => {
   });
 
   it("seeds the artifact losslessly after an escaped head boundary", () => {
-    const head = "a".repeat(96 * 1024 - 1);
-    const tail = "\n" + "b".repeat(32 * 1024 - 1);
+    const head = "a".repeat(TOOL_OUTPUT_HEAD_BYTES - 1);
+    const tail = "\n" + "b".repeat(TOOL_OUTPUT_TAIL_BYTES - 1);
     const buffer = new BoundedToolOutputBuffer("thread-1", "stream-boundary");
     buffer.append(head);
     buffer.append(tail);
@@ -167,8 +170,8 @@ describe("bounded tool output", () => {
   });
 
   it("retains a lone surrogate at the tail boundary without splitting an emoji", () => {
-    const head = "a".repeat(96 * 1024 - 1);
-    const tail = "\ud800😀" + "b".repeat(32 * 1024 - 9);
+    const head = "a".repeat(TOOL_OUTPUT_HEAD_BYTES - 1);
+    const tail = "\ud800😀" + "b".repeat(TOOL_OUTPUT_TAIL_BYTES - 9);
     const result = boundToolOutput({
       threadId: "thread-1",
       toolCallId: "surrogate-boundary",
@@ -189,8 +192,8 @@ describe("bounded tool output", () => {
     }).join("");
     const fragmentBytes = Buffer.byteLength(JSON.stringify(fragment), "utf8") - 2;
 
-    for (const size of [64, 96 * 1024, TOOL_OUTPUT_PREVIEW_BYTES - 1, TOOL_OUTPUT_PREVIEW_BYTES, TOOL_OUTPUT_PREVIEW_BYTES + 1, TOOL_OUTPUT_PREVIEW_BYTES + 7]) {
-      const head = size > 96 * 1024 ? "a".repeat(96 * 1024 - 1) + "\n" : "";
+    for (const size of [64, TOOL_OUTPUT_HEAD_BYTES, TOOL_OUTPUT_PREVIEW_BYTES - 1, TOOL_OUTPUT_PREVIEW_BYTES, TOOL_OUTPUT_PREVIEW_BYTES + 1, TOOL_OUTPUT_PREVIEW_BYTES + 7]) {
+      const head = size > TOOL_OUTPUT_HEAD_BYTES ? "a".repeat(TOOL_OUTPUT_HEAD_BYTES - 1) + "\n" : "";
       const remaining = size - (Buffer.byteLength(JSON.stringify(head), "utf8") - 2);
       const repeats = Math.floor(remaining / fragmentBytes);
       const output = head + fragment.repeat(repeats) + "b".repeat(remaining - repeats * fragmentBytes);
@@ -243,7 +246,7 @@ describe("bounded tool output", () => {
     const result = buffer.finalize();
 
     expect(result.outputTruncated).toBe(true);
-    expect(result.output.endsWith("Z".repeat(32 * 1024))).toBe(true);
+    expect(result.output.endsWith("Z".repeat(TOOL_OUTPUT_TAIL_BYTES))).toBe(true);
     expect(result.output.includes("M".repeat(1024))).toBe(false);
   });
 
