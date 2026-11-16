@@ -2988,6 +2988,25 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(failures).toEqual([]);
   });
 
+  it.each([
+    ["the writer refuses the ending as a conflict", () => {
+      vi.spyOn(writer, "interruptWorkerLoss").mockImplementationOnce(async (input) => ({ kind: "conflict", operationId: `${input.lease.leaseId}:worker-lost` }));
+    }],
+    ["reading the running turn's lease fails", () => {
+      vi.spyOn(MainCanonicalAgentBoundary.prototype, "loadExecutionLease").mockImplementationOnce(() => { throw new Error("database is locked"); });
+    }],
+  ])("keeps ending a turn still running in storage when %s once", async (_case, failOnce) => {
+    await send(1, start("codex"));
+    db.run("CREATE TRIGGER fail_progress BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.operation_id = 'live-lease:2' BEGIN SELECT RAISE(ABORT, 'disk checkpoint unavailable'); END");
+    failOnce();
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("codex", 1, "textDelta", { delta: "Before failed save", isFinalResponse: true })] });
+    await expect.poll(() => turnStatus()).toEqual({ status: "Interrupted" });
+    await admitsCommands();
+    db.run("DROP TRIGGER fail_progress");
+    expect(unsavedNotices()).toHaveLength(1);
+  });
+
   it("ends only the noticed thread's turn after a notice save failure while the other provider continues", async () => {
     await send(1, start("codex"));
     const other = { threadId: "devin-thread", turnId: "devin-turn", executionId: "00000000-0000-4000-8000-000000000155" };
