@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as NodeFS from "node:fs";
 import * as NodeTimersPromises from "node:timers/promises";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { isThreadSaveBlocked } from "../../canonical/accepted-save-failure.js";
@@ -146,7 +147,10 @@ afterEach(async () => {
 });
 
 describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
-  it.each([60, 200])("saves %i KiB Codex tool output without replacing content", async (kib) => {
+  it.each([
+    { kib: 60, spooled: false },
+    { kib: 200, spooled: true },
+  ])("saves $kib KiB provider tool output without replacing content", async ({ kib, spooled }) => {
     const active = await openWorkerTurnFixture();
     fixture = active;
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
@@ -165,6 +169,9 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     expect.soft(saved.map((tool) => ({ id: tool.id, output: tool.output_summary }))).toEqual([
       { id: "large-output", output: "x".repeat(500) },
     ]);
+    const artifactPath = saved[0]?.output_artifact_path ?? null;
+    expect.soft(artifactPath !== null).toBe(spooled);
+    if (artifactPath) expect.soft(NodeFS.readFileSync(artifactPath, "utf8") === output, "full output readable from its artifact").toBe(true);
     expect(active.canonical.loadTurnByExecution(active.turn.turnExecutionId)?.status).toBe("Completed");
   });
 
