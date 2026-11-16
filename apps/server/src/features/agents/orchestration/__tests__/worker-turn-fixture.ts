@@ -20,7 +20,7 @@ import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
 import type { ProviderHostPorts } from "@mcode/providers";
 import { setupContainer } from "../../../../application/composition/container.js";
-import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { ApplicationDatabaseWriter, type DatabaseWriterWorker } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { WorkerOwnedTurnRuntime } from "../../execution/worker-owned-turn-runtime.js";
 import { AgentService } from "../agent-service.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
@@ -55,7 +55,9 @@ async function openFixtureThread(threads: ThreadRepo, directory: string, provide
   return { workspace, thread };
 }
 
-export async function openWorkerServiceFixture(providerId: ProviderId = "codex", restart?: WorkerFixtureRestart) {
+/** Open the real worker composition with a scripted provider and optional writer faults. */
+export async function openWorkerServiceFixture(providerId: ProviderId = "codex", restart?: WorkerFixtureRestart,
+  createDatabaseWriterWorker?: () => DatabaseWriterWorker) {
   container.reset();
   const directory = restart?.directory ?? NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-worker-turn-"));
   const previousDatabasePath = process.env.MCODE_DB_PATH;
@@ -63,7 +65,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
   process.env.MCODE_DATA_DIR = NodePath.join(directory, "data");
   process.env.MCODE_DB_PATH = NodePath.join(directory, "app.sqlite");
   NodeFS.mkdirSync(process.env.MCODE_DATA_DIR, { recursive: true });
-  await setupContainer(directory);
+  await setupContainer(directory, { createDatabaseWriterWorker });
   const writer = container.resolve(ApplicationDatabaseWriter);
   const workers = container.resolve(WorkerOwnedTurnRuntime);
   await workers.whenReady();
@@ -144,7 +146,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
     eventPublication.publish(event);
   }, () => eventPublication.drain());
   publication.start();
-  async function submit(event: AgentEvent, extension?: ProviderRuntimeEvent["extension"], planCapture?: ProviderRuntimeEvent["planCapture"]): Promise<void> {
+  async function submit(event: AgentEvent, extension?: ProviderRuntimeEvent["extension"], planCapture?: ProviderRuntimeEvent["planCapture"], waitForSave = true): Promise<void> {
     const executionId = event.turnExecutionId;
     if (!executionId) throw new Error("Worker fixture event needs an execution identity");
     if (deliveryHold) {
@@ -176,7 +178,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
     });
     await delivery;
     delivered += 1;
-    await progress.waitForSaved(event.threadId);
+    if (waitForSave) await progress.waitForSaved(event.threadId);
   }
   function emit(event: AgentEvent, extension?: ProviderRuntimeEvent["extension"], planCapture?: ProviderRuntimeEvent["planCapture"]): Promise<void> {
     if (event.turnExecutionId && fenced.has(event.turnExecutionId)) return Promise.resolve();
@@ -185,6 +187,16 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
     void task.then(() => pending.delete(task), () => pending.delete(task));
     return task;
   }
+  /** Return after delivery so a blocked save cannot block the test driver. */
+  function deliver(event: AgentEvent): Promise<void> {
+    if (event.turnExecutionId && fenced.has(event.turnExecutionId)) return Promise.resolve();
+    const task = submit(event, undefined, undefined, false);
+    pending.add(task);
+    void task.then(() => pending.delete(task), () => pending.delete(task));
+    return task;
+  }
+  /** Return Stop's own result without waiting for durable terminal progress. */
+  function requestStop() { return service.stopSession(thread.id, { by: "user" }); }
   /** Holds deliveries that have not started, as a busy event sink does, until the returned release runs. */
   function holdDeliveries(): () => void {
     let release!: () => void;
@@ -226,7 +238,7 @@ export async function openWorkerServiceFixture(providerId: ProviderId = "codex",
   return {
     diffs: container.resolve(TurnDiffService), directory, writer, db, workers, service, thread,
     workspace, provider, providerRegistry, sent, host, threads, messages, tools, thoughts, hooks,
-    canonical: container.resolve(CanonicalAgentBoundary), canonicalEvents, published, emit, drain, stop, assistant, close,
+    canonical: container.resolve(CanonicalAgentBoundary), canonicalEvents, published, emit, deliver, requestStop, drain, stop, assistant, close,
     holdDeliveries, deliveredCount: () => delivered,
   };
 }

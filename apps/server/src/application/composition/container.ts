@@ -11,7 +11,7 @@ import { hostRuntime, type HostRuntime } from "@mcode/shared/node/host-runtime";
 
 import { resolveDatabasePath } from "../../runtime/persistence/sqlite/database.js";
 import { openReadOnlyDatabase } from "../../runtime/persistence/sqlite/read-only-database.js";
-import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
+import { ApplicationDatabaseWriter, type DatabaseWriterWorker } from "../../runtime/persistence/sqlite/application-database-writer.js";
 import { CanonicalAgentWriterClient } from "../../features/agents/canonical/canonical-agent-writer-client.js";
 import { registerCodexProvider } from "../../features/providers/composition/codex-provider-registration.js";
 import { registerClaudeProvider } from "../../features/providers/composition/claude-provider-registration.js";
@@ -88,8 +88,8 @@ import {
   registerThreadRepositories,
 } from "../../features/thread-control/composition/register-thread-repositories.js";
 
-/** Initialize the DI container with all server dependencies. */
-export async function setupContainer(mcodeDir: string): Promise<typeof container> {
+/** Initialize server dependencies; the optional worker factory supports fault-injection tests. */
+export async function setupContainer(mcodeDir: string, options: { createDatabaseWriterWorker?: () => DatabaseWriterWorker } = {}): Promise<typeof container> {
   container.register<HostRuntime>("HostRuntime", { useValue: hostRuntime });
   container.register("ProcessStartRunner", { useValue: sharedProcessStartWorkerClient().run });
   registerBrowserAutomation(container);
@@ -125,7 +125,7 @@ export async function setupContainer(mcodeDir: string): Promise<typeof container
 
   // Database
   const dbPath = resolveDatabasePath();
-  const databaseWriter = new ApplicationDatabaseWriter(dbPath, undefined, { bootstrap: true });
+  const databaseWriter = new ApplicationDatabaseWriter(dbPath, options.createDatabaseWriterWorker, { bootstrap: true });
   let db: Database;
   let storeId: StoreId;
   try {
