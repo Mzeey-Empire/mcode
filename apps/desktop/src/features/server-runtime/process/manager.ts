@@ -332,7 +332,16 @@ export class ServerManager {
       this.applyOwnedServerLock(lock, spawned.child, generation);
       return { port: this._port, authToken: this._authToken };
     } catch (error) {
-      this.stopFailedStartup(spawned.child, spawned.stderrStream, generation);
+      try {
+        this.stopFailedStartup(spawned.child, spawned.stderrStream, generation);
+      } catch (stopError) {
+        const startupMessage = error instanceof Error ? error.message : String(error);
+        const stopMessage = stopError instanceof Error ? stopError.message : String(stopError);
+        throw new AggregateError(
+          [error, stopError],
+          `${startupMessage}\n\n${stopMessage}. The server may still be running.`,
+        );
+      }
       throw error;
     }
   }
@@ -387,12 +396,7 @@ export class ServerManager {
     }
     this.detachServerProcess();
     stderrStream?.end();
-    try {
-      this.killAsPlannedExit(child);
-    } catch (error) {
-      // Preserve the startup error the caller rethrows because it is the cause the user needs to see.
-      console.error("[server-manager] Failed to stop the server after its start failed", { pid: child.pid }, error);
-    }
+    this.killAsPlannedExit(child);
   }
 
   /** Apply the lock data written by a newly ready server. */
