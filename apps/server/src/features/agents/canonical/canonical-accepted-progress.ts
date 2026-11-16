@@ -1458,11 +1458,18 @@ export class CanonicalAcceptedProgress {
   private finishUnsavedTurnExit(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit,
     receipt: ExecutionWriteReceipt | undefined): void {
     if (thread.exit !== exit) return;
-    thread.exit = undefined;
-    if (this.closing || this.threads.get(threadId) !== thread) return;
-    if (receipt?.kind !== "committed") this.reloadFromStorage(threadId, thread, []);
-    thread.commandPending = false;
-    this.publishSaving(threadId);
+    const current = !this.closing && this.threads.get(threadId) === thread;
+    try {
+      if (current && receipt?.kind !== "committed") this.reloadFromStorage(threadId, thread, []);
+    } catch (error) {
+      // The next durable command reloads the thread from storage again, so admitting it is the way to recover.
+      logger.error("Unsaved turn exit could not reload its thread", { threadId,
+        error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+    } finally {
+      thread.exit = undefined;
+      thread.commandPending = false;
+    }
+    if (current) this.publishSaving(threadId);
   }
 
   private saveBlocked(threadId: string, error: Error): ThreadSaveBlockedError {
