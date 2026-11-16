@@ -251,9 +251,14 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     const { active, plan, turn, event } = await start();
     await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved before the disk filled", isFinalResponse: false }));
     const fault = refuse(plan, threadWrite(active.thread.id), writerFailures.full, { times: "always", pinOperation: true });
+    // An agent that will not stop is evicted, as a user's Stop does, so the next send starts a fresh session.
+    const discardSession = vi.fn(async (_sessionId: string) => undefined);
+    Object.assign(active.provider, { discardSession });
+    active.provider.stopSession.mockRejectedValueOnce(new Error("stop unavailable"));
     await active.deliver(event({ type: "toolUse", threadId: active.thread.id, toolCallId: "full-1", toolName: "Bash", toolInput: { command: "ls" } }));
     await fault.reached;
     await retryTicks(active);
+    expect(discardSession).toHaveBeenCalledWith(`mcode-${active.thread.id}`);
     await expectSavingExit(active, turn.turnExecutionId, fault);
   });
 
