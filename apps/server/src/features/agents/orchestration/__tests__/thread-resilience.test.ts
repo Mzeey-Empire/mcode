@@ -661,6 +661,24 @@ describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
     await expectStoppedExit(active, turn.turnExecutionId);
   });
 
+  it("S2 answers a stopped turn's Stop that reaches the worker after the saving exit released it", async () => {
+    const { active, plan, turn, event } = await start();
+    await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Saved before Stop", isFinalResponse: false }));
+    const drain = holdStopDrain(active);
+    const stop = track(active.requestStop());
+    await vi.waitFor(() => expect(drain.reached).toBe(true));
+    const fault = refuse(plan, threadWrite(active.thread.id), writerFailures.full, { times: "always", pinOperation: true });
+    await active.deliver(event({ type: "toolUse", threadId: active.thread.id, toolCallId: "full-1", toolName: "Bash", toolInput: { command: "ls" } }));
+    await fault.reached;
+    await retryTicks(active);
+    await untilRuntimeReleased(active);
+    drain.open();
+    const answered = settled("Stop", await settleTrackedWithinTicks(active, stop));
+    if (answered.status === "rejected") throw answered.error;
+    expect(answered.value.status).toBe("already-terminal");
+    await expectStoppedExit(active, turn.turnExecutionId);
+  });
+
   it("S2 keeps a stopped turn ended when the agent's late text and completion arrive after the exit", async () => {
     const { active, plan, turn, event } = await start();
     await active.emit(event({ type: "textDelta", threadId: active.thread.id, delta: "Reply before Stop", isFinalResponse: true }));
