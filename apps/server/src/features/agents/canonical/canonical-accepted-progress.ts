@@ -142,6 +142,7 @@ interface UnsavedTurnExit {
 interface UnsavedTurnEnding {
   readonly lease: ExecutionLease;
   readonly receipt: ExecutionWriteReceipt;
+  readonly outcome: UnsavedTurnOutcome;
 }
 
 /** How storage ended a turn whose saving stopped: the user's Stop, or the saving failure itself. */
@@ -1400,8 +1401,7 @@ export class CanonicalAcceptedProgress {
       this.finishUnsavedTurnExit(threadId, thread, exit, ending?.receipt);
     }
     if (!ending) return;
-    const outcome = this.canonical.loadTurnByExecution(exit.execution.executionId)?.status === "Cancelled" ? "cancelled" : "interrupted";
-    await this.onUnsavedTurnEnded?.(exit.execution, ending.lease, ending.receipt, outcome);
+    await this.onUnsavedTurnEnded?.(exit.execution, ending.lease, ending.receipt, ending.outcome);
   }
 
   /**
@@ -1444,15 +1444,27 @@ export class CanonicalAcceptedProgress {
       reason: stop ? "Stopped while Mcode could not save the turn's output." : "Mcode could not save the turn's output.",
       recoveryIncidentId: workerLossIncidentId({ execution, lease }),
       unsavedOutput: stop ? { stop } : {} }, (events) => this.observeCommitted(events));
-    if (receipt.kind === "committed") return { lease, receipt };
+    if (receipt.kind === "committed") return { lease, receipt, outcome: stop ? "cancelled" : "interrupted" };
     if (receipt.kind === "conflict" && receipt.recoveryState) {
       logger.warn("Unsaved turn ending was not written", { threadId, executionId: execution.executionId,
         recoveryState: receipt.recoveryState });
-      return { lease, receipt };
+      const outcome = receipt.recoveryState === "already-terminal" ? this.terminalOutcome(threadId, execution) : "interrupted";
+      return { lease, receipt, outcome };
     }
     logger.warn("Unsaved turn ending was refused while its turn is still running; retrying", { threadId,
       executionId: execution.executionId, receipt: receipt.kind, retryInMs });
     return undefined;
+  }
+
+  /** An unreadable status still settles the exit, because its worker must be released either way. */
+  private terminalOutcome(threadId: string, execution: ExecutionIdentity): UnsavedTurnOutcome {
+    try {
+      return this.canonical.loadTurnByExecution(execution.executionId)?.status === "Cancelled" ? "cancelled" : "interrupted";
+    } catch (error) {
+      logger.warn("Unsaved turn's saved outcome could not be read; labelling it interrupted", { threadId,
+        executionId: execution.executionId, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+      return "interrupted";
+    }
   }
 
   /** The writer's lease for the exit's execution while its turn is still Running in storage, so its ending is owed. */
