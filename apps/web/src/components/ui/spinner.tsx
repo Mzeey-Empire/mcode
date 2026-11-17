@@ -22,6 +22,7 @@ function Spinner({ size = 12, className, style, "aria-label": ariaLabel, ...prop
 
   return (
     <span
+      data-slot="spinner"
       aria-hidden={ariaLabel ? undefined : true}
       aria-label={ariaLabel}
       role={ariaLabel ? "img" : undefined}

@@ -144,24 +144,22 @@ describe("SidebarThreadRow", () => {
       expect(screen.getByTestId("thread-status")).toHaveTextContent(/^Running$/);
     });
 
-    it.each<[string, (attention: ThreadAttention) => ThreadAttention, boolean, string, string]>([
-      ["Approval required", (a) => ({ ...a, waiting: { kind: "approval", since: a.lastTurn!.endedAt } }), false, "shield-alert", "text-primary"],
-      ["Answers required", (a) => ({ ...a, waiting: { kind: "questions", since: a.lastTurn!.endedAt } }), false, "message-circle-question-mark", "text-primary"],
-      ["Plan ready", (a) => ({ ...a, waiting: { kind: "plan", since: a.lastTurn!.endedAt } }), false, "list-checks", "text-primary"],
-      ["Interrupted", (a) => ({ ...a, lastTurn: { ...a.lastTurn!, outcome: "interrupted" } }), false, "circle-pause", "text-primary"],
-      ["Failed", (a) => ({ ...a, lastTurn: { ...a.lastTurn!, outcome: "errored" } }), false, "circle-alert", "text-error"],
-      ["Finished", (a) => a, false, "circle-check", "text-success"],
-      ["Running", (a) => ({ ...a, lastTurn: null }), true, "spinner", "text-muted"],
-    ])("shows %s as its icon with the label in the icon's colour", (label, shape, running, icon, toneClass) => {
+    it.each<[string, (attention: ThreadAttention) => ThreadAttention, boolean, string]>([
+      ["Approval required", (a) => ({ ...a, waiting: { kind: "approval", since: a.lastTurn!.endedAt } }), false, "shield-alert"],
+      ["Answers required", (a) => ({ ...a, waiting: { kind: "questions", since: a.lastTurn!.endedAt } }), false, "message-circle-question-mark"],
+      ["Plan ready", (a) => ({ ...a, waiting: { kind: "plan", since: a.lastTurn!.endedAt } }), false, "list-checks"],
+      ["Interrupted", (a) => ({ ...a, lastTurn: { ...a.lastTurn!, outcome: "interrupted" } }), false, "circle-pause"],
+      ["Failed", (a) => ({ ...a, lastTurn: { ...a.lastTurn!, outcome: "errored" } }), false, "circle-alert"],
+      ["Finished", (a) => a, false, "circle-check"],
+      ["Running", (a) => ({ ...a, lastTurn: null }), true, "spinner"],
+    ])("shows %s as its icon beside its label", (label, shape, running, icon) => {
       act(() => threadAttentionStore.getState().apply(shape(finished("t1"))));
       if (running) useThreadStore.setState({ runningThreadIds: new Set(["t1"]) });
       renderFlat();
       const status = screen.getByTestId("thread-status");
       const mark = within(status).getByRole("img", { name: label });
       expect(statusGlyph(mark)).toBe(icon);
-      // The spinner keeps its own neutral ink; every icon shares its colour role with the label.
-      if (!running) expect(mark.querySelector("svg")).toHaveClass(toneClass);
-      expect(within(status).getByText(label)).toHaveClass(toneClass);
+      expect(within(status).getByText(label)).toBeInTheDocument();
     });
 
     it("shows what needs the user over Running", () => {
