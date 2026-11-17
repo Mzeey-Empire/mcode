@@ -12,6 +12,7 @@ import type { BuildStage } from "@mcode/contracts/build-stage";
 import type { Settings, UpdateCheckInterval, UpdateReleaseLine } from "@mcode/contracts/models/settings";
 import { ConfirmChannelDowngradeDialog } from "./ConfirmChannelDowngradeDialog";
 import { semverGt } from "@/lib/semver";
+import { useInstallUpdate } from "@/features/updates/use-install-update";
 
 /** Segmented control options for update release line (electron-updater publish channel). */
 const RELEASE_LINE_OPTIONS: { value: UpdateReleaseLine; label: string }[] = [
@@ -41,8 +42,8 @@ function getUpdatesHint(checkInterval: UpdateCheckInterval, releaseLine: UpdateR
   return "Checks for new releases on the configured interval.";
 }
 
-function UpdateStatusControl({ status, statusLabel, canCheck, isBusy, onInstall, onCheck }: { status: UpdateStatus; statusLabel: string; canCheck: boolean; isBusy: boolean; onInstall: () => void; onCheck: () => void }) {
-  return <div className="flex items-center gap-3">{statusLabel && <span className="font-mono text-xs text-muted transition-opacity duration-300" aria-live="polite">{statusLabel}</span>}{status.state === "downloaded" ? <button onClick={onInstall} className="rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-ink transition-colors hover:bg-primary/90">Restart to install</button> : <button onClick={onCheck} disabled={!canCheck || isBusy} className="inline-flex items-center gap-1.5 rounded bg-hover px-2.5 py-1 text-xs font-medium text-ink transition-colors hover:bg-hover/80 disabled:cursor-not-allowed disabled:opacity-40" aria-label={isBusy ? "Checking for updates…" : "Check for updates now"}>{isBusy && <Spinner size={12} className="text-current" />}{isBusy ? "Checking…" : "Check now"}</button>}</div>;
+function UpdateStatusControl({ status, statusLabel, canCheck, isBusy, installing, onInstall, onCheck }: { status: UpdateStatus; statusLabel: string; canCheck: boolean; isBusy: boolean; installing: boolean; onInstall: () => void; onCheck: () => void }) {
+  return <div className="flex items-center gap-3">{statusLabel && <span className="font-mono text-xs text-muted transition-opacity duration-300" aria-live="polite">{statusLabel}</span>}{status.state === "downloaded" ? <button onClick={onInstall} disabled={installing} className="inline-flex items-center gap-1.5 rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-ink transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-40">{installing && <Spinner size={12} className="text-current" />}Restart to install</button> : <button onClick={onCheck} disabled={!canCheck || isBusy} className="inline-flex items-center gap-1.5 rounded bg-hover px-2.5 py-1 text-xs font-medium text-ink transition-colors hover:bg-hover/80 disabled:cursor-not-allowed disabled:opacity-40" aria-label={isBusy ? "Checking for updates…" : "Check for updates now"}>{isBusy && <Spinner size={12} className="text-current" />}{isBusy ? "Checking…" : "Check now"}</button>}</div>;
 }
 
 const STAGE_LABEL: Record<BuildStage, string | null> = { dev: "Dev", nightly: "Nightly", stable: null };
@@ -52,8 +53,8 @@ function VersionValue({ version, stage }: { version: string | null | undefined; 
   return <span className="flex items-center gap-2 font-mono text-xs text-muted tabular-nums"><span>{version || "—"}</span>{stageLabel && <span className="text-ink">{stageLabel}</span>}</span>;
 }
 
-function AboutSettingsRows({ version, stage, updatesHint, status, statusLabel, canCheck, isBusy, onInstall, onCheck, releaseLine, onReleaseLineChange, checkInterval, onCheckIntervalChange, autoDownload, onAutoDownloadChange, providerCliChecks, onProviderCliChecksChange, autoInstallOnQuit, onAutoInstallOnQuitChange }: { version: string | null | undefined; stage: BuildStage | null; updatesHint: string; status: UpdateStatus; statusLabel: string; canCheck: boolean; isBusy: boolean; onInstall: () => void; onCheck: () => void; releaseLine: UpdateReleaseLine; onReleaseLineChange: (value: UpdateReleaseLine) => void; checkInterval: UpdateCheckInterval; onCheckIntervalChange: (value: UpdateCheckInterval) => void; autoDownload: boolean; onAutoDownloadChange: (value: boolean) => void; providerCliChecks: boolean; onProviderCliChecksChange: (value: boolean) => void; autoInstallOnQuit: boolean; onAutoInstallOnQuitChange: (value: boolean) => void }) {
-  return <div><SettingRow label="Version" hint="Currently installed build."><VersionValue version={version} stage={stage} /></SettingRow><SettingRow label="Updates" hint={updatesHint}><UpdateStatusControl status={status} statusLabel={statusLabel} canCheck={canCheck} isBusy={isBusy} onInstall={onInstall} onCheck={onCheck} /></SettingRow><SettingRow label="Release line" hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."><SegmentedControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => onReleaseLineChange(value as UpdateReleaseLine)} /></SettingRow><SettingRow label="Check interval" hint="How often to poll for new releases. Takes effect on next launch."><SegmentedControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => onCheckIntervalChange(value as UpdateCheckInterval)} /></SettingRow><SettingRow label="Auto-download" hint="Download updates in the background as soon as they are available."><Switch checked={autoDownload} onCheckedChange={onAutoDownloadChange} /></SettingRow><SettingRow label="Provider CLI checks" hint="Ask the npm registry once a day for newer provider CLIs."><Switch aria-label="Provider CLI checks" checked={providerCliChecks} onCheckedChange={onProviderCliChecksChange} /></SettingRow><SettingRow label="Auto-install on quit" hint="Apply downloaded updates automatically when the app closes."><Switch checked={autoInstallOnQuit} onCheckedChange={onAutoInstallOnQuitChange} /></SettingRow></div>;
+function AboutSettingsRows({ version, stage, updatesHint, status, statusLabel, canCheck, isBusy, installing, onInstall, onCheck, releaseLine, onReleaseLineChange, checkInterval, onCheckIntervalChange, autoDownload, onAutoDownloadChange, providerCliChecks, onProviderCliChecksChange, autoInstallOnQuit, onAutoInstallOnQuitChange }: { version: string | null | undefined; stage: BuildStage | null; updatesHint: string; status: UpdateStatus; statusLabel: string; canCheck: boolean; isBusy: boolean; installing: boolean; onInstall: () => void; onCheck: () => void; releaseLine: UpdateReleaseLine; onReleaseLineChange: (value: UpdateReleaseLine) => void; checkInterval: UpdateCheckInterval; onCheckIntervalChange: (value: UpdateCheckInterval) => void; autoDownload: boolean; onAutoDownloadChange: (value: boolean) => void; providerCliChecks: boolean; onProviderCliChecksChange: (value: boolean) => void; autoInstallOnQuit: boolean; onAutoInstallOnQuitChange: (value: boolean) => void }) {
+  return <div><SettingRow label="Version" hint="Currently installed build."><VersionValue version={version} stage={stage} /></SettingRow><SettingRow label="Updates" hint={updatesHint}><UpdateStatusControl status={status} statusLabel={statusLabel} canCheck={canCheck} isBusy={isBusy} installing={installing} onInstall={onInstall} onCheck={onCheck} /></SettingRow><SettingRow label="Release line" hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."><SegmentedControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => onReleaseLineChange(value as UpdateReleaseLine)} /></SettingRow><SettingRow label="Check interval" hint="How often to poll for new releases. Takes effect on next launch."><SegmentedControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => onCheckIntervalChange(value as UpdateCheckInterval)} /></SettingRow><SettingRow label="Auto-download" hint="Download updates in the background as soon as they are available."><Switch checked={autoDownload} onCheckedChange={onAutoDownloadChange} /></SettingRow><SettingRow label="Provider CLI checks" hint="Ask the npm registry once a day for newer provider CLIs."><Switch aria-label="Provider CLI checks" checked={providerCliChecks} onCheckedChange={onProviderCliChecksChange} /></SettingRow><SettingRow label="Auto-install on quit" hint="Apply downloaded updates automatically when the app closes."><Switch checked={autoInstallOnQuit} onCheckedChange={onAutoInstallOnQuitChange} /></SettingRow></div>;
 }
 
 function HardwareAccelerationSetting() {
@@ -197,14 +198,7 @@ export function AboutSection() {
     }
   };
 
-  const handleInstall = async (): Promise<void> => {
-    if (!bridge) return;
-    try {
-      await bridge.installUpdate();
-    } catch {
-      // installUpdate triggers a quit-and-restart; rejections here are unexpected.
-    }
-  };
+  const { install, installing, dialog: installDialog } = useInstallUpdate(bridge);
 
   const { autoDownload, autoInstallOnQuit, checkInterval, releaseLine } = getUpdatePreferences(settings);
   const providerCliChecks = settings.updates?.providerCliChecks ?? true;
@@ -279,9 +273,10 @@ export function AboutSection() {
   return (
     <div>
       <SectionHeading>About</SectionHeading>
-      <AboutSettingsRows version={version} stage={stage} updatesHint={updatesHint} status={status} statusLabel={statusLabel} canCheck={Boolean(bridge)} isBusy={isBusy} onInstall={() => void handleInstall()} onCheck={() => void handleCheck()} releaseLine={releaseLine} onReleaseLineChange={(value) => void handleChannelChange(value)} checkInterval={checkInterval} onCheckIntervalChange={(value) => void updateSettings({ updates: { checkInterval: value } })} autoDownload={autoDownload} onAutoDownloadChange={(value) => void updateSettings({ updates: { autoDownload: value } })} providerCliChecks={providerCliChecks} onProviderCliChecksChange={(value) => void updateSettings({ updates: { providerCliChecks: value } })} autoInstallOnQuit={autoInstallOnQuit} onAutoInstallOnQuitChange={(value) => void updateSettings({ updates: { autoInstallOnQuit: value } })} />
+      <AboutSettingsRows version={version} stage={stage} updatesHint={updatesHint} status={status} statusLabel={statusLabel} canCheck={Boolean(bridge)} isBusy={isBusy} installing={installing} onInstall={() => void install()} onCheck={() => void handleCheck()} releaseLine={releaseLine} onReleaseLineChange={(value) => void handleChannelChange(value)} checkInterval={checkInterval} onCheckIntervalChange={(value) => void updateSettings({ updates: { checkInterval: value } })} autoDownload={autoDownload} onAutoDownloadChange={(value) => void updateSettings({ updates: { autoDownload: value } })} providerCliChecks={providerCliChecks} onProviderCliChecksChange={(value) => void updateSettings({ updates: { providerCliChecks: value } })} autoInstallOnQuit={autoInstallOnQuit} onAutoInstallOnQuitChange={(value) => void updateSettings({ updates: { autoInstallOnQuit: value } })} />
       <HardwareAccelerationSetting />
       <DiagnosticsRecordingSetting />
+      {installDialog}
       {pendingDowngrade && (
         <ConfirmChannelDowngradeDialog
           currentVersion={pendingDowngrade.currentVersion}

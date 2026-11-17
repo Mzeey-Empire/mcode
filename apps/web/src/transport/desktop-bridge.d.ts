@@ -17,6 +17,12 @@ export type UpdateStatus =
   | { state: "downloaded"; version: string; releaseNotes?: string; installWhenIdle: boolean }
   | { state: "error"; message: string; failedOperation: "check" | "download" | "install" };
 
+/** Desktop answer to an install request; `runningAgents` is null when the count could not be read. */
+export type InstallUpdateResult =
+  | { readonly kind: "started" }
+  | { readonly kind: "agents-running"; readonly runningAgents: number | null }
+  | { readonly kind: "refused"; readonly message: string };
+
 /** Safe renderer crash diagnostics sent to the desktop main process. */
 export interface RendererCrashReport {
   readonly errorName: string;
@@ -33,8 +39,11 @@ interface AppBridge {
   getUpdateStatus(): Promise<UpdateStatus>;
   /** Manually trigger a check for updates. Resolves with the resulting status. */
   checkForUpdates(): Promise<UpdateStatus>;
-  /** Quit and install a downloaded update. Returns false if nothing to install. */
-  installUpdate(): Promise<boolean>;
+  /**
+   * Quit and install a downloaded update. Unless `confirmed`, the desktop
+   * answers `agents-running` instead of installing while agents run.
+   */
+  installUpdate(request?: { readonly confirmed?: boolean }): Promise<InstallUpdateResult>;
   /** Arm installation once running agents finish. */
   installWhenIdle(): Promise<void>;
   /** Cancel a scheduled idle installation. */

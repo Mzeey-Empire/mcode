@@ -8,16 +8,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { friendlyUpdateError } from "@/lib/update-error-message";
 import { cn } from "@/lib/utils";
 import { useUpdateStore } from "@/stores/updateStore";
-import { getTransport } from "@/transport";
 import { isNightlyVersion } from "@mcode/contracts/build-stage";
 import { deriveUpdateButtonView, type FailedUpdateOperation } from "@/features/updates/update-button-state";
-import { InstallUpdateDialog } from "./InstallUpdateDialog";
+import { useInstallUpdate, type DesktopAppBridge } from "@/features/updates/use-install-update";
 import { ReleaseNotesCard } from "./ReleaseNotesCard";
 
 /** How long "Up to date" holds after a user-started check finds nothing. */
 export const UP_TO_DATE_FLASH_MS = 3_000;
-/** How long Install waits for the running-agent count before asking the user instead. */
-export const AGENT_COUNT_DEADLINE_MS = 3_000;
 /** Hover delay before the release notes card opens. */
 export const RELEASE_NOTES_HOVER_DELAY_MS = 300;
 
@@ -26,13 +23,6 @@ const SHRINK_CLASS = "min-w-0 max-w-full shrink";
 // A hover card or menu sets aria-expanded; the pill keeps its fill instead of the darker toggled-on fill.
 const FILLED_CLASS = cn(SHRINK_CLASS, "gap-1.5 px-2 text-caption aria-expanded:bg-selected");
 const GHOST_TEXT_CLASS = cn(SHRINK_CLASS, "gap-1.5 px-2 text-caption font-normal text-muted");
-
-interface InstallPrompt {
-  readonly version: string;
-  readonly runningAgents: number | null;
-}
-
-type DesktopAppBridge = NonNullable<Window["desktopBridge"]>["app"];
 
 /**
  * Sidebar footer update control. One slot walks the whole update lifecycle:
@@ -49,11 +39,8 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
   const status = useUpdateStore((s) => s.status);
   const pendingVersion = useUpdateStore((s) => s.pendingVersion);
   const [upToDateFlash, setUpToDateFlash] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
-  const [installing, setInstalling] = useState(false);
+  const { install, installing, dialog } = useInstallUpdate(app);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // State lags a render behind, so a second click in the same tick would slip past `installing`.
-  const installLock = useRef(false);
 
   useEffect(() => () => {
     if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -68,40 +55,10 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
     flashTimer.current = setTimeout(() => setUpToDateFlash(false), UP_TO_DATE_FLASH_MS);
   };
 
-  // Held from click until the desktop answers, so a slow teardown shows progress and repeat clicks do nothing.
-  const exclusiveInstall = async (work: () => Promise<void>) => {
-    if (installLock.current) return;
-    installLock.current = true;
-    setInstalling(true);
-    try {
-      await work();
-    } finally {
-      installLock.current = false;
-      setInstalling(false);
-    }
-  };
-
-  const installNow = async () => {
-    const started = await app.installUpdate().catch((error: unknown) => {
-      console.error("[updates] installUpdate failed", error);
-      return false;
-    });
-    if (started) return;
-    // The desktop publishes why it refused; reading it back guarantees the Retry pill even if that push was missed.
-    useUpdateStore.getState().setStatus(await app.getUpdateStatus());
-  };
-
-  const install = (version: string) =>
-    exclusiveInstall(async () => {
-      const runningAgents = await readRunningAgents();
-      if (runningAgents === 0) return installNow();
-      setInstallPrompt({ version, runningAgents });
-    });
-
   const retry = (operation: FailedUpdateOperation) => {
     if (operation === "check") return void check();
     if (operation === "download") return void app.downloadUpdate();
-    return void install(pendingVersion ?? "");
+    return void install();
   };
 
   const view = deriveUpdateButtonView(status, { upToDateFlash, pendingVersion });
@@ -109,21 +66,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
   return (
     <>
       {renderView()}
-      {installPrompt && (
-        <InstallUpdateDialog
-          version={installPrompt.version}
-          runningAgents={installPrompt.runningAgents}
-          onCancel={() => setInstallPrompt(null)}
-          onRestartNow={() => {
-            setInstallPrompt(null);
-            void exclusiveInstall(installNow);
-          }}
-          onInstallWhenIdle={() => {
-            setInstallPrompt(null);
-            void app.installWhenIdle();
-          }}
-        />
-      )}
+      {dialog}
     </>
   );
 
@@ -188,7 +131,7 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
       case "install":
         return (
           <ReleaseNotesHover version={view.version} notes={view.releaseNotes} nightlyTooltip={`Install ${view.version}`}>
-            <Button variant="subtle" className={FILLED_CLASS} onClick={() => void install(view.version)}>
+            <Button variant="subtle" className={FILLED_CLASS} onClick={() => void install()}>
               <CircleArrowUp aria-hidden />
               <span className="flex gap-1.5 text-fade">
                 Install
@@ -226,22 +169,6 @@ function DesktopUpdateButton({ app }: { app: DesktopAppBridge }) {
         );
       }
     }
-  }
-}
-
-// An unreadable or late count is treated as "agents may be running" so Install never silently stops work.
-// The shared transport waits for its socket with no deadline, so the cap lives here.
-async function readRunningAgents(): Promise<number | null> {
-  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<null>((resolve) => {
-    deadlineTimer = setTimeout(() => resolve(null), AGENT_COUNT_DEADLINE_MS);
-  });
-  try {
-    return await Promise.race([getTransport().getActiveAgentCount(), deadline]);
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(deadlineTimer);
   }
 }
 
