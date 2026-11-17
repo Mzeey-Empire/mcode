@@ -1361,6 +1361,7 @@ export class ThreadControlService {
     origin?: { sourceThreadId: string; sourceTurnId: string; sourceProviderId: string },
     mutationReservationToken?: string,
   ): Promise<void> {
+    const reasoningLevel = this.threads.findById(threadId)?.reasoning_level;
     await this.agentService.sendMessage({
       threadId,
       content: prompt,
@@ -1369,6 +1370,7 @@ export class ThreadControlService {
       permissionMode: execution.permissionMode,
       interactionMode: execution.interactionMode,
       sourceTurnId,
+      ...(reasoningLevel ? { reasoningLevel } : {}),
       ...(origin
         ? {
             sourceThreadId: origin.sourceThreadId,
