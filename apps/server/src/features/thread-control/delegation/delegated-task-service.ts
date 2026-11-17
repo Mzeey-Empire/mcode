@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import { diag } from "@mcode/shared/diagnostics";
 import { DelegateTaskInputSchema, TaskStatusInputSchema, TaskCancelInputSchema, type DelegateTaskInput, type DelegateTaskResult, type TaskStatusInput, type TaskStatusResult, type TaskCancelInput, type TaskCancelResult, type ThreadControlError, type TaskState } from "@mcode/contracts/thread-control";
 import { delegatedTaskRosterEntryId, isLiveSubagentStatus, type SubagentRosterEntry, type SubagentStatus } from "@mcode/contracts/models/subagent-roster";
-import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { ProviderIdSchema, type ReasoningLevel } from "@mcode/contracts/models/settings";
 import { type Thread } from "@mcode/contracts/models/thread";
 import type { InternalThreadControlAuthority } from "@mcode/thread-orchestration";
 import type { ThreadRepo } from "../persistence/thread-repo.js";
@@ -68,6 +68,11 @@ export class DelegatedTaskService {
   taskChanged(taskId: string): void {
     const task = this.deps.tasks.get(taskId);
     if (task) this.notifyRoster(task.coordinatorThreadId);
+  }
+
+  /** Return the reasoning level pinned in a task's launch plan. */
+  pinnedReasoningLevel(taskId: string): ReasoningLevel | undefined {
+    return this.deps.tasks.get(taskId)?.plan.reasoningLevel;
   }
 
   /** Derive Coordinators with working or waiting delegated tasks from current lifecycle facts. */
