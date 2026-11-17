@@ -9,7 +9,7 @@ import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
   getModelContextWindow as sharedGetModelContextWindow,
 } from "@mcode/shared/model-context";
-import { normalizeReasoningLevelForModel } from "@mcode/shared/model-effort";
+import { clampReasoningLevel, isKnownClaudeModelId, normalizeReasoningLevelForModel } from "@mcode/shared/model-effort";
 
 // Import from the subpath, NOT the barrel. The barrel re-exports
 // winston-bound logging at the top of index.ts, which throws
@@ -240,8 +240,16 @@ export function listProviderModels(providerId: string): readonly ModelDefinition
  * to their family (`swe-2`) through the same prefix rule.
  */
 function matchDatedVariant(id: string, providerId?: string): ModelDefinition | undefined {
-  return [...SORTED_ALL_MODELS, ...dynamicModelsSorted].find((m) =>
-    (providerId === undefined || m.providerId === providerId) && id.startsWith(`${m.id}-`));
+  if (providerId === undefined) {
+    return [...SORTED_ALL_MODELS, ...dynamicModelsSorted].find((m) => id.startsWith(`${m.id}-`));
+  }
+  const matches = (m: ModelDefinition) => m.providerId === providerId && id.startsWith(`${m.id}-`);
+  const live = dynamicModelsSorted.find(matches);
+  const fixed = SORTED_ALL_MODELS.find(matches);
+  // Within one provider, its reported def beats its built-in def on a tie, so a dated id gets the reported
+  // capabilities. Unscoped lookups keep built-in defs first, because other providers reuse vendor ids (Devin lists
+  // claude-*) and a reported def from them must not claim a dated Claude id.
+  return live && fixed && fixed.id.length > live.id.length ? fixed : live ?? fixed;
 }
 
 /**
@@ -422,7 +430,22 @@ export function normalizeReasoningLevel(
   modelId: string,
   level: ReasoningLevel,
 ): ReasoningLevel {
-  if (provider !== "devin") return normalizeReasoningLevelForModel(modelId, level);
+  if (provider === "claude") return normalizeClaudeReasoningLevel(modelId, level);
+  if (provider === "devin") return normalizeDevinReasoningLevel(modelId, level);
+  return normalizeReasoningLevelForModel(modelId, level);
+}
+
+/**
+ * The levels Claude Code reported for the model decide, matching what the provider sends. A saved level it does not
+ * offer moves to the nearest lower one, or the lowest it offers. Unknown models without a report keep the level.
+ */
+function normalizeClaudeReasoningLevel(modelId: string, level: ReasoningLevel): ReasoningLevel {
+  const levels = getReasoningLevels("claude", modelId);
+  if (levels.length > 0) return clampReasoningLevel(level, levels);
+  return isKnownClaudeModelId(modelId) ? normalizeReasoningLevelForModel(modelId, level) : level;
+}
+
+function normalizeDevinReasoningLevel(modelId: string, level: ReasoningLevel): ReasoningLevel {
   const declared = findModelById(modelId)?.supportedReasoningLevels;
   if (!declared || declared.length === 0) return level;
   if (declared.includes(level)) return level;

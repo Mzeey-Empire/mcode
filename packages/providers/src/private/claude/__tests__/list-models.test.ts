@@ -1,226 +1,224 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { query, type ModelInfo, type SDKControlInitializeResponse } from "@anthropic-ai/claude-agent-sdk";
+import { logger } from "@mcode/shared";
 import { CLAUDE_STATIC_MODELS } from "@mcode/contracts/providers/claude-static-fallback";
-import { type ProviderModelInfo } from "@mcode/contracts/providers/models";
-import { listClaudeModels, resetModelCache } from "../list-models.js";
+import { discoveredClaudeEfforts, listClaudeModels as discoverModels, resetModelCache } from "../list-models.js";
+import { ClaudeOwnedProcess } from "../claude-process.js";
+import { mockShutdownHost } from "./helpers/mock-shutdown-host.js";
+import * as NodeOS from "node:os";
 
-// Minimal shape matching the Anthropic Models API response.
-const MOCK_API_RESPONSE = {
-  data: [
-    {
-      id: "claude-sonnet-4-6-20250514",
-      display_name: "Claude Sonnet 4.6",
-      type: "model",
-      max_input_tokens: 1_000_000,
-      max_tokens: 16_384,
-    },
-    {
-      id: "claude-haiku-4-5-20251001",
-      display_name: "Claude Haiku 4.5",
-      type: "model",
-      max_input_tokens: 200_000,
-      max_tokens: 8_192,
-    },
-    {
-      id: "some-non-claude-model",
-      display_name: "Not Claude",
-      type: "model",
-      max_input_tokens: 128_000,
-      max_tokens: 4_096,
-    },
-  ],
-  has_more: false,
-};
+const listClaudeModels = (options: Parameters<typeof discoverModels>[0]) => discoverModels(options,
+  () => new ClaudeOwnedProcess(mockShutdownHost(() => {}).processes, "probe", () => {}, undefined, async () => {}));
+
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: vi.fn() }));
+
+const reported: ModelInfo[] = [
+  { value: "sonnet", resolvedModel: "claude-sonnet-6", displayName: "Sonnet 6", description: "",
+    supportsEffort: true, supportedEffortLevels: ["low", "high"], supportsFastMode: true },
+  { value: "claude-sonnet-6", displayName: "Duplicate", description: "" },
+  { value: "default", displayName: "Default", description: "" },
+];
 
 describe("listClaudeModels", () => {
-  const originalEnv = process.env.ANTHROPIC_API_KEY;
-  let fetchSpy: ReturnType<typeof vi.fn>;
+  const close = vi.fn();
+  const initialize = vi.fn<() => Promise<Pick<SDKControlInitializeResponse, "models">>>();
+  const resolveOptions = () => ({ pathToClaudeCodeExecutable: "/installed/claude", env: {} });
+  let signal: AbortSignal | undefined;
+  let prompt: AsyncIterable<unknown> | undefined;
 
   beforeEach(() => {
-    process.env.ANTHROPIC_API_KEY = "test-key-123";
-    fetchSpy = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(MOCK_API_RESPONSE),
+    vi.useFakeTimers();
+    resetModelCache();
+    vi.mocked(query).mockReset();
+    close.mockClear();
+    initialize.mockReset().mockResolvedValue({ models: reported });
+    // The SDK subprocess is the external boundary; its unused Query surface is irrelevant here.
+    vi.mocked(query).mockImplementation((input) => {
+      signal = input.options?.abortController?.signal;
+      prompt = typeof input.prompt === "string" ? undefined : input.prompt;
+      return Object.assign({ initializationResult: initialize, close });
     });
-    vi.stubGlobal("fetch", fetchSpy);
   });
 
   afterEach(() => {
-    if (originalEnv === undefined) {
-      delete process.env.ANTHROPIC_API_KEY;
-    } else {
-      process.env.ANTHROPIC_API_KEY = originalEnv;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("includes new CLI models, deduplicates resolved aliases, and preserves static ordering and metadata", async () => {
+    const result = await listClaudeModels(resolveOptions);
+    expect(result.slice(0, -1)).toEqual(CLAUDE_STATIC_MODELS);
+    expect(result.at(-1)).toEqual({
+      id: "claude-sonnet-6",
+      name: "Sonnet 6", supportsReasoning: true, supportedReasoningEfforts: ["low", "high"],
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("never sends a prompt and closes the waiting input after initialization", async () => {
+    let finish: ((value: Pick<SDKControlInitializeResponse, "models">) => void) | undefined;
+    initialize.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const result = listClaudeModels(resolveOptions);
+    const next = prompt?.[Symbol.asyncIterator]().next();
+    finish?.({ models: reported });
+    await result;
+    expect(await next).toEqual({ done: true, value: undefined });
+  });
+
+  it("keeps static metadata but honors CLI effort restrictions", async () => {
+    initialize.mockResolvedValue({ models: [{
+      value: "claude-opus-5", displayName: "Opus", description: "", supportsEffort: false,
+    }] });
+    const result = await listClaudeModels(resolveOptions);
+    expect(result.find((model) => model.id === "claude-opus-5")).toEqual({
+      ...CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"),
+      supportsReasoning: false, supportedReasoningEfforts: [], defaultReasoningEffort: undefined,
+    });
+  });
+
+  it("exposes the reported efforts for sends only after a successful discovery for that executable", async () => {
+    expect(discoveredClaudeEfforts("/installed/claude", "claude-sonnet-6")).toBeUndefined();
+    initialize.mockResolvedValue({ models: [
+      ...reported,
+      { value: "claude-opus-5", displayName: "Opus", description: "", supportsEffort: false },
+    ] });
+    await listClaudeModels(resolveOptions);
+    expect(discoveredClaudeEfforts("/installed/claude", "claude-sonnet-6")).toEqual(["low", "high"]);
+    expect(discoveredClaudeEfforts("/installed/claude", "claude-opus-5-20261117")).toEqual([]);
+    expect(discoveredClaudeEfforts("/other/claude", "claude-sonnet-6")).toBeUndefined();
+  });
+
+  it("keeps catalog efforts when Claude Code reports none for a known model", async () => {
+    initialize.mockResolvedValue({ models: [{ value: "claude-opus-5", displayName: "Opus", description: "" }] });
+    expect((await listClaudeModels(resolveOptions)).find((model) => model.id === "claude-opus-5"))
+      .toEqual(CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"));
+  });
+
+  it.each([
+    [["low", "medium"], undefined],
+    [["low", "high"], "high"],
+  ] as const)("uses CLI efforts %j and retains only a supported default", async (levels, defaultEffort) => {
+    initialize.mockResolvedValue({ models: [{
+      value: "claude-opus-5-20261117[1m]", displayName: "CLI Opus", description: "",
+      supportsEffort: true, supportedEffortLevels: [...levels],
+    }] });
+    expect((await listClaudeModels(resolveOptions)).find((model) => model.id === "claude-opus-5"))
+      .toEqual({
+        ...CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"),
+        supportsReasoning: true, supportedReasoningEfforts: [...levels], defaultReasoningEffort: defaultEffort,
+      });
+  });
+
+  it("retains the last successful list across failed refreshes only for its executable", async () => {
+    const good = await listClaudeModels(resolveOptions);
+    initialize.mockRejectedValue(new Error("CLI unavailable"));
+    for (let refresh = 0; refresh < 2; refresh++) {
+      await vi.advanceTimersByTimeAsync(300_001);
+      expect(await listClaudeModels(resolveOptions)).toBe(good);
     }
-    vi.unstubAllGlobals();
+    expect(await listClaudeModels(() => ({ pathToClaudeCodeExecutable: "/other/claude" })))
+      .toEqual(CLAUDE_STATIC_MODELS);
+    expect(query).toHaveBeenCalledTimes(4);
+  });
+
+  it("runs a JavaScript CLI entry point with node", async () => {
+    await listClaudeModels(() => ({ pathToClaudeCodeExecutable: "/installed/cli.js" }));
+    expect(vi.mocked(query).mock.calls[0]?.[0].options).toMatchObject({
+      pathToClaudeCodeExecutable: "/installed/cli.js", executable: "node",
+    });
+  });
+
+  it("shares concurrent probes and reuses the cached result until expiry", async () => {
+    const [a, b] = await Promise.all([listClaudeModels(resolveOptions), listClaudeModels(resolveOptions)]);
+    expect(a.slice(0, -1)).toEqual(CLAUDE_STATIC_MODELS);
+    expect(a.at(-1)?.id).toBe("claude-sonnet-6");
+    expect(b).toBe(a);
+    expect(await listClaudeModels(resolveOptions)).toBe(a);
+    expect(query).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300_001);
+    await listClaudeModels(resolveOptions);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches failures, logs the reason once, and retries after expiry", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    initialize.mockRejectedValue(new Error("Sign-in required"));
+    expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
+    expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
+    expect(query).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(300_001);
+    expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.any(String), { reason: "Sign-in required" });
+    initialize.mockResolvedValue({ models: reported });
+    await vi.advanceTimersByTimeAsync(300_001);
+    expect((await listClaudeModels(resolveOptions)).at(-1)?.id).toBe("claude-sonnet-6");
+    expect(close).toHaveBeenCalledTimes(3);
+  });
+
+  it("bounds initialization and closes a stalled probe before serving fallback", async () => {
+    initialize.mockImplementation(() => new Promise(() => {}));
+    const result = listClaudeModels(resolveOptions);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await result).toEqual(CLAUDE_STATIC_MODELS);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(signal?.aborted).toBe(true);
+    expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when the executable cannot resolve or spawn", async () => {
+    expect(await listClaudeModels(() => { throw new Error("Claude missing"); })).toEqual(CLAUDE_STATIC_MODELS);
+    expect(query).not.toHaveBeenCalled();
     resetModelCache();
+    vi.mocked(query).mockImplementation(() => { throw new Error("Spawn failed"); });
+    expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
   });
 
-  it("returns ProviderModelInfo[] filtered to claude models", async () => {
-    const result = await listClaudeModels();
-    expect(result).toHaveLength(15);
-    expect(result[0]).toEqual<ProviderModelInfo>({
-      id: "claude-opus-5-5",
-      name: "Claude Opus 5.5",
-      contextWindow: 1_000_000,
-      contextWindowOptions: ["200k", "1m"],
-      supportsReasoning: true,
-      supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
-      defaultReasoningEffort: "high",
+  it("falls back rather than returning an empty picker", async () => {
+    initialize.mockResolvedValue({ models: [] });
+    expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["alias only", "sonnet"],
+    ["Bedrock", "us.anthropic.claude-sonnet-5-5"],
+    ["invalid id", "claude-sonnet/6"],
+  ])("keeps the static catalog for %s", async (_, value) => {
+    initialize.mockResolvedValue({ models: [{ value, displayName: "CLI name", description: "" }] });
+    expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
+  });
+
+  it("keys both in-flight and cached discovery by executable path only", async () => {
+    const first = listClaudeModels(resolveOptions);
+    initialize.mockResolvedValue({ models: [{ value: "claude-opus-6", displayName: "Opus 6", description: "" }] });
+    const second = listClaudeModels(() => ({ pathToClaudeCodeExecutable: "/other/claude" }));
+    expect((await first).at(-1)?.id).toBe("claude-sonnet-6");
+    expect((await second).at(-1)?.id).toBe("claude-opus-6");
+    expect(await listClaudeModels(() => ({ pathToClaudeCodeExecutable: "/other/claude", env: { OTHER: "value" } })))
+      .toBe(await second);
+    expect(await listClaudeModels(resolveOptions)).toBe(await first);
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it("isolates initialization from project files and MCP servers", async () => {
+    await listClaudeModels(resolveOptions);
+    expect(vi.mocked(query).mock.calls[0]?.[0].options).toMatchObject({
+      cwd: NodeOS.tmpdir(), strictMcpConfig: true, mcpServers: {},
+      settings: { disableAllHooks: true }, persistSession: false, tools: [],
+      spawnClaudeCodeProcess: expect.any(Function),
     });
   });
 
-  it("derives capabilities and lifecycle for dated REST-only ids", async () => {
-    const result = await listClaudeModels();
-    expect(result.find((model) => model.id === "claude-sonnet-4-6-20250514")).toEqual<ProviderModelInfo>({
-      id: "claude-sonnet-4-6-20250514",
-      name: "Claude Sonnet 4.6",
-      contextWindow: 1_000_000,
-      contextWindowOptions: ["200k", "1m"],
-      supportsReasoning: true,
-      supportedReasoningEfforts: ["low", "medium", "high", "max"],
-      lifecycle: "legacy",
-    });
-    expect(result.find((model) => model.id === "claude-haiku-4-5-20251001")).toEqual<ProviderModelInfo>({
-      id: "claude-haiku-4-5-20251001",
-      name: "Claude Haiku 4.5",
-      contextWindow: 200_000,
-      supportsReasoning: false,
-      lifecycle: "legacy",
-    });
-  });
-
-  it("agrees with the static catalog for every known id returned by the API", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: CLAUDE_STATIC_MODELS.map((model) => ({
-          id: model.id, display_name: model.name, type: "model", max_input_tokens: null, max_tokens: null,
-        })),
-        has_more: false,
-      }),
-    });
-    expect(await listClaudeModels()).toEqual(CLAUDE_STATIC_MODELS);
-  });
-
-  it("sends the correct headers", async () => {
-    await listClaudeModels();
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "https://api.anthropic.com/v1/models?limit=100",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          "x-api-key": "test-key-123",
-          "anthropic-version": "2023-06-01",
-        }),
-      }),
-    );
-  });
-
-  it("returns the complete static catalog when ANTHROPIC_API_KEY is missing", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-    const result = await listClaudeModels();
-    expect(result).toHaveLength(13);
-    expect(result.map((model) => model.id)).toEqual([
-      "claude-opus-5-5",
-      "claude-opus-5",
-      "claude-sonnet-5-5",
-      "claude-fable-5-2",
-      "claude-fable-5-1",
-      "claude-fable-5",
-      "claude-sonnet-5",
-      "claude-opus-4-8",
-      "claude-opus-4-7",
-      "claude-opus-4-6",
-      "claude-sonnet-4-6",
-      "claude-haiku-5-5",
-      "claude-haiku-4-5",
-    ]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
-
-  it("keeps fallback capabilities when the API omits Opus 5 fields", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: [{
-          id: "claude-opus-5",
-          display_name: "Claude Opus 5",
-          type: "model",
-          max_input_tokens: null,
-          max_tokens: null,
-        }],
-        has_more: false,
-      }),
-    });
-
-    const opus5 = (await listClaudeModels()).find((model) => model.id === "claude-opus-5");
-    expect(opus5).toMatchObject({
-      id: "claude-opus-5",
-      contextWindow: 1_000_000,
-      supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
-      defaultReasoningEffort: "high",
-    });
-  });
-
-  it("returns the static catalog when the request is rejected", async () => {
-    fetchSpy.mockRejectedValueOnce(new Error("network unavailable"));
-    const result = await listClaudeModels();
-    await listClaudeModels();
-    expect(result).toHaveLength(13);
-    expect(result[0]?.id).toBe("claude-opus-5-5");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns the static catalog on a non-OK response", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      statusText: "Unauthorized",
-    });
-    const result = await listClaudeModels();
-    await listClaudeModels();
-    expect(result).toHaveLength(13);
-    expect(result[0]?.id).toBe("claude-opus-5-5");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("returns the static catalog when the response contains invalid JSON", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.reject(new SyntaxError("invalid JSON")),
-    });
-    const result = await listClaudeModels();
-    expect(result).toHaveLength(13);
-    expect(result[0]?.id).toBe("claude-opus-5-5");
-  });
-
-  it("retries discovery after the cached failure fallback expires", async () => {
-    fetchSpy.mockRejectedValueOnce(new Error("network unavailable"));
-    await listClaudeModels();
-
-    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5 * 60 * 1001);
-    const result = await listClaudeModels();
-
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(result).toHaveLength(15);
-    dateSpy.mockRestore();
-  });
-
-  it("returns cached result on second call without re-fetching", async () => {
-    await listClaudeModels();
-    await listClaudeModels();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("re-fetches after the TTL expires", async () => {
-    await listClaudeModels();
-    const dateSpy = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 5 * 60 * 1001);
-    await listClaudeModels();
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    dateSpy.mockRestore();
-  });
-
-  it("coalesces concurrent cache-miss requests into a single fetch", async () => {
-    const [a, b] = await Promise.all([listClaudeModels(), listClaudeModels()]);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(a).toBe(b); // same array reference from the shared promise
+  it("logs each distinct failure once across refreshes", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    for (const reason of ["Signed out", "Signed out", "CLI failed", "CLI failed"]) {
+      initialize.mockRejectedValue(new Error(reason));
+      expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
+      await vi.advanceTimersByTimeAsync(300_001);
+    }
+    expect(warn.mock.calls.map((call) => call[1])).toEqual([{ reason: "Signed out" }, { reason: "CLI failed" }]);
   });
 });

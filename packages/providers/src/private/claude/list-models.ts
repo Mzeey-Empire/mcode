@@ -1,172 +1,154 @@
-/**
- * Fetches available Claude models from the Anthropic REST API.
- *
- * Returns ProviderModelInfo[] with contextWindow populated from
- * max_input_tokens. Results are cached in-memory with a 5-minute TTL
- * to avoid hammering the API on repeated model selector hovers.
- */
-
+import { query, type ModelInfo, type Options, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { logger } from "@mcode/shared";
-import {
-  isMaxEffortModel,
-  isXhighEffortModel,
-  supports1MContextWindow,
-  supportsEffortParameter,
-} from "@mcode/shared/model-effort";
 import { CLAUDE_STATIC_MODELS, withClaudeLifecycle } from "@mcode/contracts/providers/claude-static-fallback";
 import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
+import * as NodeOS from "node:os";
+import type { ClaudeOwnedProcess } from "./claude-process.js";
 
-/** Cache TTL: 5 minutes, matching the design spec. */
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const PROBE_TIMEOUT_MS = 10_000;
+type ProbeOptions = Pick<Options, "pathToClaudeCodeExecutable" | "env">;
 
-/** Shape of a single model from the Anthropic Models API. */
-interface AnthropicModelInfo {
-  id: string;
-  display_name: string;
-  type: string;
-  max_input_tokens: number | null;
-  max_tokens: number | null;
-}
+const cache = new Map<string | undefined, { models: Promise<ProviderModelInfo[]>; timestamp: number }>();
+const loggedFailures = new Set<string>();
+const lastGood = new Map<string | undefined, ProviderModelInfo[]>();
 
-/** Paginated response from GET /v1/models. */
-interface AnthropicModelsResponse {
-  data: AnthropicModelInfo[];
-  has_more: boolean;
-  first_id?: string;
-  last_id?: string;
-}
-
-let cachedModels: ProviderModelInfo[] | null = null;
-let cacheTimestamp = 0;
-let inflight: Promise<ProviderModelInfo[]> | null = null;
-
-type ClaudeReasoningEffort = NonNullable<ProviderModelInfo["supportedReasoningEfforts"]>[number];
-
-function derivedReasoningEfforts(id: string): ClaudeReasoningEffort[] {
-  if (!supportsEffortParameter(id)) return [];
-  return [
-    "low",
-    "medium",
-    "high",
-    ...(isXhighEffortModel(id) ? (["xhigh"] as const) : []),
-    ...(isMaxEffortModel(id) ? (["max"] as const) : []),
-  ];
-}
-
-function fromAnthropicModel(model: AnthropicModelInfo): ProviderModelInfo {
-  const supportedReasoningEfforts = derivedReasoningEfforts(model.id);
+function fromCliModel(info: ModelInfo, id: string): ProviderModelInfo {
   return withClaudeLifecycle({
-    id: model.id,
-    name: model.display_name,
-    contextWindow: model.max_input_tokens ?? undefined,
-    supportsReasoning: supportedReasoningEfforts.length > 0,
-    ...(supportedReasoningEfforts.length > 0 ? { supportedReasoningEfforts } : {}),
-    ...(supports1MContextWindow(model.id) ? { contextWindowOptions: ["200k", "1m"] as const } : {}),
+    supportsReasoning: info.supportsEffort ?? Boolean(info.supportedEffortLevels?.length),
+    supportedReasoningEfforts: info.supportsEffort === false ? [] : info.supportedEffortLevels,
+    id,
+    name: info.displayName.trim() || id,
   });
 }
 
-/** Merges API metadata into the complete fallback catalog without losing defined fallback fields. */
-function mergeStaticCatalog(models: ProviderModelInfo[]): ProviderModelInfo[] {
-  const dynamicById = new Map(models.map((model) => [model.id, model]));
-  const merged = CLAUDE_STATIC_MODELS.map((fallback) => {
-    const dynamic = dynamicById.get(fallback.id);
-    if (!dynamic) return fallback;
-    const definedDynamic = Object.fromEntries(
-      Object.entries(dynamic).filter(([, value]) => value !== undefined),
-    );
-    return { ...fallback, ...definedDynamic } as ProviderModelInfo;
-  });
-  const staticIds = new Set(CLAUDE_STATIC_MODELS.map((model) => model.id));
-  return [...merged, ...models.filter((model) => !staticIds.has(model.id))];
+/** Claude Code builds that report no effort fields leave the catalog's efforts in place. */
+function withCliEffort(known: ProviderModelInfo, info: ModelInfo): ProviderModelInfo {
+  if (info.supportsEffort === undefined && info.supportedEffortLevels === undefined) return known;
+  const efforts = info.supportsEffort === false ? [] : info.supportedEffortLevels ?? known.supportedReasoningEfforts ?? [];
+  return {
+    ...known,
+    supportsReasoning: efforts.length > 0,
+    supportedReasoningEfforts: efforts,
+    defaultReasoningEffort: known.defaultReasoningEffort && efforts.includes(known.defaultReasoningEffort)
+      ? known.defaultReasoningEffort : undefined,
+  };
 }
 
-/**
- * Resets the in-memory model cache and any inflight request.
- *
- * Exposed for testing to ensure a clean state between test runs. Not intended
- * for production use; the TTL-based expiry handles normal cache invalidation.
- */
-export function resetModelCache(): void {
-  cachedModels = null;
-  cacheTimestamp = 0;
-  inflight = null;
-}
-
-/**
- * Performs the actual network request to the Anthropic Models API.
- *
- * Populates the in-memory cache on success. Does not guard against
- * concurrent callers — use listClaudeModels() which coalesces inflight
- * requests onto a single promise.
- */
-async function fetchModels(): Promise<ProviderModelInfo[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    // The Claude Agent SDK uses its own auth mechanism, so this env var
-    // is often absent. Return the complete static catalog instead of
-    // surfacing an error to the user.
-    logger.debug("ANTHROPIC_API_KEY not set, skipping models API fetch");
-    return [...CLAUDE_STATIC_MODELS];
+function mapModels(reported: ModelInfo[]): ProviderModelInfo[] {
+  const models = new Map(CLAUDE_STATIC_MODELS.map((model) => [model.id, model]));
+  const seen = new Set<string>();
+  for (const info of reported) {
+    let id = (info.resolvedModel?.trim() || info.value.trim()).replace(/\[1m\]$/, "");
+    const undated = id.replace(/-\d{8}$/, "");
+    if (CLAUDE_STATIC_MODELS.some((model) => model.id === undated)) id = undated;
+    if (!/^claude-[a-z0-9-]+$/.test(id)) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const known = models.get(id);
+    models.set(id, known ? withCliEffort(known, info) : fromCliModel(info, id));
   }
+  return [...models.values()];
+}
 
+async function probeModels(options: ProbeOptions, createProcess: () => ClaudeOwnedProcess): Promise<ProviderModelInfo[]> {
+  const ownedProcess = createProcess();
+  const abort = new AbortController();
+  // Keep stdin open without yielding a user message: initialization spends no tokens.
+  const prompt: AsyncIterable<SDKUserMessage> = {
+    [Symbol.asyncIterator]: () => ({
+      next: () => new Promise((resolve) => {
+        if (abort.signal.aborted) resolve({ done: true, value: undefined });
+        else abort.signal.addEventListener("abort", () => resolve({ done: true, value: undefined }), { once: true });
+      }),
+    }),
+  };
+  let q: ReturnType<typeof query> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    // limit=100 covers all current Claude models without pagination.
-    // Anthropic has far fewer than 100 Claude models at present, so we
-    // intentionally do not follow has_more / last_id pagination.
-    const res = await fetch("https://api.anthropic.com/v1/models?limit=100", {
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error("Anthropic Models API returned a non-OK response");
+    q = query({ prompt, options: {
+      ...options,
+      ...(options.pathToClaudeCodeExecutable?.endsWith(".js") ? { executable: "node" } : {}),
+      abortController: abort,
+      spawnClaudeCodeProcess: ownedProcess.spawn,
+      cwd: NodeOS.tmpdir(),
+      strictMcpConfig: true,
+      mcpServers: {},
+      persistSession: false,
+      tools: [],
+      settingSources: ["user"],
+      // Discovery must honor user model settings without running their session hooks.
+      settings: { disableAllHooks: true },
+    } });
+    const init = await Promise.race([
+      q.initializationResult(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Claude model probe timed out")), PROBE_TIMEOUT_MS);
+      }),
+    ]);
+    return mapModels(init.models);
+  } finally {
+    clearTimeout(timer);
+    abort.abort();
+    try {
+      q?.close();
+    } finally {
+      await ownedProcess.retire();
     }
+  }
+}
 
-    const body = (await res.json()) as AnthropicModelsResponse;
+function logFailure(error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  if (loggedFailures.has(reason)) return;
+  loggedFailures.add(reason);
+  logger.warn("Claude model discovery failed; using last good list or static catalog", { reason });
+}
 
-    const models = mergeStaticCatalog(body.data
-      .filter((m) => m.id.startsWith("claude-"))
-      .map(fromAnthropicModel));
-
-    cachedModels = models;
-    cacheTimestamp = Date.now();
-
-    logger.debug("Fetched Claude models from API", { count: models.length });
-
+async function fetchModels(options: ProbeOptions, createProcess: () => ClaudeOwnedProcess): Promise<ProviderModelInfo[]> {
+  try {
+    const models = await probeModels(options, createProcess);
+    lastGood.set(options.pathToClaudeCodeExecutable, models);
     return models;
   } catch (error) {
-    logger.warn("Claude model discovery failed; using static catalog", {
-      errorName: error instanceof Error ? error.name : "UnknownError",
-    });
-    const fallbackModels = [...CLAUDE_STATIC_MODELS];
-    cachedModels = fallbackModels;
-    cacheTimestamp = Date.now();
-    return fallbackModels;
+    logFailure(error);
+    return lastGood.get(options.pathToClaudeCodeExecutable) ?? [...CLAUDE_STATIC_MODELS];
   }
 }
 
 /**
- * Fetch Claude models from the Anthropic REST API.
- *
- * Reads `ANTHROPIC_API_KEY` from the environment (same var the Claude
- * Agent SDK uses). Filters to `claude-*` models and maps each to
- * `ProviderModelInfo` with `contextWindow` from `max_input_tokens`.
- *
- * Results are cached for CACHE_TTL_MS. Concurrent callers during a
- * cache miss share a single inflight promise to prevent stampedes.
+ * Effort levels the last successful discovery reported for a model, or undefined before any discovery. Reads only
+ * memory, so a send never waits on a probe. An empty list means the model takes no effort.
  */
-export async function listClaudeModels(): Promise<ProviderModelInfo[]> {
-  const now = Date.now();
-  if (cachedModels && now - cacheTimestamp < CACHE_TTL_MS) {
-    return cachedModels;
-  }
-  if (inflight) return inflight;
+export function discoveredClaudeEfforts(executable: string | undefined, modelId: string): readonly ReasoningLevel[] | undefined {
+  const models = lastGood.get(executable);
+  const model = models?.find((entry) => entry.id === modelId) ?? models?.find((entry) => entry.id === modelId.replace(/-\d{8}$/, ""));
+  if (!model) return undefined;
+  return model.supportsReasoning === false ? [] : model.supportedReasoningEfforts ?? [];
+}
 
-  inflight = fetchModels().finally(() => {
-    inflight = null;
-  });
-  return inflight;
+/** Clear discovery state between tests; production refreshes through the five-minute TTL. */
+export function resetModelCache(): void {
+  cache.clear();
+  lastGood.clear();
+  loggedFailures.clear();
+}
+
+/** Discover Claude Code's models, caching success or fallback and sharing one in-flight probe. */
+export async function listClaudeModels(resolveOptions: () => ProbeOptions, createProcess: () => ClaudeOwnedProcess): Promise<ProviderModelInfo[]> {
+  let options: ProbeOptions;
+  try {
+    options = resolveOptions();
+  } catch (error) {
+    logFailure(error);
+    return [...CLAUDE_STATIC_MODELS];
+  }
+  const key = options.pathToClaudeCodeExecutable;
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached.models;
+  const entry = { models: fetchModels(options, createProcess), timestamp: Infinity };
+  cache.set(key, entry);
+  void entry.models.then(() => { entry.timestamp = Date.now(); });
+  return entry.models;
 }

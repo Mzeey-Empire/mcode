@@ -15,8 +15,37 @@ import { logger } from "@mcode/shared";
 import { buildReasoningOptions } from "../build-reasoning-options.js";
 
 describe("buildReasoningOptions", () => {
+  it("sends only a level Claude Code reported, even for a known model", () => {
+    const adaptive = { type: "adaptive", display: "summarized" };
+    expect(buildReasoningOptions("high", "claude-opus-5", undefined, ["low", "medium"])).toEqual({ effort: "medium", thinking: adaptive });
+    expect(buildReasoningOptions("low", "claude-sonnet-7", undefined, ["high"])).toEqual({ effort: "high", thinking: adaptive });
+    expect(buildReasoningOptions("high", "claude-opus-5", undefined, [])).toEqual({});
+  });
+
+  it("falls back to the lowest reported level when the reported levels arrive out of order", () => {
+    expect(buildReasoningOptions("low", "claude-sonnet-7", undefined, ["max", "high"])).toEqual({
+      effort: "high", thinking: { type: "adaptive", display: "summarized" },
+    });
+  });
+
+  it("sends max effort for a newly discovered Claude model", () => {
+    expect(buildReasoningOptions("max", "claude-sonnet-6")).toEqual({
+      effort: "max", thinking: { type: "adaptive", display: "summarized" },
+    });
+  });
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each([
+    ["claude-sonnet-4-6-v2", "xhigh", "xhigh"],
+    ["claude-haiku-4-5-v2", "max", "max"],
+    ["claude-sonnet-6", "none", "low"],
+    ["claude-sonnet-6", "minimal", "low"],
+  ] as const)("passes discovered effort for %s at %s", (model, level, effort) => {
+    expect(buildReasoningOptions(level, model)).toEqual({
+      effort, thinking: { type: "adaptive", display: "summarized" },
+    });
   });
 
   // ---------------------------------------------------------------------------

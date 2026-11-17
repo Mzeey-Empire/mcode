@@ -46,7 +46,7 @@ import type { ProviderBillingMode, ProviderUsageInfo, QuotaCategory } from "@mco
 import type { ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ApprovalRequestBody } from "@mcode/contracts/models/approval";
 import type { NativePlanFileOutcome } from "@mcode/contracts/models/plan";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
-import { listClaudeModels } from "./list-models.js";
+import { discoveredClaudeEfforts, listClaudeModels } from "./list-models.js";
 import { resolveSdkModelSlug } from "./resolve-slug.js";
 import { resolveAutoCompactWindow } from "./context-window.js";
 import { readAnthropicOauthToken } from "@mcode/shared/usage";
@@ -870,7 +870,7 @@ export class ClaudeProvider
           permissionMode: "default" as const,
           persistSession: false,
           includePartialMessages: true,
-          ...buildReasoningOptions(options.reasoningLevel, model),
+          ...buildReasoningOptions(options.reasoningLevel, model, undefined, discoveredClaudeEfforts(this.resolveClaudeExecutable(), model)),
         },
       });
 
@@ -1439,6 +1439,7 @@ export class ClaudeProvider
         context.params.reasoningLevel,
         context.model,
         context.params.thinking,
+        discoveredClaudeEfforts(this.resolveClaudeExecutable(), context.model),
       ),
       ...(context.params.fallbackModel && {
         fallbackModel: context.params.fallbackModel,
@@ -3103,9 +3104,12 @@ export class ClaudeProvider
     return "unknown";
   }
 
-  /** Fetch available Claude models from the Anthropic REST API. */
+  /** Discover models supported by the same Claude Code executable used for sessions. */
   async listModels(): Promise<ProviderModelInfo[]> {
-    return listClaudeModels();
+    return listClaudeModels(() => ({
+      pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
+      env: { ...this.host.environment.snapshot() },
+    }), () => this.createOwnedClaudeProcess("model discovery"));
   }
 
   /** Settle the live SDK callback before reporting a delivered answer. */

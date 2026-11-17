@@ -102,6 +102,11 @@ const ALL_KNOWN_BASE_IDS: readonly string[] = [
   ]),
 ].sort((a, b) => b.length - a.length);
 
+/** True only for a known Claude base ID or its eight-digit dated variant. */
+export function isKnownClaudeModelId(modelId: string): boolean {
+  return ALL_KNOWN_BASE_IDS.includes(modelId.replace(/-\d{8}$/, ""));
+}
+
 /**
  * Strip a date suffix (e.g. `-20260501`) from a Claude model ID to get the base ID.
  *
@@ -185,6 +190,14 @@ export function reasoningLevelAtOrBelow(
     if (tier && declared.includes(tier)) return tier;
   }
   return undefined;
+}
+
+/**
+ * Returns the highest offered level at or below `level`, or the lowest offered level when every one is above it.
+ * Returns `level` unchanged when nothing is offered. Offered levels may arrive in any order.
+ */
+export function clampReasoningLevel(level: ReasoningLevel, offered: readonly ReasoningLevel[]): ReasoningLevel {
+  return reasoningLevelAtOrBelow(level, offered) ?? orderReasoningLevels(offered)[0] ?? level;
 }
 
 /**

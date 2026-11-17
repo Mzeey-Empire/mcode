@@ -23,6 +23,10 @@ import {
 import { supportsEffortParameter } from "@mcode/shared/model-effort";
 
 describe("pickProviderModelsForSettings", () => {
+  it("preserves the chosen effort for newly discovered Claude models", () => {
+    expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "max")).toBe("max");
+    expect(normalizeReasoningLevel("claude", "claude-sonnet-4-6", "xhigh")).toBe("high");
+  });
   it("keeps Codex provider order and excludes unavailable static entries", () => {
     const staticModels = MODEL_PROVIDERS.find((provider) => provider.id === "codex")?.models ?? [];
     const dynamic = [
@@ -100,6 +104,15 @@ describe("ModelRegistry", () => {
     expect(claude).toBeTruthy();
     expect(claude?.models).toHaveLength(13);
     expect(claude?.comingSoon).toBe(false);
+  });
+
+  it("findModelById keeps a dated Claude id on Claude when another provider reports the same base id", () => {
+    registerProviderModels("devin", [{ id: "claude-sonnet-4-6", label: "Sonnet 4.6", providerId: "devin" }]);
+    try {
+      expect(findModelById("claude-sonnet-4-6-20260101")?.providerId).toBe("claude");
+    } finally {
+      registerProviderModels("devin", []);
+    }
   });
 
   it("findModelById returns Opus 5 with the standard-mode context clamp", () => {
@@ -571,6 +584,52 @@ describe("normalizeReasoningLevelForModel", () => {
 });
 
 describe("normalizeReasoningLevel", () => {
+  it("clamps new Claude models to discovered levels without affecting other providers", () => {
+    registerProviderModels("claude", [{
+      id: "claude-sonnet-6", label: "Sonnet 6", providerId: "claude",
+      supportedReasoningLevels: ["low", "high"],
+    }]);
+    try {
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "max")).toBe("high");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "medium")).toBe("low");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "high")).toBe("high");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "none")).toBe("low");
+      for (const provider of ["copilot", "cursor"]) {
+        expect(normalizeReasoningLevel(provider, "claude-sonnet-6", "max")).toBe("high");
+        expect(normalizeReasoningLevel(provider, "claude-sonnet-4-6-v2", "xhigh")).toBe("high");
+      }
+    } finally {
+      registerProviderModels("claude", []);
+    }
+  });
+
+  it("holds known Claude models to the levels Claude Code reported", () => {
+    registerProviderModels("claude", [
+      { id: "claude-opus-5", label: "Opus 5", providerId: "claude", supportedReasoningLevels: ["low", "medium"] },
+      { id: "claude-sonnet-7", label: "Sonnet 7", providerId: "claude", supportedReasoningLevels: ["high"] },
+    ]);
+    try {
+      expect(normalizeReasoningLevel("claude", "claude-opus-5", "high")).toBe("medium");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-7", "low")).toBe("high");
+    } finally {
+      registerProviderModels("claude", []);
+    }
+  });
+
+  it("lets the levels Claude Code reported widen a known model and falls back to the lowest one", () => {
+    registerProviderModels("claude", [
+      { id: "claude-sonnet-4-6", label: "Sonnet 4.6", providerId: "claude", supportedReasoningLevels: ["low", "medium", "high", "xhigh"] },
+      { id: "claude-sonnet-7", label: "Sonnet 7", providerId: "claude", supportedReasoningLevels: ["max", "high"] },
+    ]);
+    try {
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-4-6", "xhigh")).toBe("xhigh");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-4-6-20260101", "xhigh")).toBe("xhigh");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-7", "low")).toBe("high");
+    } finally {
+      registerProviderModels("claude", []);
+    }
+  });
+
   it("keeps max for the Devin swe-2 family instead of snapping to high", () => {
     expect(normalizeReasoningLevel("devin", "swe-2", "max")).toBe("max");
   });

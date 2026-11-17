@@ -22,12 +22,14 @@ export {
 
 // Model effort normalization
 export {
+  isKnownClaudeModelId,
   isXhighEffortModel,
   isMaxEffortModel,
   supportsEffortParameter,
   supports1MContextWindow,
   supportsThinkingToggle,
   normalizeReasoningLevelForModel,
+  clampReasoningLevel,
 } from "./model-effort/index.js";
 
 export { redactMcodeBrowserCaptureV2 } from "./browser-preview/redact.js";
