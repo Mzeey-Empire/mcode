@@ -46,6 +46,17 @@ describe("ThreadDeletionTeardownService", () => {
     expect(finishThreadDeletion).toHaveBeenCalledExactlyOnceWith("thread", false);
   });
 
+  it("keeps a finished deletion successful and notifies later listeners when one listener throws", async () => {
+    const service = createService([]);
+    service.bindAcceptedProgress({ discardThreads: async () => {}, finishThreadDeletion: () => {} });
+    const notified: string[] = [];
+    service.onPersistentDataDeleted(() => { throw new Error("malformed held call row"); });
+    service.onPersistentDataDeleted(() => notified.push("second"));
+
+    await expect(service.deletePersistentData(["thread"], async () => true)).resolves.toBe(true);
+    expect(notified).toEqual(["second"]);
+  });
+
   it("stops every owned resource before releasing deletion barriers", async () => {
     const calls: string[] = [];
     const service = createService(calls);

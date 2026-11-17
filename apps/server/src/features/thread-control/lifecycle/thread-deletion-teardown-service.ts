@@ -1,4 +1,5 @@
 import { inject, injectable } from "tsyringe";
+import { logger } from "@mcode/shared";
 import { GithubService } from "../../pull-requests/github/github-service.js";
 import { CiWatcherService } from "../../pull-requests/status/ci-watcher.js";
 import { GitWatcherService } from "../../projects/git/git-watcher-service.js";
@@ -47,7 +48,14 @@ export class ThreadDeletionTeardownService {
   }
 
   private notifyDeletionListeners(): void {
-    for (const listener of this.deletionListeners) listener();
+    for (const listener of this.deletionListeners) {
+      // The rows are already gone, so a listener failure must not turn a finished deletion into a failed one.
+      try {
+        listener();
+      } catch (error) {
+        logger.error("Thread deletion listener failed", { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
   }
 
   constructor(
