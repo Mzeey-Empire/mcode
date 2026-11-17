@@ -580,7 +580,10 @@ function StruckText({ struck, children }: { struck: boolean; children: string })
   return struck ? <span data-strike className="sidebar-strike">{children}</span> : <>{children}</>;
 }
 
-/** A row title. A parenthetical ending stays visible and only the words before it fade. */
+/**
+ * A row title. A parenthetical ending stays visible and the words before it fade first; the head
+ * shrinks far faster, so only an ending wider than the whole title space fades too.
+ */
 function ThreadTitleText({ title, struck, className }: { title: string; struck: boolean; className: string }) {
   const parts = splitTitleEnding(title);
   if (!parts) {
@@ -588,8 +591,8 @@ function ThreadTitleText({ title, struck, className }: { title: string; struck: 
   }
   return (
     <div data-testid="thread-title" className={cn("flex min-w-0 whitespace-pre", className)}>
-      <span data-testid="thread-title-head" className="text-fade min-w-0"><StruckText struck={struck}>{parts.head}</StruckText></span>
-      <span data-testid="thread-title-ending" className="shrink-0"> <StruckText struck={struck}>{parts.ending}</StruckText></span>
+      <span data-testid="thread-title-head" className="text-fade shrink-[1000]"><StruckText struck={struck}>{parts.head}</StruckText></span>
+      <span data-testid="thread-title-ending" className="text-fade"> <StruckText struck={struck}>{parts.ending}</StruckText></span>
     </div>
   );
 }
