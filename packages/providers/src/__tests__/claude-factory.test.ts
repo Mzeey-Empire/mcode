@@ -40,6 +40,7 @@ function installTransport(messages: (turn: number, options: Options) => readonly
   const inputs: unknown[] = [];
   const consumedModes: Options["permissionMode"][] = [];
   let rejectModeChange = false;
+  const applyFlagSettings = vi.fn(async (_settings: unknown) => {});
   sdkQuery.mockImplementation(({ prompt, options }: { prompt: AsyncIterable<unknown>; options: Options }) => {
     optionsSeen.push(options);
     let mode = options.permissionMode;
@@ -54,7 +55,7 @@ function installTransport(messages: (turn: number, options: Options) => readonly
       }
     })();
     return Object.assign(stream, queryMethodStubs(), {
-      close: vi.fn(() => { void stream.return(); }), setModel: vi.fn(async () => undefined), getContextUsage,
+      close: vi.fn(() => { void stream.return(); }), setModel: vi.fn(async () => undefined), getContextUsage, applyFlagSettings,
       setPermissionMode: vi.fn(async (next: NonNullable<Options["permissionMode"]>) => {
         if (rejectModeChange) {
           rejectModeChange = false;
@@ -65,7 +66,7 @@ function installTransport(messages: (turn: number, options: Options) => readonly
       }),
     });
   });
-  return { optionsSeen, inputs, consumedModes, rejectPermissionSwitch: () => { rejectModeChange = true; } };
+  return { optionsSeen, inputs, consumedModes, applyFlagSettings, rejectPermissionSwitch: () => { rejectModeChange = true; } };
 }
 
 function fixture() {
@@ -103,6 +104,40 @@ async function createNativePlanFixture(proof: string) {
   if (proof !== "missing") await NodeFSPromises.writeFile(filePath, proof === "oversized" ? "x".repeat(PLAN_MAX_CONTENT_CHARS + 1) : "abc");
   return { cwd, configDir, parent, path };
 }
+
+describe("Claude Fast flags", () => {
+  it("updates only changed Fast flags and recreates a session when the SDK refuses", async () => {
+    const transport = installTransport();
+    const { provider, events } = fixture();
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    await provider.sendTurn(request({ turnExecutionId: execution2, providerOptions: { fastMode: true } }));
+    await completed(events, 2);
+    expect(transport.applyFlagSettings.mock.calls).toEqual([[{ fastMode: true }]]);
+    await provider.sendTurn(request({ turnExecutionId: "00000000-0000-4000-8000-000000000003", providerOptions: { fastMode: true } }));
+    await completed(events, 3);
+    expect(transport.applyFlagSettings.mock.calls).toEqual([[{ fastMode: true }]]);
+    transport.applyFlagSettings.mockRejectedValueOnce(new Error("flag refused"));
+    await provider.sendTurn(request({ turnExecutionId: "00000000-0000-4000-8000-000000000004" }));
+    await completed(events, 4);
+    expect(transport.optionsSeen).toHaveLength(2);
+    expect(transport.optionsSeen[1]?.settings).toMatchObject({ fastMode: false });
+  });
+  it("sends an explicit Fast choice at spawn", async () => {
+    const transport = installTransport();
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ providerOptions: { fastMode: true } }));
+    await completed(events, 1);
+    expect(transport.optionsSeen[0]?.settings).toMatchObject({ fastMode: true });
+  });
+  it("overrides inherited Fast with explicit standard", async () => {
+    const transport = installTransport();
+    const { provider, events } = fixture();
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    expect(transport.optionsSeen[0]?.settings).toMatchObject({ fastMode: false });
+  });
+});
 
 describe("Claude resolved context window", () => {
   const modelResult = (turn: number) => ({ ...result(`RESULT_${turn}`), modelUsage: { opus: { contextWindow: 1000000 } } });

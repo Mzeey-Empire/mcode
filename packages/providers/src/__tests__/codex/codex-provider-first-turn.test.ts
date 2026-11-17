@@ -249,6 +249,21 @@ describe("CodexProvider first turn on new session", () => {
     await provider.shutdown();
   });
 
+  it.each([true, false])("reports actual Fast tier: %s", async (fastMode) => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.observeCanonicalEvents(event => events.push(event));
+    await provider.sendTurn({
+      turnId: "fast-status", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: { fastMode }, permissionMode: "supervised",
+    });
+    await vi.waitFor(() => expect(events.filter(({ event }) => event.type === "fastModeStatus").map(({ event }) => event)).toEqual([
+      { type: "fastModeStatus", threadId, turnExecutionId: schemaValidExecutionId, status: { modelId: "gpt-5.4", state: fastMode ? "on" : "off" } },
+    ]));
+    await provider.shutdown();
+  });
+
   it.each([false, true])("enriches a file approval from native changes arriving late: %s", async (late) => {
     const provider = makeProvider();
     const emitted: ApprovalRequestEnvelope[] = [];

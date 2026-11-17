@@ -36,6 +36,18 @@ function createMapper(captureSdkSessionId = vi.fn(() => true)) {
 }
 
 describe("ClaudeEventMapper native dispatch", () => {
+  it("deduplicates init Fast status and reports cooldown from results", async () => {
+    const { mapper, events, callbacks } = createMapper();
+    vi.mocked(callbacks.getSession).mockReturnValue({ model: "opus", pendingToolUses: new Set(), hasFiredToolThisTurn: false });
+    const init = { type: "system", subtype: "init", fast_mode_state: "on" };
+    await mapper.map(init);
+    await mapper.map(init);
+    await mapper.map({ type: "result", subtype: "success", fast_mode_state: "cooldown" });
+    expect(events.filter(event => event.type === "fastModeStatus")).toEqual([
+      { type: "fastModeStatus", threadId: "test", status: { modelId: "opus", state: "on" } },
+      { type: "fastModeStatus", threadId: "test", status: { modelId: "opus", state: "cooldown" } },
+    ]);
+  });
   it("does not emit events for thinking token progress pings", async () => {
     const { mapper, events } = createMapper();
 

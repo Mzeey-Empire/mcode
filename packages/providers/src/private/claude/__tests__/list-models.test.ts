@@ -20,6 +20,17 @@ const reported: ModelInfo[] = [
 ];
 
 describe("listClaudeModels", () => {
+  it("maps Fast independently of effort metadata for catalog and new models", async () => {
+    initialize.mockResolvedValue({ models: [
+      { value: "claude-opus-5-5", displayName: "Opus", description: "", supportsFastMode: true },
+      { value: "claude-opus-6", displayName: "Opus 6", description: "", supportsFastMode: true },
+      { value: "claude-sonnet-5-5", displayName: "Sonnet", description: "" },
+    ] });
+    const models = await listClaudeModels(resolveOptions);
+    expect(models.find((model) => model.id === "claude-opus-5-5")?.supportsFastMode).toBe(true);
+    expect(models.find((model) => model.id === "claude-opus-6")?.supportsFastMode).toBe(true);
+    expect(models.find((model) => model.id === "claude-sonnet-5-5")?.supportsFastMode).toBe(false);
+  });
   const close = vi.fn();
   const initialize = vi.fn<() => Promise<Pick<SDKControlInitializeResponse, "models">>>();
   const resolveOptions = () => ({ pathToClaudeCodeExecutable: "/installed/claude", env: {} });
@@ -50,7 +61,7 @@ describe("listClaudeModels", () => {
     expect(result.slice(0, -1)).toEqual(CLAUDE_STATIC_MODELS);
     expect(result.at(-1)).toEqual({
       id: "claude-sonnet-6",
-      name: "Sonnet 6", supportsReasoning: true, supportedReasoningEfforts: ["low", "high"],
+      name: "Sonnet 6", supportsReasoning: true, supportedReasoningEfforts: ["low", "high"], supportsFastMode: true,
     });
     expect(close).toHaveBeenCalledTimes(1);
     expect(signal?.aborted).toBe(true);
@@ -73,7 +84,7 @@ describe("listClaudeModels", () => {
     const result = await listClaudeModels(resolveOptions);
     expect(result.find((model) => model.id === "claude-opus-5")).toEqual({
       ...CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"),
-      supportsReasoning: false, supportedReasoningEfforts: [], defaultReasoningEffort: undefined,
+      supportsReasoning: false, supportedReasoningEfforts: [], defaultReasoningEffort: undefined, supportsFastMode: false,
     });
   });
 
@@ -92,7 +103,7 @@ describe("listClaudeModels", () => {
   it("keeps catalog efforts when Claude Code reports none for a known model", async () => {
     initialize.mockResolvedValue({ models: [{ value: "claude-opus-5", displayName: "Opus", description: "" }] });
     expect((await listClaudeModels(resolveOptions)).find((model) => model.id === "claude-opus-5"))
-      .toEqual(CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"));
+      .toEqual({ ...CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"), supportsFastMode: false });
   });
 
   it.each([
@@ -106,7 +117,7 @@ describe("listClaudeModels", () => {
     expect((await listClaudeModels(resolveOptions)).find((model) => model.id === "claude-opus-5"))
       .toEqual({
         ...CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"),
-        supportsReasoning: true, supportedReasoningEfforts: [...levels], defaultReasoningEffort: defaultEffort,
+        supportsReasoning: true, supportedReasoningEfforts: [...levels], defaultReasoningEffort: defaultEffort, supportsFastMode: false,
       });
   });
 

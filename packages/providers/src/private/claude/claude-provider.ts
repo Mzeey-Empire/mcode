@@ -539,6 +539,7 @@ interface ClaudeSendMessageParams {
   reasoningLevel?: ReasoningLevel;
   orchestrationMode: OrchestrationMode;
   thinking?: boolean;
+  fastMode?: boolean;
   maxBudgetUsd?: number;
   maxTurns?: number;
 }
@@ -800,6 +801,7 @@ export class ClaudeProvider
       reasoningLevel: req.reasoningLevel,
       orchestrationMode: req.orchestrationMode ?? "standard",
       thinking: req.providerOptions.thinking,
+      fastMode: req.providerOptions.fastMode,
       maxBudgetUsd: req.maxBudgetUsd,
       maxTurns: req.maxTurns,
     };
@@ -1258,7 +1260,7 @@ export class ClaudeProvider
     context: ClaudeTurnContext,
     existing: ClaudeSessionState,
   ): Promise<boolean> {
-    if (!(await this.updateClaudeOrchestrationMode(context, existing)))
+    if (!(await this.applyClaudeFlagSettings(context, existing)))
       return false;
     if (!(await this.updateClaudeSessionModel(context, existing)))
       return false;
@@ -1285,7 +1287,7 @@ export class ClaudeProvider
     }
   }
 
-  private async updateClaudeOrchestrationMode(
+  private async applyClaudeFlagSettings(
     context: ClaudeTurnContext,
     existing: ClaudeSessionState,
   ): Promise<boolean> {
@@ -1298,7 +1300,7 @@ export class ClaudeProvider
       existing.orchestrationMode = context.params.orchestrationMode;
       return true;
     } catch (error) {
-      logger.error("Ultracode mode change failed, recreating session", {
+      logger.error("Claude flag settings change failed, recreating session", {
         sessionId: context.params.sessionId,
         orchestrationMode: context.params.orchestrationMode,
         error: sideChannelErrorMessage(error),

@@ -3,6 +3,7 @@ import { type ProviderBillingMode } from "@mcode/contracts/providers/usage";
 import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { type TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { logger } from "@mcode/shared";
+import { parseClaudeFastModeStatus } from "./fast-mode-status.js";
 import type { ProviderBackgroundToolSettlement } from "../../host-ports.js";
 import type { NativeBackgroundTask } from "../session-runtime.js";
 import type { ClaudeContextUsage } from "./context-usage.js";
@@ -130,6 +131,7 @@ export type ClaudeMapOutcome = "none" | "turn_complete" | "result_error";
 
 /** Converts Claude SDK messages to provider-neutral events. */
 export class ClaudeEventMapper {
+  private lastFastStatus: string | undefined;
   private readonly launchLabels = new Map<string, string>();
   private liveTasks: ReadonlyMap<string, NativeBackgroundTask> | null = null;
   // Ambient tasks keep their first sighting too, so flipping ambient and back cannot restart the native cap.
@@ -211,6 +213,14 @@ export class ClaudeEventMapper {
   /** Maps one message after the lifecycle has confirmed whether the session is live. */
   async map(message: Message): Promise<ClaudeMapOutcome> {
     this.nativeSource = message;
+    const model = this.callbacks.getSession()?.model;
+    const status = model ? parseClaudeFastModeStatus(message, model) : undefined;
+    if (status && JSON.stringify(status) !== this.lastFastStatus) {
+      this.lastFastStatus = JSON.stringify(status);
+      this.callbacks.emit({ type: AgentEventType.FastModeStatus, threadId: this.threadId, status }, {
+        parent: { kind: "absent" }, sourceIdentities: [],
+      });
+    }
     readParentEvidence(message);
     const type = typeof message.type === "string" ? message.type : "";
     const handler = this.handlers.get(type);
