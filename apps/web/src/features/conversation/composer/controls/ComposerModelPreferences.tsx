@@ -13,7 +13,7 @@ import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";
-import { fastModeBlockedReason, fastModeView, type FastModeView } from "./fast-mode-view";
+import { FAST_MODE_COOLING_COPY, fastModeBlockedReason, fastModeView, type FastModeView } from "./fast-mode-view";
 import { resolveComposerCapabilities } from "../composer-capabilities";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import { moveOptionFocus } from "./AccessOptionList";
@@ -88,7 +88,7 @@ function getModelPreferenceState(
   return { hasThinking, thinking, fast };
 }
 
-/** The selected model's Fast view: the user's choice, overridden by the thread's last provider status. */
+/** The selected model's Fast view: the user's choice, qualified by the thread's last provider status. */
 export function useFastModeView(
   threadId: string | undefined,
   selection: ComposerAgentSelection,
@@ -118,6 +118,8 @@ export function persistReasoningLevel(
 interface FastOption {
   readonly on: boolean;
   readonly blockedReason: string | null;
+  /** A tooltip for a Fast that stays choosable, such as while the provider cools it down. */
+  readonly note: string | null;
   readonly set: (on: boolean) => void;
 }
 
@@ -158,8 +160,9 @@ function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenc
     fast: state.fast.kind === "absent"
       ? null
       : {
-          on: state.fast.kind === "on",
+          on: state.fast.kind === "on" || state.fast.kind === "cooling",
           blockedReason: fastModeBlockedReason(state.fast),
+          note: state.fast.kind === "cooling" ? FAST_MODE_COOLING_COPY : null,
           // Matching the provider's default stores no override, so the thread keeps following the setting.
           set: (on) => change({ fastMode: on === actionProps.defaults.fastDefault ? null : on }),
         },
@@ -169,13 +172,10 @@ function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenc
 
 const FAST_ICON = <Zap aria-hidden className="size-[1.2rem]" />;
 
-function speedOptionsOf(blockedReason: string | null): SegmentedOption[] {
-  return [
-    { value: "standard", label: "Standard" },
-    blockedReason === null
-      ? { value: "fast", label: "Fast", icon: FAST_ICON }
-      : { value: "fast", label: "Fast", icon: FAST_ICON, disabled: true, title: blockedReason },
-  ];
+function speedOptionsOf({ blockedReason, note }: FastOption): SegmentedOption[] {
+  const fast: SegmentedOption = { value: "fast", label: "Fast", icon: FAST_ICON };
+  if (blockedReason !== null) return [{ value: "standard", label: "Standard" }, { ...fast, disabled: true, title: blockedReason }];
+  return [{ value: "standard", label: "Standard" }, note === null ? fast : { ...fast, title: note }];
 }
 
 /**
@@ -202,7 +202,7 @@ export function ComposerModelOptions({
           variant="pill"
           size="small"
           aria-label="Speed"
-          options={speedOptionsOf(fast.blockedReason)}
+          options={speedOptionsOf(fast)}
           value={fast.on ? "fast" : "standard"}
           onChange={(value) => fast.set(value === "fast")}
         />

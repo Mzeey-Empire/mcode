@@ -1,6 +1,6 @@
 import type { FastModeStatus, FastModeUnavailableReason } from "@mcode/contracts/models/fast-mode";
 
-/** What the Fast control shows for the selected model: the user's choice, overridden by what the provider reports. */
+/** What the Fast control shows for the selected model: the user's choice, qualified by what the provider reports. */
 export type FastModeView =
   | { kind: "absent" }
   | { kind: "off" }
@@ -21,9 +21,10 @@ export function fastModeView({ supported, chosen, status, modelId }: FastModeVie
   if (!supported) return { kind: "absent" };
   const choice: FastModeView = chosen ? { kind: "on" } : { kind: "off" };
   if (status?.modelId !== modelId) return choice;
-  if (status.state === "on") return { kind: "on" };
+  // The user's choice decides the speed; the status only says whether a chosen Fast can run, so it never flips Standard on.
+  if (status.state === "off" && status.unavailable) return { kind: "unavailable", reason: status.unavailable };
+  if (!chosen) return choice;
   if (status.state === "cooldown") return { kind: "cooling" };
-  if (status.unavailable) return { kind: "unavailable", reason: status.unavailable };
   // Claude reports plain off whenever Mcode sent `fastMode: false`, so it is no block on the user's choice.
   return choice;
 }
@@ -42,9 +43,7 @@ export const FAST_MODE_UNAVAILABLE_COPY: Readonly<Record<FastModeUnavailableReas
 /** Shown on the Fast option while the provider cools Fast down. */
 export const FAST_MODE_COOLING_COPY = "Fast is cooling down.";
 
-/** The sentence explaining why Fast cannot be chosen, or null when it can. */
+/** The sentence explaining why Fast cannot be chosen, or null when it can. Cooling is temporary, so it never blocks. */
 export function fastModeBlockedReason(view: FastModeView): string | null {
-  if (view.kind === "cooling") return FAST_MODE_COOLING_COPY;
-  if (view.kind === "unavailable") return FAST_MODE_UNAVAILABLE_COPY[view.reason];
-  return null;
+  return view.kind === "unavailable" ? FAST_MODE_UNAVAILABLE_COPY[view.reason] : null;
 }
