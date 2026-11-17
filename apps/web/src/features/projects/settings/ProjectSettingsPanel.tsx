@@ -164,9 +164,9 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
             already says it is not per-thread, and a longer scope note was cut off at the default window width. */}
         {/* The project is the item the tool is open on, so a short row drops the tool's words instead. The glyph is
             already gone below 208px, and "Project settings" 110 + space 4 + a 12-character name 76 = 190, so 192px.
-            sr-only, not hidden, keeps the words in the heading's accessible name. */}
+            sr-only, not hidden, keeps the words in the heading's accessible name. Alone, the name is the title, so ink. */}
         <span className="@max-[192px]/panel-title:sr-only">Project settings </span>
-        <span className="text-muted">{projectName}</span>
+        <span className="text-muted @max-[192px]/panel-title:text-ink">{projectName}</span>
       </PanelTitle>
     </PanelHeaderSlot>
   );
