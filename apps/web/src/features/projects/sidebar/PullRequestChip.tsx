@@ -124,9 +124,12 @@ function PullRequestListPopup({ payload }: { payload: PullRequestListPayload | u
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner side="right" align="start" sideOffset={8} className="pointer-events-none isolate z-(--layer-modal) data-anchor-hidden:invisible">
         <MenuPrimitive.Popup
-          className={cn("pointer-events-auto w-72 max-h-(--available-height) overflow-y-auto", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS, POPOVER_FADE_CLASS)}
+          className={cn("pointer-events-auto w-72 max-h-(--available-height) overflow-hidden", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS, POPOVER_FADE_CLASS)}
         >
-          {payload.ranked.map((pr) => <PullRequestMenuItem key={pr.number} pr={pr} threadId={payload.threadId} numberWidth={numberWidth} />)}
+          {/* The fade masks only this inner scroller, so the surface and its border stay whole. */}
+          <div data-testid="pull-request-list-scroller" className="scroll-fade-y flex flex-col">
+            {payload.ranked.map((pr) => <PullRequestMenuItem key={pr.number} pr={pr} threadId={payload.threadId} numberWidth={numberWidth} />)}
+          </div>
         </MenuPrimitive.Popup>
       </MenuPrimitive.Positioner>
     </MenuPrimitive.Portal>
