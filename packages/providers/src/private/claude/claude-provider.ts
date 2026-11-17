@@ -3098,9 +3098,12 @@ export class ClaudeProvider
     return "unknown";
   }
 
-  /** Fetch available Claude models from the Anthropic REST API. */
+  /** Discover models supported by the same Claude Code executable used for sessions. */
   async listModels(): Promise<ProviderModelInfo[]> {
-    return listClaudeModels();
+    return listClaudeModels(() => ({
+      pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
+      env: { ...this.host.environment.snapshot() },
+    }));
   }
 
   /** Settle the live SDK callback before reporting a delivered answer. */
