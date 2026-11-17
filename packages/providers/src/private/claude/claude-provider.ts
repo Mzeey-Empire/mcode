@@ -1535,7 +1535,7 @@ export class ClaudeProvider
       resumeId,
       uuid: context.threadId,
       baseOptions,
-        flags: claudeFlagSettings(context.params),
+      flags: claudeFlagSettings(context.params),
       resolvedModel: context.model,
       orchestrationMode: context.params.orchestrationMode,
       planTurn: context.params.planTurn,

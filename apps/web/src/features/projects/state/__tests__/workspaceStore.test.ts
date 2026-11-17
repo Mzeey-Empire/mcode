@@ -84,7 +84,7 @@ describe("workspace list loaded flag", () => {
     useWorkspaceStore.setState({ activeWorkspaceId: "ws-1", newThreadMode: "direct", threads: [] });
     vi.mocked(mockTransport.createAndSendMessage).mockRejectedValue(new Error("Creation cancelled"));
     await expect(useWorkspaceStore.getState().createAndSendMessage(
-      "First request", "claude-opus-5-5", undefined, undefined, undefined, "claude", undefined, undefined, true,
+      "First request", "claude-opus-5-5", undefined, undefined, undefined, "claude", undefined, undefined, true, "First request",
     )).rejects.toThrow("Creation cancelled");
     const placeholderId = useWorkspaceStore.getState().activeThreadId;
     if (!placeholderId) throw new Error("Missing placeholder");
