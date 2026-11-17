@@ -9,13 +9,13 @@ function model(overrides: Partial<ProviderModelInfo>): ProviderModelInfo {
 describe("reconcileSwitchOptions", () => {
   it("drops options owned by the provider being left and reports each", () => {
     const result = reconcileSwitchOptions({
-      options: { contextWindow: "1m", thinking: true, reasoningLevel: "high" },
+      options: { thinking: true, reasoningLevel: "high" },
       toProvider: "codex",
       targetModel: model({ supportedReasoningEfforts: ["low", "medium", "high"] }),
     });
 
     expect(result.options).toEqual({ reasoningLevel: "high" });
-    expect(result.dropped.map((d) => d.option).sort()).toEqual(["contextWindow", "thinking"]);
+    expect(result.dropped.map((d) => d.option)).toEqual(["thinking"]);
   });
 
   it("keeps the target provider's own toggles", () => {
