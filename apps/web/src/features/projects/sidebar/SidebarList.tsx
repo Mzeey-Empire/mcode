@@ -47,7 +47,8 @@ const PROVISIONAL_HEIGHT: Record<Exclude<SidebarItem["kind"], "thread">, number>
 };
 const PROVISIONAL_THREAD_HEIGHT: Record<Extract<SidebarItem, { kind: "thread" }>["layout"], number> = { grouped: 64, flat: 84 };
 
-const EMPTY_CLOSED_HEIGHT = 32;
+// One 20px text-label line inside py-1, the "No closed threads" line rendered below.
+const EMPTY_CLOSED_HEIGHT = 28;
 
 function provisionalHeight(item: SidebarItem): number {
   if (item.kind === "empty" && item.scope === "completed") return EMPTY_CLOSED_HEIGHT;
