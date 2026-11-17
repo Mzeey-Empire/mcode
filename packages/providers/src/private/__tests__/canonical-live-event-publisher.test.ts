@@ -47,6 +47,25 @@ describe("CanonicalLiveEventPublisher after an execution ends", () => {
     expect(onFailure).not.toHaveBeenCalled();
   });
 
+  // A background subagent can run for hours while every other thread keeps ending turns.
+  it("still drops a late event after many other threads end their turns", async () => {
+    const { publisher, submitted, onFailure } = recordingPublisher();
+    publisher.publish(routing, ended(), []);
+    await publisher.waitForExecution(routing);
+    for (let index = 0; index < 300; index += 1) {
+      const other = { ...routing, threadId: `thread-other-${index}`, executionId: `execution-other-${index}` };
+      publisher.publish(other, providerRuntimeEvent({ type: AgentEventType.Ended, threadId: other.threadId,
+        turnExecutionId: other.executionId }), []);
+      await publisher.waitForExecution(other);
+    }
+    submitted.length = 0;
+    publisher.publish(routing, lateToolUse, []);
+    await publisher.waitForExecution(routing);
+
+    expect(submitted).toEqual([]);
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
   it("still submits post-terminal hooks and the Ended that follow a turn completion", async () => {
     const { publisher, submitted } = recordingPublisher();
     publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnComplete, threadId: routing.threadId }), []);

@@ -508,12 +508,13 @@ describe("ClaudeProvider background agents", () => {
     try {
       await sendUserTurn(provider);
       await compactedAfterEnd;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      expect(userEnded(events)).toBe(true);
-      expect(afterUserTurn(events)).toEqual([]);
     } finally {
+      // Shutdown drains every accepted event to the sink, so a leaked summary would be recorded by now.
       await provider.shutdown();
     }
+
+    expect(userEnded(events)).toBe(true);
+    expect(afterUserTurn(events)).toEqual([]);
   });
 
   it("reports background work separately while the call runs and stops it when the session shuts down", async () => {

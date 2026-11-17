@@ -13,8 +13,12 @@ const RESUME_BELOW = 128;
  * A long Claude turn streams one identity per thinking or text delta, far past this window.
  */
 const NATIVE_REPLAY_WINDOW = 4_096;
-/** Late callbacks follow their own turn's end, so only recently ended executions need fencing. */
-const ENDED_EXECUTION_WINDOW = 256;
+/**
+ * A late callback routes to its thread's most recent turn, so each thread fences only its last few
+ * endings. Counting per thread keeps other threads' turns from evicting a fence a long background
+ * subagent still needs.
+ */
+const ENDED_EXECUTIONS_PER_THREAD = 16;
 
 /** Identifies the canonical turn execution that owns provider live events. */
 export interface CanonicalLiveEventRouting {
@@ -51,7 +55,7 @@ export interface NativeLiveEventEvidence {
  */
 export class CanonicalLiveEventPublisher {
   private readonly queues = new Map<string, ProviderExecutionQueue>();
-  private readonly endedExecutions = new Set<string>();
+  private readonly endedExecutions = new Map<string, string[]>();
   private admissionStopped = false;
   private shutdownTask: Promise<void> | undefined;
   private lateEventReported = false;
@@ -121,7 +125,7 @@ export class CanonicalLiveEventPublisher {
     const draft = this.createDraft(routing, runtimeEvent, sourceIdentities, sourceSequence, typeof native === "string" ? undefined : native);
     const bytes = this.byteBudget === "unbounded" ? 0 : Buffer.byteLength(JSON.stringify(draft));
     if (!this.admitBytes(queue, routing, bytes, runtimeEvent)) return;
-    if (endsExecution(runtimeEvent)) this.rememberEnded(this.queueKey(routing));
+    if (endsExecution(runtimeEvent)) this.rememberEnded(routing);
     queue.nextSourceSequence += 1;
     queue.pendingBytes += bytes;
     this.pendingByThread.set(routing.threadId, (this.pendingByThread.get(routing.threadId) ?? 0) + 1);
@@ -161,7 +165,7 @@ export class CanonicalLiveEventPublisher {
       }
       return true;
     }
-    if (!this.endedExecutions.has(this.queueKey(routing))) return false;
+    if (!this.endedExecutions.get(routing.threadId)?.includes(this.queueKey(routing))) return false;
     // The server accepts nothing after Ended, and a rejected event would break the turn's release,
     // so a late callback (a background subagent's hook or approval) must not reach it.
     logger.warn("Provider canonical event dropped after its execution ended", {
@@ -169,12 +173,11 @@ export class CanonicalLiveEventPublisher {
     return true;
   }
 
-  private rememberEnded(key: string): void {
-    if (this.endedExecutions.size >= ENDED_EXECUTION_WINDOW) {
-      const oldest = this.endedExecutions.values().next().value;
-      if (oldest !== undefined) this.endedExecutions.delete(oldest);
-    }
-    this.endedExecutions.add(key);
+  private rememberEnded(routing: CanonicalLiveEventRouting): void {
+    const ended = this.endedExecutions.get(routing.threadId) ?? [];
+    ended.push(this.queueKey(routing));
+    if (ended.length > ENDED_EXECUTIONS_PER_THREAD) ended.shift();
+    this.endedExecutions.set(routing.threadId, ended);
   }
 
   private discardUnanchoredPlan(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
