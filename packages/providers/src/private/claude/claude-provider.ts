@@ -852,12 +852,11 @@ export class ClaudeProvider
       const queue = createPromptQueue();
       const ephemeralId = `complete-${crypto.randomUUID()}`;
 
-      const executable = this.resolveClaudeExecutable();
       const q = sdkQuery({
         prompt: queue.iterable,
         options: {
           env: { ...this.host.environment.snapshot() },
-          pathToClaudeCodeExecutable: executable,
+          pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
           spawnClaudeCodeProcess: ownedProcess.spawn,
           cwd,
           model,
@@ -869,7 +868,7 @@ export class ClaudeProvider
           permissionMode: "default" as const,
           persistSession: false,
           includePartialMessages: true,
-          ...buildReasoningOptions(options.reasoningLevel, model, undefined, discoveredClaudeEfforts(executable, model)),
+          ...buildReasoningOptions(options.reasoningLevel, model, undefined, discoveredClaudeEfforts(this.resolveClaudeExecutable(), model)),
         },
       });
 
