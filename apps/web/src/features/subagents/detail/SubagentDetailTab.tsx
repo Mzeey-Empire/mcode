@@ -76,11 +76,12 @@ function DetailHeader({ threadId, entry }: { readonly threadId: string; readonly
         Subagents
       </Button>
       <div data-testid="subagent-detail-meta" className="flex h-8 min-w-0 items-center gap-2 rounded-[18px] bg-selected px-3">
-        {kind && <span className="text-fade min-w-0 text-xs text-muted">{kind}</span>}
+        {/* Status and duration lead and never shrink: in a narrow panel they matter more than the model's name. */}
         <span aria-hidden className={cn("size-[7px] shrink-0 rounded-full", running ? "bg-success" : "bg-muted")} />
         {/* The list names the state beside its dot, so the detail does too; the sr-only status already speaks it. */}
         <span aria-hidden className="shrink-0 text-xs text-ink">{subagentStatusLabel(entry.status)}</span>
-        {duration && <span className="shrink-0 font-mono text-xs text-ink">{duration}</span>}
+        {duration && <span className="shrink-0 font-mono text-xs text-ink">· {duration}</span>}
+        {kind && <span className="text-fade min-w-0 text-xs text-muted">{kind}</span>}
       </div>
       {running && entry.canStop && entry.childThreadId && <DetailStop threadId={threadId} entry={entry} childThreadId={entry.childThreadId} />}
     </PanelHeaderSlot>
