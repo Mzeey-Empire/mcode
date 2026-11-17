@@ -9,7 +9,7 @@ import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
   getModelContextWindow as sharedGetModelContextWindow,
 } from "@mcode/shared/model-context";
-import { isKnownClaudeModelId, normalizeReasoningLevelForModel, reasoningLevelAtOrBelow } from "@mcode/shared/model-effort";
+import { clampReasoningLevel, isKnownClaudeModelId, normalizeReasoningLevelForModel } from "@mcode/shared/model-effort";
 
 // Import from the subpath, NOT the barrel. The barrel re-exports
 // winston-bound logging at the top of index.ts, which throws
@@ -432,10 +432,9 @@ export function normalizeReasoningLevel(
  * offer moves to the nearest lower one, or the lowest it offers. Unknown models without a report keep the level.
  */
 function normalizeClaudeReasoningLevel(modelId: string, level: ReasoningLevel): ReasoningLevel {
-  const requested = isKnownClaudeModelId(modelId) ? normalizeReasoningLevelForModel(modelId, level) : level;
   const levels = getReasoningLevels("claude", modelId);
-  if (levels.length === 0) return requested;
-  return reasoningLevelAtOrBelow(requested, levels) ?? levels[0] ?? requested;
+  if (levels.length > 0) return clampReasoningLevel(level, levels);
+  return isKnownClaudeModelId(modelId) ? normalizeReasoningLevelForModel(modelId, level) : level;
 }
 
 function normalizeDevinReasoningLevel(modelId: string, level: ReasoningLevel): ReasoningLevel {

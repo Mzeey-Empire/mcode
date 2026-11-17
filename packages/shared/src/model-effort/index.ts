@@ -193,6 +193,14 @@ export function reasoningLevelAtOrBelow(
 }
 
 /**
+ * Returns the highest offered level at or below `level`, or the lowest offered level when every one is above it.
+ * Returns `level` unchanged when nothing is offered. Offered levels may arrive in any order.
+ */
+export function clampReasoningLevel(level: ReasoningLevel, offered: readonly ReasoningLevel[]): ReasoningLevel {
+  return reasoningLevelAtOrBelow(level, offered) ?? orderReasoningLevels(offered)[0] ?? level;
+}
+
+/**
  * Returns true when the model supports the "xhigh" effort tier.
  *
  * Only the opus-5-5, opus-5, sonnet-5-5, fable-5-2, fable-5-1, fable-5, sonnet-5, opus-4-8,

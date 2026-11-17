@@ -22,6 +22,12 @@ describe("buildReasoningOptions", () => {
     expect(buildReasoningOptions("high", "claude-opus-5", undefined, [])).toEqual({});
   });
 
+  it("falls back to the lowest reported level when the reported levels arrive out of order", () => {
+    expect(buildReasoningOptions("low", "claude-sonnet-7", undefined, ["max", "high"])).toEqual({
+      effort: "high", thinking: { type: "adaptive", display: "summarized" },
+    });
+  });
+
   it("sends max effort for a newly discovered Claude model", () => {
     expect(buildReasoningOptions("max", "claude-sonnet-6")).toEqual({
       effort: "max", thinking: { type: "adaptive", display: "summarized" },

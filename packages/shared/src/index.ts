@@ -29,7 +29,7 @@ export {
   supports1MContextWindow,
   supportsThinkingToggle,
   normalizeReasoningLevelForModel,
-  reasoningLevelAtOrBelow,
+  clampReasoningLevel,
 } from "./model-effort/index.js";
 
 export { redactMcodeBrowserCaptureV2 } from "./browser-preview/redact.js";

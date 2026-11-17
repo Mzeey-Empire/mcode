@@ -607,6 +607,19 @@ describe("normalizeReasoningLevel", () => {
     }
   });
 
+  it("lets the levels Claude Code reported widen a known model and falls back to the lowest one", () => {
+    registerProviderModels("claude", [
+      { id: "claude-sonnet-4-6", label: "Sonnet 4.6", providerId: "claude", supportedReasoningLevels: ["low", "medium", "high", "xhigh"] },
+      { id: "claude-sonnet-7", label: "Sonnet 7", providerId: "claude", supportedReasoningLevels: ["max", "high"] },
+    ]);
+    try {
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-4-6", "xhigh")).toBe("xhigh");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-7", "low")).toBe("high");
+    } finally {
+      registerProviderModels("claude", []);
+    }
+  });
+
   it("keeps max for the Devin swe-2 family instead of snapping to high", () => {
     expect(normalizeReasoningLevel("devin", "swe-2", "max")).toBe("max");
   });

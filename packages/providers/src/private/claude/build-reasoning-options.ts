@@ -4,7 +4,7 @@ import {
   isKnownClaudeModelId,
   logger,
   normalizeReasoningLevelForModel,
-  reasoningLevelAtOrBelow,
+  clampReasoningLevel,
   supportsEffortParameter,
   supportsThinkingToggle,
 } from "@mcode/shared";
@@ -29,7 +29,7 @@ function fromDiscoveredEfforts(level: ReasoningLevel | undefined, modelId: strin
   efforts: readonly ReasoningLevel[]): ReasoningOptions {
   if (efforts.length === 0) return withoutEffort(modelId, thinking);
   if (level === undefined) return {};
-  return adaptiveEffort(reasoningLevelAtOrBelow(level, efforts) ?? efforts[0] ?? level);
+  return adaptiveEffort(clampReasoningLevel(level, efforts));
 }
 
 function fromStaticTables(level: ReasoningLevel | undefined, modelId: string, thinking: boolean | undefined): ReasoningOptions {
