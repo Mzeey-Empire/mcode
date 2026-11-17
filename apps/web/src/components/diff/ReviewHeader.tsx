@@ -4,23 +4,22 @@ import {
   ChevronDown,
   ChevronsDownUp,
   ChevronsUpDown,
-  Columns2,
   Diff,
   Files,
   RefreshCw,
-  Rows2,
   SlidersHorizontal,
 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuGroupLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { IconButton } from "@/components/ui/button";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Button, IconButton } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { PanelHeaderSlot, PanelToolGlyph, usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
@@ -305,14 +304,10 @@ function ReviewStatSummary({ comparison }: { readonly comparison: ReviewComparis
   );
 }
 
-const RENDER_MODE_OPTIONS = [
-  { value: "unified", label: "Unified", title: "Unified", icon: <Rows2 className="size-4" aria-hidden /> },
-  { value: "side-by-side", label: "Split", title: "Split", icon: <Columns2 className="size-4" aria-hidden /> },
-] as const;
-
-function isRenderMode(value: string): value is DiffRenderMode {
-  return RENDER_MODE_OPTIONS.some((option) => option.value === value);
-}
+const RENDER_MODE_OPTIONS: readonly { readonly value: DiffRenderMode; readonly label: string }[] = [
+  { value: "unified", label: "Unified" },
+  { value: "side-by-side", label: "Split" },
+];
 
 /** Row 2: the view's operand on the left, display controls on the right. */
 function ReviewControlsRow({
@@ -331,7 +326,6 @@ function ReviewControlsRow({
       {view.operand ? <ReviewOperand operand={view.operand} /> : null}
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <RefreshButton refreshing={refreshing} onRefresh={onRefresh} />
-        <RenderModePill />
         <FilesToggle scopeId={scopeId} navigator={filesNavigator} />
         <ReviewDisplayMenu comparison={comparison} defaultFilesExpanded={defaultFilesExpanded} />
       </div>
@@ -429,35 +423,13 @@ function RefreshButton({ refreshing, onRefresh }: { readonly refreshing: boolean
   );
 }
 
-function RenderModePill() {
-  const renderMode = useDiffStore((s) => s.renderMode);
-  const setRenderMode = useDiffStore((s) => s.setRenderMode);
-  return (
-    <span data-testid="review-render-mode" className="contents">
-      <SegmentedControl
-        size="compact"
-        iconOnly
-        aria-label="Diff layout"
-        options={RENDER_MODE_OPTIONS}
-        value={renderMode}
-        onChange={(value) => {
-          if (isRenderMode(value)) setRenderMode(value);
-        }}
-        // Two 28px segments keep the operand's width. They are round, and the chosen one takes a pressed round
-        // toggle's fill, because a square solid segment among row 2's round buttons outweighed the operand (council r3).
-        className="[&_[role=radio]]:size-7 [&_[role=radio]]:rounded-full [&_[role=radio][aria-checked=true]]:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] dark:[&_[role=radio][aria-checked=true]]:bg-control-border"
-      />
-    </span>
-  );
-}
-
 function whitespaceUnavailableReason(threadId: string | null, comparison: ReviewComparison | null): string | null {
   if (!threadId) return "Open a thread to hide whitespace changes";
   const source = comparison?.turnDiff?.source;
   return source && source !== "git" ? "Not available for agent patches" : null;
 }
 
-/** Rarer display choices and the bulk fold command, kept off row 2 so the common controls stay visible. */
+/** Diff layout, rarer display choices, and the bulk fold command, kept off row 2 so the operand keeps its room. */
 function ReviewDisplayMenu({
   comparison,
   defaultFilesExpanded,
@@ -476,16 +448,33 @@ function ReviewDisplayMenu({
   const setBulkDiffExpand = useDiffStore((s) => s.setBulkDiffExpand);
   const whitespaceReason = whitespaceUnavailableReason(activeThreadId, comparison);
   const allExpanded = bulkDiffExpand?.expand ?? defaultFilesExpanded;
+  const renderMode = useDiffStore((s) => s.renderMode);
+  const setRenderMode = useDiffStore((s) => s.setRenderMode);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
-          <IconButton shape="round" aria-label="View" data-testid="review-display-menu">
-            <SlidersHorizontal />
-          </IconButton>
+          <Button variant="subtle" shape="round" className="shrink-0 text-body-small font-medium" data-testid="review-display-menu">
+            <SlidersHorizontal aria-hidden />
+            View
+          </Button>
         }
       />
       <DropdownMenuContent align="end" sideOffset={6}>
+        {/* Diff layout lives here, as on GitHub, because a bare Unified/Split icon pair in row 2 did not say what it switched. */}
+        <DropdownMenuGroup>
+          <DropdownMenuGroupLabel>Layout</DropdownMenuGroupLabel>
+          {RENDER_MODE_OPTIONS.map((option) => (
+            <DropdownMenuItem
+              key={option.value}
+              label={option.label}
+              checked={renderMode === option.value}
+              data-testid={`review-render-mode-${option.value}`}
+              onClick={() => setRenderMode(option.value)}
+            />
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
         <DropdownMenuCheckboxItem
           label="Wrap lines"
           checked={lineWrap}
@@ -540,17 +529,20 @@ function FilesToggle({
     return <FilesPopover open={popoverOpen} onOpenChange={setPopoverOpen} disabled={!scopeId} navigator={navigator} />;
   }
   return (
-    <IconButton
+    <Button
+      variant="subtle"
       shape="round"
       aria-label={filesVisible ? "Hide files" : "Show files"}
-      pressed={filesVisible}
+      aria-pressed={filesVisible}
       disabled={!scopeId}
       data-testid="review-files-toggle"
+      className="shrink-0 text-body-small font-medium"
       onClick={() => {
         if (scopeId) setReviewFilesVisible(scopeId, !filesVisible);
       }}
     >
-      <Files />
-    </IconButton>
+      <Files aria-hidden />
+      Files
+    </Button>
   );
 }
