@@ -290,7 +290,7 @@ export class CodexLiveEventReducer {
       case "toolUse": return this.toolUse(event);
       case "toolResult": return this.toolResult(event);
       case "toolBackgrounded":
-        this.narrative.markToolCallBackground(event.threadId, event.toolCallId);
+        this.narrative.markToolCallBackground(event.threadId, event.toolCallId, event.kind, event.label);
         return [this.recovery()];
       case "hookStarted": return this.hookStarted(event);
       case "hookCompleted": return this.hookCompleted(event);

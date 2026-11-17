@@ -170,7 +170,7 @@ async function expectSavingExit(active: Fixture, executionId: string, fault: { r
  * The wait is bounded, so a release that never finishes still fails the test.
  */
 async function untilRuntimeReleased(active: Fixture): Promise<void> {
-  await vi.waitFor(() => expect(active.service.runtimeAccess().activeCount()).toBe(0), { timeout: 10_000, interval: 10 });
+  await vi.waitFor(() => expect(active.service.runtimeAccess().activeTurnThreadIds()).toEqual([]), { timeout: 10_000, interval: 10 });
 }
 
 type OwnedExecution = NonNullable<ReturnType<Fixture["workers"]["owner"]["current"]>>["execution"];

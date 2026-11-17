@@ -1982,7 +1982,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
     await send(3, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent" })] });
+      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("claude", 3, "textDelta", { delta: "Started a background agent", isFinalResponse: true })] });
     expect((await finish()).result.kind).toBe("accepted");
@@ -1992,7 +1992,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT status, completed_at, background FROM tool_call_records WHERE id = 'agent'").get())
       .toEqual({ status: "running", completed_at: null, background: 1 });
     expect(saved.listHeldBackgroundToolCalls())
-      .toEqual([{ threadId: execution.threadId, executionId: execution.executionId, toolCallId: "agent" }]);
+      .toEqual([{ threadId: execution.threadId, executionId: execution.executionId, toolCallId: "agent",
+        kind: "subagent", label: "Look around" }]);
     const original = progress.latestAssistantMessage(execution.threadId);
     if (!original) throw new Error("Expected original accepted assistant");
 
@@ -2020,7 +2021,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
     await send(3, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent" })] });
+      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "toolUse",
       { toolCallId: "agent-step", toolName: "Bash", toolInput: { command: "ls" }, parentToolCallId: "agent" })] });
     await send(5, { kind: "event", phase: "running", nativeCursor: null,

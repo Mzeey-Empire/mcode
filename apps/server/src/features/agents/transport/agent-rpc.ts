@@ -82,6 +82,7 @@ type AgentRpcParams<Method extends AgentRpcMethod> = Method extends "subagent.ro
 
 /** Defines the services required to route validated Agent RPC calls. */
 export interface AgentRouterDeps {
+  agentWorkload: import("../workload/agent-workload.js").AgentWorkload;
   canonicalProgress?: Pick<import("../canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
     "retry" | "getTasks">;
   agentService: Pick<
@@ -185,7 +186,7 @@ const agentHandlers: AgentRpcHandlerMap = {
   },
   "agent.stop": (deps, params) => deps.agentService.stopSession(params.threadId, { by: "user" }),
   "agent.retrySave": (deps, params) => ({ retried: deps.canonicalProgress?.retry(params.threadId) ?? false }),
-  "agent.activeCount": (deps) => deps.agentService.runtimeAccess().activeCount(),
+  "agent.activeCount": (deps) => deps.agentWorkload.count(),
   // The runtime registry is the reconnect snapshot authority: startup recovery
   // interrupts every unfinished canonical checkpoint, so registry entries are
   // exactly the executions canonical state still considers live.

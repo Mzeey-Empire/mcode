@@ -137,6 +137,7 @@ import { TaskRepo } from "../../features/agents/orchestration/persistence/task-r
 import { PlanQuestionAnswersRepo } from "../../features/agents/planning/persistence/plan-question-answers-repo.js";
 import { PlanQuestionService } from "../../features/agents/planning/plan-question-service.js";
 import { BackgroundToolSettlementEffect } from "../../features/agents/turns/background-tool-settlement-effect.js";
+import { AgentWorkloadService } from "../../features/agents/workload/agent-workload.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
 import { PlanService, type PlanImplementRuntime } from "../../features/agents/planning/plan-service.js";
 import { PlanImplementStartupObserver } from "../../features/agents/planning/plan-implement-startup-observer.js";
@@ -358,6 +359,9 @@ const workspaceEnvironmentService = container.resolve(WorkspaceEnvironmentServic
 const projectActionService = container.resolve(ProjectActionService);
 const threadService = container.resolve(ThreadService);
 const agentService = container.resolve(AgentService);
+const agentWorkload = new AgentWorkloadService(agentService.runtimeAccess(), container.resolve(CanonicalAgentBoundary));
+container.registerInstance(AgentWorkloadService, agentWorkload);
+const stopObservingAgentWorkload = agentWorkload.observeCommittedEvents();
 workspaceEnvironmentService.setAutomaticSetupDispatcher({
   dispatch: (submission) => agentService.dispatchQueuedAutomaticTurn(submission),
 });
@@ -745,7 +749,7 @@ async function recoverTurnsAtStartup(): Promise<void> {
 async function settleOrphanedBackgroundToolsAtStartup(): Promise<void> {
   if (!workerOwnedTurnRuntime.progress) return;
   const settled = await container.resolve(BackgroundToolSettlementEffect).settleOrphansAtStartup();
-  if (settled > 0) logger.info("Stopped orphaned background tool calls during startup recovery", { count: settled });
+  if (settled.length > 0) logger.info("Stopped orphaned background tool calls during startup recovery", { count: settled.length });
 }
 
 /** Marks startup records interrupted because no process survives server restart. */
@@ -931,6 +935,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   projectActionService,
   threadService,
   agentService,
+  agentWorkload,
   approvalService,
   planTurnService,
   goalLifecycleService,
@@ -1079,7 +1084,7 @@ function startServerAndSubscribe(): void {
   listen(PREFERRED_PORT);
 
   // Idle terminals must not retain a server after every client disconnects.
-  const isBusy = () => agentService.runtimeAccess().activeCount() > 0;
+  const isBusy = () => agentWorkload.count() > 0;
 
   graceController = createGraceController({
     graceMs: GRACE_PERIOD_MS,
@@ -1318,6 +1323,7 @@ async function shutdown(): Promise<void> {
       await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
       await captureCleanupFailure(() => planImplementStartupObserver.stop());
       stopObservingSubagentRosters();
+      stopObservingAgentWorkload();
       stopObservingDelegatedRosters();
       stopObservingDelegatedStartups();
       stopObservingDelegatedTurns();

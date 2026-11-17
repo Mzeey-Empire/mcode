@@ -111,8 +111,8 @@ type UnsentWorkerTerminal = { outcome: "errored" } | { outcome: "cancelled"; sto
 
 /** Read-only runtime state available to server-owned diagnostics and recovery infrastructure. */
 export interface AgentRuntimeAccess {
-  /** Return the number of active agent sessions. */
-  activeCount(): number;
+  /** Thread ids holding an active turn reservation. */
+  activeTurnThreadIds(): string[];
   /** Return all active runtime thread identities. */
   activeThreadIds(): string[];
   /** Return immutable runtime snapshots. */
@@ -1556,11 +1556,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     };
   }
 
-  /** Number of currently active sessions. */
-  private activeCount(): number {
-    return this.activeSessionIds.size;
-  }
-
   /** Atomically reserve the first accepted send for one thread. */
   private reserveTurn(threadId: string): boolean {
     if (this.activeSessionIds.has(threadId)) return false;
@@ -2019,8 +2014,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Return narrow runtime capabilities for server-owned diagnostics and recovery infrastructure. */
   runtimeAccess(): AgentRuntimeAccess {
     return {
-      activeCount: () => this.activeCount(),
       activeThreadIds: () => this.activeThreadIds(),
+      activeTurnThreadIds: () => [...this.activeSessionIds],
       runtimeSnapshots: () => this.runtimeSnapshots(),
     };
   }

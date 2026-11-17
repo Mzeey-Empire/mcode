@@ -156,6 +156,8 @@ export interface CanonicalHeldBackgroundToolCall {
   threadId: string;
   executionId: string;
   toolCallId: string;
+  kind?: import("@mcode/contracts/events/agent-event").BackgroundCallKind;
+  label?: string;
 }
 
 /** Observable result after one canonical batch commits. */
@@ -910,21 +912,24 @@ export class CanonicalAgentStore {
   }
 
   /** List background tool calls still held open under a finished turn. */
-  listHeldBackgroundToolCalls(): CanonicalHeldBackgroundToolCall[] {
+  listHeldBackgroundToolCalls(filter?: { threadId: string }): CanonicalHeldBackgroundToolCall[] {
     // The id range keeps the scan on tool call keys, and the substring test skips JSON
     // parsing for the many calls that never ran in the background.
     const rows = this.db.prepare(`
       SELECT item.thread_id AS threadId, turn.execution_id AS executionId,
-        COALESCE(json_extract(item.payload_json, '$.record.id'), json_extract(item.payload_json, '$.narrative.record.id')) AS toolCallId
+        COALESCE(json_extract(item.payload_json, '$.record.id'), json_extract(item.payload_json, '$.narrative.record.id')) AS toolCallId,
+        COALESCE(json_extract(item.payload_json, '$.record.background_kind'), json_extract(item.payload_json, '$.narrative.record.background_kind')) AS kind,
+        COALESCE(json_extract(item.payload_json, '$.record.background_label'), json_extract(item.payload_json, '$.narrative.record.background_label')) AS label
       FROM canonical_agent_items item
       JOIN canonical_agent_turns turn ON turn.id = item.turn_id
       WHERE item.id >= 'toolCall:' AND item.id < 'toolCall;'
+        ${filter ? "AND item.thread_id = ?" : ""}
         AND instr(item.payload_json, '"background":true') > 0
         AND turn.status IN ('Completed', 'Cancelled', 'Interrupted', 'Errored')
         AND COALESCE(json_extract(item.payload_json, '$.record.background'), json_extract(item.payload_json, '$.narrative.record.background')) = 1
         AND COALESCE(json_extract(item.payload_json, '$.record.status'), json_extract(item.payload_json, '$.narrative.record.status')) = 'running'
       ORDER BY item.thread_id, item.created_at, item.id
-    `).all() as Record<string, unknown>[];
+    `).all(...(filter ? [filter.threadId] : [])) as Record<string, unknown>[];
     return rows.map(heldBackgroundToolCallFromRow);
   }
 
@@ -3892,5 +3897,8 @@ function heldBackgroundToolCallFromRow(row: Record<string, unknown>): CanonicalH
   if (typeof threadId !== "string" || typeof executionId !== "string" || typeof toolCallId !== "string") {
     throw new Error("Held background tool call row is malformed");
   }
-  return { threadId, executionId, toolCallId };
+  return { threadId, executionId, toolCallId,
+    ...(row.kind === "subagent" || row.kind === "command" ? { kind: row.kind } : {}),
+    ...(typeof row.label === "string" ? { label: row.label } : {}),
+  };
 }

@@ -239,6 +239,7 @@ export interface RouterDeps {
   projectActionService: ProjectActionService;
   threadService: ThreadService;
   agentService: AgentService;
+  agentWorkload: import("../../features/agents/workload/agent-workload.js").AgentWorkload;
   /** Routes provider permission decisions through the Agents feature boundary. */
   approvalService: ApprovalService;
   /** Owns plan question submission and plan output lifecycle. */

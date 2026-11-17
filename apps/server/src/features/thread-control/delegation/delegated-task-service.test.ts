@@ -192,7 +192,7 @@ async function harness(
   const audit = new ThreadControlAuditRepo(runtime.writer);
   child.registerInstance(ThreadControlAuditRepo, audit);
   child.registerInstance<Pick<AgentService, "stopSession" | "runtimeAccess">>(AgentService, { stopSession,
-    runtimeAccess: () => ({ activeThreadIds: () => [...active], activeCount: () => active.size, runtimeSnapshots: () => [] }) });
+    runtimeAccess: () => ({ activeThreadIds: () => [...active], activeTurnThreadIds: () => [...active], runtimeSnapshots: () => [] }) });
   child.registerInstance(ThreadStartupService, startups);
   child.registerInstance(ThreadStartupFetchDecisions, fetchDecisions);
   child.registerInstance(WorkspaceEnvironmentService, environment);

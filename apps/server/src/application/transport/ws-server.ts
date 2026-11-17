@@ -392,7 +392,7 @@ function handleHealthRequest(req: NodeHTTP.IncomingMessage, res: NodeHTTP.Server
 function createHealthBody(deps: WsServerDeps): Record<string, unknown> {
   const body: Record<string, unknown> = {
     status: "ok",
-    activeAgents: deps.agentService.runtimeAccess().activeCount(),
+    activeAgents: deps.agentWorkload.count(),
   };
   if (deps.browserAutomationBroker) {
     body.browserAutomation = {

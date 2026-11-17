@@ -28,8 +28,9 @@ function makeMinimalDeps(
     instanceToken: null,
     worktreeIdentity: null,
     shutdown: vi.fn(),
+    agentWorkload: { count: () => 2, hasBackgroundSubagent: () => false, onSubagentChange: () => () => {} },
     agentService: {
-      runtimeAccess: () => ({ activeCount: () => 2 }),
+      runtimeAccess: () => ({ activeTurnThreadIds: () => [] }),
     } as unknown as RouterDeps["agentService"],
     workspaceService: undefined as unknown as RouterDeps["workspaceService"],
     threadService: undefined as unknown as RouterDeps["threadService"],

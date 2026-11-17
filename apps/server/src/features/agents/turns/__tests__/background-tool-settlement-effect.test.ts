@@ -1,10 +1,10 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import { BackgroundToolSettlementEffect, ORPHANED_BACKGROUND_TOOL_OUTPUT } from "../background-tool-settlement-effect.js";
+import { BackgroundToolSettlementEffect, ORPHANED_BACKGROUND_TOOL_OUTPUT, type StoppedBackgroundCall } from "../background-tool-settlement-effect.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000124";
 
-function harness(held: { threadId: string; executionId: string; toolCallId: string }[] = []) {
+function harness(held: StoppedBackgroundCall[] = []) {
   const steps: string[] = [];
   const subagentToolChanged = vi.fn((threadId: string, toolCallId: string) => { steps.push(`roster:${threadId}:${toolCallId}`); });
   const effect = new BackgroundToolSettlementEffect({ listHeldBackgroundToolCalls: () => held }, { subagentToolChanged });
@@ -41,14 +41,14 @@ describe("BackgroundToolSettlementEffect", () => {
   });
 
   it("stops every orphan and lets each thread's writes land before the next thread", async () => {
-    const held = [
-      { threadId: "first", executionId: EXECUTION_ID, toolCallId: "a" },
+    const held: StoppedBackgroundCall[] = [
+      { threadId: "first", executionId: EXECUTION_ID, toolCallId: "a", kind: "subagent", label: "Investigate" },
       { threadId: "first", executionId: EXECUTION_ID, toolCallId: "b" },
       { threadId: "second", executionId: EXECUTION_ID, toolCallId: "c" },
     ];
     const { effect, steps, acceptLateToolResult, bind } = harness(held);
     bind();
-    await expect(effect.settleOrphansAtStartup()).resolves.toBe(3);
+    await expect(effect.settleOrphansAtStartup()).resolves.toEqual(held);
     expect(acceptLateToolResult).toHaveBeenCalledWith("first", EXECUTION_ID,
       { toolCallId: "a", status: "cancelled", output: ORPHANED_BACKGROUND_TOOL_OUTPUT });
     expect(steps).toEqual([
