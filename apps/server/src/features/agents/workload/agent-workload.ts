@@ -8,7 +8,8 @@ import type { AgentRuntimeAccess } from "../orchestration/turn-runtime-controlle
 export interface AgentWorkload {
   /** Threads with a running turn or a running background subagent, each counted once. */
   count(): number;
-  hasBackgroundSubagent(threadId: string): boolean;
+  /** Visible threads with a running background subagent, read once so a caller checking many threads scans once. */
+  backgroundSubagentThreadIds(): ReadonlySet<string>;
   /** Fires when a thread gains its first or loses its last running background subagent. */
   onSubagentChange(listener: (threadId: string) => void): () => void;
 }
@@ -38,12 +39,12 @@ export class AgentWorkloadService implements AgentWorkload {
   }
 
   /**
-   * Whether the thread has a running background subagent. It turns true once the call is backgrounded, while its
+   * Visible threads with a running background subagent. A thread joins once its call is backgrounded, while its
    * launching turn may still run, because the turn's reservation can end before its ending is saved.
    */
-  hasBackgroundSubagent(threadId: string): boolean {
-    if (this.hidden.has(threadId)) return false;
-    return this.subagents.has(threadId) || this.unsavedLaunchThreadIds().includes(threadId);
+  backgroundSubagentThreadIds(): ReadonlySet<string> {
+    const threadIds = [...this.subagents.keys(), ...this.unsavedLaunchThreadIds()];
+    return new Set(threadIds.filter((threadId) => !this.hidden.has(threadId)));
   }
 
   /** Subscribe to background occupancy transitions. */
@@ -80,7 +81,7 @@ export class AgentWorkloadService implements AgentWorkload {
     if (ids.size > 0) this.subagents.set(threadId, ids);
     else this.subagents.delete(threadId);
     // Accepting a launch notifies no one: readers see it live, and the parent's settled turn republishes attention.
-    const running = this.hasBackgroundSubagent(threadId);
+    const running = this.backgroundSubagentThreadIds().has(threadId);
     if (running === this.reported.has(threadId)) return;
     if (running) this.reported.add(threadId);
     else this.reported.delete(threadId);

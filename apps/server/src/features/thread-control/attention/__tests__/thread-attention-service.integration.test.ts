@@ -28,7 +28,7 @@ function backgroundSubagents() {
   const listeners = new Set<(threadId: string) => void>();
   const announce = (threadId: string) => { for (const listener of listeners) listener(threadId); };
   return {
-    hasBackgroundSubagent: (threadId: string) => running.has(threadId),
+    backgroundSubagentThreadIds: () => running,
     onSubagentChange: (listener: (threadId: string) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     launch: (threadId: string) => { running.add(threadId); announce(threadId); },
     settle: (threadId: string) => { running.delete(threadId); announce(threadId); },

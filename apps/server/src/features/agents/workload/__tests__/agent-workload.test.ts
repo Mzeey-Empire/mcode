@@ -74,7 +74,7 @@ describe("AgentWorkload", () => {
     hold("command", "command");
     hold("legacy");
     expect(workload.count()).toBe(0);
-    expect(workload.hasBackgroundSubagent("legacy")).toBe(false);
+    expect(workload.backgroundSubagentThreadIds().has("legacy")).toBe(false);
   });
 
   it("notifies only first and last subagent transitions, including late saved results", () => {
@@ -112,7 +112,7 @@ describe("AgentWorkload", () => {
     await deletion.deletePersistentData(["parent"], async () => new ThreadStore(db).hardDelete("parent"));
 
     expect(workload.count()).toBe(1);
-    expect(workload.hasBackgroundSubagent("other")).toBe(true);
+    expect(workload.backgroundSubagentThreadIds().has("other")).toBe(true);
     expect(changes).toEqual(["parent", "child", "other", "parent", "child"]);
   });
 
@@ -125,7 +125,7 @@ describe("AgentWorkload", () => {
     deletion.notifyThreadsHidden(["hidden"]);
 
     expect(workload.count()).toBe(1);
-    expect(workload.hasBackgroundSubagent("hidden")).toBe(false);
+    expect(workload.backgroundSubagentThreadIds().has("hidden")).toBe(false);
   });
 
   /** Soft-deletes workspace `w` through its service; the given teardown never lets it reach the later write. */
@@ -152,7 +152,7 @@ describe("AgentWorkload", () => {
     deleteWorkspace(test, teardownThread);
 
     await expect.poll(() => test.workload.count()).toBe(0);
-    expect(test.workload.hasBackgroundSubagent("idle-parent")).toBe(false);
+    expect(test.workload.backgroundSubagentThreadIds().has("idle-parent")).toBe(false);
   });
 
   it("drops a deleted workspace's thread whose turn is still running while its teardown waits", async () => {

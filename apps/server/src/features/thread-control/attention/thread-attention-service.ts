@@ -42,7 +42,7 @@ export class ThreadAttentionService {
     private readonly writer: ApplicationDatabaseWriter,
     sources: readonly ThreadWaitingSource[],
     private readonly delegations: ThreadDelegationSource,
-    private readonly subagents: Pick<AgentWorkload, "hasBackgroundSubagent">,
+    private readonly subagents: Pick<AgentWorkload, "backgroundSubagentThreadIds">,
     private readonly publish: (attention: ThreadAttention) => void,
   ) {
     this.sources = waitingPrecedence.flatMap((kind) => sources.filter((source) => source.kind === kind));
@@ -57,15 +57,18 @@ export class ThreadAttentionService {
   /** Read attention for a live thread, including one whose outcome is already seen. */
   get(threadId: string): ThreadAttention | null {
     const row = this.db.query<AttentionRow, [string]>(`${attentionSelect} AND t.id = ?`).get(threadId);
-    return row ? this.fromRow(row, this.waiting(), this.delegations.coordinatorsWithUnfinishedTasks(threadId).has(threadId)) : null;
+    if (!row) return null;
+    return this.fromRow(row, this.waiting(), this.delegations.coordinatorsWithUnfinishedTasks(threadId).has(threadId),
+      this.subagents.backgroundSubagentThreadIds());
   }
 
   /** Hydrate live threads with a wait, delegated work, a background subagent, or an unseen settled turn. */
   listInteresting(): ThreadAttention[] {
     const waiting = this.waiting();
     const coordinators = this.delegations.coordinatorsWithUnfinishedTasks();
+    const withSubagents = this.subagents.backgroundSubagentThreadIds();
     return this.db.query<AttentionRow, []>(attentionSelect).all()
-      .map((row) => this.fromRow(row, waiting, coordinators.has(row.threadId)))
+      .map((row) => this.fromRow(row, waiting, coordinators.has(row.threadId), withSubagents))
       .filter((attention) => attention.waiting !== null || threadHasRunningDescendants(attention)
         || attention.lastTurn !== null && !isTurnSeen(attention.lastTurn.sequence, attention.seen.sequence));
   }
@@ -98,11 +101,14 @@ export class ThreadAttentionService {
     return waiting;
   }
 
-  private fromRow(row: AttentionRow, waiting: ReturnType<ThreadAttentionService["waiting"]>, hasUnfinishedDelegatedTasks: boolean): ThreadAttention {
+  private fromRow(
+    row: AttentionRow, waiting: ReturnType<ThreadAttentionService["waiting"]>, hasUnfinishedDelegatedTasks: boolean,
+    withSubagents: ReadonlySet<string>,
+  ): ThreadAttention {
     return ThreadAttentionSchema().parse({
       threadId: row.threadId, waiting: waiting.get(row.threadId) ?? null,
       hasUnfinishedDelegatedTasks,
-      hasRunningBackgroundSubagents: this.subagents.hasBackgroundSubagent(row.threadId),
+      hasRunningBackgroundSubagents: withSubagents.has(row.threadId),
       lastTurn: row.outcome === null || row.sequence === null ? null : {
         outcome: row.outcome, endedAt: row.endedAt, sequence: row.sequence, changedFileCount: row.changedFileCount,
       },

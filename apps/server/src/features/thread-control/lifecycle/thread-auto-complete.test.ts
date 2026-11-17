@@ -79,7 +79,7 @@ async function fixture() {
   const workspace = await new WorkspaceRepo(runtime.reader, runtime.writer).create("Auto-complete", "/fixture");
   const thread = await threads.create(workspace.id, "Feature", "direct", "main");
   const attention = new ThreadAttentionService(runtime.reader, runtime.writer, [],
-    { coordinatorsWithUnfinishedTasks: () => new Set() }, { hasBackgroundSubagent: () => false }, () => {});
+    { coordinatorsWithUnfinishedTasks: () => new Set() }, { backgroundSubagentThreadIds: () => new Set<string>() }, () => {});
   const funnel = new PullRequestLinkFunnel(runtime.writer, () => {}, () => {});
   const reservations = new ThreadControlMutationReservationService();
   let settings = getDefaultSettings();

@@ -2149,7 +2149,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       release?.();
       await expect.poll(() => progress.depth().pending).toBe(0);
       expect(launchRecord()).toEqual({ status: "running", background: 1 });
-      expect(workload.hasBackgroundSubagent(execution.threadId)).toBe(true);
+      expect(workload.backgroundSubagentThreadIds().has(execution.threadId)).toBe(true);
       expect(changes).toEqual([execution.threadId]);
     });
 
@@ -2177,7 +2177,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
 
     async function expectUncountedButSaved(workload: AgentWorkloadService) {
       expect(workload.count()).toBe(0);
-      expect(workload.hasBackgroundSubagent(execution.threadId)).toBe(false);
+      expect(workload.backgroundSubagentThreadIds().has(execution.threadId)).toBe(false);
       release?.();
       await expect.poll(() => progress.depth().pending).toBe(0);
       expect(launchRecord()).toEqual({ status: "running", background: 1 });
