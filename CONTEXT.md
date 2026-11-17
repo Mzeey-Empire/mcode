@@ -232,9 +232,10 @@ before risky operations like edits and shell execution) and **Full** (the
 agent acts without prompting). Default for new threads: **Full**.
 
 ### Context window
-Claude Code decides the context window from the user's own settings, such
-as `autoCompactWindow`, and the model. Mcode reads back the resolved window
-for the usage ring and does not pin one.
+The provider decides the context window. For Claude, it comes from the
+user's own Claude Code settings, such as `autoCompactWindow`, and the model.
+Mcode reads the window each provider reports for the usage ring and does not
+pin one.
 
 ### Reasoning level
 A per-thread setting that controls how much reasoning effort the model
