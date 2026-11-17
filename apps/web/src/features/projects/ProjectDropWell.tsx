@@ -12,11 +12,11 @@ function isFileDrag(event: DragEvent): boolean {
 /**
  * Empty-workspace well under the Projects header. On desktop a folder dropped here
  * opens the add-project flow at that path; the palette decides whether it is addable.
- * The web build cannot read a dropped file's path, so it only points at the + button.
+ * The web build cannot read a dropped file's path, so it only points at the Add project button.
  */
 export function ProjectDropWell() {
   const bridge = typeof window === "undefined" ? undefined : window.desktopBridge;
-  return bridge ? <DesktopDropWell getPathForFile={(file) => bridge.getPathForFile(file)} /> : <WellBody state="idle" caption="Use + to add a project." />;
+  return bridge ? <DesktopDropWell getPathForFile={(file) => bridge.getPathForFile(file)} /> : <WellBody state="idle" caption="Use Add project above to add one." />;
 }
 
 function DesktopDropWell({ getPathForFile }: { getPathForFile: (file: File) => string }) {
@@ -50,7 +50,7 @@ function DesktopDropWell({ getPathForFile }: { getPathForFile: (file: File) => s
   return (
     <WellBody
       state={state}
-      caption="Drop a folder here or use + to add one."
+      caption="Drop a folder here or use Add project above."
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

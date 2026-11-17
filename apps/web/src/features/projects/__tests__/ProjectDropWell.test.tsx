@@ -34,11 +34,11 @@ afterEach(() => {
 });
 
 describe("ProjectDropWell on the web", () => {
-  it("points at the + button and does not react to drops", () => {
+  it("points at the Add project button and does not react to drops", () => {
     render(<ProjectDropWell />);
 
     expect(screen.getByText("No projects")).toBeInTheDocument();
-    expect(screen.getByText("Use + to add a project.")).toBeInTheDocument();
+    expect(screen.getByText("Use Add project above to add one.")).toBeInTheDocument();
 
     fireEvent.dragEnter(well(), { dataTransfer: fileTransfer() });
     expect(well()).toHaveAttribute("data-state", "idle");
@@ -59,7 +59,7 @@ describe("ProjectDropWell on desktop", () => {
     render(<ProjectDropWell />);
 
     expect(screen.getByText("No projects")).toBeInTheDocument();
-    expect(screen.getByText("Drop a folder here or use + to add one.")).toBeInTheDocument();
+    expect(screen.getByText("Drop a folder here or use Add project above.")).toBeInTheDocument();
   });
 
   it("shows the drop prompt during a file drag and clears it when the drag leaves", () => {

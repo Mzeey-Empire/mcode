@@ -12,7 +12,6 @@ function threadItem(id: string): SidebarItem {
 function model(ids: readonly string[], completed: readonly string[] = [], older: readonly string[] = []): SidebarModel {
   return {
     scope: "active",
-    scopeBar: { visible: completed.length > 0, completedCount: completed.length },
     items: [...ids.map(threadItem), { kind: "end-spacer", key: "end-spacer" }],
     olderBar: older.length > 0 ? { count: older.length, open: false } : null,
     olderIds: new Set(older),
@@ -96,19 +95,16 @@ describe("useSidebarMotion", () => {
     };
   }
 
-  it("shows the Completed count one behind the model until the copy lands", async () => {
+  it("keeps the closed row until the copy lands", async () => {
     const env = environment(false);
     const { result, rerender } = renderHook(({ next }) => useSidebarMotion(next, "push", null, env), { initialProps: { next: BEFORE } });
 
     rerender({ next: A_COMPLETED });
-    expect(result.current.completedCount).toBe(0);
     expect(result.current.items.map((item) => item.key)).toContain("thread:a");
 
     await act(() => vi.advanceTimersByTimeAsync(CLOSE_MS));
-    expect(result.current.completedCount).toBe(0);
 
     await act(async () => landings.splice(0).forEach((land) => land()));
-    expect(result.current.completedCount).toBe(1);
     expect(result.current.items.map((item) => item.key)).not.toContain("thread:a");
   });
 
@@ -120,17 +116,15 @@ describe("useSidebarMotion", () => {
     await act(() => vi.advanceTimersByTimeAsync(CLOSE_MS));
     await act(async () => landings.splice(0).forEach((land) => land()));
 
-    expect(result.current.completedCount).toBe(1);
     expect(result.current.items.map((item) => item.key)).not.toContain("thread:a");
   });
 
-  it("updates the count at once under reduced motion", () => {
+  it("drops the closed row at once under reduced motion", () => {
     const env = environment(true);
     const { result, rerender } = renderHook(({ next }) => useSidebarMotion(next, "push", null, env), { initialProps: { next: BEFORE } });
 
     rerender({ next: A_COMPLETED });
 
-    expect(result.current.completedCount).toBe(1);
     expect(result.current.items.map((item) => item.key)).not.toContain("thread:a");
   });
 });

@@ -152,14 +152,14 @@ describe("deriveSidebarModel", () => {
 
     expect(threadKeys(model.items)).toEqual(facts.map((entry) => entry.id).reverse());
     expect(model.items.some((item) => item.kind === "show-more")).toBe(false);
-    expect(model.scopeBar).toEqual({ visible: true, completedCount: PROJECT_ROW_CAP + 3 });
   });
 
-  it("falls back to Active and hides the scope bar with nothing completed", () => {
+  it("keeps Completed with nothing completed and lists only the empty line", () => {
     const model = deriveSidebarModel(inputs({ facts: [fact("a")], ui: { scope: "completed" } }));
 
-    expect(model.scope).toBe("active");
-    expect(model.scopeBar.visible).toBe(false);
+    expect(model.scope).toBe("completed");
+    expect(model.items[0]).toEqual({ kind: "empty", key: "empty", scope: "completed" });
+    expect(threadKeys(model.items)).toEqual([]);
   });
 
   it("has no Older bar when nothing is Older", () => {
@@ -176,7 +176,6 @@ describe("deriveSidebarModel", () => {
 
     expect(threadKeys(model.items)).toEqual(["first", "held", "last"]);
     expect(threadItem(model.items, "held")?.pending).toBe("completing");
-    expect(model.scopeBar.completedCount).toBe(0);
   });
 
   it("sets nextBoundaryAt to the earliest crossing into Older", () => {

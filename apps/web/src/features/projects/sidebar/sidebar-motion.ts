@@ -83,12 +83,10 @@ export function planTransitions(prev: SidebarModel, next: SidebarModel, cause: M
   ];
 }
 
-/** What the list renders and the scope bar counts. */
+/** What the list renders. */
 export interface ShownSidebar {
   /** Model items plus rows still closing, kept at their old index until the close finishes. */
   readonly items: readonly SidebarItem[];
-  /** The model's count minus copies still flying to the segment, so the number rises on landing. */
-  readonly completedCount: number;
   /** Thread ids whose copies are still in the air. */
   readonly flying: ReadonlySet<string>;
   /** Row keys playing their close. */
@@ -248,7 +246,5 @@ export function useSidebarMotion(model: SidebarModel, cause: ModelCause, selecte
 
   const items = useMemo(() => shownItems(state), [state]);
   const closing = useMemo(() => new Set(state.closing.keys()), [state.closing]);
-  let landing = 0;
-  for (const id of state.flying) if (model.completedIds.has(id)) landing += 1;
-  return { items, completedCount: Math.max(0, model.scopeBar.completedCount - landing), flying: state.flying, closing, arriving: state.arriving };
+  return { items, flying: state.flying, closing, arriving: state.arriving };
 }

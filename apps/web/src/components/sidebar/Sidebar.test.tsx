@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -40,6 +40,8 @@ vi.mock("./UpdateButton", () => ({
 }));
 
 import { Sidebar } from "./Sidebar";
+import { loadKeybindings } from "@/lib/keybinding-manager";
+import defaultKeybindings from "@/config/default-keybindings.json";
 import { useSidebarWidthStore } from "./sidebarWidthStore";
 
 describe("Sidebar", () => {
@@ -47,6 +49,7 @@ describe("Sidebar", () => {
     vi.clearAllMocks();
     hoisted.ui.primarySurface = "chat";
     useSidebarWidthStore.getState().resetWidth();
+    loadKeybindings(defaultKeybindings);
   });
 
   it("opens the thread finder intent from the Search field", () => {
@@ -68,6 +71,45 @@ describe("Sidebar", () => {
 
     expect(hoisted.setPrimarySurface).toHaveBeenCalledWith("chat");
     expect(hoisted.beginNewThread).toHaveBeenCalledOnce();
+  });
+
+  it("opens the add-project folder browser from the Add project icon", () => {
+    render(<Sidebar onOpenSettings={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add project" }));
+
+    expect(hoisted.openCommandPalette).toHaveBeenCalledWith({ intent: "addProject" });
+  });
+
+  it.each([
+    ["Add project", /Ctrl\+Shift\+N/i],
+    ["New thread", /^New threadCtrl\+N$/i],
+  ])("names %s and its shortcut keycap in the tooltip", (name, keycap) => {
+    vi.useFakeTimers();
+    try {
+      render(<Sidebar onOpenSettings={vi.fn()} />);
+
+      act(() => {
+        screen.getByRole("button", { name }).focus();
+        vi.advanceTimersByTime(1_000);
+      });
+
+      const tooltip = document.querySelector('[data-slot="tooltip-content"]');
+      expect(tooltip).toHaveTextContent(name);
+      expect(tooltip?.textContent).toMatch(keycap);
+      expect(tooltip?.querySelector('[data-slot="kbd"]')).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["Add project", "Control+Shift+N"],
+    ["New thread", "Control+N"],
+  ])("exposes %s's shortcut %s to assistive tech", (name, shortcut) => {
+    render(<Sidebar onOpenSettings={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name })).toHaveAttribute("aria-keyshortcuts", shortcut);
   });
 
   it("has no text navigation buttons above the projects", () => {

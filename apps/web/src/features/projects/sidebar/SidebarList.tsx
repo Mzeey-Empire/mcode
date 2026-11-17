@@ -47,7 +47,10 @@ const PROVISIONAL_HEIGHT: Record<Exclude<SidebarItem["kind"], "thread">, number>
 };
 const PROVISIONAL_THREAD_HEIGHT: Record<Extract<SidebarItem, { kind: "thread" }>["layout"], number> = { grouped: 64, flat: 84 };
 
+const EMPTY_CLOSED_HEIGHT = 32;
+
 function provisionalHeight(item: SidebarItem): number {
+  if (item.kind === "empty" && item.scope === "completed") return EMPTY_CLOSED_HEIGHT;
   return item.kind === "thread" ? PROVISIONAL_THREAD_HEIGHT[item.layout] : PROVISIONAL_HEIGHT[item.kind];
 }
 
@@ -223,8 +226,9 @@ const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: Sid
       return <ShowMoreRow item={item} />;
     // The Older bar lives in the viewport's sticky flow host, never in a recycled row.
     case "older-bar":
-    case "empty":
       return null;
+    case "empty":
+      return item.scope === "completed" ? <p className="px-2 py-1 text-label text-muted">No closed threads</p> : null;
     case "end-spacer":
       return <div aria-hidden className="h-3" />;
   }

@@ -323,7 +323,7 @@ describe("ProjectSidebar thread interactions", () => {
   beforeEach(() => {
     // Pre-expand the workspace so the thread list is visible immediately.
     useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
-    useSidebarUiStore.setState({ scope: "active" });
+    useSidebarUiStore.setState({ scope: "active", view: "projects" });
     publishedRowIdHistory.length = 0;
     vi.useFakeTimers();
   });
@@ -494,72 +494,87 @@ describe("ProjectSidebar thread interactions", () => {
     expect(screen.queryByTestId("project-row-ws-2")).toBeNull();
   });
 
-  it("hides the scope bar while no thread is completed", () => {
+  it("shows the Open/Closed pill without a count while no thread is closed", () => {
     setupStoreMocks({ threads: [makeThread({ id: "thread-active", title: "Active work" })] });
     render(<ProjectSidebar />);
 
-    expect(screen.queryByTestId("sidebar-scope-bar")).toBeNull();
-    expect(screen.queryByRole("radiogroup", { name: "Thread scope" })).toBeNull();
+    const pill = screen.getByRole("radiogroup", { name: "Thread scope" });
+    expect(within(pill).getByRole("radio", { name: "Open" })).toHaveAttribute("aria-checked", "true");
+    expect(within(pill).getByRole("radio", { name: "Closed" })).toHaveTextContent(/^Closed$/);
   });
 
-  it("shows the scope bar with the completed count once a thread is completed", () => {
-    setupStoreMocks({ threads: [makeThread({ id: "thread-active", title: "Active work" })] });
-    const view = render(<ProjectSidebar />);
+  it("shows no count on Closed once a thread is closed", () => {
     setupStoreMocks({
       threads: [
         makeThread({ id: "thread-active", title: "Active work" }),
         makeThread({ id: "thread-done", title: "Done work", user_completed_at: "2026-08-12T08:00:00.000Z" }),
       ],
     });
-    view.rerender(<ProjectSidebar />);
+    render(<ProjectSidebar />);
 
-    const bar = screen.getByRole("radiogroup", { name: "Thread scope" });
-    expect(within(bar).getByRole("radio", { name: "Open" })).toHaveAttribute("aria-checked", "true");
-    expect(within(bar).getByRole("radio", { name: /^Closed/ })).toHaveTextContent("Closed1");
+    expect(screen.getByRole("radio", { name: "Closed" })).toHaveTextContent(/^Closed$/);
   });
 
-  it.each([
-    ["collapses before it leaves", false],
-    ["leaves at once under reduced motion", true],
-  ])("when the last completed thread goes, the scope bar %s", (_behaviour, reduced) => {
-    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
-      matches: reduced && query.includes("reduce"), media: query, onchange: null,
-      addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
-    }));
-    const activeThread = makeThread({ id: "thread-active", title: "Active work" });
-    setupStoreMocks({ threads: [activeThread, makeThread({ id: "thread-done", title: "Done work", user_completed_at: "2026-08-12T08:00:00.000Z" })] });
-    const view = render(<ProjectSidebar />);
+  it("says No closed threads when Closed is chosen with none closed", () => {
+    setupStoreMocks({ threads: [makeThread({ id: "thread-active", title: "Active work" })] });
+    render(<ProjectSidebar />);
 
-    setupStoreMocks({ threads: [activeThread] });
-    view.rerender(<ProjectSidebar />);
+    selectCompletedScope();
 
-    const collapsing = screen.queryByRole("radiogroup", { name: "Thread scope", hidden: true });
-    if (reduced) {
-      expect(collapsing).toBeNull();
-      return;
-    }
-    expect(collapsing?.closest("[inert]")).not.toBeNull();
-    const host = collapsing?.closest("[inert]")?.parentElement;
-    if (!host) throw new Error("The collapsing bar has a host");
-    fireEvent.transitionEnd(host);
-    expect(screen.queryByRole("radiogroup", { name: "Thread scope", hidden: true })).toBeNull();
+    expect(screen.getByRole("radio", { name: "Closed" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("No closed threads")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
   });
 
-  it("falls back to Active when the last completed thread is deleted", () => {
+  it("keeps Closed chosen across a remount with no closed threads", () => {
+    setupStoreMocks({ threads: [makeThread({ id: "thread-active", title: "Active work" })] });
+    const first = render(<ProjectSidebar />);
+    selectCompletedScope();
+
+    first.unmount();
+    render(<ProjectSidebar />);
+
+    expect(screen.getByRole("radio", { name: "Closed" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("No closed threads")).toBeVisible();
+  });
+
+  it("stays on Closed when the last closed thread is deleted", () => {
     const activeThread = makeThread({ id: "thread-active", title: "Active work" });
     setupStoreMocks({
       threads: [activeThread, makeThread({ id: "thread-done", title: "Done work", user_completed_at: "2026-08-12T08:00:00.000Z" })],
     });
     const view = render(<ProjectSidebar />);
     selectCompletedScope();
-    expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
 
     setupStoreMocks({ threads: [activeThread] });
     view.rerender(<ProjectSidebar />);
 
-    expect(screen.queryByTestId("sidebar-scope-bar")).toBeNull();
-    expect(screen.getByRole("button", { name: /^Provider, Claude Active work/i })).toBeVisible();
-    expect(useSidebarUiStore.getState().scope).toBe("active");
+    expect(screen.getByRole("radio", { name: "Closed" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("No closed threads")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
+  });
+
+  it("hides the Open/Closed pill on first run with no projects", () => {
+    setupStoreMocks({ workspaces: [], threads: [] });
+    render(<ProjectSidebar />);
+
+    expect(screen.queryByRole("radiogroup", { name: "Thread scope" })).toBeNull();
+  });
+
+  it("switches views from the view menu, checking the current view", () => {
+    useSidebarUiStore.setState({ view: "projects" });
+    setupStoreMocks();
+    render(<ProjectSidebar />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+    act(() => vi.runOnlyPendingTimers());
+    expect(screen.getByRole("menuitemradio", { name: "Projects" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemradio", { name: "Threads" })).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Threads" }));
+
+    expect(useSidebarUiStore.getState().view).toBe("threads");
+    expect(screen.getByRole("button", { name: "Threads" })).toBeInTheDocument();
   });
 
   it("labels a thread that switched provider with every provider, current first", () => {
@@ -816,31 +831,14 @@ describe("ProjectSidebar thread interactions", () => {
     );
   });
 
-  it("shows the Add project tooltip on the header control", () => {
-    setupStoreMocks();
-
-    render(<ProjectSidebar />);
-
-    const addButton = screen.getByRole("button", { name: "Add project" });
-    act(() => {
-      addButton.focus();
-      vi.advanceTimersByTime(1_000);
-    });
-
-    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent(
-      "Add project",
-    );
-  });
-
   it("shows the drop well instead of the old empty text when there are no projects", () => {
     setupStoreMocks({ workspaces: [] });
 
     render(<ProjectSidebar />);
 
     expect(screen.getByTestId("project-drop-well")).toHaveTextContent("No projects");
-    expect(screen.getByText("Use + to add a project.")).toBeInTheDocument();
+    expect(screen.getByText("Use Add project above to add one.")).toBeInTheDocument();
     expect(screen.queryByText("No projects yet")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add project" })).toBeInTheDocument();
   });
 
   it("leads the row with the provider and title, and ends the title line with the status", () => {
