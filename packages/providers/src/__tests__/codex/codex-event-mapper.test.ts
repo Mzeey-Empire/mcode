@@ -9,6 +9,7 @@ vi.mock("@mcode/shared", () => ({
 }));
 
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
+import { TOOL_OUTPUT_PREVIEW_BYTES } from "../../bounded-tool-output.js";
 import type { CompletedItem } from "../../private/codex/codex-types.js";
 import { parseCodexNotification } from "../../private/codex/codex-notification-validation.js";
 
@@ -768,7 +769,7 @@ describe("CodexEventMapper", () => {
       outputTruncated: true,
       outputTotalBytes: Buffer.byteLength(fullOutput, "utf8"),
     });
-    expect(Buffer.byteLength(JSON.stringify(result.event.output), "utf8") - 2).toBe(128 * 1024);
+    expect(Buffer.byteLength(JSON.stringify(result.event.output), "utf8") - 2).toBe(TOOL_OUTPUT_PREVIEW_BYTES);
     expect(result.event.output.startsWith("A".repeat(1024))).toBe(true);
     expect(result.event.output.endsWith("Z".repeat(1024))).toBe(true);
     expect(existsSync(requireOutputArtifactPath(result))).toBe(true);
@@ -4311,7 +4312,7 @@ describe("CodexEventMapper", () => {
       outputTruncated: true,
       outputTotalBytes: Buffer.byteLength(fullOutput, "utf8"),
     });
-    expect(result?.event.type === "toolResult" ? Buffer.byteLength(JSON.stringify(result.event.output), "utf8") - 2 : 0).toBe(128 * 1024);
+    expect(result?.event.type === "toolResult" ? Buffer.byteLength(JSON.stringify(result.event.output), "utf8") - 2 : 0).toBe(TOOL_OUTPUT_PREVIEW_BYTES);
     expect(result?.event.type === "toolResult" ? existsSync(result.event.outputArtifactPath ?? "") : false).toBe(true);
     expect(result?.event.type === "toolResult" ? readFileSync(result.event.outputArtifactPath!, "utf8") : "").toBe(fullOutput);
   });

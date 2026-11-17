@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as NodeFS from "node:fs";
 import * as NodeTimersPromises from "node:timers/promises";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import { isThreadSaveBlocked } from "../../canonical/accepted-save-failure.js";
 import { WriterFaultPlan, originalWrite, terminalWrite, threadWrite, writerFailures } from "./faulty-writer-worker.js";
 import { InvariantViolation, expectInvariant, knownStall } from "./known-stall.js";
-import { openWorkerServiceFixture } from "./worker-turn-fixture.js";
+import { openWorkerServiceFixture, openWorkerTurnFixture } from "./worker-turn-fixture.js";
 
 vi.mock("../../../../application/transport/push.js", () => ({ broadcast: vi.fn(), subscribedThreadIds: () => new Set<string>() }));
 
@@ -146,6 +147,34 @@ afterEach(async () => {
 });
 
 describe("thread resilience without model tokens", { timeout: 30_000 }, () => {
+  it.each([
+    { kib: 60, spooled: false },
+    { kib: 200, spooled: true },
+  ])("saves $kib KiB provider tool output without replacing content", async ({ kib, spooled }) => {
+    const active = await openWorkerTurnFixture();
+    fixture = active;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const output = "x".repeat(kib * 1024);
+    await active.emit({ type: "toolUse", threadId: active.thread.id, toolCallId: "large-output",
+      toolName: "command_execution", toolInput: { command: "generate output" } });
+    await active.emit({ type: "toolResult", threadId: active.thread.id, toolCallId: "large-output",
+      output, isError: false });
+    await active.emit({ type: "textDelta", threadId: active.thread.id, delta: "Finished", isFinalResponse: true });
+    await active.finish();
+    const markers = active.db.query<{ envelope_json: string }, [string]>(
+      "SELECT envelope_json FROM canonical_agent_events WHERE thread_id = ? AND envelope_json LIKE '%ingest.content-replaced%'")
+      .all(active.thread.id);
+    expect.soft(markers).toEqual([]);
+    const saved = active.tools.listByMessage(active.assistant()!.id);
+    expect.soft(saved.map((tool) => ({ id: tool.id, output: tool.output_summary }))).toEqual([
+      { id: "large-output", output: "x".repeat(500) },
+    ]);
+    const artifactPath = saved[0]?.output_artifact_path ?? null;
+    expect.soft(artifactPath !== null).toBe(spooled);
+    if (artifactPath) expect.soft(NodeFS.readFileSync(artifactPath, "utf8") === output, "full output readable from its artifact").toBe(true);
+    expect(active.canonical.loadTurnByExecution(active.turn.turnExecutionId)?.status).toBe("Completed");
+  });
+
   it("S1 ends a refused terminal save and admits another send", async () => {
     await knownStall("refused save leaves the turn Running", /turn Running with no ending; next send refused as save-blocked/, async () => {
       const { active, turn } = await refusedFinish();

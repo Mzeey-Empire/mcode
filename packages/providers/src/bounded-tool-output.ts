@@ -3,11 +3,17 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { getMcodeDir, logger } from "@mcode/shared";
 
-/** Maximum JSON wire bytes, excluding string quotes, sent through the live event stream. */
-export const TOOL_OUTPUT_PREVIEW_BYTES = 128 * 1024;
+/**
+ * Maximum JSON wire bytes, excluding string quotes, sent through the live event stream.
+ *
+ * One server save carries the preview twice (the provider event and its live publication)
+ * under the 256 KiB operation limit in `ACTIVE_TURN_WRITE_BATCH_LIMITS`, so two previews
+ * plus the operation envelope must fit, or the save is replaced and the output is lost.
+ */
+export const TOOL_OUTPUT_PREVIEW_BYTES = 96 * 1024;
 
 /** JSON wire bytes retained from the start of a truncated output preview. */
-export const TOOL_OUTPUT_HEAD_BYTES = 96 * 1024;
+export const TOOL_OUTPUT_HEAD_BYTES = 72 * 1024;
 
 /** Milliseconds before stale tool-output artifacts are eligible for cleanup. */
 export const TOOL_OUTPUT_ARTIFACT_TTL_MS = 14 * 24 * 60 * 60 * 1000;
