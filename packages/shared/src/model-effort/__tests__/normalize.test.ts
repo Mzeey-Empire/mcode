@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import {
+  isKnownClaudeModelId,
   isXhighEffortModel,
   isMaxEffortModel,
   supportsEffortParameter,
@@ -9,6 +10,18 @@ import {
   reasoningLevelAtOrBelow,
   supportsThinkingToggle,
 } from "../index.js";
+
+describe("isKnownClaudeModelId", () => {
+  it.each([
+    ["claude-sonnet-4-6", true],
+    ["claude-sonnet-4-6-20261117", true],
+    ["claude-sonnet-4-6-v2", false],
+    ["claude-sonnet-4-6-2026111", false],
+    ["claude-sonnet-6", false],
+  ])("recognizes %s precisely", (model, known) => {
+    expect(isKnownClaudeModelId(model)).toBe(known);
+  });
+});
 
 describe("isXhighEffortModel", () => {
   it("returns true for claude-opus-5-5", () => {
@@ -225,13 +238,13 @@ describe("normalizeReasoningLevelForModel", () => {
     });
   });
 
-  describe("unknown Claude model (effort choices come from discovery)", () => {
-    it("passes xhigh through", () => {
-      expect(normalizeReasoningLevelForModel("claude-unknown-model", "xhigh")).toBe("xhigh");
+  describe("unknown Claude model (shared conservative clamp)", () => {
+    it("clamps xhigh", () => {
+      expect(normalizeReasoningLevelForModel("claude-unknown-model", "xhigh")).toBe("high");
     });
 
-    it("passes max through", () => {
-      expect(normalizeReasoningLevelForModel("claude-unknown-model", "max")).toBe("max");
+    it("clamps max", () => {
+      expect(normalizeReasoningLevelForModel("claude-unknown-model", "max")).toBe("high");
     });
 
     it("passes low through unchanged", () => {

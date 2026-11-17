@@ -16,8 +16,6 @@ const reported: ModelInfo[] = [
   { value: "sonnet", resolvedModel: "claude-sonnet-6", displayName: "Sonnet 6", description: "",
     supportsEffort: true, supportedEffortLevels: ["low", "high"], supportsFastMode: true },
   { value: "claude-sonnet-6", displayName: "Duplicate", description: "" },
-  { value: "claude-opus-5", displayName: "Opus 5", description: "",
-    supportsEffort: true, supportedEffortLevels: ["medium", "high"] },
   { value: "default", displayName: "Default", description: "" },
 ];
 
@@ -68,11 +66,49 @@ describe("listClaudeModels", () => {
     expect(await next).toEqual({ done: true, value: undefined });
   });
 
-  it("keeps static names and capabilities despite CLI restrictions", async () => {
+  it("keeps static metadata but honors CLI effort restrictions", async () => {
     initialize.mockResolvedValue({ models: [{
       value: "claude-opus-5", displayName: "Opus", description: "", supportsEffort: false,
     }] });
-    expect(await listClaudeModels(resolveOptions)).toEqual(CLAUDE_STATIC_MODELS);
+    const result = await listClaudeModels(resolveOptions);
+    expect(result.find((model) => model.id === "claude-opus-5")).toEqual({
+      ...CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"),
+      supportsReasoning: false, supportedReasoningEfforts: [], defaultReasoningEffort: undefined,
+    });
+  });
+
+  it.each([
+    [["low", "medium"], undefined],
+    [["low", "high"], "high"],
+  ] as const)("uses CLI efforts %j and retains only a supported default", async (levels, defaultEffort) => {
+    initialize.mockResolvedValue({ models: [{
+      value: "claude-opus-5-20261117[1m]", displayName: "CLI Opus", description: "",
+      supportsEffort: true, supportedEffortLevels: [...levels],
+    }] });
+    expect((await listClaudeModels(resolveOptions)).find((model) => model.id === "claude-opus-5"))
+      .toEqual({
+        ...CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"),
+        supportsReasoning: true, supportedReasoningEfforts: [...levels], defaultReasoningEffort: defaultEffort,
+      });
+  });
+
+  it("retains the last successful list across failed refreshes only for its executable", async () => {
+    const good = await listClaudeModels(resolveOptions);
+    initialize.mockRejectedValue(new Error("CLI unavailable"));
+    for (let refresh = 0; refresh < 2; refresh++) {
+      await vi.advanceTimersByTimeAsync(300_001);
+      expect(await listClaudeModels(resolveOptions)).toBe(good);
+    }
+    expect(await listClaudeModels(() => ({ pathToClaudeCodeExecutable: "/other/claude" })))
+      .toEqual(CLAUDE_STATIC_MODELS);
+    expect(query).toHaveBeenCalledTimes(4);
+  });
+
+  it("runs a JavaScript CLI entry point with node", async () => {
+    await listClaudeModels(() => ({ pathToClaudeCodeExecutable: "/installed/cli.js" }));
+    expect(vi.mocked(query).mock.calls[0]?.[0].options).toMatchObject({
+      pathToClaudeCodeExecutable: "/installed/cli.js", executable: "node",
+    });
   });
 
   it("shares concurrent probes and reuses the cached result until expiry", async () => {
@@ -129,8 +165,6 @@ describe("listClaudeModels", () => {
   });
 
   it.each([
-    ["dated Haiku", "claude-haiku-4-5-20251001"],
-    ["extended context suffix", "claude-opus-5[1m]"],
     ["alias only", "sonnet"],
     ["Bedrock", "us.anthropic.claude-sonnet-5-5"],
     ["invalid id", "claude-sonnet/6"],

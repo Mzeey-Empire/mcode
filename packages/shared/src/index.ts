@@ -22,6 +22,7 @@ export {
 
 // Model effort normalization
 export {
+  isKnownClaudeModelId,
   isXhighEffortModel,
   isMaxEffortModel,
   supportsEffortParameter,

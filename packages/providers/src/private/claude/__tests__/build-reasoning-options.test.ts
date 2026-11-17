@@ -24,6 +24,17 @@ describe("buildReasoningOptions", () => {
     vi.clearAllMocks();
   });
 
+  it.each([
+    ["claude-sonnet-4-6-v2", "xhigh", "xhigh"],
+    ["claude-haiku-4-5-v2", "max", "max"],
+    ["claude-sonnet-6", "none", "low"],
+    ["claude-sonnet-6", "minimal", "low"],
+  ] as const)("passes discovered effort for %s at %s", (model, level, effort) => {
+    expect(buildReasoningOptions(level, model)).toEqual({
+      effort, thinking: { type: "adaptive", display: "summarized" },
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // Undefined reasoning
   // ---------------------------------------------------------------------------

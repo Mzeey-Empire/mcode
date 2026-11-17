@@ -1,11 +1,20 @@
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import {
+  isKnownClaudeModelId,
   logger,
   normalizeReasoningLevelForModel,
   supportsEffortParameter,
   supportsThinkingToggle,
 } from "@mcode/shared";
+
+function adaptiveEffort(level: ReasoningLevel): Pick<Options, "effort" | "thinking"> {
+  return {
+    effort: level === "none" || level === "minimal" ? "low" : level,
+    // Newer models omit thinking text unless display is summarized; Mcode renders it in Thought rows.
+    thinking: { type: "adaptive", display: "summarized" },
+  };
+}
 
 /**
  * Build the SDK reasoning options from a reasoning level, model ID, and
@@ -23,6 +32,9 @@ export function buildReasoningOptions(
   modelId: string,
   thinking?: boolean,
 ): Pick<Options, "effort" | "thinking"> {
+  if (reasoningLevel !== undefined && modelId.startsWith("claude-") && !isKnownClaudeModelId(modelId)) {
+    return adaptiveEffort(reasoningLevel);
+  }
   // Models that ignore the effort parameter (Haiku 4.5).
   if (!supportsEffortParameter(modelId)) {
     if (thinking === true && supportsThinkingToggle(modelId)) {
@@ -42,10 +54,5 @@ export function buildReasoningOptions(
     });
   }
 
-  // "none" / "minimal" are OpenAI Codex presets; Claude path normalizes them to "low" above.
-  return {
-    effort: normalized === "none" || normalized === "minimal" ? "low" : normalized,
-    // Newer models omit thinking text unless display is summarized; Mcode renders it in Thought rows.
-    thinking: { type: "adaptive", display: "summarized" },
-  };
+  return adaptiveEffort(normalized);
 }

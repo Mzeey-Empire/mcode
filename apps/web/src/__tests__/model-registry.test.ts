@@ -575,6 +575,24 @@ describe("normalizeReasoningLevelForModel", () => {
 });
 
 describe("normalizeReasoningLevel", () => {
+  it("clamps new Claude models to discovered levels without affecting other providers", () => {
+    registerProviderModels("claude", [{
+      id: "claude-sonnet-6", label: "Sonnet 6", providerId: "claude",
+      supportedReasoningLevels: ["low", "high"],
+    }]);
+    try {
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "max")).toBe("high");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "medium")).toBe("low");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "high")).toBe("high");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "none")).toBe("none");
+      for (const provider of ["copilot", "cursor"]) {
+        expect(normalizeReasoningLevel(provider, "claude-sonnet-6", "max")).toBe("high");
+        expect(normalizeReasoningLevel(provider, "claude-sonnet-4-6-v2", "xhigh")).toBe("high");
+      }
+    } finally {
+      registerProviderModels("claude", []);
+    }
+  });
   it("keeps max for the Devin swe-2 family instead of snapping to high", () => {
     expect(normalizeReasoningLevel("devin", "swe-2", "max")).toBe("max");
   });

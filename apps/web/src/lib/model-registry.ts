@@ -9,7 +9,7 @@ import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
   getModelContextWindow as sharedGetModelContextWindow,
 } from "@mcode/shared/model-context";
-import { normalizeReasoningLevelForModel } from "@mcode/shared/model-effort";
+import { isKnownClaudeModelId, normalizeReasoningLevelForModel, reasoningLevelAtOrBelow } from "@mcode/shared/model-effort";
 
 // Import from the subpath, NOT the barrel. The barrel re-exports
 // winston-bound logging at the top of index.ts, which throws
@@ -422,7 +422,14 @@ export function normalizeReasoningLevel(
   modelId: string,
   level: ReasoningLevel,
 ): ReasoningLevel {
-  if (provider !== "devin") return normalizeReasoningLevelForModel(modelId, level);
+  if (provider === "claude" && !isKnownClaudeModelId(modelId)) {
+    return reasoningLevelAtOrBelow(level, getReasoningLevels(provider, modelId)) ?? level;
+  }
+  if (provider === "devin") return normalizeDevinReasoningLevel(modelId, level);
+  return normalizeReasoningLevelForModel(modelId, level);
+}
+
+function normalizeDevinReasoningLevel(modelId: string, level: ReasoningLevel): ReasoningLevel {
   const declared = findModelById(modelId)?.supportedReasoningLevels;
   if (!declared || declared.length === 0) return level;
   if (declared.includes(level)) return level;

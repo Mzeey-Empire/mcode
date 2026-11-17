@@ -11,6 +11,7 @@ type ProbeOptions = Pick<Options, "pathToClaudeCodeExecutable" | "env">;
 
 const cache = new Map<string | undefined, { models: Promise<ProviderModelInfo[]>; timestamp: number }>();
 const loggedFailures = new Set<string>();
+const lastGood = new Map<string | undefined, ProviderModelInfo[]>();
 
 function fromCliModel(info: ModelInfo, id: string): ProviderModelInfo {
   return withClaudeLifecycle({
@@ -21,15 +22,30 @@ function fromCliModel(info: ModelInfo, id: string): ProviderModelInfo {
   });
 }
 
+function withCliEffort(known: ProviderModelInfo, cli: ProviderModelInfo): ProviderModelInfo {
+  const efforts = cli.supportedReasoningEfforts ?? [];
+  return {
+    ...known,
+    supportsReasoning: cli.supportsReasoning,
+    supportedReasoningEfforts: efforts,
+    defaultReasoningEffort: known.defaultReasoningEffort && efforts.includes(known.defaultReasoningEffort)
+      ? known.defaultReasoningEffort : undefined,
+  };
+}
+
 function mapModels(reported: ModelInfo[]): ProviderModelInfo[] {
   const models = new Map(CLAUDE_STATIC_MODELS.map((model) => [model.id, model]));
+  const seen = new Set<string>();
   for (const info of reported) {
     let id = (info.resolvedModel?.trim() || info.value.trim()).replace(/\[1m\]$/, "");
     const undated = id.replace(/-\d{8}$/, "");
     if (CLAUDE_STATIC_MODELS.some((model) => model.id === undated)) id = undated;
     if (!/^claude-[a-z0-9-]+$/.test(id)) continue;
-    if (models.has(id)) continue;
-    models.set(id, fromCliModel(info, id));
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const known = models.get(id);
+    const cli = fromCliModel(info, id);
+    models.set(id, known ? withCliEffort(known, cli) : cli);
   }
   return [...models.values()];
 }
@@ -51,6 +67,7 @@ async function probeModels(options: ProbeOptions, createProcess: () => ClaudeOwn
   try {
     q = query({ prompt, options: {
       ...options,
+      ...(options.pathToClaudeCodeExecutable?.endsWith(".js") ? { executable: "node" } : {}),
       abortController: abort,
       spawnClaudeCodeProcess: ownedProcess.spawn,
       cwd: NodeOS.tmpdir(),
@@ -84,21 +101,24 @@ function logFailure(error: unknown): void {
   const reason = error instanceof Error ? error.message : String(error);
   if (loggedFailures.has(reason)) return;
   loggedFailures.add(reason);
-  logger.warn("Claude model discovery failed; using static catalog", { reason });
+  logger.warn("Claude model discovery failed; using last good list or static catalog", { reason });
 }
 
 async function fetchModels(options: ProbeOptions, createProcess: () => ClaudeOwnedProcess): Promise<ProviderModelInfo[]> {
   try {
-    return await probeModels(options, createProcess);
+    const models = await probeModels(options, createProcess);
+    lastGood.set(options.pathToClaudeCodeExecutable, models);
+    return models;
   } catch (error) {
     logFailure(error);
-    return [...CLAUDE_STATIC_MODELS];
+    return lastGood.get(options.pathToClaudeCodeExecutable) ?? [...CLAUDE_STATIC_MODELS];
   }
 }
 
 /** Clear discovery state between tests; production refreshes through the five-minute TTL. */
 export function resetModelCache(): void {
   cache.clear();
+  lastGood.clear();
   loggedFailures.clear();
 }
 
