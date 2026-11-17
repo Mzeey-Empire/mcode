@@ -8,6 +8,9 @@ import { notifyCommittedCanonicalEvents } from "../../canonical/committed-canoni
 import { AgentWorkloadService } from "../agent-workload.js";
 import { syntheticThreadExecutionId } from "../../canonical/canonical-thread-execution.js";
 import { MessageStore } from "../../conversation/persistence/message-store.js";
+import { ThreadStore } from "../../../thread-control/persistence/thread-store.js";
+import { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
+import { ProjectLifecycleStore } from "../../../projects/lifecycle/project-lifecycle-store.js";
 
 const NOW = "2026-11-17T12:00:00.000Z";
 const disposers: (() => void)[] = [];
@@ -21,9 +24,9 @@ function harness() {
   const active = new Set<string>();
   const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [...active] }, store);
   disposers.push(workload.observeCommittedEvents());
-  function hold(threadId: string, kind?: BackgroundCallKind, id = threadId) {
+  function hold(threadId: string, kind?: BackgroundCallKind, id = threadId, parentThreadId: string | null = null) {
     if (!store.loadTurn(threadId)) {
-      db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, 'w', 'test', 'main', 'claude', ?, ?)").run(threadId, NOW, NOW);
+      db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, parent_thread_id, created_at, updated_at) VALUES (?, 'w', 'test', 'main', 'claude', ?, ?, ?)").run(threadId, parentThreadId, NOW, NOW);
       store.startParentTurn({ thread: { id: threadId, workspaceId: "w", providerId: "claude", createdAt: NOW },
         turnId: threadId, executionId: syntheticThreadExecutionId(threadId), permissionMode: "supervised", providerIdentities: [],
         approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
@@ -40,7 +43,12 @@ function harness() {
         payload: { type: "turn.completed", endedAt: NOW } }] });
     return record;
   }
-  return { store, workload, active, hold };
+  // Deleting persistent data uses only accepted progress, so the teardown collaborators stay unused.
+  const unused = {} as never;
+  const deletion = new ThreadDeletionTeardownService(unused, unused, unused, unused, unused, unused, unused);
+  deletion.bindAcceptedProgress({ discardThreads: async () => {}, finishThreadDeletion: () => {} });
+  disposers.push(deletion.onPersistentDataDeleted(() => workload.refreshTracked()));
+  return { db, store, workload, active, hold, deletion };
 }
 
 describe("AgentWorkload", () => {
@@ -88,5 +96,31 @@ describe("AgentWorkload", () => {
     unsubscribe();
     hold("second", "subagent");
     expect(changes).toEqual(["first", "first"]);
+  });
+
+  it("drops a deleted thread and the child threads its deletion cascades to", async () => {
+    const { db, workload, hold, deletion } = harness();
+    const changes: string[] = [];
+    disposers.push(workload.onSubagentChange((threadId) => changes.push(threadId)));
+    hold("parent", "subagent");
+    hold("child", "subagent", "child", "parent");
+    hold("other", "subagent");
+    expect(workload.count()).toBe(3);
+
+    await deletion.deletePersistentData(["parent"], async () => new ThreadStore(db).hardDelete("parent"));
+
+    expect(workload.count()).toBe(1);
+    expect(workload.hasBackgroundSubagent("other")).toBe(true);
+    expect(changes).toEqual(["parent", "child", "other", "parent", "child"]);
+  });
+
+  it("drops every thread of a deleted workspace", async () => {
+    const { db, workload, hold, deletion } = harness();
+    hold("first", "subagent");
+    hold("second", "subagent");
+
+    await deletion.deletePersistentData(["first", "second"], async () => new ProjectLifecycleStore(db).forceDeleteWorkspace("w"));
+
+    expect(workload.count()).toBe(0);
   });
 });

@@ -48,6 +48,14 @@ export class AgentWorkloadService implements AgentWorkload {
     });
   }
 
+  /**
+   * Re-read every thread holding a subagent. Deletion discards the thread's unsaved writes and removes its rows,
+   * so no saved event ever reports that its calls stopped.
+   */
+  refreshTracked(): void {
+    for (const threadId of this.subagents.keys()) this.refresh(threadId);
+  }
+
   private refresh(threadId: string): void {
     const previous = this.hasBackgroundSubagent(threadId);
     const calls = this.canonical.listHeldBackgroundToolCalls({ threadId });

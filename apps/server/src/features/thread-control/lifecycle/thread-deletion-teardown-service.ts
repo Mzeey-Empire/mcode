@@ -14,10 +14,20 @@ import { ThreadStartupService } from "../../thread-startup/thread-startup-servic
 export class ThreadDeletionTeardownService {
   private acceptedProgress: Pick<import("../../agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
     "discardThreads" | "finishThreadDeletion"> | undefined;
+  private readonly deletionListeners = new Set<() => void>();
 
   /** Compose retained-save disposal for direct deletion, delayed cleanup, and workspace cascades. */
   bindAcceptedProgress(progress: NonNullable<ThreadDeletionTeardownService["acceptedProgress"]>): void {
     this.acceptedProgress = progress;
+  }
+
+  /**
+   * Observe every finished deletion attempt, including failed ones. A deletion also removes child threads its
+   * caller never lists, so listeners re-read the threads they track instead of trusting the listed ids.
+   */
+  onPersistentDataDeleted(listener: () => void): () => void {
+    this.deletionListeners.add(listener);
+    return () => { this.deletionListeners.delete(listener); };
   }
 
   /** Fence late admission while the exact in-flight save settles and persistent deletion runs. */
@@ -29,6 +39,7 @@ export class ThreadDeletionTeardownService {
       return await remove();
     } finally {
       for (const id of threadIds) progress.finishThreadDeletion(id);
+      for (const listener of this.deletionListeners) listener();
     }
   }
 
