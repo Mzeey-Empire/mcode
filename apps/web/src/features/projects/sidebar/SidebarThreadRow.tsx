@@ -1,4 +1,5 @@
-import { forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
+import { cloneElement, forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
+import { mergeProps } from "@base-ui/react/merge-props";
 import { Archive, ArchiveRestore, Laptop, RefreshCw, Undo2 } from "lucide-react";
 import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
 import { MoreIcon } from "@/components/ui/icon-map";
@@ -27,10 +28,10 @@ import { selectThreadIndex } from "../state/thread-index";
 import { IDLE_CLEANUP_RETRY, useRowLifecycleStore } from "./row-lifecycle-store";
 import type { SidebarItem, ThreadTreeLine } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
-import { PullRequestChip, PullRequestList } from "./PullRequestChip";
+import { PullRequestChip } from "./PullRequestChip";
 import { lifecycleActionBlocked, lifecycleBlockedReason, useCompletionStore } from "./completion-store";
 import { selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
-import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
+import { THREAD_PREVIEW_ID, ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
 import { ThreadOptionsMenu, useThreadMenuOpenFor, type ThreadMenuActions } from "./thread-menu";
 import { DraftTag, IconOnlyStatus, SidebarLabelTrigger, useSidebarNarrow, useSidebarStatusIconOnly } from "./sidebar-label-tooltip";
@@ -365,19 +366,13 @@ function ThreadRowVisual(props: ThreadRowVisualProps) {
 
 type ThreadRowBodyProps = ThreadRowVisualProps & { revealed: boolean };
 
-function usePullRequestChip(thread: WorkspaceThread) {
-  const [open, setOpen] = useState(false);
+function ThreadPullRequestChip({ thread }: { thread: WorkspaceThread }) {
   const ranked = useMemo(() => (isPrable(thread) ? rankPullRequests(thread.pull_requests) : []), [thread]);
-  const chip = (
-    <PullRequestChip threadId={thread.id} ranked={ranked} expanded={open} onToggleExpanded={() => setOpen((value) => !value)} />
-  );
-  const list = open && ranked.length > 1 ? <PullRequestList threadId={thread.id} ranked={ranked} /> : null;
-  return { chip, list };
+  return <PullRequestChip threadId={thread.id} ranked={ranked} />;
 }
 
 function FlatThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation } = props;
-  const pr = usePullRequestChip(thread);
   const narrow = useSidebarNarrow();
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -393,15 +388,13 @@ function FlatThreadRowBody(props: ThreadRowBodyProps) {
         <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={narrow} fallback={<ThreadRowTime thread={thread} />} />} />
       </div>
       <ThreadRowTitleLine {...props} className="mt-2" />
-      <ThreadRowMetaLine thread={thread} presentation={presentation} chip={pr.chip} />
-      {pr.list}
+      <ThreadRowMetaLine thread={thread} presentation={presentation} chip={<ThreadPullRequestChip thread={thread} />} />
     </div>
   );
 }
 
 function GroupedThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation } = props;
-  const pr = usePullRequestChip(thread);
   const narrow = useSidebarNarrow();
   // The meta line shares its width with the branch, so the status word yields earlier here than
   // in the Threads view, whose status sits on the roomier project line.
@@ -413,11 +406,9 @@ function GroupedThreadRowBody(props: ThreadRowBodyProps) {
       <ThreadRowMetaLine
         thread={thread}
         presentation={presentation}
-        chip={pr.chip}
+        chip={<ThreadPullRequestChip thread={thread} />}
         trailing={<ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={statusIconOnly} fallback={<ThreadRowTime thread={thread} />} />} />}
-      />
-      {pr.list}
-    </div>
+      />    </div>
   );
 }
 
@@ -478,8 +469,8 @@ const RECEDED_TITLE_CLASS = "text-ink/70 group-hover/row:text-ink group-focus-wi
 const RECEDED_BADGE_CLASS = "opacity-55 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-menu-open/row:opacity-100";
 
 const SURFACE_CLASS: Record<ThreadRowVariant, string> = {
-  flat: "min-h-[78px] flex-col justify-center p-2",
-  grouped: "min-h-[54px] flex-col justify-center py-2 pr-2",
+  flat: "h-[78px] flex-col justify-center p-2",
+  grouped: "h-[54px] flex-col justify-center py-2 pr-2",
   closed: "h-8 items-center gap-2 pr-2",
 };
 
@@ -582,9 +573,21 @@ function handleThreadRowKeyDown(
   onSelectThread: (id: string) => void,
   threadId: string,
 ) {
-  if (isEditing || !isThreadRowNavigationEvent(event)) return;
+  if (isEditing) return;
+  if (event.key === "ArrowRight" && event.target === event.currentTarget) {
+    focusRowPullRequestChip(event);
+    return;
+  }
+  if (!isThreadRowNavigationEvent(event)) return;
   event.preventDefault();
   onSelectThread(threadId);
+}
+
+function focusRowPullRequestChip(event: React.KeyboardEvent): void {
+  const chip = event.currentTarget.querySelector<HTMLElement>(`[aria-haspopup="menu"][data-testid^="thread-pr-indicator-"]`);
+  if (!chip) return;
+  event.preventDefault();
+  chip.focus();
 }
 
 /** Enter or Space pressed on the row itself, not on a control inside it. */
@@ -991,9 +994,15 @@ function ThreadRowPreview({
   row,
   workspaceName,
   thread,
-}: { isEditing: boolean; row: React.ReactElement; workspaceName: string; thread: WorkspaceThread }) {
+}: { isEditing: boolean; row: React.ReactElement<React.HTMLAttributes<HTMLElement>>; workspaceName: string; thread: WorkspaceThread }) {
   const handle = useContext(ThreadPreviewHandleContext);
   const payload = useMemo(() => ({ thread, workspaceName }), [thread, workspaceName]);
   if (isEditing || !handle) return row;
-  return <TooltipTrigger handle={handle} payload={payload} render={row} />;
+  return (
+    <TooltipTrigger
+      handle={handle}
+      payload={payload}
+      render={(props, state) => cloneElement(row, mergeProps(row.props, props, { "aria-describedby": state.open ? THREAD_PREVIEW_ID : undefined }))}
+    />
+  );
 }

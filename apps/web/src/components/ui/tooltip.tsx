@@ -39,6 +39,11 @@ type TooltipContentProps = TooltipPrimitive.Popup.Props &
     /** Keys of the command's shortcut, one keycap each, e.g. `["Ctrl", "C"]`. */
     shortcut?: readonly string[]
     arrowClassName?: string
+    /**
+     * Lets the pointer rest on and click inside the popup, for a tooltip that holds links or
+     * scrolls. Base UI keeps a hoverable popup open across the gap from its trigger.
+     */
+    interactive?: boolean
   }
 
 /**
@@ -54,9 +59,11 @@ function TooltipContent({
   align = "center",
   alignOffset = 0,
   shortcut,
+  interactive = false,
   children,
   ...props
 }: TooltipContentProps) {
+  const pointerEvents = interactive ? "pointer-events-auto" : "pointer-events-none"
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Positioner
@@ -64,12 +71,13 @@ function TooltipContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
-        className="pointer-events-none isolate z-(--layer-modal)"
+        className={cn(pointerEvents, "isolate z-(--layer-modal)")}
       >
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
-            "pointer-events-none z-(--layer-modal) inline-flex min-h-control-compact w-fit max-w-80 items-center gap-2 rounded-menu border border-border bg-panel px-3 py-[7px] text-caption text-ink transition-opacity duration-(--duration-standard) data-ending-style:opacity-0 data-instant:transition-none data-starting-style:opacity-0",
+            pointerEvents,
+            "z-(--layer-modal) inline-flex min-h-control-compact w-fit max-w-80 items-center gap-2 rounded-menu border border-border bg-panel px-3 py-[7px] text-caption text-ink transition-opacity duration-(--duration-standard) data-ending-style:opacity-0 data-instant:transition-none data-starting-style:opacity-0",
             className
           )}
           {...props}
