@@ -14,6 +14,10 @@ import type { SelectedTextCommentSourceNavigationRequest } from "./MessageList";
 
 const CACHE_PRESSURE_BYTES = 20 * 1024 * 1024;
 
+function firstNonEmptyLine(text: string): string | null {
+  return text.split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? null;
+}
+
 interface DismissedSessionError {
   error: string | null;
   threadEpoch: number;
@@ -269,11 +273,7 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
       ? readThreadRecord(activeThreadId).messages.find((candidate) => candidate.id === messageId)
       : undefined;
     if (!activeThreadId || !message) return;
-    setForkMode(activeThreadId, {
-      messageId,
-      content: message.role === "user" ? message.content : null,
-      role: message.role as "user" | "assistant",
-    });
+    setForkMode(activeThreadId, { messageId, content: firstNonEmptyLine(message.content) });
   }, [setForkMode]);
 
   const handleDismissCliError = useCallback(() => {

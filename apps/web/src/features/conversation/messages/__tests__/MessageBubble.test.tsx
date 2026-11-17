@@ -314,6 +314,13 @@ describe("MessageBubble copy", () => {
 });
 
 describe("MessageBubble user messages", () => {
+  it("offers Copy but no Fork on a user message", () => {
+    const { getByRole, queryByRole } = render(<MessageBubble message={makeMessage("Plan the release")} onBranch={vi.fn()} />);
+
+    expect(getByRole("button", { name: /copy/i })).toBeInTheDocument();
+    expect(queryByRole("button", { name: /fork/i })).not.toBeInTheDocument();
+  });
+
   it("hides a legacy ladder handoff anchor instead of printing its raw document", () => {
     const anchor = '<!-- mcode-handoff {"parentThreadId":"p1"} -->\n# Handoff\nPrior context';
     const { container } = render(<MessageBubble message={{ ...makeMessage(anchor), role: "system" }} />);
