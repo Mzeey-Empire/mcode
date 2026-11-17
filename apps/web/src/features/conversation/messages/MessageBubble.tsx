@@ -366,7 +366,6 @@ function ForkIcon() {
   );
 }
 
-/** Fork button in an agent message's resting action row, beside its Copy button. */
 function BranchButton({ onClick }: { onClick: () => void }) {
   return (
     <Tooltip>

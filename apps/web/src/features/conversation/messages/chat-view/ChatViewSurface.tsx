@@ -320,7 +320,6 @@ interface ThreadHeaderRename {
   readonly editingThreadId: string | null;
   readonly onEditingThreadIdChange: (threadId: string | null) => void;
   readonly onSaveTitle: (title: string) => void;
-  /** Forks from an agent message, as the message's own Fork button does. */
   readonly onBranch: (messageId: string) => void;
 }
 
@@ -351,11 +350,6 @@ function ThreadHeader({ state, rename, paneWidth, actions }: { state: ChatViewSt
 
 const NO_FORKABLE_REPLY = "No finished agent reply to fork from yet";
 
-/**
- * A durable thread's title. A click opens the thread menu at once; a double-click renames in place.
- * The editor renders outside the menu trigger, so typing in it never opens the menu, and swapping
- * the trigger out also drops the menu the double-click's first click opened.
- */
 function ThreadHeaderTitle({ thread, rename, forkableAgentMessageId }: { thread: WorkspaceThread; rename: ThreadHeaderRename; forkableAgentMessageId: string | null }) {
   const workspacePath = useWorkspaceStore((s) => s.workspaces.find((workspace) => workspace.id === thread.workspace_id)?.path ?? "");
   const deletion = useThreadDeletion();
@@ -403,7 +397,6 @@ function ThreadHeaderTitle({ thread, rename, forkableAgentMessageId }: { thread:
         leadingItems={leadingItems}
         align="start"
         trigger={
-          // The title takes clicks, so it must not hand the gesture to the window.
           <button
             type="button"
             data-testid="chat-header-title"

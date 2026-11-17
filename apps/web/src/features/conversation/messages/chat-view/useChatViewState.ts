@@ -100,7 +100,6 @@ export function useChatViewState() {
   const connectionStatus = useConnectionStore((state) => state.status);
   const isAgentRunning = useThreadStore((state) =>
     activeThreadId ? isThreadExecuting(activeThreadId, state) : false);
-  // Selects a string, not the messages, so the header does not rerender on every streamed token.
   const forkableAgentMessageId = useThreadStore((state) => {
     const record = activeThreadId ? state.records.get(activeThreadId) : undefined;
     if (!record || !activeThreadId) return null;
