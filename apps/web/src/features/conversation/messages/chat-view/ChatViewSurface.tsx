@@ -31,7 +31,7 @@ import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspa
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
 import { ThreadDeleteDialog, useThreadDeletion } from "@/features/projects/sidebar/thread-deletion";
 import { ThreadOptionsMenu, type ThreadMenuActions } from "@/features/projects/sidebar/thread-menu";
-import type { ActionMenuItem } from "@/components/ui/context-menu";
+import type { ContextMenuItem } from "@/components/ui/context-menu";
 import { openRightPanelTab } from "@/lib/right-panel-layout";
 import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
@@ -371,7 +371,7 @@ function ThreadHeaderTitle({ thread, rename, forkPoint }: { thread: WorkspaceThr
     onOpenProjectSettings: (target, workspaceId) => openRightPanelTab(workspaceId, target.threadId, "environment"),
     renamingThreadId: editingThreadId,
   }), [onEditingThreadIdChange, openDeletion, editingThreadId]);
-  const leadingItems = useMemo<readonly ActionMenuItem[]>(() => [
+  const leadingItems = useMemo<readonly ContextMenuItem[]>(() => [
     {
       label: "Fork thread",
       icon: <GitFork />,

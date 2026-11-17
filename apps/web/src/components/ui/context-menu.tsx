@@ -3,13 +3,11 @@ import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { MENU_LIST_CLASS, MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, MENU_SEPARATOR_CLASS, MenuRowBody } from "./menu-row";
-import { POPOVER_SURFACE_CLASS } from "./overlay-surface";
-import { Switch } from "./switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
+import { POPOVER_SURFACE_CLASS } from "./overlay-surface";
 
-/** An action row that closes the menu, or a divider when `divider` is set. */
-export interface ActionMenuItem {
-  kind?: "action";
+/** One context menu row: an action that closes the menu, or a divider when `divider` is set. */
+export interface ContextMenuItem {
   label: string;
   onClick: () => void;
   icon?: ReactNode;
@@ -18,22 +16,6 @@ export interface ActionMenuItem {
   /** Shown as a tooltip while the row is disabled. A row with a reason is disabled. */
   disabledReason?: string | null;
 }
-
-/** A switch row whose toggles keep the menu open. */
-export interface SwitchMenuItem {
-  kind: "switch";
-  label: string;
-  checked: boolean;
-  onCheckedChange: (checked: boolean) => void;
-  icon?: ReactNode;
-  /** Shown as a tooltip while the row is disabled. A row with a reason is disabled. */
-  disabledReason?: string | null;
-  /** A muted second line, such as why the last toggle did not save. */
-  description?: string;
-}
-
-/** One context menu row: an action that closes the menu, a divider, or a switch. */
-export type ContextMenuItem = ActionMenuItem | SwitchMenuItem;
 
 interface ContextMenuProps {
   x: number;
@@ -47,39 +29,7 @@ interface ContextMenuProps {
   anchor?: Element;
 }
 
-function SwitchRow({ item }: { item: SwitchMenuItem }) {
-  const disabled = Boolean(item.disabledReason);
-  const row = (
-    <button
-      type="button"
-      role="menuitemcheckbox"
-      aria-checked={item.checked}
-      aria-disabled={disabled || undefined}
-      data-disabled={disabled ? "" : undefined}
-      onClick={(event) => {
-        event.stopPropagation();
-        if (!disabled) item.onCheckedChange(!item.checked);
-      }}
-      className={cn(MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, item.description && "h-auto py-2", !disabled && "hover:bg-hover")}
-    >
-      <MenuRowBody
-        label={item.label}
-        description={item.description}
-        icon={item.icon}
-        trailing={<Switch checked={item.checked} disabled={disabled} readOnly aria-hidden tabIndex={-1} className="pointer-events-none" />}
-      />
-    </button>
-  );
-  if (!disabled) return row;
-  return (
-    <Tooltip>
-      <TooltipTrigger render={row} />
-      <TooltipContent side="right">{item.disabledReason}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function ActionRow({ item, onClose }: { item: ActionMenuItem; onClose: () => void }) {
+function ActionRow({ item, onClose }: { item: ContextMenuItem; onClose: () => void }) {
   const disabled = Boolean(item.disabledReason);
   const row = (
     <button
@@ -155,9 +105,7 @@ export function ContextMenu({ x, y, items, onClose, anchor }: ContextMenuProps) 
       className={cn("min-w-[160px]", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS)}
     >
       {items.map((item, i) =>
-        item.kind === "switch" ? (
-          <SwitchRow key={i} item={item} />
-        ) : item.divider ? (
+        item.divider ? (
           <div
             key={i}
             role="separator"

@@ -10,7 +10,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ActionMenuItem } from "@/components/ui/context-menu";
+import type { ContextMenuItem } from "@/components/ui/context-menu";
 import { isDetachedCheckout } from "@/lib/checkout-label";
 import { useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
@@ -76,7 +76,7 @@ export interface ThreadOptionsMenuProps {
   actions: ThreadMenuActions;
   trigger: ReactElement;
   /** Rows a surface adds before the shared thread rows, such as the chat header's Fork thread. */
-  leadingItems?: readonly ActionMenuItem[];
+  leadingItems?: readonly ContextMenuItem[];
   align?: "start" | "end";
 }
 
@@ -132,9 +132,9 @@ function useCloseOnAnchorScroll(anchor: Element, onClose: () => void): void {
 
 type ContentPlacement = Pick<ComponentProps<typeof DropdownMenuContent>, "align" | "anchor">;
 
-const NO_ITEMS: readonly ActionMenuItem[] = [];
+const NO_ITEMS: readonly ContextMenuItem[] = [];
 
-function ThreadMenuContent({ target, actions, leadingItems = NO_ITEMS, ...placement }: { target: ThreadMenuTarget; actions: ThreadMenuActions; leadingItems?: readonly ActionMenuItem[] } & ContentPlacement) {
+function ThreadMenuContent({ target, actions, leadingItems = NO_ITEMS, ...placement }: { target: ThreadMenuTarget; actions: ThreadMenuActions; leadingItems?: readonly ContextMenuItem[] } & ContentPlacement) {
   const thread = useWorkspaceStore((s) => s.threads.find((candidate) => candidate.id === target.threadId));
   if (!thread) return null;
   return (
