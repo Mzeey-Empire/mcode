@@ -36,7 +36,7 @@ import type { ComponentPropsWithRef } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Product icon stroke from DESIGN.md Iconography. The `.lucide` rule in
+ * Product icon stroke from DESIGN.md Shapes. The `.lucide` rule in
  * `index.css` applies the same value to direct Lucide imports.
  */
 export const ICON_STROKE_WIDTH = 1.5;

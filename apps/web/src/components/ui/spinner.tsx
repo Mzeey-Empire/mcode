@@ -2,7 +2,7 @@ import type { CSSProperties, HTMLAttributes } from "react";
 
 import { cn } from "@/lib/utils";
 
-/** Spinner diameters on the 4px scale (DESIGN.md, decision D5). */
+/** Spinner diameters on the 4px scale. */
 export type SpinnerSize = 12 | 16 | 20;
 
 type SpinnerStyle = CSSProperties & {

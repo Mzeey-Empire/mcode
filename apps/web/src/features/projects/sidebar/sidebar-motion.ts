@@ -3,7 +3,7 @@ import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import type { ModelCause, SidebarItem, SidebarModel } from "./sidebar-model";
 import { flyCopy, type FlightTarget } from "./flight-layer";
 
-/** DESIGN.md motion tokens, in milliseconds, and the one ease curve. */
+/** The `--duration-*` and `--ease-standard` tokens from `index.css`, in milliseconds and as the one ease curve. */
 export const MOTION = { fast: 120, standard: 180, overlay: 240, ease: "cubic-bezier(0.2, 0, 0, 1)" } as const;
 
 /** Maximum on-screen copies flown into Older per model change; remaining rows only close. */

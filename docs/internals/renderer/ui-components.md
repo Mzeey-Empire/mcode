@@ -47,7 +47,7 @@ the shared portal layers.
 
 ## Buttons
 
-`components/ui/button.tsx` holds `Button` and `IconButton`; `components/ui/split-button.tsx` holds `SplitButton`. Values come from Paper's button boards (DESIGN.md, Buttons).
+`components/ui/button.tsx` holds `Button` and `IconButton`; `components/ui/split-button.tsx` holds `SplitButton`. Values come from Paper's button boards.
 
 - **Sizes.** `compact` (32), `default` (40) and `comfortable` (48), plus `icon-*` boxes of the same heights and `icon-inline` (28) and `icon-inline-sm` (24) for row actions. The call-site default is `compact` because most buttons sit in dense chrome; pass `default` in dialogs, forms and docks.
 - **States.** Press draws a 2px inset ring in the variant's foreground and never moves the control. Focus is a 2px outline 2px outside the control, so the gap stays transparent on any surface. Do not reintroduce `translate-y-px` or a `ring-3` glow on buttons or button-like rows.
