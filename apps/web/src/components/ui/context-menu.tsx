@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { MENU_LIST_CLASS, MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, MENU_SEPARATOR_CLASS, MenuRowBody } from "./menu-row";
-import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 import { POPOVER_SURFACE_CLASS } from "./overlay-surface";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 /** One context menu row: an action that closes the menu, or a divider when `divider` is set. */
 export interface ContextMenuItem {
