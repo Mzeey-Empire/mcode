@@ -92,7 +92,9 @@ export function ActionsSection({
   if (actions.length === 0) {
     return (
       <div className="flex flex-col items-start gap-1.5 px-1 py-2">
-        <p className="text-caption text-muted">No actions</p>
+        <p className="text-caption text-muted">
+          Actions run project commands, like tests or a dev server, from Terminal&apos;s + menu.
+        </p>
         {addControl}
       </div>
     );

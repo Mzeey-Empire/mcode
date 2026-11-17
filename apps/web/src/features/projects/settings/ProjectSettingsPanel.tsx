@@ -57,7 +57,7 @@ function StorageRow({ mode, locked, onChange }: {
   );
 }
 
-/** An empty list shows the add control under its "No actions" line, so the header drops its copy. */
+/** An empty list shows the add control under its line saying what an action is, so the header drops its copy. */
 function showsHeaderAdd(section: SettingsSection, entry: ProjectSettingsDraft | undefined): boolean {
   return section === "actions" && entry?.draft.actions.length !== 0;
 }
