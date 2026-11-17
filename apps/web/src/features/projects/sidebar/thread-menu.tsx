@@ -87,27 +87,39 @@ export function isAnyThreadMenuOpen(): boolean {
   return useThreadMenuStore.getState().openMenus > 0;
 }
 
+/** Props for {@link ThreadOptionsMenu}. */
+export interface ThreadOptionsMenuProps {
+  target: ThreadMenuTarget;
+  actions: ThreadMenuActions;
+  trigger: ReactElement;
+  /** Rows a surface adds before the shared thread rows, such as the chat header's Fork thread. */
+  leadingItems?: readonly ContextMenuItem[];
+  align?: "start" | "end";
+}
+
 /** A thread's options menu, anchored to its trigger so it follows the row as the list scrolls. */
-export function ThreadOptionsMenu({ target, actions, trigger }: { target: ThreadMenuTarget; actions: ThreadMenuActions; trigger: ReactElement }) {
+export function ThreadOptionsMenu({ target, actions, trigger, leadingItems = NO_ITEMS, align = "end" }: ThreadOptionsMenuProps) {
   const [open, setOpen] = useState(false);
   useHoldThreadMenuOpen(open);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger render={trigger} />
-      {open ? <ThreadOptionsMenuContent target={target} actions={actions} /> : null}
+      {open ? <ThreadOptionsMenuContent target={target} actions={actions} leadingItems={leadingItems} align={align} /> : null}
     </DropdownMenu>
   );
 }
 
+const NO_ITEMS: readonly ContextMenuItem[] = [];
+
 // Mounted only while open, so closed rows never subscribe to the thread for the switch.
-function ThreadOptionsMenuContent({ target, actions }: { target: ThreadMenuTarget; actions: ThreadMenuActions }) {
+function ThreadOptionsMenuContent({ target, actions, leadingItems, align }: { target: ThreadMenuTarget; actions: ThreadMenuActions; leadingItems: readonly ContextMenuItem[]; align: "start" | "end" }) {
   const autoComplete = useAutoCompleteSwitch(target.threadId);
   return (
-    <DropdownMenuContent align="end" sideOffset={4} className="min-w-40">
-      {threadMenuItems(target, autoComplete, actions).map((item, index) => {
+    <DropdownMenuContent align={align} sideOffset={4} className="min-w-40">
+      {[...leadingItems, ...threadMenuItems(target, autoComplete, actions)].map((item, index) => {
         if (item.kind === "switch") return <SwitchItem key={index} item={item} />;
         if (item.divider) return <DropdownMenuSeparator key={index} />;
-        return <DropdownMenuItem key={index} label={item.label} icon={item.icon} destructive={item.destructive} onClick={item.onClick} />;
+        return <DropdownMenuItem key={index} label={item.label} icon={item.icon} destructive={item.destructive} disabledReason={item.disabledReason} onClick={item.onClick} />;
       })}
     </DropdownMenuContent>
   );
