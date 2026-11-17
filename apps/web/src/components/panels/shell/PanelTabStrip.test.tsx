@@ -11,15 +11,34 @@ const ITEMS: readonly PanelTabStripItem[] = [
 ];
 
 /**
- * jsdom has no layout, so the strip gets a fixed width and the active tab a fixed width. Every other box reads 0,
- * which the strip treats as absent, so only the 9.6rem inactive-tab floor decides how many tabs fit.
+ * jsdom has no layout, so the strip gets a fixed width and the active tab a fixed width. The tool name and the add
+ * button get theirs only when a test gives them. Every other box reads 0, which the strip treats as absent, so only
+ * the 9.6rem inactive-tab floor decides how many tabs fit.
  */
-function stubLayout({ stripWidth, activeTabWidth = 120 }: { stripWidth: number; activeTabWidth?: number }) {
+function stubLayout({
+  stripWidth,
+  activeTabWidth = 120,
+  toolNameWidth = 0,
+  addWidth = 0,
+}: {
+  stripWidth: number;
+  activeTabWidth?: number;
+  toolNameWidth?: number;
+  addWidth?: number;
+}) {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(stripWidth);
   vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
-    return this.dataset.active === "true" ? activeTabWidth : 0;
+    if (this.dataset.active === "true") return activeTabWidth;
+    if (this.hasAttribute("data-panel-tool-heading")) return this.hidden ? 0 : toolNameWidth;
+    if (this.dataset.testid === "panel-tab-add") return addWidth;
+    return 0;
   });
 }
+
+/** The strip at the default 1200px window on Windows: 184px, a 61px tool name, and a 32px add button. */
+const DEFAULT_WINDOW = { stripWidth: 184, toolNameWidth: 61, addWidth: 32, activeTabWidth: 139 } as const;
+
+const toolName = () => document.querySelector<HTMLElement>("[data-panel-tool-heading]");
 
 const FIVE: readonly PanelTabStripItem[] = ["1", "2", "3", "4", "5"].map((n) => ({ id: n, label: `${n} · pwsh`, icon: null }));
 
@@ -29,7 +48,7 @@ function FiveTabs({ activeId, onSelect = () => {} }: { readonly activeId: string
   );
 }
 
-const shownTabs = () => within(screen.getByRole("tablist", { name: "Terminals" })).getAllByRole("tab").map((tab) => tab.textContent);
+const shownTabs = (name = "Terminals") => within(screen.getByRole("tablist", { name })).getAllByRole("tab").map((tab) => tab.textContent);
 
 function renderStrip({
   onSelect = () => {},
@@ -87,6 +106,89 @@ describe("PanelTabStrip overflow", () => {
     expect(shownTabs()).toEqual(["4 · pwsh", "5 · pwsh"]);
     rerender(<FiveTabs activeId="2" />);
     expect(shownTabs()).toEqual(["2 · pwsh", "3 · pwsh"]);
+  });
+
+  it("names the tool while the tabs and the add button fit beside it", () => {
+    stubLayout({ ...DEFAULT_WINDOW, stripWidth: 600 });
+    render(
+      <PanelTabStrip
+        items={FIVE.slice(0, 2)}
+        activeId="2"
+        label="Terminals"
+        addLabel="New terminal"
+        tool={{ icon: null, name: "Terminal" }}
+        onSelect={() => {}}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    expect(toolName()).toBeVisible();
+    expect(shownTabs()).toEqual(["1 · pwsh", "2 · pwsh"]);
+  });
+
+  it("keeps the active tab when the tool name, the tab, and the menu button cannot all fit, and lists the rest from the tab", async () => {
+    stubLayout(DEFAULT_WINDOW);
+    const onSelect = vi.fn();
+    render(
+      <PanelTabStrip
+        items={FIVE.slice(0, 2)}
+        activeId="2"
+        label="Terminals"
+        addLabel="New terminal"
+        tool={{ icon: null, name: "Terminal" }}
+        onSelect={onSelect}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+
+    expect(shownTabs()).toEqual(["2 · pwsh"]);
+    expect(toolName()).not.toBeVisible();
+    const activeTab = screen.getByRole("tab", { name: "2 · pwsh" }).parentElement!;
+    await userEvent.click(within(activeTab).getByRole("button", { name: "All terminals, 1 more" }));
+    const rows = await screen.findAllByRole("menuitemradio");
+    expect(rows.map((row) => row.textContent)).toEqual(["1 · pwsh", "2 · pwsh"]);
+    await userEvent.click(rows[0]!);
+    expect(onSelect).toHaveBeenCalledWith("1");
+    expect(screen.getByRole("button", { name: "New terminal" })).toBeTruthy();
+  });
+
+  it("keeps the tool name beside the active tab when only the menu button is short of room", () => {
+    stubLayout({ ...DEFAULT_WINDOW, stripWidth: 260 });
+    render(
+      <PanelTabStrip
+        items={FIVE.slice(0, 2)}
+        activeId="2"
+        label="Terminals"
+        addLabel="New terminal"
+        tool={{ icon: null, name: "Terminal" }}
+        onSelect={() => {}}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    expect(toolName()).toBeVisible();
+    expect(shownTabs()).toEqual(["2 · pwsh"]);
+    expect(screen.getByRole("button", { name: "All terminals, 1 more" })).toBeTruthy();
+  });
+
+  it("gives a lone tab the tool name's room when both cannot fit", () => {
+    stubLayout(DEFAULT_WINDOW);
+    render(
+      <PanelTabStrip
+        items={FIVE.slice(0, 1)}
+        activeId="1"
+        label="Browser pages"
+        addLabel="New page"
+        tool={{ icon: null, name: "Browser" }}
+        onSelect={() => {}}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    expect(shownTabs("Browser pages")).toEqual(["1 · pwsh"]);
+    expect(toolName()).not.toBeVisible();
+    expect(screen.queryByRole("button", { name: /more$/ })).toBeNull();
   });
 });
 
