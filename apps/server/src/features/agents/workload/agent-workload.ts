@@ -41,17 +41,11 @@ export class AgentWorkloadService implements AgentWorkload {
   /** Observe saved tool changes and turn endings, including late results outside a turn. */
   observeCommittedEvents(subscribe = subscribeCommittedCanonicalEvents): () => void {
     return subscribe((events) => {
-      const threads = new Set(events.filter((event) => this.mayChangeOccupancy(event)).map((event) => event.routing.threadId));
+      // A late settlement also saves its tool call record with `background: true`, so tool
+      // results need no separate check.
+      const threads = new Set(events.filter(touchesBackgroundCalls).map((event) => event.routing.threadId));
       for (const threadId of threads) this.refresh(threadId);
     });
-  }
-
-  private mayChangeOccupancy(event: CanonicalAgentEventEnvelope): boolean {
-    const payload = event.payload;
-    if (payload.type === "publication.recorded" && payload.event.type === "toolResult") {
-      return this.hasBackgroundSubagent(event.routing.threadId);
-    }
-    return touchesBackgroundCalls(event);
   }
 
   private refresh(threadId: string): void {
