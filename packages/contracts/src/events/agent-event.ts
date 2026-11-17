@@ -308,7 +308,7 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       configuredPath: z.string().optional(),
     }),
     z.object({
-      /** Reports the Fast mode currently running for the model. */
+      /** Reports whether Fast is running, cooling down, or unavailable for the model. */
       type: z.literal(AgentEventType.FastModeStatus),
       threadId: z.string(),
       status: FastModeStatusSchema(),
