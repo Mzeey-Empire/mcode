@@ -21,7 +21,7 @@ vi.mock("@/features/conversation", async (importOriginal) => ({
 import { useWorkspaceStore } from "../../state/workspaceStore";
 import { useSidebarUiStore } from "../sidebar-ui-store";
 import { ProjectSidebar } from "../ProjectSidebar";
-import { highlightStyle, rowBoxInContent } from "../hover-glide";
+import { HOVER_ROW_ATTRIBUTE, HoverGlide, highlightStyle, rowBoxInContent } from "../hover-glide";
 
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
 
@@ -33,15 +33,112 @@ describe("hover highlight geometry", () => {
     expect(rowBoxInContent(row, content)).toEqual({ top: 350, left: 4, width: 232, height: 54 });
   });
 
-  it("glides between rows, jumps under reduced motion, and never slides while following a scroll", () => {
-    const box = { top: 78, left: 0, width: 240, height: 54 };
+  it("glides x, y, width and height between rows, and never slides while following a scroll", () => {
+    const box = { top: 78, left: 18, width: 222, height: 54 };
     const glide = highlightStyle(box, "glide", false);
-    expect(glide).toMatchObject({ transform: "translateY(78px)", height: "54px", opacity: "1" });
+    expect(glide).toMatchObject({ transform: "translate(18px, 78px)", width: "222px", height: "54px", opacity: "1" });
     expect(glide.transition).toMatch(/transform/);
+    expect(glide.transition).toMatch(/width/);
     expect(glide.transition).toMatch(/height/);
-    expect(highlightStyle(box, "glide", true).transition).not.toMatch(/transform|height/);
-    expect(highlightStyle(box, "appear", false).transition).not.toMatch(/transform|height/);
+    expect(highlightStyle(box, "appear", false).transition).not.toMatch(/transform|width|height/);
     expect(highlightStyle(box, "snap", false).transition).toBe("none");
+  });
+});
+
+describe("HoverGlide", () => {
+  // The fill lives in content coordinates; content starts at viewport (10, 100).
+  const CONTENT = new DOMRect(10, 100, 240, 400);
+  const ROW_BOXES = [new DOMRect(10, 100, 240, 32), new DOMRect(28, 132, 222, 54), new DOMRect(28, 186, 222, 54)];
+
+  function mountList({ inertRow }: { inertRow?: number } = {}) {
+    const scroller = document.createElement("div");
+    const content = document.createElement("div");
+    scroller.append(content);
+    content.getBoundingClientRect = () => CONTENT;
+    const rows = ROW_BOXES.map((box, index) => {
+      const row = document.createElement("div");
+      row.setAttribute(HOVER_ROW_ATTRIBUTE, "");
+      row.getBoundingClientRect = () => box;
+      if (index === inertRow) row.setAttribute("inert", "");
+      content.append(row);
+      return row;
+    });
+    document.body.append(scroller);
+    const glide = new HoverGlide(scroller, content, () => () => {});
+    return { scroller, rows, glide, fill: glide.element };
+  }
+
+  function setReducedMotion(reduced: boolean) {
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: reduced && query.includes("reduce"),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }));
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.replaceChildren();
+  });
+
+  it("lands on the hovered row, sliding sideways from a header to an indented row", () => {
+    setReducedMotion(false);
+    const { rows, fill } = mountList();
+
+    fireEvent.pointerMove(rows[0]!);
+    fireEvent.pointerMove(rows[1]!);
+
+    expect(fill.style).toMatchObject({ transform: "translate(18px, 32px)", width: "222px", height: "54px", opacity: "1" });
+    expect(fill.style.transition).toMatch(/transform/);
+  });
+
+  it("skips an inert row, which is closing and takes no hover", () => {
+    setReducedMotion(false);
+    const { rows, fill } = mountList({ inertRow: 2 });
+
+    fireEvent.pointerMove(rows[1]!);
+    fireEvent.pointerMove(rows[2]!);
+
+    expect(fill.style.opacity).toBe("0");
+  });
+
+  it("shows, moves and hides with no transition under reduced motion", () => {
+    setReducedMotion(true);
+    const { scroller, rows, fill } = mountList();
+
+    fireEvent.pointerMove(rows[0]!);
+    expect(fill.style.transition).toBe("none");
+    fireEvent.pointerMove(rows[1]!);
+    expect(fill.style.transition).toBe("none");
+    fireEvent.pointerLeave(scroller);
+    expect(fill.style).toMatchObject({ transition: "none", opacity: "0" });
+  });
+
+  it("drops its box once hidden, so it adds no scrollable overflow", () => {
+    setReducedMotion(false);
+    const { scroller, rows, fill } = mountList();
+    fireEvent.pointerMove(rows[2]!);
+
+    fireEvent.pointerLeave(scroller);
+    expect(fill.style.height).toBe("54px");
+    fill.dispatchEvent(Object.assign(new Event("transitionend"), { propertyName: "opacity" }));
+
+    expect(fill.style).toMatchObject({ transform: "none", width: "0px", height: "0px" });
+  });
+
+  it("drops its box at once when reduced motion leaves no fade to wait for", () => {
+    setReducedMotion(true);
+    const { scroller, rows, fill } = mountList();
+    fireEvent.pointerMove(rows[2]!);
+
+    fireEvent.pointerLeave(scroller);
+
+    expect(fill.style).toMatchObject({ transform: "none", width: "0px", height: "0px" });
   });
 });
 

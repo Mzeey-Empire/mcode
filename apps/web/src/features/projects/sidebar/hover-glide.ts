@@ -25,18 +25,23 @@ export function rowBoxInContent(row: DOMRectReadOnly, content: DOMRectReadOnly):
 }
 
 const FADE = "opacity var(--duration-fast) var(--ease-standard)";
-const GLIDE = `transform var(--duration-fast) var(--ease-standard), height var(--duration-fast) var(--ease-standard), ${FADE}`;
+// x rides in the transform with y, so moving between a project header and an indented thread row
+// slides sideways instead of snapping, and width glides with height for the same reason.
+const GLIDE = `transform var(--duration-fast) var(--ease-standard), width var(--duration-fast) var(--ease-standard), height var(--duration-fast) var(--ease-standard), ${FADE}`;
 
-/** Inline style that places the highlight on `box`; reduced motion turns every glide into a jump. */
+function moveTransition(move: HighlightMove, reducedMotion: boolean): string {
+  if (reducedMotion || move === "snap") return "none";
+  return move === "glide" ? GLIDE : FADE;
+}
+
+/** Inline style that places the highlight on `box`; reduced motion makes every move instant. */
 export function highlightStyle(box: HighlightBox, move: HighlightMove, reducedMotion: boolean) {
-  const transition = move === "snap" ? "none" : move === "glide" && !reducedMotion ? GLIDE : FADE;
   return {
-    transform: `translateY(${box.top}px)`,
-    left: `${box.left}px`,
+    transform: `translate(${box.left}px, ${box.top}px)`,
     width: `${box.width}px`,
     height: `${box.height}px`,
     opacity: "1",
-    transition,
+    transition: moveTransition(move, reducedMotion),
   };
 }
 
@@ -71,9 +76,10 @@ export class HoverGlide {
     this.element = document.createElement("div");
     this.element.setAttribute("aria-hidden", "true");
     this.element.dataset.testid = "sidebar-hover-highlight";
-    this.element.className = "pointer-events-none absolute top-0 rounded-lg bg-selected/40";
+    this.element.className = "pointer-events-none absolute top-0 left-0 rounded-lg bg-selected/40";
     this.element.style.opacity = "0";
     content.prepend(this.element);
+    this.element.addEventListener("transitionend", this.onTransitionEnd);
     scroller.addEventListener("pointermove", this.onPointerMove, { passive: true });
     scroller.addEventListener("pointerleave", this.onPointerLeave, { passive: true });
     // Layout listeners run a frame late; scroll events land before paint, so a wheel never shows
@@ -83,6 +89,7 @@ export class HoverGlide {
   }
 
   destroy(): void {
+    this.element.removeEventListener("transitionend", this.onTransitionEnd);
     this.scroller.removeEventListener("pointermove", this.onPointerMove);
     this.scroller.removeEventListener("pointerleave", this.onPointerLeave);
     this.scroller.removeEventListener("scroll", this.onLayout);
@@ -123,11 +130,24 @@ export class HoverGlide {
     Object.assign(this.element.style, highlightStyle(box, move, prefersReducedMotion()));
   }
 
+  private readonly onTransitionEnd = (event: TransitionEvent): void => {
+    if (event.propertyName === "opacity" && !this.row) this.collapse();
+  };
+
   private hide(): void {
     if (!this.row) return;
     this.row = null;
     this.box = null;
-    this.element.style.transition = FADE;
+    const reducedMotion = prefersReducedMotion();
+    this.element.style.transition = reducedMotion ? "none" : FADE;
     this.element.style.opacity = "0";
+    if (reducedMotion) this.collapse();
+  }
+
+  // An invisible fill still counts toward the scroller's overflow, so once it has faded it drops
+  // its box: a list that then gets shorter, or a narrower sidebar, keeps no blank scroll space.
+  // The next show is an `appear`, which fades opacity only, so the box jumps into place unseen.
+  private collapse(): void {
+    Object.assign(this.element.style, { transform: "none", width: "0px", height: "0px" });
   }
 }
