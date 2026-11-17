@@ -2809,11 +2809,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private reportCodexFastStatus(run: CodexTurnRun, input: CodexTurnInput, options: CodexTurnOptions | undefined, executionId: string): void {
-    if (!Array.isArray(input)) return;
+    // Without an explicit model the status cannot be matched to the picker's selection.
+    if (!Array.isArray(input) || !options?.model) return;
     this.emitCodexTurnEvent(run.entry, {
       type: AgentEventType.FastModeStatus,
       threadId: run.entry.threadId,
-      status: { modelId: options?.model ?? "", state: options?.serviceTier === "priority" ? "on" : "off" },
+      status: { modelId: options.model, state: options.serviceTier === "priority" ? "on" : "off" },
     }, executionId);
   }
 

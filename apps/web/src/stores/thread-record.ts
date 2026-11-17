@@ -3,6 +3,7 @@ import type { ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "
 import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { OrchestrationMode } from "@mcode/contracts/models/enums";
+import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";
 import type { PlanQuestion, PlanAnswer } from "@mcode/contracts/models/plan-questions";
 import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
 import type { GoalState } from "@mcode/contracts/models/goal";
@@ -85,6 +86,7 @@ export type ThreadErrorSource = "load" | "send" | "turn";
  * Collapses the former ~30 parallel `Record<string, X>` maps and active-thread mirror fields.
  */
 export interface ThreadRecord {
+  /** Fast state the provider last reported; transient, so a reload falls back to the user's choice. */
   fastStatus?: FastModeStatus;
   /** Canonical durable state installed through the reconnect revision protocol. */
   canonicalAgent: CanonicalAgentReplica;
@@ -365,4 +367,3 @@ export function deleteThreadRecord(
   next.delete(threadId);
   return next;
 }
-import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";

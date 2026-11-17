@@ -92,7 +92,7 @@ function optionalMentions(mentions: MessageMention[]): MessageMention[] | undefi
   return mentions.length > 0 ? mentions : undefined;
 }
 
-/** Keeps fast-mode metadata scoped to Codex submissions. */
+/** Turn admission drops Fast for models without it, so every provider may carry the choice. */
 function optionalFastMode(selection: ComposerAgentSelection): boolean | undefined {
   return selection.fastMode ?? undefined;
 }

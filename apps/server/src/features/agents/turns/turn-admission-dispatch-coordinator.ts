@@ -55,6 +55,7 @@ import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.
 import type { ExecutionParentStartContext } from "../execution/provider-execution-event-state.js";
 import type { ProviderSwitchService, ProviderSwitchTicket } from "./provider-switch-service.js";
 import { TurnAdmissionError } from "@mcode/shared/turn-admission";
+import { fastModeDefault } from "@mcode/shared";
 
 
 /** Automatic setup dispatch contract exposed to the turn command facade. */
@@ -1331,5 +1332,3 @@ export function supportsInternalThreadControl(provider: ProviderId): boolean {
 function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-
-import { fastModeDefault } from "@mcode/shared";
