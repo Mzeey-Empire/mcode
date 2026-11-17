@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { planEditorDecorations, visibleDecorations } from "./plan-editor-decorations";
 
 describe("planEditorDecorations", () => {
-  it("styles the title, summary, label, and ordered list and hides syntax marks", () => {
+  it("styles the title, summary, section heading, and ordered list and hides syntax marks", () => {
     const markdown = "# Title\n\nSummary **bold** and `code`.\n\n## Steps\n\n1. First\n2. Second\n";
 
     expect(planEditorDecorations(markdown)).toEqual([
@@ -14,7 +14,7 @@ describe("planEditorDecorations", () => {
       { kind: "hide", from: 30, to: 31 },
       { kind: "mark", from: 30, to: 36, className: "cm-plan-code" },
       { kind: "hide", from: 35, to: 36 },
-      { kind: "line", from: 39, className: "cm-plan-label" },
+      { kind: "line", from: 39, className: "cm-plan-section" },
       { kind: "hide", from: 39, to: 42 },
       { kind: "mark", from: 49, to: 51, className: "cm-plan-list-marker" },
       { kind: "hide", from: 51, to: 52 },
@@ -23,7 +23,7 @@ describe("planEditorDecorations", () => {
     ]);
   });
 
-  it("treats only the first H1 as the title, later H1s as labels, and only the next paragraph as the summary", () => {
+  it("treats only the first H1 as the title, later H1s as section headings, and only the next paragraph as the summary", () => {
     const markdown = "Intro\n\n# Title\n\nSummary one\nwraps here\n\nBody\n\n# Again\n";
 
     const lines = planEditorDecorations(markdown).filter((range) => range.kind === "line");
@@ -32,7 +32,20 @@ describe("planEditorDecorations", () => {
       { kind: "line", from: 7, className: "cm-plan-title" },
       { kind: "line", from: 16, className: "cm-plan-summary" },
       { kind: "line", from: 28, className: "cm-plan-summary" },
-      { kind: "line", from: 46, className: "cm-plan-label" },
+      { kind: "line", from: 46, className: "cm-plan-section" },
+    ]);
+  });
+
+  it("ranks H2 headings as sections and H3 to H6 headings as subsections", () => {
+    const markdown = "# Title\n\n## Context\n\n### Detail\n\n###### Note\n";
+
+    const lines = planEditorDecorations(markdown).filter((range) => range.kind === "line");
+
+    expect(lines).toEqual([
+      { kind: "line", from: 0, className: "cm-plan-title" },
+      { kind: "line", from: 9, className: "cm-plan-section" },
+      { kind: "line", from: 21, className: "cm-plan-subsection" },
+      { kind: "line", from: 33, className: "cm-plan-subsection" },
     ]);
   });
 
@@ -76,7 +89,7 @@ describe("planEditorDecorations", () => {
     ]);
   });
 
-  it("reads setext headings as the title and labels and draws a rule for ---", () => {
+  it("reads setext headings as the title and section headings and draws a rule for ---", () => {
     const markdown = "Add mod10\n===\n\nSummary\n\nSteps\n===\n\n---\n";
 
     expect(planEditorDecorations(markdown)).toEqual([
@@ -84,8 +97,8 @@ describe("planEditorDecorations", () => {
       { kind: "line", from: 10, className: "cm-plan-title" },
       { kind: "hide", from: 10, to: 13 },
       { kind: "line", from: 15, className: "cm-plan-summary" },
-      { kind: "line", from: 24, className: "cm-plan-label" },
-      { kind: "line", from: 30, className: "cm-plan-label" },
+      { kind: "line", from: 24, className: "cm-plan-section" },
+      { kind: "line", from: 30, className: "cm-plan-section" },
       { kind: "hide", from: 30, to: 33 },
       { kind: "line", from: 35, className: "cm-plan-rule" },
       { kind: "hide", from: 35, to: 38 },

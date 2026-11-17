@@ -104,7 +104,19 @@ const planTheme = EditorView.theme({
     color: "var(--color-ink)",
   },
   [`.${PLAN_EDITOR_CLASS.summary}`]: { color: "var(--color-muted)" },
-  [`.${PLAN_EDITOR_CLASS.label}`]: { fontSize: "1.2rem", lineHeight: "1.6rem", color: "var(--color-muted)" },
+  [`.${PLAN_EDITOR_CLASS.section}`]: {
+    paddingTop: "0.8rem",
+    fontSize: "1.6rem",
+    lineHeight: "2.4rem",
+    fontWeight: "600",
+    color: "var(--color-ink)",
+  },
+  [`.${PLAN_EDITOR_CLASS.subsection}`]: {
+    fontSize: "1.4rem",
+    lineHeight: "2rem",
+    fontWeight: "600",
+    color: "var(--color-ink)",
+  },
   [`.${PLAN_EDITOR_CLASS.listMarker}`]: {
     display: "inline-block",
     width: "2rem",

@@ -6,7 +6,8 @@ type PlanSyntaxNode = ReturnType<typeof parser.parse>["topNode"];
 export const PLAN_EDITOR_CLASS = {
   title: "cm-plan-title",
   summary: "cm-plan-summary",
-  label: "cm-plan-label",
+  section: "cm-plan-section",
+  subsection: "cm-plan-subsection",
   listMarker: "cm-plan-list-marker",
   code: "cm-plan-code",
   codeBlock: "cm-plan-code-block",
@@ -33,8 +34,8 @@ export interface PlanLineSpan {
 
 /**
  * Computes the read-view decorations for a plan's markdown: the first H1 is the
- * title, the paragraph right after it is the summary, later headings are
- * labels, list markers sit in a mono column with bullets drawn as dots, fenced
+ * title, the paragraph right after it is the summary, later H1 and H2 headings
+ * are sections, H3 to H6 are subsections, list markers sit in a mono column with bullets drawn as dots, fenced
  * code reads as a code block, and markdown syntax marks are hidden.
  * Sorted by position so the result is stable and easy to compare.
  */
@@ -95,8 +96,9 @@ function blockClass(
   const h1 = name === "ATXHeading1" || name === "SetextHeading1";
   if (h1 && !position.titleSeen) return PLAN_EDITOR_CLASS.title;
   if (name === "Paragraph" && position.summaryPending) return PLAN_EDITOR_CLASS.summary;
-  // Agents often write later sections as H1s, so every heading after the title is a label.
-  if (h1 || /^(ATXHeading[2-6]|SetextHeading2)$/.test(name)) return PLAN_EDITOR_CLASS.label;
+  // Agents often write later sections as H1s, so an H1 after the title is a section, not a second title.
+  if (h1 || name === "ATXHeading2" || name === "SetextHeading2") return PLAN_EDITOR_CLASS.section;
+  if (/^ATXHeading[3-6]$/.test(name)) return PLAN_EDITOR_CLASS.subsection;
   return null;
 }
 
