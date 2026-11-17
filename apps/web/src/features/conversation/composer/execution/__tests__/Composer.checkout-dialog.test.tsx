@@ -799,6 +799,20 @@ describe("Composer checkout confirmation", () => {
     expect(await screen.findByTestId("composer-branch-trigger")).toHaveTextContent("On feature/parent");
   });
 
+  it("quotes the forked agent reply in the fork bar without filling the message", async () => {
+    const workspace = seedComposerState("direct");
+    const parent = createMockThread({ id: "thread-parent", workspace_id: workspace.id, mode: "direct" });
+    useWorkspaceStore.setState({ threads: [parent], activeThreadId: parent.id });
+    const view = render(<Composer threadId={parent.id} workspaceId="ws-1" />);
+    await screen.findByLabelText("Message Mcode");
+    // Fork mode starts on a composer that is already mounted, as it does from the header or a message.
+    view.rerender(<Composer threadId={parent.id} workspaceId="ws-1" branchFromMessageId="message-1" branchFromMessageContent="Fork point ready." />);
+
+    expect(await screen.findByText("Fork point ready.")).toBeInTheDocument();
+    // The excerpt is only a label: an empty message keeps Send disabled.
+    expect(screen.getByLabelText("Send message")).toBeDisabled();
+  });
+
   it("forks a branchless parent onto the branch its checkout has out", async () => {
     const workspace = seedComposerState("direct");
     const parent = createMockThread({ id: "thread-parent", workspace_id: workspace.id, mode: "direct", branch: "", base_branch: null });

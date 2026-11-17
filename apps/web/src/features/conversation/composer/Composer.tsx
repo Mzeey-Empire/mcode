@@ -296,7 +296,6 @@ export function Composer({
     workspaceId,
     draftId,
     branchFromMessageId,
-    branchFromMessageContent,
     activeThread,
   });
   const {

@@ -206,7 +206,6 @@ describe("useComposerFormController new-thread drafts", () => {
       workspaceId: "ws-1",
       draftId: undefined,
       branchFromMessageId: "m1",
-      branchFromMessageContent: "quoted",
     }));
     act(() => branch.result.current.updateDraft("fork work", []));
     const noWorkspace = renderHook(() => useComposerFormController({
