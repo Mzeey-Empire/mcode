@@ -73,7 +73,7 @@ function PageActions({ actions }: { readonly actions: BrowserPageActions }) {
 export function BrowserToolbar({ page, address, tools, control, focusRequest }: BrowserToolbarProps) {
   const showPageActions = page.kind === "loaded" && control.kind !== "agent-acting";
   return (
-    <div data-testid="browser-toolbar" className="flex h-10 min-w-0 flex-1 items-center gap-2 px-2">
+    <div data-testid="browser-toolbar" className="flex h-10 min-w-0 flex-1 items-center gap-2">
       {page.kind === "new" ? null : <NavigationGroup navigation={page.navigation} />}
       <BrowserUrlPill
         address={address}

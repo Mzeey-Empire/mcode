@@ -18,17 +18,22 @@ export interface BrowserUrlPillProps {
 }
 
 interface UrlDisplay {
-  readonly origin: string;
+  readonly host: string;
   readonly rest: string;
 }
+
+// Dropping http(s):// at rest, as Chrome does, keeps the port and path visible in a narrow panel.
+const HIDDEN_SCHEMES = new Set(["http:", "https:"]);
 
 function urlDisplay(url: string): UrlDisplay {
   try {
     const parsed = new URL(url);
-    if (parsed.origin === "null") return { origin: "", rest: url };
-    return { origin: parsed.origin, rest: url.slice(parsed.origin.length) };
+    if (parsed.origin === "null") return { host: "", rest: url };
+    const rest = url.slice(parsed.origin.length);
+    if (!HIDDEN_SCHEMES.has(parsed.protocol)) return { host: parsed.origin, rest };
+    return { host: parsed.host, rest };
   } catch {
-    return { origin: "", rest: url };
+    return { host: "", rest: url };
   }
 }
 
@@ -44,10 +49,10 @@ function useFocusRequest(focusRequest: number | undefined, inputRef: RefObject<H
 }
 
 function UrlAtRest({ url }: { readonly url: string }) {
-  const { origin, rest } = urlDisplay(url);
+  const { host, rest } = urlDisplay(url);
   return (
     <span aria-hidden className="text-fade pointer-events-none absolute inset-0 flex items-center whitespace-nowrap">
-      <span className="text-muted">{origin}</span>
+      <span className="text-muted">{host}</span>
       <span className="text-ink">{rest}</span>
     </span>
   );

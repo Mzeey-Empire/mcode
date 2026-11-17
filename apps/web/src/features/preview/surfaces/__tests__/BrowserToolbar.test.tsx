@@ -118,6 +118,14 @@ describe("BrowserToolbar", () => {
     expect(log).toEqual(["stop-trusting"]);
   });
 
+  it("shows the address without its scheme at rest and keeps the full URL in the input", () => {
+    const url = "http://127.0.0.1:41594/alpha.html";
+    renderToolbar(loadedProps([], { address: address([], { url }) }));
+
+    expect(screen.getByTestId("browser-url-pill").textContent).toBe("127.0.0.1:41594/alpha.html");
+    expect(screen.getByRole("textbox", { name: "Preview URL" })).toHaveValue(url);
+  });
+
   it("shows no Not secure mark for a normally verified page", () => {
     renderToolbar(loadedProps([]));
 
