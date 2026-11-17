@@ -1,3 +1,4 @@
+import { fastModeDefault } from "@mcode/shared/fast-mode";
 import {
   useCallback,
   useEffect,
@@ -136,7 +137,8 @@ export interface ComposerFormController {
   editorRef: RefObject<LexicalEditor | null>;
   defaults: {
     thinking: boolean | undefined;
-    globalCodexFast: boolean;
+    /** The selected provider's global Fast choice. */
+    fastDefault: boolean;
   };
   attachmentBindings: ComposerAttachmentBindings;
   updateDraft(text: string, mentions: readonly MessageMention[]): void;
@@ -268,8 +270,10 @@ export function useComposerFormController({
   const settingsDefaultMode = useSettingsStore((state) => state.settings.agent.defaults.mode);
   const settingsDefaultPermission = useSettingsStore((state) => state.settings.agent.defaults.permission);
   const settingsDefaultThinking = useSettingsStore((state) => state.settings.model.defaults.thinking);
-  const settingsGlobalCodexFast = useSettingsStore(
-    (state) => state.settings.provider.codex.fastMode === true,
+  const fastProvider = selection.provider;
+  // Only Claude and Codex offer Fast; narrowing here keeps the selection's free-form provider id out of the shared rule.
+  const settingsFastDefault = useSettingsStore(
+    (state) => (fastProvider === "claude" || fastProvider === "codex") && fastModeDefault(state.settings, fastProvider),
   );
   const persistedInteractionMode = useThreadRecord(
     threadId,
@@ -876,7 +880,7 @@ export function useComposerFormController({
     editorRef,
     defaults: {
       thinking: settingsDefaultThinking,
-      globalCodexFast: settingsGlobalCodexFast,
+      fastDefault: settingsFastDefault,
     },
     attachmentBindings,
     updateDraft,

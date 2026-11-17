@@ -3,6 +3,8 @@ import { createRef } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { GENIE_CLOSE_MS } from "@/components/ui/genie";
 import { registerProviderModels } from "@/lib/model-registry";
@@ -80,7 +82,7 @@ async function renderSplit(overrides: SplitOverrides = {}) {
       threadId={overrides.threadId}
       branchFromMessageId={overrides.branchFromMessageId}
       selection={{ ...selection, ...overrides.selection }}
-      defaults={{ thinking: undefined, globalCodexFast: false }}
+      defaults={{ thinking: undefined, fastDefault: false }}
       reasoningLevels={overrides.reasoningLevels ?? LEVELS}
       permissionLocked={overrides.permissionLocked ?? false}
       approvalReviewSupported={overrides.approvalReviewSupported ?? true}
@@ -362,6 +364,70 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     expect(screen.getByRole("dialog", { name: "Choose model and provider" })).toBeInTheDocument();
   });
 
+  describe("with a provider Fast status", () => {
+    const THREAD_ID = "thread-fast";
+
+    function reportStatus(status: FastModeStatus): void {
+      useThreadStore.getState().handleAgentEvent({ type: "fastModeStatus", threadId: THREAD_ID, status } as AgentEvent);
+    }
+
+    afterEach(() => {
+      useThreadStore.setState((state) => {
+        const records = new Map(state.records);
+        records.delete(THREAD_ID);
+        return { records };
+      });
+    });
+
+    /** Hovers the wrapper a disabled segment hangs its tooltip on, since the disabled button swallows the pointer. */
+    async function hoverTooltip(option: HTMLElement): Promise<Element | null> {
+      const wrapper = option.parentElement as HTMLElement;
+      fireEvent.pointerEnter(wrapper, { pointerType: "mouse" });
+      fireEvent.mouseEnter(wrapper);
+      fireEvent.pointerMove(wrapper, { pointerType: "mouse" });
+      fireEvent.mouseMove(wrapper);
+      act(() => vi.advanceTimersByTime(1000));
+      for (let i = 0; i < 4; i++) frame();
+      return document.querySelector("[data-slot='tooltip-content']");
+    }
+
+    function fastOption(): HTMLElement {
+      return within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Fast" });
+    }
+
+    it("blocks Fast while it cools down, explaining why, and keeps Standard choosable", async () => {
+      serveModels([{ id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: LEVELS, supportsFastMode: true }]);
+      reportStatus({ modelId: "gpt-9-deep", state: "cooldown" });
+      const onSelectionChange = await renderSplit({ threadId: THREAD_ID, selection: { fastMode: true } });
+      await openModelPicker();
+
+      expect(fastOption()).toBeDisabled();
+      expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast is cooling down.");
+
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }));
+      // Standard matches the default here, so the thread drops its override instead of storing false.
+      expect(onSelectionChange).toHaveBeenCalledWith({ fastMode: null });
+    });
+
+    it("explains an unavailable Fast with the provider's reason", async () => {
+      serveModels([{ id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: LEVELS, supportsFastMode: true }]);
+      reportStatus({ modelId: "gpt-9-deep", state: "off", unavailable: "extra_usage" });
+      await renderSplit({ threadId: THREAD_ID });
+      await openModelPicker();
+
+      expect(fastOption()).toBeDisabled();
+      expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast needs extra usage turned on.");
+    });
+
+    it("drops Fast from the model part's name while Fast cools down", async () => {
+      registerProviderModels("codex", [{ id: "gpt-9-deep", label: "GPT-9 Deep", providerId: "codex", supportedReasoningLevels: LEVELS, supportsFastMode: true }]);
+      reportStatus({ modelId: "gpt-9-deep", state: "cooldown" });
+      await renderSplit({ threadId: THREAD_ID, selection: { fastMode: true } });
+
+      expect(screen.getByRole("button", { name: "Model: GPT-9 Deep, High reasoning" })).toBeInTheDocument();
+    });
+  });
+
   it("offers no speed choice for a model without Fast", async () => {
     await renderSplit();
     await openModelPicker();
@@ -455,7 +521,7 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     render(
       <ComposerModelOptions
         selection={{ ...selection, provider: "claude", modelId: "claude-opus-5-5" }}
-        defaults={{ thinking: undefined, globalCodexFast: false }}
+        defaults={{ thinking: undefined, fastDefault: false }}
         onSelectionChange={vi.fn()}
       />,
     );
