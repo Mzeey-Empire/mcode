@@ -24,7 +24,7 @@ import type { Thread, Workspace } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { selectThreadIndex } from "../state/thread-index";
 import { IDLE_CLEANUP_RETRY, useRowLifecycleStore } from "./row-lifecycle-store";
-import type { SidebarItem } from "./sidebar-model";
+import type { SidebarItem, ThreadTreeLine } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
 import { PullRequestChip, PullRequestList } from "./PullRequestChip";
 import { lifecycleActionBlocked, lifecycleBlockedReason, useCompletionStore } from "./completion-store";
@@ -55,7 +55,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ item, ctx }: { 
   const thread = useWorkspaceStore((s) => selectThreadIndex(s.threads).get(item.threadId));
   const workspace = useWorkspaceStore((s) => (thread ? s.workspaces.find((candidate) => candidate.id === thread.workspace_id) : undefined));
   if (!thread) return null;
-  return <ThreadRow thread={thread} workspace={workspace} depth={item.depth} showProject={item.layout === "flat"} ctx={ctx} />;
+  return <ThreadRow thread={thread} workspace={workspace} depth={item.depth} treeLine={item.treeLine} showProject={item.layout === "flat"} ctx={ctx} />;
 });
 
 function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, workspacePath: string): ThreadRowHandlers {
@@ -72,7 +72,7 @@ function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, works
   }), [ctx, workspaceId, workspacePath]);
 }
 
-function ThreadRow({ thread, workspace, depth, showProject, ctx }: { thread: WorkspaceThread; workspace: Workspace | undefined; depth: number; showProject: boolean; ctx: SidebarRowContext }) {
+function ThreadRow({ thread, workspace, depth, treeLine, showProject, ctx }: { thread: WorkspaceThread; workspace: Workspace | undefined; depth: number; treeLine: ThreadTreeLine; showProject: boolean; ctx: SidebarRowContext }) {
   if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordRowRender(`sidebar-thread:${thread.id}`);
   const isEditing = ctx.inlineEdit?.threadId === thread.id;
   const handlers = useThreadRowHandlers(ctx, thread.workspace_id, workspace?.path ?? "");
@@ -101,6 +101,7 @@ function ThreadRow({ thread, workspace, depth, showProject, ctx }: { thread: Wor
       workspaceName={workspace?.name ?? ""}
       thread={thread}
       depth={depth}
+      treeLine={treeLine}
       showProject={showProject}
       isEditing={isEditing}
       inlineEdit={isEditing ? ctx.inlineEdit : null}
@@ -136,7 +137,6 @@ interface ThreadRowPresentation {
   unusable: boolean;
   unusableReason: string;
   scaffoldDim: string | false;
-  isUserCompleted: boolean;
   closedRow: boolean;
   cleanupBlocked: boolean;
   completing: boolean;
@@ -167,6 +167,7 @@ interface ThreadRowVisualProps {
   workspaceName: string;
   thread: WorkspaceThread;
   depth: number;
+  treeLine: ThreadTreeLine;
   /** The flat Threads view has no project header, so each row names its project. */
   showProject: boolean;
   isEditing: boolean;
@@ -199,7 +200,6 @@ function createThreadRowPresentation(
     isStaleWorktree: hasStaleThreadWorktree(thread, ctx.worktreesLoadedFor, ctx.validWorktreePaths),
     ...threadProviderPresentation(thread.provider, ctx.availableProviders),
     scaffoldDim: thread.clientPreparing || thread.clientError || startupPending ? "opacity-[0.72]" : false,
-    isUserCompleted,
     closedRow: closedScope,
     cleanupBlocked: isUserCompleted && thread.cleanup_state === "blocked",
     completing: completion !== undefined && completion.phase !== "failed",
@@ -326,6 +326,7 @@ function ThreadRowVisual(props: ThreadRowVisualProps) {
     <ThreadRowSurface
       thread={thread}
       depth={props.depth}
+      treeLine={props.treeLine}
       variant={variant}
       isActive={props.isActive}
       isEditing={props.isEditing}
@@ -347,11 +348,11 @@ function ThreadRowVisual(props: ThreadRowVisualProps) {
 
 type ThreadRowBodyProps = ThreadRowVisualProps & { revealed: boolean };
 
-function usePullRequestChip(thread: WorkspaceThread, dimmed: boolean) {
+function usePullRequestChip(thread: WorkspaceThread) {
   const [open, setOpen] = useState(false);
   const ranked = useMemo(() => (isPrable(thread) ? rankPullRequests(thread.pull_requests) : []), [thread]);
   const chip = (
-    <PullRequestChip threadId={thread.id} ranked={ranked} expanded={open} onToggleExpanded={() => setOpen((value) => !value)} dimmed={dimmed} />
+    <PullRequestChip threadId={thread.id} ranked={ranked} expanded={open} onToggleExpanded={() => setOpen((value) => !value)} />
   );
   const list = open && ranked.length > 1 ? <PullRequestList threadId={thread.id} ranked={ranked} /> : null;
   return { chip, list };
@@ -359,7 +360,7 @@ function usePullRequestChip(thread: WorkspaceThread, dimmed: boolean) {
 
 function FlatThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation } = props;
-  const pr = usePullRequestChip(thread, false);
+  const pr = usePullRequestChip(thread);
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div data-testid="thread-line-project" className="flex h-4 min-w-0 items-center gap-1 text-caption text-muted">
@@ -374,14 +375,7 @@ function FlatThreadRowBody(props: ThreadRowBodyProps) {
         <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} fallback={<ThreadRowTime thread={thread} />} />} />
       </div>
       <ThreadRowTitleLine {...props} className="mt-2" />
-      <div data-testid="thread-line-branch" className={cn("mt-0.5 flex h-4 min-w-0 items-center gap-1 text-caption text-muted", presentation.scaffoldDim)}>
-        <ThreadModeIcon thread={thread} stale={presentation.isStaleWorktree} />
-        <ThreadRowBranch thread={thread} stale={presentation.isStaleWorktree} />
-        <div className="flex shrink-0 items-center gap-2 pl-1">
-          {pr.chip}
-          <ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} className="opacity-(--provider-mark-opacity)" />
-        </div>
-      </div>
+      <ThreadRowMetaLine thread={thread} presentation={presentation} chip={pr.chip} />
       {pr.list}
     </div>
   );
@@ -389,17 +383,27 @@ function FlatThreadRowBody(props: ThreadRowBodyProps) {
 
 function GroupedThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation } = props;
-  const pr = usePullRequestChip(thread, presentation.isUserCompleted);
+  const pr = usePullRequestChip(thread);
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-1">
-      <ThreadRowTitleLine
-        {...props}
-        leading={<ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} className="text-muted" />}
-      >
-        <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} fallback={null} />} />
+    <div className="flex min-w-0 flex-1 flex-col">
+      <ThreadRowTitleLine {...props}>
+        <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} fallback={<ThreadRowTime thread={thread} />} />} />
       </ThreadRowTitleLine>
-      <ThreadRowBranchLine thread={thread} presentation={presentation}>{pr.chip}</ThreadRowBranchLine>
+      <ThreadRowMetaLine thread={thread} presentation={presentation} chip={pr.chip} />
       {pr.list}
+    </div>
+  );
+}
+
+function ThreadRowMetaLine({ thread, presentation, chip }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { chip: React.ReactNode }) {
+  return (
+    <div data-testid="thread-line-branch" className={cn("mt-0.5 flex h-4 min-w-0 items-center gap-1 text-caption text-muted", presentation.scaffoldDim)}>
+      <ThreadModeIcon thread={thread} stale={presentation.isStaleWorktree} />
+      <ThreadRowBranch thread={thread} stale={presentation.isStaleWorktree} />
+      <div className="flex shrink-0 items-center gap-2 pl-1">
+        {chip}
+        <ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} className="opacity-(--provider-mark-opacity)" />
+      </div>
     </div>
   );
 }
@@ -443,24 +447,36 @@ const RECEDED_BADGE_CLASS = "opacity-55 group-hover/row:opacity-100 group-focus-
 
 const SURFACE_CLASS: Record<ThreadRowVariant, string> = {
   flat: "min-h-[78px] flex-col justify-center p-2",
-  grouped: "min-h-16 items-start gap-2 py-3 pr-2",
+  grouped: "min-h-[54px] flex-col justify-center py-2 pr-2",
   closed: "h-8 items-center gap-2 pr-2",
 };
 
+
+// The fill starts 18px in, after the line, so hover and selection never paint over it. Each row
+// draws its own segment and an 8px-radius elbow into its title, so the line survives virtualization.
+const TREE_LINE_CLASS = "ml-4.5 before:pointer-events-none before:absolute before:inset-y-0 before:-left-2 before:w-px before:bg-tree after:pointer-events-none after:absolute after:top-0 after:-left-2 after:w-2 after:rounded-bl-[8px] after:border-b after:border-l after:border-tree";
+const TREE_ELBOW_CLASS: Record<Exclude<ThreadRowVariant, "flat">, string> = { grouped: "after:h-4.5", closed: "after:h-4" };
+
+function treeLineClass(variant: ThreadRowVariant, treeLine: ThreadTreeLine): string | undefined {
+  if (treeLine === "none" || variant === "flat") return undefined;
+  return cn(TREE_LINE_CLASS, TREE_ELBOW_CLASS[variant], treeLine === "end" && "before:hidden");
+}
+
 function surfacePaddingLeft(variant: ThreadRowVariant, depth: number): CSSProperties | undefined {
   if (variant === "flat") return undefined;
-  return { paddingLeft: `${(variant === "closed" ? 8 : 4) + depth * 12}px` };
+  return { paddingLeft: `${8 + depth * 12}px` };
 }
 
 type ThreadRowSurfaceProps = Pick<
   ThreadRowVisualProps,
   "thread" | "depth" | "isActive" | "isEditing" | "onThreadClick" | "onThreadDoubleClick" | "onSelectThread" | "onThreadContextMenu"
-> & ComponentPropsWithoutRef<"div"> & { variant: ThreadRowVariant; children: React.ReactNode; onRevealChange: (revealed: boolean) => void };
+> & ComponentPropsWithoutRef<"div"> & { variant: ThreadRowVariant; treeLine: ThreadTreeLine; children: React.ReactNode; onRevealChange: (revealed: boolean) => void };
 
 const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(function ThreadRowSurface({
   thread,
   depth,
   variant,
+  treeLine,
   isActive,
   isEditing,
   onThreadClick,
@@ -512,6 +528,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
       className={cn(
         "group/row relative flex rounded-lg cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         SURFACE_CLASS[variant],
+        treeLineClass(variant, treeLine),
         isActive ? "bg-selected" : "hover:bg-selected/40 data-menu-open:bg-selected/40",
         triggerClassName,
       )}
@@ -603,17 +620,15 @@ function ThreadTitleText({ title, struck, className }: { title: string; struck: 
 }
 
 function ThreadRowTitleLine({
-  leading,
   className,
   children,
   ...props
-}: ThreadRowTitleProps & { leading?: React.ReactNode; className?: string; children?: React.ReactNode }) {
+}: ThreadRowTitleProps & { className?: string; children?: React.ReactNode }) {
   const { presentation, thread } = props;
   return (
     <div data-title-line data-testid="thread-line-title" className={cn("flex h-5 min-w-0 items-center gap-2", className)}>
       {/* A scaffold row dims what it is, never its status: the status is the part that is live. */}
       <div className={cn("flex min-w-0 flex-1 items-center gap-2", presentation.scaffoldDim)}>
-        {leading}
         {props.isEditing ? (
           <ThreadRowTitleInput {...props} />
         ) : (
@@ -676,20 +691,6 @@ function ThreadRowTime({ thread }: { thread: WorkspaceThread }) {
   const age = useRelativeTime(threadActivityAt(thread));
   if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordRowRender(`sidebar-age:${thread.id}`);
   return <div className="text-caption tabular-nums text-muted">{age}</div>;
-}
-
-function ThreadRowBranchLine({ thread, presentation, children }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { children: React.ReactNode }) {
-  const stale = presentation.isStaleWorktree;
-  return (
-    <div className={cn("flex h-4 min-w-0 items-center gap-2 text-caption text-muted", presentation.scaffoldDim)}>
-      <ThreadModeIcon thread={thread} stale={stale} />
-      <ThreadRowBranch thread={thread} stale={stale} />
-      <div className="flex shrink-0 items-center gap-1">
-        {children}
-        <ThreadRowTime thread={thread} />
-      </div>
-    </div>
-  );
 }
 
 // A completed row ages from its completion; an open one from its last turn, not from metadata writes.

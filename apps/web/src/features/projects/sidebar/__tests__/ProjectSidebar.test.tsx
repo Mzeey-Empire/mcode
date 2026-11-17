@@ -239,6 +239,11 @@ function selectCompletedScope(): void {
   fireEvent.click(screen.getByRole("radio", { name: /^Closed/ }));
 }
 
+function expectQuietStatus(status: HTMLElement): void {
+  expect(within(status).queryByRole("img")).toBeNull();
+  expect(status).not.toHaveTextContent(/required|ready|Running|Finished|Failed|Interrupted/);
+}
+
 function rowIndent(row: HTMLElement | undefined): string | undefined {
   return row?.querySelector<HTMLElement>("[style*='padding-left']")?.style.paddingLeft;
 }
@@ -462,13 +467,12 @@ describe("ProjectSidebar thread interactions", () => {
     setupStoreMocks({ threads: [activeThread, completedThread] });
 
     const firstRender = render(<ProjectSidebar />);
-    expect(screen.getByRole("button", { name: /^Provider, Claude Active work/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Active work/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Completed work/i })).toBeNull();
     expect(screen.getByRole("group", { name: "Test Project project, 1 thread" })).toBeVisible();
-    expect(screen.getByTestId("project-thread-count-ws-1")).toHaveTextContent("1");
 
     selectCompletedScope();
-    expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Active work/i })).toBeNull();
     expect(screen.getByRole("button", { name: /^Completed work/i })).toBeVisible();
 
     firstRender.unmount();
@@ -488,11 +492,11 @@ describe("ProjectSidebar thread interactions", () => {
     });
 
     render(<ProjectSidebar />);
-    expect(screen.getByRole("button", { name: /^Provider, Claude Second active/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Second active/i })).toBeVisible();
     selectCompletedScope();
 
     expect(screen.getByRole("button", { name: /^First completed/i })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /^Provider, Claude Second active/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Second active/i })).toBeNull();
     expect(screen.queryByTestId("project-row-ws-2")).toBeNull();
   });
 
@@ -553,7 +557,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     expect(screen.getByRole("radio", { name: "Closed" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("No closed threads")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Active work/i })).toBeNull();
   });
 
   it("hides the Open/Closed pill on first run with no projects", () => {
@@ -588,9 +592,9 @@ describe("ProjectSidebar thread interactions", () => {
       ],
     });
     render(<ProjectSidebar />);
-    expect(screen.getByRole("button", { name: /^Providers, Codex, Claude Switched/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^Provider, Claude Single/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^Provider, Claude Never/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Switched .*Providers, Codex, Claude$/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Single .*Provider, Claude$/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Never .*Provider, Claude$/ })).toBeVisible();
     expect(screen.getAllByTestId("provider-icon-stack")).toHaveLength(1);
   });
 
@@ -728,7 +732,7 @@ describe("ProjectSidebar thread interactions", () => {
     setupStoreMocks();
 
     render(<ProjectSidebar />);
-    expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^My Thread/i })).toBeVisible();
     const projectRow = screen.getByTestId("project-row-ws-1");
     projectRow.focus();
     // KeyboardSensor activates on event.code, not key.
@@ -738,7 +742,7 @@ describe("ProjectSidebar thread interactions", () => {
     // The DragOverlay clones the whole project group outside the viewport, so
     // queries that must hit the real row scope to the tree.
     const tree = within(screen.getByTestId("project-tree-viewport"));
-    expect(tree.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeVisible();
+    expect(tree.getByRole("button", { name: /^My Thread/i })).toBeVisible();
     expect(
       tree.getByRole("button", { name: "Toggle threads for Test Project" }),
     ).toHaveAttribute("aria-expanded", "true");
@@ -787,28 +791,35 @@ describe("ProjectSidebar thread interactions", () => {
     expect(viewport).toHaveProperty("scrollTop", 240);
   });
 
-  it("keeps the thread count trailing and swaps it for an overlaid action group", () => {
+  it("keeps the header's New thread and More actions in the keyboard order and shows no thread count", () => {
     setupStoreMocks();
-
     render(<ProjectSidebar />);
 
     const projectRow = screen.getByTestId("project-row-ws-1");
-    const threadCount = within(projectRow).getByTestId(
-      "project-thread-count-ws-1",
-    );
-    const actions = within(projectRow).getByTestId("project-row-actions-ws-1");
+    const tabStops = within(projectRow).getAllByRole("button").filter((button) => button.tabIndex >= 0);
 
-    expect(threadCount).toHaveTextContent("1");
-    expect(threadCount.nextElementSibling).toBe(actions);
-    expect(actions).toContainElement(
-      screen.getByRole("button", { name: "Toggle threads for Test Project" }),
-    );
-    expect(actions).toContainElement(
-      screen.getByRole("button", { name: "Project options for Test Project" }),
-    );
-    expect(actions).toContainElement(
-      screen.getByRole("button", { name: "New thread in Test Project" }),
-    );
+    expect(tabStops.map((button) => button.getAttribute("aria-label"))).toEqual(expect.arrayContaining([
+      "New thread in Test Project",
+      "Project options for Test Project",
+    ]));
+    expect(projectRow).not.toHaveTextContent(/\d/);
+  });
+
+  it("reads the title and status on one line, then the checkout, with no project line in the Projects view", () => {
+    setupStoreMocks();
+    render(<ProjectSidebar />);
+
+    const row = screen.getByRole("button", { name: /^My Thread/ });
+    const titleLine = within(row).getByTestId("thread-line-title");
+    const branchLine = within(row).getByTestId("thread-line-branch");
+
+    expect(within(row).queryByTestId("thread-line-project")).toBeNull();
+    expect(row).not.toHaveTextContent("Test Project");
+    expect(within(titleLine).getByTestId("thread-title")).toHaveTextContent("My Thread");
+    expect(within(titleLine).getByTestId("thread-status")).toBeInTheDocument();
+    expect(titleLine.compareDocumentPosition(branchLine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(branchLine).getByLabelText("Local mode")).toBeInTheDocument();
+    expect(within(branchLine).getByLabelText("Provider, Claude")).toBeInTheDocument();
   });
 
   it("exposes the full project name from the focused project control", () => {
@@ -897,7 +908,7 @@ describe("ProjectSidebar thread interactions", () => {
     render(<ProjectSidebar />);
 
     const rows = screen.getAllByTestId("thread-item");
-    expect(rows.map(rowIndent)).toEqual(["4px", "4px"]);
+    expect(rows.map(rowIndent)).toEqual(["8px", "8px"]);
   });
 
   it("caps the thread list at six rows and toggles the overflow", () => {
@@ -924,7 +935,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
 
-    const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const threadButton = screen.getByRole("button", { name: /^My Thread/i });
     fireEvent.click(threadButton);
 
     // Navigation must fire on the first click — no debounce.
@@ -938,7 +949,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
 
-    const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const threadButton = screen.getByRole("button", { name: /^My Thread/i });
     fireEvent.pointerDown(threadButton);
     expect(prefetchOnPointerDown).toHaveBeenCalledWith("thread-1");
 
@@ -952,7 +963,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
 
-    const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const threadButton = screen.getByRole("button", { name: /^My Thread/i });
 
     // First click navigates immediately.
     fireEvent.click(threadButton);
@@ -976,7 +987,7 @@ describe("ProjectSidebar thread interactions", () => {
     render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
-      name: /^Provider, Claude My Thread/i,
+      name: /^My Thread/i,
     });
     fireEvent.click(threadRow);
     act(() => {
@@ -994,7 +1005,7 @@ describe("ProjectSidebar thread interactions", () => {
     render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
-      name: /^Provider, Claude My Thread/i,
+      name: /^My Thread/i,
     });
     fireEvent.click(threadRow);
     act(() => {
@@ -1020,7 +1031,7 @@ describe("ProjectSidebar thread interactions", () => {
     render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
-      name: /^Provider, Claude My Thread/i,
+      name: /^My Thread/i,
     });
     fireEvent.click(threadRow);
     act(() => {
@@ -1046,7 +1057,7 @@ describe("ProjectSidebar thread interactions", () => {
     render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
-      name: /^Provider, Claude My Thread/i,
+      name: /^My Thread/i,
     });
     fireEvent.click(threadRow);
     act(() => {
@@ -1076,7 +1087,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
 
-    const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const threadButton = screen.getByRole("button", { name: /^My Thread/i });
 
     fireEvent.click(threadButton);
     act(() => {
@@ -1095,7 +1106,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
 
-    const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const threadButton = screen.getByRole("button", { name: /^My Thread/i });
 
     // Double-click to enter edit mode (first click navigates, second triggers rename).
     fireEvent.click(threadButton);
@@ -1121,7 +1132,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
 
-    const threadButton = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const threadButton = screen.getByRole("button", { name: /^My Thread/i });
 
     // Focus and press Enter on the thread row.
     threadButton.focus();
@@ -1205,7 +1216,7 @@ describe("ProjectSidebar thread interactions", () => {
     render(<ProjectSidebar />);
 
     const threadRow = screen.getByRole("button", {
-      name: /^Provider, Claude My Thread/i,
+      name: /^My Thread/i,
     });
     fireEvent.click(threadRow);
     act(() => {
@@ -1234,7 +1245,7 @@ describe("ProjectSidebar thread interactions", () => {
     const threadRow = () =>
       within(screen.getByTestId("project-tree-viewport")).queryByRole(
         "button",
-        { name: /^Provider, Claude My Thread/i },
+        { name: /^My Thread/i },
       );
 
     projectRow.focus();
@@ -1382,7 +1393,7 @@ describe("ProjectSidebar action-required indicator", () => {
   it("leaves the status lane empty for a thread with no attention facts", () => {
     render(<ProjectSidebar />);
 
-    expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
+    expectQuietStatus(screen.getByTestId("thread-status"));
   });
 
   it("keeps the ring when the waiting thread is also running", () => {
@@ -1401,7 +1412,7 @@ describe("ProjectSidebar action-required indicator", () => {
     };
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^My Thread/i })).toBeInTheDocument();
     expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" }))).toBe("spinner");
     expect(screen.queryByRole("button", { name: "Close My Thread" })).toBeNull();
   });
@@ -1459,7 +1470,7 @@ describe("ProjectSidebar action-required indicator", () => {
     applyAttention(attention("thread-pending", endedTurn("cancelled")));
     render(<ProjectSidebar />);
 
-    expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
+    expectQuietStatus(screen.getByTestId("thread-status"));
   });
 
   it("clears Finished when another client marks the turn seen", () => {
@@ -1475,7 +1486,7 @@ describe("ProjectSidebar action-required indicator", () => {
       })));
 
       expect(screen.queryByRole("img", { name: "Finished" })).not.toBeInTheDocument();
-      expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
+      expectQuietStatus(screen.getByTestId("thread-status"));
     } finally {
       stopPushListeners();
     }
@@ -1489,7 +1500,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
     applyAttention(attention("thread-pending", endedTurn("completed")));
 
-    expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
+    expectQuietStatus(screen.getByTestId("thread-status"));
   });
 
   it("shows the row's time on its branch line and the exact time in hover details", async () => {
@@ -1497,7 +1508,7 @@ describe("ProjectSidebar action-required indicator", () => {
     setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt, last_activity_at: updatedAt }) });
     render(<ProjectSidebar />);
 
-    const row = screen.getByRole("button", { name: /^Provider, Claude Updated Thread.*Local mode Branch, main 5m$/i });
+    const row = screen.getByRole("button", { name: /^Updated Thread 5m .*Local mode Branch, main Provider, Claude$/i });
     const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(updatedAt));
     row.focus();
     expect(await screen.findByTestId("thread-preview-thread-updated")).toHaveTextContent(`Updated ${exactTime}`);
@@ -1515,10 +1526,10 @@ describe("ProjectSidebar action-required indicator", () => {
       // The server keys a supervised thread_send wait on the sending thread, not its target.
       act(() => pushEmitter.emit("thread.attention", attention("thread-A", waitingOn("approval"))));
 
-      const ownerRow = screen.getByRole("button", { name: /^Provider, Claude Thread A/ });
-      const targetRow = screen.getByRole("button", { name: /^Provider, Claude Thread B/ });
+      const ownerRow = screen.getByRole("button", { name: /^Thread A/ });
+      const targetRow = screen.getByRole("button", { name: /^Thread B/ });
       expect(statusGlyph(within(ownerRow).getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
-      expect(within(targetRow).getByTestId("thread-status")).toBeEmptyDOMElement();
+      expectQuietStatus(within(targetRow).getByTestId("thread-status"));
     } finally {
       stopPushListeners();
     }
@@ -1558,7 +1569,20 @@ describe("ProjectSidebar action-required indicator", () => {
       applyAttention(attention("thread-wait", waitingOn("questions")));
 
       expect(statusGlyph(within(projectRow).getByRole("img", { name: "Answers required" }))).toBe("message-circle-question-mark");
+      expect(projectRow).toHaveTextContent("Answers required");
       expect(projectRow.querySelectorAll("[data-status-mark]")).toHaveLength(1);
+    });
+
+    it("rolls up only the threads in the shown scope", () => {
+      setupStoreMocks({ threads: [
+        makeThread({ id: "thread-open", title: "Open" }),
+        makeThread({ id: "thread-closed", title: "Closed", user_completed_at: "2026-10-11T12:00:00.000Z" }),
+      ] });
+      useSidebarUiStore.setState({ expandedProjects: new Set([]) });
+      applyAttention(attention("thread-closed", waitingOn("questions")));
+      render(<ProjectSidebar />);
+
+      expect(within(screen.getByTestId("project-row-ws-1")).queryByRole("img", { name: "Answers required" })).toBeNull();
     });
 
     it("keeps showing activity while Stop is pending", () => {
@@ -1617,7 +1641,7 @@ describe("ProjectSidebar action-required indicator", () => {
     installWorkspaceMock();
     render(<ProjectSidebar />);
 
-    const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const row = screen.getByRole("button", { name: /^My Thread/i });
     const dimmed = screen.getByTestId("thread-title").closest<HTMLElement>("[class*='opacity-[0.72]']");
     expect(row.className).not.toContain("opacity-[0.72]");
     expect(dimmed).not.toBeNull();
@@ -1686,7 +1710,7 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
       makeThread({ mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] }),
     );
     const indicator = screen.getByTestId("thread-pr-indicator-thread-1");
-    const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
+    const row = screen.getByRole("button", { name: /^My Thread/i });
     const title = screen.getByTestId("thread-title");
     expect(indicator).toHaveAttribute("aria-label", "PR #42, open");
     expect(indicator).toHaveTextContent(/^42$/);
@@ -1729,7 +1753,7 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
     renderWithThread(
       makeThread({ mode: "direct", pull_requests: [], status: "paused" }),
     );
-    expect(screen.getByTestId("thread-status")).toBeEmptyDOMElement();
+    expectQuietStatus(screen.getByTestId("thread-status"));
     expect(screen.queryByTestId("thread-pr-indicator-thread-1")).toBeNull();
   });
 
@@ -1762,7 +1786,7 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
       }),
     );
 
-    screen.getByRole("button", { name: /^Provider, Codex Branchless Thread/i }).focus();
+    screen.getByRole("button", { name: /^Branchless Thread/i }).focus();
 
     const preview = await screen.findByTestId(
       "thread-preview-thread-branchless",

@@ -192,6 +192,34 @@ describe("deriveSidebarModel", () => {
 
     expect(keys(items)).toEqual(["draft:d1", "thread:b", "thread:a", "end-spacer"]);
   });
+
+  it("ends each project's thread line at its last listed row", () => {
+    const facts = [
+      fact("a1", { activityMs: NOW - 1000 }),
+      fact("a2", { parentId: "a1", activityMs: NOW - 2000 }),
+      fact("b1", { workspaceId: "ws-b", activityMs: NOW - 3000 }),
+    ];
+    const items = deriveSidebarModel(inputs({ facts })).items;
+
+    expect(["a1", "a2", "b1"].map((id) => threadItem(items, id)?.treeLine)).toEqual(["through", "end", "end"]);
+  });
+
+  it("ends the thread line at a selected row kept past the cap and draws none under a collapsed project", () => {
+    const facts = Array.from({ length: PROJECT_ROW_CAP + 2 }, (_, index) => fact(`t${index}`, { activityMs: NOW - (index + 1) * 1000 }));
+    const last = facts.at(-1)!.id;
+    const capped = deriveSidebarModel(inputs({ facts, selectedThreadId: last })).items;
+    const collapsed = deriveSidebarModel(inputs({ facts, selectedThreadId: "t3", ui: { collapsedProjects: new Set(["ws-a"]) } })).items;
+
+    expect(threadItem(capped, `t${PROJECT_ROW_CAP - 1}`)?.treeLine).toBe("through");
+    expect(threadItem(capped, last)?.treeLine).toBe("end");
+    expect(threadItem(collapsed, "t3")?.treeLine).toBe("none");
+  });
+
+  it("draws no thread line in the Threads view", () => {
+    const items = deriveSidebarModel(inputs({ facts: [fact("a")], ui: { view: "threads" } })).items;
+
+    expect(threadItem(items, "a")?.treeLine).toBe("none");
+  });
 });
 
 describe("trackNeedsUserEnds", () => {

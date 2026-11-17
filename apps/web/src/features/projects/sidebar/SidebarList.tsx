@@ -45,7 +45,7 @@ import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 const PROVISIONAL_HEIGHT: Record<Exclude<SidebarItem["kind"], "thread">, number> = {
   project: 32, draft: 32, "show-more": 32, "older-bar": 32, empty: 0, "end-spacer": 12,
 };
-const PROVISIONAL_THREAD_HEIGHT: Record<Extract<SidebarItem, { kind: "thread" }>["layout"], number> = { grouped: 64, flat: 78 };
+const PROVISIONAL_THREAD_HEIGHT: Record<Extract<SidebarItem, { kind: "thread" }>["layout"], number> = { grouped: 54, flat: 78 };
 const CLOSED_THREAD_HEIGHT = 32;
 
 // One 20px text-label line inside py-1, the "No closed threads" line rendered below.

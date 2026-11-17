@@ -129,12 +129,21 @@ describe("SidebarList order", () => {
     expect(renderedThreadIds().filter((id) => id === selected)).toHaveLength(1);
   });
 
+  it("keeps the selected thread listed under its collapsed project, and only that one", () => {
+    seed([threadAt("first", 1), threadAt("second", 2), threadAt("third", 3)], "second");
+    useSidebarUiStore.setState({ expandedProjects: new Set() });
+    render(<Harness />);
+
+    expect(screen.getByRole("button", { name: "Toggle threads for Alpha" })).toHaveAttribute("aria-expanded", "false");
+    expect(renderedThreadIds()).toEqual(["second"]);
+  });
+
   it("opens a focused row on Enter and keeps focus on it", () => {
     const setActiveThread = vi.fn();
     seed([threadAt("first", 1), threadAt("second", 2)]);
     useWorkspaceStore.setState({ setActiveThread });
     render(<Harness />);
-    const row = within(document.querySelector<HTMLElement>("[data-thread-id='second']")!).getByRole("button", { name: /^Provider, Claude Title second/ });
+    const row = within(document.querySelector<HTMLElement>("[data-thread-id='second']")!).getByRole("button", { name: /^Title second/ });
 
     row.focus();
     fireEvent.keyDown(row, { key: "Enter" });
@@ -287,7 +296,7 @@ describe("SidebarList frozen order", () => {
   });
 
   function rowButton(id: string): HTMLElement {
-    return within(document.querySelector<HTMLElement>(`[data-thread-id='${id}']`)!).getByRole("button", { name: new RegExp(`^Provider, Claude Title ${id}`) });
+    return within(document.querySelector<HTMLElement>(`[data-thread-id='${id}']`)!).getByRole("button", { name: new RegExp(`^Title ${id}`) });
   }
 
   it("holds the order while keyboard focus is in the list and reorders once focus leaves", () => {

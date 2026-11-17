@@ -69,10 +69,16 @@ export type SidebarRowPending = "none" | "completing" | "failed";
  * One virtual row. Keys are typed per kind so two kinds never collide in the virtual list, and a
  * thread appears under exactly one key whatever its section.
  */
+/**
+ * The project's thread line through a row: it runs on below the row, ends at the row, or is absent
+ * (the flat Threads view, and a selected thread kept under a collapsed project).
+ */
+export type ThreadTreeLine = "through" | "end" | "none";
+
 export type SidebarItem =
   | { readonly kind: "project"; readonly key: `project:${string}` | `older-project:${string}`; readonly workspaceId: string; readonly section: SidebarSection; readonly collapsed: boolean; readonly count: number }
   | { readonly kind: "draft"; readonly key: `draft:${string}`; readonly draftId: string; readonly workspaceId: string }
-  | { readonly kind: "thread"; readonly key: `thread:${string}`; readonly threadId: string; readonly section: SidebarSection; readonly layout: "grouped" | "flat"; readonly depth: number; readonly pending: SidebarRowPending }
+  | { readonly kind: "thread"; readonly key: `thread:${string}`; readonly threadId: string; readonly section: SidebarSection; readonly layout: "grouped" | "flat"; readonly depth: number; readonly pending: SidebarRowPending; readonly treeLine: ThreadTreeLine }
   | { readonly kind: "show-more"; readonly key: `more:${string}`; readonly workspaceId: string; readonly hidden: number; readonly expanded: boolean }
   | { readonly kind: "older-bar"; readonly key: "older-bar"; readonly count: number; readonly open: boolean }
   | { readonly kind: "empty"; readonly key: "empty"; readonly scope: SidebarScope }
@@ -187,7 +193,7 @@ function collectFamily(root: Placed, children: ReadonlyMap<string, Placed[]>): F
   return { rows, key };
 }
 
-function threadItem(row: FamilyRow, section: SidebarSection, layout: "grouped" | "flat"): SidebarItem {
+function threadItem(row: FamilyRow, section: SidebarSection, layout: "grouped" | "flat", treeLine: ThreadTreeLine = layout === "flat" ? "none" : "through"): SidebarItem {
   return {
     kind: "thread",
     key: `thread:${row.placed.fact.id}`,
@@ -196,6 +202,7 @@ function threadItem(row: FamilyRow, section: SidebarSection, layout: "grouped" |
     layout,
     depth: layout === "flat" ? 0 : row.depth,
     pending: row.placed.pending,
+    treeLine,
   };
 }
 
@@ -288,19 +295,31 @@ interface ProjectGroupOptions {
   readonly drafts: boolean;
 }
 
+/**
+ * Marks the group's last thread row, where the project's thread line stops. Each row draws its own
+ * line segment, so the line stays whole across virtualization and the cap.
+ */
+function endThreadLine(items: readonly SidebarItem[]): SidebarItem[] {
+  let lastIndex = -1;
+  items.forEach((item, index) => {
+    if (item.kind === "thread") lastIndex = index;
+  });
+  return items.map((item, index) => (index === lastIndex && item.kind === "thread" ? { ...item, treeLine: "end" } : item));
+}
+
 function projectGroup(workspaceId: string, placed: readonly Placed[], ctx: SectionContext, options: ProjectGroupOptions): SidebarItem[] {
   const families = buildFamilies(placed);
   const collapsed = options.collapsedSet.has(workspaceId);
   const header = projectHeader(workspaceId, ctx.section, collapsed, placed.length);
   if (collapsed) {
     const selected = selectedRow(families, ctx.inputs.selectedThreadId);
-    return selected ? [header, threadItem(selected, ctx.section, "grouped")] : [header];
+    return selected ? [header, threadItem(selected, ctx.section, "grouped", "none")] : [header];
   }
   const drafts = options.drafts ? draftItems(workspaceId, ctx.inputs) : [];
   const rows = options.capped
     ? cappedProjectRows(workspaceId, families, ctx)
     : families.flatMap((family) => family.rows.map((row) => threadItem(row, ctx.section, "grouped")));
-  return [header, ...drafts, ...rows];
+  return [header, ...drafts, ...endThreadLine(rows)];
 }
 
 function recentProjectsView(parts: Partitioned, inputs: SidebarInputs): SidebarItem[] {

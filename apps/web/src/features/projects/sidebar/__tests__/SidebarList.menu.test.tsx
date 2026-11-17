@@ -49,7 +49,7 @@ function setGlobalCompleteOnMerge(value: boolean): void {
 
 async function openThreadMenu(): Promise<HTMLElement> {
   render(<ProjectSidebar />);
-  fireEvent.contextMenu(screen.getByRole("button", { name: /^Provider, .* Menu thread/ }));
+  fireEvent.contextMenu(screen.getByRole("button", { name: /^Menu thread/ }));
   return screen.findByRole("menu");
 }
 

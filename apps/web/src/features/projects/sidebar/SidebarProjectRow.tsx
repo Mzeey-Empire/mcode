@@ -1,4 +1,4 @@
-import { memo, useCallback, type CSSProperties } from "react";
+import { memo, useCallback, useMemo, type CSSProperties } from "react";
 import { useShallow } from "zustand/shallow";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -17,8 +17,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
-import { StatusMark } from "@/components/ui/status-mark";
 import { threadRowLook } from "@/features/thread-attention/thread-row-presentation";
+import { STATUS_MARK_TEXT_CLASS, StatusMark } from "@/components/ui/status-mark";
 import { useRolledUpThreadRowState } from "@/features/thread-attention/thread-rollup";
 import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
 import { getCiVisual } from "@/lib/ci-status";
@@ -111,19 +111,18 @@ interface ProjectHeaderProps {
 /** A project header: icon, name, roll-ups, and the hover actions. Also the drag overlay's clone. */
 export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging = false, sortableListeners, sortableAttributes }: ProjectHeaderProps) {
   const workspace = useWorkspaceStore((state) => state.workspaces.find((candidate) => candidate.id === item.workspaceId));
-  const isActive = useWorkspaceStore((state) => state.activeWorkspaceId === item.workspaceId);
   const threads = useWorkspaceStore(useShallow((state) => workspaceThreads(state.threads, item.workspaceId)));
   // Only headers roll up CI, so only they subscribe; a checks poll must not re-render thread rows.
   const checksById = useWorkspaceStore((state) => state.checksById);
   const scope = useSidebarScope();
-  const collapsedStatus = useRolledUpThreadRowState(item.collapsed ? threads : NO_THREADS);
+  const scopedThreads = useMemo(() => threads.filter((thread) => inScope(thread, scope)), [threads, scope]);
+  const collapsedStatus = useRolledUpThreadRowState(item.collapsed ? scopedThreads : NO_THREADS);
   if (!workspace) return null;
   return (
     <>
       <ProjectWorkspaceRow
         workspace={workspace}
         item={item}
-        isActive={isActive}
         isProjectDragging={isDragging}
         sortableListeners={sortableListeners}
         sortableAttributes={sortableAttributes}
@@ -151,7 +150,6 @@ function ProjectEmptyNote({ item, scope }: { item: ProjectItem; scope: SidebarSc
 interface ProjectWorkspaceRowProps {
   workspace: Workspace;
   item: ProjectItem;
-  isActive: boolean;
   isProjectDragging: boolean;
   sortableListeners: DraggableSyntheticListeners | undefined;
   sortableAttributes: SortableAttributes | undefined;
@@ -192,7 +190,6 @@ function useProjectActions(workspace: Workspace, section: ProjectItem["section"]
 function ProjectWorkspaceRow({
   workspace,
   item,
-  isActive,
   isProjectDragging,
   sortableListeners,
   sortableAttributes,
@@ -218,22 +215,19 @@ function ProjectWorkspaceRow({
       data-testid={`project-row-${workspace.id}`}
       onClick={actions.toggle}
       className={cn(
-        "group/ws relative flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-body-small touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70 has-[[data-project-title]:focus-visible]:ring-2 has-[[data-project-title]:focus-visible]:ring-focus/70",
+        "group/ws relative flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2 pl-1 text-label text-muted touch-none outline-none hover:bg-selected/40 focus-visible:ring-2 focus-visible:ring-focus/70 has-[[data-project-title]:focus-visible]:ring-2 has-[[data-project-title]:focus-visible]:ring-focus/70",
         isProjectDragging && "cursor-grabbing",
-        isActive ? "text-ink" : "text-muted hover:bg-selected/40 hover:text-ink",
       )}
       {...sortableListeners}
     >
-      <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} className="shrink-0" />
+      <ProjectDisclosure workspace={workspace} isExpanded={!item.collapsed} onToggle={actions.toggle} />
+      <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} tone="tinted" />
       <ProjectTitle workspace={workspace} onClick={actions.toggle} />
       <ProjectGitStatus isGitRepository={workspace.is_git_repo} />
       <WorkspaceCiRollupChip threads={visibleThreads} checksById={checksById} />
       <ProjectCollapsedStatus status={collapsedStatus} />
-      <ProjectThreadCount workspaceId={workspace.id} count={item.count} />
       <ProjectRowActions
         workspace={workspace}
-        isExpanded={!item.collapsed}
-        onToggle={actions.toggle}
         onOpenInExplorer={actions.openInExplorer}
         onRename={actions.renameProject}
         onDelete={actions.deleteProject}
@@ -337,8 +331,8 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
   return (
     <Tooltip disabled={dragging}>
       <TooltipTrigger render={
-        <Button data-project-title type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left hover:bg-transparent group-hover/ws:pr-24 group-focus-within/ws:pr-24 focus-visible:outline-none dark:hover:bg-transparent">
-          <span className="flex-1 text-fade font-medium tracking-tight">{workspace.name}</span>
+        <Button data-project-title type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left font-medium text-muted hover:bg-transparent hover:text-muted group-hover/ws:pr-12 group-focus-within/ws:pr-12 focus-visible:outline-none dark:hover:bg-transparent">
+          <span className="flex-1 text-fade">{workspace.name}</span>
         </Button>
       } />
       <TooltipContent side="right" className="text-xs">{workspace.name}</TooltipContent>
@@ -355,33 +349,40 @@ function ProjectCollapsedStatus({ status }: { status: ThreadRowState }) {
   const look = threadRowLook(status);
   if (!look) return null;
   return (
-    <span className="flex shrink-0 transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none">
+    <span className="ml-auto flex shrink-0 items-center gap-1 pl-1 text-caption whitespace-nowrap transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none">
       <StatusMark state={look.state} label={look.label} icon={look.icon} />
+      <span aria-hidden className={cn("font-medium", STATUS_MARK_TEXT_CLASS[look.state])}>{look.label}</span>
     </span>
   );
 }
 
-function ProjectThreadCount({ workspaceId, count }: { workspaceId: string; count: number }) {
-  if (count === 0) return null;
-  return <span data-testid={`project-thread-count-${workspaceId}`} className="ml-auto flex h-4 min-w-3 shrink-0 items-center justify-end font-mono text-xs leading-4 tabular-nums text-muted/45 transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none">{count}</span>;
+function ProjectDisclosure({ workspace, isExpanded, onToggle }: { workspace: Workspace; isExpanded: boolean; onToggle: () => void }) {
+  return (
+    <Button type="button" variant="ghost" size="icon-compact" aria-label={`Toggle threads for ${workspace.name}`} aria-expanded={isExpanded} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="mr-1 size-3.5 shrink-0 text-muted hover:bg-transparent hover:text-ink active:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent">
+      <ChevronRight aria-hidden className={cn("size-3.5 transition-transform duration-150 motion-reduce:transition-none", isExpanded && "rotate-90")} />
+    </Button>
+  );
 }
+
+const PROJECT_ACTION_CLASS = "inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted outline-none hover:bg-selected hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70 dark:hover:bg-selected";
 
 function ProjectRowActions({
   workspace,
-  isExpanded,
-  onToggle,
   onOpenInExplorer,
   onRename,
   onDelete,
   onCreateThread,
-}: { workspace: Workspace; isExpanded: boolean; onToggle: () => void; onOpenInExplorer: (event: React.MouseEvent) => void; onRename: (event: React.MouseEvent) => void; onDelete: (event: React.MouseEvent) => void; onCreateThread: (event: React.MouseEvent) => void }) {
+}: { workspace: Workspace; onOpenInExplorer: (event: React.MouseEvent) => void; onRename: (event: React.MouseEvent) => void; onDelete: (event: React.MouseEvent) => void; onCreateThread: (event: React.MouseEvent) => void }) {
   return (
-    <div data-testid={`project-row-actions-${workspace.id}`} className="pointer-events-none absolute inset-y-0 right-1.5 z-(--layer-dropdown) flex items-center justify-end gap-1 bg-transparent px-0.5 opacity-0 transition-opacity duration-150 group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100 motion-reduce:transition-none">
-      <Button type="button" variant="ghost" size="icon-compact" aria-label={`Toggle threads for ${workspace.name}`} aria-expanded={isExpanded} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="size-6 shrink-0 text-muted opacity-0 transition-opacity hover:bg-transparent hover:text-muted dark:hover:bg-transparent group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100">
-        <ChevronRight size={14} className={cn("transition-transform duration-150 motion-reduce:transition-none", isExpanded && "rotate-90")} />
-      </Button>
+    <div data-testid={`project-row-actions-${workspace.id}`} className="pointer-events-none absolute inset-y-0 right-2 z-(--layer-dropdown) flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100 motion-reduce:transition-none">
+      <Tooltip>
+        <TooltipTrigger
+          render={<Button variant="ghost" size="icon-compact" aria-label={`New thread in ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={onCreateThread} className={PROJECT_ACTION_CLASS}><SquarePen aria-hidden className="size-3.5" /></Button>}
+        />
+        <TooltipContent>{`New thread in ${workspace.name}`}</TooltipContent>
+      </Tooltip>
       <DropdownMenu>
-        <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onClick={(event) => event.stopPropagation()} className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted opacity-0 outline-none transition-colors hover:bg-background/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100"><MoreIcon size={13} /></DropdownMenuTrigger>
+        <DropdownMenuTrigger aria-label={`Project options for ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => event.stopPropagation()} className={PROJECT_ACTION_CLASS}><MoreIcon aria-hidden size={14} /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={4}>
           <DropdownMenuItem label="Open in Explorer" onClick={onOpenInExplorer} />
           <DropdownMenuItem label="Rename project" onClick={onRename} />
@@ -389,12 +390,6 @@ function ProjectRowActions({
           <DropdownMenuItem label="Delete project" destructive onClick={onDelete} />
         </DropdownMenuContent>
       </DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger
-          render={<Button variant="ghost" size="icon-compact" aria-label={`New thread in ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={onCreateThread} className="opacity-0 text-muted hover:bg-background/60 hover:text-ink group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 focus:opacity-100"><SquarePen className="size-[1.4rem]" /></Button>}
-        />
-        <TooltipContent>{`New thread in ${workspace.name}`}</TooltipContent>
-      </Tooltip>
     </div>
   );
 }
