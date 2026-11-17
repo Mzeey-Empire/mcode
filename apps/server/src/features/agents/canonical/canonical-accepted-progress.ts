@@ -981,19 +981,13 @@ export class CanonicalAcceptedProgress {
   /**
    * Settle a background tool call against the finished turn that launched it, even after
    * another turn starts. A repeated identical result is a no-op. A result that arrives while
-   * a durable command or an unsaved-turn exit fences the thread is saved once the fence lifts.
+   * a durable command, an unsaved-turn exit, or a deletion fences the thread is saved once the
+   * fence lifts, unless the deletion succeeded.
    */
   acceptLateToolResult(threadId: string, executionId: string, result: LateToolResult): void {
     this.assertOpen();
+    if (this.holdWhileFenced(threadId, executionId, result)) return;
     const thread = this.thread(threadId);
-    if (thread.commandPending) {
-      // The provider sends each result once, often because the fencing command closed its session, so a
-      // refusal here would leave the call running in storage until the next restart.
-      const pending = this.fencedLateResults.get(threadId) ?? [];
-      pending.push({ executionId, result });
-      this.fencedLateResults.set(threadId, pending);
-      return;
-    }
     const turn = acceptedTerminalTurn(thread.state, threadId, executionId);
     const execution = { threadId, turnId: turn.id, executionId };
     const message = exactTerminalAssistant(thread.state, execution);
@@ -1062,7 +1056,6 @@ export class CanonicalAcceptedProgress {
     const ownerId = this.ownerThreadId(threadId);
     if (ownerId !== threadId) throw new Error("Delete the owning conversation before discarding its family progress");
     this.deletingThreads.add(threadId);
-    this.fencedLateResults.delete(threadId);
     const thread = this.threads.get(ownerId);
     if (!thread) return;
     thread.commandPending = true;
@@ -1089,8 +1082,15 @@ export class CanonicalAcceptedProgress {
     for (const owner of owners) await this.discardThread(owner);
   }
 
-  /** Release the temporary admission fence after the caller's durable deletion attempt finishes. */
-  finishThreadDeletion(threadId: string): void { this.deletingThreads.delete(threadId); }
+  /**
+   * Release the temporary admission fence after the caller's durable deletion attempt finishes. Late results held
+   * by the fence go with a deleted thread; a thread that survives a failed deletion saves them.
+   */
+  finishThreadDeletion(threadId: string, deleted: boolean): void {
+    this.deletingThreads.delete(threadId);
+    if (deleted) this.fencedLateResults.delete(threadId);
+    else this.admitFencedLateResults(threadId);
+  }
 
   /** Stop admission, then write every accepted save still queued, starting no attempt at or after `attemptsUntil`. */
   async close(options: { readonly attemptsUntil?: number } = {}): Promise<void> {
@@ -1118,6 +1118,16 @@ export class CanonicalAcceptedProgress {
     if (thread.commandPending) throw new Error("Accepted progress is fenced by a durable thread command");
   }
 
+  private holdWhileFenced(threadId: string, executionId: string, result: LateToolResult): boolean {
+    if (!this.deletingThreads.has(threadId) && !this.threads.get(threadId)?.commandPending) return false;
+    // The provider sends each result once, often because the fencing command closed its session, so a
+    // refusal here would leave the call running in storage until the next restart.
+    const pending = this.fencedLateResults.get(threadId) ?? [];
+    pending.push({ executionId, result });
+    this.fencedLateResults.set(threadId, pending);
+    return true;
+  }
+
   /** Save the late results the fence held back, now that the thread admits progress again. */
   private admitFencedLateResults(threadId: string): void {
     const pending = this.fencedLateResults.get(threadId);
@@ -1127,7 +1137,8 @@ export class CanonicalAcceptedProgress {
       try {
         this.acceptLateToolResult(threadId, executionId, result);
       } catch (error) {
-        logger.error("Background tool result held by a durable command could not be saved", { threadId, executionId,
+        // The result is dropped, so its call stays running in storage until the startup sweep stops it.
+        logger.error("Background tool result held by a thread fence could not be saved", { threadId, executionId,
           toolCallId: result.toolCallId, error: error instanceof Error ? error.message : String(error) });
       }
     }

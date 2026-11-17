@@ -34,13 +34,20 @@ export class ThreadDeletionTeardownService {
   async deletePersistentData<Result>(threadIds: readonly string[], remove: () => Promise<Result>): Promise<Result> {
     const progress = this.acceptedProgress;
     if (!progress) throw new Error("Conversation deletion requires its accepted progress boundary");
+    let deleted = false;
     try {
       await progress.discardThreads(threadIds);
-      return await remove();
+      const result = await remove();
+      deleted = true;
+      return result;
     } finally {
-      for (const id of threadIds) progress.finishThreadDeletion(id);
-      for (const listener of this.deletionListeners) listener();
+      for (const id of threadIds) progress.finishThreadDeletion(id, deleted);
+      this.notifyDeletionListeners();
     }
+  }
+
+  private notifyDeletionListeners(): void {
+    for (const listener of this.deletionListeners) listener();
   }
 
   constructor(

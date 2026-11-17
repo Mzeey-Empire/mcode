@@ -2124,6 +2124,26 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(workload.count()).toBe(0);
     });
 
+    it.each([
+      ["a durable command held before the deletion", true],
+      ["the deletion itself", false],
+    ])("saves a result fenced by %s once that deletion fails", async (_fence, heldBeforeDeletion) => {
+      const workload = await holdBackgroundSubagent();
+      const result = { toolCallId: "agent", status: "cancelled", output: "Stopped with its session." } as const;
+
+      if (heldBeforeDeletion) {
+        await progress.beforeDurableCommand(execution.threadId);
+        progress.acceptLateToolResult(execution.threadId, execution.executionId, result);
+      }
+      await progress.discardThreads([execution.threadId]);
+      if (!heldBeforeDeletion) progress.acceptLateToolResult(execution.threadId, execution.executionId, result);
+      expect(agentStatus()).toEqual({ status: "running", output_summary: "" });
+      progress.finishThreadDeletion(execution.threadId, false);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+
+      expect(agentStatus()).toEqual({ status: "cancelled", output_summary: "Stopped with its session." });
+      expect(workload.count()).toBe(0);
+    });
   });
 
   it("assigns live plan, task and notice projections before storage and persists those same identities", async () => {
@@ -2277,7 +2297,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT event_id FROM canonical_agent_events WHERE event_id = ?").get(`${execution.executionId}:raw:2`)).toBeNull();
     expect(() => progress.acceptSynthesizedPublications(execution.threadId,
       [{ type: "system", threadId: execution.threadId, subtype: "late" }])).toThrow("deletion is in progress");
-    progress.finishThreadDeletion(execution.threadId);
+    progress.finishThreadDeletion(execution.threadId, true);
   });
 
   it("interrupts a fully saved family child on restart even after its parent has completed", async () => {
