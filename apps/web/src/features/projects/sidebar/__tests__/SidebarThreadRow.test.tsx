@@ -29,6 +29,7 @@ import { PREVIEW_SCROLL_SETTLE_MS } from "../preview-scroll-guard";
 import { FakeVirtualViewport } from "./fake-virtual-viewport";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useThreadStore } from "@/stores/threadStore";
+import { statusGlyph } from "@/features/thread-attention/__tests__/status-glyph";
 
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
 const PR_URL = (number: number) => `https://github.com/acme/app/pull/${number}`;
@@ -141,6 +142,26 @@ describe("SidebarThreadRow", () => {
       useThreadStore.setState({ runningThreadIds: new Set(["t1"]) });
       renderFlat();
       expect(screen.getByTestId("thread-status")).toHaveTextContent(/^Running$/);
+    });
+
+    it.each<[string, (attention: ThreadAttention) => ThreadAttention, boolean, string, string]>([
+      ["Approval required", (a) => ({ ...a, waiting: { kind: "approval", since: a.lastTurn!.endedAt } }), false, "shield-alert", "text-primary"],
+      ["Answers required", (a) => ({ ...a, waiting: { kind: "questions", since: a.lastTurn!.endedAt } }), false, "message-circle-question-mark", "text-primary"],
+      ["Plan ready", (a) => ({ ...a, waiting: { kind: "plan", since: a.lastTurn!.endedAt } }), false, "list-checks", "text-primary"],
+      ["Interrupted", (a) => ({ ...a, lastTurn: { ...a.lastTurn!, outcome: "interrupted" } }), false, "circle-pause", "text-primary"],
+      ["Failed", (a) => ({ ...a, lastTurn: { ...a.lastTurn!, outcome: "errored" } }), false, "circle-alert", "text-error"],
+      ["Finished", (a) => a, false, "circle-check", "text-success"],
+      ["Running", (a) => ({ ...a, lastTurn: null }), true, "spinner", "text-muted"],
+    ])("shows %s as its icon with the label in the icon's colour", (label, shape, running, icon, toneClass) => {
+      act(() => threadAttentionStore.getState().apply(shape(finished("t1"))));
+      if (running) useThreadStore.setState({ runningThreadIds: new Set(["t1"]) });
+      renderFlat();
+      const status = screen.getByTestId("thread-status");
+      const mark = within(status).getByRole("img", { name: label });
+      expect(statusGlyph(mark)).toBe(icon);
+      // The spinner keeps its own neutral ink; every icon shares its colour role with the label.
+      if (!running) expect(mark.querySelector("svg")).toHaveClass(toneClass);
+      expect(within(status).getByText(label)).toHaveClass(toneClass);
     });
 
     it("shows what needs the user over Running", () => {

@@ -72,6 +72,7 @@ vi.mock("@/features/projects/state/workspaceStore", () => ({
 }));
 
 import { filterAndSortRecentThreads, ThreadSearchView } from "../ThreadSearchView";
+import { statusGlyph } from "@/features/thread-attention/__tests__/status-glyph";
 
 function setupStartup(threadId: string, setup: ThreadStartup["steps"][number]["state"], block?: ThreadStartup["block"]): ThreadStartup {
   return {
@@ -148,13 +149,13 @@ describe("ThreadSearchView", () => {
       } } });
     });
     const { rerender } = render(<Command shouldFilter={false}><ThreadSearchView /></Command>);
-    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(screen.getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
 
     act(() => {
       threadAttentionStore.setState((state) => ({ byThreadId: { [thread.id]: { ...state.byThreadId[thread.id]!, waiting: null } } }));
     });
     rerender(<Command shouldFilter={false}><ThreadSearchView /></Command>);
-    expect(screen.getByRole("img", { name: "Failed" })).toHaveAttribute("data-status-mark", "error");
+    expect(statusGlyph(screen.getByRole("img", { name: "Failed" }))).toBe("circle-alert");
     expect(screen.queryByText("Errored")).not.toBeInTheDocument();
   });
 
@@ -165,7 +166,7 @@ describe("ThreadSearchView", () => {
     });
     render(<Command shouldFilter={false}><ThreadSearchView /></Command>);
 
-    expect(screen.getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(screen.getByRole("img", { name: "Setup failed" }))).toBe("circle-alert");
   });
 
   it("opens the selected thread inside its project and switches the global scope to its lifecycle", () => {

@@ -8,7 +8,6 @@ import type { ChecksStatus } from "@mcode/contracts/github";
 import { Button } from "@/components/ui/button";
 import { MoreIcon } from "@/components/ui/icon-map";
 import { Spinner } from "@/components/ui/spinner";
-import { StatusMark } from "@/components/ui/status-mark";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -18,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
+import { StatusMark } from "@/components/ui/status-mark";
 import { threadRowLook } from "@/features/thread-attention/thread-row-presentation";
 import { useRolledUpThreadRowState } from "@/features/thread-attention/thread-rollup";
 import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
@@ -352,11 +352,11 @@ function ProjectGitStatus({ isGitRepository }: { isGitRepository: boolean }) {
 }
 
 function ProjectCollapsedStatus({ status }: { status: ThreadRowState }) {
-  const { mark } = threadRowLook(status);
-  if (!mark) return null;
+  const look = threadRowLook(status);
+  if (!look) return null;
   return (
     <span className="flex shrink-0 transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none">
-      <StatusMark state={mark.state} label={mark.label} />
+      <StatusMark state={look.state} label={look.label} icon={look.icon} />
     </span>
   );
 }

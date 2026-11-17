@@ -1,34 +1,58 @@
 import type { ThreadStartup } from "@mcode/contracts/thread-startup";
+import { CircleAlert, CircleCheck, CirclePause, ListChecks, MessageCircleQuestion, ShieldAlert, type LucideIcon } from "lucide-react";
 import type { StatusMarkState } from "@/components/ui/status-mark";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { startupDecision } from "@/features/thread-startup/startup-step-copy";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { threadAttentionStore } from "./thread-attention-store";
-import { deriveThreadRowState, type ThreadRowSetup, type ThreadRowState } from "./thread-row-state";
+import { deriveThreadRowState, type NeedsYouLabel, type ThreadRowSetup, type ThreadRowState } from "./thread-row-state";
 
-/** How a row state renders: its status lane mark and, when it has one, its third-line label. */
-export interface ThreadRowLook {
-  mark: { state: StatusMarkState; label: string } | null;
-  label: { text: string; className: string } | null;
+/** Every label a thread's status corner can show; "Closed" is the brief state while a close is in flight. */
+export type ThreadStatusLabel = NeedsYouLabel | "Running" | "Failed" | "Finished" | "Closed";
+
+/** How a status renders: the mark's state (which sets the colour role), its icon, and the label set beside it. */
+export interface ThreadStatusLook {
+  label: ThreadStatusLabel;
+  state: StatusMarkState;
+  icon: LucideIcon | undefined;
 }
 
-/** Maps a row state to its status mark and corner label. */
+/** A row state's look, or null for a quiet row, which shows its relative time instead. */
+export type ThreadRowLook = ThreadStatusLook | null;
+
+const look = (label: ThreadStatusLabel, state: StatusMarkState, icon?: LucideIcon): ThreadStatusLook => ({ label, state, icon });
+
+/**
+ * One entry per label, so rows, roll-ups and the palette cannot disagree on a status's look.
+ * "Setup failed" asks the user to decide, but it is a failure, so it reads as one. Running keeps
+ * the mark's spinner, so it has no icon.
+ */
+export const THREAD_STATUS_LOOK: Record<ThreadStatusLabel, ThreadStatusLook> = {
+  "Approval required": look("Approval required", "attention", ShieldAlert),
+  "Answers required": look("Answers required", "attention", MessageCircleQuestion),
+  "Plan ready": look("Plan ready", "attention", ListChecks),
+  Interrupted: look("Interrupted", "attention", CirclePause),
+  "Setup failed": look("Setup failed", "error", CircleAlert),
+  Running: look("Running", "running"),
+  Failed: look("Failed", "error", CircleAlert),
+  Finished: look("Finished", "success", CircleCheck),
+  Closed: look("Closed", "success", CircleCheck),
+};
+
+/** Maps a row state to its status look; a quiet row has none. */
 export function threadRowLook(state: ThreadRowState): ThreadRowLook {
   switch (state.kind) {
     case "needs-you":
-      return {
-        mark: { state: "attention", label: state.label },
-        label: { text: state.label, className: "text-primary" },
-      };
+      return THREAD_STATUS_LOOK[state.label];
     case "running":
-      return { mark: { state: "running", label: "Running" }, label: { text: "Running", className: "text-muted" } };
+      return THREAD_STATUS_LOOK.Running;
     case "failed":
-      return { mark: { state: "error", label: "Failed" }, label: { text: "Failed", className: "text-error" } };
+      return THREAD_STATUS_LOOK.Failed;
     case "finished":
-      return { mark: { state: "success", label: "Finished" }, label: { text: "Finished", className: "text-success" } };
+      return THREAD_STATUS_LOOK.Finished;
     case "quiet":
-      return { mark: null, label: null };
+      return null;
   }
 }
 

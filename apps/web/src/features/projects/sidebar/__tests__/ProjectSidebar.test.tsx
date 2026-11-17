@@ -199,6 +199,7 @@ import { threadAttentionStore } from "@/features/thread-attention/thread-attenti
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { FakeVirtualViewport } from "./fake-virtual-viewport";
+import { statusGlyph } from "@/features/thread-attention/__tests__/status-glyph";
 
 const publishedRowIdHistory = FakeVirtualViewport.published;
 
@@ -1374,7 +1375,7 @@ describe("ProjectSidebar action-required indicator", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(screen.getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
     expect(screen.getByText("Approval required")).toBeInTheDocument();
   });
 
@@ -1389,7 +1390,7 @@ describe("ProjectSidebar action-required indicator", () => {
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(screen.getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
     expect(screen.queryByRole("img", { name: "Running" })).toBeNull();
   });
 
@@ -1401,7 +1402,7 @@ describe("ProjectSidebar action-required indicator", () => {
     render(<ProjectSidebar />);
 
     expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeInTheDocument();
-    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
+    expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" }))).toBe("spinner");
     expect(screen.queryByRole("button", { name: "Close My Thread" })).toBeNull();
   });
 
@@ -1419,7 +1420,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
     render(<ProjectSidebar />);
 
-    expect(await screen.findByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
+    expect(statusGlyph(await screen.findByRole("img", { name: "Running" }))).toBe("spinner");
   });
 
   it("shows Setup failed for a startup stopped on setup, loaded when the sidebar connects", async () => {
@@ -1429,7 +1430,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
     render(<ProjectSidebar />);
 
-    expect(await screen.findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(await screen.findByRole("img", { name: "Setup failed" }))).toBe("circle-alert");
     expect(screen.queryByRole("img", { name: "Running" })).not.toBeInTheDocument();
   });
 
@@ -1438,18 +1439,18 @@ describe("ProjectSidebar action-required indicator", () => {
     installWorkspaceMock();
     render(<ProjectSidebar />);
 
-    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
+    expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" }))).toBe("spinner");
   });
 
   it.each([
-    ["completed", "Finished", "success"],
-    ["errored", "Failed", "error"],
-    ["interrupted", "Interrupted", "attention"],
-  ] as const)("marks an unseen %s turn as %s", (outcome, label, markState) => {
+    ["completed", "Finished", "circle-check"],
+    ["errored", "Failed", "circle-alert"],
+    ["interrupted", "Interrupted", "circle-pause"],
+  ] as const)("marks an unseen %s turn as %s", (outcome, label, icon) => {
     applyAttention(attention("thread-pending", endedTurn(outcome)));
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("img", { name: label })).toHaveAttribute("data-status-mark", markState);
+    expect(statusGlyph(screen.getByRole("img", { name: label }))).toBe(icon);
     expect(screen.getByText(label)).toBeVisible();
     expect(screen.queryByText("Errored")).not.toBeInTheDocument();
   });
@@ -1516,7 +1517,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
       const ownerRow = screen.getByRole("button", { name: /^Provider, Claude Thread A/ });
       const targetRow = screen.getByRole("button", { name: /^Provider, Claude Thread B/ });
-      expect(within(ownerRow).getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+      expect(statusGlyph(within(ownerRow).getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
       expect(within(targetRow).getByTestId("thread-status")).toBeEmptyDOMElement();
     } finally {
       stopPushListeners();
@@ -1532,7 +1533,7 @@ describe("ProjectSidebar action-required indicator", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
     render(<ProjectSidebar />);
 
-    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
     expect(screen.getByTestId("thread-pr-indicator-thread-pending")).toHaveAccessibleName("PR #42, open");
   });
 
@@ -1556,7 +1557,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
       applyAttention(attention("thread-wait", waitingOn("questions")));
 
-      expect(within(projectRow).getByRole("img", { name: "Answers required" })).toHaveAttribute("data-status-mark", "attention");
+      expect(statusGlyph(within(projectRow).getByRole("img", { name: "Answers required" }))).toBe("message-circle-question-mark");
       expect(projectRow.querySelectorAll("[data-status-mark]")).toHaveLength(1);
     });
 
@@ -1582,7 +1583,7 @@ describe("ProjectSidebar action-required indicator", () => {
       installWorkspaceMock();
       render(<ProjectSidebar />);
 
-      expect(await within(screen.getByTestId("project-row-ws-1")).findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+      expect(statusGlyph(await within(screen.getByTestId("project-row-ws-1")).findByRole("img", { name: "Setup failed" }))).toBe("circle-alert");
     });
 
     it("keeps a setup that settles after its project collapses current", async () => {
@@ -1596,7 +1597,7 @@ describe("ProjectSidebar action-required indicator", () => {
       fireEvent.click(screen.getByRole("button", { name: "Toggle threads for Test" }));
       act(() => useThreadStartupStore.getState().apply(setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)));
 
-      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+      expect(statusGlyph(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" }))).toBe("circle-alert");
     });
 
     it("leaves the mark to the rows once expanded", () => {

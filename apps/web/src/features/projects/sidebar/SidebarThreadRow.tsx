@@ -8,10 +8,10 @@ import { ProviderIcon, ProviderIconStack, providerLabel } from "@/components/ui/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { StatusMark } from "@/components/ui/status-mark";
 import { cancelPrefetch, prefetchOnPointerDown, schedulePrefetch } from "@/features/conversation";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
-import { threadRowLook, threadTitleTone, useThreadRowState, type ThreadRowLook, type ThreadTitleTone } from "@/features/thread-attention/thread-row-presentation";
+import { STATUS_MARK_TEXT_CLASS, StatusMark } from "@/components/ui/status-mark";
+import { THREAD_STATUS_LOOK, threadRowLook, threadTitleTone, useThreadRowState, type ThreadRowLook, type ThreadStatusLook, type ThreadTitleTone } from "@/features/thread-attention/thread-row-presentation";
 import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
 import { isPrable } from "@/lib/is-prable";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
@@ -732,24 +732,21 @@ function ThreadRowStatus({ thread, presentation, lifecycle, fallback }: Pick<Thr
   if (presentation.completionFailure !== null) {
     return <ThreadRowCaption role="status" className="text-error">{presentation.completionFailure}</ThreadRowCaption>;
   }
-  if (presentation.completing) {
-    return (
-      <>
-        <StatusMark state="success" label="Closed" />
-        <ThreadRowCaption className="text-success">Closed</ThreadRowCaption>
-      </>
-    );
-  }
-  const { mark, label } = presentation.look;
-  if (!mark && !label) {
+  const look = presentation.completing ? THREAD_STATUS_LOOK.Closed : presentation.look;
+  if (!look) {
     return hasStandingCaption(presentation, lifecycle)
       ? <ThreadRowStandingCaption thread={thread} presentation={presentation} lifecycle={lifecycle} />
       : fallback;
   }
+  return <ThreadRowLookStatus look={look} />;
+}
+
+/** Icon then label in the icon's colour; the icon carries the name, so the label is hidden from assistive tech. */
+function ThreadRowLookStatus({ look }: { look: ThreadStatusLook }) {
   return (
     <>
-      {mark && <StatusMark state={mark.state} label={mark.label} />}
-      {label && <ThreadRowCaption className={label.className}>{label.text}</ThreadRowCaption>}
+      <StatusMark state={look.state} label={look.label} icon={look.icon} />
+      <ThreadRowCaption aria-hidden className={cn("font-medium", STATUS_MARK_TEXT_CLASS[look.state])}>{look.label}</ThreadRowCaption>
     </>
   );
 }
