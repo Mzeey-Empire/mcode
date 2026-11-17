@@ -145,12 +145,33 @@ describe("PanelTabStrip overflow", () => {
     expect(shownTabs()).toEqual(["2 · pwsh"]);
     expect(toolName()).not.toBeVisible();
     const activeTab = screen.getByRole("tab", { name: "2 · pwsh" }).parentElement!;
-    await userEvent.click(within(activeTab).getByRole("button", { name: "All terminals, 1 more" }));
+    const trigger = within(activeTab).getByRole("button", { name: "All terminals, 1 more" });
+    expect(trigger).toHaveTextContent("1");
+    await userEvent.click(trigger);
     const rows = await screen.findAllByRole("menuitemradio");
     expect(rows.map((row) => row.textContent)).toEqual(["1 · pwsh", "2 · pwsh"]);
     await userEvent.click(rows[0]!);
     expect(onSelect).toHaveBeenCalledWith("1");
     expect(screen.getByRole("button", { name: "New terminal" })).toBeTruthy();
+  });
+
+  it("counts the hidden tabs on the active tab's menu button, so two and five tabs read differently", () => {
+    stubLayout(DEFAULT_WINDOW);
+    render(
+      <PanelTabStrip
+        items={FIVE}
+        activeId="3"
+        label="Terminals"
+        addLabel="New terminal"
+        tool={{ icon: null, name: "Terminal" }}
+        onSelect={() => {}}
+        onClose={() => {}}
+        onAdd={() => {}}
+      />,
+    );
+    expect(shownTabs()).toEqual(["3 · pwsh"]);
+    const activeTab = screen.getByRole("tab", { name: "3 · pwsh" }).parentElement!;
+    expect(within(activeTab).getByRole("button", { name: "All terminals, 4 more" })).toHaveTextContent("4");
   });
 
   it("keeps the tool name beside the active tab when only the menu button is short of room", () => {
