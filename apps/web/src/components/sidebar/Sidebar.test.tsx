@@ -40,7 +40,7 @@ vi.mock("./UpdateButton", () => ({
 }));
 
 import { Sidebar } from "./Sidebar";
-import { loadKeybindings } from "@/lib/keybinding-manager";
+import { clearKeybindings, loadKeybindings } from "@/lib/keybinding-manager";
 import defaultKeybindings from "@/config/default-keybindings.json";
 import { useSidebarWidthStore } from "./sidebarWidthStore";
 
@@ -110,6 +110,17 @@ describe("Sidebar", () => {
     render(<Sidebar onOpenSettings={vi.fn()} />);
 
     expect(screen.getByRole("button", { name })).toHaveAttribute("aria-keyshortcuts", shortcut);
+  });
+
+  it("exposes the shortcuts once bindings load after the sidebar's first render", () => {
+    // The App loads bindings in an effect, so the sidebar renders before any exist.
+    clearKeybindings();
+    render(<Sidebar onOpenSettings={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "New thread" })).not.toHaveAttribute("aria-keyshortcuts");
+
+    act(() => loadKeybindings(defaultKeybindings));
+
+    expect(screen.getByRole("button", { name: "New thread" })).toHaveAttribute("aria-keyshortcuts", "Control+N");
   });
 
   it("has no text navigation buttons above the projects", () => {

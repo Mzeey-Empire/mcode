@@ -23,6 +23,22 @@ export interface ParsedKeybinding {
 let keybindings: Keybinding[] = [];
 /** Pre-parsed cache, rebuilt whenever keybindings are loaded. */
 let parsedCache: ParsedKeybinding[] = [];
+const listeners = new Set<() => void>();
+
+/**
+ * Calls `listener` whenever the bindings change. Bindings load in an App effect after the first
+ * render, so anything that renders a binding must subscribe or it shows none until it re-renders.
+ */
+export function subscribeKeybindings(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function setKeybindings(next: Keybinding[]): void {
+  keybindings = next;
+  parsedCache = keybindings.map((b) => parseKeybinding(b.key));
+  for (const listener of listeners) listener();
+}
 
 /**
  * Parse a keybinding string like "mod+shift+k" into its components.
@@ -78,8 +94,7 @@ export function loadKeybindings(
   userOverrides?: Keybinding[],
 ): void {
   if (!userOverrides || userOverrides.length === 0) {
-    keybindings = [...defaults];
-    parsedCache = keybindings.map((b) => parseKeybinding(b.key));
+    setKeybindings([...defaults]);
     return;
   }
 
@@ -112,8 +127,7 @@ export function loadKeybindings(
     merged.push(binding);
   }
 
-  keybindings = merged;
-  parsedCache = keybindings.map((b) => parseKeybinding(b.key));
+  setKeybindings(merged);
 }
 
 /** Get all active keybindings. */
@@ -183,6 +197,5 @@ export function formatKeybinding(key: string, isMac: boolean): string {
 
 /** Remove all keybindings (for testing). */
 export function clearKeybindings(): void {
-  keybindings = [];
-  parsedCache = [];
+  setKeybindings([]);
 }
