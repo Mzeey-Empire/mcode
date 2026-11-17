@@ -7,6 +7,7 @@ import { useActiveWorkspaceThread, useParentThreadExists } from "@/features/proj
 import { hasResidentContent } from "../../hydration/resident-content";
 import { getConversationResidency } from "../../residency/conversation-residency";
 import { useActiveThreadRecord, useThreadRecord } from "../../state";
+import { latestForkableAgentMessageId } from "../virtual-items";
 import { useOutgoingTranscriptHold } from "./useOutgoingTranscriptHold";
 import { keepThreadAlive, NO_KEPT_ALIVE_THREADS } from "./kept-alive-threads";
 
@@ -99,6 +100,13 @@ export function useChatViewState() {
   const connectionStatus = useConnectionStore((state) => state.status);
   const isAgentRunning = useThreadStore((state) =>
     activeThreadId ? isThreadExecuting(activeThreadId, state) : false);
+  // Selects a string, not the messages, so the header does not rerender on every streamed token.
+  const forkableAgentMessageId = useThreadStore((state) => {
+    const record = activeThreadId ? state.records.get(activeThreadId) : undefined;
+    if (!record || !activeThreadId) return null;
+    const liveResponseMessageId = isThreadExecuting(activeThreadId, state) ? record.currentTurnMessageId || null : null;
+    return latestForkableAgentMessageId(record.messages, liveResponseMessageId);
+  });
   // A resident target record (kept-alive or previously hydrated) can paint
   // immediately; gating on the hydration commit would hide already-rendered
   // content behind the transition shell on every warm switch.
@@ -134,6 +142,7 @@ export function useChatViewState() {
     connectionStatus,
     desiredThreadIds,
     displayHoldThreadId,
+    forkableAgentMessageId,
     historyLoading,
     hydratedThreadId,
     isAgentRunning,

@@ -554,6 +554,65 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.getByTestId("chat-header-title-input")).toBeInTheDocument();
   });
 
+  it("opens the thread menu with Fork thread and the sidebar's actions on a title click", async () => {
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+
+    const menu = await screen.findByRole("menu");
+    for (const name of ["Fork thread", "Rename", "Copy Path", "Copy Thread ID", "Delete"]) {
+      expect(within(menu).getByRole("menuitem", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("renames on double-click without leaving the thread menu open", async () => {
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.dblClick(screen.getByTestId("chat-header-title"));
+
+    expect(screen.getByTestId("chat-header-title-input")).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("forks the thread from its latest finished agent reply, quoting its first line", async () => {
+    const record = {
+      ...createEmptyThreadRecord(),
+      messages: [
+        createMockMessage({ id: "ask", thread_id: "thread-1", role: "user", content: "Plan it" }),
+        createMockMessage({ id: "older-answer", thread_id: "thread-1", role: "assistant", content: "Old plan" }),
+        createMockMessage({ id: "answer", thread_id: "thread-1", role: "assistant", content: "\n  Here is the plan.\nStep one" }),
+      ],
+    };
+    const threadState = defaultThreadState({ activeRecord: record, records: new Map([["thread-1", record]]) });
+    chatViewThreadMockRef.current = threadState;
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+    await user.click(await screen.findByRole("menuitem", { name: "Fork thread" }));
+
+    expect(threadState.setForkMode).toHaveBeenCalledWith("thread-1", { messageId: "answer", content: "Here is the plan." });
+  });
+
+  it("disables Fork thread while the thread has no agent reply", async () => {
+    const record = {
+      ...createEmptyThreadRecord(),
+      messages: [createMockMessage({ id: "ask", thread_id: "thread-1", role: "user", content: "Plan it" })],
+    };
+    const threadState = defaultThreadState({ activeRecord: record, records: new Map([["thread-1", record]]) });
+    chatViewThreadMockRef.current = threadState;
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+    const fork = await screen.findByRole("menuitem", { name: "Fork thread" });
+    expect(fork).toHaveAttribute("aria-disabled", "true");
+    await user.click(fork);
+    expect(threadState.setForkMode).not.toHaveBeenCalled();
+  });
+
   it("saves new title on Enter key", async () => {
     const updateThreadTitle = vi.fn().mockResolvedValue(undefined);
     setupWorkspaceMock(defaultWorkspaceState({ updateThreadTitle }));

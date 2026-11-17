@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type Ref, type RefObject } from "react";
-import { GitFork } from "lucide-react";
+import { ChevronDown, GitFork } from "lucide-react";
 import type { Message } from "@mcode/contracts/models/message";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { ThreadStartup, ThreadStartupKind } from "@mcode/contracts/thread-startup";
@@ -29,6 +29,9 @@ import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStar
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
+import { ThreadDeleteDialog, useThreadDeletion } from "@/features/projects/sidebar/thread-deletion";
+import { ThreadOptionsMenu, type ThreadMenuActions } from "@/features/projects/sidebar/thread-menu";
+import type { ContextMenuItem } from "@/components/ui/context-menu";
 import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
 import type { ComposerStartingThread } from "../../composer/useComposerStartup";
@@ -317,6 +320,8 @@ interface ThreadHeaderRename {
   readonly editingThreadId: string | null;
   readonly onEditingThreadIdChange: (threadId: string | null) => void;
   readonly onSaveTitle: (title: string) => void;
+  /** Forks from an agent message, as the message's own Fork button does. */
+  readonly onBranch: (messageId: string) => void;
 }
 
 /** Renders the thread header for both surface variants; the preparing variant omits `rename` and `paneWidth` and passes its own `actions`. */
@@ -327,10 +332,7 @@ function ThreadHeader({ state, rename, paneWidth, actions }: { state: ChatViewSt
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <CanvasBreadcrumb projectName={state.activeWorkspaceName || undefined} workspaceId={thread.workspace_id}>
           {rename ? (
-            // Double-click renames, so the title must not hand the gesture to the window.
-            <div data-testid="chat-header-title" onDoubleClick={() => rename.onEditingThreadIdChange(thread.id)} className="window-no-drag flex min-w-0 cursor-text">
-              <ThreadTitleEditor title={thread.title} isEditing={rename.editingThreadId === thread.id} onSave={rename.onSaveTitle} onCancel={() => rename.onEditingThreadIdChange(null)} />
-            </div>
+            <ThreadHeaderTitle thread={thread} rename={rename} forkableAgentMessageId={state.forkableAgentMessageId} />
           ) : (
             <span data-testid="chat-header-title" className="text-fade text-label text-ink">{thread.title}</span>
           )}
@@ -344,6 +346,77 @@ function ThreadHeader({ state, rename, paneWidth, actions }: { state: ChatViewSt
       </div>
       {paneWidth !== undefined ? <HeaderActions thread={thread} threadPaneWidth={paneWidth} /> : actions}
     </CanvasHeader>
+  );
+}
+
+const NO_FORKABLE_REPLY = "No finished agent reply to fork from yet";
+
+/**
+ * A durable thread's title. A click opens the thread menu at once; a double-click renames in place.
+ * The editor renders outside the menu trigger, so typing in it never opens the menu, and swapping
+ * the trigger out also drops the menu the double-click's first click opened.
+ */
+function ThreadHeaderTitle({ thread, rename, forkableAgentMessageId }: { thread: WorkspaceThread; rename: ThreadHeaderRename; forkableAgentMessageId: string | null }) {
+  const workspacePath = useWorkspaceStore((s) => s.workspaces.find((workspace) => workspace.id === thread.workspace_id)?.path ?? "");
+  const deletion = useThreadDeletion();
+  const { onEditingThreadIdChange, onBranch } = rename;
+  const openDeletion = deletion.open;
+  const actions = useMemo<ThreadMenuActions>(() => ({
+    onRename: (target) => onEditingThreadIdChange(target.threadId),
+    onDelete: (target) => openDeletion({ threadId: target.threadId, threadTitle: target.threadTitle, worktreePath: target.worktreePath }),
+  }), [onEditingThreadIdChange, openDeletion]);
+  const leadingItems = useMemo<readonly ContextMenuItem[]>(() => [
+    {
+      label: "Fork thread",
+      icon: <GitFork />,
+      disabledReason: forkableAgentMessageId === null ? NO_FORKABLE_REPLY : null,
+      onClick: () => { if (forkableAgentMessageId !== null) onBranch(forkableAgentMessageId); },
+    },
+    { label: "", onClick: () => {}, divider: true },
+  ], [forkableAgentMessageId, onBranch]);
+  const target = { threadId: thread.id, threadTitle: thread.title, workspacePath, worktreePath: thread.worktree_path ?? null };
+  const dialog = (
+    <ThreadDeleteDialog
+      dialog={deletion.dialog}
+      deleteWorktree={deletion.deleteWorktree}
+      isDeleting={deletion.isDeleting}
+      onDeleteWorktreeChange={deletion.setDeleteWorktree}
+      onClose={deletion.close}
+      onConfirm={deletion.confirm}
+    />
+  );
+  if (rename.editingThreadId === thread.id) {
+    return (
+      <>
+        <div className="window-no-drag flex min-w-0">
+          <ThreadTitleEditor title={thread.title} isEditing onSave={rename.onSaveTitle} onCancel={() => onEditingThreadIdChange(null)} />
+        </div>
+        {dialog}
+      </>
+    );
+  }
+  return (
+    <>
+      <ThreadOptionsMenu
+        target={target}
+        actions={actions}
+        leadingItems={leadingItems}
+        align="start"
+        trigger={
+          // The title takes clicks, so it must not hand the gesture to the window.
+          <button
+            type="button"
+            data-testid="chat-header-title"
+            onDoubleClick={() => onEditingThreadIdChange(thread.id)}
+            className="window-no-drag -mx-1 flex min-w-0 items-center gap-1 rounded-sm px-1 outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <span className="text-fade text-label text-ink">{thread.title}</span>
+            <ChevronDown size={12} className="shrink-0 text-muted" aria-hidden />
+          </button>
+        }
+      />
+      {dialog}
+    </>
   );
 }
 
@@ -643,7 +716,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
         {/* The transcript fills the pane and scrolls under both chrome blocks. The top block takes the
             sticky layer so it paints over the transcript that follows it in the DOM. */}
         <div ref={topChromeRef} className="relative z-(--layer-sticky)">
-          <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} paneWidth={paneWidth} />
+          <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle, onBranch: interactions.onBranch }} paneWidth={paneWidth} />
           <ActiveThreadBanners state={state} />
           {showConversationLoadError ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">Could not refresh conversation: {state.sessionError}</p></div> : null}
           <TurnSavingNotice lostProgress={state.lostProgress} />
