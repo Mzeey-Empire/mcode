@@ -89,7 +89,9 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
 
 vi.mock("@mcode/shared", () => ({
   logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+  isKnownClaudeModelId: vi.fn(() => true),
   normalizeReasoningLevelForModel: vi.fn((_modelId: string, level: string) => level),
+  reasoningLevelAtOrBelow: vi.fn((level: string) => level),
   supportsEffortParameter: vi.fn(() => true),
   supportsThinkingToggle: vi.fn(() => false),
 }));

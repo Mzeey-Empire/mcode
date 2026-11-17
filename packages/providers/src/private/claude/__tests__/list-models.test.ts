@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { query, type ModelInfo, type SDKControlInitializeResponse } from "@anthropic-ai/claude-agent-sdk";
 import { logger } from "@mcode/shared";
 import { CLAUDE_STATIC_MODELS } from "@mcode/contracts/providers/claude-static-fallback";
-import { listClaudeModels as discoverModels, resetModelCache } from "../list-models.js";
+import { discoveredClaudeEfforts, listClaudeModels as discoverModels, resetModelCache } from "../list-models.js";
 import { ClaudeOwnedProcess } from "../claude-process.js";
 import { mockShutdownHost } from "./helpers/mock-shutdown-host.js";
 import * as NodeOS from "node:os";
@@ -75,6 +75,18 @@ describe("listClaudeModels", () => {
       ...CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"),
       supportsReasoning: false, supportedReasoningEfforts: [], defaultReasoningEffort: undefined,
     });
+  });
+
+  it("exposes the reported efforts for sends only after a successful discovery for that executable", async () => {
+    expect(discoveredClaudeEfforts("/installed/claude", "claude-sonnet-6")).toBeUndefined();
+    initialize.mockResolvedValue({ models: [
+      ...reported,
+      { value: "claude-opus-5", displayName: "Opus", description: "", supportsEffort: false },
+    ] });
+    await listClaudeModels(resolveOptions);
+    expect(discoveredClaudeEfforts("/installed/claude", "claude-sonnet-6")).toEqual(["low", "high"]);
+    expect(discoveredClaudeEfforts("/installed/claude", "claude-opus-5-20261117")).toEqual([]);
+    expect(discoveredClaudeEfforts("/other/claude", "claude-sonnet-6")).toBeUndefined();
   });
 
   it("keeps catalog efforts when Claude Code reports none for a known model", async () => {

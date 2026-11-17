@@ -2,6 +2,7 @@ import { query, type ModelInfo, type Options, type SDKUserMessage } from "@anthr
 import { logger } from "@mcode/shared";
 import { CLAUDE_STATIC_MODELS, withClaudeLifecycle } from "@mcode/contracts/providers/claude-static-fallback";
 import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import * as NodeOS from "node:os";
 import type { ClaudeOwnedProcess } from "./claude-process.js";
 
@@ -114,6 +115,17 @@ async function fetchModels(options: ProbeOptions, createProcess: () => ClaudeOwn
     logFailure(error);
     return lastGood.get(options.pathToClaudeCodeExecutable) ?? [...CLAUDE_STATIC_MODELS];
   }
+}
+
+/**
+ * Effort levels the last successful discovery reported for a model, or undefined before any discovery. Reads only
+ * memory, so a send never waits on a probe. An empty list means the model takes no effort.
+ */
+export function discoveredClaudeEfforts(executable: string | undefined, modelId: string): readonly ReasoningLevel[] | undefined {
+  const models = lastGood.get(executable);
+  const model = models?.find((entry) => entry.id === modelId) ?? models?.find((entry) => entry.id === modelId.replace(/-\d{8}$/, ""));
+  if (!model) return undefined;
+  return model.supportsReasoning === false ? [] : model.supportedReasoningEfforts ?? [];
 }
 
 /** Clear discovery state between tests; production refreshes through the five-minute TTL. */

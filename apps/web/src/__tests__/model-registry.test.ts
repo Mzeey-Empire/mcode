@@ -584,7 +584,7 @@ describe("normalizeReasoningLevel", () => {
       expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "max")).toBe("high");
       expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "medium")).toBe("low");
       expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "high")).toBe("high");
-      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "none")).toBe("none");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "none")).toBe("low");
       for (const provider of ["copilot", "cursor"]) {
         expect(normalizeReasoningLevel(provider, "claude-sonnet-6", "max")).toBe("high");
         expect(normalizeReasoningLevel(provider, "claude-sonnet-4-6-v2", "xhigh")).toBe("high");
@@ -593,6 +593,20 @@ describe("normalizeReasoningLevel", () => {
       registerProviderModels("claude", []);
     }
   });
+
+  it("holds known Claude models to the levels Claude Code reported", () => {
+    registerProviderModels("claude", [
+      { id: "claude-opus-5", label: "Opus 5", providerId: "claude", supportedReasoningLevels: ["low", "medium"] },
+      { id: "claude-sonnet-7", label: "Sonnet 7", providerId: "claude", supportedReasoningLevels: ["high"] },
+    ]);
+    try {
+      expect(normalizeReasoningLevel("claude", "claude-opus-5", "high")).toBe("medium");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-7", "low")).toBe("high");
+    } finally {
+      registerProviderModels("claude", []);
+    }
+  });
+
   it("keeps max for the Devin swe-2 family instead of snapping to high", () => {
     expect(normalizeReasoningLevel("devin", "swe-2", "max")).toBe("max");
   });

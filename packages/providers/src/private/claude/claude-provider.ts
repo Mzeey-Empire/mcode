@@ -46,7 +46,7 @@ import type { ProviderBillingMode, ProviderUsageInfo, QuotaCategory } from "@mco
 import type { ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, ApprovalRequestBody } from "@mcode/contracts/models/approval";
 import type { NativePlanFileOutcome } from "@mcode/contracts/models/plan";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
-import { listClaudeModels } from "./list-models.js";
+import { discoveredClaudeEfforts, listClaudeModels } from "./list-models.js";
 import { resolveSdkModelSlug } from "./resolve-slug.js";
 import { resolveAutoCompactWindow } from "./context-window.js";
 import { readAnthropicOauthToken } from "@mcode/shared/usage";
@@ -852,11 +852,12 @@ export class ClaudeProvider
       const queue = createPromptQueue();
       const ephemeralId = `complete-${crypto.randomUUID()}`;
 
+      const executable = this.resolveClaudeExecutable();
       const q = sdkQuery({
         prompt: queue.iterable,
         options: {
           env: { ...this.host.environment.snapshot() },
-          pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
+          pathToClaudeCodeExecutable: executable,
           spawnClaudeCodeProcess: ownedProcess.spawn,
           cwd,
           model,
@@ -868,7 +869,7 @@ export class ClaudeProvider
           permissionMode: "default" as const,
           persistSession: false,
           includePartialMessages: true,
-          ...buildReasoningOptions(options.reasoningLevel, model),
+          ...buildReasoningOptions(options.reasoningLevel, model, undefined, discoveredClaudeEfforts(executable, model)),
         },
       });
 
@@ -1437,6 +1438,7 @@ export class ClaudeProvider
         context.params.reasoningLevel,
         context.model,
         context.params.thinking,
+        discoveredClaudeEfforts(this.resolveClaudeExecutable(), context.model),
       ),
       ...(context.params.fallbackModel && {
         fallbackModel: context.params.fallbackModel,

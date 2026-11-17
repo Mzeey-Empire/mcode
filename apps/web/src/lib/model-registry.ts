@@ -422,11 +422,20 @@ export function normalizeReasoningLevel(
   modelId: string,
   level: ReasoningLevel,
 ): ReasoningLevel {
-  if (provider === "claude" && !isKnownClaudeModelId(modelId)) {
-    return reasoningLevelAtOrBelow(level, getReasoningLevels(provider, modelId)) ?? level;
-  }
+  if (provider === "claude") return normalizeClaudeReasoningLevel(modelId, level);
   if (provider === "devin") return normalizeDevinReasoningLevel(modelId, level);
   return normalizeReasoningLevelForModel(modelId, level);
+}
+
+/**
+ * The levels Claude Code reported for the model decide, matching what the provider sends. A saved level it does not
+ * offer moves to the nearest lower one, or the lowest it offers. Unknown models without a report keep the level.
+ */
+function normalizeClaudeReasoningLevel(modelId: string, level: ReasoningLevel): ReasoningLevel {
+  const requested = isKnownClaudeModelId(modelId) ? normalizeReasoningLevelForModel(modelId, level) : level;
+  const levels = getReasoningLevels("claude", modelId);
+  if (levels.length === 0) return requested;
+  return reasoningLevelAtOrBelow(requested, levels) ?? levels[0] ?? requested;
 }
 
 function normalizeDevinReasoningLevel(modelId: string, level: ReasoningLevel): ReasoningLevel {
