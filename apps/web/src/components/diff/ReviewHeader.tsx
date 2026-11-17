@@ -75,8 +75,10 @@ export function ReviewHeader(props: ReviewHeaderProps) {
         <PanelToolGlyph>
           <Diff />
         </PanelToolGlyph>
-        {/* Named like Terminal and Browser, so the picker after it holds only the view and reads as one. */}
-        <span data-panel-tool-name className="shrink-0 pr-1 text-sm/5 font-medium text-ink">
+        {/* Named like Terminal and Browser, so the picker after it holds only the view and reads as one. The name
+            goes first when the row is short, because the view and its stat are the facts: glyph 32 + name 54 +
+            "Since you looked" picker 158 + "10 files +100 -100" 128 + three 8px gaps = 396px, so 400px. */}
+        <span data-panel-tool-name className="shrink-0 pr-1 text-sm/5 font-medium text-ink @max-[400px]/panel-title:hidden">
           Review
         </span>
         <ReviewViewMenu selection={selection} />
@@ -240,7 +242,7 @@ function ReviewViewMenu({ selection }: { readonly selection: ReviewViewSelection
         // The same 32px pill as the other tools' row-1 titles, with the subtle button's hover and open fills.
         className="flex h-8 min-w-0 items-center gap-2 whitespace-nowrap rounded-control bg-selected px-3 text-sm font-medium text-ink hover:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] aria-expanded:bg-control-border"
       >
-        {/* At the panel's minimum width the label fades rather than pushing the picker under Maximize. */}
+        {/* The stat summary never shrinks, so the label fades only once the picker and the summary alone do not fit. */}
         <span className="text-fade">{reviewViewById(viewMode).label}</span>
         <ChevronDown size={14} aria-hidden className="shrink-0 text-muted" />
       </DropdownMenuTrigger>
@@ -295,7 +297,7 @@ function ReviewStatSummary({ comparison }: { readonly comparison: ReviewComparis
   return (
     <span
       data-testid="review-stat-summary"
-      className="text-fade flex items-center gap-1.5 font-mono text-caption tabular-nums text-muted"
+      className="flex shrink-0 items-center gap-1.5 whitespace-nowrap font-mono text-caption tabular-nums text-muted"
     >
       {fileCount} {fileCount === 1 ? "file" : "files"}
       <DiffStat additions={comparison.additions} deletions={comparison.deletions} />
