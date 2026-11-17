@@ -20,9 +20,9 @@ describe("TurnRequest providerOptions discrimination", () => {
       permissionMode: "full",
       approvalReviewMode: "manual",
       interactionMode: "build",
-      providerOptions: { contextWindowMode: "1m", thinking: true },
+      providerOptions: { thinking: true },
     };
-    expect(req.providerOptions.contextWindowMode).toBe("1m");
+    expect(req.providerOptions.thinking).toBe(true);
   });
 
   it("requires an empty bag for knob-less providers", () => {

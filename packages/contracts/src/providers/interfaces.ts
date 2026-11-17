@@ -11,7 +11,7 @@ import type {
   ApprovalRequestEnvelope,
   ApprovalOutcome,
 } from "../models/approval.js";
-import type { ContextWindowMode, ReasoningLevel } from "../models/settings.js";
+import type { ReasoningLevel } from "../models/settings.js";
 import type { ProviderModelInfo } from "./models.js";
 import type { ProviderUsageInfo } from "./usage.js";
 import type { ProviderStatusFacts } from "./provider-status.js";
@@ -72,8 +72,8 @@ export interface ITurnDiffSource {
  * field type is selected by the request's `P` type parameter.
  */
 export interface ProviderOptionsByProvider {
-  /** Claude: context-window tier and the Haiku thinking toggle. */
-  claude: { contextWindowMode?: ContextWindowMode; thinking?: boolean };
+  /** Claude: the Haiku thinking toggle. */
+  claude: { thinking?: boolean };
   /** Codex: request the OpenAI fast service tier. */
   codex: { fastMode?: boolean };
   /** Copilot uses standard per-turn controls and native discovery. */

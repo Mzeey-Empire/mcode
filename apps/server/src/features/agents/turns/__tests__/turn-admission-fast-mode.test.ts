@@ -57,7 +57,7 @@ afterEach(async () => {
   NodeFS.rmSync(directory, { recursive: true, force: true });
 });
 
-async function fixture(providerId: ProviderId, models: TurnModelCatalog = catalog) {
+async function fixture(providerId: ProviderId, models: TurnModelCatalog = catalog, legacyWindow = false) {
   const db = openAgentStorageTestDatabase();
   const writer = agentStorageTestWriter(db);
   const threads = new ThreadRepo(db, writer);
@@ -65,6 +65,7 @@ async function fixture(providerId: ProviderId, models: TurnModelCatalog = catalo
   const messages = new MessageRepo(db, writer);
   const workspace = await workspaces.create("Fast fixture", directory, false);
   const thread = await threads.create(workspace.id, "Fast mode", "direct", "main", false, providerId);
+  if (legacyWindow) db.prepare("UPDATE threads SET context_window_mode = '1m' WHERE id = ?").run(thread.id);
   const provider: IAgentProvider = Object.assign(new NodeEvents.EventEmitter(), {
     id: providerId, descriptor: { id: providerId, capabilities: [] }, supportsCompletion: false,
     maxInputCharactersPerTurn: 100_000,
@@ -95,6 +96,11 @@ async function fixture(providerId: ProviderId, models: TurnModelCatalog = catalo
 }
 
 describe("turn admission Fast mode", () => {
+  it("ignores a legacy Claude window mode stored by an older build", async () => {
+    const { send } = await fixture("claude", { listModels: async () => [] }, true);
+    expect(await send({ model: "claude-opus-5-5" })).toEqual({ thinking: false });
+  });
+
   it("sends Fast to a model that declares it and keeps it on the thread for later turns", async () => {
     const { send, row } = await fixture("codex");
 

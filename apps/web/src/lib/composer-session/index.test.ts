@@ -11,7 +11,6 @@ const globalDefaults = {
 const threadSettings = {
   interactionMode: INTERACTION_MODES.PLAN,
   permissionMode: PERMISSION_MODES.SUPERVISED,
-  contextWindow: "1m" as const,
   thinking: true,
   fastMode: false,
   devinMode: null,
@@ -133,7 +132,6 @@ describe("resolveComposerSession", () => {
         reasoning_level: "high",
         interaction_mode: "build",
         permission_mode: "full",
-        context_window_mode: null,
         thinking: null,
         fast_mode: null,
       } as never,

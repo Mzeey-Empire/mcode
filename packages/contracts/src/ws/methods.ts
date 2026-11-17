@@ -112,7 +112,6 @@ import {
   PartialSettingsSchema,
   ReasoningLevelSchema,
   ProviderIdSchema,
-  ContextWindowModeSchema,
 } from "../models/settings.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { TerminalBackendCapabilitiesSchema } from "../models/terminal-backend.js";
@@ -348,8 +347,6 @@ export const SendMessageSchema = lazySchema(() => z.object({
     maxBudgetUsd: z.number().nonnegative().finite().optional(),
     /** Maximum agent turns. 0 or absent disables. */
     maxTurns: z.number().int().nonnegative().optional(),
-    /** Context window tier ("200k" default, "1m" extended). Honored only by 1M-capable Claude models. */
-    contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
     /**
@@ -416,8 +413,6 @@ const createAndSendFields = lazySchema(() =>
     maxBudgetUsd: z.number().nonnegative().finite().optional(),
     /** Maximum agent turns. 0 or absent disables. */
     maxTurns: z.number().int().nonnegative().optional(),
-    /** Context window tier ("200k" default, "1m" extended). Honored only by 1M-capable Claude models. */
-    contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
     /**
@@ -850,8 +845,6 @@ export const WS_METHODS = lazySchema(() => ({
       interactionMode: InteractionModeSchema.optional(),
       orchestrationMode: OrchestrationModeSchema.optional(),
       permissionMode: PermissionModeSchema.optional(),
-      /** Context window tier persisted on the thread. Pass null to clear back to the global default. */
-      contextWindow: ContextWindowModeSchema.nullable().optional(),
       /** Boolean thinking toggle persisted on the thread. Honored only for Haiku-class models. Pass null to clear. */
       thinking: z.boolean().nullable().optional(),
       /**
@@ -877,7 +870,6 @@ export const WS_METHODS = lazySchema(() => ({
         data.interactionMode !== undefined ||
         data.orchestrationMode !== undefined ||
         data.permissionMode !== undefined ||
-        data.contextWindow !== undefined ||
         data.thinking !== undefined ||
         data.fastMode !== undefined ||
         data.devinMode !== undefined ||
@@ -1193,7 +1185,6 @@ export const WS_METHODS = lazySchema(() => ({
       answers: z.array(PlanAnswerSchema()),
       permissionMode: PermissionModeSchema.optional(),
       reasoningLevel: ReasoningLevelSchema.optional(),
-      contextWindow: ContextWindowModeSchema.optional(),
       thinking: z.boolean().optional(),
     }),
     result: z.void(),

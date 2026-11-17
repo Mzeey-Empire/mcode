@@ -30,7 +30,7 @@ export class CanonicalContextCompactionProjection {
   private applyEvent(threadId: string, active: boolean, event: ProjectedCommittedProviderEvent["event"]): boolean | null {
     switch (event.type) {
       case "contextEstimate":
-        if (event.totalProcessedTokens !== undefined && !active) this.recordUsage(threadId, event.tokensIn, event.contextWindow);
+        if ((event.totalProcessedTokens !== undefined || event.contextWindow !== undefined) && !active) this.recordUsage(threadId, event.tokensIn, event.contextWindow);
         return active;
       case "turnComplete":
         if (active) return null;
@@ -47,7 +47,8 @@ export class CanonicalContextCompactionProjection {
   }
 
   private recordUsage(threadId: string, tokensIn: number, contextWindow?: number): void {
-    if (tokensIn > 0) this.threads.updateContextUsage(threadId, tokensIn, contextWindow);
+    if (tokensIn > 0 || contextWindow !== undefined)
+      this.threads.updateContextUsage(threadId, tokensIn > 0 ? tokensIn : undefined, contextWindow);
   }
 
   private persistDivider(threadId: string): void {

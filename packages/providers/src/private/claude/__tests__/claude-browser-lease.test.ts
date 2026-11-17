@@ -49,7 +49,6 @@ function makeProvider(lease: BrowserAutomationSessionLease) {
     closeQueue: vi.fn(),
     model: "claude-sonnet-4-6",
     permissionMode: "default",
-    contextWindowMode: undefined,
     orchestrationMode: "standard",
     pendingToolUses: new Set<string>(),
     hasFiredToolThisTurn: false,

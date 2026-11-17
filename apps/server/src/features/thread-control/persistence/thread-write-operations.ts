@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { HandoffIdSchema, MessageSchema } from "@mcode/contracts/models/message";
 import { AcknowledgeSeenResultSchema } from "@mcode/contracts/models/thread-attention";
-import { ContextWindowModeSchema } from "@mcode/contracts/models/settings";
 import { PlanPhaseSchema, ThreadSchema } from "@mcode/contracts/models/thread";
 import { ThreadModeSchema, ThreadStatusSchema } from "@mcode/contracts/models/enums";
 import { TurnOutcomeSchema } from "@mcode/contracts/models/turn-outcome";
@@ -11,7 +10,6 @@ const settings = z.object({
   model: z.string().optional(), provider: z.string().optional(),
   reasoning_level: z.string().optional(), interaction_mode: z.string().optional(),
   orchestration_mode: z.string().optional(), permission_mode: z.string().optional(),
-  context_window_mode: ContextWindowModeSchema.nullable().optional(),
   thinking: z.boolean().nullable().optional(), fast_mode: z.boolean().nullable().optional(),
   devin_mode: z.string().nullable().optional(),
   default_open_in_app: z.string().nullable().optional(),

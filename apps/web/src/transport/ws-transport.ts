@@ -1098,7 +1098,6 @@ export function createWsTransport(
         interactionMode: settings.interactionMode,
         orchestrationMode: settings.orchestrationMode,
         permissionMode: settings.permissionMode,
-        contextWindow: settings.contextWindow,
         thinking: settings.thinking,
         fastMode: settings.fastMode,
         devinMode: settings.devinMode,
@@ -1193,8 +1192,8 @@ export function createWsTransport(
       WS_METHODS()["approval.respond"].result.parse(await rpc<unknown>("approval.respond", { requestId, ...response })),
     listPendingApprovals: (threadId) =>
       rpc<ApprovalRequest[]>("approval.listPending", { threadId }),
-    answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?, contextWindow?, thinking?) =>
-      rpc<void>("agent.answerQuestions", { threadId, answers, permissionMode, reasoningLevel, contextWindow, thinking }),
+    answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?, thinking?) =>
+      rpc<void>("agent.answerQuestions", { threadId, answers, permissionMode, reasoningLevel, thinking }),
     dismissPlanQuestions: (threadId) =>
       rpc<void>("agent.dismissPlanQuestions", { threadId }),
     readClipboardImage: () =>

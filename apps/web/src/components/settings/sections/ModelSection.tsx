@@ -6,7 +6,6 @@ import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import {
   MODEL_PROVIDERS,
   getReasoningLevels,
-  supports1MContextWindow,
   supportsThinkingToggle,
   normalizeReasoningLevel,
   pickProviderModelsForSettings,
@@ -17,7 +16,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
 import { Switch } from "@/components/ui/switch";
-import type { ContextWindowMode, SettingsProviderId, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { SettingsProviderId, ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { ProviderAvailability } from "@mcode/contracts/providers/availability";
 import { Sparkles } from "lucide-react";
 import { ProviderIcon } from "@/components/ui/provider-icon";
@@ -124,9 +123,6 @@ export function ModelSection() {
   const modelId = useSettingsStore((s) => s.settings.model.defaults.id);
   const fallbackId = useSettingsStore((s) => s.settings.model.defaults.fallbackId);
   const reasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
-  const contextWindowMode = useSettingsStore(
-    (s) => s.settings.model.defaults.contextWindow,
-  );
   const thinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
   const fastMode = useSettingsStore(
     (s) => s.settings.provider.codex?.fastMode ?? false,
@@ -371,7 +367,6 @@ export function ModelSection() {
       modelId={modelId}
       fallbackId={fallbackId}
       reasoning={reasoning}
-      contextWindowMode={contextWindowMode}
       thinking={thinking}
       fastMode={fastMode}
       providerOptions={providerOptions}
@@ -384,7 +379,6 @@ export function ModelSection() {
       reasoningOptions={reasoningOptions}
       reasoningHint={reasoningHint}
       showFastMode={provider === "codex"}
-      showContextWindow={provider === "claude"}
       showThinking={shouldShowThinking(provider, modelId)}
       utilityProvider={utilityProvider}
       utilityModelId={utilityModelId}
@@ -396,7 +390,6 @@ export function ModelSection() {
       onFallbackChange={(value) => void update({ model: { defaults: { fallbackId: value } } })}
       onReasoningChange={(value) => update({ model: { defaults: { reasoning: value as ReasoningLevel } } })}
       onFastModeChange={(value) => void update({ provider: { codex: { fastMode: value } } })}
-      onContextWindowChange={(value) => update({ model: { defaults: { contextWindow: value as ContextWindowMode } } })}
       onThinkingChange={(value) => update({ model: { defaults: { thinking: value === "on" } } })}
       onUtilityProviderChange={(value) => void update({ model: { utility: { provider: value as SettingsProviderId | "", id: "" } } })}
       onUtilityModelChange={(value) => void update({ model: { utility: { id: value } } })}
@@ -409,7 +402,6 @@ interface ModelSettingsContentProps {
   modelId: string;
   fallbackId: string;
   reasoning: string;
-  contextWindowMode: string;
   thinking: boolean;
   fastMode: boolean;
   providerOptions: ProviderOptions;
@@ -422,7 +414,6 @@ interface ModelSettingsContentProps {
   reasoningOptions: ReasoningOptions;
   reasoningHint: string;
   showFastMode: boolean;
-  showContextWindow: boolean;
   showThinking: boolean;
   utilityProvider: string;
   utilityModelId: string;
@@ -434,7 +425,6 @@ interface ModelSettingsContentProps {
   onFallbackChange: (value: string) => void;
   onReasoningChange: (value: string) => void;
   onFastModeChange: (value: boolean) => void;
-  onContextWindowChange: (value: string) => void;
   onThinkingChange: (value: string) => void;
   onUtilityProviderChange: (value: string) => void;
   onUtilityModelChange: (value: string) => void;
@@ -445,7 +435,6 @@ function ModelSettingsContent({
   modelId,
   fallbackId,
   reasoning,
-  contextWindowMode,
   thinking,
   fastMode,
   providerOptions,
@@ -458,7 +447,6 @@ function ModelSettingsContent({
   reasoningOptions,
   reasoningHint,
   showFastMode,
-  showContextWindow,
   showThinking,
   utilityProvider,
   utilityModelId,
@@ -470,7 +458,6 @@ function ModelSettingsContent({
   onFallbackChange,
   onReasoningChange,
   onFastModeChange,
-  onContextWindowChange,
   onThinkingChange,
   onUtilityProviderChange,
   onUtilityModelChange,
@@ -493,7 +480,6 @@ function ModelSettingsContent({
           modelId={modelId}
           fallbackId={fallbackId}
           reasoning={reasoning}
-          contextWindowMode={contextWindowMode}
           thinking={thinking}
           fastMode={fastMode}
           providerOptions={providerOptions}
@@ -506,14 +492,12 @@ function ModelSettingsContent({
           reasoningOptions={reasoningOptions}
           reasoningHint={reasoningHint}
           showFastMode={showFastMode}
-          showContextWindow={showContextWindow}
           showThinking={showThinking}
           onProviderChange={onProviderChange}
           onModelChange={onModelChange}
           onFallbackChange={onFallbackChange}
           onReasoningChange={onReasoningChange}
           onFastModeChange={onFastModeChange}
-          onContextWindowChange={onContextWindowChange}
           onThinkingChange={onThinkingChange}
         />
         <UtilityModelSettings
@@ -536,7 +520,6 @@ type DefaultModelSettingsProps = Pick<
   | "modelId"
   | "fallbackId"
   | "reasoning"
-  | "contextWindowMode"
   | "thinking"
   | "fastMode"
   | "providerOptions"
@@ -549,14 +532,12 @@ type DefaultModelSettingsProps = Pick<
   | "reasoningOptions"
   | "reasoningHint"
   | "showFastMode"
-  | "showContextWindow"
   | "showThinking"
   | "onProviderChange"
   | "onModelChange"
   | "onFallbackChange"
   | "onReasoningChange"
   | "onFastModeChange"
-  | "onContextWindowChange"
   | "onThinkingChange"
 >;
 
@@ -565,7 +546,6 @@ function DefaultModelSettings({
   modelId,
   fallbackId,
   reasoning,
-  contextWindowMode,
   thinking,
   fastMode,
   providerOptions,
@@ -578,14 +558,12 @@ function DefaultModelSettings({
   reasoningOptions,
   reasoningHint,
   showFastMode,
-  showContextWindow,
   showThinking,
   onProviderChange,
   onModelChange,
   onFallbackChange,
   onReasoningChange,
   onFastModeChange,
-  onContextWindowChange,
   onThinkingChange,
 }: DefaultModelSettingsProps) {
   return (
@@ -650,22 +628,6 @@ function DefaultModelSettings({
           hint="Sends OpenAI fast service tier on Codex turns when your CLI and account support it (often lower latency; billing follows OpenAI rules)."
         >
           <Switch checked={fastMode} onCheckedChange={onFastModeChange} />
-        </SettingRow>
-      )}
-      {showContextWindow && (
-        <SettingRow
-          label="Context window"
-          configKey="model.defaults.contextWindow"
-          hint="200k is the standard window. 1M uses the extended beta window on Opus 4.7/4.6 and Sonnet 4.6."
-        >
-          <SegmentedControl
-            options={[
-              { value: "200k", label: "200K" },
-              { value: "1m", label: "1M", disabled: !supports1MContextWindow(modelId) },
-            ]}
-            value={contextWindowMode}
-            onChange={onContextWindowChange}
-          />
         </SettingRow>
       )}
       {showThinking && (

@@ -1,5 +1,5 @@
 import type { Thread } from "@/transport";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { OrchestrationMode } from "@mcode/contracts/models/enums";
 
 /**
@@ -54,7 +54,6 @@ type PlaceholderWorkspaceThreadParams = {
   interactionMode?: Thread["interaction_mode"];
   orchestrationMode?: OrchestrationMode | null;
   permissionMode?: Thread["permission_mode"];
-  contextWindow?: ContextWindowMode | null;
   thinking?: boolean | null;
   fastMode?: boolean | null;
   devinMode?: Thread["devin_mode"];
@@ -89,7 +88,6 @@ function resolveProviderFields(params: PlaceholderWorkspaceThreadParams) {
 function resolveProviderOptionFields(params: PlaceholderWorkspaceThreadParams) {
   return {
     permission_mode: params.permissionMode ?? null,
-    context_window_mode: params.contextWindow ?? null,
     thinking: params.thinking ?? null,
     fast_mode: params.fastMode ?? null,
     devin_mode: params.devinMode ?? null,

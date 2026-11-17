@@ -98,6 +98,11 @@ describe("persistAcceptedFeatureWrite", () => {
     expect(new PlanRepo(db).listByThread(THREAD)).toEqual([assigned]);
   });
 
+  it("persists a window-only probe while preserving the last occupancy", () => {
+    persistAcceptedFeatureWrite(db, THREAD, { threadPatch: { contextWindow: 300000 } });
+    expect(new ThreadRepo(db).findById(THREAD)).toMatchObject({ last_context_tokens: 10, context_window: 300000 });
+  });
+
   it("preserves existing context-window semantics and persists the exact compaction summary", () => {
     persistAcceptedFeatureWrite(db, THREAD, { threadPatch: { contextTokensUsed: 800, compactSummary: "Accepted compacted context" } });
     expect(new ThreadRepo(db).findById(THREAD)).toMatchObject({ last_context_tokens: 800, context_window: 1000,
@@ -148,7 +153,7 @@ describe("persistAcceptedFeatureWrite", () => {
 
   it("validates metadata schema, counts, bytes and routing at the worker boundary", () => {
     for (const metadata of [
-      { threadPatch: { contextWindow: 2000 } }, { threadPatch: { contextTokensUsed: -1 } },
+      { threadPatch: { contextTokensUsed: -1 } },
       { threadPatch: { contextTokensUsed: 1.5 } }, { noticeSession: { sessionId: "x".repeat(65) } },
       { noticeSessionId: undefined }, { providerEffect: "must not run" },
       { planRecords: [plan({ threadId: ` ${THREAD} ` })] },

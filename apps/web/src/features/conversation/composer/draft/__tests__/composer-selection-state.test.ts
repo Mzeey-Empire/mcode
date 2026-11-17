@@ -12,7 +12,6 @@ const selection: ComposerAgentSelection = {
   permissionMode: "full",
   approvalReviewMode: "manual",
   orchestrationMode: "standard",
-  contextWindow: null,
   thinking: null,
   fastMode: null,
   devinMode: null,

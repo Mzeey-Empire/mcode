@@ -41,7 +41,6 @@ export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = ([
     id,
     name,
     contextWindow: 1_000_000,
-    contextWindowOptions: ["200k", "1m"],
     supportsReasoning: true,
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     defaultReasoningEffort: "high",
@@ -53,7 +52,6 @@ export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = ([
     id,
     name,
     contextWindow: 1_000_000,
-    contextWindowOptions: ["200k", "1m"],
     supportsReasoning: true,
     supportedReasoningEfforts: ["low", "medium", "high", "max"],
     defaultReasoningEffort: "high",
@@ -62,7 +60,6 @@ export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = ([
     id: "claude-haiku-5-5",
     name: "Claude Haiku 5.5",
     contextWindow: 1_000_000,
-    contextWindowOptions: ["200k", "1m"],
     supportsReasoning: true,
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     // Anthropic defaults Haiku 5.5 to medium effort, one level below the other Claude 5 models.

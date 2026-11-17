@@ -3,12 +3,8 @@ import { CLAUDE_STATIC_MODELS } from "@mcode/contracts/providers/claude-static-f
 import { CODEX_STATIC_MODELS } from "@mcode/contracts/providers/codex-static-fallback";
 import { CURSOR_STATIC_MODEL_FALLBACK } from "@mcode/contracts/providers/cursor-static-fallback";
 import { DEVIN_STATIC_MODEL_FALLBACK, groupDevinModelFamilies } from "@mcode/contracts/providers/devin-models";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { ModelLifecycle, ProviderModelInfo } from "@mcode/contracts/providers/models";
-import {
-  MODEL_CONTEXT_WINDOWS_DEFAULT,
-  getModelContextWindow as sharedGetModelContextWindow,
-} from "@mcode/shared/model-context";
 import { clampReasoningLevel, isKnownClaudeModelId, normalizeReasoningLevelForModel } from "@mcode/shared/model-effort";
 
 // Import from the subpath, NOT the barrel. The barrel re-exports
@@ -18,7 +14,6 @@ import { clampReasoningLevel, isKnownClaudeModelId, normalizeReasoningLevelForMo
 export {
   isXhighEffortModel,
   isMaxEffortModel,
-  supports1MContextWindow,
   supportsThinkingToggle,
   normalizeReasoningLevelForModel,
 } from "@mcode/shared/model-effort";
@@ -58,8 +53,6 @@ export interface ModelDefinition {
   multiplier?: number;
   /** Whether the provider can run this model in Fast mode. Absent means no Fast control. */
   supportsFastMode?: boolean;
-  /** Context windows the user can choose between. Absent means no choice. */
-  contextWindowOptions?: readonly ContextWindowMode[];
   /** Model generation. Absent means current; pickers fold legacy models away. */
   lifecycle?: ModelLifecycle;
   /**
@@ -97,7 +90,6 @@ export function toModelDefinition(providerId: string, model: ProviderModelInfo):
     supportedReasoningLevels: model.supportedReasoningEfforts,
     defaultReasoningLevel: model.defaultReasoningEffort,
     supportsFastMode: model.supportsFastMode,
-    contextWindowOptions: model.contextWindowOptions,
     lifecycle: model.lifecycle,
   };
 }
@@ -108,10 +100,7 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     name: "Claude",
     comingSoon: false,
     supportsCompletion: true,
-    models: CLAUDE_STATIC_MODELS.map((model) => ({
-      ...toModelDefinition("claude", model),
-      contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT[model.id],
-    })),
+    models: CLAUDE_STATIC_MODELS.map((model) => toModelDefinition("claude", model)),
   },
   {
     id: "codex",
@@ -394,18 +383,6 @@ export function getDefaultReasoningLevel(): ReasoningLevel {
 /** Returns the context window size for a model, if statically known. */
 export function getContextWindow(modelId: string): number | undefined {
   return findModelById(modelId)?.contextWindow;
-}
-
-/**
- * Returns the active context window (tokens) for a model and the user's
- * selected mode. "1m" yields the extended window only when the model supports
- * it; otherwise falls through to the model's default 200k window.
- */
-export function getModelContextWindow(
-  modelId: string,
-  mode: ContextWindowMode = "200k",
-): number | undefined {
-  return sharedGetModelContextWindow(modelId, mode);
 }
 
 /**

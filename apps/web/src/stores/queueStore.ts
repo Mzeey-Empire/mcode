@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { AttachmentMeta, PermissionMode } from "@/transport";
 import type { ApprovalReviewMode, DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
@@ -42,8 +42,6 @@ export interface QueuedMessage {
   orchestrationMode?: OrchestrationMode;
   /** Provider to use; undefined means inherit the thread's stored provider. */
   provider?: string;
-  /** Claude context window mode for this turn; undefined means inherit from thread/settings. */
-  contextWindow?: ContextWindowMode;
   /** Haiku thinking toggle for this turn; undefined means inherit from thread/settings. */
   thinking?: boolean;
   /** Codex OpenAI fast tier for this queued send; undefined inherits at dequeue. */

@@ -122,41 +122,9 @@ describe("SettingsSchema", () => {
     });
   });
 
-  describe("model.defaults.contextWindow", () => {
-    it("accepts contextWindow '200k'", () => {
-      const result = SettingsSchema().parse({
-        model: { defaults: { contextWindow: "200k" } },
-      });
-      expect(result.model.defaults.contextWindow).toBe("200k");
-    });
-
-    it("accepts contextWindow '1m'", () => {
-      const result = SettingsSchema().parse({
-        model: { defaults: { contextWindow: "1m" } },
-      });
-      expect(result.model.defaults.contextWindow).toBe("1m");
-    });
-
-    it("defaults contextWindow to '200k' when omitted", () => {
-      const result = SettingsSchema().parse({});
-      expect(result.model.defaults.contextWindow).toBe("200k");
-    });
-
-    it("rejects numeric contextWindow", () => {
-      expect(() =>
-        SettingsSchema().parse({
-          model: { defaults: { contextWindow: 1_000_000 } },
-        }),
-      ).toThrow();
-    });
-
-    it("rejects unknown contextWindow strings", () => {
-      expect(() =>
-        SettingsSchema().parse({
-          model: { defaults: { contextWindow: "1M" } },
-        }),
-      ).toThrow();
-    });
+  it("ignores the legacy context window preference", () => {
+    const result = SettingsSchema().parse({ model: { defaults: { contextWindow: "1m" } } });
+    expect(result.model.defaults).not.toHaveProperty("contextWindow");
   });
 
   describe("agent.defaults.mode", () => {

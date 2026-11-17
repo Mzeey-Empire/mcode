@@ -278,7 +278,6 @@ function updateThreadSettings(
     interactionMode?: string;
     orchestrationMode?: string;
     permissionMode?: string;
-    contextWindow?: Thread["context_window_mode"];
     thinking?: boolean | null;
     fastMode?: boolean | null;
     defaultOpenInApp?: string | null;
@@ -290,8 +289,6 @@ function updateThreadSettings(
     interaction_mode: params.interactionMode,
     orchestration_mode: params.orchestrationMode,
     permission_mode: params.permissionMode,
-    context_window_mode: params.contextWindow,
-    thinking: params.thinking,
     fast_mode: params.fastMode,
     default_open_in_app: params.defaultOpenInApp,
     auto_complete_on_merge: params.autoCompleteOnMerge,

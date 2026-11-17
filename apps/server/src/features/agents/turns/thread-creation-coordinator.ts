@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { inject, injectable } from "tsyringe";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { CreateAndSendInput } from "@mcode/contracts/ws/methods";
 import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "@mcode/contracts/models/enums";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
@@ -74,7 +74,6 @@ export interface CreateThreadForTurnInput {
   reasoningLevel?: ReasoningLevel;
   interactionMode?: InteractionMode;
   orchestrationMode?: OrchestrationMode;
-  contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   fastMode?: boolean;
   devinMode?: DevinMode;
@@ -103,7 +102,6 @@ interface BranchedInitialTurnParams {
   title: string;
   maxBudgetUsd?: number;
   maxTurns?: number;
-  contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   fastMode?: boolean;
   devinMode?: DevinMode;
@@ -283,7 +281,6 @@ export class ThreadCreationCoordinator {
       maxBudgetUsd,
       maxTurns,
 
-      contextWindow: contextWindowMode,
       thinking,
       fastMode,
       devinMode,
@@ -299,7 +296,7 @@ export class ThreadCreationCoordinator {
       existingWorktreePath, existingWorktreeBaseBranch, attachments, reasoningLevel,
       provider, interactionMode, parentThreadId, forkedFromMessageId,
       title: command.title ?? titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns,
-      contextWindowMode, thinking, fastMode, devinMode, displayContent, mentions,
+      thinking, fastMode, devinMode, displayContent, mentions,
       previewAnnotations, selectedTextComments, goalObjective, orchestrationMode,
     };
     return params;
@@ -325,7 +322,6 @@ export class ThreadCreationCoordinator {
       reasoningLevel: params.reasoningLevel,
       interactionMode: params.interactionMode,
       orchestrationMode: params.orchestrationMode,
-      contextWindowMode: params.contextWindowMode,
       thinking: params.thinking,
       fastMode: params.fastMode,
       devinMode: params.devinMode,
@@ -479,7 +475,6 @@ export class ThreadCreationCoordinator {
       interactionMode: params.interactionMode,
       maxBudgetUsd: params.maxBudgetUsd,
       maxTurns: params.maxTurns,
-      contextWindow: params.contextWindowMode,
       thinking: params.thinking,
       displayContent: params.displayContent,
       mentions: params.mentions,
@@ -521,7 +516,6 @@ export class ThreadCreationCoordinator {
         interactionMode: params.interactionMode,
         maxBudgetUsd: params.maxBudgetUsd,
         maxTurns: params.maxTurns,
-        contextWindow: params.contextWindowMode,
         thinking: params.thinking,
         displayContent: params.displayContent,
         mentions: params.mentions,
@@ -672,7 +666,6 @@ export class ThreadCreationCoordinator {
       interaction_mode: input.interactionMode ?? created.interaction_mode,
       orchestration_mode: input.orchestrationMode ?? created.orchestration_mode,
       permission_mode: input.permissionMode === "default" ? created.permission_mode : input.permissionMode,
-      context_window_mode: input.contextWindowMode ?? created.context_window_mode,
       thinking: input.thinking ?? created.thinking,
       devin_mode: input.devinMode ?? created.devin_mode,
     };
@@ -694,7 +687,6 @@ export class ThreadCreationCoordinator {
       ...(input.interactionMode !== undefined && { interaction_mode: input.interactionMode }),
       ...(input.orchestrationMode !== undefined && { orchestration_mode: input.orchestrationMode }),
       ...(input.permissionMode !== "default" && { permission_mode: input.permissionMode }),
-      ...(input.contextWindowMode !== undefined && { context_window_mode: input.contextWindowMode }),
       ...(input.thinking !== undefined && { thinking: input.thinking }),
       ...(input.fastMode !== undefined && { fast_mode: input.fastMode }),
     };
@@ -765,7 +757,6 @@ export class ThreadCreationCoordinator {
       parentThreadId: params.parentThreadId,
       forkedFromMessageId: params.forkedFromMessageId,
       title: params.title,
-      contextWindowMode: params.contextWindowMode,
       thinking: params.thinking,
       fastMode: params.fastMode,
       devinMode: params.devinMode,
@@ -793,7 +784,6 @@ export class ThreadCreationCoordinator {
         interactionMode: params.interactionMode,
         maxBudgetUsd: params.maxBudgetUsd,
         maxTurns: params.maxTurns,
-        contextWindow: provisioned.contextWindowMode,
         thinking: provisioned.thinking,
         fastMode: provisioned.fastMode,
         devinMode: provisioned.devinMode,

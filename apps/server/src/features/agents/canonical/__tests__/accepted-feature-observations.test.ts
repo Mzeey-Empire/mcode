@@ -300,6 +300,11 @@ describe("prepareAcceptedFeatureObservations", () => {
     expect(subsequent.publications[0].event).not.toMatchObject({ messageId: "notice-0" });
   });
 
+  it("retains a zero-token probe window without replacing occupancy", () => {
+    const estimate = event({ type: "contextEstimate", tokensIn: 0, contextWindow: 300000 });
+    expect(prepare(operation({}, estimate)).threadPatch).toEqual({ contextWindow: 300000 });
+  });
+
   it("advances compaction and usage effects using accepted state without manufacturing unsupported projections", () => {
     const divider = event({ type: "compacting", active: false });
     const prepared = prepareAcceptedFeatureObservations({ ...base, compaction: { active: true }, operation: operation({}, divider), items: {} });

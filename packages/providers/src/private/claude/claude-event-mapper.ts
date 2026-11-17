@@ -1,12 +1,11 @@
 import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
-import { type ContextWindowMode } from "@mcode/contracts/models/settings";
 import { type ProviderBillingMode } from "@mcode/contracts/providers/usage";
 import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { type TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { logger } from "@mcode/shared";
 import type { ProviderBackgroundToolSettlement } from "../../host-ports.js";
 import type { NativeBackgroundTask } from "../session-runtime.js";
-import { clampContextWindowToMode } from "./context-window.js";
+import type { ClaudeContextUsage } from "./context-usage.js";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 import {
   classifyClaudeFailure,
@@ -82,7 +81,6 @@ type BackgroundToolStatus = ProviderBackgroundToolSettlement["status"];
 export interface ClaudeMappedSession {
   permissionMode?: string;
   model: string;
-  contextWindowMode: ContextWindowMode | undefined;
   pendingToolUses: Set<string>;
   hasFiredToolThisTurn: boolean;
   poisoned?: boolean;
@@ -217,6 +215,19 @@ export class ClaudeEventMapper {
     const type = typeof message.type === "string" ? message.type : "";
     const handler = this.handlers.get(type);
     return handler ? await handler(message) : "none";
+  }
+
+  /** Publishes a resolved window only while an execution can own the estimate. */
+  observeContextUsage(usage: ClaudeContextUsage): void {
+    this.lastContextWindow = usage.windowTokens;
+    if (this.callbacks.liveExecutionId()) {
+      this.callbacks.emit({
+        type: AgentEventType.ContextEstimate,
+        threadId: this.threadId,
+        tokensIn: usage.usedTokens,
+        contextWindow: usage.windowTokens,
+      }, { parent: { kind: "absent" }, sourceIdentities: [] });
+    }
   }
 
   /** Resets only derived attribution when a new queued execution consumes its prompt. */
@@ -641,8 +652,7 @@ export class ClaudeEventMapper {
   }
 
   private emitTurnComplete(message: Message, usage: Usage): void {
-    const session = this.callbacks.getSession();
-    const contextWindow = resultContextWindow(message, session);
+    const contextWindow = this.lastContextWindow ?? modelUsageWindow(message);
     this.emit({
       type: AgentEventType.TurnComplete,
       threadId: this.threadId,
@@ -659,7 +669,6 @@ export class ClaudeEventMapper {
       cacheWriteTokens: usage.cache_creation_input_tokens ?? undefined,
       providerId: "claude",
     });
-    this.lastContextWindow = contextWindow;
   }
 
   private async emitQuotaUpdate(snapshot: ClaudeUsageSnapshot): Promise<void> {
@@ -1147,10 +1156,7 @@ function inputTokens(usage: Usage): number {
     (usage.cache_creation_input_tokens ?? 0)
   );
 }
-function resultContextWindow(
-  message: Message,
-  session: ClaudeMappedSession | undefined,
-): number | undefined {
+function modelUsageWindow(message: Message): number | undefined {
   const models = objectValue(message.modelUsage) as Record<
     string,
     { contextWindow?: number }
@@ -1160,11 +1166,7 @@ function resultContextWindow(
       typeof item.contextWindow === "number" &&
       Number.isFinite(item.contextWindow),
   )?.contextWindow;
-  return clampContextWindowToMode(
-    contextWindow,
-    session?.contextWindowMode,
-    session?.model,
-  );
+  return contextWindow;
 }
 function metrics(message: Message, usage: Usage): ClaudeUsageMetrics {
   const serviceTier = usage.service_tier;

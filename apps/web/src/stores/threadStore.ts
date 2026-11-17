@@ -6,7 +6,7 @@ import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { AgentModelState, AgentTurn, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { CanonicalAgentProgressFrame, CanonicalAgentProgressRecovery } from "@mcode/contracts/models/canonical-agent-progress";
 import type { CanonicalAgentReconnectRecovery } from "@mcode/contracts/models/canonical-agent-reconnect";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { NarrativeDetailCursor, NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
 import type { OrchestrationMode } from "@mcode/contracts/models/enums";
@@ -47,8 +47,6 @@ import { usePlanStore } from "./planStore";
 import type { TaskItem } from "./taskStore";
 import { useToastStore } from "./toastStore";
 import { findModelById } from "@/lib/model-registry";
-import { resolveContextWindow } from "@/lib/resolve-context-window";
-import { useSettingsStore } from "./settingsStore";
 import { createConversationResidency, registerConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import {
   clearPendingTurnPersistMessage,
@@ -446,7 +444,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, contextWindow?: ContextWindowMode, thinking?: boolean, fastMode?: boolean, replyToMessageId?: string, quotedText?: string, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts/models/enums").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, planCommentIds?: string[]) => Promise<SendMessageOutcome>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, thinking?: boolean, fastMode?: boolean, replyToMessageId?: string, quotedText?: string, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts/models/enums").ApprovalReviewMode, devinMode?: DevinMode, messageId?: string, resendOfSteerId?: string, planCommentIds?: string[]) => Promise<SendMessageOutcome>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -823,7 +821,6 @@ export async function sendQueuedMessage(threadId: string, message: QueuedMessage
       message.displayContent,
       message.reasoningLevel,
       message.provider,
-      message.contextWindow,
       message.thinking,
       message.fastMode,
       undefined,
@@ -1088,9 +1085,8 @@ const DEFAULT_THREAD_SETTINGS: ThreadSettings = {
 /** Maps the composer-scoped nullable fields of a workspace thread row. */
 function nullableThreadFields(
   thread: ReturnType<typeof useWorkspaceStore.getState>["threads"][number],
-): Pick<ThreadSettings, "contextWindow" | "thinking" | "fastMode" | "devinMode" | "defaultOpenInApp"> {
+): Pick<ThreadSettings, "thinking" | "fastMode" | "devinMode" | "defaultOpenInApp"> {
   return {
-    contextWindow: (thread.context_window_mode as ContextWindowMode | null) ?? null,
     thinking: thread.thinking ?? null,
     fastMode: thread.fast_mode ?? null,
     devinMode: thread.devin_mode ?? null,
@@ -2755,21 +2751,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return appendStreamingTerminalMessage(record, base, message, null, snapshot.threadId);
   };
 
-  const resolvedTurnContextWindow = (event: Extract<AgentEvent, { type: "turnComplete" }>) => {
-    const record = getRec(event.threadId);
-    const thread = useWorkspaceStore.getState().threads.find((item) => item.id === event.threadId);
-    const modelId = record.lastFallback?.actualModel ?? thread?.model ?? "claude-sonnet-4-6";
-    const settings = useSettingsStore.getState().settings.model.defaults;
-    const contextWindowMode = (thread?.context_window_mode as ContextWindowMode | null | undefined)
-      ?? settings.contextWindow
-      ?? "200k";
-    return resolveContextWindow({
-      sdkContextWindow: event.contextWindow,
-      modelId,
-      contextWindowMode,
-      previousContextWindow: record.context?.contextWindow,
-    });
-  };
+  const resolvedTurnContextWindow = (event: Extract<AgentEvent, { type: "turnComplete" }>) =>
+    event.contextWindow ?? getRec(event.threadId).context?.contextWindow;
 
   const updateTurnContext = (event: Extract<AgentEvent, { type: "turnComplete" }>): void => {
     if (event.tokensIn <= 0 || getRec(event.threadId).isCompacting) return;
@@ -2929,11 +2912,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const handleContextEstimate = (event: Extract<AgentEvent, { type: "contextEstimate" }>): void => {
-    if (event.tokensIn <= 0 || getRec(event.threadId).isCompacting) return;
+    if (getRec(event.threadId).isCompacting) return;
     patchRec(event.threadId, (record) => ({
       context: {
         ...record.context,
-        lastTokensIn: event.tokensIn,
+        lastTokensIn: event.tokensIn > 0 ? event.tokensIn : record.context?.lastTokensIn ?? 0,
         contextWindow: event.contextWindow ?? record.context?.contextWindow,
         totalProcessedTokens: event.totalProcessedTokens ?? record.context?.totalProcessedTokens,
       },
@@ -3094,7 +3077,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     source: Partial<ThreadSettings>,
     target: Partial<ThreadSettings>,
   ): void => {
-    if ("contextWindow" in source) target.contextWindow = source.contextWindow;
     if ("thinking" in source) target.thinking = source.thinking;
     if ("fastMode" in source) target.fastMode = source.fastMode;
     if ("devinMode" in source) target.devinMode = source.devinMode;
@@ -3123,7 +3105,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     thread: ReturnType<typeof useWorkspaceStore.getState>["threads"][number],
     patch: Partial<ThreadSettings>,
   ) => {
-    if ("contextWindow" in patch) thread = { ...thread, context_window_mode: patch.contextWindow ?? null };
     if ("thinking" in patch) thread = { ...thread, thinking: patch.thinking ?? null };
     if ("devinMode" in patch) thread = { ...thread, devin_mode: patch.devinMode ?? null };
     return thread;
@@ -3154,7 +3135,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   });
 
   const nullableThreadSettingsPatch = (patch: Partial<ThreadSettings>) => ({
-    ...("contextWindow" in patch ? { contextWindow: patch.contextWindow } : {}),
     ...("thinking" in patch ? { thinking: patch.thinking } : {}),
     ...("fastMode" in patch ? { fastMode: patch.fastMode } : {}),
     ...("devinMode" in patch ? { devinMode: patch.devinMode } : {}),
@@ -3358,14 +3338,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     current: ThreadSettings,
     reasoningLevel: ReasoningLevel | undefined,
     orchestrationMode: OrchestrationMode | undefined,
-    contextWindow: ContextWindowMode | undefined,
     thinking: boolean | undefined,
     fastMode: boolean | undefined,
   ): Partial<ThreadRecord> => {
     const patch: Partial<ThreadSettings> = {};
     if (reasoningLevel !== undefined) patch.reasoningLevel = reasoningLevel;
     if (orchestrationMode !== undefined) patch.orchestrationMode = orchestrationMode;
-    if (contextWindow !== undefined) patch.contextWindow = contextWindow;
     if (thinking !== undefined) patch.thinking = thinking;
     if (fastMode !== undefined) patch.fastMode = fastMode;
     return Object.keys(patch).length > 0 ? { settings: { ...current, ...patch } } : {};
@@ -3381,14 +3359,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   const applyOptimisticSend = (
     threadId: string, message: Message, isControlCommand: boolean, responseKey: string,
     reasoningLevel: ReasoningLevel | undefined, orchestrationMode: OrchestrationMode | undefined,
-    contextWindow: ContextWindowMode | undefined, thinking: boolean | undefined, fastMode: boolean | undefined,
+    thinking: boolean | undefined, fastMode: boolean | undefined,
   ): void => {
     set((state) => {
       const record = getThreadRecord(state.records, threadId);
       return {
         records: patchThreadRecord(state.records, threadId, {
           ...resetTurnEphemeral(record),
-          ...sendSettingsPatch(state.getThreadSettings(threadId), reasoningLevel, orchestrationMode, contextWindow, thinking, fastMode),
+          ...sendSettingsPatch(state.getThreadSettings(threadId), reasoningLevel, orchestrationMode, thinking, fastMode),
           ...optimisticMessageWindowPatch(state, threadId, message),
           agentStartTime: Date.now(), fileEffectSummary: { revision: 0, fileCount: 0, additions: 0, deletions: 0, effects: [] },
           currentTurnResponseKey: responseKey, ...(isControlCommand ? {} : { turnExecutionId: null, optimisticUserMessageId: message.id }),
@@ -3918,7 +3896,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, contextWindow, thinking, fastMode, replyToMessageId, quotedText, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId, resendOfSteerId, planCommentIds) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, thinking, fastMode, replyToMessageId, quotedText, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode, messageId, resendOfSteerId, planCommentIds) => {
     conversationResidency.invalidateConversation(threadId);
 
     const { isControlCommand, runningBeforeControl } = prepareOutgoingTurn(threadId, content);
@@ -3931,7 +3909,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     );
     applyOptimisticSend(
       threadId, userMessage, isControlCommand, optimisticTurnResponseKey,
-      reasoningLevel, orchestrationMode, contextWindow, thinking, fastMode,
+      reasoningLevel, orchestrationMode, thinking, fastMode,
     );
 
     try {
@@ -3948,7 +3926,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         reasoningLevel,
         provider: provider === undefined ? undefined : ProviderIdSchema.parse(provider),
         interactionMode,
-        contextWindow,
         thinking,
         fastMode,
         replyToMessageId,
@@ -4369,7 +4346,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const rec = getRec(threadId);
     const answersMap = rec.planAnswers;
     const questions = rec.planQuestions ?? [];
-    const { permissionMode, reasoningLevel, contextWindow, thinking } = get().getThreadSettings(threadId);
+    const { permissionMode, reasoningLevel, thinking } = get().getThreadSettings(threadId);
 
     const answers: PlanAnswer[] = questions.map((q) => {
       const a = answersMap.get(q.id);
@@ -4389,7 +4366,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         answers,
         permissionMode,
         reasoningLevel,
-        contextWindow ?? undefined,
         thinking ?? undefined,
       );
     } catch (e) {

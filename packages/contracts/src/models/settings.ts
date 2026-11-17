@@ -46,19 +46,6 @@ export const ReasoningLevelSchema = z.preprocess(
 /** Reasoning effort level value. */
 export type ReasoningLevel = z.infer<typeof ReasoningLevelSchema>;
 
-/**
- * Context window selection for Claude models that support an extended 1M tier.
- * "200k" is the default tier every Claude model supports; "1m" requests the
- * 1,000,000-token tier (only honored for Opus 4.7/4.6 and Sonnet 4.6).
- *
- * At send time the server appends a `[1m]` suffix to the model slug to opt
- * into the extended window via the Claude Agent SDK; the SDK forwards the
- * appropriate beta header internally.
- */
-export const ContextWindowModeSchema = z.enum(["200k", "1m"]);
-/** Context window selection value. */
-export type ContextWindowMode = z.infer<typeof ContextWindowModeSchema>;
-
 /** Supported AI provider identifier for settings. */
 export const ProviderIdSchema = z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode", "devin"]);
 /** Supported AI provider identifier value. */
@@ -211,12 +198,6 @@ export const SettingsSchema = lazySchema(() =>
             reasoning: ReasoningLevelSchema.default("high"),
             /** Fallback model when the primary is unavailable. Empty string disables fallback. */
             fallbackId: z.string().trim().default("claude-sonnet-4-6"),
-            /**
-             * Default context window mode. "200k" is the universally supported tier;
-             * "1m" requests the extended 1M-token window from Opus 4.8/4.7/4.6 and Sonnet 4.6.
-             * Models that do not support 1M ignore this and run on 200k.
-             */
-            contextWindow: ContextWindowModeSchema.default("200k"),
             /**
              * Default boolean thinking toggle. Honored only by models that expose
              * thinking as a boolean (Haiku 4.5). Effort-tier models ignore this and
@@ -540,7 +521,6 @@ export const PartialSettingsSchema = lazySchema(() =>
             id: z.string().optional(),
             reasoning: ReasoningLevelSchema.optional(),
             fallbackId: z.string().trim().optional(),
-            contextWindow: ContextWindowModeSchema.optional(),
             thinking: z.boolean().optional(),
           })
           .optional(),

@@ -5,7 +5,7 @@ import type { SendMessageInput } from "@mcode/contracts/ws/methods";
 /** Composer options that only some providers (or some of a provider's models) understand. */
 export type SwitchableOptions = Pick<
   SendMessageInput,
-  "reasoningLevel" | "contextWindow" | "thinking" | "fastMode" | "devinMode"
+  "reasoningLevel" | "thinking" | "fastMode" | "devinMode"
 >;
 
 /** One option the target could not honour, kept so the timeline can say what was dropped. */
@@ -30,7 +30,6 @@ export interface ReconciledOptions {
  * context-window or Devin mode, so a new provider that adds one of these options must be listed here.
  */
 const OPTION_OWNER: Partial<Record<keyof SwitchableOptions, ProviderId>> = {
-  contextWindow: "claude",
   thinking: "claude",
   devinMode: "devin",
 };
@@ -38,7 +37,7 @@ const OPTION_OWNER: Partial<Record<keyof SwitchableOptions, ProviderId>> = {
 /**
  * Reconcile the composer's options against the provider and model the send is switching to.
  *
- * Provider-owned toggles (context-window mode, thinking, Devin mode) drop when another provider
+ * Provider-owned toggles (thinking, Devin mode) drop when another provider
  * receives the send. Fast drops unless the target model declares it, matching turn admission, which
  * sends Fast only to such models. A reasoning level drops only when the target model's catalog entry
  * lists levels and omits this one: a model missing from the catalog is not evidence that the level is

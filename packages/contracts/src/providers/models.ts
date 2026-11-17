@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { ContextWindowModeSchema } from "../models/settings.js";
 import { lazySchema } from "../utils/lazySchema.js";
 
 /** Policy state for a provider model (read-only, set by org admins). */
@@ -34,8 +33,6 @@ export const ProviderModelInfoSchema = lazySchema(() =>
     supportsUltraOrchestration: z.boolean().optional(),
     /** Whether mcode can run this model in Fast mode. Absent means no Fast control. */
     supportsFastMode: z.boolean().optional(),
-    /** Context windows the user can choose between (e.g. ["200k", "1m"]). Absent means no choice. */
-    contextWindowOptions: z.array(ContextWindowModeSchema).optional(),
     /** Model generation. Absent means current; legacy models sit behind the picker's fold. */
     lifecycle: ModelLifecycleSchema.optional(),
     /** Org/enterprise policy state. Absent when no policy is configured. */

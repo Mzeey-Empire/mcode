@@ -1,7 +1,7 @@
 import { inject, injectable } from "tsyringe";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { PlanCapture, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { InteractionMode, PermissionMode } from "@mcode/contracts/models/enums";
 import type { NativePlanQuestionBatch, PlanQuestionSettlement } from "@mcode/contracts/models/plan-questions";
 import { broadcast } from "../../../application/transport/push.js";
@@ -196,7 +196,6 @@ ${userMessage}`;
     answers: PlanAnswerInput[],
     permissionMode: PermissionMode | "default" = "default",
     reasoningLevel?: ReasoningLevel,
-    contextWindow?: ContextWindowMode,
     thinking?: boolean,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
@@ -220,7 +219,6 @@ ${userMessage}`;
       attachments: [],
       reasoningLevel,
       provider: (thread.provider as ProviderId) ?? "claude",
-      contextWindow,
       thinking,
       markPlanAnswerForMessageId: payload.markPlanAnswerForMessageId,
     });

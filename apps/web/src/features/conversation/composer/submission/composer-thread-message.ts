@@ -53,7 +53,6 @@ export async function sendComposerThreadMessage(
     payload.displayContent,
     selection.reasoning,
     selection.provider,
-    selection.contextWindow ?? undefined,
     selection.thinking ?? undefined,
     scoped.fastMode,
     undefined,

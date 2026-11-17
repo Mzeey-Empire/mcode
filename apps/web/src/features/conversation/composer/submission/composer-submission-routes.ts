@@ -48,7 +48,6 @@ function composerDraftForPendingCreation(
     modelId: snapshot.selection.modelId,
     provider: snapshot.selection.provider,
     reasoning: snapshot.selection.reasoning,
-    contextWindow: snapshot.selection.contextWindow ?? undefined,
     fastMode: snapshot.selection.fastMode,
     devinMode: snapshot.selection.devinMode,
   });
@@ -93,7 +92,6 @@ function createThreadForSubmission(
     selection.reasoning,
     selection.provider,
     selection.interactionMode,
-    selection.contextWindow ?? undefined,
     selection.thinking ?? undefined,
     scoped.fastMode,
     prepared.displayContent,
@@ -217,7 +215,6 @@ function branchThreadAgentOptions(selection: ComposerAgentSelection) {
     permissionMode: selection.permissionMode,
     approvalReviewMode: selection.approvalReviewMode,
     reasoningLevel: selection.reasoning,
-    contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
     fastMode: selection.provider === "codex" ? selection.fastMode ?? undefined : undefined,
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,

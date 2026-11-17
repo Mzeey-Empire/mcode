@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ContextWindowModeSchema, ProviderIdSchema, ReasoningLevelSchema } from "@mcode/contracts/models/settings";
+import { ProviderIdSchema, ReasoningLevelSchema } from "@mcode/contracts/models/settings";
 import { InteractionModeSchema, PermissionModeSchema } from "@mcode/contracts/models/enums";
 import { PullRequestIdentitySchema, PullRequestReviewLinkSchema } from "@mcode/contracts/pull-requests";
 import { ThreadSchema } from "@mcode/contracts/models/thread";
@@ -19,8 +19,7 @@ export const createReviewTaskInputSchema = z.object({
   identity: PullRequestIdentitySchema(), title: z.string(), pullRequestTitle: z.string().max(512), baseBranch: z.string(), checkout,
   defaults: z.object({
     provider: ProviderIdSchema, model: z.string(), reasoning: ReasoningLevelSchema,
-    interactionMode: InteractionModeSchema, permission: PermissionModeSchema,
-    contextWindow: ContextWindowModeSchema, thinking: z.boolean(),
+    interactionMode: InteractionModeSchema, permission: PermissionModeSchema, thinking: z.boolean(),
   }).strict(),
 }).strict();
 

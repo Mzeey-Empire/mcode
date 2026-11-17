@@ -53,7 +53,6 @@ function readComposerThreadSettings(threadId: string | undefined) {
       interactionMode: INTERACTION_MODES.BUILD,
       orchestrationMode: ORCHESTRATION_MODES.STANDARD,
       permissionMode: PERMISSION_MODES.FULL,
-      contextWindow: null,
       thinking: null,
       fastMode: null,
       devinMode: null,
@@ -64,7 +63,6 @@ function readComposerThreadSettings(threadId: string | undefined) {
     interactionMode: settings.interactionMode,
     orchestrationMode: settings.orchestrationMode,
     permissionMode: settings.permissionMode,
-    contextWindow: settings.contextWindow ?? null,
     thinking: settings.thinking ?? null,
     fastMode: settings.fastMode ?? null,
     devinMode: settings.devinMode ?? null,
@@ -99,7 +97,6 @@ function resolveThreadDraftSession(entity: ThreadDraft): ComposerSession {
     approvalReviewMode: entity.selection.approvalReviewMode,
     thinking: entity.selection.thinking,
     // Draft-owned fields live on the draft itself; the settings fallback re-reads them.
-    contextWindow: entity.draft.contextWindow ?? null,
     fastMode: entity.draft.fastMode ?? null,
     devinMode: entity.draft.devinMode ?? null,
   });

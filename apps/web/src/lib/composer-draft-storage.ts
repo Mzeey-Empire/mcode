@@ -290,7 +290,6 @@ export function parseStoredComposerDraft(raw: unknown): ComposerDraft | null {
     modelId: candidate.modelId,
     provider: typeof candidate.provider === "string" ? candidate.provider : undefined,
     reasoning: candidate.reasoning as ComposerDraft["reasoning"],
-    contextWindow: candidate.contextWindow,
     fastMode: candidate.fastMode ?? legacyFastMode(raw),
     devinMode: candidate.devinMode,
     ...parseStoredNextMessageFields(candidate),

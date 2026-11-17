@@ -74,7 +74,7 @@ const COMMIT_ATTEMPTS = 2;
 
 const FALLBACK_SELECTION_KEYS = [
   "model", "permissionMode", "reasoningLevel", "provider", "interactionMode", "orchestrationMode",
-  "contextWindow", "thinking", "fastMode", "devinMode",
+  "thinking", "fastMode", "devinMode",
 ] as const satisfies readonly (keyof SendMessageCommand)[];
 
 /** Runs the provider-neutral part of a cross-provider switch: handoff, target session, and commit on acceptance. */
@@ -395,7 +395,6 @@ async function reconcileCommand(command: SendMessageCommand, toProvider: Provide
   const { options, dropped } = reconcileSwitchOptions({
     options: {
       reasoningLevel: command.reasoningLevel,
-      contextWindow: command.contextWindow,
       thinking: command.thinking,
       fastMode: command.fastMode,
       devinMode: command.devinMode,
@@ -408,7 +407,6 @@ async function reconcileCommand(command: SendMessageCommand, toProvider: Provide
     command: {
       ...command,
       reasoningLevel: options.reasoningLevel,
-      contextWindow: options.contextWindow,
       thinking: options.thinking,
       fastMode: options.fastMode,
       devinMode: options.devinMode,

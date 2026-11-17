@@ -20,7 +20,7 @@ import { type AcknowledgeSeenResult } from "@mcode/contracts/models/thread-atten
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { DevinMode, ThreadMode, ThreadStatus, InteractionMode, OrchestrationMode, PermissionMode } from "@mcode/contracts/models/enums";
 import type { Thread, RecentThread } from "@mcode/contracts/models/thread";
-import type { ReasoningLevel, ContextWindowMode } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import {
   canonicalAgentThreads,
   canonicalAgentTurns,
@@ -166,7 +166,7 @@ function rowToThreadLifecycle(row: ThreadRow): Pick<Thread,
 }
 
 function rowToThreadPreferences(row: ThreadRow): Pick<Thread,
-  "reasoning_level" | "interaction_mode" | "plan_phase" | "orchestration_mode" | "permission_mode" | "context_window_mode"
+  "reasoning_level" | "interaction_mode" | "plan_phase" | "orchestration_mode" | "permission_mode"
 > {
   return {
     reasoning_level: parseStoredReasoningLevel(row.reasoningLevel),
@@ -174,8 +174,6 @@ function rowToThreadPreferences(row: ThreadRow): Pick<Thread,
     plan_phase: PlanPhaseSchema.nullable().parse(row.planPhase),
     orchestration_mode: (row.orchestrationMode ?? null) as OrchestrationMode | null,
     permission_mode: (row.permissionMode ?? null) as PermissionMode | null,
-    context_window_mode:
-      (row.contextWindowMode ?? null) as ContextWindowMode | null,
   };
 }
 
@@ -269,7 +267,6 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     plan_phase: null,
     orchestration_mode: null,
     permission_mode: null,
-    context_window_mode: null,
     thinking: null,
     fast_mode: null,
     devin_mode: null,
@@ -381,7 +378,6 @@ type ThreadSettings = {
   interaction_mode?: string;
   orchestration_mode?: string;
   permission_mode?: string;
-  context_window_mode?: ContextWindowMode | null;
   thinking?: boolean | null;
   fast_mode?: boolean | null;
   auto_complete_on_merge?: boolean | null;
@@ -396,7 +392,6 @@ const TEXT_SETTING_COLUMNS = [
   ["interaction_mode", "interactionMode"],
   ["orchestration_mode", "orchestrationMode"],
   ["permission_mode", "permissionMode"],
-  ["context_window_mode", "contextWindowMode"],
   ["devin_mode", "devinMode"],
   ["default_open_in_app", "defaultOpenInApp"],
 ] as const satisfies readonly (readonly [keyof ThreadSettings, keyof typeof threads.$inferInsert])[];
@@ -1179,13 +1174,13 @@ export class ThreadStore {
   }
 
   /** Persist the latest context window usage for a thread.
-   * Always updates last_context_tokens. Only updates context_window when provided. */
-  updateContextUsage(id: string, lastContextTokens: number, contextWindow?: number): boolean {
+   * Window-only probes preserve the previous occupancy. */
+  updateContextUsage(id: string, lastContextTokens: number | undefined, contextWindow?: number): boolean {
     const now = new Date().toISOString();
     const result = runChanges(this.orm
       .update(threads)
       .set({
-        lastContextTokens,
+        ...(lastContextTokens === undefined ? {} : { lastContextTokens }),
         ...(contextWindow === undefined ? {} : { contextWindow }),
         updatedAt: now,
       })

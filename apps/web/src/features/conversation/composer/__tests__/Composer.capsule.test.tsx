@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
+import { resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { mockTransport } from "@/__tests__/mocks/transport";
 
@@ -123,6 +123,13 @@ describe("Composer capsule", () => {
     resetThreadStoreForTests({ runningThreadIds: new Set() });
     useComposerDraftStore.setState({ drafts: {}, pendingPrefill: null });
     seedCodexThread();
+  });
+
+  it("shows Claude's resolved 300K window instead of the model maximum", async () => {
+    seedCodexThread({ provider: "claude", model: "claude-opus-5-5", context_window: 1000000 });
+    resetThreadStoreForTests({ currentThreadId: "thread-1", records: seedThreadRecord("thread-1", { context: { lastTokensIn: 240000, contextWindow: 300000 } }) });
+    render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+    expect(await screen.findByRole("img", { name: /80%.*240K\/300K context used/i })).toBeInTheDocument();
   });
 
   it("shows an attached file as a tile in the tray, outside the capsule", async () => {

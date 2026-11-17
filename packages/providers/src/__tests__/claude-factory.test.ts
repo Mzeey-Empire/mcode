@@ -35,7 +35,7 @@ function mcodeAttachment(toolkits = { browser: true, threadControl: true, visual
 
 type NativeMessage = Record<string, unknown>;
 function result(id = "RESULT_1"): NativeMessage { return { type: "result", uuid: id, is_error: false, usage: { input_tokens: 1, output_tokens: 2 }, total_cost_usd: 0.01, num_turns: 1, duration_ms: 3 }; }
-function installTransport(messages: (turn: number, options: Options) => readonly NativeMessage[] | Promise<readonly NativeMessage[]> = (turn) => [result(`RESULT_${turn}`)], emitInit = true) {
+function installTransport(messages: (turn: number, options: Options) => readonly NativeMessage[] | Promise<readonly NativeMessage[]> = (turn) => [result(`RESULT_${turn}`)], emitInit = true, getContextUsage = vi.fn(async () => ({ rawMaxTokens: 300000, totalTokens: 18000 }))) {
   const optionsSeen: Options[] = [];
   const inputs: unknown[] = [];
   const consumedModes: Options["permissionMode"][] = [];
@@ -54,7 +54,7 @@ function installTransport(messages: (turn: number, options: Options) => readonly
       }
     })();
     return Object.assign(stream, queryMethodStubs(), {
-      close: vi.fn(() => { void stream.return(); }), setModel: vi.fn(async () => undefined),
+      close: vi.fn(() => { void stream.return(); }), setModel: vi.fn(async () => undefined), getContextUsage,
       setPermissionMode: vi.fn(async (next: NonNullable<Options["permissionMode"]>) => {
         if (rejectModeChange) {
           rejectModeChange = false;
@@ -103,6 +103,70 @@ async function createNativePlanFixture(proof: string) {
   if (proof !== "missing") await NodeFSPromises.writeFile(filePath, proof === "oversized" ? "x".repeat(PLAN_MAX_CONTENT_CHARS + 1) : "abc");
   return { cwd, configDir, parent, path };
 }
+
+describe("Claude resolved context window", () => {
+  const modelResult = (turn: number) => ({ ...result(`RESULT_${turn}`), modelUsage: { opus: { contextWindow: 1000000 } } });
+
+  it("publishes the resolved window before completion and leaves user compaction settings alone", async () => {
+    const transport = installTransport(turn => [modelResult(turn)]);
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ model: "claude-opus-5-5" }));
+    await completed(events, 1);
+    const recorded = events().map(({ event }) => event);
+    const estimate = recorded.findIndex(event => event.type === AgentEventType.ContextEstimate && event.contextWindow === 300000);
+    expect(estimate).toBeGreaterThanOrEqual(0);
+    expect(estimate).toBeLessThan(recorded.findIndex(event => event.type === AgentEventType.TurnComplete));
+    expect(recorded.find(event => event.type === AgentEventType.TurnComplete)).toMatchObject({ contextWindow: 300000 });
+    expect(transport.optionsSeen[0]?.model).toBe("claude-opus-5-5");
+    expect(transport.optionsSeen[0]?.settings).not.toHaveProperty("autoCompactWindow");
+  });
+
+  it("probes again after switching the model on a reused session", async () => {
+    const probe = vi.fn(async () => ({ rawMaxTokens: 300000, totalTokens: 18000 }))
+      .mockResolvedValueOnce({ rawMaxTokens: 300000, totalTokens: 18000 })
+      .mockResolvedValueOnce({ rawMaxTokens: 200000, totalTokens: 18000 });
+    const transport = installTransport(turn => [modelResult(turn)], true, probe);
+    const { provider, events } = fixture();
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2, model: "claude-haiku-4-5" }));
+    await completed(events, 2);
+    expect(transport.optionsSeen).toHaveLength(1);
+    expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete).map(({ event }) => event)).toMatchObject([
+      { contextWindow: 300000 }, { contextWindow: 200000 },
+    ]);
+  });
+
+  it("ignores an older probe that resolves after the next turn's probe", async () => {
+    let resolveOld: (value: { rawMaxTokens: number; totalTokens: number }) => void = () => undefined;
+    const old = new Promise<{ rawMaxTokens: number; totalTokens: number }>(resolve => { resolveOld = resolve; });
+    const probe = vi.fn(async () => ({ rawMaxTokens: 200000, totalTokens: 18000 }))
+      .mockImplementationOnce(() => old)
+      .mockResolvedValueOnce({ rawMaxTokens: 200000, totalTokens: 18000 })
+      .mockRejectedValueOnce(new Error("probe unavailable"));
+    installTransport(turn => [modelResult(turn)], true, probe);
+    const { provider, events } = fixture();
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2 }));
+    await completed(events, 2);
+    resolveOld({ rawMaxTokens: 300000, totalTokens: 18000 });
+    await old;
+    await provider.sendTurn(request({ turnId: "turn-3", turnExecutionId: "00000000-0000-4000-8000-000000000003" }));
+    await completed(events, 3);
+    expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete).map(({ event }) => event)).toMatchObject([
+      { contextWindow: 1000000 }, { contextWindow: 200000 }, { contextWindow: 200000 },
+    ]);
+  });
+
+  it("completes with the model maximum when the probe rejects", async () => {
+    installTransport(turn => [modelResult(turn)], true, vi.fn().mockRejectedValue(new Error("unsupported request")));
+    const { provider, events } = fixture();
+    await provider.sendTurn(request());
+    await completed(events, 1);
+    expect(events().find(({ event }) => event.type === AgentEventType.TurnComplete)?.event).toMatchObject({ contextWindow: 1000000 });
+  });
+});
 
 describe("Claude native plan turns", () => {
   it.each(["full", "supervised"] as const)("switches all plan kinds and build on one %s session", async permissionMode => {
@@ -521,7 +585,7 @@ describe("Claude public factory core and capabilities", () => {
     const { provider, events } = fixture();
     await provider.sendTurn(request());
     await completed(events, 1);
-    await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2, permissionMode: "full", resumeFrom: "NATIVE_PARENT", providerOptions: { contextWindowMode: "1m" } }));
+    await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2, permissionMode: "full", resumeFrom: "NATIVE_PARENT" }));
     await completed(events, 2);
     expect(sdkQuery).toHaveBeenCalledTimes(2);
     expect(transport.optionsSeen[1]).toMatchObject({ resume: "NATIVE_PARENT", permissionMode: "bypassPermissions" });

@@ -291,7 +291,7 @@ describe("ClaudeEventMapper background tools", () => {
   async function launched(ids: readonly string[]) {
     const harness = createMapper();
     const pendingToolUses = new Set<string>();
-    vi.mocked(harness.callbacks.getSession).mockReturnValue({ model: "sonnet", contextWindowMode: undefined, pendingToolUses, hasFiredToolThisTurn: false });
+    vi.mocked(harness.callbacks.getSession).mockReturnValue({ model: "sonnet", pendingToolUses, hasFiredToolThisTurn: false });
     for (const id of ids) {
       await harness.mapper.map({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Agent", input: {} }] } });
       await harness.mapper.map(launch(id));
