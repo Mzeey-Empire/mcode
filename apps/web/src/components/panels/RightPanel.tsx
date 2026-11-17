@@ -8,7 +8,7 @@ import {
   useDiffStore,
   PANEL_MIN_WIDTH,
   PANEL_WIDE_WIDTH,
-  RIGHT_PANEL_CONVERSATION_MIN_WIDTH,
+  COMPOSER_MIN_WIDTH,
   PANEL_SPLIT_GAP_PX,
   maxPanelWidthInSplit,
   projectRightPanelForScope,
@@ -50,7 +50,7 @@ import {
 import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { hideRightPanelAdaptive, toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
-import { rightPanelMinWidth, rightPanelPostureForPanel, type RightPanelTools } from "@/lib/composer-layout";
+import { rightPanelPosture } from "@/lib/composer-layout";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { SHEET_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
@@ -543,7 +543,6 @@ function RightPanelFrame({
   maximized,
   panelVisible,
   panelWidth,
-  toolMinWidth,
 }: {
   readonly children: React.ReactNode;
   readonly floating: boolean;
@@ -551,7 +550,6 @@ function RightPanelFrame({
   readonly maximized: boolean;
   readonly panelVisible: boolean;
   readonly panelWidth: number;
-  readonly toolMinWidth: number;
 }) {
   const getMaxPanelWidth = useCallback(
     (panel: HTMLDivElement | null) => maxPanelWidthForPosture(panel?.parentElement?.clientWidth, floating),
@@ -560,10 +558,9 @@ function RightPanelFrame({
   return (
     <ResizableRightPanel
       testId="right-panel"
-      // Shown at the tool's minimum without rewriting the stored width, so a narrower tool gets it back.
-      width={Math.max(panelWidth, toolMinWidth)}
-      minWidth={toolMinWidth}
-      maxWidth={floating ? "100%" : `calc(100% - ${RIGHT_PANEL_CONVERSATION_MIN_WIDTH}px - ${PANEL_SPLIT_GAP_PX}px)`}
+      width={panelWidth}
+      minWidth={PANEL_MIN_WIDTH}
+      maxWidth={floating ? "100%" : `calc(100% - ${COMPOSER_MIN_WIDTH}px - ${PANEL_SPLIT_GAP_PX}px)`}
       getMaxWidth={getMaxPanelWidth}
       defaultWidth={getDefaultPanelWidthPx()}
       wideWidth={PANEL_WIDE_WIDTH}
@@ -589,12 +586,12 @@ function getRightPanelVisibilityStyle(panelVisible: boolean): React.CSSPropertie
 }
 
 /**
- * Docked, the panel leaves {@link RIGHT_PANEL_CONVERSATION_MIN_WIDTH}px for the conversation. Floating, it overlays
+ * Docked, the panel leaves {@link COMPOSER_MIN_WIDTH}px for the composer. Floating, it overlays
  * the conversation and may span the content row.
  */
 function maxPanelWidthForPosture(contentRowWidth: number | undefined, floating: boolean): number {
   if (contentRowWidth === undefined) {
-    return Math.max(PANEL_MIN_WIDTH, window.innerWidth - RIGHT_PANEL_CONVERSATION_MIN_WIDTH);
+    return Math.max(PANEL_MIN_WIDTH, window.innerWidth - COMPOSER_MIN_WIDTH);
   }
   return floating ? contentRowWidth : maxPanelWidthInSplit(contentRowWidth);
 }
@@ -618,10 +615,10 @@ function getRightPanelClassName(panelVisible: boolean, maximized: boolean, float
  * Whether the panel floats over the conversation. The layout guard maximizes a full-surface panel a frame later, so
  * until then it floats rather than squeezing the conversation. An unmeasured row docks.
  */
-function useRightPanelFloating(maximized: boolean, panel: RightPanelTools): boolean {
+function useRightPanelFloating(maximized: boolean): boolean {
   const contentRowWidth = useLayoutStore((state) => state.contentRowWidth);
   if (maximized || contentRowWidth <= 0) return false;
-  return rightPanelPostureForPanel(contentRowWidth, panel) !== "docked";
+  return rightPanelPosture(contentRowWidth) !== "docked";
 }
 
 function RightPanelContent({
@@ -1152,8 +1149,7 @@ export function RightPanel() {
     });
   }, [activeWorkspaceId, browserScopePresent, busyPreviewScopeIds, panelScopeId, previewActive]);
 
-  const panelTools = { activeTab: renderedActiveTab, openTabs: renderedOpenTabs };
-  const floating = useRightPanelFloating(maximized, panelTools);
+  const floating = useRightPanelFloating(maximized);
   const isChangesActive = panelVisible && changesActive;
   const changesFresh = useChangesFreshness(
     activeThreadId,
@@ -1196,7 +1192,6 @@ export function RightPanel() {
       maximized={maximized}
       panelVisible={panelVisible}
       panelWidth={panelWidth}
-      toolMinWidth={rightPanelMinWidth(panelTools)}
     >
       <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
         {/* First in the DOM so Tab reaches the rail before the panel body; it still renders on the right. */}

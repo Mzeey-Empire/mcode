@@ -5,8 +5,8 @@ import type { RightPanelState } from "../stores/diffStore";
 import { reviewViewAvailability } from "../lib/review-views";
 import {
   useDiffStore,
+  COMPOSER_MIN_WIDTH,
   PANEL_MIN_WIDTH,
-  RIGHT_PANEL_CONVERSATION_MIN_WIDTH,
   PANEL_SPLIT_GAP_PX,
   maxPanelWidthInSplit,
   getDefaultPanelWidthPx,
@@ -391,10 +391,10 @@ describe("diffStore", () => {
   });
 
   describe("maxPanelWidthInSplit", () => {
-    it("reserves the conversation's docked minimum from the row width", () => {
+    it("reserves the composer's minimum from the row width", () => {
       const split = 1200;
       expect(maxPanelWidthInSplit(split)).toBe(
-        split - RIGHT_PANEL_CONVERSATION_MIN_WIDTH - PANEL_SPLIT_GAP_PX,
+        split - COMPOSER_MIN_WIDTH - PANEL_SPLIT_GAP_PX,
       );
     });
 

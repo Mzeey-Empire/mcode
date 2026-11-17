@@ -1,7 +1,7 @@
 import { useEffect, type RefObject } from "react";
 import { useDiffStore } from "@/stores/diffStore";
 import { useUiStore } from "@/stores/uiStore";
-import { rightPanelMinWidth, rightPanelPostureForPanel, setLayoutMeasurements } from "@/lib/composer-layout";
+import { rightPanelPosture, setLayoutMeasurements } from "@/lib/composer-layout";
 
 /** Inputs that affect composer-first layout enforcement. */
 export interface ComposerLayoutGuardOptions {
@@ -21,7 +21,7 @@ function enforceThreadLayout(contentWidth: number, workspaceId: string, threadId
   const diff = useDiffStore.getState();
   const panelVisible = diff.getRightPanelVisible(workspaceId, threadId);
   if (!panelVisible) return;
-  const fits = rightPanelPostureForPanel(contentWidth, diff.getRightPanel(workspaceId, threadId)) !== "full-surface";
+  const fits = rightPanelPosture(contentWidth) !== "full-surface";
   if (ui.rightPanelMaximized) {
     if (ui.rightPanelMaximizedByLayout && fits) ui.setRightPanelMaximized(false);
     return;
@@ -56,10 +56,8 @@ export function useComposerLayoutGuard(
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
   const rightPanelMaximizedByLayout = useUiStore((s) => s.rightPanelMaximizedByLayout);
-  // Opening or closing the panel, or a tool in it, changes the room it needs without resizing the content row, and
-  // a floating panel never resizes it, so these rerun the guard too.
+  // Opening the panel does not resize the content row, and a floating panel never resizes it, so this reruns the guard.
   const rightPanelVisible = useDiffStore((s) => activeWorkspaceId !== null && s.getRightPanelVisible(activeWorkspaceId, activeThreadId));
-  const rightPanelNeed = useDiffStore((s) => activeWorkspaceId === null ? 0 : rightPanelMinWidth(s.getRightPanel(activeWorkspaceId, activeThreadId)));
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -105,6 +103,5 @@ export function useComposerLayoutGuard(
     rightPanelMaximized,
     rightPanelMaximizedByLayout,
     rightPanelVisible,
-    rightPanelNeed,
   ]);
 }

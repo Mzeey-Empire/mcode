@@ -154,8 +154,8 @@ describe("useComposerLayoutGuard responsive layout", () => {
 
     it("floats Review over a row too narrow to dock it, and takes the full surface only below the narrow posture", () => {
       setReviewPanelVisible(true);
-      // Review needs 560px beside the conversation's 520px, so 900px cannot dock it but can still show both.
-      const view = render(<LayoutHarness contentWidth={900} {...threadProps} />);
+      // Docking needs 864px (composer 480 + panel 384), so 800px cannot dock the panel but can still show both.
+      const view = render(<LayoutHarness contentWidth={800} {...threadProps} />);
       expect(useUiStore.getState().rightPanelMaximized).toBe(false);
 
       view.rerender(<LayoutHarness contentWidth={759} {...threadProps} />);

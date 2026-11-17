@@ -151,8 +151,13 @@ export function PanelTitle({
  */
 export function PanelToolGlyph({ children }: { readonly children: ReactNode }) {
   return (
-    // The tab list or title beside it names the tool, so the glyph is for sighted users only.
-    <span aria-hidden data-panel-tool-icon className="grid size-8 shrink-0 place-items-center text-muted [&_svg]:size-4">
+    // The tab list or title beside it names the tool, so the glyph is for sighted users only. A narrow panel drops it
+    // first, since the rail's selected entry shows the same icon; 208px fits Review's name and view picker without it.
+    <span
+      aria-hidden
+      data-panel-tool-icon
+      className="grid size-8 shrink-0 place-items-center text-muted @max-[208px]/panel-title:hidden [&_svg]:size-4"
+    >
       {children}
     </span>
   );
@@ -268,7 +273,7 @@ export function PanelHeader({
         className="window-drag flex h-row-comfortable shrink-0 items-center gap-2 pl-2 select-none"
       >
         {maximized && !sidebarDocked ? <CollapsedSidebarControls /> : null}
-        <div ref={leadingRef} data-testid="panel-header-leading" className="flex h-full min-w-0 flex-1 items-center gap-2" />
+        <div ref={leadingRef} data-testid="panel-header-leading" className="@container/panel-title flex h-full min-w-0 flex-1 items-center gap-2" />
         {fullSurface ? (
           // It hides the panel, so it stands in for the Hide panel button as well as Restore.
           <Button variant="subtle" shape="round" className="text-body-small font-medium" onClick={onReturnToChat}>
