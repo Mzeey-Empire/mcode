@@ -49,7 +49,7 @@ function ModePill({ mode, onChange }: { readonly mode: FileViewMode; readonly on
           role="radio"
           aria-checked={mode === option.value}
           onClick={() => onChange(option.value)}
-          className={`h-7 rounded-full px-2.5 text-body-small font-medium ${mode === option.value ? "bg-border text-ink" : "text-muted hover:text-ink"}`}
+          className={`h-7 rounded-full px-2 text-body-small font-medium ${mode === option.value ? "bg-border text-ink" : "text-muted hover:text-ink"}`}
         >
           {option.label}
         </button>
