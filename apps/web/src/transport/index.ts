@@ -195,6 +195,8 @@ export async function initTransport(): Promise<McodeTransport> {
       if (token) localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
     } catch { /* ignore parse errors */ }
 
+    // Users install a missing CLI in another window; returning to Mcode is the moment to look for it again.
+    window.addEventListener("focus", () => void useProviderAvailabilityStore.getState().recheckMissing());
     transport = createWsTransport(url, {
       onStatusChange: (status) => {
         useConnectionStore.getState().setStatus(status);
