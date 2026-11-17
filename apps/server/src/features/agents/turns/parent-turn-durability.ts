@@ -1,4 +1,4 @@
-import type { InterruptionCause, ProviderIdentity } from "@mcode/contracts/compat/agent-model";
+import type { InterruptionCause, ProviderIdentity, TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import type { Message } from "@mcode/contracts/models/message";
 import type { NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
 import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
@@ -81,6 +81,10 @@ export interface ParentTurnInterruptionInput {
     narrative: readonly ParentNarrativeRecoveryItem[],
   ) => void;
   recoveredNarrative?: readonly ParentNarrativeRecoveryItem[];
+  /** Set when someone stopped the turn on purpose: it then ends cancelled by them instead of interrupted. */
+  stop?: TurnStopCause;
+  /** A notice row staged in the same transaction, recorded on the turn's timeline with its ending. */
+  notice?: Message;
 }
 
 /** Durable parent-turn operations that orchestration can receive by construction. */

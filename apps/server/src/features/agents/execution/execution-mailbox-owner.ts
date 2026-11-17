@@ -12,6 +12,20 @@ interface OwnedExecution {
   readonly execution: ExecutionIdentity;
   readonly lease: ExecutionLease;
   started: boolean;
+  /** The release command under way for this execution; a second release waits for it instead of sending another. */
+  release?: Promise<void>;
+}
+
+/**
+ * Refuses a command offered after its execution's worker release began. The worker drops the execution on release,
+ * so the command could never run, and while it was pending the release could not free the worker slot. The release
+ * ends the turn; `released` settles once it has freed the worker, and rejects if it failed.
+ */
+export class ExecutionReleaseUnderWay extends Error {
+  constructor(executionId: string, readonly released: Promise<void>) {
+    super(`Execution release is under way: ${executionId}`);
+    this.name = "ExecutionReleaseUnderWay";
+  }
 }
 
 /** Claims one mailbox before a parent turn can be written or sent to a provider. */
@@ -59,39 +73,73 @@ export class ExecutionMailboxOwner {
     }
   }
 
-  /** Admit one ordered command only for the current thread execution and lease. */
+  /**
+   * Admit one ordered command only for the current thread execution and lease. Rejects with
+   * `ExecutionReleaseUnderWay` once the execution's release began.
+   */
   submit(execution: ExecutionIdentity, command: ExecutionWorkCommand): Promise<ExecutionWorkerResult> {
-    return this.submitOwned(this.requireOwner(execution), command);
+    return this.submitAdmitted(this.requireOwner(execution), command);
   }
 
-  /** Put Stop behind every already admitted event before awaiting provider teardown. */
+  /**
+   * Put Stop behind every already admitted event before awaiting provider teardown. Rejects with
+   * `ExecutionReleaseUnderWay` once the execution's release began.
+   */
   stop(execution: ExecutionIdentity, requestId: string): Promise<ExecutionWorkerResult> {
-    const owner = this.requireOwner(execution);
-    return this.submitOwned(owner, { kind: "stop", requestId });
+    return this.submitAdmitted(this.requireOwner(execution), { kind: "stop", requestId });
   }
 
-  /** Release the slot only after finalization and its release command have settled. */
-  async release(execution: ExecutionIdentity): Promise<void> {
-    const owner = this.requireOwner(execution);
-    const result = await this.submitOwned(owner, { kind: "release" });
-    if (result.kind !== "released" || !this.scheduler.release(owner.execution, owner.lease)) {
-      throw new Error(`Execution release was not acknowledged: ${execution.executionId}`);
-    }
-    this.active.delete(execution.threadId);
+  /**
+   * Release the slot only after finalization and its release command have settled. Resolves false when another
+   * release freed this execution, or this owner no longer holds it, so whoever freed it owns ending the turn.
+   */
+  async release(execution: ExecutionIdentity): Promise<boolean> {
+    const owner = this.held(execution);
+    if (!owner) return false;
+    return this.releaseOnce(owner, { kind: "release" }, "Execution release was not acknowledged");
   }
 
-  /** Release an execution using writer evidence validated by its exact worker lease. */
-  async releaseRecovered(execution: ExecutionIdentity, recovery: ExecutionRecoveryReceipt): Promise<void> {
-    const owner = this.requireOwner(execution);
+  /**
+   * Release an execution using writer evidence validated by its exact worker lease. Resolves false when another
+   * release freed this execution, or this owner no longer holds it, so whoever freed it owns ending the turn.
+   */
+  async releaseRecovered(execution: ExecutionIdentity, recovery: ExecutionRecoveryReceipt): Promise<boolean> {
+    const owner = this.held(execution);
+    if (!owner) return false;
     if (recovery.operationId !== `${owner.lease.leaseId}:worker-lost`
       || recovery.kind === "conflict" && recovery.recoveryState !== "already-terminal") {
       throw new Error("Recovered release has no matching durable evidence");
     }
-    const result = await this.submitOwned(owner, { kind: "release", recovery });
-    if (result.kind !== "released" || !this.scheduler.release(owner.execution, owner.lease)) {
-      throw new Error(`Recovered execution release was not acknowledged: ${execution.executionId}`);
+    return this.releaseOnce(owner, { kind: "release", recovery }, "Recovered execution release was not acknowledged");
+  }
+
+  /**
+   * A turn's ordinary release and its saving exit can both release it at once. The worker drops the execution on the
+   * first release command, so a second command is refused, and while it is pending the first cannot free the slot.
+   * A caller that finds a release under way waits for it, and sends its own only if that one failed.
+   */
+  private async releaseOnce(owner: OwnedExecution, command: Extract<ExecutionWorkCommand, { kind: "release" }>,
+    unacknowledged: string): Promise<boolean> {
+    while (owner.release) {
+      if (await owner.release.then(() => true, () => false)) return false;
     }
-    this.active.delete(execution.threadId);
+    owner.release = this.submitRelease(owner, command, unacknowledged);
+    try {
+      await owner.release;
+    } catch (error) {
+      owner.release = undefined;
+      throw error;
+    }
+    return true;
+  }
+
+  private async submitRelease(owner: OwnedExecution, command: Extract<ExecutionWorkCommand, { kind: "release" }>,
+    unacknowledged: string): Promise<void> {
+    const result = await this.submitOwned(owner, command);
+    if (result.kind !== "released" || !this.scheduler.release(owner.execution, owner.lease)) {
+      throw new Error(`${unacknowledged}: ${owner.execution.executionId}`);
+    }
+    this.active.delete(owner.execution.threadId);
   }
 
   /** Forget a worker-lost execution only after the recovery coordinator released its lease. */
@@ -113,12 +161,28 @@ export class ExecutionMailboxOwner {
     return owner?.started === true && sameExecution(owner.execution, execution);
   }
 
-  private requireOwner(execution: ExecutionIdentity): OwnedExecution {
+  /**
+   * An owner drops an execution only when a release freed it, worker-loss recovery released it, or its start was
+   * abandoned; each of those ends the turn itself, so a release that finds it gone has nothing to end.
+   */
+  private held(execution: ExecutionIdentity): OwnedExecution | undefined {
     const owner = this.active.get(execution.threadId);
-    if (!owner || !sameExecution(owner.execution, execution)) {
-      throw new Error(`No matching execution owner: ${execution.executionId}`);
-    }
+    return owner && sameExecution(owner.execution, execution) ? owner : undefined;
+  }
+
+  private requireOwner(execution: ExecutionIdentity): OwnedExecution {
+    const owner = this.held(execution);
+    if (!owner) throw new Error(`No matching execution owner: ${execution.executionId}`);
     return owner;
+  }
+
+  /** Commands admitted before the release still drain ahead of it, in mailbox order. */
+  private submitAdmitted(
+    owner: OwnedExecution,
+    command: ExecutionWorkCommand | { readonly kind: "stop"; readonly requestId: string },
+  ): Promise<ExecutionWorkerResult> {
+    if (owner.release) return Promise.reject(new ExecutionReleaseUnderWay(owner.execution.executionId, owner.release));
+    return this.submitOwned(owner, command);
   }
 
   private async submitOwned(

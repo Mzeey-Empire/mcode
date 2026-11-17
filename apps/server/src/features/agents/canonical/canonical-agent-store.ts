@@ -84,9 +84,18 @@ import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { notifyCommittedCanonicalEvents } from "./committed-canonical-events.js";
 import { interruptionReason, withTurnEnding, type TurnEndingCause } from "./turn-ending.js";
 import { CanonicalItemContentTail, canonicalItemRowSelection, foldItemContentTail, type CanonicalItemContentTailOptions } from "./canonical-item-content-tail.js";
+import type { ExecutionLease } from "../execution/execution-mailbox-protocol.js";
+import { z } from "zod";
 
 const CANONICAL_EXECUTION_DIAGNOSTIC_INDEX_CAPACITY = 128;
 const CANONICAL_DIAGNOSTIC_EXPORT_EVENT_CAPACITY = 1_024;
+
+/** Operation id of the row where the canonical writer keeps an execution's semantic head. */
+export const EXECUTION_HEAD_OPERATION_ID = "semantic:head";
+/** Receipt kind of an execution's semantic head row. */
+export const EXECUTION_HEAD_KIND = "semantic-head";
+const storedExecutionLeaseSchema = z.object({ lease: z.object({ ownerEpoch: z.number().int(),
+  workerIndex: z.number().int(), workerGeneration: z.number().int(), leaseId: z.string() }) });
 
 /** Server input before accepted sequence, durable revision, and server timestamps are assigned. */
 export interface CanonicalAgentEventDraft {
@@ -775,6 +784,14 @@ export class CanonicalAgentStore {
     if (!turn) return null;
     this.cacheTurnExecution(executionId, turn.id);
     return turn;
+  }
+
+  /** Load the lease the canonical writer's head holds for an execution, which a worker-loss ending must match. */
+  loadExecutionLease(executionId: string): ExecutionLease | null {
+    const row = this.db.prepare("SELECT receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ? AND kind = ?")
+      .get(executionId, EXECUTION_HEAD_OPERATION_ID, EXECUTION_HEAD_KIND);
+    if (!row || typeof row !== "object" || !("receipt_json" in row) || typeof row.receipt_json !== "string") return null;
+    return storedExecutionLeaseSchema.parse(JSON.parse(row.receipt_json)).lease;
   }
 
   /** Load the accepted user anchor owned by the exact parent execution. */
@@ -2080,6 +2097,7 @@ export class CanonicalAgentStore {
     recoveredNarrative: readonly ParentNarrativeRecoveryItem[] = [],
     recoveryIncidentId?: string,
     endedAt?: string,
+    ending: Pick<ParentTurnInterruptionInput, "stop" | "notice"> = {},
   ): CanonicalAgentCommitResult {
     return this.parentLifecycle.interrupt({
       executionId,
@@ -2090,6 +2108,7 @@ export class CanonicalAgentStore {
       recoveredNarrative,
       recoveryIncidentId,
       endedAt,
+      ...ending,
     } satisfies ParentTurnInterruptionInput);
   }
 

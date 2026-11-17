@@ -29,7 +29,7 @@ import type {
   ParentLiveEffects,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventDraft, CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
-import { CanonicalAgentStore } from "./canonical-agent-store.js";
+import { CanonicalAgentStore, EXECUTION_HEAD_KIND, EXECUTION_HEAD_OPERATION_ID } from "./canonical-agent-store.js";
 import { AcceptedContentRejected } from "./accepted-save-failure.js";
 import { sanitizePublicToolInput } from "../tools/input/public-tool-input.js";
 import { APPEND_GROUP_LIMITS, isGroupableAppend } from "./canonical-append-group.js";
@@ -40,7 +40,7 @@ import { matchesCodexSystemIntents } from "./codex-system-intents.js";
 import { endingFromAdapterFailure } from "./turn-ending.js";
 import { admittedSessionId } from "../turns/completed-turn-watermark.js";
 import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
-import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput } from "./canonical-parent-turn-write.js";
+import { CanonicalParentTurnWrite, type DataOnlyParentLiveMessageInput, type DataOnlyParentTurnFinishInput, type UnsavedTurnOutput } from "./canonical-parent-turn-write.js";
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
 import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 import { HookExecutionStore as HookExecutionRepo } from "../events/persistence/hook-execution-store.js";
@@ -53,8 +53,8 @@ import {
   type ParentAssistantTextCheckpointResult,
 } from "../turns/parent-assistant-text-checkpoint-store.js";
 
-const HEAD_ID = "semantic:head";
-const HEAD_KIND = "semantic-head";
+const HEAD_ID = EXECUTION_HEAD_OPERATION_ID;
+const HEAD_KIND = EXECUTION_HEAD_KIND;
 const PUBLICATION_KIND = "semantic-publication";
 const ACKNOWLEDGED_PUBLICATION_KIND = "semantic-publication-acknowledged";
 const PENDING_FINISH_KIND = "semantic:finish-pending";
@@ -211,6 +211,8 @@ export interface LostExecutionInterruption {
   readonly lease: ExecutionLease;
   readonly reason: string;
   readonly recoveryIncidentId: string;
+  /** Set when the turn ends because accepted progress dropped output it could not save. */
+  readonly unsavedOutput?: UnsavedTurnOutput;
 }
 
 /**
@@ -368,6 +370,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     const result = this.turns.interruptLostExecution({ ...input.execution,
       // A lost worker means Mcode could no longer save the provider's output.
       reason: input.reason, cause: "saving_stopped", recoveryIncidentId: input.recoveryIncidentId,
+      ...(input.unsavedOutput ? { unsavedOutput: input.unsavedOutput } : {}),
       ...(current.assignedMessageId ? { assignedMessageId: current.assignedMessageId } : {}) });
     const receipt = committed(operation, result.durableThrough);
     const sequences = this.bufferedPublication?.flatMap((batch) => batch.map((event) => event.acceptedSequence)) ?? [];

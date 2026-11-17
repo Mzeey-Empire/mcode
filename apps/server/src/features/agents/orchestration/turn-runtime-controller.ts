@@ -35,12 +35,14 @@ import { TurnRuntimeRegistry } from "../turns/turn-runtime.js";
 import type { TurnOutcome } from "../turns/turn-outcome.js";
 import { ProviderEventIngress } from "../../providers/composition/provider-event-ingress.js";
 import { ExecutionFileEvidenceCoordinator } from "../execution/execution-file-evidence-coordinator.js";
-import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import { sameExecution, type ExecutionIdentity } from "../execution/execution-mailbox-protocol.js";
+import { ExecutionReleaseUnderWay } from "../execution/execution-mailbox-owner.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "../execution/execution-worker-handler.js";
 import { WorkerOwnedTurnRuntime } from "../execution/worker-owned-turn-runtime.js";
 import type { WorkerOwnedProviderEventBatch } from "../../providers/composition/provider-host-ports.js";
 import { SnapshotService } from "../../projects/diffs/snapshots/snapshot-service.js";
 import { SnapshotRefPins } from "../../projects/diffs/snapshots/snapshot-ref-pins.js";
+import type { UnsavedTurnOutcome } from "../canonical/canonical-accepted-progress.js";
 import type { DataOnlyParentTurnFinishInput } from "../canonical/canonical-parent-turn-write.js";
 import { observedProviderRetries, persistTurnFailure, providerFailureTerminal, type TurnEndingCause } from "../canonical/turn-ending.js";
 import { TurnEventPipeline, type TurnLifecycleControl } from "../turns/turn-event-pipeline.js";
@@ -101,6 +103,9 @@ type PreparedStop = {
   runtime: TurnRuntimeSnapshot;
   stop: TurnStopCause;
 };
+
+/** The session a provider stop targets, and the turn whose runtime must still be current to evict it. */
+type StopTarget = Pick<PreparedStop, "threadId" | "sessionId" | "providerId" | "runtime">;
 
 type UnsentWorkerTerminal = { outcome: "errored" } | { outcome: "cancelled"; stop: TurnStopCause };
 
@@ -232,8 +237,23 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     });
     workerRuntime?.providerEvents.bindCommandPreparation((execution, batch) => this.prepareWorkerEvent(execution, batch));
     workerRuntime?.providerEvents.bindCommitted((execution, result) => this.applyWorkerReceipt(execution, result));
-    workerRuntime?.bindRecovered((execution) => this.handleWorkerRecovery(execution));
+    workerRuntime?.bindRecovered((execution, outcome) => this.handleWorkerRecovery(execution, outcome));
+    workerRuntime?.bindUnsavedEndingSettled((execution) => this.settleRecoveredEvidence(execution));
+    workerRuntime?.bindUnsavedAgentStop((execution) => this.stopUnsavedAgent(execution));
     this.eventPublication.registerPipelineStart(() => this.initializeProviderEvents());
+  }
+
+  /** A turn whose finish was refused has already left the worker, so its provider is resolved through the registry. */
+  private async stopUnsavedAgent(execution: ExecutionIdentity): Promise<void> {
+    const { threadId } = execution;
+    const runtime = this.turnRuntime.snapshot(threadId);
+    if (runtime?.turnExecutionId !== execution.executionId) return;
+    const providerId = this.activeProviderId(threadId);
+    const provider = this.lifecycles.workerFor(execution)?.provider
+      ?? (providerId ? this.providerRegistry.resolve(providerId) : undefined);
+    if (!provider) return;
+    await this.stopWorkerProvider({ threadId, sessionId: `mcode-${threadId}`, ...(providerId ? { providerId } : {}), runtime },
+      provider);
   }
 
   /** Retain a turn's release promises while test ingress drains, even after its lifecycle ends. */
@@ -734,7 +754,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         await this.retireWorkerProvider(provider, execution, deliveryAttempt);
       }
       await this.requireWorkerRuntime().providerEvents.retire(execution);
-      await this.requireWorkerRuntime().owner.release(execution);
+      // A saving exit that released the worker first ends the turn through `handleWorkerRecovery`.
+      if (!await this.requireWorkerRuntime().owner.release(execution)) return;
       this.requireWorkerFiles().retire(execution.threadId, execution.executionId, deliveryAttempt);
       this.lifecycles.end(execution, active);
       this.trackSessionEnded(execution.threadId, execution.executionId);
@@ -807,9 +828,14 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       logger.warn("Abandoned file evidence sweep failed", { threadId, error: String(error) }));
   }
 
-  private handleWorkerRecovery(execution: ExecutionIdentity): void {
+  /** A recovered ending is saved without the publication that normally marks the turn's file evidence saved. */
+  private settleRecoveredEvidence(execution: ExecutionIdentity): void {
     this.fileEvidence?.tracked(execution, "lost");
     this.fileEvidence?.terminalSaved(execution);
+  }
+
+  private handleWorkerRecovery(execution: ExecutionIdentity, outcome: UnsavedTurnOutcome = "interrupted"): void {
+    this.settleRecoveredEvidence(execution);
     void this.resolveAbandonedEvidence(execution.threadId);
     // Recovery has committed the interruption, so the baseline pin can settle.
     this.settlePinsInBackground(execution);
@@ -818,7 +844,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (this.lifecycles.worker(execution.threadId) !== active) return;
     this.lifecycles.end(execution);
     if (active) this.recoverWorkerProvider(active);
-    this.turnRuntime.terminalize(execution.threadId, execution.executionId, "interrupted");
+    this.turnRuntime.terminalize(execution.threadId, execution.executionId, outcome);
     this.trackSessionEnded(execution.threadId, execution.executionId);
     this.clearTurnDispatch(execution.threadId);
     this.clearTurnEndedState(execution.threadId);
@@ -1232,6 +1258,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
    * and evicts the pooled session in the background.
    */
   private async stopSessionInternal(threadId: string, stop: TurnStopCause): Promise<AgentStopResult> {
+    const unsaved = await this.stopUnsavedTurn(threadId, stop);
+    if (unsaved) return unsaved;
     const prepared = this.prepareStop(threadId, stop);
     if (isRunningRuntime(prepared.runtime) && prepared.dispatchState === "not-dispatched") {
       this.lifecycles.recordStopBeforeSend(threadId, prepared.runtime.turnExecutionId!, prepared.stop);
@@ -1249,6 +1277,12 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       });
     });
     return this.finalizeStoppedTurn(prepared);
+  }
+
+  /** No provider stop here: the unsaved-turn exit already stops the agent. */
+  private async stopUnsavedTurn(threadId: string, stop: TurnStopCause): Promise<AgentStopResult | undefined> {
+    const status = await this.workerRuntime?.progress?.stopUnsavedTurn(threadId, stop);
+    return status ? { ...this.alreadyTerminal(this.prepareStop(threadId, stop)), status } : undefined;
   }
 
   private async stopWorkerSession(prepared: PreparedStop): Promise<AgentStopResult> {
@@ -1281,11 +1315,25 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     try {
       return await this.completeWorkerStop(prepared, active, drained);
     } catch (error) {
-      await this.requireWorkerRuntime().recoverRejected(active.execution);
-      throw error;
+      return await this.failWorkerStop(prepared, active.execution, error);
     } finally {
       active.stopInProgress = false;
     }
+  }
+
+  /**
+   * When another release, the saving exit's, freed the worker, that release ends the turn and Stop has nothing left
+   * to do; a release still under way counts only once it succeeds. Otherwise recovery ends the turn.
+   */
+  private async failWorkerStop(prepared: PreparedStop, execution: ExecutionIdentity, error: unknown): Promise<AgentStopResult> {
+    const worker = this.requireWorkerRuntime();
+    const owned = worker.owner.current(execution.threadId);
+    const releasedByAnother = error instanceof ExecutionReleaseUnderWay
+      ? await error.released.then(() => true, () => false)
+      : !owned || !sameExecution(owned.execution, execution);
+    if (releasedByAnother) return this.alreadyTerminal(prepared);
+    await worker.recoverRejected(execution);
+    throw error;
   }
 
   private async completeWorkerStop(
@@ -1349,7 +1397,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
       status: "cancelled", dispatchState: prepared.dispatchState };
   }
 
-  private async stopWorkerProvider(prepared: PreparedStop, provider: IAgentProvider): Promise<void> {
+  private async stopWorkerProvider(prepared: StopTarget, provider: IAgentProvider): Promise<void> {
     void Promise.resolve(this.featureEffects.stopDescendants(prepared.threadId)).catch((error: unknown) => {
       logger.warn("Worker-owned descendant stop failed", { threadId: prepared.threadId,
         error: error instanceof Error ? error.message : String(error) });
@@ -1431,7 +1479,7 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   }
 
   /** Drop a pooled session whose provider ignored cancellation so the next turn respawns fresh. */
-  private evictUnresponsiveSession(prepared: PreparedStop): void {
+  private evictUnresponsiveSession(prepared: StopTarget): void {
     const providerId = prepared.providerId;
     if (!providerId) return;
     if (this.turnRuntime.snapshot(prepared.threadId)?.turnExecutionId !== prepared.runtime.turnExecutionId) return;

@@ -9,10 +9,10 @@ import { ExecutionMailboxOwner } from "./execution-mailbox-owner.js";
 import { ExecutionMailboxScheduler, type ExecutionMailboxLimits } from "./execution-mailbox-scheduler.js";
 import { ExecutionProviderEventOwnership } from "./execution-provider-event-ownership.js";
 import { ExecutionThreadWorkerPort } from "./execution-worker-port.js";
-import type { ExecutionIdentity, ExecutionLease } from "./execution-mailbox-protocol.js";
+import { sameExecution, sameLease, type ExecutionIdentity, type ExecutionLease } from "./execution-mailbox-protocol.js";
 import { ExecutionWorkerLossCoordinator, workerLossIncidentId } from "./execution-worker-loss-coordinator.js";
 import type { ExecutionWorkCommand, ExecutionWorkerResult } from "./execution-worker-handler.js";
-import { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
+import { CanonicalAcceptedProgress, type UnsavedTurnEnded, type UnsavedTurnOutcome } from "../canonical/canonical-accepted-progress.js";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import type { CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { PlanFileWriter } from "../planning/plan-file-writer.js";
@@ -41,7 +41,8 @@ export class WorkerOwnedTurnRuntime {
   readonly providerEvents: ExecutionProviderEventOwnership;
   private readonly initialWorkers: ExecutionThreadWorkerPort[] = [];
   private readonly rejectedRecoveries = new Map<string, Promise<void>>();
-  private onRecovered: ((execution: ExecutionIdentity) => void) | undefined;
+  private onRecovered: ((execution: ExecutionIdentity, outcome?: UnsavedTurnOutcome) => void) | undefined;
+  private onUnsavedEndingSettled: ((execution: ExecutionIdentity) => void) | undefined;
   private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
 
   constructor(
@@ -80,11 +81,38 @@ export class WorkerOwnedTurnRuntime {
     this.owner = new ExecutionMailboxOwner(this.scheduler, (execution, lease) => this.writerPort.abandonStart(execution, lease));
     this.providerEvents = new ExecutionProviderEventOwnership(this.owner);
     this.progress?.bindPermanentFailure(async (execution) => this.recoverRejected(execution));
+    this.progress?.bindUnsavedTurnEnded(async (...ended) => this.releaseUnsavedTurn(...ended));
   }
 
-  /** Notify the runtime controller only after writer-backed worker-loss recovery releases the lease. */
-  bindRecovered(onRecovered: (execution: ExecutionIdentity) => void): void {
+  /**
+   * Notify the runtime controller only after writer-backed worker-loss recovery releases the lease. The outcome is
+   * the one storage saved; worker loss always saves an interruption.
+   */
+  bindRecovered(onRecovered: (execution: ExecutionIdentity, outcome?: UnsavedTurnOutcome) => void): void {
     this.onRecovered = onRecovered;
+  }
+
+  /** Let accepted progress stop the agent of a turn it is ending because the turn's output could not be saved. */
+  bindUnsavedAgentStop(stopAgent: (execution: ExecutionIdentity) => Promise<void>): void {
+    this.progress?.bindUnsavedAgentStop(stopAgent);
+  }
+
+  /**
+   * Settle what a saving exit's ending owes when another release, not the exit's, freed the turn's worker. That
+   * release ends the turn, but the exit discarded the save that would have published the ending.
+   */
+  bindUnsavedEndingSettled(onSettled: (execution: ExecutionIdentity) => void): void {
+    this.onUnsavedEndingSettled = onSettled;
+  }
+
+  /** A turn whose finish was refused has usually been released already; one that failed mid-turn still holds its worker. */
+  private async releaseUnsavedTurn(...[execution, lease, receipt, outcome]: Parameters<UnsavedTurnEnded>): Promise<void> {
+    if (receipt.kind !== "committed" && (receipt.kind !== "conflict" || receipt.recoveryState !== "already-terminal")) return;
+    const owned = this.owner.current(execution.threadId);
+    const holdsLease = owned !== undefined && sameExecution(owned.execution, execution) && sameLease(owned.lease, lease);
+    // Only the release that freed the worker ends the turn; the ending is saved either way.
+    if (holdsLease && await this.owner.releaseRecovered(execution, receipt)) this.onRecovered?.(execution, outcome);
+    else this.onUnsavedEndingSettled?.(execution);
   }
 
   /** Connect durable plan publication to thread hydration and background attention. */
@@ -117,8 +145,7 @@ export class WorkerOwnedTurnRuntime {
     if (receipt.kind !== "accepted" && receipt.kind !== "committed" && (receipt.kind !== "conflict" || receipt.recoveryState !== "already-terminal")) {
       throw new Error("Rejected execution has no durable recovery evidence");
     }
-    await this.owner.releaseRecovered(execution, receipt);
-    this.onRecovered?.(execution);
+    if (await this.owner.releaseRecovered(execution, receipt)) this.onRecovered?.(execution);
   }
 
   /** Wait for the writer and every initial slot before accepting a provider turn. */

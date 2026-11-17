@@ -16,7 +16,9 @@ import { broadcast, subscribedThreadIds } from "../../../application/transport/p
 import { BoundedProgressRetention } from "../execution/progress-retention-budget.js";
 import { ThreadProgressOwner } from "../execution/thread-progress-owner.js";
 import type { AcceptedProgressBatch, SavedProgressReceipt, ProgressSaveFailure } from "../execution/thread-progress-types.js";
-import type { ExecutionAcceptedReceipt, ExecutionSemanticOperation, ExecutionTerminalPersistenceReceipt } from "../execution/execution-worker-handler.js";
+import type { ExecutionAcceptedReceipt, ExecutionSemanticOperation, ExecutionTerminalPersistenceReceipt, ExecutionWriteReceipt } from "../execution/execution-worker-handler.js";
+import { workerLossIncidentId } from "../execution/execution-worker-loss-coordinator.js";
+import type { TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import { publishTurnPersisted } from "../execution/turn-persisted-publication.js";
 import { admittedSessionId, coverageOf, type CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
@@ -122,7 +124,41 @@ interface ProgressThread {
   readonly answeredPlanMessages: Set<string>;
   collaboration?: AcceptedCodexCollaboration;
   features: ReturnType<CanonicalAgentBoundary["loadAcceptedFeatureSeed"]> & { compacting: boolean };
+  exit?: UnsavedTurnExit;
+  /** The user's latest Stop, kept so an exit that starts after the Stop was answered still saves it. */
+  stopIntent?: { readonly executionId: string; readonly stop: TurnStopCause };
 }
+
+interface UnsavedTurnExit {
+  /** The execution whose ending is owed; storage decides whether its turn is still running and holds its lease. */
+  readonly execution: ExecutionIdentity;
+  readonly error: Error;
+  /** Recorded by the ending in place of the saving failure. */
+  stop?: TurnStopCause;
+  readonly firstAttempt: Promise<void>;
+  readonly markAttempted: () => void;
+}
+
+interface UnsavedTurnEnding {
+  readonly lease: ExecutionLease;
+  readonly receipt: ExecutionWriteReceipt;
+  readonly outcome: UnsavedTurnOutcome;
+  /** False when the commit's own reload of the thread failed, so the exit reloads it before lifting the fence. */
+  readonly reloaded: boolean;
+}
+
+/** How storage ended a turn whose saving stopped: the user's Stop, or the saving failure itself. */
+export type UnsavedTurnOutcome = "cancelled" | "interrupted";
+
+/** Runs once an unsaved turn's ending is settled in storage, with the outcome storage recorded for it. */
+export type UnsavedTurnEnded = (execution: ExecutionIdentity, lease: ExecutionLease, receipt: ExecutionWriteReceipt,
+  outcome: UnsavedTurnOutcome) => Promise<void>;
+
+/** How a Stop resolved for a turn whose ending is owed because its saving could not continue. */
+export type UnsavedTurnStop = "cancelled" | "already-terminal" | "ending-not-saved";
+
+const UNSAVED_ENDING_MAX_RETRY_MS = 30_000;
+const UNSAVED_ENDING_FIRST_RETRY_MS = 1_000;
 
 /**
  * A renderer's reconnect cursor: the last accepted position it holds and, with `liveShown`, that it showed live
@@ -159,6 +195,8 @@ export class CanonicalAcceptedProgress {
   private readonly saves: AcceptedSaveScheduler<AcceptedExecutionWriteIntent>;
   private readonly savingPublisher: SavingStatusPublisher;
   private onPermanentFailure: ((execution: ExecutionIdentity, error: Error) => Promise<void>) | undefined;
+  private stopUnsavedAgent: ((execution: ExecutionIdentity) => Promise<void>) | undefined;
+  private onUnsavedTurnEnded: UnsavedTurnEnded | undefined;
   private pendingSaved: readonly CanonicalAcceptedWriteReceipt[] = [];
   private closing = false;
   private readonly deletingThreads = new Set<string>();
@@ -186,6 +224,7 @@ export class CanonicalAcceptedProgress {
   async beforeDurableCommand(threadId: string): Promise<void> {
     this.assertOpen();
     const thread = this.thread(threadId);
+    if (thread.exit) throw this.saveBlocked(threadId, thread.exit.error);
     if (thread.commandPending) throw new Error("A durable thread command is already pending");
     this.flushLive(thread);
     thread.commandPending = true;
@@ -208,7 +247,7 @@ export class CanonicalAcceptedProgress {
   /** Release the admission fence if the durable command fails or conflicts. */
   cancelDurableCommand(threadId: string): void {
     const thread = this.threads.get(threadId);
-    if (thread) thread.commandPending = false;
+    if (thread && !thread.exit) thread.commandPending = false;
   }
 
   /**
@@ -223,6 +262,11 @@ export class CanonicalAcceptedProgress {
     const thread = this.thread(threadId);
     if (operation && replaysPastBegin(thread.head, operation)) return;
     if (thread.owner.recoveryCut().retained.length > 0) throw new Error("A durable command overtook accepted progress");
+    this.reloadFromStorage(threadId, thread, events, operation);
+  }
+
+  private reloadFromStorage(threadId: string, thread: ProgressThread, events: readonly CanonicalAgentEventEnvelope[],
+    operation?: ExecutionSemanticOperation): void {
     const recovery = this.canonical.recoverThread(threadId, {
       conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER });
     if (recovery.mode !== "snapshot") throw new Error("Durable command seed requires a snapshot");
@@ -231,7 +275,8 @@ export class CanonicalAcceptedProgress {
     thread.revision = recovery.snapshot.revision;
     thread.epoch = `${this.epoch}:${NodeCrypto.randomUUID()}`;
     thread.owner = this.makeOwner(threadId, thread.epoch, thread.state, thread.revision);
-    thread.commandPending = false;
+    // The exit that wrote this ending clears its own fence once it has also published the saving status.
+    thread.commandPending = thread.exit !== undefined;
     thread.answeredPlanMessages.clear();
     thread.messageSequence = nextMessageSequence(thread.state);
     thread.features = { ...this.canonical.loadAcceptedFeatureSeed(threadId), compacting: false };
@@ -278,9 +323,8 @@ export class CanonicalAcceptedProgress {
   accept(operation: ExecutionSemanticOperation): ExecutionAcceptedReceipt {
     this.assertOpen();
     const thread = this.thread(operation.execution.threadId);
-    this.assertAdmission(thread);
     const replay = this.operationAdmission(thread, operation);
-    if (replay.kind === "duplicate") return replay.receipt;
+    if (replay.kind === "settled") return replay.receipt;
     const { head, inputHash } = replay;
     const collaboration = prepareAcceptedCollaboration(thread.state, operation, thread.collaboration);
     const { modelThread, turn } = admittedModel(thread, operation.execution, "Accepted parent execution has no admitted model");
@@ -480,13 +524,17 @@ export class CanonicalAcceptedProgress {
   }
 
   private operationAdmission(thread: ProgressThread, operation: ExecutionSemanticOperation):
-    { readonly kind: "duplicate"; readonly receipt: ExecutionAcceptedReceipt }
+    { readonly kind: "settled"; readonly receipt: ExecutionAcceptedReceipt }
     | { readonly kind: "new"; readonly head: AcceptedExecutionState; readonly inputHash: string } {
+    if (thread.exit && sameExecution(thread.exit.execution, operation.execution)) {
+      return { kind: "settled", receipt: droppedReceipt(thread, operation) };
+    }
+    this.assertAdmission(thread);
     const head = requireExecutionHead(thread, operation);
     const inputHash = operationInputHash(operation);
     const live = thread.liveReceipts.replay(operation.operationId, inputHash);
     const replay = live.kind === "unknown" ? thread.owner.replay(operation.operationId, inputHash) : live;
-    if (replay.kind === "duplicate") return replay;
+    if (replay.kind === "duplicate") return { kind: "settled", receipt: replay.receipt };
     if (replay.kind === "conflict") throw new ProgressAdmissionError("identity-conflict");
     if (operation.ordinal !== head.ordinal + 1) throw new ProgressAdmissionError("routing-conflict");
     return { kind: "new", head, inputHash };
@@ -784,6 +832,53 @@ export class CanonicalAcceptedProgress {
     this.onPermanentFailure = callback;
   }
 
+  /** Bind how the exit for an unsaved turn stops its agent, which it does before writing the ending. */
+  bindUnsavedAgentStop(stopAgent: (execution: ExecutionIdentity) => Promise<void>): void {
+    this.stopUnsavedAgent = stopAgent;
+  }
+
+  /** Bind what runs once an unsaved turn's ending is settled in storage, such as releasing its worker's lease. */
+  bindUnsavedTurnEnded(callback: UnsavedTurnEnded): void {
+    this.onUnsavedTurnEnded = callback;
+  }
+
+  /** Whether this execution's turn is being ended because its saving cannot continue. */
+  endingUnsavedTurn(execution: ExecutionIdentity): boolean {
+    const exit = this.threads.get(execution.threadId)?.exit;
+    return exit !== undefined && sameExecution(exit.execution, execution);
+  }
+
+  /**
+   * Record a Stop on a turn whose ending is owed because its saving could not continue. Answers undefined when no
+   * such turn exists, so the ordinary Stop applies. The Stop is recorded first, so an exit that starts later, after
+   * a retry this Stop waits for or after the ordinary Stop's own ending fails to save, still saves it.
+   */
+  async stopUnsavedTurn(threadId: string, stop: TurnStopCause): Promise<UnsavedTurnStop | undefined> {
+    const thread = this.threads.get(threadId);
+    if (!thread) return undefined;
+    if (thread.head) thread.stopIntent = { executionId: thread.head.execution.executionId, stop };
+    if (!thread.exit && endingAwaitsSave(thread)) await this.waitForSaved(threadId).catch(() => undefined);
+    const exit = headExit(this.threads.get(threadId));
+    if (!exit) return undefined;
+    exit.stop = stop;
+    await exit.firstAttempt;
+    return this.unsavedTurnStop(threadId, exit);
+  }
+
+  /** A status that cannot be read leaves the ending not known to be saved. */
+  private unsavedTurnStop(threadId: string, exit: UnsavedTurnExit): UnsavedTurnStop {
+    let status: string | undefined;
+    try {
+      status = this.canonical.loadTurnByExecution(exit.execution.executionId)?.status;
+    } catch (error) {
+      logger.warn("Stop could not read whether the unsaved turn's ending was saved", { threadId,
+        executionId: exit.execution.executionId, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+      return "ending-not-saved";
+    }
+    if (status === "Running") return "ending-not-saved";
+    return status === "Cancelled" ? "cancelled" : "already-terminal";
+  }
+
   /**
    * A lost worker's terminal observation enters the same owner without awaiting unavailable storage. With no live
    * head for the execution this owner knows nothing about it and answers `not-started`; only SQLite can say more.
@@ -857,7 +952,7 @@ export class CanonicalAcceptedProgress {
   retry(threadId: string): boolean {
     this.assertOpen();
     threadId = this.ownerThreadId(threadId);
-    if (!this.saves.retry(threadId)) return false;
+    if (this.threads.get(threadId)?.exit || !this.saves.retry(threadId)) return false;
     const thread = this.threads.get(threadId);
     const state = thread?.owner.savingState();
     if (thread && state?.kind === "failed") {
@@ -1258,12 +1353,11 @@ export class CanonicalAcceptedProgress {
     thread.owner.recordFailure(failure);
     if (failure.exhausted) {
       this.settleSteerSave(batch.operationId, failure.error);
-      thread.commandPending = false;
-      if (thread.waiters.size > 0) {
-        const blocked = this.saveBlocked(batch.execution.threadId, failure.error);
-        for (const waiter of thread.waiters) waiter.reject(blocked);
+      if (source === "storage") this.startUnsavedTurnExit(thread, batch, failure.error);
+      else {
+        thread.commandPending = false;
+        this.rejectWaiters(thread, batch.execution.threadId, failure.error);
       }
-      thread.waiters.clear();
     }
     logger.error(source === "receipt" ? "Accepted progress receipt processing failed" : "Accepted progress save failed", { threadId: batch.execution.threadId,
       executionId: batch.execution.executionId, operationId: batch.operationId, error: describeSaveFailure(failure.error),
@@ -1278,8 +1372,150 @@ export class CanonicalAcceptedProgress {
       types: [...new Set(batch.events.map((event) => event.draft.payload.type))].slice(0, 8),
     }));
     this.publishSaving(batch.execution.threadId);
-    // Disk failure retains the accepted stream; invalid receipt application still invalidates execution ownership.
+    // Invalid receipt application invalidates execution ownership; a storage failure takes the unsaved-turn exit.
     if (failure.exhausted && source === "receipt") await this.stopFailedOwner(thread, failure.error);
+  }
+
+  private rejectWaiters(thread: ProgressThread, threadId: string, error: Error): void {
+    if (thread.waiters.size > 0) {
+      const blocked = this.saveBlocked(threadId, error);
+      for (const waiter of thread.waiters) waiter.reject(blocked);
+    }
+    thread.waiters.clear();
+  }
+
+  /** The exit runs outside this failure callback because it waits for the in-flight write reporting the failure. */
+  private startUnsavedTurnExit(thread: ProgressThread, batch: AcceptedProgressBatch<AcceptedExecutionWriteIntent>, error: Error): void {
+    if (thread.exit) return;
+    const threadId = batch.execution.threadId;
+    let markAttempted!: () => void;
+    const firstAttempt = new Promise<void>((resolve) => { markAttempted = resolve; });
+    const execution = headWithDroppedOutput(thread) ?? batch.execution;
+    const stop = thread.stopIntent?.executionId === execution.executionId ? thread.stopIntent.stop : undefined;
+    const exit: UnsavedTurnExit = { execution, error, ...(stop ? { stop } : {}), firstAttempt, markAttempted };
+    thread.exit = exit;
+    thread.commandPending = true;
+    this.rejectWaiters(thread, threadId, error);
+    this.rejectSteerSaves(this.saveBlocked(threadId, error), threadId);
+    void this.endUnsavedTurn(threadId, thread, exit).catch((failure: unknown) => logger.error("Unsaved turn exit failed", {
+      threadId, executionId: exit.execution.executionId, error: describeSaveFailure(failure instanceof Error ? failure : new Error(String(failure))) }));
+  }
+
+  /** The ending goes straight to the writer, because the accepted queue it would otherwise join is the one that failed. */
+  private async endUnsavedTurn(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit): Promise<void> {
+    let ending: UnsavedTurnEnding | undefined;
+    try {
+      await this.saves.discardThread(threadId);
+      thread.live?.cancelTimer();
+      thread.live = undefined;
+      thread.owner.discard();
+      ending = await this.writeUnsavedEnding(threadId, thread, exit);
+    } finally {
+      exit.markAttempted();
+      this.finishUnsavedTurnExit(threadId, thread, exit, ending?.reloaded === true);
+    }
+    if (!ending) return;
+    await this.onUnsavedTurnEnded?.(exit.execution, ending.lease, ending.receipt, ending.outcome);
+  }
+
+  /**
+   * Retry until the ending is settled or its turn no longer runs in storage. Each attempt rereads the writer's lease,
+   * so a conflict from a lease the writer no longer holds is retried with the one it checks.
+   */
+  private async writeUnsavedEnding(threadId: string, thread: ProgressThread,
+    exit: UnsavedTurnExit): Promise<UnsavedTurnEnding | undefined> {
+    if (this.closing || this.threads.get(threadId) !== thread) return undefined;
+    // Stopped before any storage read, so a failing read cannot keep the agent running.
+    await this.stopExitAgent(threadId, exit);
+    for (let delayMs = UNSAVED_ENDING_FIRST_RETRY_MS; ; delayMs = Math.min(delayMs * 2, UNSAVED_ENDING_MAX_RETRY_MS)) {
+      if (this.closing || this.threads.get(threadId) !== thread) return undefined;
+      try {
+        const lease = this.owedEndingLease(exit);
+        if (!lease) {
+          logger.warn("Unsaved progress belongs to no running turn; dropped it without an ending", { threadId,
+            executionId: exit.execution.executionId });
+          return undefined;
+        }
+        const ending = await this.attemptUnsavedEnding(threadId, exit, lease, delayMs);
+        if (ending) return ending;
+      } catch (error) {
+        logger.warn("Unsaved turn ending could not be saved; retrying", { threadId, executionId: exit.execution.executionId,
+          retryInMs: delayMs, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+      }
+      exit.markAttempted();
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  /** The stop only reaches an agent still running the exit's execution, so an exit for an ended turn stops nothing. */
+  private async stopExitAgent(threadId: string, exit: UnsavedTurnExit): Promise<void> {
+    await this.stopUnsavedAgent?.(exit.execution).catch((error: unknown) => logger.warn("Unsaved turn agent stop failed", {
+      threadId, error: error instanceof Error ? error.message : String(error) }));
+  }
+
+  /** Undefined when the writer refused the ending while its turn still runs, so the caller retries. */
+  private async attemptUnsavedEnding(threadId: string, exit: UnsavedTurnExit, lease: ExecutionLease,
+    retryInMs: number): Promise<UnsavedTurnEnding | undefined> {
+    const { execution, stop } = exit;
+    let reloaded = true;
+    // A throwing publication would turn this committed ending into a rejected write, and the retry would then find
+    // the turn already ended and never release its worker.
+    const observeEnding = (events: readonly CanonicalAgentEventEnvelope[]) => {
+      try {
+        this.observeCommitted(events);
+      } catch (error) {
+        reloaded = false;
+        logger.error("Unsaved turn ending was saved but its thread could not be reloaded", { threadId,
+          executionId: execution.executionId, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+      }
+    };
+    const receipt = await this.writer.interruptWorkerLoss({ execution, lease,
+      reason: stop ? "Stopped while Mcode could not save the turn's output." : "Mcode could not save the turn's output.",
+      recoveryIncidentId: workerLossIncidentId({ execution, lease }),
+      unsavedOutput: stop ? { stop } : {} }, observeEnding);
+    if (receipt.kind === "committed") return { lease, receipt, outcome: stop ? "cancelled" : "interrupted", reloaded };
+    if (receipt.kind === "conflict" && receipt.recoveryState) {
+      logger.warn("Unsaved turn ending was not written", { threadId, executionId: execution.executionId,
+        recoveryState: receipt.recoveryState });
+      const outcome = receipt.recoveryState === "already-terminal" ? this.terminalOutcome(threadId, execution) : "interrupted";
+      return { lease, receipt, outcome, reloaded: false };
+    }
+    logger.warn("Unsaved turn ending was refused while its turn is still running; retrying", { threadId,
+      executionId: execution.executionId, receipt: receipt.kind, retryInMs });
+    return undefined;
+  }
+
+  /** An unreadable status still settles the exit, because its worker must be released either way. */
+  private terminalOutcome(threadId: string, execution: ExecutionIdentity): UnsavedTurnOutcome {
+    try {
+      return this.canonical.loadTurnByExecution(execution.executionId)?.status === "Cancelled" ? "cancelled" : "interrupted";
+    } catch (error) {
+      logger.warn("Unsaved turn's saved outcome could not be read; labelling it interrupted", { threadId,
+        executionId: execution.executionId, error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+      return "interrupted";
+    }
+  }
+
+  /** The writer's lease for the exit's execution while its turn is still Running in storage, so its ending is owed. */
+  private owedEndingLease(exit: UnsavedTurnExit): ExecutionLease | undefined {
+    if (this.canonical.loadTurnByExecution(exit.execution.executionId)?.status !== "Running") return undefined;
+    return this.canonical.loadExecutionLease(exit.execution.executionId) ?? undefined;
+  }
+
+  private finishUnsavedTurnExit(threadId: string, thread: ProgressThread, exit: UnsavedTurnExit, reloaded: boolean): void {
+    if (thread.exit !== exit) return;
+    const current = !this.closing && this.threads.get(threadId) === thread;
+    try {
+      if (current && !reloaded) this.reloadFromStorage(threadId, thread, []);
+    } catch (error) {
+      // The next durable command reloads the thread from storage again, so admitting it is the way to recover.
+      logger.error("Unsaved turn exit could not reload its thread", { threadId,
+        error: describeSaveFailure(error instanceof Error ? error : new Error(String(error))) });
+    } finally {
+      thread.exit = undefined;
+      thread.commandPending = false;
+    }
+    if (current) this.publishSaving(threadId);
   }
 
   private saveBlocked(threadId: string, error: Error): ThreadSaveBlockedError {
@@ -1592,6 +1828,34 @@ function operationInputHash(operation: ExecutionSemanticOperation): string {
   hash.update(`:narrative:${narrative.length}:[`);
   for (const item of narrative) hash.update(JSON.stringify(item)).update(",");
   return hash.update("]").digest("hex");
+}
+
+/** Dropped rather than refused, because refusing would fail the agent's delivery for a turn already ending. */
+function droppedReceipt(thread: ProgressThread, operation: ExecutionSemanticOperation): ExecutionAcceptedReceipt {
+  const accepted = thread.owner.recoveryCut().accepted;
+  return { kind: "accepted", operationId: operation.operationId, progressPosition: accepted,
+    acceptedThrough: accepted.sequence, eventCount: 0 };
+}
+
+/** Dropping the head's queued or live output desyncs it from storage, so its turn ends whichever save failed. */
+function headWithDroppedOutput(thread: ProgressThread): ExecutionIdentity | undefined {
+  const head = thread.head?.execution;
+  if (!head) return undefined;
+  const dropped = thread.owner.recoveryCut().retained.some((batch) => sameExecution(batch.execution, head))
+    || (thread.live !== undefined && sameExecution(thread.live.operation.execution, head));
+  return dropped ? head : undefined;
+}
+
+function headExit(thread: ProgressThread | undefined): UnsavedTurnExit | undefined {
+  const exit = thread?.exit;
+  const head = thread?.head?.execution;
+  return exit && head && sameExecution(exit.execution, head) ? exit : undefined;
+}
+
+function endingAwaitsSave(thread: ProgressThread): boolean {
+  const turnId = thread.head?.execution.turnId;
+  return turnId !== undefined && thread.durableState.turns[turnId]?.status === "Running"
+    && thread.state.turns[turnId]?.status !== "Running" && thread.owner.recoveryCut().retained.length > 0;
 }
 
 /** Nothing accepted, saving, or still to arrive needs this owner, so release and eviction may drop it. */

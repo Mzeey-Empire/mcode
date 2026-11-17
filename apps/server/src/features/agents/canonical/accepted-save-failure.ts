@@ -1,7 +1,13 @@
+/**
+ * Error code of writer backpressure, a refusal before the write reached SQLite. The code survives a failure's
+ * rebuild across a worker boundary, where the error's class does not.
+ */
+export const WRITER_ADMISSION_FULL_CODE = "MCODE_WRITER_ADMISSION_FULL";
+
 /** Error code that marks a save the writer refused because of the batch's own contents. */
 export const ACCEPTED_CONTENT_REJECTED_CODE = "MCODE_ACCEPTED_CONTENT_REJECTED";
 
-/** How an accepted save failure is handled: retried, replaced, or reported while retries continue. */
+/** How an accepted save failure is handled: retried a bounded number of times, replaced, or ended at once. */
 export type SaveFailureClass = "transient" | "content" | "environment";
 
 /**
@@ -21,8 +27,8 @@ export class AcceptedContentRejected extends Error {
 export const THREAD_SAVE_BLOCKED_CODE = "THREAD_SAVE_BLOCKED";
 
 /**
- * A new turn command refused because an earlier save of the thread cannot complete. Later saves wait behind
- * the failed one in order, so the thread accepts no new turn until the save succeeds or the server restarts.
+ * A new turn command refused because an earlier save of the thread could not complete. The thread accepts no new
+ * turn until Mcode has dropped the unsaved output and written the ending of the turn that produced it.
  */
 export class ThreadSaveBlockedError extends Error {
   override readonly name = "ThreadSaveBlockedError";
@@ -30,7 +36,7 @@ export class ThreadSaveBlockedError extends Error {
 
   constructor(cause: Error) {
     // The hint leads and the reason is capped so both survive the execution worker's 2,000-character message limit.
-    super("This thread cannot save new work. Restart Mcode to recover it. "
+    super("This thread is ending a turn whose output could not be saved. Try again in a moment. "
       + `The earlier save failed: ${(cause.message || cause.name).slice(0, 1_000)}`, { cause });
   }
 }
@@ -45,7 +51,9 @@ export function isThreadSaveBlocked(error: unknown): boolean {
 
 /** Classify a failed save by the codes on its error and `cause` chain. */
 export function classifySaveFailure(error: Error): SaveFailureClass {
-  if (findCode(error, (code) => /^SQLITE_(BUSY|LOCKED)/.test(code))) return "transient";
+  if (findCode(error, (code) => /^SQLITE_(BUSY|LOCKED)/.test(code) || code === WRITER_ADMISSION_FULL_CODE)) {
+    return "transient";
+  }
   if (findCode(error, (code) => code === ACCEPTED_CONTENT_REJECTED_CODE)) return "content";
   return "environment";
 }

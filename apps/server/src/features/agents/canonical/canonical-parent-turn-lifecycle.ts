@@ -9,7 +9,7 @@ import {
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts/ws/channels";
 import { TurnRecoveryError } from "../recovery/turn-recovery-error.js";
-import type { AgentThread, AgentTurn } from "@mcode/contracts/compat/agent-model";
+import type { AgentThread, AgentTurn, TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import type { Message } from "@mcode/contracts/models/message";
 import type { ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
 import { isToolCallActive } from "@mcode/contracts/models/tool-call-record";
@@ -64,6 +64,11 @@ export interface CanonicalParentTurnLifecycleOperations {
 
 /** Canonical alias for the parent-turn interruption durability input. */
 export type CanonicalParentTurnInterruptionInput = ParentTurnInterruptionInput;
+
+/** A lost turn ends cancelled when the user's Stop is recorded with it, otherwise interrupted. */
+export function endingOutcome(input: Pick<CanonicalParentTurnInterruptionInput, "stop">): "cancelled" | "interrupted" {
+  return input.stop ? "cancelled" : "interrupted";
+}
 
 /** Coordinates start and terminal decisions for one parent execution. */
 export class CanonicalParentTurnLifecycle {
@@ -133,7 +138,7 @@ export class CanonicalParentTurnLifecycle {
     const endedAt = input.endedAt ?? new Date().toISOString();
     const recoveryProjection = this.recoveryProjection(
       input.stagedAssistant ?? this.operations.loadTerminalProjection(context.checkpoint.turnId).message,
-      input.executionId,
+      input,
     );
     const narrative = this.recoveredNarrative(
       input.recoveredNarrative ?? [],
@@ -206,13 +211,16 @@ export class CanonicalParentTurnLifecycle {
     throw new Error(`Recovered assistant projection does not belong to execution: ${executionId}`);
   }
 
-  private recoveryProjection(assistant: Message | null, executionId: string): Message | null {
+  private recoveryProjection(
+    assistant: Message | null,
+    input: Pick<CanonicalParentTurnInterruptionInput, "executionId" | "stop">,
+  ): Message | null {
     if (!assistant) return null;
     return {
       ...assistant,
       is_internal: false,
-      outcome: "interrupted",
-      outcomeExecutionId: executionId,
+      outcome: endingOutcome(input),
+      outcomeExecutionId: input.executionId,
     };
   }
 
@@ -238,8 +246,8 @@ export class CanonicalParentTurnLifecycle {
       threadId: context.checkpoint.threadId,
       turnId: context.checkpoint.turnId,
       executionId: input.executionId,
-      phase: "interrupted",
-      terminalOutcome: "interrupted",
+      phase: endingOutcome(input),
+      terminalOutcome: endingOutcome(input),
       error: input.reason,
       nativeCursor: context.checkpoint.nativeCursor ?? undefined,
       projectCompatibility: () => {
@@ -259,7 +267,7 @@ export class CanonicalParentTurnLifecycle {
   ): void {
     if (!assistant) return;
     const updated = runChanges(this.orm.update(messages)
-      .set({ isInternal: 0, outcome: "interrupted", outcomeExecutionId: input.executionId })
+      .set({ isInternal: 0, outcome: endingOutcome(input), outcomeExecutionId: input.executionId })
       .where(and(eq(messages.id, assistant.id), eq(messages.role, "assistant"))));
     if (input.stagedAssistant && updated.changes !== 1) {
       throw new Error(`Recovered assistant message was not staged: ${assistant.id}`);
@@ -268,7 +276,7 @@ export class CanonicalParentTurnLifecycle {
   }
 
   private interruptionEvents(
-    input: Pick<CanonicalParentTurnInterruptionInput, "reason" | "cause">,
+    input: Pick<CanonicalParentTurnInterruptionInput, "reason" | "cause" | "stop" | "notice">,
     context: { checkpoint: CanonicalAgentCheckpoint; thread: AgentThread },
     assistant: Message | null,
     endedAt: string,
@@ -277,7 +285,10 @@ export class CanonicalParentTurnLifecycle {
     return [
       this.idleEvent(checkpoint, thread, endedAt),
       ...this.assistantEvent(checkpoint, thread, assistant, endedAt),
-      this.interruptedEvent(checkpoint, thread, input, endedAt),
+      ...this.messageEvent(checkpoint, thread, input.notice ?? null, endedAt, "recovery-notice"),
+      input.stop
+        ? this.cancelledEvent(checkpoint, thread, { reason: input.reason, stop: input.stop }, endedAt)
+        : this.interruptedEvent(checkpoint, thread, input, endedAt),
     ];
   }
 
@@ -304,31 +315,60 @@ export class CanonicalParentTurnLifecycle {
     assistant: Message | null,
     endedAt: string,
   ): CanonicalAgentEventDraft[] {
-    if (!assistant) return [];
+    return this.messageEvent(checkpoint, thread, assistant, endedAt, "recovery-assistant-outcome");
+  }
+
+  private messageEvent(
+    checkpoint: CanonicalAgentCheckpoint,
+    thread: AgentThread,
+    message: Message | null,
+    endedAt: string,
+    eventKind: string,
+  ): CanonicalAgentEventDraft[] {
+    if (!message) return [];
     return [{
-      eventId: `${checkpoint.executionId}:recovery-assistant-outcome:${assistant.id}`,
+      eventId: `${checkpoint.executionId}:${eventKind}:${message.id}`,
       routing: {
         threadId: checkpoint.threadId,
         turnId: checkpoint.turnId,
         executionId: checkpoint.executionId,
-        itemId: `message:${assistant.id}`,
+        itemId: `message:${message.id}`,
       },
       sourceProviderId: thread.providerId,
       sourceIdentities: thread.providerIdentities,
       payload: {
         type: "item.recorded",
         item: {
-          id: `message:${assistant.id}`,
+          id: `message:${message.id}`,
           threadId: checkpoint.threadId,
           turnId: checkpoint.turnId,
           kind: "message",
           providerIdentities: thread.providerIdentities,
-          payload: { projection: "message", message: assistant },
-          createdAt: assistant.timestamp,
+          payload: { projection: "message", message },
+          createdAt: message.timestamp,
           updatedAt: endedAt,
         },
       },
     }];
+  }
+
+  private cancelledEvent(
+    checkpoint: CanonicalAgentCheckpoint,
+    thread: AgentThread,
+    { reason, stop }: { reason: string; stop: TurnStopCause },
+    endedAt: string,
+  ): CanonicalAgentEventDraft {
+    return {
+      eventId: `${checkpoint.executionId}:recovery-cancelled`,
+      routing: {
+        threadId: checkpoint.threadId,
+        turnId: checkpoint.turnId,
+        executionId: checkpoint.executionId,
+      },
+      sourceProviderId: thread.providerId,
+      sourceIdentities: thread.providerIdentities,
+      payload: { type: "turn.cancelled", endedAt, reason, stop },
+    };
   }
 
   private interruptedEvent(
