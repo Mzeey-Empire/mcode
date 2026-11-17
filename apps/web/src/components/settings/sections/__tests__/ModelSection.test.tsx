@@ -64,7 +64,11 @@ function makeState(provider: string, modelId: string, reasoning = "high") {
         defaults: { provider, id: modelId, reasoning, fallbackId: "" },
         utility: { provider: "", id: "" },
       },
-      provider: { cli: { codex: "", claude: "", copilot: "", cursor: "" } },
+      provider: {
+        cli: { codex: "", claude: "", copilot: "", cursor: "" },
+        claude: { fastMode: false },
+        codex: { fastMode: false },
+      },
     },
     update: vi.fn(),
   };

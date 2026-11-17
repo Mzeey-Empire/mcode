@@ -270,11 +270,7 @@ export function useComposerFormController({
   const settingsDefaultMode = useSettingsStore((state) => state.settings.agent.defaults.mode);
   const settingsDefaultPermission = useSettingsStore((state) => state.settings.agent.defaults.permission);
   const settingsDefaultThinking = useSettingsStore((state) => state.settings.model.defaults.thinking);
-  const fastProvider = selection.provider;
-  // Only Claude and Codex offer Fast; narrowing here keeps the selection's free-form provider id out of the shared rule.
-  const settingsFastDefault = useSettingsStore(
-    (state) => (fastProvider === "claude" || fastProvider === "codex") && fastModeDefault(state.settings, fastProvider),
-  );
+  const settingsFastDefault = useSettingsStore((state) => fastModeDefault(state.settings, selection.provider));
   const persistedInteractionMode = useThreadRecord(
     threadId,
     (record) => record.settings.interactionMode,

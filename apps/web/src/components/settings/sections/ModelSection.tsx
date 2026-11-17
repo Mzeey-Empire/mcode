@@ -21,6 +21,7 @@ import type { ProviderAvailability } from "@mcode/contracts/providers/availabili
 import { Sparkles } from "lucide-react";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { useToastStore } from "@/stores/toastStore";
+import { fastModeDefault, fastModeSettingProvider, type FastModeSettingProvider } from "@mcode/shared/fast-mode";
 
 
 /** Display labels for provider-declared reasoning effort levels. */
@@ -101,13 +102,6 @@ function isModelStale(
   );
 }
 
-/** Providers with a global Fast default in settings. */
-type FastModeProvider = "claude" | "codex";
-
-function fastModeProviderOf(provider: string): FastModeProvider | null {
-  return provider === "claude" || provider === "codex" ? provider : null;
-}
-
 const CODEX_FAST_MODE_HINT =
   "Sends OpenAI fast service tier on Codex turns when your CLI and account support it (often lower latency; billing follows OpenAI rules).";
 
@@ -134,10 +128,8 @@ export function ModelSection() {
   const fallbackId = useSettingsStore((s) => s.settings.model.defaults.fallbackId);
   const reasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
   const thinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
-  const fastModeProvider = fastModeProviderOf(provider);
-  const fastMode = useSettingsStore(
-    (s) => (fastModeProvider ? s.settings.provider[fastModeProvider]?.fastMode ?? false : false),
-  );
+  const fastModeProvider = fastModeSettingProvider(provider);
+  const fastMode = useSettingsStore((s) => fastModeDefault(s.settings, provider));
   const utilityProvider = useSettingsStore((s) => s.settings.model.utility.provider);
   const utilityModelId = useSettingsStore((s) => s.settings.model.utility.id);
   const update = useSettingsStore((s) => s.update);
@@ -427,7 +419,7 @@ interface ModelSettingsContentProps {
   reasoningOptions: ReasoningOptions;
   reasoningHint: string;
   /** The provider whose Fast default the row edits, or null to hide the row. */
-  fastModeProvider: FastModeProvider | null;
+  fastModeProvider: FastModeSettingProvider | null;
   showThinking: boolean;
   utilityProvider: string;
   utilityModelId: string;
