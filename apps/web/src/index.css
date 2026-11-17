@@ -957,7 +957,7 @@ diffs-container:has([data-jump-highlight="true"]) {
   }
 
   /* JetBrains Mono turns `=>` and `!==` into ligatures; code must show the
-     characters the agent wrote (DESIGN.md, No-Ligatures-In-Code Rule). */
+     characters the agent wrote (DESIGN.md, Typography). */
   code, pre, kbd, samp {
     font-variant-ligatures: none;
   }

@@ -691,7 +691,7 @@ function resolveActiveKey<T>(rows: readonly ListRow<T>[], highlight: Highlight |
 
 /**
  * Row the highlight moves to for `key`, or `null` when the key is not a list key. Home and End take the keys
- * from the search caret, as cmdk did and DESIGN.md's picker contract asks.
+ * from the search caret, as cmdk did.
  */
 function highlightTarget<T>(rows: readonly ListRow<T>[], activeIndex: number, key: string): number | null {
   if (key === "Home") return nextReachableRow(rows, -1, 1);
@@ -1047,7 +1047,7 @@ function PickerRowActionButton({ action, onRun }: { readonly action: PickerRowAc
       }}
       onMouseDown={(event) => event.preventDefault()}
       className={cn(
-        // A 24px box around the 14px glyph, as DESIGN.md asks of inline row actions.
+        // A 24px box around the 14px glyph, the size of Mcode's other inline row actions.
         "-mx-[5px] flex size-6 shrink-0 items-center justify-center rounded-xs [&_svg]:size-[1.4rem]",
         // An unpinned action shows only on the highlighted or hovered row, so the list reads as a column of names.
         !action.pinned && "opacity-0 group-hover/option:opacity-100 group-data-active/option:opacity-100",

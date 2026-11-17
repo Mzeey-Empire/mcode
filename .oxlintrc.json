@@ -40,7 +40,7 @@
         "paths": [
           {
             "name": "@phosphor-icons/react",
-            "message": "Product icons are Lucide. Import from @/components/ui/icon-map or lucide-react (DESIGN.md Iconography)."
+            "message": "Product icons are Lucide. Import from @/components/ui/icon-map or lucide-react (DESIGN.md Shapes)."
           }
         ]
       }

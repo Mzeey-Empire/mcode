@@ -4,8 +4,8 @@ import { cn } from "@/lib/utils"
 import { FOCUS_RING_CLASS } from "./focus-ring"
 
 /**
- * Switch on Paper's 36 by 20 track. The knob moves without a transition: DESIGN.md's switch
- * contract changes position instantly and lets only the colours update.
+ * Switch on Paper's 36 by 20 track. The knob moves without a transition: Paper's switch
+ * changes position instantly and lets only the colours update.
  */
 function Switch({
   className,
