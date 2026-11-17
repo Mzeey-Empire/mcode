@@ -243,8 +243,12 @@ function matchDatedVariant(id: string, providerId?: string): ModelDefinition | u
   const matches = (m: ModelDefinition) => (providerId === undefined || m.providerId === providerId) && id.startsWith(`${m.id}-`);
   const live = dynamicModelsSorted.find(matches);
   const fixed = SORTED_ALL_MODELS.find(matches);
-  // Live defs win a tie, as in exact lookups, so a dated id gets the capabilities the provider reported.
-  return live && fixed && fixed.id.length > live.id.length ? fixed : live ?? fixed;
+  // A provider's reported def beats its own built-in def, so a dated id gets the capabilities the provider reported.
+  // Only its own: other providers reuse vendor ids (Devin lists claude-*), and an unscoped lookup must not hand a
+  // dated Claude id to them.
+  const preferLive = live !== undefined
+    && (fixed === undefined || (live.providerId === fixed.providerId && live.id.length >= fixed.id.length));
+  return preferLive ? live : fixed;
 }
 
 /**

@@ -106,6 +106,15 @@ describe("ModelRegistry", () => {
     expect(claude?.comingSoon).toBe(false);
   });
 
+  it("findModelById keeps a dated Claude id on Claude when another provider reports the same base id", () => {
+    registerProviderModels("devin", [{ id: "claude-sonnet-4-6", label: "Sonnet 4.6", providerId: "devin" }]);
+    try {
+      expect(findModelById("claude-sonnet-4-6-20260101")?.providerId).toBe("claude");
+    } finally {
+      registerProviderModels("devin", []);
+    }
+  });
+
   it("findModelById returns Opus 5 with the standard-mode context clamp", () => {
     const model = findModelById("claude-opus-5");
     expect(model).toEqual({
