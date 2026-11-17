@@ -441,6 +441,48 @@ describe("ClaudeProvider background agents", () => {
     expect(events.filter(({ event }) => "toolCallId" in event && event.toolCallId === "BASH_1")).toEqual([]);
   });
 
+  it("publishes nothing to the launching turn after it ends when the background subagent's first tool call reports its effort", async () => {
+    type PreToolUseHook = (input: Record<string, unknown>) => Promise<unknown>;
+    let subagentStepped!: () => void;
+    const stepped = new Promise<void>((resolve) => { subagentStepped = resolve; });
+    // Replays the live failure: the parent's result ends the turn, then the subagent's first Bash call runs the PreToolUse hooks.
+    mockQuery.mockImplementation(({ prompt, options }: { prompt: AsyncIterable<unknown>; options: { hooks: { PreToolUse: [{ hooks: PreToolUseHook[] }] } } }) => {
+      let closeSession!: () => void;
+      const closed = new Promise<void>((resolve) => { closeSession = resolve; });
+      const stream = (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+        yield { type: "assistant", parent_tool_use_id: null, message: { content: [
+          { type: "tool_use", id: "AGENT_1", name: "Agent", input: { description: "Wait for the timer", run_in_background: true } },
+        ] } };
+        yield { type: "system", subtype: "task_started", task_id: "agent-1", tool_use_id: "AGENT_1", is_backgrounded: true, task_type: "local_agent" };
+        yield { type: "user", parent_tool_use_id: null, tool_use_result: { status: "async_launched", isAsync: true, agentId: "agent-1" },
+          message: { content: [{ type: "tool_result", tool_use_id: "AGENT_1", content: "Async agent launched successfully." }] } };
+        yield { type: "result", is_error: false, result: "Started", usage: { output_tokens: 1 } };
+        yield { type: "assistant", parent_tool_use_id: "AGENT_1", message: { content: [
+          { type: "tool_use", id: "BASH_1", name: "Bash", input: { command: "node -e \"setTimeout(() => {}, 100000)\"" } },
+        ] } };
+        for (const hook of options.hooks.PreToolUse[0].hooks) {
+          await hook({ hook_event_name: "PreToolUse", session_id: "sdk-provider-turn", agent_id: "agent-1", effort: { level: "high" },
+            tool_name: "Bash", tool_input: {}, tool_use_id: "BASH_1", cwd: "/tmp", transcript_path: "fixture" });
+        }
+        subagentStepped();
+        await closed;
+      })();
+      return Object.assign(stream, { close: closeSession });
+    });
+    const events: ProviderRuntimeEvent[] = [];
+    const provider = providerWith(events, { open: vi.fn(async (): Promise<ProviderTurnOpening> => ({ kind: "declined", reason: "busy" })), settleBackgroundTool: vi.fn(async () => {}) });
+    try {
+      await sendUserTurn(provider);
+      await stepped;
+      expect(userEnded(events)).toBe(true);
+      expect(afterUserTurn(events)).toEqual([]);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   it("reports background work separately while the call runs and stops it when the session shuts down", async () => {
     mockQuery.mockImplementation(backgroundAgentQuery(false));
     const events: ProviderRuntimeEvent[] = [];

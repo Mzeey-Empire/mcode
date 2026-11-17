@@ -431,6 +431,9 @@ export class ClaudeEventMapper {
    * The Agent input names a model only when Claude overrides it, so the run itself is the evidence.
    */
   reportSubagentRun(agentToolCallId: string, run: { model?: string; reasoningEffort?: string }): void {
+    // A background subagent outlives its launching turn, and an ended turn accepts no further events:
+    // the server rejects them and recovery would stop the session, killing the subagent.
+    if (this.callbacks.liveExecutionId() === undefined) return;
     const reported = this.subagentRuns.get(agentToolCallId);
     if (!reported) return;
     const toolInput: Record<string, string> = {};
