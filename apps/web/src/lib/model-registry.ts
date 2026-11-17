@@ -240,15 +240,16 @@ export function listProviderModels(providerId: string): readonly ModelDefinition
  * to their family (`swe-2`) through the same prefix rule.
  */
 function matchDatedVariant(id: string, providerId?: string): ModelDefinition | undefined {
-  const matches = (m: ModelDefinition) => (providerId === undefined || m.providerId === providerId) && id.startsWith(`${m.id}-`);
+  if (providerId === undefined) {
+    return [...SORTED_ALL_MODELS, ...dynamicModelsSorted].find((m) => id.startsWith(`${m.id}-`));
+  }
+  const matches = (m: ModelDefinition) => m.providerId === providerId && id.startsWith(`${m.id}-`);
   const live = dynamicModelsSorted.find(matches);
   const fixed = SORTED_ALL_MODELS.find(matches);
-  // A provider's reported def beats its own built-in def, so a dated id gets the capabilities the provider reported.
-  // Only its own: other providers reuse vendor ids (Devin lists claude-*), and an unscoped lookup must not hand a
-  // dated Claude id to them.
-  const preferLive = live !== undefined
-    && (fixed === undefined || (live.providerId === fixed.providerId && live.id.length >= fixed.id.length));
-  return preferLive ? live : fixed;
+  // Within one provider, its reported def beats its built-in def on a tie, so a dated id gets the reported
+  // capabilities. Unscoped lookups keep built-in defs first, because other providers reuse vendor ids (Devin lists
+  // claude-*) and a reported def from them must not claim a dated Claude id.
+  return live && fixed && fixed.id.length > live.id.length ? fixed : live ?? fixed;
 }
 
 /**
