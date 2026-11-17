@@ -238,7 +238,7 @@ interface MessageBubbleProps {
   /** Controls whether message actions such as copy or fork are available. */
   interactive?: boolean;
   /** Called when the user forks from this message. Only agent messages offer Fork. */
-  onBranch?: (messageId: string) => void;
+  onBranch?: (message: Message) => void;
   /** Called when the user clicks a quote block to scroll to the original message. */
   onScrollToMessage?: (messageId: string) => void;
   /** Lifecycle state that controls the visible treatment of this agent response. */
@@ -433,6 +433,15 @@ const FILE_ATTACHMENT_ALIGNMENT_CLASS = {
   end: "flex flex-wrap justify-end gap-2",
 } as const;
 
+/** Splits the attachments a bubble shows into images and files; sent-note snapshots render in their notes tile instead. */
+function splitVisibleAttachments(attachments: Message["attachments"], previewAnnotations: Message["previewAnnotations"]) {
+  const noteSnapshotIds = previewAnnotations ? readSentNotes(previewAnnotations)?.snapshotIds : undefined;
+  return {
+    imageAttachments: attachments?.filter((attachment) => attachment.mimeType.startsWith("image/") && !noteSnapshotIds?.has(attachment.id)) ?? [],
+    fileAttachments: attachments?.filter((attachment) => !attachment.mimeType.startsWith("image/")) ?? [],
+  };
+}
+
 /** Separates a message's image and file attachments and derives its preview slides. */
 function useMessageAttachments(message: Message) {
   const attachmentTransportUrl = useSyncExternalStore(
@@ -440,17 +449,9 @@ function useMessageAttachments(message: Message) {
     getAttachmentTransportUrlSnapshot,
     getAttachmentTransportUrlSnapshot,
   );
-  const noteSnapshotIds = useMemo(
-    () => message.previewAnnotations ? readSentNotes(message.previewAnnotations)?.snapshotIds : undefined,
-    [message.previewAnnotations],
-  );
-  const imageAttachments = useMemo(
-    () => message.attachments?.filter((attachment) => attachment.mimeType.startsWith("image/") && !noteSnapshotIds?.has(attachment.id)) ?? [],
-    [message.attachments, noteSnapshotIds],
-  );
-  const fileAttachments = useMemo(
-    () => message.attachments?.filter((attachment) => !attachment.mimeType.startsWith("image/")) ?? [],
-    [message.attachments],
+  const { imageAttachments, fileAttachments } = useMemo(
+    () => splitVisibleAttachments(message.attachments, message.previewAnnotations),
+    [message.attachments, message.previewAnnotations],
   );
   const imageSlides = useMemo(
     () => {
@@ -809,12 +810,12 @@ function AssistantMessageActions({
   message: Message;
   textContent: string;
   isAgentResponseComplete: boolean;
-  onBranch?: (messageId: string) => void;
+  onBranch?: (message: Message) => void;
 }) {
   if (!isAgentResponseComplete) return null;
   return (
     <div className="flex h-6 items-center gap-1" data-testid="agent-message-actions">
-      {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
+      {onBranch && <BranchButton onClick={() => onBranch(message)} />}
       {textContent.trim() && <CopyButton content={textContent} className={RESTING_ACTION_CLASS} />}
       <PersistedTurnHooks threadId={message.thread_id} messageId={message.id} />
     </div>
@@ -852,6 +853,22 @@ function HiddenPlanResponse({ message, answered, textMayContinue }: { message: M
   return answered ? <AnsweredSummary content={message.content} messageId={message.id} /> : null;
 }
 
+/** Render state an assistant bubble reads from outside its message. */
+export interface AssistantActionRowContext {
+  readonly agentDisplayState?: AgentDisplayState;
+  readonly textIsStreaming?: boolean;
+  readonly hasPlan: boolean;
+}
+
+/** Whether an assistant bubble renders its action row, rather than a goal notice or a hidden plan response. */
+export function assistantShowsActionRow(message: Message, context: AssistantActionRowContext): boolean {
+  if (parseGoalStatusNotice(stripInjectedFiles(message.content))) return false;
+  if (context.hasPlan) return true;
+  if (!isAssistantContentEmpty(message.content, isTextStillArriving(context.textIsStreaming, context.agentDisplayState))) return true;
+  const { imageAttachments, fileAttachments } = splitVisibleAttachments(message.attachments, message.previewAnnotations);
+  return imageAttachments.length > 0 || fileAttachments.length > 0;
+}
+
 /** Renders an assistant message, including its live response state. */
 function AssistantMessageContent({
   message,
@@ -869,8 +886,7 @@ function AssistantMessageContent({
   const goal = parseGoalStatusNotice(textContent);
   if (goal) return <AssistantGoalNotice goal={goal} />;
   const assistantContentEmpty = isAssistantContentEmpty(message.content, isTextStillArriving(textIsStreaming, agentDisplayState));
-  const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
-  if (assistantContentEmpty && !hasAttachments && planVersion === undefined) {
+  if (!assistantShowsActionRow(message, { agentDisplayState, textIsStreaming, hasPlan: planVersion !== undefined })) {
     return <HiddenPlanResponse message={message} answered={isAnsweredPlanMessage}
       textMayContinue={isTextStillArriving(textIsStreaming, agentDisplayState)} />;
   }

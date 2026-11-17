@@ -6,7 +6,9 @@ import {
   type SelectedTextCommentEditorDraft,
 } from "@/stores/composerDraftStore";
 import type { SubagentRosterTarget } from "../narrative";
-import { readThreadRecord } from "../state";
+import type { Message } from "@/transport";
+import { stripInjectedFiles } from "@/lib/file-tags";
+import { stripPlanFences } from "@/lib/plan-fences";
 import { useThreadSubscriptionReconciler } from "../subscriptions/useThreadSubscriptionReconciler";
 import { ChatViewSurface, type ChatViewInteractions } from "./chat-view/ChatViewSurface";
 import { useChatViewState } from "./chat-view/useChatViewState";
@@ -267,13 +269,10 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
     previousThreadIdRef.current = state.activeThreadId;
   }, [state.activeThreadId]);
 
-  const handleBranch = useCallback((messageId: string) => {
+  const handleBranch = useCallback((message: Message) => {
     const activeThreadId = useWorkspaceStore.getState().activeThreadId;
-    const message = activeThreadId
-      ? readThreadRecord(activeThreadId).messages.find((candidate) => candidate.id === messageId)
-      : undefined;
-    if (!activeThreadId || !message) return;
-    setForkMode(activeThreadId, { messageId, content: firstNonEmptyLine(message.content) });
+    if (!activeThreadId) return;
+    setForkMode(activeThreadId, { messageId: message.id, content: firstNonEmptyLine(stripPlanFences(stripInjectedFiles(message.content))) });
   }, [setForkMode]);
 
   const handleDismissCliError = useCallback(() => {

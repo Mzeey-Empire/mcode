@@ -158,7 +158,8 @@ vi.mock("@/features/projects/state/workspaceStore", () => ({
 }));
 
 // Stub heavy children.
-vi.mock("../MessageBubble", () => ({
+vi.mock("../MessageBubble", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../MessageBubble")>(),
   MessageBubble: ({ message }: { message: {
     id: string;
     content: string;

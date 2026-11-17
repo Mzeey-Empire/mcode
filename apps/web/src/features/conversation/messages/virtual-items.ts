@@ -127,24 +127,6 @@ function agentDisplayStateFromOutcome(
   }
 }
 
-/**
- * The latest agent message the transcript shows a Fork button on, or null. Mirrors the timeline
- * rule: an assistant row offers Fork only once its display state is `completed`, so the in-flight
- * response of a running turn and turns that errored, were cancelled, or were interrupted are skipped.
- */
-export function latestForkableAgentMessageId(
-  messages: readonly Message[],
-  liveResponseMessageId: string | null,
-): string | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role !== "assistant" || message.is_internal || isRoutineProviderNotice(message)) continue;
-    if (message.id === liveResponseMessageId) continue;
-    if (agentDisplayStateFromOutcome(messageOutcome(message)).phase === "completed") return message.id;
-  }
-  return null;
-}
-
 /** Whether an agent display state still owns live narrative activity. */
 export function isAgentDisplayActive(
   state: AgentDisplayState | undefined,

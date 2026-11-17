@@ -8,7 +8,8 @@ import { TurnEndNotice } from "../../turn-ending/TurnEndNotice";
 import { ThreadTurnEndNotice } from "../../turn-ending/ThreadTurnEndNotice";
 import { MessageBubble } from "../MessageBubble";
 import { VisibleNarrativeLoader } from "../TranscriptNarrativeRow";
-import type { ChatVirtualItem } from "../virtual-items";
+import type { Message } from "@/transport";
+import type { AgentDisplayState, ChatVirtualItem } from "../virtual-items";
 
 /** Props for {@link TranscriptItemRenderer}. */
 export interface TranscriptItemRendererProps {
@@ -21,7 +22,7 @@ export interface TranscriptItemRendererProps {
   /** Manual expansion state for persisted turn-change summaries. */
   turnExpandRef?: RefObject<Map<string, boolean>>;
   /** Activates branch mode from a message. */
-  onBranch?: (messageId: string) => void;
+  onBranch?: (message: Message) => void;
   /** Opens a selected canonical child through the composition root. */
   onSubagentSelect?: (id: string, target: SubagentRosterTarget) => void;
   /** Opens the owning thread's subagent roster. */
@@ -40,6 +41,11 @@ type TranscriptItemComponent = ComponentType<TranscriptItemRendererProps>;
 
 type MessageTranscriptItem = Extract<ChatVirtualItem, { type: "message" }>;
 
+/** Whether a message row withholds its agent actions: only a row without a display state or a completed one offers them. */
+export function agentActionsDisabledFor(agentDisplayState: AgentDisplayState | undefined): boolean {
+  return agentDisplayState != null && agentDisplayState.phase !== "completed";
+}
+
 /** Renders a message virtual item and withholds actions while its agent response remains active. */
 function MessageTranscriptItemRenderer({
   item,
@@ -53,8 +59,7 @@ function MessageTranscriptItemRenderer({
     messageItem.message.role === "assistant"
     && currentTurnMessageIdByThread[messageItem.message.thread_id] === messageItem.message.id
     && messageItem.agentDisplayState?.phase !== "completed";
-  const agentActionsDisabled = messageItem.agentDisplayState != null
-    && messageItem.agentDisplayState.phase !== "completed";
+  const agentActionsDisabled = agentActionsDisabledFor(messageItem.agentDisplayState);
   return (
     <div className={isJustPersisted ? "agent-response-just-persisted" : ""}>
       {messageItem.message.role === "assistant" && !messageItem.message.is_internal ? (
