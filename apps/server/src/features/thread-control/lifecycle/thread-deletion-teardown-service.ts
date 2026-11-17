@@ -59,14 +59,14 @@ export class ThreadDeletionTeardownService {
   }
 
   constructor(
-    @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
+    @inject(ThreadRepo) private readonly threadRepo: Pick<ThreadRepo, "findById">,
     @inject(WorkspaceEnvironmentService)
-    private readonly workspaceEnvironmentService: WorkspaceEnvironmentService,
-    @inject(ProjectActionService) private readonly projectActionService: ProjectActionService,
-    @inject(GithubService) private readonly githubService: GithubService,
-    @inject(CiWatcherService) private readonly ciWatcherService: CiWatcherService,
-    @inject(ThreadTeardownService) private readonly threadTeardownService: ThreadTeardownService,
-    @inject(GitWatcherService) private readonly gitWatcherService: GitWatcherService,
+    private readonly workspaceEnvironmentService: Pick<WorkspaceEnvironmentService, "beginThreadDeletion" | "cancelSetupForThread">,
+    @inject(ProjectActionService) private readonly projectActionService: Pick<ProjectActionService, "beginThreadTeardown" | "stopForThread">,
+    @inject(GithubService) private readonly githubService: Pick<GithubService, "cancelForRepoPath">,
+    @inject(CiWatcherService) private readonly ciWatcherService: Pick<CiWatcherService, "teardownThread">,
+    @inject(ThreadTeardownService) private readonly threadTeardownService: Pick<ThreadTeardownService, "teardownThread">,
+    @inject(GitWatcherService) private readonly gitWatcherService: Pick<GitWatcherService, "unwatchThreadWorktree">,
     @inject(TurnResumeScheduler, { isOptional: true }) private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
     @inject(ThreadStartupService, { isOptional: true }) private readonly startups?: Pick<ThreadStartupService, "findByThreadId" | "fail">,
   ) {}

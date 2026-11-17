@@ -44,8 +44,10 @@ function harness() {
     return record;
   }
   // Deleting persistent data uses only accepted progress, so the teardown collaborators stay unused.
-  const unused = {} as never;
-  const deletion = new ThreadDeletionTeardownService(unused, unused, unused, unused, unused, unused, unused);
+  const unused = (): never => { throw new Error("Thread teardown is not under test"); };
+  const deletion = new ThreadDeletionTeardownService({ findById: unused }, { beginThreadDeletion: unused, cancelSetupForThread: unused },
+    { beginThreadTeardown: unused, stopForThread: unused }, { cancelForRepoPath: unused }, { teardownThread: unused },
+    { teardownThread: unused }, { unwatchThreadWorktree: unused });
   deletion.bindAcceptedProgress({ discardThreads: async () => {}, finishThreadDeletion: () => {} });
   disposers.push(deletion.onPersistentDataDeleted(() => workload.refreshTracked()));
   return { db, store, workload, active, hold, deletion };
