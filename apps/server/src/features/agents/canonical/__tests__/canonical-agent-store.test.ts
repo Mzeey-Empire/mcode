@@ -371,7 +371,7 @@ describe("CanonicalAgentStore", () => {
     sink = new CanonicalAgentStore(db, published);
   });
 
-  it("filters held calls by thread and returns background metadata", () => {
+  it("returns held call metadata and lists a thread's running background subagents", () => {
     startCanonicalParent(sink, db);
     const input = parentTerminalInput(db, 1);
     const project = input.projectTurn;
@@ -382,10 +382,11 @@ describe("CanonicalAgentStore", () => {
           background_kind: "subagent", background_label: "Investigate" } } : item) };
     };
     sink.finishParentTurnBatched(input);
-    expect(sink.listHeldBackgroundToolCalls({ threadId: "other" })).toEqual([]);
-    expect(sink.listHeldBackgroundToolCalls({ threadId: THREAD_ID })).toEqual([
+    expect(sink.listHeldBackgroundToolCalls()).toEqual([
       { threadId: THREAD_ID, executionId: EXECUTION_ID, toolCallId: "recovery-tool-0", kind: "subagent", label: "Investigate" },
     ]);
+    expect(sink.listRunningBackgroundSubagentIds("other")).toEqual([]);
+    expect(sink.listRunningBackgroundSubagentIds(THREAD_ID)).toEqual(["recovery-tool-0"]);
   });
 
   it("retains the resolved approval-review decision when a turn is read after reopening", () => {

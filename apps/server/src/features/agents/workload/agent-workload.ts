@@ -19,7 +19,7 @@ export class AgentWorkloadService implements AgentWorkload {
 
   constructor(
     private readonly runtime: Pick<AgentRuntimeAccess, "activeTurnThreadIds">,
-    private readonly canonical: Pick<CanonicalAgentBoundary, "listHeldBackgroundToolCalls">,
+    private readonly canonical: Pick<CanonicalAgentBoundary, "listRunningBackgroundSubagentIds">,
   ) {}
 
   /** Read current occupancy without database access. */
@@ -27,7 +27,10 @@ export class AgentWorkloadService implements AgentWorkload {
     return new Set([...this.runtime.activeTurnThreadIds(), ...this.subagents.keys()]).size;
   }
 
-  /** Whether a finished turn still owns a running background subagent. */
+  /**
+   * Whether the thread has a running background subagent. It turns true once the call is backgrounded, while its
+   * launching turn may still run, because the turn's reservation can end before its ending is saved.
+   */
   hasBackgroundSubagent(threadId: string): boolean {
     return this.subagents.has(threadId);
   }
@@ -38,7 +41,7 @@ export class AgentWorkloadService implements AgentWorkload {
     return () => { this.listeners.delete(listener); };
   }
 
-  /** Observe saved tool changes and turn endings, including late results outside a turn. */
+  /** Observe saved background tool changes, including late results outside a turn. */
   observeCommittedEvents(subscribe = subscribeCommittedCanonicalEvents): () => void {
     return subscribe((events) => {
       // A late settlement also saves its tool call record with `background: true`, so tool
@@ -49,8 +52,8 @@ export class AgentWorkloadService implements AgentWorkload {
   }
 
   /**
-   * Re-read every thread holding a subagent. Deletion discards the thread's unsaved writes and removes its rows,
-   * so no saved event ever reports that its calls stopped.
+   * Re-read every thread holding a subagent. Deletion hides or removes a thread's rows and discards its unsaved
+   * writes, so no saved event ever reports that its calls stopped.
    */
   refreshTracked(): void {
     for (const threadId of this.subagents.keys()) this.refresh(threadId);
@@ -58,8 +61,7 @@ export class AgentWorkloadService implements AgentWorkload {
 
   private refresh(threadId: string): void {
     const previous = this.hasBackgroundSubagent(threadId);
-    const calls = this.canonical.listHeldBackgroundToolCalls({ threadId });
-    const ids = new Set(calls.filter((call) => call.kind === "subagent").map((call) => call.toolCallId));
+    const ids = new Set(this.canonical.listRunningBackgroundSubagentIds(threadId));
     if (ids.size > 0) this.subagents.set(threadId, ids);
     else this.subagents.delete(threadId);
     if (previous !== this.hasBackgroundSubagent(threadId)) {
@@ -70,7 +72,6 @@ export class AgentWorkloadService implements AgentWorkload {
 
 function touchesBackgroundCalls(event: CanonicalAgentEventEnvelope): boolean {
   const payload = event.payload;
-  if (["turn.completed", "turn.cancelled", "turn.interrupted", "turn.errored"].includes(payload.type)) return true;
   if (payload.type === "publication.recorded") return payload.event.type === "toolBackgrounded";
   if (payload.type !== "item.recorded" || payload.item.kind !== "tool-call") return false;
   const item = payload.item.payload;

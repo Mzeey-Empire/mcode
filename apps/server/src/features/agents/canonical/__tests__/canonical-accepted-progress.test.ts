@@ -2044,6 +2044,30 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(step()).toEqual({ parent_tool_call_id: "agent", message_id: original.id, status: "completed", ...agent });
   });
 
+  it("keeps counting a background subagent after its worker is released and before its turn's ending is saved", async () => {
+    const reserved = new Set([execution.threadId]);
+    const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [...reserved] }, new CanonicalAgentStore(db, () => {}));
+    onTestFinished(workload.observeCommittedEvents());
+    await send(1, start("claude"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    holdWrites();
+    await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "turnComplete")],
+      terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await send(5, { kind: "release" });
+    reserved.clear();
+
+    expect(turnStatus()).toEqual({ status: "Running" });
+    expect(workload.count()).toBe(1);
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(turnStatus()).toEqual({ status: "Completed" });
+    expect(workload.count()).toBe(1);
+  });
+
   describe("when a background call's late result arrives while its thread is fenced", () => {
     const next = { ...execution, turnId: "next-turn", executionId: "00000000-0000-4000-8000-000000000127" };
     const nextLease = { ...lease, leaseId: "next-lease" };
@@ -2099,6 +2123,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(agentStatus()).toEqual({ status: "cancelled", output_summary: "Stopped with its session." });
       expect(workload.count()).toBe(0);
     });
+
   });
 
   it("assigns live plan, task and notice projections before storage and persists those same identities", async () => {

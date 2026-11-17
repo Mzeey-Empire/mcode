@@ -912,12 +912,9 @@ export class CanonicalAgentStore {
   }
 
   /** List background tool calls still held open under a finished turn. */
-  listHeldBackgroundToolCalls(filter?: { threadId: string }): CanonicalHeldBackgroundToolCall[] {
+  listHeldBackgroundToolCalls(): CanonicalHeldBackgroundToolCall[] {
     // The id range keeps the scan on tool call keys, and the substring test skips JSON
-    // parsing for the many calls that never ran in the background. With a thread filter,
-    // the unary `+` stops the id range from using the primary key, which statistics can
-    // make the planner prefer over the thread index and so scan every thread's calls.
-    const id = filter ? "+item.id" : "item.id";
+    // parsing for the many calls that never ran in the background.
     const rows = this.db.prepare(`
       SELECT item.thread_id AS threadId, turn.execution_id AS executionId,
         COALESCE(json_extract(item.payload_json, '$.record.id'), json_extract(item.payload_json, '$.narrative.record.id')) AS toolCallId,
@@ -925,15 +922,40 @@ export class CanonicalAgentStore {
         COALESCE(json_extract(item.payload_json, '$.record.background_label'), json_extract(item.payload_json, '$.narrative.record.background_label')) AS label
       FROM canonical_agent_items item
       JOIN canonical_agent_turns turn ON turn.id = item.turn_id
-      WHERE ${id} >= 'toolCall:' AND ${id} < 'toolCall;'
-        ${filter ? "AND item.thread_id = ?" : ""}
+      WHERE item.id >= 'toolCall:' AND item.id < 'toolCall;'
         AND instr(item.payload_json, '"background":true') > 0
         AND turn.status IN ('Completed', 'Cancelled', 'Interrupted', 'Errored')
         AND COALESCE(json_extract(item.payload_json, '$.record.background'), json_extract(item.payload_json, '$.narrative.record.background')) = 1
         AND COALESCE(json_extract(item.payload_json, '$.record.status'), json_extract(item.payload_json, '$.narrative.record.status')) = 'running'
       ORDER BY item.thread_id, item.created_at, item.id
-    `).all(...(filter ? [filter.threadId] : [])) as Record<string, unknown>[];
+    `).all() as Record<string, unknown>[];
     return rows.map(heldBackgroundToolCallFromRow);
+  }
+
+  /**
+   * List a visible thread's running background subagent calls, whatever their launching turn's status. A turn's
+   * worker can be released before its ending is saved, so waiting for the ending would leave the call uncounted.
+   */
+  listRunningBackgroundSubagentIds(threadId: string): string[] {
+    // The id range and substring test skip JSON parsing for calls that never ran in the background. The unary `+`
+    // stops the id range from using the primary key, which statistics can make the planner prefer over the thread
+    // index and so scan every thread's calls.
+    const rows = this.db.prepare(`
+      SELECT COALESCE(json_extract(item.payload_json, '$.record.id'), json_extract(item.payload_json, '$.narrative.record.id')) AS toolCallId
+      FROM canonical_agent_items item
+      JOIN threads thread ON thread.id = item.thread_id
+      WHERE +item.id >= 'toolCall:' AND +item.id < 'toolCall;'
+        AND item.thread_id = ?
+        AND thread.deleted_at IS NULL
+        AND instr(item.payload_json, '"background":true') > 0
+        AND COALESCE(json_extract(item.payload_json, '$.record.background'), json_extract(item.payload_json, '$.narrative.record.background')) = 1
+        AND COALESCE(json_extract(item.payload_json, '$.record.background_kind'), json_extract(item.payload_json, '$.narrative.record.background_kind')) = 'subagent'
+        AND COALESCE(json_extract(item.payload_json, '$.record.status'), json_extract(item.payload_json, '$.narrative.record.status')) = 'running'
+    `).all(threadId) as { toolCallId: unknown }[];
+    return rows.map(({ toolCallId }) => {
+      if (typeof toolCallId !== "string") throw new Error("Running background subagent row is malformed");
+      return toolCallId;
+    });
   }
 
   /** Reopen an unmaterialized terminal checkpoint so ordinary interruption recovery can finish it. */

@@ -53,7 +53,7 @@ function harness() {
 
 describe("AgentWorkload", () => {
   it("unions running turns and background subagents by thread", () => {
-    const { workload, active, hold, store } = harness();
+    const { workload, active, hold } = harness();
     active.add("first");
     expect(workload.count()).toBe(1);
     hold("first", "subagent");
@@ -62,9 +62,6 @@ describe("AgentWorkload", () => {
     expect(workload.count()).toBe(1);
     hold("second", "subagent");
     expect(workload.count()).toBe(2);
-    expect(store.listHeldBackgroundToolCalls({ threadId: "second" })).toEqual([
-      { threadId: "second", executionId: syntheticThreadExecutionId("second"), toolCallId: "second", kind: "subagent", label: "Investigate" },
-    ]);
   });
 
   it("ignores commands and unclassified legacy calls", () => {

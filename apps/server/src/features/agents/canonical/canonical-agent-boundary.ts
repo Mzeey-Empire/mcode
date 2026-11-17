@@ -201,8 +201,13 @@ export class CanonicalAgentBoundary {
   }
 
   /** List background tool calls still held open under a finished turn. */
-  listHeldBackgroundToolCalls(filter?: { threadId: string }): ReturnType<CanonicalAgentStore["listHeldBackgroundToolCalls"]> {
-    return this.reader.listHeldBackgroundToolCalls(filter);
+  listHeldBackgroundToolCalls(): ReturnType<CanonicalAgentStore["listHeldBackgroundToolCalls"]> {
+    return this.reader.listHeldBackgroundToolCalls();
+  }
+
+  /** List a visible thread's running background subagent calls, whatever their launching turn's status. */
+  listRunningBackgroundSubagentIds(threadId: string): string[] {
+    return this.reader.listRunningBackgroundSubagentIds(threadId);
   }
 
   /** Load interrupted checkpoints that permit an explicit recovery action. */
