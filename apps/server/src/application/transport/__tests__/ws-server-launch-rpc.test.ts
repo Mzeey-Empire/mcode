@@ -17,7 +17,7 @@ it("records text, abandoned upload, binary upload and shutdown answers in the la
   const server = createWsServer({
     authToken: "test-token",
     shutdown: () => undefined,
-    agentService: { runtimeAccess: () => ({ activeCount: () => 0 }) },
+    agentWorkload: { count: () => 0 },
     terminalService: { disconnectClient: () => undefined },
     resolveBrowserAutomationHostAuthorization: () => null,
   } as never);

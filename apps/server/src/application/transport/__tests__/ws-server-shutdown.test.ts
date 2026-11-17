@@ -42,7 +42,7 @@ describe("transport admission and shutdown drain", () => {
     const server = createWsServer({
       authToken: "test-token",
       shutdown,
-      agentService: { runtimeAccess: () => ({ activeCount: () => 0 }) },
+      agentWorkload: { count: () => 0 },
       terminalService: { disconnectClient: () => undefined },
       resolveBrowserAutomationHostAuthorization: () => null,
       reliabilityHarness: { enabled: true, handleRequest: handler },
