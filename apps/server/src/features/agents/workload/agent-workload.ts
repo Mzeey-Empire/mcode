@@ -16,6 +16,8 @@ export interface AgentWorkload {
 /** Maintains background occupancy from durable canonical changes, plus launches accepted but not yet saved. */
 export class AgentWorkloadService implements AgentWorkload {
   private readonly subagents = new Map<string, Set<string>>();
+  /** Threads listeners last heard hold a subagent, so an unsaved launch becoming saved is not a second change. */
+  private readonly reported = new Set<string>();
   private readonly listeners = new Set<(threadId: string) => void>();
 
   constructor(
@@ -26,10 +28,7 @@ export class AgentWorkloadService implements AgentWorkload {
 
   /** Read current occupancy without database access. */
   count(): number {
-    // A turn's reservation ends without waiting for its writes, so a launch still queued for SQLite is
-    // counted from the accepted owner until its saved event refreshes `subagents`.
-    return new Set([...this.runtime.activeTurnThreadIds(), ...this.subagents.keys(),
-      ...this.accepted?.unsavedThreadIds(touchesBackgroundCalls) ?? []]).size;
+    return new Set([...this.runtime.activeTurnThreadIds(), ...this.subagents.keys(), ...this.unsavedLaunchThreadIds()]).size;
   }
 
   /**
@@ -37,7 +36,7 @@ export class AgentWorkloadService implements AgentWorkload {
    * launching turn may still run, because the turn's reservation can end before its ending is saved.
    */
   hasBackgroundSubagent(threadId: string): boolean {
-    return this.subagents.has(threadId);
+    return this.subagents.has(threadId) || this.unsavedLaunchThreadIds().includes(threadId);
   }
 
   /** Subscribe to background occupancy transitions. */
@@ -61,34 +60,54 @@ export class AgentWorkloadService implements AgentWorkload {
    * writes, so no saved event ever reports that its calls stopped.
    */
   refreshTracked(): void {
-    for (const threadId of this.subagents.keys()) this.refresh(threadId);
+    for (const threadId of new Set([...this.subagents.keys(), ...this.reported])) this.refresh(threadId);
   }
 
   private refresh(threadId: string): void {
-    const previous = this.hasBackgroundSubagent(threadId);
     const ids = new Set(this.canonical.listRunningBackgroundSubagentIds(threadId));
     if (ids.size > 0) this.subagents.set(threadId, ids);
     else this.subagents.delete(threadId);
-    if (previous !== this.hasBackgroundSubagent(threadId)) {
-      for (const listener of this.listeners) listener(threadId);
-    }
+    // Accepting a launch notifies no one: readers see it live, and the parent's settled turn republishes attention.
+    const running = this.hasBackgroundSubagent(threadId);
+    if (running === this.reported.has(threadId)) return;
+    if (running) this.reported.add(threadId);
+    else this.reported.delete(threadId);
+    for (const listener of this.listeners) listener(threadId);
   }
+
+  /** A turn's reservation ends without waiting for its writes, so a launch still queued for SQLite counts from here. */
+  private unsavedLaunchThreadIds(): string[] {
+    return this.accepted?.unsavedThreadIds(launchesBackgroundSubagent) ?? [];
+  }
+}
+
+/** An unsaved event that starts a subagent; background commands and settlements never hold occupancy. */
+function launchesBackgroundSubagent(event: Pick<CanonicalAgentEventEnvelope, "payload">): boolean {
+  const payload = event.payload;
+  if (payload.type === "publication.recorded") {
+    return payload.event.type === "toolBackgrounded" && payload.event.kind === "subagent";
+  }
+  const record = toolCallRecordOf(event);
+  return isBackgroundRecord(record) && "background_kind" in record && record.background_kind === "subagent"
+    && "status" in record && record.status === "running";
+}
+
+function toolCallRecordOf(event: Pick<CanonicalAgentEventEnvelope, "payload">): unknown {
+  const payload = event.payload;
+  if (payload.type !== "item.recorded" || payload.item.kind !== "tool-call") return undefined;
+  const item = payload.item.payload;
+  if (item.projection === "toolCall") return item.record;
+  if (item.projection !== "narrativeRecovery" && item.projection !== "narrativeRecoveryDiscarded") return undefined;
+  const narrative: unknown = item.narrative;
+  return typeof narrative === "object" && narrative !== null && "record" in narrative ? narrative.record : undefined;
 }
 
 function touchesBackgroundCalls(event: Pick<CanonicalAgentEventEnvelope, "payload">): boolean {
   const payload = event.payload;
   if (payload.type === "publication.recorded") return payload.event.type === "toolBackgrounded";
-  if (payload.type !== "item.recorded" || payload.item.kind !== "tool-call") return false;
-  const item = payload.item.payload;
-  if (item.projection === "toolCall") return isBackgroundRecord(item.record);
-  if (item.projection !== "narrativeRecovery" && item.projection !== "narrativeRecoveryDiscarded") return false;
-  return isBackgroundNarrative(item.narrative);
+  return isBackgroundRecord(toolCallRecordOf(event));
 }
 
-function isBackgroundNarrative(narrative: unknown): boolean {
-  return typeof narrative === "object" && narrative !== null && "record" in narrative && isBackgroundRecord(narrative.record);
-}
-
-function isBackgroundRecord(record: unknown): boolean {
+function isBackgroundRecord(record: unknown): record is object {
   return typeof record === "object" && record !== null && "background" in record && record.background === true;
 }

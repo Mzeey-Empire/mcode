@@ -48,6 +48,9 @@ import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagno
 import { AcceptedContentRejected } from "../accepted-save-failure.js";
 import { ParentAssistantTextCheckpointStore } from "../../turns/parent-assistant-text-checkpoint-store.js";
 import { AgentWorkloadService } from "../../workload/agent-workload.js";
+import { createMockThread, createMockThreadPullRequest } from "@mcode/contracts/testing";
+import { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
+import { autoCompleteDecision } from "../../../thread-control/lifecycle/thread-auto-complete.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -2093,6 +2096,56 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await expect.poll(() => progress.depth().pending).toBe(0);
     expect(agentRecord()).toEqual({ status: "running", background: 1 });
     expect(workload.count()).toBe(1);
+  });
+
+  describe("when a background launch is still unsaved after its worker is released", () => {
+    const launchRecord = () => db.prepare("SELECT status, background FROM tool_call_records WHERE id = 'launch'").get();
+
+    /** Launches one background call, then ends its turn and releases the worker while every write is held. */
+    async function releaseWithUnsavedLaunch(kind: "subagent" | "command") {
+      const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [] }, new CanonicalAgentStore(db, () => {}), progress);
+      onTestFinished(workload.observeCommittedEvents());
+      await send(1, start("claude"));
+      await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 1, "toolUse",
+        kind === "subagent"
+          ? { toolCallId: "launch", toolName: "Agent", toolInput: { prompt: "Look around" } }
+          : { toolCallId: "launch", toolName: "Bash", toolInput: { command: "bun run build" } })] });
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      holdWrites();
+      await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "launch", kind, label: "Background work" })] });
+      await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "turnComplete")],
+        terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await send(5, { kind: "release" });
+      expect(launchRecord()).toEqual({ status: "running", background: 0 });
+      return workload;
+    }
+
+    it("does not count a background command", async () => {
+      const workload = await releaseWithUnsavedLaunch("command");
+
+      expect(workload.count()).toBe(0);
+      release?.();
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(workload.count()).toBe(0);
+    });
+
+    it("keeps auto-completion from completing the thread, and reports the subagent once", async () => {
+      const workload = await releaseWithUnsavedLaunch("subagent");
+      const changes: string[] = [];
+      onTestFinished(workload.onSubagentChange((threadId) => changes.push(threadId)));
+      const attention = new ThreadAttentionService(db, databaseWriter, [], { coordinatorsWithUnfinishedTasks: () => new Set() },
+        workload, () => {});
+      const decision = () => autoCompleteDecision({ ...createMockThread({ pull_requests: [createMockThreadPullRequest({ state: "merged" })] }),
+        attention: attention.get(execution.threadId), completeOnPrMerge: true });
+
+      expect(decision()).toBe("needs-user");
+      release?.();
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(launchRecord()).toEqual({ status: "running", background: 1 });
+      expect(workload.hasBackgroundSubagent(execution.threadId)).toBe(true);
+      expect(changes).toEqual([execution.threadId]);
+    });
   });
 
   describe("when a background call's late result arrives while its thread is fenced", () => {
