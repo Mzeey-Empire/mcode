@@ -66,15 +66,15 @@ export type SidebarSection = "recent" | "older";
 export type SidebarRowPending = "none" | "completing" | "failed";
 
 /**
- * One virtual row. Keys are typed per kind so two kinds never collide in the virtual list, and a
- * thread appears under exactly one key whatever its section.
- */
-/**
  * The project's thread line through a row: it runs on below the row, ends at the row, or is absent
  * (the flat Threads view, and a selected thread kept under a collapsed project).
  */
 export type ThreadTreeLine = "through" | "end" | "none";
 
+/**
+ * One virtual row. Keys are typed per kind so two kinds never collide in the virtual list, and a
+ * thread appears under exactly one key whatever its section.
+ */
 export type SidebarItem =
   | { readonly kind: "project"; readonly key: `project:${string}` | `older-project:${string}`; readonly workspaceId: string; readonly section: SidebarSection; readonly collapsed: boolean; readonly count: number }
   | { readonly kind: "draft"; readonly key: `draft:${string}`; readonly draftId: string; readonly workspaceId: string }
@@ -89,7 +89,7 @@ export interface SidebarModel {
   /** The scope the user chose; it stays chosen when it lists nothing. */
   readonly scope: SidebarScope;
   readonly items: readonly SidebarItem[];
-  /** Null when no thread is Older (the bar exists only then) or the scope is Completed. */
+  /** Null when no thread is Older (the bar exists only then) or the scope is Closed. */
   readonly olderBar: { readonly count: number; readonly open: boolean } | null;
   /** Thread ids in Older, for the motion layer's clock-crossing diff. */
   readonly olderIds: ReadonlySet<string>;
@@ -402,8 +402,8 @@ function nextBoundary(parts: Partitioned, inputs: SidebarInputs): number | null 
 }
 
 /**
- * Derives sidebar rows, effective scope and aging boundaries without side effects.
- * Pending completions stay Active; an empty Completed scope stays chosen and lists one empty line.
+ * Derives sidebar rows, the chosen scope and aging boundaries without side effects.
+ * Pending completions stay Open; an empty Closed scope stays chosen and lists one empty line.
  */
 export function deriveSidebarModel(inputs: SidebarInputs): SidebarModel {
   const parts = partition(inputs);
