@@ -19,7 +19,7 @@ import * as NodeOS from "node:os";
 import { captureClaudePlanFileRef, isClaudePlanFilePath, isWritableClaudePlanPath, syncClaudePlanFile } from "../../plan/claude-plan-file.js";
 import { z } from "zod";
 import * as NodePath from "node:path";
-import which from "which";
+import { resolveClaudeExecutable, checkClaudeVersion } from "./claude-executable.js";
 import { ClaudeOwnedProcess } from "./claude-process.js";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -50,7 +50,7 @@ import { listClaudeModels } from "./list-models.js";
 import { resolveSdkModelSlug } from "./resolve-slug.js";
 import { resolveAutoCompactWindow } from "./context-window.js";
 import { readAnthropicOauthToken } from "@mcode/shared/usage";
-import { createCliStatusRunner, readCliStatusVersion, resolveCliStatusBinary } from "../status/cli-status-runner.js";
+import { createCliStatusRunner } from "../status/cli-status-runner.js";
 import { describeClaudeAuth } from "../status/provider-auth-checks.js";
 import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
 import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
@@ -847,6 +847,7 @@ export class ClaudeProvider
     cwd: string,
     options: CompletionOptions = {},
   ): Promise<string> {
+    await this.requireClaudeInstallation();
     const ownedProcess = this.createOwnedClaudeProcess("completion");
     try {
       const queue = createPromptQueue();
@@ -1702,6 +1703,7 @@ export class ClaudeProvider
     params: ClaudeSendMessageParams,
     routing: ClaudeCanonicalEventRouting,
   ): Promise<void> {
+    await this.requireClaudeInstallation();
     const {
       sessionId,
       message,
@@ -1841,13 +1843,25 @@ export class ClaudeProvider
     }, threadId, (signal) => threadId === undefined ? Promise.resolve() : this.canonicalEventPublisher.waitForCapacity(threadId, signal));
   }
 
-  private resolveClaudeExecutable(): string | undefined {
-    // The SDK ships its own CLI for the default command. Custom commands must resolve lazily.
-    if (this.configuration.cliPath === "claude") return undefined;
-    if (NodePath.isAbsolute(this.configuration.cliPath)) return this.configuration.cliPath;
-    const executable = which.sync(this.configuration.cliPath, { nothrow: true });
-    if (!executable) throw new Error("Configured Claude executable is unavailable");
-    return executable;
+  private resolveClaudeExecutable(): string {
+    return resolveClaudeExecutable(this.configuration.cliPath, this.host.environment.snapshot(), this.host.runtime.platform);
+  }
+
+  private claudeVersionCheck: { executable: string; result: ReturnType<typeof checkClaudeVersion> } | undefined;
+
+  private checkInstalledClaude(executable: string, refresh = false): ReturnType<typeof checkClaudeVersion> {
+    if (refresh || this.claudeVersionCheck?.executable !== executable) {
+      const env = this.host.environment.snapshot();
+      const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.host.runtime.platform, env });
+      this.claudeVersionCheck = { executable, result: checkClaudeVersion(run, this.configuration.cliPath) };
+    }
+    return this.claudeVersionCheck.result;
+  }
+
+  private async requireClaudeInstallation(): Promise<void> {
+    const executable = this.resolveClaudeExecutable();
+    const version = await this.checkInstalledClaude(executable);
+    if (version.problem) throw new Error(version.problem);
   }
 
   private startClaudeSdkQuery(
@@ -3048,15 +3062,20 @@ export class ClaudeProvider
     const env = this.host.environment.snapshot();
     const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.requireHostRuntime().platform, env });
     const cliPath = this.configuration.cliPath;
-    const bundled = cliPath === "claude";
+    let executable: string;
+    try {
+      executable = this.resolveClaudeExecutable();
+    } catch (error) {
+      return { auth: { state: "unknown" as const }, cli: {
+        installed: null, managedBy: "user" as const, resolvedPath: null,
+        npmPackage: "@anthropic-ai/claude-code",
+        problem: error instanceof Error ? error.message : "Claude Code is not installed.",
+      } };
+    }
+    const version = await this.checkInstalledClaude(executable, true);
     return {
       ...await describeClaudeAuth(run, cliPath, env),
-      cli: {
-        installed: bundled ? null : await readCliStatusVersion(run, cliPath),
-        managedBy: bundled ? "mcode" as const : "user" as const,
-        resolvedPath: bundled ? null : await resolveCliStatusBinary(cliPath, env),
-        npmPackage: bundled ? null : "@anthropic-ai/claude-code",
-      },
+      cli: { ...version, managedBy: "user" as const, resolvedPath: executable, npmPackage: "@anthropic-ai/claude-code" },
     };
   }
 

@@ -47,14 +47,8 @@ type ReasoningOptions = ComponentProps<typeof SegmentedControl>["options"];
  * is still loading, the option stays selectable to avoid falsely blanking every
  * entry on first paint.
  */
-function buildProviderOption(
-  p: (typeof MODEL_PROVIDERS)[number],
-  avail: ProviderAvailability | undefined,
-): { value: string; label: string; disabled: boolean; icon: ReactNode; title: string | undefined } {
-  const unavailable =
-    avail != null &&
-    (!avail.enabled || !avail.hasAdapter || avail.cli.status === "not_found");
-  const title = p.comingSoon
+function providerOptionTitle(comingSoon: boolean, avail: ProviderAvailability | undefined): string | undefined {
+  return comingSoon
     ? "Coming soon"
     : avail == null
       ? undefined
@@ -63,8 +57,18 @@ function buildProviderOption(
         : !avail.hasAdapter
           ? "Unavailable"
           : avail.cli.status === "not_found"
-            ? "CLI not found"
+            ? avail.cli.message ?? "CLI not found"
             : undefined;
+}
+
+function buildProviderOption(
+  p: (typeof MODEL_PROVIDERS)[number],
+  avail: ProviderAvailability | undefined,
+): { value: string; label: string; disabled: boolean; icon: ReactNode; title: string | undefined } {
+  const unavailable =
+    avail != null &&
+    (!avail.enabled || !avail.hasAdapter || avail.cli.status === "not_found");
+  const title = providerOptionTitle(p.comingSoon, avail);
   return {
     value: p.id,
     label: p.name,

@@ -8,7 +8,6 @@ import {
   downloadTargetPackage,
   downloadAndExtractPackage,
   packageMetadataUsable,
-  resolveClaudeTargetPackagePlan,
   resolveInstallPackageDestination,
   resolveInstallRoot,
   verifyPackageIntegrity,
@@ -75,27 +74,16 @@ describe("Copilot SDK target package preparation", () => {
   it("passes canonical package names and integrity to missing-package downloader", async () => {
     const requests = [];
     const downloader = async (request) => requests.push(request);
-    const claudePlan = resolveClaudeTargetPackagePlan(
-      serverRoot,
-      "darwin",
-      "x64",
-    );
     const copilotPlan = resolveCopilotTargetPackagePlan(
       serverRoot,
       "darwin",
       "x64",
     );
 
-    await downloadTargetPackage(claudePlan, downloader);
     await downloadTargetPackage(copilotPlan, downloader);
 
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      packageName: "@anthropic-ai/claude-agent-sdk-darwin-x64",
-      version: claudePlan.version,
-      integrity: claudePlan.integrity,
-    });
-    expect(requests[1]).toMatchObject({
       packageName: "@github/copilot-darwin-x64",
       version: copilotPlan.version,
       integrity: copilotPlan.integrity,

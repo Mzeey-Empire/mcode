@@ -13,6 +13,8 @@ export type CliStatus = z.infer<ReturnType<typeof CliStatusSchema>>;
 export const ProviderCliInfoSchema = lazySchema(() =>
   z.object({
     status: CliStatusSchema(),
+    /** Adapter installation or compatibility guidance, when unavailable. */
+    message: z.string().optional(),
     /** Path that `which` or `fs.stat` resolved, or null when not_found/unchecked. */
     resolvedPath: z.string().nullable(),
     /** The configured path from settings.provider.cli[id]. Empty string means "auto via PATH". */

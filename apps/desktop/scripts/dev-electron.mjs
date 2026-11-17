@@ -35,7 +35,6 @@ const { context, build } = await import("esbuild");
 const {
   rebuildServerDevBundle,
   resolveServerTscBin,
-  copyClaudeSdkCliNextTo,
 } = await import("../../../scripts/build-server-dev-bundle.mjs");
 const webRoot = NodePath.resolve(projectRoot, "..", "web");
 const serverRoot = NodePath.resolve(projectRoot, "..", "server");
@@ -186,7 +185,6 @@ let distTscWatcher = null;
 const scheduleServerBundleRebuild = makeCoalescedAsync(async () => {
   try {
     await build({ ...serverEsbuildCfg });
-    copyClaudeSdkCliNextTo(serverOutFile, serverRoot);
   } catch (err) {
     console.error("[dev] server bundle rebuild failed:", err);
   }

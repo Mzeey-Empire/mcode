@@ -30,6 +30,24 @@ function stubRegistry(ids: string[]): IProviderRegistry {
 }
 
 describe("ProviderAvailabilityService.listAvailability", () => {
+  it("blocks incompatible Claude and clears the message after an update", async () => {
+    const registry = stubRegistry(["claude"]);
+    const provider = registry.resolveAll()[0];
+    let problem: string | undefined = "Update Claude Code to 2.1.291 or later.";
+    provider.describeStatus = async () => ({ auth: { state: "unknown" }, cli: {
+      installed: "2.1.290", managedBy: "user", resolvedPath: "/installed/claude", npmPackage: "@anthropic-ai/claude-code", problem,
+    } });
+    const service = new ProviderAvailabilityService(stubSettings(), registry, {
+      which: async () => "/installed/claude", statExecutable: async () => true,
+    });
+    await service.verifyCli("claude");
+    expect(service.listAvailability()[0].cli).toMatchObject({ status: "not_found", message: problem });
+    expect(() => service.assertUsable("claude")).toThrow(/Update Claude Code/);
+    problem = undefined;
+    await service.verifyCli("claude");
+    expect(service.listAvailability()[0].cli).toEqual({ status: "found", resolvedPath: "/installed/claude", configuredPath: "" });
+    expect(() => service.assertUsable("claude")).not.toThrow();
+  });
   beforeEach(() => vi.clearAllMocks());
 
   it("reflects settings.provider.enabled flags in output", () => {

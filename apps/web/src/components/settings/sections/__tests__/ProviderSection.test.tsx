@@ -74,6 +74,13 @@ beforeEach(() => {
 });
 
 describe("ProviderSection", () => {
+  it.each(["Claude Code is not installed.", "Update Claude Code to 2.1.291 or later."])("shows Claude installation guidance: %s", (message) => {
+    useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
+      ? { ...row, cli: { ...row.cli, status: "not_found", message } }
+      : row) }));
+    render(<ProviderSection />);
+    expect(screen.getByTestId("provider-badge-claude-cli-missing")).toHaveTextContent(message);
+  });
   it("renders switches only for available providers", () => {
     render(<ProviderSection />);
     const switches = screen.getAllByRole("switch");

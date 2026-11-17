@@ -2,7 +2,6 @@
  * electron-builder afterPack hook.
  *
  * 1. Built renamed `mcode-server` Electron binary (before fuse flip)
- * 2. Copied Claude Agent SDK native CLI into the asar-unpacked server tree
  * 3. Copied Copilot SDK's bundled CLI package tree into the asar-unpacked server tree
  * 4. Restored node-pty's Windows ConPTY runtime after the native rebuild
  * 5. Copied browser V8 snapshot (when generated) and flipped security fuses
@@ -20,7 +19,6 @@ import {
   buildServerBinary,
 } from "./build-server-binary.mjs";
 import {
-  copyClaudeSdkCliToDir,
   copyCopilotSdkToDir,
   electronArchToNpm,
   electronPlatformToNpm,
@@ -84,7 +82,7 @@ export default async function afterPack(context) {
   console.log("[after-pack] Built renamed server binary");
 
   // -------------------------------------------------------------------------
-  // Step 1b: Copy Claude Agent SDK native CLI into asar-unpacked server tree.
+  // Step 1b: Stage the Bun runtime and Copilot SDK in the unpacked server tree.
   // electron-builder excludes nested node_modules from the default files filter,
   // so build-time staging under dist/server/node_modules does not survive packaging.
   // -------------------------------------------------------------------------
@@ -108,13 +106,6 @@ export default async function afterPack(context) {
     arch: electronArchToNpm(context.arch),
   });
   console.log(`[after-pack] Staged Bun server runtime at ${bunRuntime}`);
-  const { platformPkg, binDst } = copyClaudeSdkCliToDir({
-    destServerDir: packagedServerDir,
-    serverPackageRoot,
-    platform: npmPlatform,
-    arch: npmArch,
-  });
-  console.log(`[after-pack] Copied Claude SDK CLI (${platformPkg}) to ${binDst}`);
 
   const { platformPkg: copilotPlatformPkg, copilotDst } = copyCopilotSdkToDir({
     destServerDir: packagedServerDir,

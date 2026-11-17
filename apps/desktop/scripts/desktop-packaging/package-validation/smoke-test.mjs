@@ -10,7 +10,6 @@
  * - Broken asarUnpack configuration
  * - Server startup crashes invisible in the packaged app
  * - Import/require resolution failures in the CJS bundle
- * - Missing Claude Agent SDK native CLI (after-pack regression)
  *
  * Usage:
  *   node apps/desktop/scripts/desktop-packaging/package-validation/smoke-test.mjs             # auto-detect unpacked dir
@@ -24,8 +23,6 @@ import * as NodeURL from "node:url";
 import * as NodeOS from "node:os";
 import * as NodeCrypto from "node:crypto";
 import {
-  findClaudeSdkCliPath,
-  expectedClaudeSdkCliPath,
 } from "../../../../../scripts/build-server-dev-bundle.mjs";
 import {
   classifySmokeOutcome,
@@ -206,14 +203,6 @@ if (!bundleOnly) {
   }
   console.log(`[smoke-test] koffi module: ${found.koffi}`);
 
-  const claudeCli = findClaudeSdkCliPath(found.server, sdkTarget.platform, sdkTarget.arch);
-  if (!claudeCli) {
-    const expected = expectedClaudeSdkCliPath(found.server, sdkTarget.platform, sdkTarget.arch);
-    console.error(`[smoke-test] ERROR: Claude SDK CLI binary missing at ${expected}`);
-    console.error("  after-pack.mjs should copy it into app.asar.unpacked/dist/server/node_modules/");
-    process.exit(1);
-  }
-  console.log(`[smoke-test] Claude SDK CLI: ${claudeCli}`);
 
   if (sdkTarget.platform === "win32") {
     const marker = "MCODE_PACKAGED_PTY_OK";

@@ -1,5 +1,5 @@
 /**
- * Prepare Claude and Copilot SDK platform packages for the electron-builder target.
+ * Prepare Copilot SDK platform packages for the electron-builder target.
  *
  * Bun filters optional dependencies by host architecture. Cross-architecture
  * packaging therefore downloads missing target packages directly into Bun's
@@ -23,7 +23,6 @@ import {
   verifyPackageIntegrity,
 } from "./package-registry.mjs";
 import {
-  resolveClaudeTargetPackagePlan,
   resolveCopilotTargetPackagePlan,
   resolveHostDesktopTarget,
 } from "../target-inventory/target-inventory.mjs";
@@ -39,7 +38,6 @@ export {
 } from "./package-registry.mjs";
 export {
   copilotSdkPlatformPackageName,
-  resolveClaudeTargetPackagePlan,
   resolveCopilotTargetPackagePlan,
 } from "../target-inventory/target-inventory.mjs";
 
@@ -157,7 +155,7 @@ export async function downloadTargetPackage(
   return downloader({ ...plan, packageName: plan.packageName, plan });
 }
 
-/** Ensure both SDK platform packages exist for a packaging target. */
+/** Ensure the Copilot SDK platform package exists for a packaging target. */
 export async function prepareSdkPlatformPackages({
   serverPackageRoot = serverRoot,
   platform = electronPlatformToNpm(process.platform),
@@ -169,12 +167,6 @@ export async function prepareSdkPlatformPackages({
   const targetPlatform = { windows: "win32", macos: "darwin", linux: "linux" }[
     target.platform
   ];
-  const claudePlan = resolveClaudeTargetPackagePlan(
-    serverPackageRoot,
-    targetPlatform,
-    target.arch,
-  );
-  await ensureTargetPackage("Claude", claudePlan, target.id, serverPackageRoot);
 
   const copilotPlan = resolveCopilotTargetPackagePlan(
     serverPackageRoot,

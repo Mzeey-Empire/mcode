@@ -15,8 +15,9 @@ export class ProviderCliMissingError extends Error {
   constructor(
     public readonly providerId: ProviderId,
     public readonly configuredPath: string,
+    message?: string,
   ) {
-    super(`Provider "${providerId}" CLI not found (configuredPath="${configuredPath}")`);
+    super(message ?? `Provider "${providerId}" CLI not found (configuredPath="${configuredPath}")`);
     this.name = "ProviderCliMissingError";
   }
 }

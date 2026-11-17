@@ -14,6 +14,7 @@ import * as NodeFS from "node:fs";
 type CliRuntime = {
   status: "found" | "not_found" | "unchecked";
   resolvedPath: string | null;
+  message?: string;
 };
 
 /** Provider IDs whose CLI path is user-configurable via `settings.provider.cli`. */
@@ -84,6 +85,7 @@ export class ProviderAvailabilityService {
         capabilities: [...(registered.get(entry.id)?.descriptor.capabilities ?? [])],
         cli: {
           status: cliRuntime.status,
+          ...(cliRuntime.message ? { message: cliRuntime.message } : {}),
           resolvedPath: cliRuntime.resolvedPath,
           configuredPath,
         },
@@ -121,7 +123,21 @@ export class ProviderAvailabilityService {
         ? { status: "found", resolvedPath: resolved }
         : { status: "not_found", resolvedPath: null };
     }
+    if (id === "claude") result = await this.verifyClaude(result);
     this.cliCache.set(id, result);
+    return result;
+  }
+
+  private async verifyClaude(result: CliRuntime): Promise<CliRuntime> {
+    const provider = this.registry.resolveAll().find((entry) => entry.id === "claude");
+    const facts = await provider?.describeStatus?.();
+    if (facts?.cli) {
+      result = facts.cli.problem
+        ? { status: "not_found", resolvedPath: facts.cli.resolvedPath, message: facts.cli.problem }
+        : { status: "found", resolvedPath: facts.cli.resolvedPath };
+    } else if (result.status === "not_found") {
+      result.message = "Claude Code is not installed. Install Claude Code or configure its CLI path.";
+    }
     return result;
   }
 
@@ -147,7 +163,7 @@ export class ProviderAvailabilityService {
     const cached = this.cliCache.get(id);
     if (cached?.status === "not_found") {
       const configuredPath = hasCliPath(id) ? this.settings.get().provider.cli[id] : "";
-      throw new ProviderCliMissingError(id, configuredPath);
+      throw new ProviderCliMissingError(id, configuredPath, cached.message);
     }
   }
 
