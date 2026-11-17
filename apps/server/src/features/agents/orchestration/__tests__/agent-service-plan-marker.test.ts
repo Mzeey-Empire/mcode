@@ -91,7 +91,7 @@ async function buildService(db: Database) {
       Promise.resolve({
         model: { defaults: { fallbackId: undefined, contextWindow: "auto", thinking: false } },
         agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
-        provider: { enabled: {}, cli: {} },
+        provider: { enabled: {}, cli: {}, claude: { fastMode: false }, codex: { fastMode: false } },
       }),
     ),
     on: vi.fn(),

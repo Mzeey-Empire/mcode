@@ -213,7 +213,7 @@ async function buildService(
     get: vi.fn(() => ({
       model: { defaults: { fallbackId: undefined } },
       agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
-      provider: { enabled: {}, cli: {} },
+      provider: { enabled: {}, cli: {}, claude: { fastMode: false }, codex: { fastMode: false } },
     })),
     on: vi.fn(),
   } as unknown as SettingsService;
@@ -1036,7 +1036,7 @@ describe("AgentService Ended finalization through the production execution worke
       get: vi.fn(() => ({
         model: { defaults: { fallbackId: undefined } },
         agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
-        provider: { enabled: {}, cli: {} },
+        provider: { enabled: {}, cli: {}, claude: { fastMode: false }, codex: { fastMode: false } },
       })),
       on: vi.fn(),
     } as unknown as SettingsService;
