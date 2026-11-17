@@ -59,6 +59,7 @@
     },
     "files": [
       "dist/**/*",
+      "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
       "package.json",
       "node_modules/koffi/**/*",
       "node_modules/node-pty/**/*"

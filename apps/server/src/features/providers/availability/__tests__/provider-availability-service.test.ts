@@ -30,6 +30,51 @@ function stubRegistry(ids: string[]): IProviderRegistry {
 }
 
 describe("ProviderAvailabilityService.listAvailability", () => {
+  it("recovers a newly installed CLI when a client refreshes availability and broadcasts once", async () => {
+    let installed = false;
+    const which = vi.fn(async () => {
+      if (!installed) throw new Error("missing");
+      return "/installed/claude";
+    });
+    const service = new ProviderAvailabilityService(stubSettings(), stubRegistry(["claude"]), {
+      which, statExecutable: async () => false,
+    });
+    const changed = vi.fn<(list: ProviderAvailability[]) => void>();
+    service.onChange(changed);
+    await service.verifyAllEnabled();
+    expect(service.listAvailability()[0].cli.status).toBe("not_found");
+    await service.refreshAvailability();
+    expect(changed).not.toHaveBeenCalled();
+
+    installed = true;
+    const recovered = await service.refreshAvailability();
+    expect(recovered[0].cli).toEqual({ status: "found", resolvedPath: "/installed/claude", configuredPath: "" });
+    expect(changed.mock.calls).toEqual([[recovered]]);
+    await service.refreshAvailability();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(which).toHaveBeenCalledTimes(3);
+  });
+  it("warns about incompatible Claude and clears the message after an update", async () => {
+    const registry = stubRegistry(["claude"]);
+    const provider = registry.resolveAll()[0];
+    let warning: string | undefined = "Update Claude Code to a supported version.";
+    provider.describeStatus = async () => ({ auth: { state: "unknown" }, cli: {
+      installed: "2.1.290", managedBy: "user", resolvedPath: "/installed/claude", npmPackage: "@anthropic-ai/claude-code", warning,
+    } });
+    const service = new ProviderAvailabilityService(stubSettings(), registry, {
+      which: async () => "/installed/claude", statExecutable: async () => true,
+    });
+    await service.verifyCli("claude");
+    expect(service.listAvailability()[0].cli).toMatchObject({ status: "found", warning });
+    await expect(service.assertUsable("claude")).resolves.toBeUndefined();
+    const changed = vi.fn<(list: ProviderAvailability[]) => void>();
+    service.onChange(changed);
+    warning = undefined;
+    await service.refreshAvailability();
+    expect(service.listAvailability()[0].cli).toEqual({ status: "found", resolvedPath: "/installed/claude", configuredPath: "" });
+    expect(changed).toHaveBeenCalledTimes(1);
+    await expect(service.assertUsable("claude")).resolves.toBeUndefined();
+  });
   beforeEach(() => vi.clearAllMocks());
 
   it("reflects settings.provider.enabled flags in output", () => {
@@ -207,6 +252,25 @@ describe("ProviderAvailabilityService.assertEnabled", () => {
 });
 
 describe("ProviderAvailabilityService.assertUsable", () => {
+  it("rechecks a missing executable before sending and broadcasts recovery once", async () => {
+    let installed = false;
+    const which = vi.fn(async () => {
+      if (!installed) throw new Error("missing");
+      return "/installed/claude";
+    });
+    const svc = new ProviderAvailabilityService(stubSettings(), stubRegistry(["claude"]), { which, statExecutable: async () => false });
+    const changed = vi.fn();
+    svc.onChange(changed);
+    await svc.verifyCli("claude");
+    await expect(svc.assertUsable("claude")).rejects.toThrow(ProviderCliMissingError);
+    expect(changed).not.toHaveBeenCalled();
+    installed = true;
+    await expect(svc.assertUsable("claude")).resolves.toBeUndefined();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed.mock.calls[0][0].find((row: ProviderAvailability) => row.id === "claude").cli).toMatchObject({ status: "found", resolvedPath: "/installed/claude" });
+    await svc.assertUsable("claude");
+    expect(which).toHaveBeenCalledTimes(3);
+  });
   it("throws ProviderDisabledError when the toggle is off", async () => {
     const s = getDefaultSettings();
     s.provider.enabled.codex = false;
@@ -214,17 +278,17 @@ describe("ProviderAvailabilityService.assertUsable", () => {
       { get: () => s, on: () => {} } as unknown as SettingsService,
       stubRegistry(["claude", "codex"]),
     );
-    expect(() => svc.assertUsable("codex")).toThrow(ProviderDisabledError);
+    await expect(svc.assertUsable("codex")).rejects.toThrow(ProviderDisabledError);
   });
 
-  it("throws ProviderDisabledError for coming-soon providers regardless of settings", () => {
+  it("throws ProviderDisabledError for coming-soon providers regardless of settings", async () => {
     const s = getDefaultSettings();
     s.provider.enabled.gemini = true;
     const svc = new ProviderAvailabilityService(
       { get: () => s, on: () => {} } as unknown as SettingsService,
       stubRegistry([]),
     );
-    expect(() => svc.assertUsable("gemini")).toThrow(ProviderDisabledError);
+    await expect(svc.assertUsable("gemini")).rejects.toThrow(ProviderDisabledError);
   });
 
   it("throws ProviderCliMissingError when enabled but CLI not_found", async () => {
@@ -234,7 +298,7 @@ describe("ProviderAvailabilityService.assertUsable", () => {
       { which: vi.fn(async () => { throw new Error("nope"); }), statExecutable: vi.fn() },
     );
     await svc.verifyCli("claude");
-    expect(() => svc.assertUsable("claude")).toThrow(ProviderCliMissingError);
+    await expect(svc.assertUsable("claude")).rejects.toThrow(ProviderCliMissingError);
   });
 
   it("does not throw when enabled and CLI found", async () => {
@@ -244,12 +308,12 @@ describe("ProviderAvailabilityService.assertUsable", () => {
       { which: vi.fn(async () => "/usr/local/bin/claude"), statExecutable: vi.fn() },
     );
     await svc.verifyCli("claude");
-    expect(() => svc.assertUsable("claude")).not.toThrow();
+    await expect(svc.assertUsable("claude")).resolves.toBeUndefined();
   });
 
-  it("does not throw when enabled + adapter present but CLI unchecked (startup race)", () => {
+  it("does not throw when enabled + adapter present but CLI unchecked (startup race)", async () => {
     const svc = new ProviderAvailabilityService(stubSettings(), stubRegistry(["claude"]));
-    expect(() => svc.assertUsable("claude")).not.toThrow();
+    await expect(svc.assertUsable("claude")).resolves.toBeUndefined();
   });
 });
 

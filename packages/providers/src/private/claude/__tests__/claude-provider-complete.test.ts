@@ -97,8 +97,48 @@ vi.mock("@mcode/shared", () => ({
 import { ClaudeProvider } from "./helpers/provider-fixture.js";
 import { stubEnvService } from "./helpers/provider-fixture.js";
 import { stubJobObject } from "./helpers/provider-fixture.js";
+import { fixtureHost } from "./helpers/provider-fixture.js";
+import { ClaudeProvider as RuntimeClaudeProvider } from "../claude-provider.js";
+import sdkMetadata from "../../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 describe("ClaudeProvider.complete()", () => {
+  it.each(["0.0.1", ""])("allows completion with an old or unprobeable CLI version: %s", async (version) => {
+    const host = fixtureHost();
+    host.processes.run = async () => ({ stdout: version, stderr: "" });
+    const installed = new RuntimeClaudeProvider(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 });
+    mockQuery.mockImplementation(createMockSdkQuery("completed"));
+    try {
+      expect(await installed.complete("hello", "model", process.cwd())).toBe("completed");
+    } finally {
+      await installed.shutdown();
+    }
+  });
+
+  it("runs a JavaScript entry point with node, and probes its version only for status", async () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-complete-"));
+    const executable = NodePath.join(root, "cli.js");
+    NodeFS.writeFileSync(executable, "fixture");
+    const host = fixtureHost();
+    const run = vi.fn().mockResolvedValue({ stdout: sdkMetadata.claudeCodeVersion, stderr: "" });
+    host.processes.run = run;
+    const installed = new RuntimeClaudeProvider(host, { cliPath: executable, idleSessionTtlMs: 600_000 });
+    mockQuery.mockImplementation(createMockSdkQuery("completed"));
+    try {
+      expect(await installed.complete("hello", "model", process.cwd())).toBe("completed");
+      expect(run).not.toHaveBeenCalled();
+      expect(mockQuery.mock.calls[0][0].options).toMatchObject({ executable: "node", pathToClaudeCodeExecutable: executable });
+      await installed.describeStatus();
+      const probe = run.mock.calls.find(([request]) => request.args?.includes("--version"))?.[0];
+      expect(probe).toMatchObject({ args: [executable, "--version"] });
+      expect(NodePath.basename(probe.command).toLowerCase()).toMatch(/^node(?:\.exe)?$/);
+    } finally {
+      await installed.shutdown();
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
   let provider: ClaudeProvider;
 
   beforeEach(() => {

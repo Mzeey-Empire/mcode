@@ -603,7 +603,7 @@ export class ReviewWorktreeService {
     const context = this.buildProviderContext(intent, source);
     const warnings: string[] = [];
     try {
-      this.providerAvailability.assertUsable(provider);
+      await this.providerAvailability.assertUsable(provider);
     } catch (error) {
       warnings.push("The Review task was created, but its provider is unavailable. Send the intent again after enabling the provider.");
       logger.warn("Review task provider unavailable after local creation", {

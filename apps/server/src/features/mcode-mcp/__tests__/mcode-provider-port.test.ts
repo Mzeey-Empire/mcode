@@ -1,3 +1,4 @@
+import sdkMetadata from "../../../../../../packages/providers/node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
 import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { createClaudeProvider, type ClaudeProviderBoundary } from "@mcode/providers";
@@ -39,7 +40,7 @@ function createClaudeFixture(port: McodeProviderPort) {
       occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       runtime: hostRuntime,
       environment: { snapshot: () => ({}) },
-      processes: { open: () => { throw new Error("mcode-provider-port.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("mcode-provider-port.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async () => undefined },
+      processes: { open: () => { throw new Error("mcode-provider-port.test.ts fixture does not support process sessions"); }, run: async ({ args }) => { if (args?.[0] === "--version") return { stdout: `${sdkMetadata.claudeCodeVersion} (Claude Code)`, stderr: "" }; throw new Error("mcode-provider-port.test.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async () => undefined },
       browser: new BrowserAutomationSessionLease(),
       mcode: port,
       grants: { consume: () => false },

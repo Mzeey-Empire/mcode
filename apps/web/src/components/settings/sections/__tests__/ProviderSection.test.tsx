@@ -74,6 +74,36 @@ beforeEach(() => {
 });
 
 describe("ProviderSection", () => {
+  it("shows the last-enabled constraint first and still shows a Claude version warning", () => {
+    const warning = "Update Claude Code to a supported version.";
+    useProviderAvailabilityStore.setState(({ providers }) => ({
+      providers: providers.map((row) => ({
+        ...row,
+        enabled: row.id === "claude",
+        cli: { ...row.cli, ...(row.id === "claude" ? { warning } : {}) },
+      })),
+    }));
+    render(<ProviderSection />);
+    expect(screen.getByTestId("provider-switch-claude")).toBeDisabled();
+    expect(screen.getByText(`At least one provider must be enabled. ${warning}`)).toBeInTheDocument();
+  });
+  it.each(["Claude Code is not installed.", "Point the CLI path at claude.exe or the claude binary."])("shows Claude installation guidance: %s", (message) => {
+    useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
+      ? { ...row, cli: { ...row.cli, status: "not_found", message } }
+      : row) }));
+    render(<ProviderSection />);
+    expect(screen.getByTestId("provider-badge-claude-cli-missing")).toHaveTextContent("CLI not found");
+    expect(screen.getAllByText(message)).toHaveLength(2);
+  });
+  it("shows a version warning as a hint without a missing CLI badge", () => {
+    const warning = "Update Claude Code to a supported version.";
+    useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
+      ? { ...row, cli: { ...row.cli, warning } }
+      : row) }));
+    render(<ProviderSection />);
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    expect(screen.queryByTestId("provider-badge-claude-cli-missing")).not.toBeInTheDocument();
+  });
   it("renders switches only for available providers", () => {
     render(<ProviderSection />);
     const switches = screen.getAllByRole("switch");

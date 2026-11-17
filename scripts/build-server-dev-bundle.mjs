@@ -1,7 +1,7 @@
 /**
  * One-shot dev server bundle: `apps/server` swc emit (decorator metadata for
  * tsyringe) followed by esbuild CJS bundle to `apps/desktop/dist/server/server.cjs`,
- * plus Claude and Copilot SDK native CLI binaries beside it. Shared by desktop dev orchestration
+ * plus Copilot SDK native CLI binaries beside it. Shared by desktop dev orchestration
  * and `scripts/dev-web.mjs` (no `--import tsx` at runtime). Typechecking is NOT
  * part of this pipeline — it lives in the separate `typecheck` verify gate
  * (and `tsc --watch` during `dev:desktop` for live feedback).
@@ -117,7 +117,7 @@ export function electronArchToNpm(electronArch) {
     case 3:
       return "arm64";
     case 4:
-      throw new Error("electron-builder Arch.universal is not supported for Claude SDK platform packages");
+      throw new Error("electron-builder Arch.universal is not supported for SDK platform packages");
     default:
       throw new Error(`Unsupported electron-builder arch: ${electronArch}`);
   }
@@ -137,176 +137,6 @@ export function resolvePackagedServerDir({ appOutDir, electronPlatformName, prod
     return NodePath.resolve(appOutDir, `${productFilename}.app`, "Contents", "Resources", ...tail);
   }
   return NodePath.resolve(appOutDir, "resources", ...tail);
-}
-
-/**
- * Ordered Claude SDK platform package names to try for a target OS/arch.
- * Linux musl hosts only install the `-musl` optional dependency.
- *
- * @param {NodeJS.Platform} platform
- * @param {NodeJS.Architecture} arch
- * @returns {string[]}
- */
-export function claudeSdkPlatformPackageCandidates(platform, arch) {
-  if (platform === "linux") {
-    return [
-      `@anthropic-ai/claude-agent-sdk-linux-${arch}-musl`,
-      `@anthropic-ai/claude-agent-sdk-linux-${arch}`,
-    ];
-  }
-  return [`@anthropic-ai/claude-agent-sdk-${platform}-${arch}`];
-}
-
-/**
- * Platform package name and CLI binary filename for the Claude Agent SDK.
- *
- * @param {NodeJS.Platform} platform
- * @param {NodeJS.Architecture} arch
- */
-export function claudeSdkPlatformParts(platform, arch) {
-  const platformPkg = `@anthropic-ai/claude-agent-sdk-${platform}-${arch}`;
-  const binName = platform === "win32" ? "claude.exe" : "claude";
-  return { platformPkg, binName };
-}
-
-/**
- * Expected on-disk path to the staged Claude SDK CLI beside a bundled `server.cjs`.
- *
- * @param {string} serverCjsOut Absolute path to `server.cjs`.
- * @param {NodeJS.Platform} [platform]
- * @param {NodeJS.Architecture} [arch]
- */
-export function expectedClaudeSdkCliPath(
-  serverCjsOut,
-  platform = process.platform,
-  arch = process.arch,
-) {
-  const { platformPkg, binName } = claudeSdkPlatformParts(platform, arch);
-  return NodePath.resolve(NodePath.dirname(serverCjsOut), "node_modules", platformPkg, binName);
-}
-
-/**
- * Locate the staged Claude SDK CLI beside `server.cjs`, trying linux musl and glibc names.
- *
- * @param {string} serverCjsOut
- * @param {NodeJS.Platform} platform
- * @param {NodeJS.Architecture} arch
- * @returns {string | undefined}
- */
-export function findClaudeSdkCliPath(serverCjsOut, platform, arch) {
-  const binName = platform === "win32" ? "claude.exe" : "claude";
-  const serverDir = NodePath.dirname(serverCjsOut);
-  for (const platformPkg of claudeSdkPlatformPackageCandidates(platform, arch)) {
-    const candidate = NodePath.resolve(serverDir, "node_modules", platformPkg, binName);
-    if (NodeFS.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Resolve the installed Claude SDK platform package and CLI binary on the build host.
- *
- * @param {string} serverPackageRoot Root of `apps/server` (directory with `package.json`).
- * @param {NodeJS.Platform} platform
- * @param {NodeJS.Architecture} arch
- */
-export function resolveClaudeSdkCliSources(serverPackageRoot, platform, arch) {
-  const binName = platform === "win32" ? "claude.exe" : "claude";
-  const candidates = claudeSdkPlatformPackageCandidates(platform, arch);
-  const failures = [];
-
-  try {
-    const serverRequire = NodeModule.createRequire(NodePath.resolve(serverPackageRoot, "package.json"));
-    // Resolve from the SDK package itself: bun keeps platform packages as store
-    // siblings of the SDK, not hoisted to the workspace root.
-    const sdkEntry = serverRequire.resolve("@anthropic-ai/claude-agent-sdk");
-    const sdkRequire = NodeModule.createRequire(sdkEntry);
-
-    for (const platformPkg of candidates) {
-      try {
-        const binSrc = sdkRequire.resolve(`${platformPkg}/${binName}`);
-        const packageJsonSrc = NodePath.resolve(NodePath.dirname(binSrc), "package.json");
-        return { platformPkg, binName, binSrc, packageJsonSrc };
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        failures.push(`${platformPkg}: ${detail}`);
-      }
-    }
-  } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    failures.push(detail);
-  }
-
-  const label = candidates.join(" or ");
-  throw new Error(
-    `${label} not installed - run 'bun install' or node apps/desktop/scripts/desktop-packaging/target-package/target-package.mjs (node_modules out of sync with bun.lock): ${failures.join("; ")}`,
-  );
-}
-
-/**
- * Copy the Claude Agent SDK native CLI into a directory tree (used by afterPack).
- *
- * @param {object} args
- * @param {string} args.destServerDir Absolute path to packaged `dist/server` (or dev equivalent).
- * @param {string} args.serverPackageRoot Root of `apps/server`.
- * @param {NodeJS.Platform} args.platform Target npm `process.platform` value.
- * @param {NodeJS.Architecture} args.arch Target npm `process.arch` value.
- * @returns {{ platformPkg: string, binDst: string }}
- */
-export function copyClaudeSdkCliToDir({ destServerDir, serverPackageRoot, platform, arch }) {
-  const { platformPkg, binName, binSrc, packageJsonSrc } = resolveClaudeSdkCliSources(
-    serverPackageRoot,
-    platform,
-    arch,
-  );
-  const dstPkgDir = NodePath.resolve(destServerDir, "node_modules", platformPkg);
-  const binDst = NodePath.resolve(dstPkgDir, binName);
-  NodeFS.mkdirSync(dstPkgDir, { recursive: true });
-  NodeFS.copyFileSync(packageJsonSrc, NodePath.resolve(dstPkgDir, "package.json"));
-  NodeFS.copyFileSync(binSrc, binDst);
-  if (platform !== "win32") {
-    NodeFS.chmodSync(binDst, 0o755);
-  }
-  return { platformPkg, binDst };
-}
-
-/**
- * Stage the Claude Agent SDK's native CLI binary next to the bundled server entry.
- *
- * SDK >= 0.3 ships the CLI as a platform-specific package
- * (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>/claude[.exe]`) and resolves
- * it at runtime via `createRequire(import.meta.url)`. The esbuild bundle rewrites
- * `import.meta.url` to point at `server.cjs`, so the binary must be reachable by
- * walking up from `dist/server/` — i.e. under `dist/server/node_modules/`.
- *
- * The binary is ~230MB; the copy is skipped when the destination already matches
- * the source size so dev rebuilds stay fast.
- *
- * @param {string} serverCjsOut Absolute path to `server.cjs`.
- * @param {string} serverPackageRoot Root of `apps/server` (directory with `package.json`).
- * @param {NodeJS.Platform} [platform]
- * @param {NodeJS.Architecture} [arch]
- */
-export function copyClaudeSdkCliNextTo(
-  serverCjsOut,
-  serverPackageRoot,
-  platform = process.platform,
-  arch = process.arch,
-) {
-  const { platformPkg, binName, binSrc, packageJsonSrc } = resolveClaudeSdkCliSources(
-    serverPackageRoot,
-    platform,
-    arch,
-  );
-  const dstPkgDir = NodePath.resolve(NodePath.dirname(serverCjsOut), "node_modules", platformPkg);
-  const binDst = NodePath.resolve(dstPkgDir, binName);
-  NodeFS.mkdirSync(dstPkgDir, { recursive: true });
-  NodeFS.copyFileSync(packageJsonSrc, NodePath.resolve(dstPkgDir, "package.json"));
-  if (!NodeFS.existsSync(binDst) || NodeFS.statSync(binDst).size !== NodeFS.statSync(binSrc).size) {
-    NodeFS.copyFileSync(binSrc, binDst);
-  }
 }
 
 /** Return the platform-specific optional package name shipped with Copilot CLI. */
@@ -670,7 +500,6 @@ export async function rebuildServerDevBundle(options = {}) {
     ptyHostOutFile,
   });
 
-  copyClaudeSdkCliNextTo(serverOutFile, serverRoot);
   copyCopilotSdkNextTo(serverOutFile, serverRoot);
 
   const drizzleSrc = NodePath.resolve(serverRoot, "drizzle");

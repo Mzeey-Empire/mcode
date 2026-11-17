@@ -1,3 +1,4 @@
+import sdkMetadata from "../../../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
 import type { ProviderHostPorts } from "@mcode/providers";
 import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
@@ -13,7 +14,7 @@ export function mockShutdownHost(
     occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
-    processes: { open: () => { throw new Error("mock-shutdown-host.ts fixture does not support process sessions"); }, run: async () => { throw new Error("mock-shutdown-host.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
+    processes: { open: () => { throw new Error("mock-shutdown-host.ts fixture does not support process sessions"); }, run: async ({ args }) => { if (args?.[0] === "--version") return { stdout: `${sdkMetadata.claudeCodeVersion} (Claude Code)`, stderr: "" }; throw new Error("mock-shutdown-host.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
     browser: {
       stage: () => ({ leaseId: "shutdown-test", expiresAt: Date.now() + 60_000 }),
       releaseSession: () => 0, isConfigured: () => false, issue: () => null,

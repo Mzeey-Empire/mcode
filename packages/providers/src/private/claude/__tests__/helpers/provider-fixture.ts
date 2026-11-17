@@ -1,3 +1,4 @@
+import sdkMetadata from "../../../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
 import { ClaudeProvider as RuntimeClaudeProvider } from "../../claude-provider.js";
 import type { ProviderHostPorts, ProviderEventSinkPort, ProviderBrowserPort, ProviderBrowserLeaseRequest, ProviderBrowserLeaseHandle, ProviderBrowserLeaseGrant } from "../../../../host-ports.js";
 import { mockProviderHostRuntime } from "./mock-sdk-query.js";
@@ -8,7 +9,10 @@ export function fixtureHost(overrides: Partial<ProviderHostPorts> = {}): Provide
     occupancy: { read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }), openSession: () => 1, closeSession: () => {}, nativeChanged: () => {} },
     runtime: mockProviderHostRuntime,
     environment: { snapshot: () => ({}) },
-    processes: { open: () => { throw new Error("provider-fixture.ts fixture does not support process sessions"); }, run: async () => { throw new Error("provider-fixture.ts fixture does not support process runs"); }, attach: () => undefined, terminateTree: async () => undefined },
+    processes: { open: () => { throw new Error("provider-fixture.ts fixture does not support process sessions"); }, run: async ({ args }) => {
+      if (args?.[0] === "--version") return { stdout: `${sdkMetadata.claudeCodeVersion} (Claude Code)`, stderr: "" };
+      throw new Error("provider-fixture.ts fixture does not support process runs");
+    }, attach: () => undefined, terminateTree: async () => undefined },
     browser: new BrowserAutomationSessionLease(),
     mcode: { attach: async () => null, close: async () => undefined },
     grants: { consume: () => false },

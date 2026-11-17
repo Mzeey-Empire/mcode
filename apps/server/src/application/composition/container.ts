@@ -258,7 +258,7 @@ export async function setupContainer(mcodeDir: string, options: { createDatabase
 
   registerClaudeProvider(container, {
     configuration: {
-      cliPath: container.resolve(SettingsService).get().provider.cli.claude || "claude",
+      get cliPath() { return container.resolve(SettingsService).get().provider.cli.claude || "claude"; },
       idleSessionTtlMs: 10 * 60 * 1_000,
     },
     host: container.resolve("ProviderHostPorts"),

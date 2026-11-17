@@ -2,7 +2,6 @@ import * as NodeModule from "node:module";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import {
-  claudeSdkPlatformPackageCandidates,
   copilotSdkPlatformPackageName,
   electronArchToNpm,
   electronPlatformToNpm,
@@ -232,35 +231,6 @@ function planLockData(plan, serverPackageRoot) {
   };
 }
 
-/** Resolves the Claude SDK package plan required by a supported target. */
-export function resolveClaudeTargetPackagePlan(serverPackageRoot, platform, arch) {
-  const targetPlatform = resolveDesktopTarget(
-    { win32: "windows", darwin: "macos", linux: "linux" }[platform] ?? platform,
-    arch,
-  );
-  const npmPlatform = { windows: "win32", macos: "darwin", linux: "linux" }[
-    targetPlatform.platform
-  ];
-  const serverRequire = NodeModule.createRequire(NodePath.resolve(serverPackageRoot, "package.json"));
-  const sdkEntry = serverRequire.resolve("@anthropic-ai/claude-agent-sdk");
-  const packageName = claudeSdkPlatformPackageCandidates(npmPlatform, arch)[0];
-  const packageDir = NodePath.dirname(sdkEntry);
-  return planLockData(
-    {
-      kind: "claude",
-      platform: npmPlatform,
-      arch,
-      packageName,
-      version: readPackageVersion(packageDir),
-      destination: resolveInstallPackageDestination(sdkEntry, packageName),
-      installRoot: resolveInstallRoot(sdkEntry),
-      executable: npmPlatform === "win32" ? "claude.exe" : "claude",
-      chmodExecutable: npmPlatform !== "win32",
-    },
-    serverPackageRoot,
-  );
-}
-
 /** Resolves the Copilot SDK package plan required by a supported target. */
 export function resolveCopilotTargetPackagePlan(serverPackageRoot, platform, arch) {
   const targetPlatform = resolveDesktopTarget(
@@ -291,7 +261,7 @@ export function resolveCopilotTargetPackagePlan(serverPackageRoot, platform, arc
   );
 }
 
-/** Resolves both SDK target package plans for one supported desktop target. */
+/** Resolves SDK target package plans for one supported desktop target. */
 export function resolveDesktopTargetPackagePlans(serverPackageRoot, platform, arch) {
   const target = resolveDesktopTarget(platform, arch);
   const npmPlatform = { windows: "win32", macos: "darwin", linux: "linux" }[
@@ -299,7 +269,6 @@ export function resolveDesktopTargetPackagePlans(serverPackageRoot, platform, ar
   ];
   return {
     target,
-    claude: resolveClaudeTargetPackagePlan(serverPackageRoot, npmPlatform, target.arch),
     copilot: resolveCopilotTargetPackagePlan(serverPackageRoot, npmPlatform, target.arch),
   };
 }

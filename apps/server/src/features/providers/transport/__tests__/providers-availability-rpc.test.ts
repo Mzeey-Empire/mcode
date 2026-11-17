@@ -116,7 +116,7 @@ describe("providers.listAvailability RPC", () => {
 
     const deps = makeMinimalDeps({
       providerAvailability: {
-        listAvailability: () => fakeAvailability,
+        refreshAvailability: async () => fakeAvailability,
       } as unknown as RouterDeps["providerAvailability"],
     });
 
@@ -136,6 +136,32 @@ describe("providers.listAvailability RPC", () => {
       "opencode",
       "devin",
     ]);
+  });
+
+  it.each([
+    ["providers.listStatus", {}],
+    ["providers.updateCli", { providerId: "claude" }],
+  ])("rechecks availability on %s without holding the reply for it", async (method, params) => {
+    let refreshes = 0;
+    const deps = makeMinimalDeps({
+      providerAvailability: {
+        refreshAvailability: () => {
+          refreshes += 1;
+          return new Promise(() => {});
+        },
+      } as unknown as RouterDeps["providerAvailability"],
+      providerStatus: {
+        listStatus: async () => [],
+        updateCli: async () => ({}),
+      } as unknown as RouterDeps["providerStatus"],
+    });
+
+    ({ httpServer: server } = createWsServer(deps));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const response = await rpcCall(server, method, params);
+    expect(response.error).toBeUndefined();
+    expect(refreshes).toBe(1);
   });
 
   it("returns PROVIDER_DISABLED when calling listModels on a disabled provider", async () => {

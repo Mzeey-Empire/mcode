@@ -14,6 +14,8 @@ import * as NodeFS from "node:fs";
 type CliRuntime = {
   status: "found" | "not_found" | "unchecked";
   resolvedPath: string | null;
+  message?: string;
+  warning?: string;
 };
 
 /** Provider IDs whose CLI path is user-configurable via `settings.provider.cli`. */
@@ -84,11 +86,28 @@ export class ProviderAvailabilityService {
         capabilities: [...(registered.get(entry.id)?.descriptor.capabilities ?? [])],
         cli: {
           status: cliRuntime.status,
+          ...(cliRuntime.message ? { message: cliRuntime.message } : {}),
+          ...(cliRuntime.warning ? { warning: cliRuntime.warning } : {}),
           resolvedPath: cliRuntime.resolvedPath,
           configuredPath,
         },
       };
     });
+  }
+
+  /**
+   * Rechecks enabled CLIs that are missing or carry a version warning before returning a client-requested snapshot,
+   * so an install or upgrade made outside Mcode shows without a restart.
+   */
+  async refreshAvailability(): Promise<ProviderAvailability[]> {
+    const stale = this.listAvailability().filter((row) => row.enabled && (row.cli.status === "not_found" || row.cli.warning));
+    const changes = await Promise.all(stale.map(async (row) => {
+      const previous = this.cliCache.get(row.id);
+      const current = await this.verifyCli(row.id);
+      return JSON.stringify(previous) !== JSON.stringify(current);
+    }));
+    if (changes.some(Boolean)) this.broadcastAvailability();
+    return this.listAvailability();
   }
 
   /**
@@ -121,7 +140,21 @@ export class ProviderAvailabilityService {
         ? { status: "found", resolvedPath: resolved }
         : { status: "not_found", resolvedPath: null };
     }
+    if (id === "claude") result = await this.verifyClaude(result);
     this.cliCache.set(id, result);
+    return result;
+  }
+
+  private async verifyClaude(result: CliRuntime): Promise<CliRuntime> {
+    const provider = this.registry.resolveAll().find((entry) => entry.id === "claude");
+    const facts = await provider?.describeStatus?.();
+    if (facts?.cli) {
+      result = facts.cli.problem
+        ? { status: "not_found", resolvedPath: facts.cli.resolvedPath, message: facts.cli.problem }
+        : { status: "found", resolvedPath: facts.cli.resolvedPath, ...(facts.cli.warning ? { warning: facts.cli.warning } : {}) };
+    } else if (result.status === "not_found") {
+      result.message = "Claude Code is not installed. Install Claude Code or configure its CLI path.";
+    }
     return result;
   }
 
@@ -142,12 +175,17 @@ export class ProviderAvailabilityService {
    * CLI `unchecked` state is treated as "probably ok" — the first send will
    * re-verify and surface the real error if the binary is missing.
    */
-  assertUsable(id: ProviderId): void {
+  async assertUsable(id: ProviderId): Promise<void> {
     this.assertEnabled(id);
-    const cached = this.cliCache.get(id);
+    let cached = this.cliCache.get(id);
+    if (cached?.status === "not_found") {
+      const previous = cached;
+      cached = await this.verifyCli(id);
+      if (JSON.stringify(previous) !== JSON.stringify(cached)) this.broadcastAvailability();
+    }
     if (cached?.status === "not_found") {
       const configuredPath = hasCliPath(id) ? this.settings.get().provider.cli[id] : "";
-      throw new ProviderCliMissingError(id, configuredPath);
+      throw new ProviderCliMissingError(id, configuredPath, cached.message);
     }
   }
 
@@ -197,6 +235,10 @@ export class ProviderAvailabilityService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    this.broadcastAvailability();
+  }
+
+  private broadcastAvailability(): void {
     const list = this.listAvailability();
     for (const cb of this.broadcastListeners) {
       try {

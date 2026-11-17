@@ -33,11 +33,7 @@ describe("desktop packaging target inventory", () => {
         target.platform,
         target.arch,
       );
-      expect(plans.claude).toMatchObject({
-        platform: expect.any(String),
-        arch: target.arch,
-        packageName: expect.stringContaining(target.arch),
-      });
+      expect(Object.keys(plans).sort()).toEqual(["copilot", "target"]);
       expect(plans.copilot).toMatchObject({
         platform: expect.any(String),
         arch: target.arch,

@@ -19,7 +19,6 @@ import * as NodeURL from "node:url";
 import {
   buildServerRuntimeBundles,
   compileServerWithSwc,
-  copyClaudeSdkCliNextTo,
 } from "../../../scripts/build-server-dev-bundle.mjs";
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -99,12 +98,6 @@ if (NodeFS.existsSync(drizzleSrc)) {
   NodeFS.cpSync(drizzleSrc, drizzleDst, { recursive: true });
   console.log(`Copied Drizzle migrations -> ${drizzleDst}`);
 }
-
-// Stage the Claude Agent SDK's native CLI binary under dist/server/node_modules
-// for local dev and pre-packaging verification. Packaged installs receive the
-// binary via after-pack.mjs because electron-builder excludes nested node_modules.
-copyClaudeSdkCliNextTo(NodePath.resolve(desktopRoot, "dist/server/server.cjs"), serverRoot);
-console.log("Staged SDK native CLI binary -> dist/server/node_modules");
 
 // Step 3: Build web renderer for Electron (cross-platform env var)
 const rendererOutDir = NodePath.resolve(desktopRoot, "dist", "renderer");

@@ -1,7 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { resolveClaudeSdkCliSources, resolveCopilotSdkSources } from "../../../../../scripts/build-server-dev-bundle.mjs";
+import { resolveCopilotSdkSources } from "../../../../../scripts/build-server-dev-bundle.mjs";
 
 const packageNamePattern =
   /^@[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -108,10 +108,8 @@ export function packageMetadataUsable(metadata, plan) {
 /** Checks whether the target package is already present and valid. */
 export function readPlanTargetMetadata(plan, serverPackageRoot) {
   try {
-    const source = plan.kind === "claude"
-      ? resolveClaudeSdkCliSources(serverPackageRoot, plan.platform, plan.arch)
-      : resolveCopilotSdkSources(serverPackageRoot, plan.platform, plan.arch);
-    const packageDir = plan.kind === "claude" ? NodePath.dirname(source.binSrc) : source.platformPackageDir;
+    const source = resolveCopilotSdkSources(serverPackageRoot, plan.platform, plan.arch);
+    const packageDir = source.platformPackageDir;
     const metadata = JSON.parse(NodeFS.readFileSync(NodePath.resolve(packageDir, "package.json"), "utf8"));
     return packageMetadataUsable(metadata, plan) && NodeFS.existsSync(NodePath.resolve(packageDir, plan.executable)) && NodeFS.statSync(NodePath.resolve(packageDir, plan.executable)).isFile();
   } catch {

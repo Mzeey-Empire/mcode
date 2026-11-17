@@ -91,4 +91,8 @@ export interface ProviderCliFacts {
   managedBy: "mcode" | "user";
   resolvedPath: string | null;
   npmPackage: string | null;
+  /** Installation or compatibility failure reported by the adapter. */
+  problem?: string;
+  /** Advisory CLI compatibility guidance; execution remains available. */
+  warning?: string;
 }
