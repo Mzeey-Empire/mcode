@@ -61,7 +61,7 @@ export class UtilityCompletionService {
 
     let provider = resolvedProvider;
     let model = resolvedModel;
-    this.availability.assertUsable(provider);
+    await this.availability.assertUsable(provider);
 
     let agent = this.providerRegistry.resolve(provider);
 
@@ -71,7 +71,7 @@ export class UtilityCompletionService {
       );
       provider = "claude" as ProviderId;
       model = "";
-      this.availability.assertUsable(provider);
+      await this.availability.assertUsable(provider);
       agent = this.providerRegistry.resolve(provider);
 
       if (!isCompletionCapable(agent)) {

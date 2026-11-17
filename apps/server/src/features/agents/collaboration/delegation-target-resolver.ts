@@ -89,7 +89,7 @@ export class DelegationTargetResolver {
     userReasoning: ReasoningLevel,
   ): Promise<ThreadTargetListResult["providers"][number] | undefined> {
     try {
-      this.availability?.assertUsable(providerId);
+      await this.availability?.assertUsable(providerId);
       const models = this.usableModels(await this.models.listModels(providerId));
       if (models.length === 0) return undefined;
       const defaultModelId = globalDefaultModel && models.some((model) => model.id === globalDefaultModel)
@@ -144,7 +144,7 @@ export class DelegationTargetResolver {
     userReasoning: ReasoningLevel,
   ): Promise<DelegationTargetResolution> {
     try {
-      this.availability?.assertUsable(provider.id);
+      await this.availability?.assertUsable(provider.id);
       const models = this.usableModels(await this.models.listModels(provider.id));
       const model = models.find((candidate) => candidate.id === modelId);
       if (!model) {

@@ -97,8 +97,48 @@ vi.mock("@mcode/shared", () => ({
 import { ClaudeProvider } from "./helpers/provider-fixture.js";
 import { stubEnvService } from "./helpers/provider-fixture.js";
 import { stubJobObject } from "./helpers/provider-fixture.js";
+import { fixtureHost } from "./helpers/provider-fixture.js";
+import { ClaudeProvider as RuntimeClaudeProvider } from "../claude-provider.js";
+import sdkMetadata from "../../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 describe("ClaudeProvider.complete()", () => {
+  it.each(["0.0.1", ""])("allows completion with an old or unprobeable CLI version: %s", async (version) => {
+    const host = fixtureHost();
+    host.processes.run = async () => ({ stdout: version, stderr: "" });
+    const installed = new RuntimeClaudeProvider(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 });
+    mockQuery.mockImplementation(createMockSdkQuery("completed"));
+    try {
+      expect(await installed.complete("hello", "model", process.cwd())).toBe("completed");
+    } finally {
+      await installed.shutdown();
+    }
+  });
+
+  it("retries failed probes, caches successful probes, and runs JavaScript with node", async () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-complete-"));
+    const executable = NodePath.join(root, "cli.js");
+    NodeFS.writeFileSync(executable, "fixture");
+    const host = fixtureHost();
+    const run = vi.fn().mockResolvedValueOnce({ stdout: "", stderr: "" }).mockResolvedValue({ stdout: sdkMetadata.claudeCodeVersion, stderr: "" });
+    host.processes.run = run;
+    const installed = new RuntimeClaudeProvider(host, { cliPath: executable, idleSessionTtlMs: 600_000 });
+    mockQuery.mockImplementation(createMockSdkQuery("completed"));
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        expect(await installed.complete("hello", "model", process.cwd())).toBe("completed");
+      }
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(run.mock.calls[0][0]).toMatchObject({ args: [executable, "--version"] });
+      expect(NodePath.basename(run.mock.calls[0][0].command).toLowerCase()).toMatch(/^node(?:\.exe)?$/);
+      expect(mockQuery.mock.calls[0][0].options).toMatchObject({ executable: "node", pathToClaudeCodeExecutable: executable });
+    } finally {
+      await installed.shutdown();
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
   let provider: ClaudeProvider;
 
   beforeEach(() => {

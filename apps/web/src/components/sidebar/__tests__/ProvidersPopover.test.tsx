@@ -281,7 +281,7 @@ describe("deriveProviderBellRows", () => {
     ]);
   });
 
-  it("shows no row for a CLI with no update, such as Mcode's bundled Claude", () => {
+  it("shows no row for a CLI with no update, such as an up-to-date Claude installation", () => {
     const rows = deriveProviderBellRows([
       status("claude", { cli: { installed: null, managedBy: "mcode", latest: null, update: { state: "none" } } }),
       codexCli({ state: "none" }),

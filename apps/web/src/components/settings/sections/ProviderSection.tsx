@@ -125,7 +125,7 @@ interface ProviderRowProps {
 function ProviderControls({ row, switchDisabled, onToggle }: Pick<ProviderRowProps, "row" | "onToggle"> & { switchDisabled: boolean }) {
   return <div className="flex items-center gap-2 min-[80rem]:min-w-[9.2rem] min-[80rem]:justify-end">
     {row.beta && <Tooltip><TooltipTrigger><Badge variant="secondary" data-testid={`provider-badge-${row.id}-beta`}>Beta</Badge></TooltipTrigger><TooltipContent>This provider is in early phase. Expect bugs or incomplete features.</TooltipContent></Tooltip>}
-    {row.enabled && row.cli.status === "not_found" && <Tooltip><TooltipTrigger><Badge variant="destructive" data-testid={`provider-badge-${row.id}-cli-missing`}>{row.cli.message ?? "CLI not found"}</Badge></TooltipTrigger><TooltipContent>Tried: {row.cli.configuredPath ? row.cli.configuredPath : "PATH lookup"}. Install the CLI or set the path below.</TooltipContent></Tooltip>}
+    {row.enabled && row.cli.status === "not_found" && <Tooltip><TooltipTrigger><Badge variant="destructive" data-testid={`provider-badge-${row.id}-cli-missing`}>CLI not found</Badge></TooltipTrigger><TooltipContent>{row.cli.message ?? "Install the CLI or set the path below."}</TooltipContent></Tooltip>}
     <Switch data-testid={`provider-switch-${row.id}`} checked={row.enabled && row.hasAdapter} disabled={switchDisabled} onCheckedChange={onToggle} />
   </div>;
 }
@@ -241,9 +241,10 @@ function labelFor(id: ProviderId): string {
 
 /** Returns the hint text shown below the provider label. */
 function hintFor(row: ProviderAvailability, isLastEnabled: boolean): string {
-  if (isLastEnabled) return "At least one provider must be enabled.";
   if (row.enabled && row.cli.status === "not_found") {
     return row.cli.message ?? `CLI not found${row.cli.configuredPath ? ` at ${row.cli.configuredPath}` : ""}.`;
   }
+  if (row.enabled && row.cli.warning) return row.cli.warning;
+  if (isLastEnabled) return "At least one provider must be enabled.";
   return "";
 }

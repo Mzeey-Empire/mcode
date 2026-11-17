@@ -252,7 +252,7 @@ async function routeProviderUsage(
   deps: ProviderRouterDeps,
   providerId: ProviderCatalogRequest["providerId"],
 ): Promise<ProviderUsageInfo> {
-  deps.providerAvailability.assertUsable(providerId);
+  await deps.providerAvailability.assertUsable(providerId);
   const provider = deps.providerRegistry.resolve(providerId);
   if (!provider.getUsage) return unsupportedUsageSnapshot(provider.id);
   try {

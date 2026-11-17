@@ -1,3 +1,4 @@
+import sdkMetadata from "../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
 import {
   AgentEventRoutingSchema,
   CanonicalAgentEventSchema,
@@ -578,7 +579,7 @@ function createFakeHost(sink: DeterministicCanonicalSink, calls: string[]): Prov
     runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
     environment: { snapshot: () => ({}) },
     processes: {
-      open: () => { throw new Error("harness.ts fixture does not support process sessions"); }, run: async () => { throw new Error("harness.ts fixture does not support process runs"); },
+      open: () => { throw new Error("harness.ts fixture does not support process sessions"); }, run: async ({ args }) => { if (args?.[0] === "--version") return { stdout: `${sdkMetadata.claudeCodeVersion} (Claude Code)`, stderr: "" }; throw new Error("harness.ts fixture does not support process runs"); },
       attach: () => calls.push("processes.attach"),
       terminateTree: async () => { calls.push("processes.terminateTree"); },
     },

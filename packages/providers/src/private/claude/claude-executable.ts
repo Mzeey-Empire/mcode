@@ -25,15 +25,18 @@ function resolveWindowsClaudeEntry(resolved: string): string {
     const candidate = NodePath.resolve(directory, entry);
     if (NodeFS.existsSync(candidate) && NodeFS.statSync(candidate).isFile()) return candidate;
   }
-  throw new Error("Claude Code launcher has no supported executable. Reinstall Claude Code or configure its CLI path.");
+  throw new Error("Claude Code launcher has no supported executable. Reinstall Claude Code or point its CLI path at claude.exe or the claude binary.");
 }
 
 /** Checks the installed version against the CLI version required by the current SDK. */
-export async function checkClaudeVersion(run: CliStatusRunner, executable: string): Promise<{ installed: string | null; problem?: string }> {
-  const installed = await readCliStatusVersion(run, executable);
-  if (!installed) return { installed, problem: "Could not check Claude Code version. Reinstall Claude Code or configure its CLI path." };
+export async function checkClaudeVersion(run: CliStatusRunner, executable: string): Promise<{ installed: string | null; warning?: string }> {
+  const probe: CliStatusRunner = executable.endsWith(".js")
+    ? (_binary, args) => run("node", [executable, ...args])
+    : run;
+  const installed = await readCliStatusVersion(probe, executable);
+  if (!installed) return { installed, warning: "Could not check Claude Code version. Reinstall Claude Code or configure its CLI path." };
   if (!meetsMinVersion(installed, sdkMetadata.claudeCodeVersion)) {
-    return { installed, problem: `Update Claude Code to ${sdkMetadata.claudeCodeVersion} or later (installed ${installed}).` };
+    return { installed, warning: `Update Claude Code to ${sdkMetadata.claudeCodeVersion} or later (installed ${installed}).` };
   }
   return { installed };
 }

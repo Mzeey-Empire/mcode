@@ -15,6 +15,8 @@ export const ProviderCliInfoSchema = lazySchema(() =>
     status: CliStatusSchema(),
     /** Adapter installation or compatibility guidance, when unavailable. */
     message: z.string().optional(),
+    /** Advisory compatibility guidance that does not prevent execution. */
+    warning: z.string().optional(),
     /** Path that `which` or `fs.stat` resolved, or null when not_found/unchecked. */
     resolvedPath: z.string().nullable(),
     /** The configured path from settings.provider.cli[id]. Empty string means "auto via PATH". */

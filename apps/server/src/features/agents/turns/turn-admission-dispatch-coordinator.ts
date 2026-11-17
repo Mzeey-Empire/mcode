@@ -521,7 +521,7 @@ export class TurnAdmissionDispatchCoordinator {
     const thread = this.requireThread(command.threadId);
     this.requireSendableThread(thread);
     const providerId = this.selectProvider(thread.provider, command.provider);
-    this.assertProviderAvailable(command.threadId, providerId);
+    await this.assertProviderAvailable(command.threadId, providerId);
     command = await this.resolveDefaultModel(command, providerId, thread);
     const workspace = this.requireWorkspace(thread.workspace_id);
     const mentions = this.validateMentions({
@@ -702,9 +702,9 @@ export class TurnAdmissionDispatchCoordinator {
     return { ...command, model };
   }
 
-  private assertProviderAvailable(threadId: string, providerId: ProviderId): void {
+  private async assertProviderAvailable(threadId: string, providerId: ProviderId): Promise<void> {
     try {
-      this.availability.assertUsable(providerId);
+      await this.availability.assertUsable(providerId);
     } catch (error) {
       this.publishProviderUnavailable(threadId, providerId, error);
       throw error;

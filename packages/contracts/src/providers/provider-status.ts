@@ -93,4 +93,6 @@ export interface ProviderCliFacts {
   npmPackage: string | null;
   /** Installation or compatibility failure reported by the adapter. */
   problem?: string;
+  /** Advisory CLI compatibility guidance; execution remains available. */
+  warning?: string;
 }

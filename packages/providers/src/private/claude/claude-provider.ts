@@ -848,6 +848,7 @@ export class ClaudeProvider
     options: CompletionOptions = {},
   ): Promise<string> {
     await this.requireClaudeInstallation();
+    const executable = this.resolveClaudeExecutable();
     const ownedProcess = this.createOwnedClaudeProcess("completion");
     try {
       const queue = createPromptQueue();
@@ -857,7 +858,8 @@ export class ClaudeProvider
         prompt: queue.iterable,
         options: {
           env: { ...this.host.environment.snapshot() },
-          pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
+          pathToClaudeCodeExecutable: executable,
+          ...(executable.endsWith(".js") ? { executable: "node" as const } : {}),
           spawnClaudeCodeProcess: ownedProcess.spawn,
           cwd,
           model,
@@ -1849,19 +1851,21 @@ export class ClaudeProvider
 
   private claudeVersionCheck: { executable: string; result: ReturnType<typeof checkClaudeVersion> } | undefined;
 
-  private checkInstalledClaude(executable: string, refresh = false): ReturnType<typeof checkClaudeVersion> {
+  private async checkInstalledClaude(executable: string, refresh = false): ReturnType<typeof checkClaudeVersion> {
     if (refresh || this.claudeVersionCheck?.executable !== executable) {
       const env = this.host.environment.snapshot();
       const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.host.runtime.platform, env });
-      this.claudeVersionCheck = { executable, result: checkClaudeVersion(run, this.configuration.cliPath) };
+      const result = await checkClaudeVersion(run, executable);
+      if (result.installed) this.claudeVersionCheck = { executable, result: Promise.resolve(result) };
+      else this.claudeVersionCheck = undefined;
+      return result;
     }
     return this.claudeVersionCheck.result;
   }
 
   private async requireClaudeInstallation(): Promise<void> {
     const executable = this.resolveClaudeExecutable();
-    const version = await this.checkInstalledClaude(executable);
-    if (version.problem) throw new Error(version.problem);
+    await this.checkInstalledClaude(executable);
   }
 
   private startClaudeSdkQuery(
@@ -1990,6 +1994,7 @@ export class ClaudeProvider
     // startup_failure_reason to classify them by.
     options.env = { ...args.env, CLAUDE_CODE_STARTUP_FAILURE_RESULTS: "1" };
     options.pathToClaudeCodeExecutable = this.resolveClaudeExecutable();
+    if (options.pathToClaudeCodeExecutable.endsWith(".js")) options.executable = "node";
     options.spawnClaudeCodeProcess = ownedProcess.spawn;
     let query: Query;
     try {

@@ -15,6 +15,7 @@ type CliRuntime = {
   status: "found" | "not_found" | "unchecked";
   resolvedPath: string | null;
   message?: string;
+  warning?: string;
 };
 
 /** Provider IDs whose CLI path is user-configurable via `settings.provider.cli`. */
@@ -86,6 +87,7 @@ export class ProviderAvailabilityService {
         cli: {
           status: cliRuntime.status,
           ...(cliRuntime.message ? { message: cliRuntime.message } : {}),
+          ...(cliRuntime.warning ? { warning: cliRuntime.warning } : {}),
           resolvedPath: cliRuntime.resolvedPath,
           configuredPath,
         },
@@ -134,7 +136,7 @@ export class ProviderAvailabilityService {
     if (facts?.cli) {
       result = facts.cli.problem
         ? { status: "not_found", resolvedPath: facts.cli.resolvedPath, message: facts.cli.problem }
-        : { status: "found", resolvedPath: facts.cli.resolvedPath };
+        : { status: "found", resolvedPath: facts.cli.resolvedPath, ...(facts.cli.warning ? { warning: facts.cli.warning } : {}) };
     } else if (result.status === "not_found") {
       result.message = "Claude Code is not installed. Install Claude Code or configure its CLI path.";
     }
@@ -158,9 +160,14 @@ export class ProviderAvailabilityService {
    * CLI `unchecked` state is treated as "probably ok" — the first send will
    * re-verify and surface the real error if the binary is missing.
    */
-  assertUsable(id: ProviderId): void {
+  async assertUsable(id: ProviderId): Promise<void> {
     this.assertEnabled(id);
-    const cached = this.cliCache.get(id);
+    let cached = this.cliCache.get(id);
+    if (cached?.status === "not_found") {
+      const previous = cached;
+      cached = await this.verifyCli(id);
+      if (JSON.stringify(previous) !== JSON.stringify(cached)) this.broadcastAvailability();
+    }
     if (cached?.status === "not_found") {
       const configuredPath = hasCliPath(id) ? this.settings.get().provider.cli[id] : "";
       throw new ProviderCliMissingError(id, configuredPath, cached.message);
@@ -213,6 +220,10 @@ export class ProviderAvailabilityService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    this.broadcastAvailability();
+  }
+
+  private broadcastAvailability(): void {
     const list = this.listAvailability();
     for (const cb of this.broadcastListeners) {
       try {

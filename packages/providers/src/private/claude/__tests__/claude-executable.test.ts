@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import * as NodeOS from "node:os";
+import sdkMetadata from "../../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
 import { resolveClaudeExecutable, checkClaudeVersion } from "../claude-executable.js";
 import { ClaudeProvider } from "../claude-provider.js";
 import { fixtureHost } from "./helpers/provider-fixture.js";
 
 const roots: string[] = [];
 function fixture() {
-  const base = NodePath.resolve("../../.codex/tmp");
-  NodeFS.mkdirSync(base, { recursive: true });
+  const base = NodeOS.tmpdir();
   const root = NodeFS.mkdtempSync(NodePath.join(base, "claude-executable-"));
   roots.push(root);
   return root;
@@ -21,6 +22,7 @@ describe("installed Claude executable", () => {
     const executable = NodePath.join(root, process.platform === "win32" ? "claude.EXE" : "claude");
     NodeFS.writeFileSync(executable, "fixture", { mode: 0o755 });
     expect(resolveClaudeExecutable("claude", { PATH: root }, process.platform)).toBe(executable);
+    expect(resolveClaudeExecutable("claude", { Path: root }, process.platform)).toBe(executable);
     expect(resolveClaudeExecutable(executable, { PATH: "" }, process.platform)).toBe(executable);
   });
   it("rejects a missing command instead of selecting a bundled executable", () => {
@@ -35,13 +37,27 @@ describe("installed Claude executable", () => {
     NodeFS.mkdirSync(NodePath.dirname(entry), { recursive: true });
     NodeFS.writeFileSync(entry, "fixture");
     expect(resolveClaudeExecutable(shim, {}, "win32")).toBe(entry);
+    const native = NodePath.join(NodePath.dirname(entry), "bin/claude.exe");
+    NodeFS.mkdirSync(NodePath.dirname(native), { recursive: true });
+    NodeFS.writeFileSync(native, "fixture");
+    expect(resolveClaudeExecutable(shim, {}, "win32")).toBe(native);
   });
-  it.each(["2.1.291", "2.1.322"])("accepts compatible version %s", async (version) => {
+  it("resolves a WinGet Links launcher", () => {
+    const root = fixture();
+    const shim = NodePath.join(root, "Links/claude.cmd");
+    const native = NodePath.join(root, "Packages/Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe/claude.exe");
+    for (const file of [shim, native]) {
+      NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
+      NodeFS.writeFileSync(file, "fixture");
+    }
+    expect(resolveClaudeExecutable(shim, {}, "win32")).toBe(native);
+  });
+  it.each([sdkMetadata.claudeCodeVersion, "999.0.0"])("accepts compatible version %s", async (version) => {
     expect(await checkClaudeVersion(async () => ({ kind: "exited", code: 0, output: `${version} (Claude Code)` }), "claude")).toEqual({ installed: version });
   });
-  it("rejects an old version and a failed probe", async () => {
-    expect(await checkClaudeVersion(async () => ({ kind: "exited", code: 0, output: "2.1.290 (Claude Code)" }), "claude")).toMatchObject({ installed: "2.1.290", problem: expect.stringContaining("Update Claude Code") });
-    expect(await checkClaudeVersion(async () => ({ kind: "failed" }), "claude")).toMatchObject({ installed: null, problem: expect.stringContaining("Could not check") });
+  it("warns about an old version and a failed probe", async () => {
+    expect(await checkClaudeVersion(async () => ({ kind: "exited", code: 0, output: "0.0.1 (Claude Code)" }), "claude")).toMatchObject({ installed: "0.0.1", warning: expect.stringContaining("Update Claude Code") });
+    expect(await checkClaudeVersion(async () => ({ kind: "failed" }), "claude")).toMatchObject({ installed: null, warning: expect.stringContaining("Could not check") });
   });
   it("reports missing installation and fails completion before starting an SDK query", async () => {
     const provider = new ClaudeProvider(fixtureHost(), { cliPath: NodePath.join(fixture(), "missing.exe"), idleSessionTtlMs: 600_000 });
@@ -53,16 +69,19 @@ describe("installed Claude executable", () => {
       model: "model", permissionMode: "supervised", approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
     })).rejects.toThrow(/Claude Code is not installed/);
   });
-  it("reports too old, blocks completion, and recovers after a status refresh", async () => {
-    let version = "2.1.290";
+  it("reads a changed configured path and retries a failed version probe", async () => {
+    let version = "";
+    let cliPath = NodePath.join(fixture(), "missing.exe");
     const host = fixtureHost();
     host.processes.run = async ({ args }) => ({ stdout: args?.[0] === "--version" ? `${version} (Claude Code)` : "{}", stderr: "" });
-    const provider = new ClaudeProvider(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 });
-    expect(await provider.describeStatus()).toMatchObject({ cli: { installed: "2.1.290", problem: expect.stringContaining("Update Claude Code") } });
-    await expect(provider.complete("hello", "model", process.cwd())).rejects.toThrow(/Update Claude Code/);
-    version = "2.1.322";
+    const provider = new ClaudeProvider(host, { get cliPath() { return cliPath; }, idleSessionTtlMs: 600_000 });
+    expect((await provider.describeStatus()).cli.resolvedPath).toBeNull();
+    cliPath = process.execPath;
+    expect(await provider.describeStatus()).toMatchObject({ cli: { installed: null, warning: expect.stringContaining("Could not check"), resolvedPath: process.execPath } });
+    version = sdkMetadata.claudeCodeVersion;
     const facts = await provider.describeStatus();
-    expect(facts.cli.installed).toBe("2.1.322");
+    expect(facts.cli.installed).toBe(sdkMetadata.claudeCodeVersion);
     expect(facts.cli.problem).toBeUndefined();
+    expect(facts.cli.warning).toBeUndefined();
   });
 });
