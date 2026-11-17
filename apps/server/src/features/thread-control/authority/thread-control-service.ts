@@ -1362,7 +1362,7 @@ export class ThreadControlService {
     origin?: { sourceThreadId: string; sourceTurnId: string; sourceProviderId: string },
     mutationReservationToken?: string,
   ): Promise<void> {
-    const reasoningLevel = await this.supportedStoredReasoningLevel(threadId, execution);
+    const reasoningLevel = this.supportedStoredReasoningLevel(threadId, execution);
     await this.agentService.sendMessage({
       threadId,
       content: prompt,
@@ -1383,12 +1383,13 @@ export class ThreadControlService {
     });
   }
 
-  private async supportedStoredReasoningLevel(threadId: string, execution: ResolvedExecution): Promise<ReasoningLevel | undefined> {
+  // Read only the cache so a level check never blocks or fails a turn.
+  private supportedStoredReasoningLevel(threadId: string, execution: ResolvedExecution): ReasoningLevel | undefined {
     const level = this.threads.findById(threadId)?.reasoning_level;
     if (!level) return undefined;
 
-    const models = await this.models.listModels(execution.providerId);
-    const model = models.find((candidate) => candidate.id === execution.modelId) ?? null;
+    const models = this.models.getCached(execution.providerId);
+    const model = models?.find((candidate) => candidate.id === execution.modelId) ?? null;
     return modelSupportsReasoningLevel(model, level) ? level : undefined;
   }
 

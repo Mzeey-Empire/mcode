@@ -3,6 +3,8 @@ import type { IAgentProvider } from "@mcode/contracts/providers/interfaces";
 import { container } from "tsyringe";
 import { expect, it, vi } from "vitest";
 import { ThreadControlService } from "../../../thread-control/authority/thread-control-service.js";
+import { ModelCacheService } from "../../../providers/models/model-cache-service.js";
+import { ApprovalService } from "../../approvals/approval-service.js";
 import { openWorkerServiceFixture } from "./worker-turn-fixture.js";
 
 it("runs a thread_send follow-up at the target thread's stored reasoning level", async () => {
@@ -22,6 +24,43 @@ it("runs a thread_send follow-up at the target thread's stored reasoning level",
       { threadId: fixture.thread.id, message: "Follow up" },
     );
     expect(result.status).toBe("accepted");
+    await vi.waitFor(() => expect(fixture.sent).toHaveLength(1));
+    expect(fixture.sent[0]?.reasoningLevel).toBe("low");
+  } finally {
+    await fixture.close();
+  }
+});
+
+it("runs an approved thread_send at the stored reasoning level when model discovery fails after cache invalidation", async () => {
+  const fixture = await openWorkerServiceFixture();
+  try {
+    container.resolve(ApprovalService).start({
+      publishApprovalRequest: vi.fn(),
+      publishApprovalResolved: vi.fn(),
+      stopSession: async () => {},
+    });
+    const coordinator = await fixture.threads.create(fixture.workspace.id, "Coordinator", "direct", "main", true, "codex");
+    await fixture.threads.updateSettings(fixture.thread.id, { reasoning_level: "low", model: "gpt-5.5" });
+    const provider: Pick<IAgentProvider, "listModels"> = fixture.provider;
+    const listModels = vi.spyOn(provider, "listModels").mockResolvedValue([
+      { id: "gpt-5.5", name: "GPT-5.5", provider: "codex" },
+    ]);
+    const control = container.resolve(ThreadControlService);
+    const result = await control.threadSend(
+      {
+        type: "internal", userId: "local-user", sourceThreadId: coordinator.id, sourceTurnId: "turn-1",
+        sourceToolCallId: "call-1", sourceProviderId: "codex", permissionMode: "supervised",
+      },
+      { threadId: fixture.thread.id, message: "Follow up" },
+    );
+    expect(result.status).toBe("pending_approval");
+    expect(fixture.sent).toHaveLength(0);
+    if (result.status !== "pending_approval") throw new Error("Expected a pending thread_send approval");
+
+    await container.resolve(ModelCacheService).invalidate("codex");
+    listModels.mockRejectedValue(new Error("discovery down"));
+    await control.respondToApproval(result.approvalId, { choiceId: "allow" });
+
     await vi.waitFor(() => expect(fixture.sent).toHaveLength(1));
     expect(fixture.sent[0]?.reasoningLevel).toBe("low");
   } finally {
