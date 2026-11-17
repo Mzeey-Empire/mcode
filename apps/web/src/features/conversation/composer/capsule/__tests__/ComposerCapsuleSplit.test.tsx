@@ -484,6 +484,7 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
 
       expect(fastOption()).toHaveAttribute("aria-checked", "true");
       expect(fastOption()).toBeDisabled();
+      expect(fastOption()).toHaveAccessibleDescription("Fast needs extra usage turned on.");
       expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast needs extra usage turned on.");
 
       fireEvent.click(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }));

@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useRef, type KeyboardEvent, type ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 import { FOCUS_RING_CLASS } from "./focus-ring";
@@ -161,6 +161,7 @@ export function SegmentedControl({
   const axis = stripAxis(iconOnly, orientation);
   const vertical = axis === "vertical";
   const segmentRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const descriptionIdPrefix = useId();
   const activeIndex = options.findIndex((option) => option.value === value);
   // A disabled button can't take focus, so with no enabled match the first enabled segment takes the tab stop.
   const tabStopIndex =
@@ -196,6 +197,7 @@ export function SegmentedControl({
         <SlidingHighlight follow={SEGMENT_HOVER} />
         {options.map((option, index) => {
           const isActive = index === activeIndex;
+          const descriptionId = option.title ? `${descriptionIdPrefix}-${index}` : undefined;
           const segment = (
             <button
               ref={(node) => {
@@ -204,6 +206,7 @@ export function SegmentedControl({
               type="button"
               role="radio"
               aria-checked={isActive}
+              aria-describedby={descriptionId}
               disabled={option.disabled}
               tabIndex={index === tabStopIndex ? 0 : -1}
               onClick={() => onChange(option.value)}
@@ -232,9 +235,13 @@ export function SegmentedControl({
           if (!option.title) return <span key={option.value} className="contents">{segment}</span>;
 
           // Disabled buttons swallow pointer events, so the tooltip hangs off a wrapper instead.
+          // The tooltip is pointer-only, so the same text also describes the button for keyboard and screen readers.
           return (
             <Tooltip key={option.value}>
-              <TooltipTrigger render={<span className={tooltipWrapperClass(layout, fill)} />}>{segment}</TooltipTrigger>
+              <TooltipTrigger render={<span className={tooltipWrapperClass(layout, fill)} />}>
+                {segment}
+                <span id={descriptionId} className="sr-only">{option.title}</span>
+              </TooltipTrigger>
               {/* A stacked strip is a picker's left rail, so its tooltips open outward instead of over the next segment. */}
               <TooltipContent side={vertical ? "left" : "top"}>{option.title}</TooltipContent>
             </Tooltip>
