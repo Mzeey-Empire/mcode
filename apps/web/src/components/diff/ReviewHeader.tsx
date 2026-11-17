@@ -320,7 +320,9 @@ function ReviewControlsRow({
   view,
 }: ReviewHeaderProps & { readonly view: ReviewView }) {
   return (
-    <div data-testid="review-controls-row" className="flex h-10 min-w-0 flex-1 items-center gap-2">
+    // Below 400px the Files and View icons drop (FilesPopover reads this container too): at the panel's 384px
+    // minimum, row 2 is 352px, and with icons the two labelled buttons left "Working tree → staged" 121px of its 134px.
+    <div data-testid="review-controls-row" className="@container/review-controls flex h-10 min-w-0 flex-1 items-center gap-2">
       {view.id === "since-looked" ? <SinceLookedTurns /> : null}
       {view.comparison ? <FixedComparison comparison={view.comparison} /> : null}
       {view.operand ? <ReviewOperand operand={view.operand} /> : null}
@@ -455,7 +457,7 @@ function ReviewDisplayMenu({
       <DropdownMenuTrigger
         render={
           <Button variant="subtle" shape="round" className="shrink-0 text-body-small font-medium" data-testid="review-display-menu">
-            <SlidersHorizontal aria-hidden />
+            <SlidersHorizontal aria-hidden className="@max-[400px]/review-controls:hidden" />
             View
           </Button>
         }
@@ -541,7 +543,7 @@ function FilesToggle({
         if (scopeId) setReviewFilesVisible(scopeId, !filesVisible);
       }}
     >
-      <Files aria-hidden />
+      <Files aria-hidden className="@max-[400px]/review-controls:hidden" />
       Files
     </Button>
   );

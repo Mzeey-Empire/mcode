@@ -27,7 +27,7 @@ export function FilesPopover({ open, onOpenChange, disabled, navigator }: FilesP
           />
         }
       >
-        <Files aria-hidden />
+        <Files aria-hidden className="@max-[400px]/review-controls:hidden" />
         Files
       </PopoverTrigger>
       <PopoverContent
