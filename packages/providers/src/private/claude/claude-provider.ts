@@ -1747,7 +1747,7 @@ export class ClaudeProvider
     });
     if (reuseOutcome === "handled") return;
     if (reuseOutcome === "retry_fresh")
-      return await this.doSendMessage({ ...params, resume: params.resumeRequired && params.resume }, routing);
+      return await this.doSendMessage({ ...params, resume: true }, routing);
 
     // Retrying an old close after attach would revoke the replacement MCP credential.
     if (!existing) await this.runtime.stop(sessionId);
