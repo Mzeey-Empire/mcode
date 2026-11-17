@@ -614,8 +614,8 @@ function ThreadRowTitleLine({
             struck={presentation.completing}
             className={cn(
               "flex-1 text-label",
-              presentation.titleTone === "prominent" ? "text-ink" : RECEDED_TITLE_CLASS,
-              presentation.completing && "text-muted/55",
+              // A closing row lingers while hovered or focused, so the receded hover ink must not cover its fade.
+              presentation.completing ? "text-muted/55" : presentation.titleTone === "prominent" ? "text-ink" : RECEDED_TITLE_CLASS,
             )}
           />
         )}
