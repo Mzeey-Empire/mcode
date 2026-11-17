@@ -60,11 +60,11 @@ export function threadRowLook(state: ThreadRowState): ThreadRowLook {
 export type ThreadTitleTone = "prominent" | "receded";
 
 /**
- * A running thread's title recedes while the agent works, so the rows that need a look stand out;
+ * A quiet thread (no status) recedes, so every row with a status, running included, stands out;
  * the selected row keeps full ink so the thread the user is reading stays legible.
  */
 export function threadTitleTone(state: ThreadRowState, selected: boolean): ThreadTitleTone {
-  return state.kind === "running" && !selected ? "receded" : "prominent";
+  return state.kind === "quiet" && !selected ? "receded" : "prominent";
 }
 
 /** Only a setup that is holding the thread's startup shapes its row. */

@@ -37,7 +37,7 @@ export interface StatusMarkProps {
 /**
  * The Paper status mark: an 8px dot or ring, or a neutral spinner, in a 16px slot.
  * `data-status-mark` exposes the state so a row can style itself, for example
- * the sidebar fading a running thread.
+ * a sidebar row reacting to its thread's status.
  */
 export function StatusMark({ state, label, icon: Icon, className }: StatusMarkProps) {
   return (

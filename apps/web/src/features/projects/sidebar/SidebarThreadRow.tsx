@@ -363,7 +363,13 @@ function FlatThreadRowBody(props: ThreadRowBodyProps) {
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div data-testid="thread-line-project" className="flex h-4 min-w-0 items-center gap-1 text-caption text-muted">
-        <ProjectIcon workspaceId={thread.workspace_id} name={props.workspaceName} size={16} tone="tinted" />
+        <ProjectIcon
+          workspaceId={thread.workspace_id}
+          name={props.workspaceName}
+          size={16}
+          tone="tinted"
+          className={presentation.titleTone === "receded" ? RECEDED_BADGE_CLASS : undefined}
+        />
         <span className={cn("text-fade min-w-0 flex-1", presentation.scaffoldDim)}>{props.workspaceName}</span>
         <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} fallback={<ThreadRowTime thread={thread} />} />} />
       </div>
@@ -429,6 +435,10 @@ function ClosedRowCleanupStatus({ presentation, lifecycle }: Pick<ThreadRowVisua
 }
 
 type ThreadRowVariant = "flat" | "grouped" | "closed";
+
+// Hover and focus restore full ink in CSS, not React state, so the change paints in the next frame.
+const RECEDED_TITLE_CLASS = "text-ink/70 group-hover/row:text-ink group-focus-within/row:text-ink";
+const RECEDED_BADGE_CLASS = "opacity-55 group-hover/row:opacity-100 group-focus-within/row:opacity-100";
 
 const SURFACE_CLASS: Record<ThreadRowVariant, string> = {
   flat: "min-h-[78px] flex-col justify-center p-2",
@@ -604,7 +614,7 @@ function ThreadRowTitleLine({
             struck={presentation.completing}
             className={cn(
               "flex-1 text-label",
-              presentation.titleTone === "prominent" ? "text-ink" : "text-muted",
+              presentation.titleTone === "prominent" ? "text-ink" : RECEDED_TITLE_CLASS,
               presentation.completing && "text-muted/55",
             )}
           />
