@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { dropRemountAnchor } from "../terminalRemountScroll";
+import { TERMINAL_THEME_TOKENS } from "../terminalTheme";
 
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
@@ -111,7 +112,7 @@ function applyPalette(mode: keyof typeof PALETTES): void {
 describe("TerminalView theme", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    for (const token of ["--success", "--primary", "--error", "--link"]) {
+    for (const token of new Set([...Object.values(TERMINAL_THEME_TOKENS.light), ...Object.values(TERMINAL_THEME_TOKENS.dark)])) {
       document.documentElement.style.setProperty(token, "oklch(50% 0.1 260)");
     }
     applyPalette("light");

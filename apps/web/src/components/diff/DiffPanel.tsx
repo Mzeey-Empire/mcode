@@ -658,6 +658,24 @@ function getMutableComparisonRevision(viewMode: DiffViewMode, diffRevision: numb
   return isGitView(viewMode) && viewMode !== "commit" ? diffRevision : 0;
 }
 
+/**
+ * Review stays mounted while another tool shows, and an edit made from a terminal
+ * or editor pushes nothing, so showing Review reloads the working-tree views.
+ */
+function useReloadWorkingTreeOnShow(
+  active: boolean,
+  diffScopeId: string | null,
+  viewMode: DiffViewMode,
+  bumpDiffRevision: DiffStoreState["bumpDiffRevision"],
+): void {
+  const wasActiveRef = useRef(active);
+  useEffect(() => {
+    const shown = active && !wasActiveRef.current;
+    wasActiveRef.current = active;
+    if (shown && diffScopeId && isGitView(viewMode) && viewMode !== "commit") bumpDiffRevision(diffScopeId);
+  }, [active, bumpDiffRevision, diffScopeId, viewMode]);
+}
+
 function isTurnLive(reviewTurns: readonly ReviewTurn[] | undefined, turnMessageId: string | null): boolean {
   return reviewTurns?.some((turn) => turn.messageId === turnMessageId && turn.phase === "live") ?? false;
 }
@@ -793,13 +811,15 @@ function useReviewTurns(
  * diff. Dual-scope: with no thread it renders the git working-tree views
  * (Unstaged, Staged, Commit, Branch) against the workspace root; with a thread
  * it adds the turn views (Turn, All turns). Each view renders exactly one diff.
+ * `active` is false while the panel shows another tool and Review stays mounted.
  */
-export function DiffPanel() {
+export function DiffPanel({ active = true }: { readonly active?: boolean }) {
   const panelRootRef = useRef<HTMLDivElement>(null);
   const store = useDiffPanelStore();
   const {
     activeThreadId,
     activeWorkspaceId,
+    bumpDiffRevision,
     diffScopeId,
     filesVisible,
     requestReviewFileJump,
@@ -807,6 +827,11 @@ export function DiffPanel() {
     viewMode,
   } = store;
   useWorkspaceFileRefresh(activeWorkspaceId, activeThreadId);
+  // Reopening the panel with Review on top shows it as much as switching to it does.
+  const panelVisible = useDiffStore((state) =>
+    activeWorkspaceId ? state.getRightPanelVisible(activeWorkspaceId, activeThreadId) : false,
+  );
+  useReloadWorkingTreeOnShow(active && panelVisible, diffScopeId, viewMode, bumpDiffRevision);
   const {
     activeWorktreePath,
     filesPaneFits,
@@ -952,6 +977,9 @@ function DiffPanelView({
     return comparison.comparisonPending ? <ReviewLoadingPulse /> : null;
   }
   if (body.kind !== "ready") {
+    // A reload keeps the earlier answer up to avoid a flash, but an earlier "No unstaged changes" would state as
+    // fact what the reload is still checking, such as after an edit made in an editor while Review was hidden.
+    if (body.kind === "empty" && comparison.comparisonLoading) return <ReviewLoadingPulse />;
     return <ReviewStateBody body={body} onRetry={comparison.onRefreshComparison} />;
   }
   return (

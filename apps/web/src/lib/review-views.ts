@@ -20,14 +20,16 @@ export interface ReviewView {
   readonly label: string;
   /** The picked operand row 2 shows for this view, if any. */
   readonly operand?: ReviewViewOperand;
+  /** What a fixed comparison compares, as row 2's `compare → base` text, in the Branch pickers' order. */
+  readonly comparison?: readonly [compare: string, base: string];
 }
 
 const REVIEW_VIEW_BY_ID: Readonly<Record<DiffViewMode, ReviewView>> = {
   turn: { id: "turn", label: "Turn", operand: "turn" },
   "since-looked": { id: "since-looked", label: "Since you looked" },
-  cumulative: { id: "cumulative", label: "All turns" },
-  unstaged: { id: "unstaged", label: "Unstaged" },
-  staged: { id: "staged", label: "Staged" },
+  cumulative: { id: "cumulative", label: "All turns", comparison: ["All turns", "thread start"] },
+  unstaged: { id: "unstaged", label: "Unstaged", comparison: ["Working tree", "staged"] },
+  staged: { id: "staged", label: "Staged", comparison: ["Staged", "last commit"] },
   commit: { id: "commit", label: "Commit", operand: "commit" },
   branch: { id: "branch", label: "Branch", operand: "branch" },
 };

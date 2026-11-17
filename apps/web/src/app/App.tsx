@@ -219,9 +219,11 @@ function AppMainSurface(props: Pick<
   if (props.rightPanelMaximized && isRightPanelMounted(props)) return null;
   const useFlexibleWidth = props.showNewThreadCanvas || props.settingsOpen || props.showPullRequests;
   return (
+    // `isolate` keeps the conversation's own layers (composer, Overview) under a right panel floating over it, so
+    // the panel can float without a z-index of its own. See RightPanelFrame.
     <main
       ref={props.mainRef}
-      className="flex-1 overflow-hidden bg-background"
+      className="isolate flex-1 overflow-hidden bg-background"
       style={{ minWidth: useFlexibleWidth ? 0 : `min(100%, ${COMPOSER_MIN_WIDTH}px)` }}
     >
       <AppPrimarySurface {...props} />
@@ -298,8 +300,9 @@ function AppLayout(props: AppLayoutProps) {
               data-testid="content-row"
               data-content-row=""
               data-right-panel-visible={rightPanelCommitted && rightPanelVisible}
-              className="flex min-w-0 flex-1 overflow-hidden"
+              className="relative flex min-w-0 flex-1 overflow-hidden"
             >
+
               <AppMainSurface {...props} mainRef={setMainElement} />
               <RightPanelSlot {...props} onCommittedChange={setRightPanelCommitted} />
             </div>
@@ -725,6 +728,13 @@ export function App() {
         category: "View",
         // Plan is thread-only; summonTab no-ops when there is no thread.
         handler: () => summonTab("tasks"),
+      }),
+      registerCommand({
+        id: "subagents.toggle",
+        title: "Toggle Subagents Panel",
+        category: "View",
+        // Subagents is thread-only; summonTab no-ops when there is no thread.
+        handler: () => summonTab("subagents"),
       }),
       registerCommand({
         id: "changes.toggle",

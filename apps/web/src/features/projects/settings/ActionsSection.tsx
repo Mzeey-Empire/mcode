@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { WorkspaceEnvironmentAction } from "@mcode/contracts/models/workspace-environment";
 import { Badge } from "@/components/ui/badge";
 import { Button, IconButton } from "@/components/ui/button";
@@ -67,6 +67,8 @@ interface ActionsSectionProps {
   readonly onRemove: (actionId: string) => void;
   readonly onDuplicate: (actionId: string) => void;
   readonly onForgetApproval: (actionId: string) => void;
+  /** The add-action control, shown under the empty line so an empty list offers its way out. */
+  readonly addControl: ReactNode;
 }
 
 /** The list of a Project's actions, one open at a time. */
@@ -82,11 +84,19 @@ export function ActionsSection({
   onRemove,
   onDuplicate,
   onForgetApproval,
+  addControl,
 }: ActionsSectionProps) {
   const [collapsedByEscapeId, setCollapsedByEscapeId] = useState<string | null>(null);
   // The row's button unmounts when it opens, which would drop keyboard focus without this.
   const [openedActionId, setOpenedActionId] = useState<string | null>(null);
-  if (actions.length === 0) return <p className="px-1 py-2 text-caption text-muted">No actions</p>;
+  if (actions.length === 0) {
+    return (
+      <div className="flex flex-col items-start gap-1.5 px-1 py-2">
+        <p className="text-caption text-muted">No actions</p>
+        {addControl}
+      </div>
+    );
+  }
   return (
     <ul className="flex flex-col gap-1.5">
       {actions.map((action) => {

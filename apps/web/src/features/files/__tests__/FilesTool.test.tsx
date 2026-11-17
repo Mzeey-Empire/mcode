@@ -5,6 +5,9 @@ import type { FileReadResult, WorkspaceFileChanges } from "@mcode/contracts/mode
 import { pushEmitter } from "@/transport";
 import { FilesTool } from "../FilesTool";
 import { getFilesScope, useFilesTabsStore } from "../filesTabsStore";
+import { useConnectionStore } from "@/stores/connectionStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { createMockWorkspace } from "@mcode/contracts/testing";
 
 const transport = {
   listWorkspaceFiles: vi.mocked(mockTransport.listWorkspaceFiles),
@@ -50,6 +53,7 @@ function renderTool() {
 }
 
 beforeEach(() => {
+  useConnectionStore.getState().setStatus("connected");
   useFilesTabsStore.setState({ scopes: {} });
   transport.listWorkspaceFiles.mockResolvedValue({ paths: PATHS, truncated: false });
   transport.getWorkspaceFileChanges.mockResolvedValue(NO_CHANGES);
@@ -97,6 +101,26 @@ describe("FilesTool layout", () => {
 });
 
 describe("FilesTool freshness", () => {
+  it("loads the tree once the connection comes back instead of keeping the drop error", async () => {
+    setBodyWidth(536);
+    // The real transport rejects requests still in flight when the socket closes, then reconnects.
+    let dropInFlight: (error: Error) => void = () => {};
+    transport.listWorkspaceFiles.mockImplementationOnce(
+      () => new Promise((_resolve, reject) => { dropInFlight = reject; }),
+    );
+    renderTool();
+    await waitFor(() => expect(transport.listWorkspaceFiles).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      useConnectionStore.getState().setStatus("reconnecting");
+      dropInFlight(new Error("WebSocket disconnected"));
+    });
+
+    act(() => useConnectionStore.getState().setStatus("connected"));
+
+    expect(await screen.findByRole("treeitem", { name: /README\.md/ })).toBeTruthy();
+    expect(screen.queryByText("WebSocket disconnected")).toBeNull();
+  });
+
   it("refreshes marks and changed-line bars on files.changed", async () => {
     setBodyWidth(900);
     useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");
@@ -147,6 +171,46 @@ describe("FilesTool freshness", () => {
     const reads = transport.readFileContent.mock.calls.length;
     act(() => pushEmitter.emit("files.changed", { workspaceId: "other", changedPaths: ["src/a.ts"] }));
     expect(transport.readFileContent.mock.calls.length).toBe(reads);
+  });
+});
+
+describe("FilesTool header", () => {
+  afterEach(() => useWorkspaceStore.setState({ workspaces: [] }));
+
+  it("names the checkout the tree lists, with or without a file showing", async () => {
+    useWorkspaceStore.setState({ workspaces: [createMockWorkspace({ id: WORKSPACE, path: "/repos/fixture-repo" })] });
+    setBodyWidth(536);
+    renderTool();
+    await screen.findByTestId("files-tree-body");
+    expect(screen.getByTestId("files-checkout-name")).toHaveTextContent("fixture-repo");
+
+    fireEvent.click(await screen.findByRole("treeitem", { name: /README\.md/ }));
+    await screen.findByTestId("files-path-pill");
+    expect(screen.getByTestId("files-checkout-name")).toHaveTextContent("fixture-repo");
+  });
+
+  it("names the tool in row 1 until a file opens, then shows the file tabs", async () => {
+    setBodyWidth(536);
+    renderTool();
+    await screen.findByTestId("files-tree-body");
+    expect(screen.getByTestId("panel-title")).toHaveTextContent("Files");
+    expect(screen.queryByRole("tablist", { name: "Open files" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /Go to file/ })).toHaveLength(1);
+
+    fireEvent.click(await screen.findByRole("treeitem", { name: /README\.md/ }));
+    const tabs = await screen.findByRole("tablist", { name: "Open files" });
+    expect(within(tabs).getByRole("button", { name: "Close README.md" })).toBeTruthy();
+    expect(screen.queryByTestId("panel-title")).toBeNull();
+  });
+
+  it("offers Find in file only once a file shows", async () => {
+    setBodyWidth(536);
+    renderTool();
+    await screen.findByTestId("files-tree-body");
+    expect(screen.queryByRole("button", { name: "Find in file" })).toBeNull();
+
+    fireEvent.click(await screen.findByRole("treeitem", { name: /README\.md/ }));
+    expect(await screen.findByRole("button", { name: "Find in file" })).toBeInTheDocument();
   });
 });
 

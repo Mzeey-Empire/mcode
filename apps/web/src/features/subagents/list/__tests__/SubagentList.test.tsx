@@ -183,6 +183,13 @@ describe("SubagentList live time", () => {
     expect(screen.getByRole("button", { name: "Open stopped details, Stopped" })).toHaveTextContent(/^stoppedStopped$/);
   });
 
+  it("counts one step in the singular and more in the plural", () => {
+    renderList([entry("one", { stepCount: 1 }), entry("three", { stepCount: 3 })]);
+
+    expect(screen.getByRole("button", { name: "Open one details, Running" })).toHaveTextContent(/1 step(?!s)/);
+    expect(screen.getByRole("button", { name: "Open three details, Running" })).toHaveTextContent("3 steps");
+  });
+
   it("schedules no timer when nothing is running", () => {
     const interval = vi.spyOn(window, "setInterval");
     renderList([entry("finished", { status: "failed", endedAt: at(9) })]);

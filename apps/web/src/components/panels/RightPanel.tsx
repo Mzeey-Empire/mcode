@@ -8,7 +8,7 @@ import {
   useDiffStore,
   PANEL_MIN_WIDTH,
   PANEL_WIDE_WIDTH,
-  COMPOSER_MIN_WIDTH,
+  RIGHT_PANEL_CONVERSATION_MIN_WIDTH,
   PANEL_SPLIT_GAP_PX,
   maxPanelWidthInSplit,
   projectRightPanelForScope,
@@ -18,7 +18,12 @@ import {
 } from "@/stores/diffStore";
 import { PlanPanel } from "./plan";
 import { PanelEmptyState } from "./PanelEmptyState";
-import { ACTIVITY_RAIL_FLOATING_OVERLAP_PX, ActivityRail } from "./ActivityRail";
+import {
+  ACTIVITY_RAIL_FLOATING_OVERLAP_PX,
+  ActivityRail,
+  RIGHT_PANEL_TABPANEL_ID,
+  railTabElementId,
+} from "./ActivityRail";
 import { PanelHeader, PanelHeaderSlotScope, PanelToggleButton, type PanelHeaderElements } from "./shell/PanelHeader";
 import { windowChromeKind } from "@/components/shell/window-chrome";
 import type { PanelScope } from "@/lib/panel-tabs";
@@ -43,8 +48,11 @@ import {
   type TerminalInstance,
 } from "@/features/terminal";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
-import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
+import { hideRightPanelAdaptive, toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
+import { rightPanelMinWidth, rightPanelPostureForPanel, type RightPanelTools } from "@/lib/composer-layout";
+import { useLayoutStore } from "@/stores/layoutStore";
+import { SHEET_SURFACE_CLASS } from "@/components/ui/overlay-surface";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { ResizableRightPanel } from "./ResizableRightPanel";
 
@@ -524,27 +532,38 @@ function useChangesFreshness(
   return fresh;
 }
 
+/**
+ * One element for every posture, so switching between docked and floating restyles the panel instead of remounting
+ * its tools: terminals, Browser pages, drafts, scroll, and focus carry across.
+ */
 function RightPanelFrame({
   children,
-  getMaxPanelWidth,
+  floating,
   handlePanelWidthChange,
   maximized,
   panelVisible,
   panelWidth,
+  toolMinWidth,
 }: {
   readonly children: React.ReactNode;
-  readonly getMaxPanelWidth: (panel: HTMLDivElement | null) => number;
+  readonly floating: boolean;
   readonly handlePanelWidthChange: (width: number, source: "preserve" | "user") => void;
   readonly maximized: boolean;
   readonly panelVisible: boolean;
   readonly panelWidth: number;
+  readonly toolMinWidth: number;
 }) {
+  const getMaxPanelWidth = useCallback(
+    (panel: HTMLDivElement | null) => maxPanelWidthForPosture(panel?.parentElement?.clientWidth, floating),
+    [floating],
+  );
   return (
     <ResizableRightPanel
       testId="right-panel"
-      width={panelWidth}
-      minWidth={PANEL_MIN_WIDTH}
-      maxWidth={`calc(100% - ${COMPOSER_MIN_WIDTH}px - ${PANEL_SPLIT_GAP_PX}px)`}
+      // Shown at the tool's minimum without rewriting the stored width, so a narrower tool gets it back.
+      width={Math.max(panelWidth, toolMinWidth)}
+      minWidth={toolMinWidth}
+      maxWidth={floating ? "100%" : `calc(100% - ${RIGHT_PANEL_CONVERSATION_MIN_WIDTH}px - ${PANEL_SPLIT_GAP_PX}px)`}
       getMaxWidth={getMaxPanelWidth}
       defaultWidth={getDefaultPanelWidthPx()}
       wideWidth={PANEL_WIDE_WIDTH}
@@ -552,8 +571,9 @@ function RightPanelFrame({
       resizeEnabled={panelVisible && !maximized}
       onWidthChange={handlePanelWidthChange}
       style={getRightPanelVisibilityStyle(panelVisible)}
-      className={getRightPanelClassName(panelVisible, maximized)}
+      className={getRightPanelClassName(panelVisible, maximized, floating)}
       data-right-panel-root=""
+      data-posture={floating ? "floating" : "docked"}
       data-visible={panelVisible}
       inert={!panelVisible ? true : undefined}
     >
@@ -568,9 +588,23 @@ function getRightPanelVisibilityStyle(panelVisible: boolean): React.CSSPropertie
   return { width: 0, minWidth: 0, maxWidth: 0 };
 }
 
-function getRightPanelClassName(panelVisible: boolean, maximized: boolean): string {
+/**
+ * Docked, the panel leaves {@link RIGHT_PANEL_CONVERSATION_MIN_WIDTH}px for the conversation. Floating, it overlays
+ * the conversation and may span the content row.
+ */
+function maxPanelWidthForPosture(contentRowWidth: number | undefined, floating: boolean): number {
+  if (contentRowWidth === undefined) {
+    return Math.max(PANEL_MIN_WIDTH, window.innerWidth - RIGHT_PANEL_CONVERSATION_MIN_WIDTH);
+  }
+  return floating ? contentRowWidth : maxPanelWidthInSplit(contentRowWidth);
+}
+
+function getRightPanelClassName(panelVisible: boolean, maximized: boolean, floating: boolean): string {
   return cn(
-    "relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background focus:outline-none",
+    "flex h-full min-h-0 min-w-0 flex-col overflow-hidden focus:outline-none",
+    // Floating takes no z-index: one would make a stacking context that traps Design overlays below the hosted
+    // Browser page. App.tsx isolates the conversation instead, so this later positioned sibling paints above it.
+    floating ? cn("absolute inset-y-0 right-0", SHEET_SURFACE_CLASS) : "relative bg-background",
     "transition-[width,min-width,max-width,opacity,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
     !panelVisible && "pointer-events-none translate-x-2 opacity-0",
     // No translate when visible: even translate-x-0 creates a stacking context
@@ -578,6 +612,16 @@ function getRightPanelClassName(panelVisible: boolean, maximized: boolean): stri
     panelVisible && "opacity-100",
     panelVisible && maximized && "flex-1",
   );
+}
+
+/**
+ * Whether the panel floats over the conversation. The layout guard maximizes a full-surface panel a frame later, so
+ * until then it floats rather than squeezing the conversation. An unmeasured row docks.
+ */
+function useRightPanelFloating(maximized: boolean, panel: RightPanelTools): boolean {
+  const contentRowWidth = useLayoutStore((state) => state.contentRowWidth);
+  if (maximized || contentRowWidth <= 0) return false;
+  return rightPanelPostureForPanel(contentRowWidth, panel) !== "docked";
 }
 
 function RightPanelContent({
@@ -619,7 +663,12 @@ function RightPanelContent({
   // warm Browser surfaces stay mounted, so they narrow it to their own activity.
   return (
     <PanelHeaderSlotScope active elements={headerElements}>
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div
+        id={RIGHT_PANEL_TABPANEL_ID}
+        role={renderedActiveTabId ? "tabpanel" : undefined}
+        aria-labelledby={renderedActiveTabId ? railTabElementId(renderedActiveTabId) : undefined}
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      >
         <PanelEmptyContent
           panelScope={panelScope}
           renderedOpenTabs={renderedOpenTabs}
@@ -735,7 +784,7 @@ function EnvironmentPanelContent({
 function ChangesPanelContent({ active }: { readonly active: boolean }) {
   return (
     <div className={active ? "flex flex-1 flex-col min-h-0" : "hidden"}>
-      <DiffPanel />
+      <DiffPanel active={active} />
     </div>
   );
 }
@@ -902,6 +951,7 @@ export function RightPanel() {
   // chat/composer (App.tsx suppresses the chat pane). A transient view toggle,
   // not a stored width — the panel keeps its width so restoring drops back inline.
   const maximized = useUiStore((s) => s.rightPanelMaximized);
+  const fullSurface = useUiStore((s) => s.rightPanelMaximized && s.rightPanelMaximizedByLayout);
   const toggleMaximized = useUiStore((s) => s.toggleRightPanelMaximized);
 
   // Select raw records by reference, then project the scope in useMemo. The
@@ -1102,6 +1152,8 @@ export function RightPanel() {
     });
   }, [activeWorkspaceId, browserScopePresent, busyPreviewScopeIds, panelScopeId, previewActive]);
 
+  const panelTools = { activeTab: renderedActiveTab, openTabs: renderedOpenTabs };
+  const floating = useRightPanelFloating(maximized, panelTools);
   const isChangesActive = panelVisible && changesActive;
   const changesFresh = useChangesFreshness(
     activeThreadId,
@@ -1115,21 +1167,6 @@ export function RightPanel() {
   useEffect(() => {
     if (maximized && !panelVisible) setMaximized(false);
   }, [maximized, panelVisible, setMaximized]);
-
-  /** Max panel width that still leaves {@link COMPOSER_MIN_WIDTH}px for the chat. */
-  const getMaxPanelWidth = useCallback(
-    (panel: HTMLDivElement | null): number => {
-      const split = panel?.parentElement;
-      if (!split) {
-        return Math.max(
-          PANEL_MIN_WIDTH,
-          window.innerWidth - COMPOSER_MIN_WIDTH,
-        );
-      }
-      return maxPanelWidthInSplit(split.clientWidth);
-    },
-    [],
-  );
 
   const handleCreateTab = useCallback(
     (id: Parameters<typeof setRightPanelTab>[2]) => {
@@ -1154,17 +1191,40 @@ export function RightPanel() {
 
   return (
     <RightPanelFrame
-      getMaxPanelWidth={getMaxPanelWidth}
+      floating={floating}
       handlePanelWidthChange={handlePanelWidthChange}
       maximized={maximized}
       panelVisible={panelVisible}
       panelWidth={panelWidth}
+      toolMinWidth={rightPanelMinWidth(panelTools)}
     >
       <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
+        {/* First in the DOM so Tab reaches the rail before the panel body; it still renders on the right. */}
+        <RightPanelActivityRail
+          // Hiding the panel moves the rail out from under the pointer without a pointerleave,
+          // so a rail expanded at close would reopen expanded and empty. Remounting resets it.
+          key={`rail-visible-${String(panelVisible)}`}
+          captionAction={panelToggle.rail}
+          activeThreadId={activeThreadId}
+          activeWorkspaceId={activeWorkspaceId}
+          changesCount={changesCount}
+          changesFresh={changesFresh}
+          closeRightPanelTabInstance={closeRightPanelTabInstance}
+          onCreateTab={handleCreateTab}
+          panelScope={panelScope}
+          renderedActiveTabId={renderedActiveTabId}
+          renderedTabInstances={renderedTabInstances}
+          reorderRightPanelTab={reorderRightPanelTab}
+          setActivityRailExpanded={setActivityRailExpanded}
+          setRightPanelTabInstance={setRightPanelTabInstance}
+        />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="contents" {...browserChromeMarker(previewActive)}>
             <PanelHeader
               maximized={maximized}
+              fullSurface={fullSurface}
+              hasOpenTool={renderedOpenTabs.length > 0}
+              onReturnToChat={() => hideRightPanelAdaptive(activeWorkspaceId, activeThreadId)}
               leadingRef={setHeaderLeading}
               row2Ref={setHeaderRow2}
               row3Ref={setHeaderRow3}
@@ -1191,21 +1251,6 @@ export function RightPanel() {
             onCreateTab={handleCreateTab}
           />
         </div>
-        <RightPanelActivityRail
-          captionAction={panelToggle.rail}
-          activeThreadId={activeThreadId}
-          activeWorkspaceId={activeWorkspaceId}
-          changesCount={changesCount}
-          changesFresh={changesFresh}
-          closeRightPanelTabInstance={closeRightPanelTabInstance}
-          onCreateTab={handleCreateTab}
-          panelScope={panelScope}
-          renderedActiveTabId={renderedActiveTabId}
-          renderedTabInstances={renderedTabInstances}
-          reorderRightPanelTab={reorderRightPanelTab}
-          setActivityRailExpanded={setActivityRailExpanded}
-          setRightPanelTabInstance={setRightPanelTabInstance}
-        />
       </div>
     </RightPanelFrame>
   );

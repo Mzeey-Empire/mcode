@@ -22,8 +22,8 @@ interface WorkingFolderPillProps {
 }
 
 /**
- * Row-2 pill for a shell's working folder: parent muted, folder name ink. On overflow
- * the parent fades out so the folder name stays readable. Clicking copies the full path; the chevron opens the folder elsewhere.
+ * Row-2 pill for a shell's working folder: folder name first in ink, parent after it in muted.
+ * On overflow the parent fades; the tooltip shows the full path on hover or focus. Clicking copies the full path; the chevron opens the folder elsewhere.
  */
 export function WorkingFolderPill({ path, onOpenInEditor, editorReason, onOpenInFileManager }: WorkingFolderPillProps) {
   const [copied, setCopied] = useState(false);
@@ -52,10 +52,12 @@ export function WorkingFolderPill({ path, onOpenInEditor, editorReason, onOpenIn
               type="button"
               aria-label={`Copy ${path}`}
               onClick={copy}
-              className="flex min-w-0 flex-1 items-baseline text-left font-mono text-xs"
+              // DESIGN.md paths: the name leads and keeps its width, the parent folder after it is
+              // the part that fades. The name fades too only when it alone outgrows the pill.
+              className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden text-left font-mono text-xs"
             >
-              <span className="text-fade text-muted">{parent}</span>
-              <span className="shrink-0 text-ink">{name}</span>
+              <span className="text-fade max-w-full shrink-0 text-ink">{name}</span>
+              {parent ? <span className="text-fade text-muted">{parent}</span> : null}
             </button>
           }
         />
@@ -64,7 +66,7 @@ export function WorkingFolderPill({ path, onOpenInEditor, editorReason, onOpenIn
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <IconButton size="inline-sm" aria-label="Open working folder in">
+            <IconButton size="inline-sm" aria-label="Open working folder in another app" className="shrink-0">
               <ChevronDown />
             </IconButton>
           }

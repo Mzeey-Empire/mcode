@@ -6,7 +6,15 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PanelEmptyState } from "../PanelEmptyState";
-import { loadKeybindings, clearKeybindings } from "@/lib/keybinding-manager";
+import {
+  loadKeybindings,
+  clearKeybindings,
+  getKeybindingForCommand,
+  keybindingKeycaps,
+} from "@/lib/keybinding-manager";
+import { isMac } from "@/lib/platform";
+import { shownTabTypes } from "@/lib/panel-tabs";
+import { ShortcutCombo } from "@/components/ui/shortcut-keys";
 import defaultKeybindings from "@/config/default-keybindings.json";
 
 beforeEach(() => {
@@ -80,10 +88,20 @@ describe("PanelEmptyState — create surface", () => {
     expect(screen.queryByRole("button", { name: /add|new tab|\+/i })).not.toBeInTheDocument();
   });
 
-  it("shows the mcode keycap for an openable type", () => {
+  it("draws each shortcut exactly as the rail's Open tool menu does", () => {
     render(<PanelEmptyState scope="threadless" openTabs={[]} onOpen={vi.fn()} />);
-    // Terminal binds to mod+j → "Ctrl+J" on non-mac.
-    const terminal = screen.getByTestId("panel-card-terminal");
-    expect(terminal.querySelector("kbd")).toBeInTheDocument();
+    let compared = 0;
+    for (const type of shownTabTypes("threadless", [])) {
+      const binding = type.commandId ? getKeybindingForCommand(type.commandId) : null;
+      if (!binding) continue;
+      const { container: menuShortcut, unmount } = render(
+        <ShortcutCombo keys={keybindingKeycaps(binding.key, isMac)} />,
+      );
+      const row = screen.getByTestId(`panel-card-${type.id}`);
+      expect(row.querySelector("kbd")?.textContent).toBe(menuShortcut.textContent);
+      unmount();
+      compared += 1;
+    }
+    expect(compared).toBeGreaterThan(0);
   });
 });

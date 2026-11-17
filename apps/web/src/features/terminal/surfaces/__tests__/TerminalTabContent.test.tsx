@@ -89,7 +89,7 @@ function seedAction(run: WorkspaceEnvironmentActionRun, state: TerminalInstance[
   seed([shell("pty-action", { kind: "action", actionId: "web", label: "web", state })]);
 }
 
-const closeTab = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Close ${name}` }));
+const closeTab = (name: string) => fireEvent.click(screen.getByRole("button", { name: `Close ${name} (ends the shell)` }));
 
 describe("Terminal tool header", () => {
   const closeRightPanelTab = vi.spyOn(useDiffStore.getState(), "closeRightPanelTab");
@@ -279,16 +279,16 @@ describe("Terminal tool header", () => {
       ]);
       renderTool();
 
-      expect(screen.getByRole("button", { name: "Close pwsh (1)" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Close pwsh (2)" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Close Project Action" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close 1 · pwsh (ends the shell)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close 2 · pwsh (ends the shell)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Close Project Action (ends the shell)" })).toBeInTheDocument();
     });
 
     it("selecting a tab makes it the scope's active terminal", () => {
       seed([shell("pty-1"), shell("pty-2", { label: "bash" })], "pty-1");
       renderTool();
 
-      fireEvent.click(screen.getByRole("button", { name: "bash" }));
+      fireEvent.click(screen.getByRole("tab", { name: "bash" }));
 
       expect(useTerminalStore.getState().activeTerminalByScope["thread-1"]).toBe("pty-2");
     });
@@ -313,7 +313,7 @@ describe("Terminal tool header", () => {
       renderTool();
 
       expect(screen.getByTestId("action-tab-badge")).toHaveAttribute("data-badge", badge);
-      expect(screen.getByRole("button", { name: `web, ${label}` })).toHaveAttribute("aria-pressed");
+      expect(screen.getByRole("tab", { name: `web, ${label}` })).toHaveAttribute("aria-selected");
     });
 
     it("shows the needs-you ring for a run awaiting approval", () => {
@@ -321,7 +321,7 @@ describe("Terminal tool header", () => {
       renderTool();
 
       expect(screen.getByTestId("action-tab-badge")).toHaveAttribute("data-badge", "pending");
-      expect(screen.getByRole("button", { name: "web, Approval required" })).toHaveAttribute("aria-pressed");
+      expect(screen.getByRole("tab", { name: "web, Approval required" })).toHaveAttribute("aria-selected");
     });
 
     it("closes a pending action without asking, even when confirmOnKill is always, since nothing is running", async () => {
@@ -398,23 +398,23 @@ describe("Terminal tool header", () => {
   });
 
   describe("row 2", () => {
-    it("shows the active shell's working folder with the last segment emphasised", () => {
+    it("shows the active shell's folder name first and keeps the full path on the copy button", () => {
       seed([shell("pty-1", { cwd: "/work/repo" })]);
       renderTool();
 
       const pill = screen.getByTestId("working-folder-pill");
-      expect(pill).toHaveTextContent("/work/repo");
-      expect(screen.getByText("repo")).toBeInTheDocument();
+      expect(pill).toHaveTextContent(/^repo\/work\/$/);
+      expect(screen.getByRole("button", { name: "Copy /work/repo" })).toBeInTheDocument();
     });
 
     it("follows the active tab", () => {
       seed([shell("pty-1", { cwd: "/work/one" }), shell("pty-2", { cwd: "/work/two", label: "bash" })], "pty-1");
       renderTool();
-      expect(screen.getByTestId("working-folder-pill")).toHaveTextContent("/work/one");
+      expect(screen.getByRole("button", { name: "Copy /work/one" })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "bash" }));
+      fireEvent.click(screen.getByRole("tab", { name: "bash" }));
 
-      expect(screen.getByTestId("working-folder-pill")).toHaveTextContent("/work/two");
+      expect(screen.getByRole("button", { name: "Copy /work/two" })).toBeInTheDocument();
     });
 
     it("offers action controls, not shell controls, for an action record", () => {

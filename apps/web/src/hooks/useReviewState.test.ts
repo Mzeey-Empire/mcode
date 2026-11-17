@@ -42,6 +42,17 @@ describe("useReviewState", () => {
     await waitFor(() => expect(result.current.isDirty).toBe(false));
     expect(getReviewState).toHaveBeenCalledTimes(3);
   });
+  it("keeps the checkout's last answer while a refresh is in flight", async () => {
+    getReviewState.mockResolvedValue({ ...clean, uncommitted: { staged: 0, unstaged: 1, untracked: 0 } });
+    const { result } = renderHook(() => useReviewState("workspace", "thread"));
+    await waitFor(() => expect(result.current.isDirty).toBe(true));
+    let finish: ((state: ReviewState) => void) | undefined;
+    getReviewState.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    act(() => useDiffStore.getState().bumpDiffRevision("thread"));
+    expect(result.current.isDirty).toBe(true);
+    await act(async () => { finish?.(clean); });
+    expect(result.current.isDirty).toBe(false);
+  });
   it("ignores a stale response after switching threads", async () => {
     let finish: ((state: ReviewState) => void) | undefined;
     getReviewState.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));

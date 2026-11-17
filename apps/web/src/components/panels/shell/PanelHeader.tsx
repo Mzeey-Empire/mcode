@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useState, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { Maximize2, Minimize2, PanelRight } from "lucide-react";
-import { IconButton } from "@/components/ui/button";
+import { Maximize2, MessageSquare, Minimize2, PanelRight } from "lucide-react";
+import { Button, IconButton } from "@/components/ui/button";
 import { CollapsedSidebarControls } from "@/components/shell/CanvasHeader";
 import { useShellChrome } from "@/components/shell/shell-chrome-context";
 import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
@@ -114,10 +114,11 @@ export function PanelHeaderSlot({
 }
 
 /**
- * Row-1 title for tools without tabs or a picker: selected fill, fades past 320.
+ * Row-1 title for tools without tabs: the tool glyph in its slot, then the title as plain text that fades past 320.
+ * Only a tab that can be switched away from gets the selected fill, so a lone title stays text.
  * `headingLevel` keeps the tool's heading in the outline after it moves here.
  */
-export function PanelTitlePill({
+export function PanelTitle({
   id,
   icon,
   headingLevel,
@@ -125,28 +126,39 @@ export function PanelTitlePill({
 }: {
   readonly id?: string;
   readonly icon?: ReactNode;
-  readonly headingLevel?: 1 | 2;
+  readonly headingLevel?: 1 | 2 | 3;
   readonly children: ReactNode;
 }) {
   return (
-    <span
-      data-testid="panel-title-pill"
-      className="flex h-8 min-w-0 max-w-80 items-center gap-2 rounded-control bg-selected px-3 text-sm font-medium text-ink"
-    >
-      {icon}
+    <>
+      {icon ? <PanelToolGlyph>{icon}</PanelToolGlyph> : null}
       <span
         id={id}
         role={headingLevel ? "heading" : undefined}
         aria-level={headingLevel}
-        className="text-fade min-w-0"
+        data-testid="panel-title"
+        className="text-fade min-w-0 max-w-80 text-sm/5 font-medium text-ink"
       >
         {children}
       </span>
+    </>
+  );
+}
+
+/**
+ * The tool's glyph at the start of row 1. Every tool puts it in this one slot, followed by its name and item tabs or
+ * by its title, so row 1 keeps one shape as the user moves between tools.
+ */
+export function PanelToolGlyph({ children }: { readonly children: ReactNode }) {
+  return (
+    // The tab list or title beside it names the tool, so the glyph is for sighted users only.
+    <span aria-hidden data-panel-tool-icon className="grid size-8 shrink-0 place-items-center text-muted [&_svg]:size-4">
+      {children}
     </span>
   );
 }
 
-/** The round Close panel button, shared by row 1 and the rail's caption strip. */
+/** The round Hide panel button, shared by row 1 and the rail's caption strip. */
 export function PanelToggleButton({ onClick }: { readonly onClick: () => void }) {
   const panelShortcut = keybindingKeycaps(
     getKeybindingForCommand("rightPanel.toggle")?.key ?? "mod+alt+b",
@@ -155,7 +167,9 @@ export function PanelToggleButton({ onClick }: { readonly onClick: () => void })
   return (
     <IconButton
       shape="round"
-      aria-label="Close panel"
+      aria-label="Hide panel"
+      // Matches the rail's exits ("Hide Terminal (shells keep running)"), so hiding never reads as closing.
+      tooltip="Hide panel (tools stay open in this thread)"
       tooltipShortcut={panelShortcut}
       data-testid="panel-header-toggle"
       data-preview-design-keep-open="true"
@@ -166,13 +180,64 @@ export function PanelToggleButton({ onClick }: { readonly onClick: () => void })
   );
 }
 
+/**
+ * Row 1's Expand button. While maximized it becomes a labelled Restore, because the conversation is hidden and a
+ * bare glyph read as one more panel control; the label makes the way back as plain as narrow posture's Back to chat.
+ */
+function ExpandControl({
+  maximized,
+  hasOpenTool,
+  onToggleMaximized,
+}: {
+  readonly maximized: boolean;
+  readonly hasOpenTool: boolean;
+  readonly onToggleMaximized: () => void;
+}) {
+  if (maximized) {
+    return (
+      <Button
+        variant="subtle"
+        shape="round"
+        className="text-body-small font-medium"
+        data-testid="panel-header-expand"
+        data-preview-design-keep-open="true"
+        onClick={onToggleMaximized}
+      >
+        <Minimize2 aria-hidden />
+        Restore
+      </Button>
+    );
+  }
+  if (!hasOpenTool) return null;
+  return (
+    <IconButton
+      shape="round"
+      aria-label="Expand"
+      data-testid="panel-header-expand"
+      data-preview-design-keep-open="true"
+      onClick={onToggleMaximized}
+    >
+      <Maximize2 />
+    </IconButton>
+  );
+}
+
 interface PanelHeaderProps {
   readonly maximized: boolean;
+  /**
+   * The window is too narrow to show the conversation beside the panel, so the layout maximized it. Restore would
+   * be maximized again at once; row 1 offers the way back to the conversation instead.
+   */
+  readonly fullSurface: boolean;
+  /** A tool is open. Expanding the empty launcher would only stretch its tool list, so Expand waits for a tool. */
+  readonly hasOpenTool: boolean;
+  /** Hides the panel, keeping its state, so the conversation shows again. */
+  readonly onReturnToChat: () => void;
   readonly leadingRef: Ref<HTMLDivElement>;
   readonly row2Ref: Ref<HTMLDivElement>;
   readonly row3Ref: Ref<HTMLDivElement>;
   readonly onToggleMaximized: () => void;
-  /** Row 1's trailing Close panel button, or null when the rail's caption strip hosts it. */
+  /** Row 1's trailing Hide panel button, or null when the rail's caption strip hosts it. */
   readonly panelToggle: ReactNode;
 }
 
@@ -185,6 +250,9 @@ interface PanelHeaderProps {
  */
 export function PanelHeader({
   maximized,
+  fullSurface,
+  hasOpenTool,
+  onReturnToChat,
   leadingRef,
   row2Ref,
   row3Ref,
@@ -201,16 +269,18 @@ export function PanelHeader({
       >
         {maximized && !sidebarDocked ? <CollapsedSidebarControls /> : null}
         <div ref={leadingRef} data-testid="panel-header-leading" className="flex h-full min-w-0 flex-1 items-center gap-2" />
-        <IconButton
-          shape="round"
-          aria-label={maximized ? "Restore" : "Expand"}
-          data-testid="panel-header-expand"
-          data-preview-design-keep-open="true"
-          onClick={onToggleMaximized}
-        >
-          {maximized ? <Minimize2 /> : <Maximize2 />}
-        </IconButton>
-        {panelToggle}
+        {fullSurface ? (
+          // It hides the panel, so it stands in for the Hide panel button as well as Restore.
+          <Button variant="subtle" shape="round" className="text-body-small font-medium" onClick={onReturnToChat}>
+            <MessageSquare aria-hidden />
+            Back to chat
+          </Button>
+        ) : (
+          <>
+            <ExpandControl maximized={maximized} hasOpenTool={hasOpenTool} onToggleMaximized={onToggleMaximized} />
+            {panelToggle}
+          </>
+        )}
       </div>
       <div
         ref={row2Ref}

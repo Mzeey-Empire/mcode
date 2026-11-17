@@ -1,18 +1,19 @@
 import type { ReviewComparison, ReviewState } from "@mcode/contracts/models/review-comparison";
-import { Fragment, useContext, useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useContext, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronsDownUp,
   ChevronsUpDown,
   Columns2,
+  Diff,
   Files,
-  Pilcrow,
   RefreshCw,
   Rows2,
-  TextWrap,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -22,7 +23,7 @@ import { IconButton } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Spinner } from "@/components/ui/spinner";
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
-import { PanelHeaderSlot, usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
+import { PanelHeaderSlot, PanelToolGlyph, usePanelHeaderMenuOpen } from "@/components/panels/shell/PanelHeader";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { sinceLookedBaseline, threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useReviewState } from "@/hooks/useReviewState";
@@ -71,6 +72,13 @@ export function ReviewHeader(props: ReviewHeaderProps) {
   return (
     <>
       <PanelHeaderSlot slot="leading">
+        <PanelToolGlyph>
+          <Diff />
+        </PanelToolGlyph>
+        {/* Named like Terminal and Browser, so the picker after it holds only the view and reads as one. */}
+        <span data-panel-tool-name className="shrink-0 pr-1 text-sm/5 font-medium text-ink">
+          Review
+        </span>
         <ReviewViewMenu selection={selection} />
         <ReviewStatSummary comparison={props.comparison} />
       </PanelHeaderSlot>
@@ -229,10 +237,11 @@ function ReviewViewMenu({ selection }: { readonly selection: ReviewViewSelection
       <DropdownMenuTrigger
         data-testid="review-view-switcher"
         aria-label="Select review view"
-        className="flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 text-caption font-medium tracking-tight text-ink hover:bg-selected"
+        // The same 32px pill as the other tools' row-1 titles, with the subtle button's hover and open fills.
+        className="flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-control bg-selected px-3 text-sm font-medium text-ink hover:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] aria-expanded:bg-control-border"
       >
-        {reviewViewById(viewMode).label}
-        <ChevronDown size={11} className="text-muted/60" />
+        <span>{reviewViewById(viewMode).label}</span>
+        <ChevronDown size={14} aria-hidden className="text-muted" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={4} className="min-w-[150px]">
         {REVIEW_VIEW_GROUPS.map((group, index) => (
@@ -314,14 +323,14 @@ function ReviewControlsRow({
 }: ReviewHeaderProps & { readonly view: ReviewView }) {
   return (
     <div data-testid="review-controls-row" className="flex h-10 min-w-0 flex-1 items-center gap-2">
-      {view.id === "since-looked" ? <SinceLookedTurns /> : <ReviewOperand operand={view.operand} />}
+      {view.id === "since-looked" ? <SinceLookedTurns /> : null}
+      {view.comparison ? <FixedComparison comparison={view.comparison} /> : null}
+      {view.operand ? <ReviewOperand operand={view.operand} /> : null}
       <div className="ml-auto flex shrink-0 items-center gap-1">
         <RefreshButton refreshing={refreshing} onRefresh={onRefresh} />
         <RenderModePill />
-        <WrapToggle />
-        <WhitespaceToggle comparison={comparison} />
-        <ToggleAllButton defaultFilesExpanded={defaultFilesExpanded} />
         <FilesToggle scopeId={scopeId} navigator={filesNavigator} />
+        <ReviewDisplayMenu comparison={comparison} defaultFilesExpanded={defaultFilesExpanded} />
       </div>
     </div>
   );
@@ -342,6 +351,21 @@ function ReviewOperand({ operand }: { readonly operand: ReviewView["operand"] })
   );
 }
 
+/**
+ * A fixed comparison has no picker; row 2 still names both sides, laid out like the Branch pickers. The inset matches a
+ * picker button's padding, so the text starts where a picker's label would, as in every other tool's row 2.
+ */
+function FixedComparison({ comparison: [compare, base] }: { readonly comparison: NonNullable<ReviewView["comparison"]> }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2 px-3 text-caption text-muted" data-testid="review-operand-slot" data-operand="fixed">
+      <span className="text-fade min-w-0 text-ink">{compare}</span>
+      <span aria-hidden className="shrink-0 font-mono">→</span>
+      <span className="sr-only">against</span>
+      <span className="text-fade min-w-0">{base}</span>
+    </span>
+  );
+}
+
 /** Since you looked has no picker; row 2 names the turns it covers as plain text. */
 function SinceLookedTurns() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
@@ -353,7 +377,7 @@ function SinceLookedTurns() {
     : sinceLookedTurnsLabel(turns, sinceLookedMessageIds(snapshots, baseline));
   if (!label) return null;
   return (
-    <span className="shrink-0 whitespace-nowrap text-caption text-muted" data-testid="review-operand-slot" data-operand="since-looked">
+    <span className="shrink-0 whitespace-nowrap px-3 text-caption text-muted" data-testid="review-operand-slot" data-operand="since-looked">
       {label}
     </span>
   );
@@ -416,33 +440,11 @@ function RenderModePill() {
         onChange={(value) => {
           if (isRenderMode(value)) setRenderMode(value);
         }}
-        // Paper draws row 2's pill as two 28px icon segments with the active one
-        // filled by the control border, so the operand keeps its width.
-        className="[&_[role=radio]]:w-7 [&_[role=radio][aria-checked=true]]:bg-control-border"
+        // Two 28px segments keep the operand's width. They are round, and the chosen one takes a pressed round
+        // toggle's fill, because a square solid segment among row 2's round buttons outweighed the operand (council r3).
+        className="[&_[role=radio]]:size-7 [&_[role=radio]]:rounded-full [&_[role=radio][aria-checked=true]]:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] dark:[&_[role=radio][aria-checked=true]]:bg-control-border"
       />
     </span>
-  );
-}
-
-function WrapToggle() {
-  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
-  const lineWrap = useDiffStore((s) => (activeThreadId ? s.getLineWrap(activeThreadId) : true));
-  const toggleLineWrap = useDiffStore((s) => s.toggleLineWrap);
-  // Wrap is stored per thread, so threadless scope keeps the default on.
-  return (
-    <IconButton
-      shape="round"
-      aria-label="Wrap lines"
-      tooltip={activeThreadId ? "Wrap lines" : "Open a thread to change wrapping"}
-      pressed={lineWrap}
-      disabled={!activeThreadId}
-      data-testid="review-wrap-toggle"
-      onClick={() => {
-        if (activeThreadId) toggleLineWrap(activeThreadId);
-      }}
-    >
-      <TextWrap />
-    </IconButton>
   );
 }
 
@@ -452,51 +454,63 @@ function whitespaceUnavailableReason(threadId: string | null, comparison: Review
   return source && source !== "git" ? "Not available for agent patches" : null;
 }
 
-function WhitespaceToggle({ comparison }: { readonly comparison: ReviewComparison | null }) {
+/** Rarer display choices and the bulk fold command, kept off row 2 so the common controls stay visible. */
+function ReviewDisplayMenu({
+  comparison,
+  defaultFilesExpanded,
+}: {
+  readonly comparison: ReviewComparison | null;
+  readonly defaultFilesExpanded: boolean;
+}) {
+  const [open, setOpen] = usePanelHeaderMenuOpen();
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  // Wrap and whitespace are stored per thread, so threadless scope keeps the defaults.
+  const lineWrap = useDiffStore((s) => (activeThreadId ? s.getLineWrap(activeThreadId) : true));
   const ignoreWhitespace = useDiffStore((s) => (activeThreadId ? s.getIgnoreWhitespace(activeThreadId) : false));
+  const toggleLineWrap = useDiffStore((s) => s.toggleLineWrap);
   const toggleIgnoreWhitespace = useDiffStore((s) => s.toggleIgnoreWhitespace);
-  const reasonId = useId();
-  const unavailableReason = whitespaceUnavailableReason(activeThreadId, comparison);
-  const disabled = unavailableReason !== null;
-  return (
-    <>
-      <IconButton
-        shape="round"
-        aria-label="Hide whitespace changes"
-        tooltip={unavailableReason ?? "Hide whitespace changes"}
-        aria-describedby={disabled ? reasonId : undefined}
-        pressed={ignoreWhitespace && !disabled}
-        disabled={disabled}
-        focusableWhenDisabled
-        className="aria-disabled:opacity-50"
-        data-testid="review-whitespace-toggle"
-        onClick={() => {
-          if (activeThreadId && !disabled) toggleIgnoreWhitespace(activeThreadId);
-        }}
-      >
-        <Pilcrow />
-      </IconButton>
-      {disabled ? <span id={reasonId} hidden>{unavailableReason}</span> : null}
-    </>
-  );
-}
-
-function ToggleAllButton({ defaultFilesExpanded }: { readonly defaultFilesExpanded: boolean }) {
   const bulkDiffExpand = useDiffStore((s) => s.bulkDiffExpand);
   const setBulkDiffExpand = useDiffStore((s) => s.setBulkDiffExpand);
+  const whitespaceReason = whitespaceUnavailableReason(activeThreadId, comparison);
   const allExpanded = bulkDiffExpand?.expand ?? defaultFilesExpanded;
-  const label = allExpanded ? "Collapse all" : "Expand all";
   return (
-    <IconButton
-      shape="round"
-      aria-label={label}
-      data-testid="review-toggle-all"
-      data-expanded={allExpanded ? "true" : "false"}
-      onClick={() => setBulkDiffExpand(!allExpanded)}
-    >
-      {allExpanded ? <ChevronsDownUp /> : <ChevronsUpDown />}
-    </IconButton>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger
+        render={
+          <IconButton shape="round" aria-label="View" data-testid="review-display-menu">
+            <SlidersHorizontal />
+          </IconButton>
+        }
+      />
+      <DropdownMenuContent align="end" sideOffset={6}>
+        <DropdownMenuCheckboxItem
+          label="Wrap lines"
+          checked={lineWrap}
+          disabledReason={activeThreadId ? null : "Open a thread to change wrapping"}
+          data-testid="review-wrap-toggle"
+          onCheckedChange={() => {
+            if (activeThreadId) toggleLineWrap(activeThreadId);
+          }}
+        />
+        <DropdownMenuCheckboxItem
+          label="Hide whitespace changes"
+          checked={ignoreWhitespace && !whitespaceReason}
+          disabledReason={whitespaceReason}
+          data-testid="review-whitespace-toggle"
+          onCheckedChange={() => {
+            if (activeThreadId && !whitespaceReason) toggleIgnoreWhitespace(activeThreadId);
+          }}
+        />
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          label={allExpanded ? "Collapse all" : "Expand all"}
+          icon={allExpanded ? <ChevronsDownUp /> : <ChevronsUpDown />}
+          data-testid="review-toggle-all"
+          data-expanded={allExpanded ? "true" : "false"}
+          onClick={() => setBulkDiffExpand(!allExpanded)}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

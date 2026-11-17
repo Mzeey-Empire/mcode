@@ -1,10 +1,10 @@
-import { memo, useMemo, useState, useCallback, useRef, useEffect, useSyncExternalStore, lazy, Suspense, type ReactNode } from "react";
+import { memo, useMemo, useState, useCallback, useRef, useEffect, useSyncExternalStore, Suspense, type ReactNode } from "react";
 import type { Message } from "@/transport";
 import { ImageIcon, Copy, Check, Target } from "lucide-react";
 import { WarningIcon } from "@/components/ui/icon-map";
 import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
-const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
+import { LazyMarkdownContent } from "@/components/chat/LazyMarkdownContent";
 import { isHiddenPlanAnswer, stripPlanFences } from "@/lib/plan-fences";
 import { stripInjectedFiles } from "@/lib/file-tags";
 import {

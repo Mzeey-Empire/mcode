@@ -3,7 +3,7 @@ import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useComposerLayoutGuard } from "../useComposerLayoutGuard";
 import { useUiStore } from "@/stores/uiStore";
-import { useDiffStore } from "@/stores/diffStore";
+import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { setLayoutMeasurements } from "@/lib/composer-layout";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 
@@ -142,5 +142,38 @@ describe("useComposerLayoutGuard responsive layout", () => {
     renderWideningThreadLayout();
 
     expect(useUiStore.getState().rightPanelMaximized).toBe(true);
+  });
+
+  describe("right panel posture", () => {
+    const threadProps = { showPullRequests: false, showLanding: false, activeWorkspaceId: "workspace-1" };
+    const setReviewPanelVisible = (visible: boolean) => act(() => useDiffStore.setState({
+      rightPanelFallbackByWorkspace: {
+        "workspace-1": createRightPanelState({ visible, width: 560, openTabs: ["changes"], activeTab: "changes" }),
+      },
+    }));
+
+    it("floats Review over a row too narrow to dock it, and takes the full surface only below the narrow posture", () => {
+      setReviewPanelVisible(true);
+      // Review needs 560px beside the conversation's 520px, so 900px cannot dock it but can still show both.
+      const view = render(<LayoutHarness contentWidth={900} {...threadProps} />);
+      expect(useUiStore.getState().rightPanelMaximized).toBe(false);
+
+      view.rerender(<LayoutHarness contentWidth={759} {...threadProps} />);
+      triggerResize();
+      expect(useUiStore.getState()).toMatchObject({ rightPanelMaximized: true, rightPanelMaximizedByLayout: true });
+
+      view.rerender(<LayoutHarness contentWidth={760} {...threadProps} />);
+      triggerResize();
+      expect(useUiStore.getState().rightPanelMaximized).toBe(false);
+    });
+
+    it("maximizes a panel that opens into a row too narrow for both, though no resize fires", () => {
+      setReviewPanelVisible(false);
+      render(<LayoutHarness contentWidth={700} {...threadProps} />);
+      expect(useUiStore.getState().rightPanelMaximized).toBe(false);
+
+      setReviewPanelVisible(true);
+      expect(useUiStore.getState().rightPanelMaximized).toBe(true);
+    });
   });
 });

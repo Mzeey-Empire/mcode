@@ -180,4 +180,26 @@ describe("Review file header", () => {
     expect(screen.getByRole("button", { name: "Copy file path" })).toBeInTheDocument();
     expect(screen.getByTestId("review-file-counts").textContent).toBe("-9+4");
   });
+
+  it("names the icon-only control that expands unchanged context", async () => {
+    transport.getWorkingTreeDiff.mockResolvedValue(`diff --git a/${MENU_FILE.path} b/${MENU_FILE.path}
+index 1111111..2222222 100644
+--- a/${MENU_FILE.path}
++++ b/${MENU_FILE.path}
+@@ -20,2 +20,2 @@
+ const groups = [];
+-const gone = 1;
++const kept = 2;
+`);
+    const { container } = renderReviewDiff(true);
+
+    const expandButtons = () =>
+      [...container.querySelectorAll("diffs-container")].flatMap((el) => [
+        ...(el.shadowRoot?.querySelectorAll("[data-expand-button]") ?? []),
+      ]);
+    await waitFor(() => expect(expandButtons().length).toBeGreaterThan(0));
+    for (const button of expandButtons()) {
+      expect(button).toHaveAccessibleName(/^Show unchanged lines/);
+    }
+  });
 });

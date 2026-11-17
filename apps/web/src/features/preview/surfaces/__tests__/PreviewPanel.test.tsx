@@ -571,7 +571,7 @@ describe("PreviewPanel: unavailable state", () => {
       expect(useBrowserAutomationStore.getState().viewportCoordinators.size).toBeGreaterThan(0);
     });
     const iframe = screen.getByTestId("web-runtime-preview-iframe");
-    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(screen.getByRole("button", { name: "More browser actions" }));
     const menu = await screen.findByRole("menu");
     await user.click(within(menu).getByRole("menuitem", { name: "Device toolbar" }));
 
@@ -609,7 +609,7 @@ describe("PreviewPanel: unavailable state", () => {
     await waitFor(() => {
       expect(useBrowserAutomationStore.getState().viewportCoordinators.size).toBeGreaterThan(0);
     });
-    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(screen.getByRole("button", { name: "More browser actions" }));
     await user.click(within(await screen.findByRole("menu")).getByRole(
       "menuitem",
       { name: "Device toolbar" },
@@ -626,7 +626,7 @@ describe("PreviewPanel: unavailable state", () => {
     });
 
     await user.click(within(toolbar).getByRole("button", { name: "Close viewport toolbar" }));
-    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(screen.getByRole("button", { name: "More browser actions" }));
     await user.click(within(await screen.findByRole("menu")).getByRole(
       "menuitem",
       { name: "Device toolbar" },
@@ -1725,7 +1725,7 @@ describe("PreviewPanel: full panel state", () => {
     render(<PreviewPanel threadId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />);
 
     expect(screen.getByTestId("preview-webview")).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText("More"));
+    fireEvent.click(screen.getByLabelText("More browser actions"));
 
     expect(await screen.findByRole("menu")).toBeInTheDocument();
     expect(screen.getByTestId("preview-webview")).toBeInTheDocument();

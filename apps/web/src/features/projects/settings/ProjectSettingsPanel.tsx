@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Plus, Settings } from "lucide-react";
 import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentStorageMode } from "@mcode/contracts/models/workspace-environment";
-import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
+import { PanelHeaderSlot, PanelTitle } from "@/components/panels/shell/PanelHeader";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { applyActionRun } from "@/features/terminal/state/applyActionRun";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { openRightPanelTab } from "@/lib/right-panel-layout";
+import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import type { ActionPlay } from "./ActionEditor";
@@ -54,6 +55,11 @@ function StorageRow({ mode, locked, onChange }: {
       />
     </div>
   );
+}
+
+/** An empty list shows the add control under its "No actions" line, so the header drops its copy. */
+function showsHeaderAdd(section: SettingsSection, entry: ProjectSettingsDraft | undefined): boolean {
+  return section === "actions" && entry?.draft.actions.length !== 0;
 }
 
 /** Splits issues into the first under each action field and the first that belongs to the whole document. */
@@ -153,26 +159,31 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
 
   const header = (
     <PanelHeaderSlot slot="leading">
-      <PanelTitlePill id="project-settings-title" headingLevel={1} icon={<Settings className="size-3.5" aria-hidden />}>
-        {projectName}
-      </PanelTitlePill>
+      <PanelTitle id="project-settings-title" headingLevel={2} icon={<Settings className="size-3.5" aria-hidden />}>
+        {/* The tool's name leads, as on every other tool's title; the project it configures follows, muted.
+            Unlike the other tools it is not per-thread, and the chooser that said so is gone once it opens. */}
+        Project settings <span className="text-muted">{projectName} · all threads</span>
+      </PanelTitle>
     </PanelHeaderSlot>
+  );
+  const addActionButton = (className?: string) => (
+    <Button variant="subtle" shape="round" className={cn("text-body-small font-medium", className)} disabled={!entry} onClick={addAction}>
+      <Plus aria-hidden />
+      Add action
+    </Button>
   );
   const addButton = (
     <PanelHeaderSlot slot="row2">
       <SegmentedControl
         variant="pill"
+        // Row 2 is inset 8px; this lines the switch up with the settings below it, which sit 24px in.
+        className="ml-4"
         aria-label="Project settings section"
         value={section}
         onChange={(value) => setSection(value as SettingsSection)}
         options={SECTION_OPTIONS}
       />
-      {section === "actions" ? (
-        <Button variant="subtle" shape="round" className="ml-auto text-body-small font-medium" disabled={!entry} onClick={addAction}>
-          <Plus aria-hidden />
-          Action
-        </Button>
-      ) : null}
+      {showsHeaderAdd(section, entry) ? addActionButton("ml-auto") : null}
     </PanelHeaderSlot>
   );
 
@@ -193,7 +204,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
       <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="project-settings-title">
         {header}
         {addButton}
-        <p role="status" className="px-3 py-2 text-caption text-muted">
+        <p role="status" className="px-6 py-2 text-caption text-muted">
           {settings.loadError ? "Settings could not be loaded." : "Loading"}
         </p>
       </section>
@@ -206,7 +217,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
     <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="project-settings-title">
       {header}
       {addButton}
-      <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-2 pt-1 pb-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-5 pt-1 pb-2">
         {entry.conflict && dirty ? (
           <EnvironmentConflictBanner
             storageMode={storageMode}
@@ -236,6 +247,7 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
           }}
           onDuplicate={duplicate}
           onForgetApproval={(actionId) => void settings.forgetApproval(actionId)}
+          addControl={addActionButton()}
         />
       </div>
       {dirty ? (

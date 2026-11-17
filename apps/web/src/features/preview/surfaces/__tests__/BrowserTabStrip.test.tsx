@@ -64,12 +64,12 @@ function Harness() {
 }
 
 function selectedPage(): string | null {
-  return screen.queryAllByRole("button", { pressed: true })[0]?.textContent ?? null;
+  return screen.queryAllByRole("tab", { selected: true })[0]?.textContent ?? null;
 }
 
 function pageNames(): string[] {
-  return screen.queryAllByRole("group", { name: "Browser pages" })
-    .flatMap((strip) => [...strip.querySelectorAll("button[aria-pressed]")])
+  return screen.queryAllByRole("tablist", { name: "Browser pages" })
+    .flatMap((strip) => [...strip.querySelectorAll("[role=\"tab\"]")])
     .map((button) => button.textContent ?? "");
 }
 
@@ -95,7 +95,7 @@ describe("BrowserTabStrip", () => {
     const { calls } = installFakeTabTransport([page("a", "Docs"), page("b", "Dashboard")]);
     render(<Harness />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Dashboard" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Dashboard" }));
     await waitFor(() => expect(selectedPage()).toBe("Dashboard"));
     fireEvent.click(screen.getByRole("button", { name: "Close Dashboard" }));
     await waitFor(() => expect(pageNames()).toEqual(["Docs"]));
@@ -130,6 +130,27 @@ describe("BrowserTabStrip", () => {
     expect(within(tabOf("a")).getByTestId("browser-agent-control-indicator")).toBeInTheDocument();
     expect(tabOf("a").querySelector("img")).toBeNull();
     expect(within(tabOf("b")).queryByTestId("browser-agent-control-indicator")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the globe when the favicon fails, and retries a new favicon", () => {
+    installFakeTabTransport([{ ...page("a", "Docs"), faviconUrl: "https://docs.example.test/missing.png" }]);
+    render(<Harness />);
+    const tab = () => document.querySelector<HTMLElement>('[data-panel-tab="a"]')!;
+    expect(within(tab()).queryByTestId("browser-page-globe")).toBeNull();
+
+    fireEvent.error(tab().querySelector("img")!);
+    expect(within(tab()).getByTestId("browser-page-globe")).toBeInTheDocument();
+    expect(tab().querySelector("img")).toBeNull();
+
+    act(() => {
+      usePreviewTabsStore.getState().setTabSet(WORKSPACE, THREAD, {
+        threadId: THREAD,
+        activeTabId: "a",
+        tabs: [{ ...page("a", "Docs"), active: true, faviconUrl: "https://docs.example.test/icon.png" }],
+      });
+    });
+    expect(tab().querySelector("img")?.getAttribute("src")).toBe("https://docs.example.test/icon.png");
+    expect(within(tab()).queryByTestId("browser-page-globe")).toBeNull();
   });
 
   it("closes an inactive page without selecting it first", async () => {

@@ -1,9 +1,10 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { render, screen, within } from "@testing-library/react";
 import { act, StrictMode } from "react";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { clearKeybindings, loadKeybindings } from "@/lib/keybinding-manager";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import {
@@ -215,6 +216,7 @@ beforeEach(() => {
   vi.mocked(mockTransport.openIn).mockReset().mockImplementation(() => Promise.resolve());
 });
 
+import { TERMINAL_THEME_TOKENS } from "../terminalTheme";
 import { TerminalView } from "../TerminalView";
 
 /** Flushes init's dynamic imports and the reattach microtask chain. */
@@ -265,10 +267,9 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
   beforeEach(() => {
     document.documentElement.style.setProperty("--page", "oklch(95.5% 0.005 260)");
     document.documentElement.style.setProperty("--ink", "oklch(19% 0.005 260)");
-    document.documentElement.style.setProperty("--success", "oklch(52% 0.120 145)");
-    document.documentElement.style.setProperty("--primary", "oklch(52% 0.170 75)");
-    document.documentElement.style.setProperty("--error", "oklch(52% 0.140 25)");
-    document.documentElement.style.setProperty("--link", "oklch(50% 0.160 260)");
+    for (const token of Object.values(TERMINAL_THEME_TOKENS.light)) {
+      if (token !== "--page" && token !== "--ink") document.documentElement.style.setProperty(token, "oklch(50% 0.1 260)");
+    }
     bufferActive.viewportY = 42;
     bufferActive.length = 100;
     term.options.disableStdin = false;
@@ -368,14 +369,6 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
         background: "oklch(95.5% 0.005 260)",
         foreground: "oklch(19% 0.005 260)",
         cursor: "oklch(19% 0.005 260)",
-        green: "oklch(52% 0.120 145)",
-        brightGreen: "oklch(52% 0.120 145)",
-        yellow: "oklch(52% 0.170 75)",
-        brightYellow: "oklch(52% 0.170 75)",
-        red: "oklch(52% 0.140 25)",
-        brightRed: "oklch(52% 0.140 25)",
-        blue: "oklch(50% 0.160 260)",
-        brightBlue: "oklch(50% 0.160 260)",
       },
       scrollback: 2500,
       fontFamily: "Test Sans",
@@ -473,6 +466,35 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     expect(term.focus.mock.calls.length).toBe(focusCallsBefore);
     // Repaint still happens so half-painted output recovers.
     expect(term.refresh).toHaveBeenCalled();
+  });
+
+  // Reopening the panel with Ctrl+J reveals the warm view; typing must reach the shell without a click.
+  it("focuses a warm terminal again when it is shown after being hidden", async () => {
+    const { rerender } = render(<TerminalView ptyId="pty-warm" visible={true} threadActive={true} />);
+    await settle();
+    rerender(<TerminalView ptyId="pty-warm" visible={false} threadActive={false} />);
+    await settle();
+    term.focus.mockClear();
+
+    rerender(<TerminalView ptyId="pty-warm" visible={true} threadActive={true} />);
+
+    await vi.waitFor(() => expect(term.focus).toHaveBeenCalled());
+  });
+
+  // xterm consumes keys it turns into shell input; the Terminal toggle must reach the app so Ctrl+J also closes it.
+  it("leaves the Terminal toggle key to the app and other control keys to the shell", async () => {
+    loadKeybindings([{ key: "mod+j", command: "terminal.toggle" }]);
+    render(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
+    await settle();
+    const handler = term.attachCustomKeyEventHandler.mock.calls[0]?.[0] as (event: KeyboardEvent) => boolean;
+    const ctrl = (key: string) => new KeyboardEvent("keydown", { key, ctrlKey: true });
+
+    expect(handler(ctrl("j"))).toBe(false);
+    expect(handler(ctrl("r"))).toBe(true);
+
+    loadKeybindings([{ key: "mod+j", command: "terminal.toggle" }], [{ key: "mod+shift+t", command: "terminal.toggle" }]);
+    expect(handler(ctrl("j"))).toBe(true);
+    clearKeybindings();
   });
 
   // #748: a freshly mounted view replays the full retained scrollback window.
@@ -848,6 +870,74 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     expect(terminalRoot.style.visibility).toBe("visible");
   });
 
+  // A browser ignores focus() on an element under visibility: hidden, so only a focus call made while the view
+  // shows puts keys into the shell. Each call records the visibility it saw.
+  describe("focus when a cold view appears", () => {
+    let focusVisibility: string[] = [];
+
+    afterEach(() => {
+      term.focus.mockReset();
+    });
+
+    async function mountColdView(): Promise<() => Promise<void>> {
+      let resolveReattach: (value: { mode: "delta" }) => void = () => {};
+      let finishReplayWrite: (() => void) | undefined;
+      transport.terminalReattach.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveReattach = resolve;
+        }),
+      );
+      term.write.mockImplementation((data: string | Uint8Array, cb?: () => void) => {
+        if (data instanceof Uint8Array) {
+          finishReplayWrite = cb;
+          return;
+        }
+        cb?.();
+      });
+      focusVisibility = [];
+      term.focus.mockImplementation(() => {
+        const view = document.querySelector<HTMLElement>('[data-testid="terminal-render-content"]');
+        focusVisibility.push(view?.style.visibility ?? "");
+      });
+
+      render(<TerminalView ptyId="pty-cold" visible={true} threadActive={true} />);
+      await settle();
+      await act(async () => {
+        emitPtyData({ ptyId: "pty-cold", seq: 0, payload: new Uint8Array([65]) });
+        resolveReattach({ mode: "delta" });
+      });
+      await settle();
+
+      return async () => {
+        await act(async () => {
+          finishReplayWrite?.();
+        });
+        await settle();
+      };
+    }
+
+    // Ctrl+J on a thread whose shell last showed on another thread mounts it cold; typing must reach the shell.
+    it("focuses the terminal once its replay paints and the view shows", async () => {
+      const paintReplay = await mountColdView();
+
+      await paintReplay();
+
+      expect(focusVisibility).toContain("visible");
+    });
+
+    it("leaves focus where the user moved it while the view loaded", async () => {
+      const paintReplay = await mountColdView();
+      const composer = document.createElement("textarea");
+      document.body.append(composer);
+      composer.focus();
+
+      await paintReplay();
+
+      expect(focusVisibility).not.toContain("visible");
+      composer.remove();
+    });
+  });
+
   describe("terminal query replies during replay", () => {
     // Built in the test realm: jsdom's TextEncoder returns a Uint8Array that fails the mock's instanceof check.
     const DEVICE_ATTRIBUTES_QUERY = new Uint8Array([0x1b, 0x5b, 0x63]);
@@ -955,7 +1045,7 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
 
   // Regression: an exited PTY must remain mounted so its completed output and
   // recovery actions stay available to the user.
-  it("retains exited output and exposes retry and close actions", async () => {
+  it("retains exited output and exposes restart and close actions", async () => {
     retainTerminal("pty-exit");
 
     render(
@@ -971,12 +1061,10 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     await settle();
 
     const status = screen.getByRole("status");
-    expect(status).toHaveTextContent(
-      "This terminal exited with code 1. Its completed output is retained.",
-    );
+    expect(status).toHaveTextContent("Process exited with code 1");
     expect(within(status).queryByRole("button")).toBeNull();
     expect(screen.getByTestId("terminal-render-content")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Retry terminal" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restart" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close terminal" })).toBeInTheDocument();
   });
 
@@ -994,13 +1082,86 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     );
     await settle();
 
-    expect(screen.queryByRole("button", { name: "Retry terminal" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
     expect(screen.getByRole("button", { name: "Close terminal" })).toBeInTheDocument();
+  });
+
+  it("shows the shell starting until it prints text, not just control sequences", async () => {
+    render(
+      <TerminalView ptyId="pty-start" ownerScopeId="thread-1" shellLabel="pwsh" visible={true} threadActive={true} />,
+    );
+    await settle();
+
+    expect(screen.getByText("Starting pwsh")).toBeInTheDocument();
+
+    // ConPTY's opening chunk: modes, a cleared screen, the cursor home, and the window title, but no text.
+    act(() => {
+      emitPtyData({
+        ptyId: "pty-start",
+        seq: 1,
+        payload: new TextEncoder().encode("\x1b[?9001h\x1b[?1004h\x1b[?25l\x1b[2J\x1b[m\x1b[H\x1b]0;pwsh.exe\x07\x1b[?25h\r\n"),
+      });
+    });
+    await settle();
+    expect(screen.getByText("Starting pwsh")).toBeInTheDocument();
+
+    act(() => {
+      emitPtyData({ ptyId: "pty-start", seq: 2, payload: new TextEncoder().encode("PS> ") });
+    });
+    await settle();
+
+    expect(screen.queryByText("Starting pwsh")).toBeNull();
+  });
+
+  it("does not claim an exited terminal is starting", async () => {
+    retainTerminal("pty-exit");
+    render(
+      <TerminalView
+        ptyId="pty-exit"
+        ownerScopeId="thread-1"
+        shellLabel="pwsh"
+        sessionState="exited"
+        exit={{ code: null, signal: null, reason: "natural" }}
+        visible={true}
+        threadActive={true}
+      />,
+    );
+    await settle();
+
+    expect(screen.queryByText("Starting pwsh")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Process exited");
+  });
+
+  it("shows why a failed terminal stopped and respawns it on Retry", async () => {
+    retainTerminal("pty-failed", "thread-1", "failed");
+    render(
+      <TerminalView
+        ptyId="pty-failed"
+        ownerScopeId="thread-1"
+        sessionState="failed"
+        exit={{ code: null, signal: null, reason: "host-crash" }}
+        visible={true}
+        threadActive={true}
+      />,
+    );
+    await settle();
+
+    expect(screen.getByRole("status")).toHaveTextContent("Terminal failed: the terminal host crashed.");
+    await act(async () => {
+      screen.getByRole("button", { name: "Retry" }).click();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(transport.terminalCreate).toHaveBeenCalledWith("thread-1", "pty-failed");
+    expect(useTerminalStore.getState().terminals["thread-1"]).toEqual([
+      expect.objectContaining({ id: "pty-replacement" }),
+    ]);
   });
 
   // Regression: retry must replace the retained PTY atomically, or the old
   // tombstone would continue consuming the session capacity.
-  it("retries an exited PTY by sending its replacement ID and replacing store state", async () => {
+  it("restarts an exited PTY by sending its replacement ID and replacing store state", async () => {
     retainTerminal("pty-replace");
 
     render(
@@ -1016,7 +1177,7 @@ describe("TerminalView lifecycle (ADR-0010)", () => {
     await settle();
 
     await act(async () => {
-      screen.getByRole("button", { name: "Retry terminal" }).click();
+      screen.getByRole("button", { name: "Restart" }).click();
       await Promise.resolve();
     });
     await settle();

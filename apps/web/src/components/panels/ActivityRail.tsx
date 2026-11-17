@@ -4,9 +4,10 @@ import type {
   ReactElement,
   PointerEvent as ReactPointerEvent,
   ReactNode,
+  RefObject,
 } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { Layers, MousePointer2, Plus, X } from "lucide-react";
+import { Layers, Minus, MousePointer2, Plus, X } from "lucide-react";
 import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { Button } from "@/components/ui/button";
 import { ProviderIcon } from "@/components/ui/provider-icon";
@@ -53,39 +54,37 @@ const RAIL_ICON_SIZE = 16;
 
 const RAIL_ENTRY_CLASS = "relative h-8 w-full overflow-hidden rounded-lg px-2 text-xs transition-colors";
 
-/** The selected entry: selected fill and ink glyph; `RailActiveEdge` adds the amber bar. */
+/** The selected entry: selected fill and ink glyph, per DESIGN.md "Vertical tabs". */
 const RAIL_ACTIVE_CLASS = "bg-selected text-ink";
 
 const RAIL_IDLE_CLASS = "text-muted hover:bg-hover hover:text-ink";
 
-/**
- * The active entry's 2x20 amber bar, 2px outside its body-facing edge. A
- * sibling of the entry rather than a shadow, because the entry clips its
- * label during expansion and outer shadows are not part of the elevation set.
- */
-function RailActiveEdge() {
-  return (
-    <span
-      data-testid="rail-active-edge"
-      aria-hidden
-      className="pointer-events-none absolute top-1/2 -left-[2px] h-[20px] w-[2px] -translate-y-1/2 rounded-[1px] bg-primary"
-    />
-  );
+/** Stable id of the right panel body, which the rail's tabs control. */
+export const RIGHT_PANEL_TABPANEL_ID = "right-panel-tabpanel";
+
+/** Stable DOM id of the rail tab for one tab instance, so the panel body can name it. */
+export function railTabElementId(instanceId: string): string {
+  return `right-panel-tab-${instanceId}`;
 }
 
 function RailTooltip({
   content,
+  shortcut,
   disabled = false,
+  anchor,
   children,
 }: {
   content: string;
+  shortcut?: readonly string[];
   disabled?: boolean;
+  /** Positions the tooltip against this element instead of the trigger. */
+  anchor?: RefObject<HTMLElement | null>;
   children: ReactElement;
 }) {
   return (
     <Tooltip disabled={disabled}>
       <TooltipTrigger render={children} />
-      <TooltipContent side="left">{content}</TooltipContent>
+      <TooltipContent side="left" anchor={anchor} shortcut={shortcut}>{content}</TooltipContent>
     </Tooltip>
   );
 }
@@ -114,11 +113,13 @@ function ReorderableRailItem({
   lane,
   children,
   onReorder,
+  onClose,
 }: {
   instanceId: string;
   lane: "tool" | "subagent";
   children: ReactNode;
   onReorder: (instanceId: string, direction: -1 | 1) => void;
+  onClose: (instanceId: string) => void;
 }) {
   const draggingRef = useRef(false);
   const dragStartYRef = useRef<number | null>(null);
@@ -158,6 +159,12 @@ function ReorderableRailItem({
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    // The close × leaves the tab order so Tab moves from the tablist into the panel; Delete closes instead.
+    if (event.key === "Delete" && (event.target as HTMLElement).getAttribute("role") === "tab") {
+      event.preventDefault();
+      onClose(instanceId);
+      return;
+    }
     if (!event.altKey || !event.shiftKey) return;
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     event.preventDefault();
@@ -184,6 +191,34 @@ function ReorderableRailItem({
       {children}
     </div>
   );
+}
+
+const RAIL_FOCUS_KEYS = new Set(["ArrowUp", "ArrowDown", "Home", "End"]);
+
+/** Where a focus key lands among `count` tabs from `current` (-1 when focus is outside), wrapping at the ends. */
+function nextRailTabIndex(key: string, current: number, count: number): number {
+  const last = count - 1;
+  if (key === "Home") return 0;
+  if (key === "End") return last;
+  if (key === "ArrowUp") return current <= 0 ? last : current - 1;
+  return current < 0 || current === last ? 0 : current + 1;
+}
+
+function hasModifier(event: ReactKeyboardEvent): boolean {
+  return event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
+}
+
+/**
+ * Roving focus for the vertical tablist. Moving focus never selects a tool,
+ * because switching tools mounts work; Enter or Space activates the focused tab.
+ */
+function onTablistKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+  if (!RAIL_FOCUS_KEYS.has(event.key) || hasModifier(event)) return;
+  const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
+  if (tabs.length === 0) return;
+  const current = tabs.indexOf(document.activeElement as HTMLElement);
+  event.preventDefault();
+  tabs[nextRailTabIndex(event.key, current, tabs.length)]?.focus();
 }
 
 /** Catalog metadata (product label + icon) for an openable tab, by store id. */
@@ -250,9 +285,7 @@ function RailStatus({
       <span
         className={cn(
           "font-mono text-xs font-medium leading-none tabular-nums transition-[opacity,transform] motion-reduce:duration-0 motion-reduce:transition-none",
-          expanded
-            ? "absolute right-2 top-1/2 -translate-y-1/2 group-hover:opacity-0"
-            : "mt-0.5",
+          expanded ? "shrink-0" : "mt-0.5",
           changesFresh
             ? "changes-fresh-ring text-primary"
             : active
@@ -267,39 +300,89 @@ function RailStatus({
   return null;
 }
 
-/** One rail entry: a select glyph, plus a hover-revealed × to close. */
+/**
+ * The expanded rail's label row: the tool name, then its status on the right. A three-key shortcut chip took most
+ * of the 104px row and cut "Files" to "F", so the shortcut lives in the row's tooltip instead.
+ */
+function RailEntryLabel({
+  label,
+  status,
+  expanded,
+  active,
+}: {
+  label: string;
+  status?: ReactNode;
+  expanded: boolean;
+  active: boolean;
+}) {
+  return (
+        <span
+          aria-hidden
+          className={cn(
+            "absolute left-8 flex items-center gap-2 transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+            // The active entry shows its exit at rest, so its row ends before the exit's slot.
+            active ? "right-8" : "right-2",
+            expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
+          )}
+        >
+          <span className={cn("min-w-0 flex-1 text-fade text-left font-medium text-ink", !active && "group-hover:mr-6")}>{label}</span>
+          {/* The trailing status gives way to the hover-revealed close. */}
+          {expanded && status ? (
+            <span className="flex shrink-0 items-center gap-2 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none group-hover:opacity-0">
+              {status}
+            </span>
+          ) : null}
+        </span>
+  );
+}
+
+/** One rail entry: a select glyph, plus a hover-revealed exit: × to close, or − when the tool only hides. */
 function RailEntry({
+  instanceId,
   domId,
   icon,
   label,
   accessibleLabel,
+  hideLabel,
   status,
+  shortcut,
   active,
+  focusable,
   expanded,
   onSelect,
   onClose,
 }: {
+  instanceId: string;
   domId: string;
   icon: ReactNode;
   label: string;
   accessibleLabel: string;
+  hideLabel?: string;
   status?: ReactNode;
+  shortcut?: readonly string[];
   active: boolean;
+  /** The roving tab stop: the active tab, or the first one when none is active. */
+  focusable: boolean;
   expanded: boolean;
   onSelect: () => void;
   onClose: () => void;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
   return (
-    <div className="group relative w-full">
-      {active && <RailActiveEdge />}
-      <RailTooltip content={label} disabled={expanded}>
+    <div ref={rowRef} className="group relative w-full">
+      {/* The expanded row already shows the name; its tooltip stays only to teach the shortcut. */}
+      <RailTooltip content={label} shortcut={shortcut} disabled={expanded && !shortcut?.length}>
         <Button
           type="button"
           variant="ghost"
           size="compact"
+          role="tab"
+          id={railTabElementId(instanceId)}
           data-rail-tab={domId}
           data-active={active ? "true" : undefined}
-          aria-pressed={active}
+          aria-selected={active}
+          aria-controls={RIGHT_PANEL_TABPANEL_ID}
+          tabIndex={focusable ? 0 : -1}
           aria-label={accessibleLabel}
           onClick={onSelect}
           className={cn(
@@ -309,46 +392,64 @@ function RailEntry({
           )}
         >
           {icon}
-          <span
-            aria-hidden
-            className={cn(
-              "absolute left-8 right-8 text-fade text-left font-medium text-ink transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
-              expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
-            )}
-          >
-            {label}
-          </span>
-          {status}
+          <RailEntryLabel label={label} status={status} expanded={expanded} active={active} />
+          {expanded ? null : status}
         </Button>
       </RailTooltip>
-      {/* Hover/focus-revealed close. A sibling button (not nested) so the markup
-          stays valid and the × is its own focusable, announced control. */}
-      <RailTooltip content={`Close ${label}`} disabled={expanded}>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-compact"
-          aria-label={`Close ${label}`}
-          data-rail-close
-          onClick={onClose}
-          className={cn(
-            RAIL_TRAILING_CONTROL_CLASS,
-            "text-muted opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
-            expanded
-              ? "focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-              : "pointer-events-none",
-          )}
-        >
-          <X size={12} />
-        </Button>
-      </RailTooltip>
+      {/* A sibling button (not nested) so the markup stays valid and the exit is its own announced control. */}
+      <RailEntryExit label={hideLabel ?? `Close ${label}`} hides={hideLabel !== undefined} active={active} expanded={expanded} row={rowRef} onExit={onClose} />
     </div>
   );
 }
 
+/** A rail entry's hover- or focus-revealed way out: × closes the tool, − only hides it. */
+function RailEntryExit({
+  label,
+  hides,
+  active,
+  expanded,
+  row,
+  onExit,
+}: {
+  label: string;
+  hides: boolean;
+  active: boolean;
+  expanded: boolean;
+  /** The entry's row. The exit sits at the row's trailing end, so a tooltip beside the exit would cover the row's name. */
+  row: RefObject<HTMLDivElement | null>;
+  onExit: () => void;
+}) {
+  return (
+    // The exit cannot be pressed while the rail is collapsed, so its tooltip only applies once it expands.
+    <RailTooltip content={label} disabled={!expanded} anchor={row}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-compact"
+        aria-label={label}
+        tabIndex={-1}
+        data-rail-close
+        onClick={onExit}
+        className={cn(
+          RAIL_TRAILING_CONTROL_CLASS,
+          "text-muted opacity-0 transition-opacity motion-reduce:duration-0 motion-reduce:transition-none hover:bg-panel hover:text-ink",
+          // As in the header tab strips, the active entry's way out shows at rest once the rail has room for it.
+          expanded
+            ? active ? "opacity-100" : "group-focus-within:opacity-100 group-hover:opacity-100"
+            : "pointer-events-none",
+        )}
+      >
+        {hides ? <Minus size={12} /> : <X size={12} />}
+      </Button>
+    </RailTooltip>
+  );
+}
+
 function RailTab({
+  instanceId,
   id,
   active,
+  focusable,
   expanded,
   changesCount,
   changesFresh,
@@ -356,8 +457,10 @@ function RailTab({
   onSelect,
   onClose,
 }: {
+  instanceId: string;
   id: RightPanelTool;
   active: boolean;
+  focusable: boolean;
   expanded: boolean;
   changesCount: number;
   changesFresh: boolean;
@@ -370,6 +473,7 @@ function RailTab({
   const { icon: Icon, label } = meta;
   return (
     <RailEntry
+      instanceId={instanceId}
       domId={railDomId(id)}
       icon={
         id === "preview" && browserActing ? (
@@ -380,8 +484,11 @@ function RailTab({
       }
       label={label}
       accessibleLabel={railAccessibleLabel(id, label, changesCount, changesFresh)}
+      hideLabel={meta.hideLabel}
       status={<RailStatus id={id} active={active} expanded={expanded} changesCount={changesCount} changesFresh={changesFresh} />}
+      shortcut={tabKeycaps(meta)}
       active={active}
+      focusable={focusable}
       expanded={expanded}
       onSelect={onSelect}
       onClose={onClose}
@@ -390,16 +497,20 @@ function RailTab({
 }
 
 function RailSubagentTab({
+  instanceId,
   entryId,
   entry,
   active,
+  focusable,
   expanded,
   onSelect,
   onClose,
 }: {
+  instanceId: string;
   entryId: string;
   entry: SubagentRosterEntry | undefined;
   active: boolean;
+  focusable: boolean;
   expanded: boolean;
   onSelect: () => void;
   onClose: () => void;
@@ -408,6 +519,7 @@ function RailSubagentTab({
   const running = entry?.status === "running";
   return (
     <RailEntry
+      instanceId={instanceId}
       domId={`subagent:${entryId}`}
       icon={
         <span className="relative inline-flex shrink-0">
@@ -428,6 +540,7 @@ function RailSubagentTab({
       label={label}
       accessibleLabel={running ? `${label}, running` : label}
       active={active}
+      focusable={focusable}
       expanded={expanded}
       onSelect={onSelect}
       onClose={onClose}
@@ -443,8 +556,7 @@ function RailDivider() {
  * The dynamic add control: hidden when nothing is creatable, opens the one
  * creatable type directly when exactly one remains, otherwise a menu of the
  * shown set (the same set the empty-state grid presents; coming-soon teasers
- * disabled). Only rendered when at least one tab is already open; the empty
- * state's card grid is its own create surface (ADR-0004, issue #611).
+ * disabled).
  */
 function RailAddControl({
   scope,
@@ -467,13 +579,13 @@ function RailAddControl({
   if (creatable.length === 1) {
     const only = creatable[0];
     return (
-      <RailTooltip content={`New ${only.label}`} disabled={expanded}>
+      <RailTooltip content={`Open ${only.label}`} disabled={expanded}>
         <span className="block">
           <Button
             variant="ghost"
             size="compact"
             className="relative h-8 w-full justify-start overflow-hidden rounded-lg px-2 text-muted hover:text-ink"
-            aria-label={`New ${only.label}`}
+            aria-label={`Open ${only.label}`}
             onClick={() => onCreate(only.id)}
           >
             <Plus />
@@ -484,7 +596,7 @@ function RailAddControl({
                 expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
               )}
             >
-              New {only.label}
+              Open {only.label}
             </span>
           </Button>
         </span>
@@ -494,14 +606,14 @@ function RailAddControl({
 
   return (
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-      <RailTooltip content="New tab" disabled={expanded}>
+      <RailTooltip content="Open tool" disabled={expanded}>
         <DropdownMenuTrigger
           render={
             <Button
               variant="ghost"
               size="compact"
               className="relative h-8 w-full justify-start overflow-hidden rounded-lg px-2 text-muted hover:text-ink"
-              aria-label="New tab"
+              aria-label="Open tool"
             >
               <Plus />
               <span
@@ -511,7 +623,7 @@ function RailAddControl({
                   expanded ? "translate-x-0 opacity-100" : "translate-x-1 opacity-0",
                 )}
               >
-                New tab
+                Open tool
               </span>
             </Button>
           }
@@ -589,23 +701,30 @@ function RailTabInstances({
   | "onReorder"
 >) {
   const firstSubagentId = tabInstances.find(isSubagentTabInstance)?.id;
+  const rovingId = tabInstances.some((instance) => instance.id === activeTabId)
+    ? activeTabId
+    : tabInstances[0]?.id;
   return tabInstances.map((instance) => (
     <Fragment key={instance.id}>
       {instance.id === firstSubagentId && <RailDivider />}
-      <ReorderableRailItem instanceId={instance.id} lane={isSubagentTabInstance(instance) ? "subagent" : "tool"} onReorder={onReorder}>
+      <ReorderableRailItem instanceId={instance.id} lane={isSubagentTabInstance(instance) ? "subagent" : "tool"} onReorder={onReorder} onClose={onClose}>
         {isSubagentTabInstance(instance) ? (
           <RailSubagentTab
+            instanceId={instance.id}
             entryId={instance.entryId}
             entry={subagentEntries?.find((entry) => entry.id === instance.entryId)}
             active={instance.id === activeTabId}
+            focusable={instance.id === rovingId}
             expanded={expanded}
             onSelect={() => onSelect(instance.id)}
             onClose={() => onClose(instance.id)}
           />
         ) : (
           <RailTab
+            instanceId={instance.id}
             id={instance.type}
             active={instance.id === activeTabId}
+            focusable={instance.id === rovingId}
             expanded={expanded}
             changesCount={changesCount}
             changesFresh={changesFresh}
@@ -628,16 +747,14 @@ function RailFooter({
   const openTabs = rightPanelOpenTools(tabInstances);
   return (
     <>
-      {/* The add control only appears once a tab is open; with none open the
-          empty-state card grid is the create surface. */}
-      {openTabs.length > 0 && (
-        <RailAddControl
-          scope={scope}
-          openTabs={openTabs}
-          expanded={expanded}
-          onCreate={onCreate}
-        />
-      )}
+      {/* Shown beside the empty state's card grid too, so the rail is where a user first meets the add control
+          rather than a blank column that fills in later. */}
+      <RailAddControl
+        scope={scope}
+        openTabs={openTabs}
+        expanded={expanded}
+        onCreate={onCreate}
+      />
     </>
   );
 }
@@ -669,7 +786,8 @@ function ActivityRailView({
       ref={railRef}
       data-testid="activity-rail"
       data-expanded={expanded ? "true" : "false"}
-      className="relative z-(--layer-floating-panel) w-(--container-right-rail) flex-none"
+      // Last visually but first in the DOM, so Tab reaches the tools before the panel body.
+      className="relative z-(--layer-floating-panel) order-last w-(--container-right-rail) flex-none"
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
       onPointerDownCapture={onPointerDownCapture}
@@ -689,6 +807,14 @@ function ActivityRailView({
       >
         {captionAction}
       </div>
+      {/* The body under the expanded rail fades into it, so covered text is not cut off mid-word. */}
+      <div
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute top-row-comfortable bottom-0 w-6 bg-linear-to-l from-page to-transparent transition-[right,opacity] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+          expanded ? "right-(--container-right-rail-expanded) opacity-100" : "right-(--container-right-rail) opacity-0",
+        )}
+      />
       {/* Anchored to the window edge, so hover expansion grows leftward over the body. */}
       <div
         data-testid="activity-rail-surface"
@@ -700,7 +826,13 @@ function ActivityRailView({
       >
       {/* Eight subagent tabs below the tools outgrow a short window. The bleed
           padding keeps the active bar and running dot outside the scroll clip. */}
-      <div data-testid="activity-rail-tabs" className="-mx-2 -my-1 flex min-h-0 shrink flex-col items-stretch gap-1 overflow-y-auto px-2 py-1 [scrollbar-width:none]">
+      <div
+        data-testid="activity-rail-tabs"
+        role="tablist"
+        aria-label="Panel tools"
+        aria-orientation="vertical"
+        onKeyDown={onTablistKeyDown}
+        className="-mx-2 -my-1 flex min-h-0 shrink flex-col items-stretch gap-1 overflow-y-auto px-2 py-1 [scrollbar-width:none]">
         <RailTabInstances
           tabInstances={tabInstances}
           activeTabId={activeTabId}
@@ -751,10 +883,28 @@ export function ActivityRail({
   const expandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pointerWithinRef = useRef(false);
-  const focusWithinRef = useRef(false);
+  // A mouse press focuses the entry it lands on, so only focus that arrived
+  // without a press (keyboard) holds the rail open after the pointer leaves.
+  const focusFromPointerRef = useRef(false);
   // The rail grows leftward from the window edge, so expanding mid-press slides
   // the entry out from under the pointer and the click lands elsewhere.
   const pointerPressedRef = useRef(false);
+  // Set by a pointer pick and cleared when the pointer leaves. The picked tool's header controls sit under the
+  // expanded rail, so a rail that stayed open while the pointer headed for them would cover them.
+  const expandSuppressedRef = useRef(false);
+  // Focus can arrive with no press inside the rail, as when a menu returns it to its trigger; the last input anywhere
+  // in the window tells whether a pointer or the keyboard moved it, as :focus-visible does.
+  const lastInputWasPointerRef = useRef(false);
+  useEffect(() => {
+    const onPointer = () => { lastInputWasPointerRef.current = true; };
+    const onKey = () => { lastInputWasPointerRef.current = false; };
+    document.addEventListener("pointerdown", onPointer, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer, true);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, []);
 
   const clearExpandTimer = useCallback(() => {
     if (expandTimerRef.current === null) return;
@@ -770,10 +920,10 @@ export function ActivityRail({
 
   const scheduleExpand = useCallback(() => {
     clearCollapseTimer();
-    if (expanded || expandTimerRef.current !== null) return;
+    if (expanded || expandSuppressedRef.current || expandTimerRef.current !== null) return;
     expandTimerRef.current = setTimeout(() => {
       expandTimerRef.current = null;
-      if (pointerWithinRef.current && !pointerPressedRef.current) setExpanded(true);
+      if (pointerWithinRef.current && !pointerPressedRef.current && !expandSuppressedRef.current) setExpanded(true);
     }, RAIL_EXPAND_DELAY_MS);
   }, [clearCollapseTimer, expanded]);
 
@@ -782,9 +932,9 @@ export function ActivityRail({
     clearCollapseTimer();
     collapseTimerRef.current = setTimeout(() => {
       collapseTimerRef.current = null;
-      const focusWithin = railRef.current?.contains(document.activeElement) ?? false;
-      focusWithinRef.current = focusWithin;
-      if (!pointerWithinRef.current && !focusWithin) setExpanded(false);
+      const keyboardFocusWithin =
+        !focusFromPointerRef.current && (railRef.current?.contains(document.activeElement) ?? false);
+      if (!pointerWithinRef.current && !keyboardFocusWithin) setExpanded(false);
     }, RAIL_COLLAPSE_DELAY_MS);
   }, [clearCollapseTimer, clearExpandTimer]);
 
@@ -810,7 +960,17 @@ export function ActivityRail({
     if (event.pointerType === "touch") return;
     pointerWithinRef.current = false;
     pointerPressedRef.current = false;
+    expandSuppressedRef.current = false;
     scheduleCollapse();
+  };
+
+  const selectTool = (instanceId: string) => {
+    onSelect(instanceId);
+    if (!lastInputWasPointerRef.current) return;
+    clearExpandTimer();
+    clearCollapseTimer();
+    expandSuppressedRef.current = true;
+    setExpanded(false);
   };
 
   const onPointerDownCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -824,15 +984,18 @@ export function ActivityRail({
   };
 
   const onFocusCapture = () => {
-    focusWithinRef.current = true;
+    const fromPointer = pointerPressedRef.current || lastInputWasPointerRef.current;
+    focusFromPointerRef.current = fromPointer;
     clearExpandTimer();
     clearCollapseTimer();
-    if (!pointerPressedRef.current) setExpanded(true);
+    if (!fromPointer) setExpanded(true);
+    // The add menu hands focus back to its trigger after a pointer pick made outside the rail. Treating that as
+    // keyboard focus left the rail expanded over the tool it had just opened.
+    else if (!pointerWithinRef.current) scheduleCollapse();
   };
 
   const onBlurCapture = (event: ReactFocusEvent<HTMLDivElement>) => {
     if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-    focusWithinRef.current = false;
     scheduleCollapse();
   };
 
@@ -845,7 +1008,7 @@ export function ActivityRail({
       changesCount={changesCount}
       changesFresh={changesFresh}
       browserActing={browserActing}
-      onSelect={onSelect}
+      onSelect={selectTool}
       onClose={onClose}
       onReorder={onReorder}
       onCreate={onCreate}

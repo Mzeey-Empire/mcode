@@ -126,6 +126,11 @@ export function getParsedKeybinding(index: number): ParsedKeybinding {
   return parsedCache[index];
 }
 
+/** Whether `event` presses any key currently bound to `commandId`, including a user's rebinding. */
+export function matchesCommandKeybinding(commandId: string, event: KeyboardEvent): boolean {
+  return keybindings.some((binding, index) => binding.command === commandId && matchesKeyEvent(parsedCache[index], event));
+}
+
 /** Find the keybinding for a given command ID. */
 export function getKeybindingForCommand(
   commandId: string,

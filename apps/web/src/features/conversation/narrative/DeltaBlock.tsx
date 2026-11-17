@@ -1,9 +1,9 @@
-import { lazy, Suspense, useMemo } from "react";
+import { Suspense, useMemo } from "react";
 import { committedStreamingText, splitStreamingBlocks } from "./streaming-blocks";
 import { TURN_PROSE_CLASS } from "./narrative-layout";
 import { stripPlanFences } from "@/lib/plan-fences";
 
-const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
+import { LazyMarkdownContent } from "@/components/chat/LazyMarkdownContent";
 
 interface DeltaBlockProps {
   /** The streamed response text to display. */

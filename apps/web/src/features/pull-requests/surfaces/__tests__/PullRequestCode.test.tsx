@@ -550,7 +550,8 @@ describe("PullRequestCode", () => {
     const viewport = await screen.findByTestId("code-viewport-seam");
     expect(viewport).toHaveAttribute("data-files", "0");
     expect(viewport).toHaveAttribute("data-threads", "1");
-    expect(screen.getByRole("status")).toHaveTextContent(
+    // The resizable panel keeps its own, empty, resize announcer beside this one.
+    expect(screen.getAllByRole("status").map((region) => region.textContent)).toContain(
       "No changed files match this view.",
     );
   });

@@ -6,7 +6,7 @@
 - Below 896 pixels, or while the right panel is open, the card does not dock and the reserve is gone. `[data-testid="header-overview-toggle"]` then opens the card as an overlay at the same corner. Escape or an outside press closes the overlay.
 - `header-overview-toggle` reports `aria-pressed="true"` while the card shows, docked or as an overlay. Pressing it on a docked card closes the card, and that close holds for the thread across right-panel changes for the session.
 - The card scrolls within the canvas height, with a bottom fade while more content sits below.
-- `header-panel-toggle` renders only while the right panel is closed. Once open, the panel's row 1 owns `panel-header-toggle` (Close panel) and `panel-header-expand` (Expand or Restore).
+- `header-panel-toggle` renders only while the right panel is closed. Once open, the panel's row 1 owns `panel-header-toggle` (Hide panel) and `panel-header-expand` (Expand or Restore).
 - `panel-header-expand` maximizes the panel within the app. It is not native window fullscreen. While maximized, the chat surface and Thread Overview are intentionally unavailable.
 
 ## How to get to it (user or client POV)

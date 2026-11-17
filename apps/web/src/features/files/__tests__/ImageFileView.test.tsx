@@ -109,4 +109,18 @@ describe("ImageFileView", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Preview" }));
     expect(screen.getByRole("img", { name: "icons/logo.svg" })).toBeTruthy();
   });
+
+  it("flips an SVG between Preview and Source with the narrow row's single toggle", async () => {
+    openImage("icons/logo.svg", "image/svg+xml");
+    await screen.findByRole("img", { name: "icons/logo.svg" });
+    const toggle = screen.getByRole("button", { name: "Show source" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByTestId("code-file-view").textContent).toContain('<rect width="4"'));
+    expect(screen.getByRole("button", { name: "Show source" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show source" }));
+    expect(screen.getByRole("img", { name: "icons/logo.svg" })).toBeTruthy();
+  });
 });

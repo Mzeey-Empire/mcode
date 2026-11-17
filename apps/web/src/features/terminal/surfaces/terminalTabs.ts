@@ -20,7 +20,7 @@ export function terminalCapReason(count: number): string | null {
 
 /**
  * Row-1 tab labels for a scope's terminal records. Shells that share a label get
- * " (n)" ordinals so each tab stays distinguishable; action records take their
+ * a leading "n · " ordinal so each tab stays distinguishable; action records take their
  * Project Action's name.
  */
 export function terminalTabLabels(
@@ -39,7 +39,8 @@ export function terminalTabLabels(
     }
     const ordinal = (seen.get(terminal.label) ?? 0) + 1;
     seen.set(terminal.label, ordinal);
-    labels.set(terminal.id, occurrences.get(terminal.label)! > 1 ? `${terminal.label} (${ordinal})` : terminal.label);
+    // The number leads because inactive tabs shrink and fade at their right edge, which hid a trailing ordinal.
+    labels.set(terminal.id, occurrences.get(terminal.label)! > 1 ? `${ordinal} · ${terminal.label}` : terminal.label);
   }
   return labels;
 }

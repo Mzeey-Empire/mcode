@@ -1,8 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { isLiveSubagentStatus, type SubagentDetail, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { Button, IconButton } from "@/components/ui/button";
-import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
+import { PanelHeaderSlot, PanelTitle } from "@/components/panels/shell/PanelHeader";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { DEFAULT_ICON, TOOL_ICONS, TOOL_LABELS, resolveToolName } from "@/components/chat/tool-renderers/constants";
@@ -24,7 +24,7 @@ import { subagentKind } from "../subagent-kind";
 import { openSubagentDetail, openSubagentsPanel } from "./open-subagent-detail";
 import { ParentPromptBubble } from "./ParentPromptBubble";
 
-const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
+import { LazyMarkdownContent } from "@/components/chat/LazyMarkdownContent";
 
 function providerName(entry: SubagentRosterEntry): string {
   return MODEL_PROVIDERS.find((provider) => provider.id === entry.provider)?.name ?? entry.provider;
@@ -37,7 +37,7 @@ export function SubagentDetailTab({ threadId, entryId }: { readonly threadId: st
   const entry = roster?.entries.find((candidate) => candidate.id === entryId);
   if (!entry) {
     return roster || rosterLost
-      ? <p data-testid="subagent-detail-missing" className="px-5 py-6 text-sm text-muted">This subagent is no longer available.</p>
+      ? <p data-testid="subagent-detail-missing" className="px-6 py-6 text-sm text-muted">This subagent is no longer available.</p>
       : null;
   }
   return (
@@ -57,7 +57,7 @@ export function SubagentDetailTab({ threadId, entryId }: { readonly threadId: st
 }
 
 function DetailBody({ children }: { readonly children: ReactNode }) {
-  return <ScrollArea className="min-h-0 flex-1"><div className="flex flex-col gap-3.5 px-5 pt-2 pb-4">{children}</div></ScrollArea>;
+  return <ScrollArea className="min-h-0 flex-1"><div className="flex flex-col gap-3.5 px-6 pt-2 pb-4">{children}</div></ScrollArea>;
 }
 
 function DetailHeader({ threadId, entry }: { readonly threadId: string; readonly entry: SubagentRosterEntry }) {
@@ -67,15 +67,19 @@ function DetailHeader({ threadId, entry }: { readonly threadId: string; readonly
   const duration = elapsed(entry, now);
   return <>
     <PanelHeaderSlot slot="leading">
-      <PanelTitlePill headingLevel={2} icon={<ProviderIcon provider={entry.provider} size={16} />}>{entry.title}</PanelTitlePill>
+      <PanelTitle headingLevel={2} icon={<ProviderIcon provider={entry.provider} size={16} />}>{entry.title}</PanelTitle>
     </PanelHeaderSlot>
     <PanelHeaderSlot slot="row2">
-      <IconButton shape="round" aria-label="Back to subagents" onClick={() => openSubagentsPanel()}>
-        <ArrowLeft size={16} aria-hidden />
-      </IconButton>
+      {/* Worded like Back to chat: an arrow alone did not say where it goes. */}
+      <Button variant="subtle" shape="round" className="shrink-0 text-body-small font-medium" aria-label="Back to subagents" onClick={() => openSubagentsPanel()}>
+        <ArrowLeft aria-hidden />
+        Subagents
+      </Button>
       <div data-testid="subagent-detail-meta" className="flex h-8 min-w-0 items-center gap-2 rounded-[18px] bg-selected px-3">
         {kind && <span className="text-fade min-w-0 text-xs text-muted">{kind}</span>}
         <span aria-hidden className={cn("size-[7px] shrink-0 rounded-full", running ? "bg-success" : "bg-muted")} />
+        {/* The list names the state beside its dot, so the detail does too; the sr-only status already speaks it. */}
+        <span aria-hidden className="shrink-0 text-xs text-ink">{subagentStatusLabel(entry.status)}</span>
         {duration && <span className="shrink-0 font-mono text-xs text-ink">{duration}</span>}
       </div>
       {running && entry.canStop && entry.childThreadId && <DetailStop threadId={threadId} entry={entry} childThreadId={entry.childThreadId} />}
@@ -130,7 +134,7 @@ function TranscriptBody({ entry, childThreadId }: { readonly entry: SubagentRost
   return (
     <div className="min-h-0 flex-1">
       <MessageList displayThreadId={childThreadId} onSubagentSelect={openSubagentDetail} onOpenSubagents={openSubagentsPanel}
-        leadingContent={showPrompt && entry.prompt ? <div className="px-5 pt-2"><ParentPromptBubble prompt={entry.prompt} /></div> : undefined} />
+        leadingContent={showPrompt && entry.prompt ? <div className="px-6 pt-2"><ParentPromptBubble prompt={entry.prompt} /></div> : undefined} />
     </div>
   );
 }
@@ -173,6 +177,7 @@ function StepsTier({ threadId, entry, roster }: {
     {error && <p role="alert" className="flex items-center gap-2 text-sm text-ink">
       Couldn't load subagent activity <Button variant="ghost" size="compact" onClick={() => setRetry((value) => value + 1)}>Retry</Button>
     </p>}
+    {!detail && !error && <p className="text-body-small text-muted">Loading activity</p>}
     {detail && <StepsDetail detail={detail} running={isLiveSubagentStatus(entry.status)} />}
   </>;
 }

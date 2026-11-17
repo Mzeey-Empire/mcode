@@ -1,11 +1,7 @@
 import { useDiffStore, type RightPanelTool } from "@/stores/diffStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import {
-  canFitSideBySidePanel,
-  getContentRowWidth,
-  preferredSplitPanelWidth,
-} from "@/lib/composer-layout";
+import { getContentRowWidth, preferredSplitPanelWidth, rightPanelPostureForPanel } from "@/lib/composer-layout";
 
 /**
  * On auto-owned opens, size the panel to ~half the current content row. A width
@@ -22,18 +18,22 @@ function applyHalfWidthIfUntouched(workspaceId: string, threadId?: string | null
   );
 }
 
+/** Whether the panel's row is too narrow to show the conversation beside it, docked or floating. */
+function panelNeedsFullSurface(workspaceId: string, threadId?: string | null): boolean {
+  const panel = useDiffStore.getState().getRightPanel(workspaceId, threadId);
+  return rightPanelPostureForPanel(getContentRowWidth(), panel) === "full-surface";
+}
+
 /**
- * After opening the right panel, maximize it when the content row cannot fit
- * composer and panel side by side. Composer-first: inline mode only when there
- * is room; otherwise the panel owns the content row. The width is read from the
- * scope's effective panel record (the thread's own, or the workspace fallback).
+ * After opening the right panel, maximize it when the content row is too narrow
+ * to show the conversation beside it. A panel that only cannot dock floats over
+ * the conversation instead (see {@link rightPanelPostureForPanel}).
  */
 export function applyMaximizeIfCramped(
   workspaceId: string,
   threadId?: string | null,
 ): void {
-  const panelWidth = useDiffStore.getState().getRightPanel(workspaceId, threadId).width;
-  if (canFitSideBySidePanel(getContentRowWidth(), panelWidth)) return;
+  if (!panelNeedsFullSurface(workspaceId, threadId)) return;
   useUiStore.getState().setRightPanelMaximized(true, "layout");
 }
 
@@ -88,11 +88,10 @@ export function hideRightPanelAdaptive(workspaceId: string, threadId?: string | 
 
 /**
  * Puts the chat on screen for a reveal. Clearing maximize alone is not enough
- * when chat and panel cannot fit side by side: the layout guard maximizes again.
+ * when the row is too narrow for both: the layout guard maximizes again.
  */
 export function showChatAdaptive(workspaceId: string, threadId?: string | null): void {
-  const panelWidth = useDiffStore.getState().getRightPanel(workspaceId, threadId).width;
-  if (canFitSideBySidePanel(getContentRowWidth(), panelWidth)) {
+  if (!panelNeedsFullSurface(workspaceId, threadId)) {
     useUiStore.getState().setRightPanelMaximized(false);
     return;
   }

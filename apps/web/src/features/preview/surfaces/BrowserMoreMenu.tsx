@@ -96,7 +96,7 @@ export function BrowserMoreMenu({ tools }: { readonly tools: BrowserTools }) {
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
-        render={<Button type="button" variant="subtle" shape="round" size="icon-compact" aria-label="More" />}
+        render={<Button type="button" variant="subtle" shape="round" size="icon-compact" aria-label="More browser actions" />}
       >
         <EllipsisVertical aria-hidden />
       </DropdownMenuTrigger>

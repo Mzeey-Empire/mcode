@@ -529,6 +529,7 @@ export function ReviewDiffView({
       itemMetrics: { diffHeaderHeight: REVIEW_FILE_HEADER_HEIGHT },
       hunkSeparators: "line-info-basic",
       unsafeCSS: DIFF_UNSAFE_CSS,
+      onPostRender: labelExpandButtons,
     }),
     [lineWrap, loadFileContents, renderMode, shikiTheme, source],
   );
@@ -740,6 +741,25 @@ function SavedAnnotationChip({
       </span>
     </button>
   );
+}
+
+/**
+ * Pierre renders its expand-context controls as icon-only `role="button"`
+ * divs inside the shadow root with no accessible name and no render hook, so
+ * the names are applied after each render.
+ */
+function labelExpandButtons(node: HTMLElement): void {
+  const root = node.shadowRoot ?? node;
+  for (const button of root.querySelectorAll<HTMLElement>("[data-expand-button]:not([data-expand-all-button])")) {
+    // Pierre names the direction the hidden range grows from: "up" reveals the lines that follow the code above,
+    // under a down chevron, so the names follow what the reader sees rather than pierre's attribute.
+    const label = button.hasAttribute("data-expand-up")
+      ? "Show unchanged lines below"
+      : button.hasAttribute("data-expand-down")
+        ? "Show unchanged lines above"
+        : "Show unchanged lines";
+    button.setAttribute("aria-label", label);
+  }
 }
 
 /** Pixel height of {@link ReviewFileHeader}; pierre reserves it before measuring. */

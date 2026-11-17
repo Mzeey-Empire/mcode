@@ -23,11 +23,11 @@ describe("right-panel-layout", () => {
     });
 
     hideRightPanelAdaptive("ws-1", "thread-1");
-    setLayoutMeasurements(1000);
+    setLayoutMeasurements(1100);
     showRightPanelAdaptive("ws-1", "thread-1");
 
     expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
-      width: 500,
+      width: 550,
       widthSource: "auto",
     });
   });

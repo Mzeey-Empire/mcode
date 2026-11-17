@@ -34,7 +34,7 @@ const createTooltipHandle = TooltipPrimitive.createHandle
 type TooltipContentProps = TooltipPrimitive.Popup.Props &
   Pick<
     TooltipPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "anchor" | "side" | "sideOffset"
   > & {
     /** Keys of the command's shortcut, one keycap each, e.g. `["Ctrl", "C"]`. */
     shortcut?: readonly string[]
@@ -53,6 +53,7 @@ function TooltipContent({
   sideOffset = 8,
   align = "center",
   alignOffset = 0,
+  anchor,
   shortcut,
   children,
   ...props
@@ -62,6 +63,7 @@ function TooltipContent({
       <TooltipPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
+        anchor={anchor}
         side={side}
         sideOffset={sideOffset}
         className="pointer-events-none isolate z-(--layer-modal)"

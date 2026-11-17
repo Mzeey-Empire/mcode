@@ -7,6 +7,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { emitPtyData, onPtyData } from "@/features/terminal/adapters/pty-data-registry";
 import { dropRemountAnchor } from "../terminalRemountScroll";
 import { dispatchTerminalClear } from "../terminalClear";
+import { TERMINAL_THEME_TOKENS } from "../terminalTheme";
 
 if (typeof globalThis.ResizeObserver === "undefined") {
   globalThis.ResizeObserver = class {
@@ -133,7 +134,7 @@ function emit(ptyId: string, seq: number, text: string): void {
 
 describe("TerminalView Clear", () => {
   beforeEach(() => {
-    for (const token of ["--page", "--ink", "--success", "--primary", "--error", "--link"]) {
+    for (const token of new Set([...Object.values(TERMINAL_THEME_TOKENS.light), ...Object.values(TERMINAL_THEME_TOKENS.dark)])) {
       document.documentElement.style.setProperty(token, "oklch(50% 0.1 260)");
     }
     vi.clearAllMocks();

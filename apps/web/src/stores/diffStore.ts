@@ -100,14 +100,19 @@ export function refLabel(ref: string): string {
 /** Diff rendering mode. */
 export type DiffRenderMode = "unified" | "side-by-side";
 
-/** Minimum right panel width in pixels. */
-export const PANEL_MIN_WIDTH = 384;
+/** Minimum right panel width in pixels: DESIGN.md's `48rem`. */
+export const PANEL_MIN_WIDTH = 480;
 /**
  * Minimum width reserved for the chat/composer beside an inline right panel.
  * Drag and resize clamping use this (not {@link PANEL_MIN_WIDTH}) so the panel
  * cannot swallow the project tree and still crush the composer to one column.
  */
 export const COMPOSER_MIN_WIDTH = 480;
+/**
+ * Narrowest the conversation may get beside a docked right panel: DESIGN.md's `52rem` at the app's 10px root.
+ * Wider than {@link COMPOSER_MIN_WIDTH} because a docked tool that squeezes the conversation further should float.
+ */
+export const RIGHT_PANEL_CONVERSATION_MIN_WIDTH = 520;
 /** Gap between chat main and right panel in App.tsx. The visible split is a draggable line. */
 export const PANEL_SPLIT_GAP_PX = 0;
 /**
@@ -163,14 +168,14 @@ export function getDefaultPanelWidthPx(): number {
 }
 
 /**
- * Largest panel width that still leaves {@link COMPOSER_MIN_WIDTH}px for the
- * composer in a split row of the given inner width (chat + gap + panel).
+ * Largest docked panel width that still leaves {@link RIGHT_PANEL_CONVERSATION_MIN_WIDTH}px for the
+ * conversation in a split row of the given inner width (chat + gap + panel).
  */
 export function maxPanelWidthInSplit(
   splitWidthPx: number,
   gapPx: number = PANEL_SPLIT_GAP_PX,
 ): number {
-  return Math.max(PANEL_MIN_WIDTH, splitWidthPx - COMPOSER_MIN_WIDTH - gapPx);
+  return Math.max(PANEL_MIN_WIDTH, splitWidthPx - RIGHT_PANEL_CONVERSATION_MIN_WIDTH - gapPx);
 }
 
 /** Review comparison source that decides how a file's diff is fetched and cached. */

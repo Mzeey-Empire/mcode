@@ -144,7 +144,7 @@ describe("OverviewTerminalsSection", () => {
     renderSection();
 
     const row = screen.getAllByTestId("thread-overview-terminal")[1]!;
-    await user.click(within(row).getByRole("button", { name: /^pwsh/ }));
+    await user.click(within(row).getByRole("button", { name: "1 · pwsh" }));
 
     expect(useTerminalStore.getState().activeTerminalByScope[thread.id]).toBe("a");
     expect(useDiffStore.getState().getRightPanel("ws-1", thread.id)).toMatchObject({

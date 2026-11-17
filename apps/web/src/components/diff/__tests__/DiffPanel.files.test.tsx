@@ -1,5 +1,5 @@
 import { createMockWorkspace } from "@mcode/contracts/testing";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewComparison, ReviewComparisonResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
@@ -22,6 +22,14 @@ const transport = {
   getReviewState: vi.mocked(mockTransport.getReviewState),
   listReviewTurns: vi.mocked(mockTransport.listReviewTurns),
 };
+
+/** Opens row 2's View menu and returns the named row once the menu mounts. */
+async function openViewMenuItem(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByTestId("review-display-menu"));
+  const menu = await screen.findByRole("menu");
+  const role = name === "Collapse all" || name === "Expand all" ? "menuitem" : "menuitemcheckbox";
+  return within(menu).getByRole(role, { name });
+}
 
 const EMPTY_READY: ReviewComparisonResult = { status: "ready", comparison: { files: [], additions: 0, deletions: 0 } };
 
@@ -173,6 +181,7 @@ describe("DiffPanel", () => {
       bulkDiffExpand: null,
       reviewViewMenuOpen: false,
     });
+    useDiffStore.getState().showRightPanel("workspace-1", "thread-1");
   });
 
   it("starts closed at wide widths and never requests the full worktree", async () => {
@@ -185,11 +194,79 @@ describe("DiffPanel", () => {
     expect(useDiffStore.getState().reviewFilesVisibleByScope["thread-1"]).toBeFalsy();
   });
 
+  it("reloads a git view when hidden Review is shown, so an edit made meanwhile appears", async () => {
+    pickThreadView("unstaged");
+    transport.getReviewComparison.mockResolvedValue(stats());
+    const { rerender } = render(<DiffPanel active={false} />);
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveTextContent("No unstaged changes"));
+
+    transport.getReviewComparison.mockResolvedValue(stats("README.md"));
+    rerender(<DiffPanel active />);
+
+    expect(await screen.findByTestId("diff-files")).toHaveTextContent("README.md");
+  });
+
+  it("reloads a git view when the panel reopens with Review on top, so an edit made meanwhile appears", async () => {
+    pickThreadView("unstaged");
+    transport.getReviewComparison.mockResolvedValue(stats());
+    render(<DiffPanel active />);
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveTextContent("No unstaged changes"));
+    act(() => useDiffStore.getState().hideRightPanel("workspace-1", "thread-1"));
+
+    transport.getReviewComparison.mockResolvedValue(stats("README.md"));
+    act(() => useDiffStore.getState().showRightPanel("workspace-1", "thread-1"));
+
+    expect(await screen.findByTestId("diff-files")).toHaveTextContent("README.md");
+  });
+
+  it("does not repeat an earlier empty answer while the reload on show is still checking", async () => {
+    pickThreadView("unstaged");
+    transport.getReviewComparison.mockResolvedValue(stats());
+    const { rerender } = render(<DiffPanel active={false} />);
+    await waitFor(() => expect(screen.getByTestId("review-state")).toHaveTextContent("No unstaged changes"));
+
+    const reload = deferred<ReviewComparisonResult>();
+    transport.getReviewComparison.mockReturnValue(reload.promise);
+    rerender(<DiffPanel active />);
+
+    expect(await screen.findByTestId("review-loading")).toBeInTheDocument();
+    expect(screen.queryByText("No unstaged changes")).not.toBeInTheDocument();
+    await act(async () => reload.resolve(stats("README.md")));
+    expect(await screen.findByTestId("diff-files")).toHaveTextContent("README.md");
+  });
+
+  it("reloads once per show, not on renders while Review stays visible", async () => {
+    pickThreadView("unstaged");
+    transport.getReviewComparison.mockResolvedValue(stats("a.ts"));
+    const { rerender } = render(<DiffPanel active />);
+    await screen.findByTestId("diff-files");
+    rerender(<DiffPanel active />);
+    rerender(<DiffPanel active={false} />);
+    rerender(<DiffPanel active />);
+    await waitFor(() => expect(transport.getReviewComparison).toHaveBeenCalledTimes(2));
+    rerender(<DiffPanel active />);
+
+    await act(async () => { await Promise.resolve(); });
+    expect(transport.getReviewComparison).toHaveBeenCalledTimes(2);
+  });
+
   it("starts with Wrap on", async () => {
     render(<DiffPanel />);
 
     await screen.findByTestId("review-state");
-    expect(screen.getByTestId("review-wrap-toggle")).toHaveAttribute("aria-pressed", "true");
+    expect(await openViewMenuItem(userEvent.setup(), "Wrap lines")).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("turns Wrap off from the View menu, and the row reports it", async () => {
+    render(<DiffPanel />);
+    await screen.findByTestId("review-state");
+    const user = userEvent.setup();
+
+    const wrap = await openViewMenuItem(user, "Wrap lines");
+    await user.click(wrap);
+
+    expect(useDiffStore.getState().getLineWrap("thread-1")).toBe(false);
+    expect(wrap).toHaveAttribute("aria-checked", "false");
   });
 
   it("hides whitespace-only files in Git views, keeps the choice across views, and remembers it", async () => {
@@ -200,16 +277,16 @@ describe("DiffPanel", () => {
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("logic.ts,indent.ts"));
     expect(screen.getByTestId("review-stat-summary")).toHaveTextContent(/^2 files\s*\+2/);
-    const toggle = screen.getByTestId("review-whitespace-toggle");
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(toggle).toHaveAccessibleName("Hide whitespace changes");
+    const user = userEvent.setup();
+    const toggle = await openViewMenuItem(user, "Hide whitespace changes");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
 
-    await userEvent.setup().click(toggle);
+    await user.click(toggle);
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent(/^logic\.ts$/));
     expect(screen.getByTestId("review-stat-summary")).toHaveTextContent(/^1 file\s*\+1/);
     expect(transport.getReviewComparison).toHaveBeenLastCalledWith(expect.objectContaining({ view: "unstaged", ignoreWhitespace: true }));
     expect(screen.getByTestId("diff-files")).toHaveAttribute("data-ignore-whitespace", "true");
-    expect(screen.getByTestId("review-whitespace-toggle")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("review-whitespace-toggle")).toHaveAttribute("aria-checked", "true");
     expect(JSON.parse(localStorage.getItem("mcode.review-ignore-whitespace.v1") ?? "{}")).toEqual({ "thread-1": true });
 
     act(() => pickThreadView("staged"));
@@ -225,12 +302,13 @@ describe("DiffPanel", () => {
     render(<DiffPanel />);
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("agent.ts"));
-    const toggle = screen.getByTestId("review-whitespace-toggle");
+    const user = userEvent.setup();
+    const toggle = await openViewMenuItem(user, "Hide whitespace changes");
     expect(toggle).toHaveAttribute("aria-disabled", "true");
     expect(toggle).toHaveAccessibleDescription("Not available for agent patches");
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await userEvent.setup().hover(toggle);
-    expect(await screen.findByText("Not available for agent patches")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    await user.hover(toggle);
+    await waitFor(() => expect(screen.getAllByText("Not available for agent patches").some((node) => !node.hidden)).toBe(true));
   });
 
   it.each([
@@ -244,7 +322,8 @@ describe("DiffPanel", () => {
     render(<DiffPanel />);
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("indent.ts,logic.ts"));
-    await userEvent.setup().click(screen.getByTestId("review-whitespace-toggle"));
+    const user = userEvent.setup();
+    await user.click(await openViewMenuItem(user, "Hide whitespace changes"));
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent(/^logic\.ts$/));
     expect(transport.getCumulativeDiffStats).toHaveBeenLastCalledWith("thread-1", baseline, { ignoreWhitespace: true });
     expect(screen.getByTestId("diff-files")).toHaveAttribute("data-ignore-whitespace", "true");
@@ -257,7 +336,8 @@ describe("DiffPanel", () => {
     render(<DiffPanel />);
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("fallback.ts"));
-    await userEvent.setup().click(screen.getByTestId("review-whitespace-toggle"));
+    const user = userEvent.setup();
+    await user.click(await openViewMenuItem(user, "Hide whitespace changes"));
     await waitFor(() => expect(transport.getTurnDiffComparison).toHaveBeenLastCalledWith("thread-1", "msg-1", { ignoreWhitespace: true }));
   });
 
@@ -607,10 +687,10 @@ describe("DiffPanel", () => {
     expect(body).toHaveAttribute("data-review-state", kind);
     expect(body).toHaveTextContent(text);
     expect(screen.queryByTestId("diff-files")).not.toBeInTheDocument();
-    // Refresh, Expand/Collapse all and Files stay reachable without a file list.
+    // Refresh, the View menu and Files stay reachable without a file list.
     expect(screen.getByTestId("review-controls-row")).toBeInTheDocument();
     expect(screen.getByTestId("review-refresh")).toBeEnabled();
-    expect(screen.getByTestId("review-toggle-all")).toBeInTheDocument();
+    expect(screen.getByTestId("review-display-menu")).toBeEnabled();
     expect(screen.getByTestId("review-files-toggle")).toBeEnabled();
   });
 
@@ -629,17 +709,14 @@ describe("DiffPanel", () => {
     renderUnstaged(stats("a.ts", "b.ts", "c.ts"));
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("a.ts,b.ts,c.ts"));
     const user = userEvent.setup();
-    const toggle = () => screen.getByTestId("review-toggle-all");
 
-    expect(toggle()).toHaveAccessibleName("Collapse all");
-
-    await user.click(toggle());
+    await user.click(await openViewMenuItem(user, "Collapse all"));
     expect(useDiffStore.getState().bulkDiffExpand?.expand).toBe(false);
-    expect(toggle()).toHaveAccessibleName("Expand all");
 
-    await user.click(toggle());
+    await user.click(await openViewMenuItem(user, "Expand all"));
     expect(useDiffStore.getState().bulkDiffExpand?.expand).toBe(true);
-    expect(toggle()).toHaveAccessibleName("Collapse all");
+
+    expect(await openViewMenuItem(user, "Collapse all")).toBeInTheDocument();
   });
 
   it("starts All turns collapsed, so its toggle offers Expand all", async () => {
@@ -648,7 +725,7 @@ describe("DiffPanel", () => {
     render(<DiffPanel />);
 
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("a.ts"));
-    expect(screen.getByTestId("review-toggle-all")).toHaveAccessibleName("Expand all");
+    expect(await openViewMenuItem(userEvent.setup(), "Expand all")).toBeInTheDocument();
   });
 
   it("loads Since you looked after this visit's baseline, collapsed, and reloads when the baseline moves", async () => {
@@ -661,7 +738,8 @@ describe("DiffPanel", () => {
     expect(screen.getByTestId("diff-files")).toHaveAttribute("data-source", "since-looked");
     expect(screen.getByTestId("diff-files")).toHaveAttribute("data-id", "4");
     expect(transport.getCumulativeDiffStats).toHaveBeenLastCalledWith("thread-1", 4, { ignoreWhitespace: false });
-    expect(screen.getByTestId("review-toggle-all")).toHaveAccessibleName("Expand all");
+    expect(await openViewMenuItem(userEvent.setup(), "Expand all")).toBeInTheDocument();
+    await userEvent.setup().keyboard("{Escape}");
 
     transport.getCumulativeDiffStats.mockResolvedValue(stats("b.ts"));
     act(() => threadAttentionStore.setState({ visitBaselines: { "thread-1": 8 } }));

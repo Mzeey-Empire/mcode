@@ -1,4 +1,5 @@
 import { useMemo, type ReactElement } from "react";
+import { Terminal } from "lucide-react";
 import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts/models/terminal";
 import { type WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
@@ -60,9 +61,13 @@ function TerminalTabs({
     () =>
       terminals.map((terminal) => {
         const run = terminal.kind === "action" && terminal.actionId ? actionRuns[terminal.actionId] : undefined;
+        const label = labels.get(terminal.id) ?? terminal.label;
         return {
           id: terminal.id,
-          label: labels.get(terminal.id) ?? terminal.label,
+          label,
+          // Hiding the Terminal tool keeps shells running; closing a tab ends one, so its name says so.
+          closeLabel: `Close ${label} (ends the shell)`,
+          closeTooltip: "End shell and stop running commands",
           icon: terminal.kind === "action" ? <ActionTabGlyph run={run} /> : <ActionIcon iconId={shellActionIconId(terminal.label)} command="" size={14} />,
           status: actionBadgeLabel(run),
         };
@@ -75,6 +80,7 @@ function TerminalTabs({
         items={items}
         activeId={activeId}
         label="Terminals"
+        tool={{ icon: <Terminal />, name: "Terminal" }}
         addLabel="New terminal"
         addDisabledReason={terminals.length >= TERMINAL_MAX_PER_SCOPE ? TERMINAL_CAP_REASON : undefined}
         onSelect={(ptyId) => useTerminalStore.getState().setActiveTerminal(scopeId, ptyId)}

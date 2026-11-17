@@ -43,6 +43,22 @@ describe("ReviewHeader view menu", () => {
     useDiffStore.setState({ viewMode: "unstaged", diffRevisionByScope: {}, reviewViewMenuOpen: false });
   });
 
+  it("names the tool before a picker that shows only the current view", async () => {
+    const user = userEvent.setup();
+    const { container } = render(header());
+    expect(container.querySelector("[data-panel-tool-name]")).toHaveTextContent(/^Review$/);
+    const trigger = screen.getByRole("button", { name: "Select review view" });
+    expect(trigger).toHaveTextContent(/^Unstaged$/);
+
+    await user.click(trigger);
+    expect(await screen.findByTestId("review-view-unstaged")).toHaveTextContent(/^Unstaged$/);
+  });
+
+  it("names both sides of a fixed comparison in row 2", async () => {
+    render(header());
+    expect(await screen.findByTestId("review-operand-slot")).toHaveTextContent(/^Working tree→againststaged$/);
+  });
+
   it("lists view names in three groups and dims the ones that cannot load with their reason", async () => {
     const user = userEvent.setup();
     render(header());

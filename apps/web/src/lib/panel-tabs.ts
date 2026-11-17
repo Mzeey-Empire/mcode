@@ -26,6 +26,11 @@ export interface PanelTabType {
   readonly needsThread: boolean;
   /** Command id whose keybinding renders as the card's keycap, when it has one. */
   readonly commandId?: string;
+  /**
+   * The rail exit only hides this tool and leaves its work running. It gets this name and a minus glyph, so it never
+   * looks like the × on an item tab that ends the item.
+   */
+  readonly hideLabel?: string;
 }
 
 /**
@@ -40,23 +45,27 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     id: "preview",
     label: "Browser",
     icon: Globe,
-    blurb: "Open a website",
+    blurb: "Web pages for this thread",
     needsThread: false,
     commandId: "preview.toggle",
+    // Pages live in the preview tabs store, not the panel, so hiding Browser leaves them open.
+    hideLabel: "Hide Browser (pages stay open)",
   },
   {
     id: "terminal",
     label: "Terminal",
     icon: Terminal,
-    blurb: "Start a shell",
+    blurb: "Shells in this thread's checkout",
     needsThread: false,
     commandId: "terminal.toggle",
+    // Closing the rail entry only hides the tool; terminal records are not ended.
+    hideLabel: "Hide Terminal (shells keep running)",
   },
   {
     id: "files",
     label: "Files",
     icon: Files,
-    blurb: "Browse project files",
+    blurb: "Files in this thread's checkout",
     needsThread: false,
     commandId: "files.toggle",
   },
@@ -64,7 +73,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     id: "changes",
     label: "Review",
     icon: Diff,
-    blurb: "View code changes",
+    blurb: "Diffs in this thread's checkout",
     // Dual-scope: the git working-tree views (Unstaged/Staged/Commit/Branch)
     // read the workspace root and need no thread; a thread adds the turn views.
     // See CONTEXT.md → "Review tab".
@@ -75,7 +84,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     id: "environment",
     label: "Project settings",
     icon: Settings,
-    blurb: "Edit Project actions",
+    blurb: "Shared by all project threads",
     needsThread: false,
     commandId: "projectEnvironment.open",
   },
@@ -83,7 +92,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     id: "tasks",
     label: "Plan",
     icon: FileText,
-    blurb: "Review the plan",
+    blurb: "The agent's plan for this thread",
     needsThread: true,
     commandId: "tasks.toggle",
   },
@@ -91,8 +100,9 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     id: "subagents",
     label: "Subagents",
     icon: Layers,
-    blurb: "Follow delegated work",
+    blurb: "Agents this thread delegated to",
     needsThread: true,
+    commandId: "subagents.toggle",
   },
 ];
 

@@ -141,7 +141,7 @@ export function GeneralSection({ workspaceId }: { readonly workspaceId: string }
   const chosenPath = icon?.source === "chosen" ? icon.path : workspace.icon_path;
 
   return (
-    <div className="flex flex-col px-2">
+    <div className="flex flex-col px-6">
       <SettingRow title="Icon" detail={iconSource(icon, chosenPath)}>
         <ProjectIcon workspaceId={workspaceId} name={workspace.name} size={40} />
         <ProjectIconPicker workspaceId={workspaceId} chosenPath={icon?.source === "chosen" ? icon.path : null} onPick={saveIcon} />

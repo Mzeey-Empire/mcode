@@ -1,7 +1,7 @@
 import { useEffect, type RefObject } from "react";
 import { useDiffStore } from "@/stores/diffStore";
 import { useUiStore } from "@/stores/uiStore";
-import { canFitSideBySidePanel, setLayoutMeasurements } from "@/lib/composer-layout";
+import { rightPanelMinWidth, rightPanelPostureForPanel, setLayoutMeasurements } from "@/lib/composer-layout";
 
 /** Inputs that affect composer-first layout enforcement. */
 export interface ComposerLayoutGuardOptions {
@@ -12,13 +12,16 @@ export interface ComposerLayoutGuardOptions {
   readonly activeThreadId: string | null;
 }
 
+/**
+ * The content row holds both the conversation and the panel, so its width does not depend on the panel's posture.
+ * A panel that cannot dock floats over the conversation; only a row too narrow to show both maximizes it.
+ */
 function enforceThreadLayout(contentWidth: number, workspaceId: string, threadId: string | null): void {
   const ui = useUiStore.getState();
   const diff = useDiffStore.getState();
   const panelVisible = diff.getRightPanelVisible(workspaceId, threadId);
   if (!panelVisible) return;
-  const panelWidth = diff.getRightPanel(workspaceId, threadId).width;
-  const fits = canFitSideBySidePanel(contentWidth, panelWidth);
+  const fits = rightPanelPostureForPanel(contentWidth, diff.getRightPanel(workspaceId, threadId)) !== "full-surface";
   if (ui.rightPanelMaximized) {
     if (ui.rightPanelMaximizedByLayout && fits) ui.setRightPanelMaximized(false);
     return;
@@ -33,11 +36,11 @@ function enforceComposerLayout(contentWidth: number, opts: ComposerLayoutGuardOp
 }
 
 /**
- * Composer-first responsive guard: on shrink, maximizes the inline right panel
- * before the chat/composer can fall below its minimum width, and restores it
- * side by side when room returns. The docked project tree is never moved; it
- * only narrows the content row. Publishes the live content-row width for
- * adaptive open paths.
+ * Composer-first responsive guard: on shrink, maximizes the right panel only when
+ * the conversation and a floating panel can no longer share the content row, and
+ * restores it when room returns. The docked project tree is never moved; it only
+ * narrows the content row. Publishes the live content-row width for adaptive
+ * open paths.
  */
 export function useComposerLayoutGuard(
   contentRowRef: RefObject<HTMLElement | null>,
@@ -53,6 +56,10 @@ export function useComposerLayoutGuard(
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
   const rightPanelMaximizedByLayout = useUiStore((s) => s.rightPanelMaximizedByLayout);
+  // Opening or closing the panel, or a tool in it, changes the room it needs without resizing the content row, and
+  // a floating panel never resizes it, so these rerun the guard too.
+  const rightPanelVisible = useDiffStore((s) => activeWorkspaceId !== null && s.getRightPanelVisible(activeWorkspaceId, activeThreadId));
+  const rightPanelNeed = useDiffStore((s) => activeWorkspaceId === null ? 0 : rightPanelMinWidth(s.getRightPanel(activeWorkspaceId, activeThreadId)));
 
   useEffect(() => {
     if (settingsOpen) return;
@@ -97,5 +104,7 @@ export function useComposerLayoutGuard(
     sidebarCollapsed,
     rightPanelMaximized,
     rightPanelMaximizedByLayout,
+    rightPanelVisible,
+    rightPanelNeed,
   ]);
 }

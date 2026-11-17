@@ -6,7 +6,7 @@ import { reviewViewAvailability } from "../lib/review-views";
 import {
   useDiffStore,
   PANEL_MIN_WIDTH,
-  COMPOSER_MIN_WIDTH,
+  RIGHT_PANEL_CONVERSATION_MIN_WIDTH,
   PANEL_SPLIT_GAP_PX,
   maxPanelWidthInSplit,
   getDefaultPanelWidthPx,
@@ -391,10 +391,10 @@ describe("diffStore", () => {
   });
 
   describe("maxPanelWidthInSplit", () => {
-    it("reserves composer min width from the row width", () => {
+    it("reserves the conversation's docked minimum from the row width", () => {
       const split = 1200;
       expect(maxPanelWidthInSplit(split)).toBe(
-        split - COMPOSER_MIN_WIDTH - PANEL_SPLIT_GAP_PX,
+        split - RIGHT_PANEL_CONVERSATION_MIN_WIDTH - PANEL_SPLIT_GAP_PX,
       );
     });
 
@@ -845,12 +845,12 @@ describe("diffStore", () => {
       const { showRightPanel, setRightPanelWidth, setRightPanelTab, getRightPanel } =
         useDiffStore.getState();
       showRightPanel("ws-1");
-      setRightPanelWidth("ws-1", null, 460);
+      setRightPanelWidth("ws-1", null, 520);
       setRightPanelTab("ws-1", null, "preview");
 
       const panel = getRightPanel("ws-1");
       expect(panel.visible).toBe(true);
-      expect(panel.width).toBe(460);
+      expect(panel.width).toBe(520);
       expect(panel.activeTab).toBe("preview");
     });
 
