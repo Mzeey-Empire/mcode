@@ -1,1800 +1,297 @@
 ---
 name: Mcode
-description: Orchestration surface for running many coding agents at once, glanceable, editorial, and dark by default.
-# Colors mirror the Paper role tokens (--color-<role> dark, --color-light-<role> light).
-# Each role points at a step of the Paper 50 to 950 ramps (neutral, amber, blue, sage,
-# clay, violet); the step is named in the trailing comment. The ramps themselves live in
-# Paper and in apps/web/src/index.css.
-colors:
-  page: "oklch(0.12 0.005 260)" # neutral-950
-  background: "oklch(0.16 0.005 260)" # neutral-900
-  panel: "oklch(0.19 0.005 260)" # neutral-800
-  hover: "oklch(0.22 0.005 260)" # neutral-700
-  selected: "oklch(0.24 0.005 260)" # neutral-600
-  border: "oklch(0.25 0.005 260)" # between neutral-600 and neutral-500
-  control-border: "oklch(0.50 0.010 260)" # neutral-400
-  ink: "oklch(0.955 0.005 260)" # neutral-100
-  muted: "oklch(0.65 0.005 260)" # neutral-300
-  primary: "oklch(0.72 0.17 75)" # amber-500
-  primary-hover: "oklch(0.68 0.17 75)" # amber-600
-  primary-ink: "oklch(0.16 0.005 260)" # neutral-900
-  destructive: "oklch(0.65 0.20 25)" # clay-500
-  destructive-ink: "oklch(0.16 0.005 260)" # neutral-900
-  button-secondary-hover: "oklch(0.28 0.005 260)" # neutral-500
-  button-destructive-hover: "oklch(0.78 0.13 25)" # clay-400
-  focus: "oklch(0.62 0.19 264)" # blue-500
-  link: "oklch(0.70 0.14 260)" # blue-400
-  success: "oklch(0.78 0.13 145)" # sage-400
-  error: "oklch(0.78 0.13 25)" # clay-400
-  warning: "oklch(0.82 0.11 92)" # brass, off the lamp's hue
-  info: "oklch(0.70 0.14 260)" # blue-400
-  pr-merged: "oklch(0.70 0.14 293)" # violet-400
-  diff-add-bg: "oklch(0.26 0.035 145)" # sage-900
-  diff-remove-bg: "oklch(0.26 0.045 25)" # clay-900
-  light-page: "oklch(0.955 0.005 260)" # neutral-100
-  light-background: "oklch(0.99 0.005 260)" # neutral-50
-  light-panel: "oklch(0.99 0.005 260)" # neutral-50
-  light-hover: "oklch(0.955 0.005 260)" # neutral-100
-  light-selected: "oklch(0.90 0.005 260)" # neutral-200
-  light-border: "oklch(0.925 0.005 260)" # between neutral-100 and neutral-200
-  light-control-border: "oklch(0.65 0.005 260)" # neutral-300
-  light-ink: "oklch(0.19 0.005 260)" # neutral-800
-  light-muted: "oklch(0.47 0.010 260)" # a step below neutral-400
-  light-primary: "oklch(0.52 0.17 75)" # amber-700
-  light-primary-hover: "oklch(0.48 0.17 75)" # amber-800
-  light-primary-ink: "oklch(0.99 0.005 260)" # neutral-50
-  light-destructive: "oklch(0.577 0.19 27.3)" # clay-600
-  light-destructive-ink: "oklch(0.99 0.005 260)" # neutral-50
-  light-button-secondary-hover: "oklch(0.90 0.005 260)" # neutral-200
-  light-button-destructive-hover: "oklch(0.52 0.14 25)" # clay-700
-  light-focus: "oklch(0.52 0.17 264)" # blue-600
-  light-link: "oklch(0.50 0.16 260)" # blue-700
-  light-success: "oklch(0.52 0.12 145)" # sage-600
-  light-error: "oklch(0.52 0.14 25)" # clay-700
-  light-warning: "oklch(0.46 0.10 92)" # dark brass, off the lamp's hue
-  light-info: "oklch(0.50 0.16 260)" # blue-700
-  light-pr-merged: "oklch(0.50 0.16 293)" # violet-700
-  light-diff-add-bg: "oklch(0.96 0.035 145)" # sage-100
-  light-diff-remove-bg: "oklch(0.96 0.045 25)" # clay-100
-  # Identity asset, not a UI role. Provider marks keep their own colours.
-  provider-claude: "#D97757"
-  # Owned here: Paper defines only the diff background pair.
-  diff-add-gutter: "oklch(0.50 0.11 145)"
-  diff-add-text: "oklch(0.86 0.09 145)"
-  diff-add-emphasis: "oklch(0.34 0.07 145)" # sage-800, word-level emphasis
-  diff-remove-gutter: "oklch(0.55 0.13 25)"
-  diff-remove-text: "oklch(0.86 0.09 25)"
-  diff-remove-emphasis: "oklch(0.37 0.09 25)" # clay-800, word-level emphasis
-  light-diff-add-gutter: "oklch(0.78 0.10 145)"
-  light-diff-add-text: "oklch(0.40 0.12 145)"
-  light-diff-add-emphasis: "oklch(0.93 0.055 145)"
-  light-diff-remove-gutter: "oklch(0.78 0.11 25)"
-  light-diff-remove-text: "oklch(0.48 0.15 25)"
-  light-diff-remove-emphasis: "oklch(0.93 0.065 25)"
-  # Owned here until Paper adds them: entity token hues.
-  capability: "oklch(0.78 0.105 328)"
-  file-reference: "oklch(0.80 0.07 205)"
-  light-capability: "oklch(0.50 0.15 328)"
-  light-file-reference: "oklch(0.48 0.08 205)"
-typography:
-  h1:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "4.8rem"
-    fontWeight: 600
-    lineHeight: "5.6rem"
-    letterSpacing: "-0.03em"
-  h2:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "4rem"
-    fontWeight: 600
-    lineHeight: "4.8rem"
-    letterSpacing: "-0.025em"
-  h3:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "3.2rem"
-    fontWeight: 600
-    lineHeight: "4rem"
-    letterSpacing: "-0.02em"
-  h4:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "2.8rem"
-    fontWeight: 600
-    lineHeight: "3.2rem"
-    letterSpacing: "-0.015em"
-  h5:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "2.4rem"
-    fontWeight: 600
-    lineHeight: "2.8rem"
-    letterSpacing: "-0.01em"
-  h6:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "2rem"
-    fontWeight: 600
-    lineHeight: "2.4rem"
-    letterSpacing: "0em"
-  body:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "1.6rem"
-    fontWeight: 400
-    lineHeight: "2.4rem"
-    letterSpacing: "0em"
-  prose:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "1.6rem"
-    fontWeight: 400
-    lineHeight: "2.8rem"
-    letterSpacing: "0em"
-  body-small:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "1.4rem"
-    fontWeight: 400
-    lineHeight: "2rem"
-    letterSpacing: "0em"
-  caption:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "1.2rem"
-    fontWeight: 400
-    lineHeight: "1.6rem"
-    letterSpacing: "0em"
-  label:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "1.4rem"
-    fontWeight: 500
-    lineHeight: "2rem"
-    letterSpacing: "0em"
-  button:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "1.4rem"
-    fontWeight: 500
-    lineHeight: "2rem"
-    letterSpacing: "0em"
-  link:
-    fontFamily: "Public Sans, ui-sans-serif, system-ui, -apple-system, sans-serif"
-    fontSize: "1.6rem"
-    fontWeight: 500
-    lineHeight: "2.4rem"
-    letterSpacing: "0em"
-  code:
-    fontFamily: "JetBrains Mono, Cascadia Code, Consolas, monospace"
-    fontSize: "1.4rem"
-    fontWeight: 400
-    lineHeight: "2rem"
-    letterSpacing: "0em"
-    fontVariantLigatures: "none"
-rounded:
-  badge: "0.6rem"
-  menu: "0.8rem"
-  control: "1rem"
-  composer: "1.4rem"
-  dialog: "1.8rem"
-  full: "999px"
-spacing:
-  4: "0.4rem"
-  8: "0.8rem"
-  12: "1.2rem"
-  16: "1.6rem"
-  20: "2rem"
-  24: "2.4rem"
-  28: "2.8rem"
-  32: "3.2rem"
-  40: "4rem"
-  48: "4.8rem"
-  56: "5.6rem"
-  compact-row: "{spacing.8}"
-  group: "{spacing.16}"
-  task-stage: "{spacing.32}"
-  workspace: "{spacing.32}"
-  text-fade: "{spacing.24}"
-sizes:
-  control-compact: "3.2rem"
-  control-default: "4rem"
-  control-comfortable: "4.8rem"
-  row-compact: "3.2rem"
-  row-default: "4rem"
-  row-comfortable: "4.8rem"
-  target-touch: "4.8rem"
-  border-default: "1px"
-  focus-ring: "2px"
-  focus-offset: "2px"
-opacity:
-  disabled: 0.5
-  overlay: 0.1
-  active-row: 0.55
-iconography:
-  package: "lucide-react"
-  grid: "2.4rem"
-  strokeWidth: 1.5
-  caps: "round"
-  joins: "round"
-  sizes:
-    metadata: "1.2rem"
-    compact: "1.6rem"
-    standard: "2rem"
-    large: "2.4rem"
-    display: "3.2rem"
-  opticalSizes:
-    dense: "1.4rem"
-motion:
-  instant: "0ms"
-  fast: "120ms"
-  standard: "180ms"
-  overlay: "240ms"
-  ease: "cubic-bezier(0.2, 0, 0, 1)"
-  spin: "1000ms"
-shadows:
-  # The 2px gap takes the color of the surface the control sits on.
-  focusRing: "0 0 0 2px {surface}, 0 0 0 4px {colors.focus}"
-  popover: "0 8px 24px oklch(0 0 0 / 0.24)"
-  floating: "0 8px 24px oklch(0 0 0 / 0.40)"
-  dialog: "0 16px 48px oklch(0 0 0 / 0.40)"
-  lightOverlay: "0 12px 32px #1418201F, 0 2px 6px #1418200F"
-layout:
-  sidebarMin: "22rem"
-  sidebarDefault: "30.4rem"
-  sidebarMax: "34rem"
-  conversationMin: "52rem"
-  readingMeasure: "76rem"
-  composerWidth: "76rem"
-  threadOverviewWidth: "28rem"
-  inspectorMin: "28rem"
-  inspectorDefault: "31rem"
-  rightRail: "4.8rem"
-  rightRailExpanded: "16rem"
-  rightPanelMin: "48rem"
-  rightPanelDefault: "60rem"
-  rightPanelMax: "84rem"
-  panelHeaderPrimary: "4.8rem"
-  panelHeaderSecondary: "4rem"
-  settingsMeasure: "76rem"
-  wideMin: "126rem"
-  constrainedMin: "76rem"
-layers:
-  base: 0
-  sticky: 10
-  dropdown: 20
-  floatingPanel: 30
-  modalBackdrop: 40
-  modal: 50
-  toast: 60
-  tooltip: 70
-components:
-  button:
-    rounded: "{rounded.control}"
-    typography: "{typography.button}"
-    heights: "{sizes.control-compact} / {sizes.control-default} / {sizes.control-comfortable}"
-    paddingInline: "1.2rem / 1.6rem / 2rem"
-    iconSize: "1.6rem / 2rem / 2rem"
-    pressed: "inset 0 0 0 2px <variant foreground>; ghost: {colors.selected} fill, no ring"
-    focus: "{shadows.focusRing}"
-    disabledOpacity: "{opacity.disabled}"
-  button-primary:
-    backgroundColor: "{colors.primary}"
-    backgroundColorHover: "{colors.primary-hover}"
-    textColor: "{colors.primary-ink}"
-    backgroundColorLight: "{colors.light-primary}"
-    backgroundColorHoverLight: "{colors.light-primary-hover}"
-    textColorLight: "{colors.light-primary-ink}"
-  button-outline:
-    backgroundColor: "{colors.background}"
-    backgroundColorHover: "{colors.hover}"
-    borderColor: "{colors.control-border}"
-    textColor: "{colors.ink}"
-  button-secondary:
-    backgroundColor: "{colors.selected}"
-    backgroundColorHover: "{colors.button-secondary-hover}"
-    textColor: "{colors.ink}"
-  button-ghost:
-    backgroundColor: "transparent"
-    backgroundColorHover: "{colors.hover}"
-    borderColor: "transparent"
-    textColor: "{colors.ink}"
-    iconColorAtRest: "{colors.muted}"
-  button-destructive:
-    backgroundColor: "{colors.destructive}"
-    backgroundColorHover: "{colors.button-destructive-hover}"
-    textColor: "{colors.destructive-ink}"
-  button-link:
-    textColor: "{colors.link}"
-    typography: "{typography.link}"
-    textDecoration: "underline"
-  icon-button-round:
-    size: "{sizes.control-compact}"
-    rounded: "{rounded.full}"
-    backgroundColor: "{colors.selected}"
-    backgroundColorOn: "{colors.control-border}"
-    iconColor: "{colors.ink}"
-    iconSize: "{iconography.sizes.compact}"
-    border: "none"
-    floatingSize: "{sizes.control-default}"
-    floatingShadow: "{shadows.floating}"
-  input:
-    backgroundColor: "{colors.selected}"
-    borderColor: "{colors.control-border}"
-    borderColorHover: "{colors.muted}"
-    textColor: "{colors.ink}"
-    placeholderColor: "{colors.muted}"
-    errorColor: "{colors.error}"
-    focus: "{shadows.focusRing}"
-    typography: "{typography.body-small}"
-    rounded: "{rounded.control}"
-    height: "{sizes.control-default}"
-    heightCompact: "{sizes.control-compact}"
-    paddingInline: "1.2rem"
-    disabledOpacity: "{opacity.disabled}"
-  panel:
-    backgroundColor: "{colors.background}"
-    rounded: "0"
-    padding: "0"
-  floating-panel:
-    backgroundColor: "{colors.panel}"
-    borderColor: "{colors.border}"
-    rounded: "{rounded.composer}"
-    padding: "0.8rem"
-    shadow: "{shadows.popover}"
-    shadowLight: "{shadows.lightOverlay}"
-  menu-row:
-    height: "{sizes.row-compact}"
-    rounded: "{rounded.badge}"
-    paddingInline: "1.2rem"
-    iconSlot: "2rem"
-    iconSize: "{iconography.sizes.compact}"
-    iconColor: "{colors.muted}"
-    typography: "{typography.body-small}"
-    highlighted: "{colors.hover}"
-    shortcutColor: "{colors.muted}"
-    destructiveColor: "{colors.error}"
-    divider: "1px {colors.border}, full row width"
-  tooltip:
-    backgroundColor: "{colors.panel}"
-    borderColor: "{colors.border}"
-    rounded: "{rounded.menu}"
-    typography: "{typography.caption}"
-    minHeight: "{sizes.control-compact}"
-    paddingInline: "1.2rem"
-    maxWidth: "32rem"
-  dialog:
-    backgroundColor: "{colors.panel}"
-    borderColor: "{colors.border}"
-    rounded: "{rounded.composer}"
-    shadow: "{shadows.dialog}"
-  toast:
-    width: "34rem"
-    backgroundColor: "{colors.selected}"
-    backgroundColorHover: "{colors.border}"
-    rounded: "{rounded.dialog}"
-    border: "none"
-    shadow: "{shadows.floating}"
-    padding: "1.2rem 1rem 1.2rem 1.6rem"
-    maxStack: 3
-    finishedLifetime: "8000ms"
-    enter: "{motion.overlay} {motion.ease}"
-    swipeExit: "160ms"
-    stackReflow: "200ms"
-  status-mark:
-    size: "0.8rem"
-    ringWidth: "1.5px"
-    needsYou: "ring {colors.primary}"
-    finished: "dot {colors.success}"
-    failed: "dot {colors.error}"
-    running: "neutral spinner, row at {opacity.active-row}"
-    accessibleTextRequired: true
+description: Orchestration surface for running many coding agents at once. Glanceable, editorial, designed dark-first.
 ---
 
-# Design System: Mcode
+# Design: Mcode
+
+This is a design brief, not a spec. It tells you what Mcode should feel like
+and how to decide when nothing here covers your case. Exact values live in
+code: tokens in `apps/web/src/index.css`, components in
+`apps/web/src/components/ui/`. When this brief and shipped code disagree on a
+value, the code wins and the brief is wrong. When they disagree on intent, ask
+the user. Paper holds drafts and explorations; treat it as a source of ideas,
+not of truth.
+
+Read `PRODUCT.md` for who Mcode serves and `CONTEXT.md` for its words. Then,
+before you design:
+
+1. Name the user job and the exact state the user is in.
+2. Pick the primary surface and the one next step.
+3. Decide loading, empty, error, and narrow-width behaviour.
+4. Open the reference components in section 7 and match them.
 
 ## 1. Overview
 
-**Creative North Star: "The Quiet Workbench"**
+**The Quiet Workbench.** Mcode is the window a developer keeps open all
+evening on a second monitor while five agents run. It sits beside the editor,
+the terminal, and the browser; it is an instrument panel, not a destination.
+The user rarely reads the agent's prose. They flick their eyes to the sidebar
+to see what finished, what failed, what needs them, and which branch each run
+is on. Design for that one-second glance.
 
-Mcode is the surface a developer keeps open all evening on a second monitor while five agents run in parallel. It is not a destination; it is an instrument panel that sits next to the editor, the terminal, and the browser. So the whole system is built for the *glance*, not the read. The user is rarely studying the agent's prose; they are flicking their eyes to the sidebar to see what finished, what failed, what needs them, and what branch each run is on. Everything here optimizes that one-second scan: a status mark read at flick-speed is worth more than a paragraph.
+The register is editorial and typeset: closer to a well-made code editor than
+to a SaaS dashboard. A senior developer at 11pm should feel in control and
+unhurried, reading an instrument, not being sold to.
 
-The register is editorial and typeset, closer to a well-made code editor or a terminal than a CRM or a SaaS dashboard. Information density is a feature, but uniform compression is not. Repeated rows and tabular data stay compact. Groups, task stages, writing surfaces, and primary work areas use enough space to communicate hierarchy, focus, and ownership. Color is rationed: a warm amber primary on a matte cool-slate canvas, with sage for additions and clay for removals. The amber is the single point of warmth; the slate is the cool room around it after dark. Dark is the default canvas because the product is used in the evening; a cool light counterpart exists for daytime.
+What that means in practice:
 
-This system explicitly rejects the consumer-app reflexes: no softened "Oops, something went wrong" copy (we say "Failed", "Idle", "Empty"), no emoji decoration, no colorful status chips, no glassmorphism, no gradient hero metrics, no marketing voice in the diff. If it looks like it wants to convert a visitor, it is wrong. It should look like it wants to get out of the way.
+- **Glance first.** State is recognisable at a glance from a small mark; its
+  label stays short, never a paragraph.
+- **Dense, not cramped.** Repeated rows stay compact. Groups, stages, and the
+  writing surface get room to show hierarchy.
+- **One warm light.** A single amber accent in a cool slate room. Its rarity is
+  what makes it readable.
+- **Quiet over loud.** Leave unused space empty. If a surface looks like it
+  wants to convert a visitor, it is wrong.
+- **Machine facts look like machine facts.** SHAs, branches, paths, and
+  durations are monospace; human words are not.
+- **Keyboard first.** Every action has a key path, and shortcuts are visible
+  where they apply.
 
-**Key Characteristics:**
-- Register in three words: editorial, quiet, instrument-grade. A senior
-  developer at 11pm should feel in control and unhurried, reading an
-  instrument, not being marketed to.
-- Glance-first: status communicated by small marks, a fade, and one short
-  label, never paragraphs.
-- Dark-primary, Filament Amber accent on cool-slate surfaces; light theme is the cool-neutral counterpart.
-- Tonal lift instead of divider lines: panels float a few percent off the page.
-- Monospace carries machine facts (SHAs, branches, paths, durations, timestamps); Public Sans carries human prose and labels.
-- Keyboard-first: shortcuts are first-class, not hidden.
-- Information-dense by intent: compact related rows, clear group spacing, and no decorative padding.
-- Four-point spacing: every layout gap, inset, control size, and icon size lands on a 4px step.
-- Text that does not fit fades out at its right edge. Mcode never truncates with an ellipsis.
-- Capability-preserving responsive layout: the same tool docks, floats, or
-  collapses without losing state or actions.
-
-### How to use this document
-
-This file is the implementation contract for product UI. An agent should be
-able to make a routine design decision from it without opening a reference app.
-Read `PRODUCT.md` first for product intent and `CONTEXT.md` for domain language.
-Then use this file for visual and interaction choices. Use
-`docs/internals/renderer/ui-components.md` for the component registry and live-verification
-requirements.
-
-The [Mcode Paper file](https://app.paper.design/file/01M3V9R04VVSFTYQ76BRHHA83K)
-is the visual source of truth. Its "01 · Style guide" page defines the design
-tokens, and its "04 · Components" page defines each component's variants and
-states. Design changes start in Paper; this file and the code follow. When
-Paper and this file disagree, Paper wins, and the next edit to this file
-corrects the drift.
-
-When guidance conflicts, apply this order:
-
-1. Explicit user feedback, screenshots, and selected references.
-2. The Paper file for tokens and component appearance.
-3. `PRODUCT.md` for audience, jobs, and product principles.
-4. This file for interaction, accessibility, and rules a canvas cannot show.
-5. Existing shared components and neighboring product patterns.
-
-Within this file, each decision has one normative owner:
-
-| Concern | Normative owner |
-|---|---|
-| Exact token values and primitive recipes | The Paper file's design tokens. The YAML frontmatter mirrors them by Paper's role names and owns values Paper does not define, such as shadows, motion, layers, and the diff gutter and text colors. |
-| Domain ownership and lifecycle | `CONTEXT.md`; this file describes presentation only. |
-| Layout, component anatomy, interaction, motion, and accessibility | The matching section in Sections 3 through 10. |
-| Product-state composition | Canonical compositions; recipes assemble existing rules and do not redefine them. |
-| Implementation workflow | Before an agent changes UI and `docs/internals/renderer/ui-components.md`. |
-| Prohibitions | Section 12. |
-
-Later checklists point to these owners. They do not create alternate token
-values, names, shortcuts, or behaviors. When a summary conflicts with its
-normative owner, fix or remove the summary instead of choosing between them.
-
-Do not copy a reference product wholesale. The Codex app is the main reference
-for calm agent-run presentation, progressive disclosure, and a content-first
-task surface. Mcode keeps its own identity: cool slate, Filament Amber, a
-sidebar built for several concurrent runs, dense machine facts, and explicit
-worktree state.
-
-### Fast decisions for agents
-
-| Question | Default answer |
-|---|---|
-| Which icon family? | Lucide via `lucide-react`, 1.5px stroke. |
-| How does an icon show the current or active state? | A selected fill behind it. The stroke never gets heavier. |
-| Which accent? | Filament Amber for one primary action per state, a live mode, or a thread that needs the user. Selection uses a neutral fill. Links use the link color. |
-| Border or surface change? | Surface change first; add a hairline when adjacent structure still needs definition. |
-| Card or pane? | Pane for a primary workspace; one card only for a discrete object. |
-| Text too long for its slot? | Clip it and fade the last 24px. Never an ellipsis. |
-| Icon-only action at the top level or floating over content? | A 32px round button with the selected fill and an ink icon. |
-| Icon-only action inside a row or toolbar? | A ghost button: transparent at rest, hover fill on hover. |
-| Spinner, skeleton, or stale content? | Spinner for a short initiating action, skeleton for known first-load geometry, stale content for refresh. |
-| Modal or inline interaction? | Inline first, anchored popover second, dialog only for a genuinely modal decision. |
-| What happens when width shrinks? | Keep the same component and state; change its posture from docked to floating to full-surface. |
-| How many primary actions? | One per state. |
-| How should an error sound? | State what failed and place recovery beside it. Say "Failed", not "Errored". |
-| Should this row carry a caption or a count? | Only if a developer would miss it. Counts appear only where they change the next action. |
+Mcode borrows from the Codex app its calm presentation of a run in flight, a
+document-like task surface, and progressive disclosure of technical detail. It
+does not borrow Codex's single-task focus. Mcode's sidebar holds many runs at
+once, and threads expose provider, branch, worktree, status, and diff as
+first-class state.
 
 ## 2. Colors
 
-A warm amber accent rationed over a matte cool-slate canvas, with a sage/clay pair reserved exclusively for diff and run-state semantics.
+A matte, cool-slate canvas with one warm lamp. Mcode is designed dark-first,
+because it is used in the evening. It defaults to the system theme; the user
+can choose light or dark. Light is the daytime counterpart with the same
+roles. Neutrals carry a faint cool tint and are never pure grey, white, or
+black.
 
-Paper defines six 50 to 950 ramps (neutral, amber, blue, sage, clay, violet) on its "01 · Style guide" page, and every color role points at one step of a ramp. The role names below are the Paper names; code uses the same names.
+Use colors by role, never by value. The lint rule `mcode/no-raw-color` enforces
+this.
 
-### Primary
-- **Filament Amber** (`primary`, amber-500 dark / `light-primary`, amber-700 light): The single accent. Primary buttons, the composer Send button, a live mode such as Design mode, and the needs-you ring. Selection uses a neutral fill so the lamp remains available for action and attention. Hue 75 reads as a warm workbench lamp, not a brand purple. The same hue and chroma shift only in lightness between themes so identity holds across both. Amber carries dark ink text (`primary-ink`, neutral-900) in dark theme and near-white (`light-primary-ink`, neutral-50) in light theme, to hold 4.5:1.
-
-### Secondary
-- **Focus** (`focus`, blue-500 dark / blue-600 light): The keyboard focus ring in both themes. A cooler blue-violet used only for focus affordance, never as a second brand voice.
-- **Link** (`link`, blue-400 dark / blue-700 light): Hyperlinks and link-styled actions. Links are navigational plumbing, not brand moments, so they take the surface's own cool hue at higher chroma rather than borrowing the amber lamp.
-- **Information** (`info`) and **Warning** (`warning`): feedback notices, always paired with an icon and text. Warning also marks two composer states to notice before sending: the context label from 70% and the model part's access mark while Don't ask is on.
-- **Merged PR** (`pr-merged`, violet): the merged state of a pull request. Nothing else uses violet.
-- **Capability** (`capability`, orchid): skill, plugin, command and sub-agent tokens in the composer and transcript. A quiet hue so a reference never competes with the lamp.
-- **File reference** (`file-reference`, mist teal): file tokens, which open the file in Files when clicked. Kept apart from `link` so a file reads as part of the workspace, not a web page.
-
-### Tertiary
-- **Success** (`success`, sage-400 dark / sage-600 light): Additions, completed state, the finished status mark, and the "Finished" label.
-- **Error** (`error`, clay-400 dark / clay-700 light): Removals, the failed status mark, the "Failed" label, invalid fields, and destructive menu items. Closely related to `destructive` (clay-500 dark / clay-600 light), which fills destructive buttons; `error` is desaturated for inline legibility.
-
-### Neutral
-- **Ink** (`ink`, neutral-100 dark / neutral-800 light): Primary text. Near-white in dark, near-black-cool in light. Never pure `#fff` or `#000`.
-- **Muted** (`muted`, neutral-300 dark / 47% neutral light): Secondary text, meta, captions, resting icons. Holds 4.5:1 on its surfaces; do not push muted text lighter "for elegance."
-- **Page** (`page`): The darkest layer, page chrome and the sidebar. Panels sit *above* it.
-- **Background** (`background`): App background and the conversation canvas, one step up from page.
-- **Panel** (`panel`): Menus, popovers, pickers, tooltips, dialogs, and cards.
-- **Hover** (`hover`) and **Selected** (`selected`): The hover fill and the selected fill. Selected also fills inputs, round icon buttons, toasts, and the active segment of a segmented control.
-- **Border** (`border`): The rare explicit hairline, dividers inside menus, and the 1px edge of transient panels.
-- **Control boundary** (`control-border`): The 1px edge of inputs, outline buttons, and segmented controls, and the fill of a round icon button that is switched on.
-
-### Theme contract
-
-Both themes use the same semantic roles and hierarchy. Theme switching changes
-token values, never component anatomy, status meaning, or action priority.
-
-| Role | Dark | Light |
+| Role | Means | Use it for |
 |---|---|---|
-| Page | `page` (neutral-950) | `light-page` (neutral-100) |
-| Background | `background` (neutral-900) | `light-background` (neutral-50) |
-| Panel | `panel` (neutral-800) | `light-panel` (neutral-50) |
-| Hover | `hover` (neutral-700) | `light-hover` (neutral-100) |
-| Selected | `selected` (neutral-600) | `light-selected` (neutral-200) |
-| Border | `border` (25%, a step under neutral-500) | `light-border` (92.5%, a step under neutral-200) |
-| Control boundary | `control-border` (neutral-400) | `light-control-border` (neutral-300) |
-| Text | `ink` (neutral-100) | `light-ink` (neutral-800) |
-| Muted text | `muted` (neutral-300) | `light-muted` (47% lightness, a step below neutral-400, so it holds 4.5:1 on `light-selected`) |
-| Primary | `primary` (amber-500) | `light-primary` (amber-700) |
-| Primary hover | `primary-hover` (amber-600) | `light-primary-hover` (amber-800) |
-| Primary text | `primary-ink` (neutral-900) | `light-primary-ink` (neutral-50) |
-| Destructive | `destructive` (clay-500) | `light-destructive` (clay-600) |
-| Destructive text | `destructive-ink` (neutral-900) | `light-destructive-ink` (neutral-50) |
-| Secondary button hover | `button-secondary-hover` (neutral-500) | `light-button-secondary-hover` (neutral-200) |
-| Destructive button hover | `button-destructive-hover` (clay-400) | `light-button-destructive-hover` (clay-700) |
-| Focus | `focus` (blue-500) | `light-focus` (blue-600) |
-| Link | `link` (blue-400) | `light-link` (blue-700) |
-| Success | `success` (sage-400) | `light-success` (sage-600) |
-| Error | `error` (clay-400) | `light-error` (clay-700) |
-| Warning | `warning` (brass, off the lamp's hue so a warning never reads as Send) | `light-warning` (dark brass, the same hue) |
-| Information | `info` (blue-400) | `light-info` (blue-700) |
-| Merged PR | `pr-merged` (violet-400) | `light-pr-merged` (violet-700) |
-| Capability | `capability` (owned here) | `light-capability` (owned here) |
-| File reference | `file-reference` (owned here) | `light-file-reference` (owned here) |
-| Diff addition | `diff-add-bg` (sage-900), plus the frontmatter gutter, text, and emphasis colors | Matching `light-*` tokens. |
-| Diff removal | `diff-remove-bg` (clay-900), plus the frontmatter gutter, text, and emphasis colors | Matching `light-*` tokens. |
+| `primary` (Filament Amber) | "Act here" or "this needs you" | One primary action per state, a live mode the user turned on, a thread that needs the user. |
+| `page`, `background`, `panel` | Depth | Panels sit a few percent lighter than the page, so surfaces separate without lines. |
+| `hover`, `selected` | Pointer and selection | Selection is a neutral fill, never amber. |
+| `ink`, `muted` | Text priority | `muted` for meta and resting icons. It must still hold 4.5:1 on its surface. |
+| `success`, `error` | Added or finished; removed, failed, or invalid | Diffs, run state, invalid fields, and destructive menu rows. Never decoration. |
+| `destructive` | "This deletes or discards" | The confirming action of a destructive dialog. Never amber. |
+| `focus` | Keyboard focus | The focus ring, and nothing else. |
+| `link` | Navigation | Links, not brand moments. |
+| `warning`, `info` | Notices | Always with an icon and text. Warning's brass sits off amber's hue so it never reads as Send. |
+| `capability`, `file-reference`, `pr-merged` | Entity identity | Skill and command tokens, file tokens, merged pull requests. |
 
-The primary and destructive pairs are contrast-checked as complete pairs. Do
-not reuse one theme's foreground in the other theme. Placeholder and muted
-readable text still meet 4.5:1 against the surface where they appear.
-
-The control boundary tokens are solid 1px colors, not translucent hints.
-`control-border` measures approximately 3.24:1 against `background`;
-`light-control-border` measures approximately 3.1:1 against
-`light-background`. Recheck the light value after any token change.
-
-### Named Rules
-**The One Lamp Rule.** Filament Amber is Mcode's primary brand color. Each state has at most one amber primary action. Amber also marks a live mode the user turned on (Design mode, an agent acting in the Browser) and a thread that needs the user (the needs-you ring and its label). Everything else is neutral: selected rows, the access-mode picker's selected row, the model picker's rail tab, the Plan chip, the access mark (Don't ask takes `warning`, not the lamp), the Stop button, toggles, update and notification buttons, and status icons. Links use the link color, never amber. Entity tokens use `capability` or `file-reference`, never amber. Keyboard focus uses the focus blue.
-
-**The Earned-Color Rule.** Neutrals are the surface default. A bounded region may carry color to clarify state, ownership, mode, or task posture. Area color must carry meaning.
-
-**The Semantic-Only Sage/Clay Rule.** Sage and clay are never decoration. They mean addition or success, and removal or failure. A green that does not mean "added or finished" and a red that does not mean "removed or failed" are forbidden.
-
-**The Tinted-Neutral Rule.** Neutrals are never pure gray. Both themes carry 0.005 to 0.010 chroma toward cool hue 260. The tint is subliminal and load-bearing for cohesion.
+**The One Lamp rule.** Each state has at most one amber primary action. Amber
+also marks a live mode the user turned on, a thread that needs the user, and a
+checked switch; none of those competes with the primary action. Selection, the
+Stop button, status icons, and links stay neutral or use their own role. When
+two actions want amber, one of them is wrong.
 
 ## 3. Typography
 
-**Display / Body Font:** Public Sans (with `ui-sans-serif, system-ui, -apple-system, sans-serif`)
-**Code / Mono Font:** JetBrains Mono (with `Cascadia Code, Consolas, monospace`)
-
-**Character:** A single humanist sans handles headings, prose, controls, captions, and labels. Monospace supports code, identifiers, and aligned values where fixed-width characters improve scanning. It is a functional contrast, not a decorative "developer vibe."
-
-### Roles
-
-| Role | Font | Size / line | Weight | Use |
-|---|---|---|---|---|
-| H1 | Public Sans | `4.8rem / 5.6rem` | 600 | Rare screen-level or document-level heading. |
-| H2 | Public Sans | `4rem / 4.8rem` | 600 | Major panel or document section heading. |
-| H3 | Public Sans | `3.2rem / 4rem` | 600 | Section title inside a full surface. |
-| H4 | Public Sans | `2.8rem / 3.2rem` | 600 | High-emphasis panel title. |
-| H5 | Public Sans | `2.4rem / 2.8rem` | 600 | Compact panel title, utility page title. |
-| H6 | Public Sans | `2rem / 2.4rem` | 600 | Dense subsection heading. |
-| Body | Public Sans | `1.6rem / 2.4rem` | 400 | Forms, dialogs, and readable UI copy. |
-| Prose | Public Sans | `1.6rem / 2.8rem` | 400 | Agent answers, narration, plans, and other long reading. |
-| Body small | Public Sans | `1.4rem / 2rem` | 400 | Navigation rows, menus, inputs, dense rows, and helper text. |
-| Compact | Public Sans | `1.3rem / 2rem` | 400 | The composer capsule's parts, mode chips, context label, and slash menu descriptions, a step quieter than the draft. |
-| Caption | Public Sans | `1.2rem / 1.6rem` | 400 | Meta lines, timestamps, fine print. |
-| Label | Public Sans | `1.4rem / 2rem` | 500 | Field labels, row titles, toast titles. |
-| Button | Public Sans | `1.4rem / 2rem` | 500 | Text inside every button size. |
-| Link | Public Sans | `1.6rem / 2.4rem` | 500 | Inline links; underlined. |
-| Code | JetBrains Mono | `1.4rem / 2rem` | 400 | Code blocks, diffs, file views, inline code. |
-
-Inline code sits in a `panel` well with the badge radius and a `0.4rem / 0.8rem`
-inset. Code blocks use a `2.4rem` inset.
-
-### Named Rules
-**The Mono-Is-Scannable-Data Rule.** Use monospace for code, identifiers, branch and worktree names, paths, durations, and aligned values. Mono meta (a branch under a thread title, a duration on a tool row) uses the caption size in `muted`. Keep numerals in Public Sans inside prose or human-facing labels. Tabular data uses `tabular-nums`.
-
-**The Duration Rule.** Durations on thought rows, tool rows, and live timers read as compact words (`22s`, `1m 5s`, `2h 3m`), matching "Worked for 9s", never in parentheses. A thought row reads as one phrase: "Thought for 2s".
-
-**The No-Ligatures-In-Code Rule.** JetBrains Mono turns `=>` and `!==` into ligatures. Code views, diffs, file views, and the terminal switch ligatures off (`font-variant-ligatures: none`; for Pierre diffs, its font-features variable). A reader must see the characters the agent wrote.
-
-**The Fixed-Type Rule.** Product UI uses the roles above. H1 through H6 serve documents and spacious panels; dense chrome defaults to Body small or Label; conversation reading uses Prose. Do not set arbitrary pixel sizes. Add a named role in Paper first when the existing steps fail.
-
-**The Decimal Rem Rule.** The root font size is `62.5%`, making `1rem` equal to 10px in default browser settings. Express fixed dimensions in rem or em whenever practical, so `12px` becomes `1.2rem`, `32px` becomes `3.2rem`, and `48px` becomes `4.8rem`. Use raw px only for true hairlines, bitmap dimensions, canvas pixels, and sub-pixel optical fixes.
-
-### Text overflow
-
-Text that does not fit its slot fades out over its last `2.4rem` (the `text-fade`
-spacing token). Never add an ellipsis, never use `text-overflow: ellipsis`, and
-never cut a string with `…` in code. Progress labels such as "Starting thread…"
-are not truncation and keep their ellipsis.
-
-- Apply the fade only when the text actually overflows. Text that fits shows no
-  fade.
-- Put the mask on the clipping container, not on the text node:
-  `mask-image: linear-gradient(to right, black calc(100% - 2.4rem), transparent)`.
-- Keep icons, counts, shortcuts, and actions in the row fully visible. Only the
-  text fades.
-- When the full value matters, show it on hover or keyboard focus, or let the
-  text wrap where space permits.
-- A path shows the file name first in `ink` and the folder after it in `muted`;
-  the folder is the part that fades.
-- A clamped multi-line block ends in a `2.4rem` bottom fade and a "Show all"
-  control, never a trailing ellipsis.
-
-## 4. Iconography
-
-Lucide is Mcode's product icon family. Use `lucide-react` with a 1.5px stroke on
-the 24px grid, round caps and joins. Provider marks, file-type icons, action
-icons from the Material Icon Theme set, and operating-system or third-party brand
-marks remain their authentic assets. They are identity, not product controls.
-
-Every product icon renders at the 1.5px stroke. Do not set it per call site.
-`icon-map.tsx` sets it on its icons, and one `.lucide` rule in the base layer of
-`apps/web/src/index.css` gives direct Lucide imports the same stroke. Do not
-import Phosphor or any second outline library.
-
-The shared module `apps/web/src/components/ui/icon-map.tsx` is the only
-product-level alias map. It exports the canonical concepts below with the
-documented stroke, size, and mirroring defaults. Feature files import named
-concepts from that module rather than inventing aliases. Direct Lucide imports
-remain valid for a one-off literal object icon that has no product-wide
-meaning; use Lucide's current names, not its deprecated aliases (`CircleAlert`,
-not `AlertCircle`). Provider, file-type, operating-system, and third-party
-brand assets bypass the map.
-
-### State and style
-
-- One stroke weight in every state. The current destination, a selected mode,
-  or a switched-on toggle shows a selected fill behind the icon and an `ink`
-  icon. The stroke never gets heavier to show state.
-- Resting icons in rows, menus, and ghost buttons use `muted`. Icons on a
-  selected or round button use `ink`.
-- Filled silhouettes are reserved for status marks and for a persistent
-  binary state whose filled form is conventional, such as pinned. Never fill
-  an icon merely to make it louder.
-
-### Size and geometry
-
-| Role | Size | Typical use |
-|---|---:|---|
-| Metadata | 12px | Passive inline facts and low-priority status. |
-| Dense optical | 14px | Close glyphs on toasts and tabs, rail tab badges. |
-| Compact | 16px | Default toolbar, menu, input, row, and round-button icon. |
-| Standard | 20px | Controls in a 40px or larger box. |
-| Large | 24px | Touch targets and spacious controls. |
-| Display | 32px | Empty-state or teaching glyph only. |
-
-Icons sit in a fixed slot so rows align into lanes: a 16px icon in a 20px slot
-in compact rows, a 20px icon in a 24px slot in standard rows. Keep 8px between
-an icon and a text label. Icon-only controls use the documented button boxes;
-the glyph does not become the hit target.
-
-### Meaning and accessibility
-
-- Pick the most literal familiar symbol. A `GitBranch` means a branch; a
-  `GitFork` means a fork. Do not choose a clever metaphor when a domain symbol
-  exists.
-- One concept uses one icon throughout the app. Record exceptions in the
-  shared icon mapping, not inside individual features.
-- Do not repeat a type icon on every row of a list whose type is already
-  clear, such as a branch icon on every row of a branch picker.
-- Decorative icons use `aria-hidden="true"`. Icon-only controls require an
-  accessible name and a tooltip. Do not give the same control two competing
-  names.
-- State never depends on an icon or color alone. Pair it with position, visible
-  copy, or accessible status text.
-- Use `currentColor` so theme and interaction state come from the parent.
-- Directional icons mirror in right-to-left layouts when meaning follows
-  reading direction. Object icons such as play, terminal, and provider marks do
-  not mirror.
-
-### Canonical product mapping
-
-Use these Lucide concepts unless a neighboring established pattern is more
-specific:
-
-| Concept | Lucide icon |
-|---|---|
-| Add or create | `Plus` |
-| Close or dismiss | `X` |
-| Search | `Search` |
-| Settings | `Settings` |
-| More actions | `Ellipsis` |
-| Expand or next | `ChevronRight` |
-| Collapse or disclose | `ChevronDown` |
-| List fold: show rows below, then hide them | `ChevronDown`, then `ChevronUp` |
-| Back | `ArrowLeft` |
-| Submit or send | `ArrowUp` |
-| Retry or refresh | `RotateCw` |
-| Copy | `Copy` |
-| Edit | `Pencil` |
-| Delete | `Trash2` |
-| Confirmed | `Check` |
-| Warning | `TriangleAlert` |
-| Error | `CircleAlert` |
-| Information | `Info` |
-| Terminal | `SquareTerminal` |
-| Browser | `Globe` |
-| Review | `Diff` |
-| Files | `Files` |
-| Git branch | `GitBranch` |
-| Fork | `GitFork` |
-| Pull request | `GitPullRequest` |
-| Open externally | `ExternalLink` |
-| Toggle sidebar | `PanelLeft` |
-| Toggle right panel | `PanelRight` |
-| Pin | `Pin` |
-| Attachment | `Paperclip` |
-| Plan | `ListChecks` |
-| Build or run | `Hammer` |
-
-## 5. Shape and Elevation
-
-Flat by default. Depth begins with **tonal layering**. The signature move: `page` sits one step below `background` in both themes; panels step further along the ramp. Use quiet hairlines for dense boundaries, toolbars, diff hunks, resize seams, and adjacent rows when tone is insufficient.
-
-### Radius
-
-| Token | Value | Use |
-|---|---:|---|
-| `badge` | 6px | Badges, inline code, segmented-control segments, menu rows. |
-| `menu` | 8px | Tooltips, list rows. |
-| `control` | 10px | Buttons, inputs, selects, segmented controls, icon tiles. |
-| `composer` | 14px | The composer, dialogs, menus, popovers, pickers, and floating cards. |
-| `dialog` | 18px | Sheets, toasts, and floating pills. |
-| `full` | 999px | Round icon buttons, the composer Send button, status marks. |
-
-Workspace panes stay square to the app shell.
-
-### Borders and focus
-
-- Dividers and the edges of transient panels are 1px `border`.
-- Interactive boundaries (inputs, outline buttons, segmented controls) are 1px
-  `control-border`.
-- Keyboard focus is a 2px `focus` ring with a 2px offset in the surface
-  color, drawn outside the control (`shadows.focusRing`). It never changes the
-  control's own size. Rows inside a menu, list or pane draw it inside the row
-  instead, because they sit 4px from the container's edge.
-
-### Shadow vocabulary
-
-| Recipe | Value | Use |
-|---|---|---|
-| None | Tonal separation | Permanent panes and resting content. |
-| `popover` | `0 8px 24px` at 24% black | Menus, popovers, pickers, hover cards. |
-| `floating` | `0 8px 24px` at 40% black | Toasts and controls that float over content, such as the floating Commit button. |
-| `dialog` | `0 16px 48px` at 40% black | Dialogs and sheets. |
-| `lightOverlay` | Two soft cool shadows | Every transient layer in the light theme. |
-
-Frontmatter owns the exact shadow values. Feature code references these recipes
-and never copies their CSS values locally.
-
-### Named Rules
-**The Tonal-Lift Rule.** Separate major surfaces with a step on the lightness ramp. Use `border` for compact internal structure where neighboring elements share a tone or where a resize, diff, toolbar, or row boundary must remain legible.
-
-**The Earned-Elevation Rule.** Permanent panes rely on tone and hairlines. Transient layers use the recipe for their role. Resting content has no decorative shadow.
-
-## 6. App Shell and Layout
-
-Mcode borrows Codex's calm task presentation, shallow chrome, and content-first
-conversation. It does not borrow Codex's single-task emphasis. Mcode's shell
-must keep several runs legible at once.
-
-### Shell anatomy
-
-The desktop hierarchy has three sibling panes:
-
-1. **Sidebar:** projects, threads, status, and primary navigation.
-2. **Conversation:** thread header, narrative, and composer, with the thread
-   overview card floating at its top right.
-3. **Right panel:** the host for Browser, Terminal, Review, Plan, Files,
-   Subagents, and Project settings, with a vertical tab rail at the window's
-   right edge. Its visibility, width, active tab, and tab set belong to the
-   open thread; with no thread open, the workspace keeps its own copy. Each
-   tab declares whether its content uses workspace or thread scope. Browser
-   and Terminal can use the workspace root; Plan requires a thread. The Paper
-   boards 10a (Review), 11a (Browser), 12a (Terminal), and 07e (Plan) are the
-   visual reference.
-
-These panes share the app frame. Never wrap them in an outer dashboard card.
-The conversation is the visual anchor. The sidebar provides orientation; the
-right panel provides inspection. Neither should compete with the thread's
-current work.
-
-There is no separate title bar. On Windows and Linux the native caption
-buttons overlay the top 48px of the rightmost surface; read their width from
-`env(titlebar-area-width)` rather than hard-coding it. On macOS the traffic
-lights sit in the sidebar header.
-
-### Calm precision
-
-- Use one bounded task column inside a quiet canvas. Do not stretch readable
-  content merely because space exists.
-- Keep containment shallow. Make one surface dominant and place supporting
-  controls directly on the canvas when they do not need a boundary.
-- Separate selection, focus, and activity. A neutral fill selects, the focus
-  ring focuses, and Filament Amber marks the primary action, a live mode, or
-  a thread that needs the user.
-- Align headings, controls, metadata, and trailing values to shared axes.
-- Leave unused space empty. Do not fill the canvas with cards, metrics,
-  decoration, or duplicate navigation.
-- Spend strong contrast on the current task. Peripheral chrome stays legible
-  and quiet.
-
-### Pane behavior
-
-- Sidebar width ranges from `22rem` to `34rem` and defaults to `30.4rem`.
-  The right panel ranges from `48rem` to `84rem` and defaults to `60rem`; its
-  tab rail is `4.8rem` wide and expands leftward over the panel body to `16rem`
-  on hover. The thread overview card
-  is `28rem` wide. A compact floating inspector defaults to `31rem` and never
-  shrinks below `28rem`.
-- The composer is `76rem` wide wherever it appears and never resizes between
-  the new-thread screen and a running thread. Conversation keeps at least
-  `52rem` of usable width. Its prose measure caps at `76rem`; code, diffs,
-  tables, and terminal output may exceed that measure inside their own
-  scrolling region.
-- Sidebar width persists per workspace. Right panel state persists per thread.
-- Closing the panel's last tab closes the panel and leaves maximize. Reopening
-  it shows the empty state.
-- Resize seams are visible on hover and focus, remain at least 1px at rest, and
-  implement the keyboard and accessibility contract below.
-- Toolbars remain attached to the content they control. Do not add a detached
-  global toolbar for a local action.
-- Sticky chrome may hold orientation and primary actions. It must not cover the
-  first or last readable line, and its background must clearly separate it
-  from scrolling content.
-
-### Panel header
-
-Every right panel tab uses the same two-row header. Nothing floats over the
-panel's content except one floating primary action when the design calls for
-it (the Review panel's Commit button).
-
-- **Row 1** (`4.8rem`) shares the window caption overlay. It holds the tab's
-  identity on the left (a view picker, a title pill, or horizontal tabs), a
-  drag spacer, and the round expand and panel-toggle buttons on the right,
-  clear of the caption buttons.
-- **Row 2** (`4rem`) appears only when the tab has controls. The tab's operand
-  sits on the left (a URL, a branch pair, a working folder, a version picker)
-  and its view controls sit on the right as 32px round buttons.
-- The conversation header's panel toggle shows only while the panel is closed.
-  Once open, row 1's toggle takes its place.
-
-### Responsive posture
-
-Choose posture from remaining usable width. The thresholds below are the
-fallback contract when content measurement cannot decide earlier:
-
-| Posture | Layout behavior |
-|---|---|
-| Wide, `126rem` and above | Sidebar, conversation, and right panel may dock as siblings. |
-| Constrained, `76rem` to `125.9rem` | Preserve conversation width; float the secondary pane over the right edge. |
-| Narrow, below `76rem` | One primary surface at a time; preserve the same pane state and return path. |
-
-The component stays mounted when practical so selection, scroll, draft, and
-terminal state survive posture changes. A width change must take effect during
-resize, without close and reopen.
-
-#### Focus, resizing, and announcements
-
-- A posture change does not move focus when the focused control remains visible
-  in the same mounted pane. Docking and floating change presentation, not
-  interaction identity.
-- When a secondary pane becomes full-surface while focus is inside it, keep
-  focus on the same control. When the user opens it from another surface, move
-  focus to the pane heading or first task control after the transition settles.
-- Closing a floating or full-surface pane returns focus to its invoking control.
-  If that control no longer exists, return focus to the active thread row or
-  the workspace's primary heading, in that order.
-- A resize seam is a focusable separator with `aria-orientation="vertical"`
-  and current, minimum, and maximum values. Left and Right Arrow resize by
-  `1.6rem`; Shift plus Arrow resizes by `4.8rem`; Home and End move to the
-  documented minimum and maximum. Direction follows the edge the seam controls.
-- Do not announce every pixel during pointer or window resize. After a
-  user-initiated keyboard resize, announce the settled width. Announce a change
-  to floating or full-surface posture once, through a polite live region, only
-  when it changes the focused user's navigation context.
-
-Secondary surfaces use these minimum usable widths before changing posture:
-
-| Surface | Minimum width | Next posture below minimum |
-|---|---:|---|
-| Plan or tasks | `40rem` | Float, then full-surface. |
-| Terminal | `48rem` | Float, then full-surface. |
-| Diff or review | `56rem` | Float, then full-surface. |
-| Preview | `64rem` | Float, then full-surface. |
-| Compact inspector | `28rem` | Full-surface. |
-
-When content needs more width than this table, change posture at the measured
-content threshold. Do not squeeze controls, clip labels, or create horizontal
-page scroll to preserve docking.
-
-### Layer contract
-
-Use the semantic `layers` tokens from frontmatter. `base` holds normal panes;
-`sticky` holds attached headers and composers; `dropdown` holds menus and
-popovers; `floatingPanel` holds constrained-layout inspectors; `modalBackdrop`
-and `modal` form one modal pair; `toast` reports transient global outcomes;
-`tooltip` sits above every interactive layer. Portaled content keeps the layer
-assigned to its semantic role. Feature code never invents a numeric z-index.
-
-### Alignment and density
-
-- Pane headers, tabs, filters, and their content use one horizontal axis.
-- Repeated rows use 32px as the compact height (menus, select lists, and the
-  thread overview) and 40px as the default height (pickers, settings rows).
-  Increase height when a second line, status explanation, or direct
-  manipulation needs it.
-- Use 8px internal gaps for tightly related controls, 16px within a group,
-  24px for panel insets, and 32px between task stages. These are applications
-  of the four-point scale, not new tokens.
-- Preserve visible hierarchy at 100%, 125%, and 200% zoom. Density may never
-  depend on text clipping.
-
-### Canonical compositions
-
-These recipes fix information order and focal contrast. They are authoritative
-across features; local variation may change content, not hierarchy.
-
-| State | Sidebar | Conversation or task canvas | Secondary surface | Primary focus |
-|---|---|---|---|---|
-| Multi-run glance | Project groups, compact thread rows, visible attention labels, one selected row. | Selected thread remains readable but quiet until opened. | Closed unless the selected thread needs inspection. | The run that needs the user. |
-| Active run | The row fades to about 55% with a neutral spinner and no status text. | Latest narration and local progress remain near the work; the composer's submit position holds a neutral Stop. | The thread overview shows environment, changes, tasks, and subagents. | Current work and its Stop. |
-| Needs the user | Full brightness, amber ring, and a visible label ("Approval required", "Answers required", "Plan ready", "Interrupted"). | The request docks in place of the composer surface. | The overview keeps showing what exists. | The one decision being asked. |
-| Finished run | Unopened: green status mark and a green "Finished" line, no fill. | The final answer leads into the end-of-turn changes bar, whose Review action stays neutral. | Review opens only when requested or already active. | The answer and its changes. |
-| Failed or disconnected run | Clay status mark plus a visible "Failed" or "Disconnected" line. | Preserve completed output, name the failed boundary, and show what remains safe in one end notice. | Technical detail opens by disclosure without replacing recovery. | One recovery action such as `Retry` or `Reconnect`. |
-| Empty workspace | Navigation remains available; no fake activity or metrics. | Center one explanation and one create or connect action in a bounded task column. | Closed. | The first useful setup action. |
-| Settings or utility | Utility navigation replaces the project rail and provides `Back to app`. | Center a `72rem` to `80rem` task column; group related rows in shallow tonal cards. | Closed unless a setting needs a focused picker. | The setting currently being changed. |
-| Constrained inspection | Preserve selected thread and compact rail where width allows. | Conversation keeps its measure and state. | The same inspector floats at the right edge, then becomes full-surface below its minimum. | The user's current pane, not a replacement picker. |
+Public Sans for everything a person reads or clicks. JetBrains Mono for code,
+identifiers, paths, branches, durations, and aligned numbers, with ligatures
+off so the reader sees the characters the agent wrote.
+
+Use the named type roles in `index.css` (Body, Body small, Prose, Caption,
+Label, Code, and the rest). The lint rule `mcode/no-arbitrary-text-size`
+rejects arbitrary font sizes; choosing the right role is on you. Dense chrome
+defaults to Body small; long agent output uses Prose; headings are rare.
+
+Durations read as compact words: `22s`, `1m 5s`, "Worked for 9s".
+
+**Text that does not fit fades out at its right edge.** Never an ellipsis
+(`mcode/no-ellipsis-truncation`). Only the text fades; icons, counts, and
+actions in the row stay whole. The full value stays in the accessible name and
+appears on hover or focus. A path shows the file name first and lets the folder
+fade.
+
+## 4. Layout
+
+Three sibling panes share the window: the **sidebar** (projects, threads,
+status), the **conversation** (thread, narrative, composer), and the **right
+panel** (Browser, Terminal, Review, Plan, Files, and other tools). The
+conversation is the anchor. The sidebar orients; the right panel inspects.
+Neither competes with the current work. Never wrap the panes in an outer
+dashboard card.
+
+- **One task column.** Readable content keeps a bounded measure inside a quiet
+  canvas. Do not stretch it because space exists. Code, diffs, and terminal
+  output may run wider inside their own scroll region.
+- **Shallow containment.** One dominant surface. Controls that need no boundary
+  sit directly on the canvas.
+- **Shared axes.** Headings, controls, metadata, and trailing values line up.
+- **One spacing scale.** Gaps, insets, and control sizes land on the spacing
+  scale: tight for related controls, more within a group, most between stages.
+  The root font size is 62.5%, so `1rem` is 10px when the browser's text size
+  is the usual 16px; write rem sizes with that in mind.
+- **Width changes posture, not capability.** As the window narrows, a pane goes
+  from docked to floating to full-surface. It keeps its state, its actions, and
+  its way back. Never swap a capable pane for a weaker picker to save width.
+  Focus stays on the same control when it remains visible. Closing a floating
+  or full-surface pane returns focus to the control that opened it. When the
+  user opens a pane full-surface from another surface, focus moves to the
+  pane's heading or first control. If the opener no longer exists when a pane
+  closes, focus goes to the active thread row, then to the workspace's main
+  heading.
+- **Toolbars stay with what they control.** No detached global toolbar for a
+  local action.
+
+## 5. Elevation and Depth
+
+Depth comes from tone, not lines or shadows. A panel floats a few percent off
+the page. Add a hairline only when neighbouring structure still needs it.
+Shadows belong to things that truly float (menus, popovers, dialogs, toasts),
+never to resting cards. Stack layers with the `--layer-*` tokens
+(`mcode/no-numeric-z-index`, `mcode/no-raw-shadow`).
+
+## 6. Shapes
+
+Lucide icons at one shared stroke, through the map in
+`apps/web/src/components/ui/icon-map.tsx`. A direct `lucide-react` import is
+fine for a one-off icon; never add a second icon library. State never makes a
+stroke heavier: a current or active icon gets a selected fill behind it.
+Provider, file-type, and brand marks keep their own artwork. A provider is
+identified by its mark, never by a coloured badge.
+
+Corners are soft but not bubbly; use the radius tokens. Icon buttons follow
+the surface they sit in, so copy the icon buttons already beside the one you
+are adding rather than choosing a shape. Take sizes and variants from
+`button.tsx`.
 
 ## 7. Components
 
-### Buttons
+Do not design a component from this section. Open the reference, match it, and
+extend its variants rather than writing a parallel one. These are the pieces
+that carry Mcode's look best:
 
-Paper's "04 · Components" page holds the full state matrix for every variant.
-
-- **Shape and size:** `control` radius (10px) at every size. Compact is 32px
-  (12px inset, 16px icon), default is 40px (16px inset, 20px icon),
-  comfortable is 48px (20px inset, 20px icon). Labels use the Button role at
-  every size. Dense chrome uses compact; dialogs, forms, and docks use
-  default; comfortable is for touch and rare spacious confirmations.
-- **Primary:** `primary` fill, `primary-ink` text, `primary-hover` on hover.
-  One per state.
-- **Outline:** `background` fill, 1px `control-border`, `ink` text, `hover`
-  fill on hover. An alternate action beside a primary.
-- **Secondary:** `selected` fill, `ink` text, `button-secondary-hover` on
-  hover. Everyday neutral actions.
-- **Ghost:** transparent with a reserved transparent 1px border so geometry
-  never shifts; `hover` fill on hover. Ghost is the default for icon-only
-  buttons inside rows and toolbars because most buttons are not primary. Its
-  icon is `muted` at rest.
-- **Destructive:** `destructive` fill, `destructive-ink` text,
-  `button-destructive-hover` on hover. Only for the confirming action of a
-  destructive decision.
-- **Link:** `link` color, Link role, underlined. No fill.
-- **Round icon button:** a 32px circle with the `selected` fill, no border,
-  and a 16px `ink` icon. Use it for top-level actions (panel header expand and
-  toggle, the thread overview button, canvas header actions) and for every
-  view control in a panel header's second row. When it toggles something on,
-  the fill becomes `control-border` and the icon stays `ink`. A round button
-  that floats over content is 40px and takes the `floating` shadow.
-- **Composer Send:** a 32px round primary button. While a turn runs, the same
-  slot holds Stop (an `ink` circle with a `background` square, never amber or
-  red), or Queue once there is a draft. The Composer section has every state.
-- **Split button:** one control with the action on the left and a chevron on
-  the right that opens a menu of alternate methods ("Implement v2 ⌄",
-  "Commit 3 files ⌄"). The menu lists the alternates by name with their
-  shortcuts. A split button is amber only when its action is the state's
-  primary.
-- **States:** Hover changes the fill. Pressed draws a 2px inset ring in the
-  variant's foreground color; no translation. A ghost button, or a row that
-  acts like one, has no resting fill, so a ring would hug bare icons and text:
-  pressed takes the selected fill instead and draws no ring. Focus draws the focus ring
-  outside the control. Disabled drops to 50% opacity. Loading keeps the width,
-  swaps the leading icon for a spinner, and blocks repeat activation.
-- **Inline row actions:** per-file and per-row actions inside a row, such as
-  revert file, a row's Stop, or a toast's close, use a 24px or 28px ghost or
-  round box. The row around them stays the larger target, and adjacent inline
-  actions keep at least 4px apart.
-
-### Inputs / Fields
-- **Style:** `selected` well, 1px `control-border`, `control` radius, 40px
-  default height (32px in dense chrome), 12px inset, Body small text. The
-  boundary remains visible in both themes; tone alone is not sufficient on
-  the light canvas.
-- **Hover:** the border shifts to `muted`.
-- **Focus:** the 2px focus ring with a 2px offset outside the field. No
-  bounce, no color flash.
-- **Error / Disabled / Read-only:** invalid draws an `error` border and an
-  error line under the field (icon plus text). Disabled drops to 50% opacity
-  and `pointer-events-none`. Read-only keeps the value legible and the 1px
-  `control-border`, and fills the field with `panel`.
-- **Search rows** inside menus and pickers are borderless: a 16px search icon
-  and the field on the panel surface, sitting above the list.
-
-### Selection controls
-
-- Checkboxes, radio buttons, and switches each have default, hover, focus,
-  invalid, and disabled states on the Components page. Checkboxes support a
-  three-state (mixed) value for folder rows.
-- A switch is off on the field fill with a 1px `control-border` and a `muted`
-  knob. On, the track is `primary` and the knob is `primary-ink`, plus the
-  control's semantic checked state.
-- Keep labels and concise consequences beside the control. A switch changes the
-  setting immediately; use a checkbox when several choices are submitted as a
-  group.
-
-### Segmented controls
-
-A 32px `panel` container with a 1px `control-border` and the `control` radius
-holds equal-width segments with the `badge` radius. The active segment has the
-`selected` fill and an `ink` Label; inactive segments are `muted` Body small.
-Use them for sibling sources of one list (Branches | Pull requests, Local |
-Origin) and for view modes (unified | split). Segments show names only, no
-counts. A hovered or focus-visible segment takes the sliding highlight, under
-the active segment's own fill.
-
-**Sliding highlight.** Every menu, picker, and segmented control has one
-`hover` fill per group, never a fill per row. When the highlighted row
-changes, the fill slides to it over `--duration-standard` (180ms) on
-`--ease-standard`, taking the row's size and radius. When nothing is
-highlighted it fades out where it is, and when a row is highlighted again it
-fades in where it lands instead of sliding from a stale spot. A filtered or
-rebuilt list puts the fill on its highlighted row in place, with no slide and
-no flash. A group with one option shows no fill. The fill scrolls with its
-row and never scrolls the list: the arrow keys scroll a row into view, hover
-does not. Under reduced motion only the opacity fade remains. Checks and the
-`selected` fill stay on their rows, separate from the transient fill.
-
-### Cards / Panels
-- **Workspace panes:** Edge-to-edge, square to the app shell, and resizable where the user compares or inspects content. Do not wrap a primary work area in a decorative card.
-- **Floating cards** (the thread overview, menus, popovers, pickers): `panel`
-  fill, 1px `border`, `composer` radius, and the `popover` shadow.
-- **Dialogs:** `panel` fill, 1px `border`, `composer` radius, and the `dialog`
-  shadow. The title is 16px on a 24px line at weight 600, and the footer sits
-  under a 1px `border` rule with 16px above the buttons.
-- **Sheets:** `panel` fill, 1px `border`, `dialog` radius, and the `dialog`
-  shadow.
-- **Shadow strategy:** Tonal separation first. Transient panels use the
-  recipe for their role.
-- **Border:** Quiet hairlines are allowed for dense internal structure. Never a colored side-stripe.
-- **Internal Padding:** 4px inside menus, 8px inside pickers, 16px inside popovers,
-  20px inside dialogs, 24px inside panels. Repeated list rows may use less, while
-  writing, reading, and decision surfaces should preserve comfortable
-  structure.
-- **Containment depth:** A discrete object may use one contained surface. Its
-  headers, metadata, body, and actions stay flat inside it. Do not nest cards,
-  tonal slabs, rings, and footers to restate the same boundary.
-
-### Responsive Workspaces
-- Preserve the component, its state, and its actions across widths.
-- Prefer docked pane to floating pane to full-surface takeover. Use a modal only when the interaction itself is modal.
-- Choose breakpoints from the component's usable content width, not a device label.
-- Recompute posture while the user resizes. Do not require close and reopen.
-- Keep one visible toggle for a panel. Do not add a second compact-only control that exposes a different version of the same tool.
-
-### Action Hierarchy
-- Give one task one visible control. Put alternate methods in an attached menu or a split button.
-- Put persistent actions in persistent chrome. Do not create a second bottom toolbar for an action already available at the top.
-- Use a neutral fill for the current selection. Keep amber for the state's one primary action. Secondary toolbar actions stay neutral.
-- Keep actions near the object they affect, without creating a panel solely to hold a button.
-
-### Navigation (Sidebar)
-- **Style:** Projects-and-threads tree on the `page` surface, drag-reorderable. The first thing the user scans, every time.
-- **Thread row:** a status lane, the provider icon, the title in Label (fading
-  when long), and a second line with the branch or worktree name in mono
-  caption, `muted`. A third line appears only when the thread needs the user,
-  failed, or finished unseen.
-- **States:** Selection is a full row fill with `selected`, never a left side-stripe. Indentation alone carries tree depth; no nested guide rails.
-- **Row priority:** a thread that needs the user outranks a finished one. It
-  keeps full brightness, the selected-style fill, an amber ring, and an amber
-  label. A finished, unopened thread shows a green mark and a green
-  "Finished" line without the fill. A failed thread shows a clay mark and a
-  clay "Failed" line. A running thread fades to about 55% with a neutral
-  spinner and no text, so the user is not drawn to watch it. A thread the user
-  stopped shows nothing. Every attention state clears when the thread is
-  opened.
-
-### Status Mark (signature)
-
-The smallest and most important component. An 8px mark in the status lane:
-
-| State | Mark | Visible text |
+| Reference | File | What it teaches |
 |---|---|---|
-| Needs the user | 8px ring, 1.5px `primary` border | Amber label: "Approval required", "Answers required", "Plan ready", "Interrupted". |
-| Finished, unopened | 8px `success` dot | Green "Finished". |
-| Failed | 8px `error` dot | Clay "Failed". |
-| Running or starting | Neutral spinner; the row at 55% opacity | None; the accessible name says "Running". |
-| Idle, stopped, opened | No mark | None. |
+| Sidebar thread row | `apps/web/src/features/projects/sidebar/SidebarThreadRow.tsx`, `apps/web/src/features/thread-attention/thread-row-state.ts` | The glance: density, status lane, fade truncation, hover actions that also appear on focus. The state file owns the thread states; `thread-row-presentation.ts` maps each to its mark and label. |
+| Status mark | `apps/web/src/components/ui/status-mark.tsx` | Shows a thread's state at a glance. Reuse it instead of drawing a new one. |
+| Composer | `apps/web/src/features/conversation/composer/Composer.tsx` | The strongest persistent object: a drafting surface, not a chat bubble. Controls that change what a send does stay visible beside Send. |
+| Picker | `apps/web/src/components/ui/picker.tsx` | Default anatomy: search on top, a flat list, a check on the chosen row. It also supports grouped rows, tabs, and a detail pane; extend it rather than stripping those out. |
+| Button and menu row | `apps/web/src/components/ui/button.tsx`, `menu-row.tsx` | Variants, sizes, and states for every action. |
 
-The mark always has accessible status text. Color never carries the status
-alone. Dark surfaces use `success` and `error`; light surfaces use
-`light-success` and `light-error`. The documented status pairs exceed the 3:1
-graphical-object threshold against their default canvases: dark success on
-`background` is approximately 10.16:1, dark error is 9.17:1, light success on
-`light-background` is 5.08:1, and light error is 5.75:1. These calculated sRGB
-ratios validate the tokens, not an implementation. Live UI verification must
-recheck the rendered mark against its actual surface, including the row fade.
+**The status mark** carries meaning you must know without opening code. These
+are examples; `thread-row-state.ts` holds the thread states,
+`thread-row-presentation.ts` gives each its mark and label, and a row may add
+short-lived ones of its own, such as "Closed" as a thread closes
+(`SidebarThreadRow.tsx`):
 
-Tooltips may clarify status but cannot be the only source of critical
-information. Never add a second colored chip.
+| State | Colour | Label |
+|---|---|---|
+| Needs the user | `primary` | "Approval required", "Answers required", "Plan ready", "Interrupted", "Setup failed" |
+| Finished, unopened | `success` | "Finished" |
+| Failed | `error` | "Failed" |
+| Running | Neutral | "Running" |
+| Idle, or a settled outcome the user has seen | None | None |
 
-### Status-mark placement
+The mark's shape, and whether its label shows as text, in a tooltip, or only
+as the mark's accessible name, come from `status-mark.tsx` and the row that
+uses it.
 
-Status marks are ambient attention signals, not universal completion ornaments.
-Use one when an object appears on a glance surface while its underlying content
-is hidden, or when its state changed while the user was elsewhere. Appropriate
-uses include a thread in the project tree, a toast, a terminal tab, a subagent
-row, a collapsed CI result in the thread overview, and a background run that
-completed outside the current view.
+Use a mark only on glance surfaces or for state the user cannot otherwise see.
+Opening a thread clears its settled outcomes once seen, including finished,
+failed, and interrupted. Running activity and live waits (approval, answers,
+setup failure, plan ready) stay visible. `thread-row-state.ts` defines the
+exact rules.
 
-Do not use a mark to repeat state already stated by the current section, label,
-or open content. A completed item inside `Done`, or a completed detail view,
-does not need a green mark solely to restate completion.
+**The conversation** reads as a document, not speech bubbles: one
+chronological flow. Collapse detail before you hide meaning. Do not invent a
+second timeline grammar for a new event type; fit it into the existing one.
+Streaming must not reflow or flash earlier content. See
+`docs/internals/conversation/narrative-pipeline.md`.
 
-When the user opens the object, its local content becomes the primary source of
-state. Remove the ambient mark unless ongoing activity or an exceptional state
-still needs monitoring. Preserve the state through visible text or accessible
-semantics; color and motion remain supplementary.
+**Choosing a surface.** Inline first, an anchored popover second, a dialog only
+for a decision that truly blocks. Menus run commands; pickers choose a value;
+popovers inspect. Escape closes the frontmost surface and returns focus to its
+trigger. A destructive confirmation uses the `destructive` button variant, not
+amber.
 
-### Provider identity
+**The next step.** When a thread has one likely next move, show it in the same
+place every time, between the narrative and the composer: one amber action,
+other valid moves as quiet ghosts. The next step is a fixed function of state.
+It does not learn, reorder, or guess.
 
-Providers are shown by their own icon, never by generic colored badges or
-assigned identity colors. Conversation chips and rows use the 16px provider
-icon. A stack of subagents in the thread overview overlaps 20px provider discs
-on a 12px step, each with a ring in the panel color, and shows at most three;
-the text beside it carries the total ("1 active · 7 done"). Subagent threads
-are provider-native, so they show the parent thread's provider.
+**When things go wrong.** Keep what the user had (draft, output, changes,
+scroll). Say what failed in plain words, with raw detail behind a disclosure.
+Put one recovery action beside the failed object: `Retry`, `Reconnect`,
+`Resume`, `Sign in`. Never imply a rollback that did not happen. When a remote
+outcome is unknown, check its status before you offer `Retry`, because
+repeating it may duplicate work. A run the user stopped gets a quiet line, with
+no fill and no button. Success updates the object in place; show a toast only
+when the object is no longer visible.
 
-### Conversation and Narrative
+**Loading and empty.** A spinner inside the control for a short action, a
+skeleton for a first load whose shape is known, stale content with a quiet cue
+for a refresh. An empty surface says why it is empty. Offer one action only
+when the user can resolve the condition. No fake activity, no placeholder
+metrics.
 
-- Render the conversation as a readable document, not alternating speech
-  bubbles. User prompts may use a restrained tonal block when authorship needs
-  emphasis; agent prose stays on the conversation canvas in the Prose role.
-- Keep the current run state near the work it describes. Narration, reasoning,
-  tool calls, approvals, and final response remain distinct, but they share one
-  chronological reading flow. Reasoning renders as a collapsed "Thought" row;
-  narration and the final answer render as prose.
-- Collapse detail before hiding meaning. A settled tool call may reduce to its
-  action, target, outcome, and duration. Its full payload remains available by
-  disclosure.
-- Parallel sub-agents appear as chips in the flow and open in their own right
-  panel tab. Nested tool calls follow
-  `docs/internals/conversation/narrative-pipeline.md`. Do not invent a second
-  timeline grammar.
-- Streaming motion stays local to the newest content. Existing content must not
-  reflow or flash as tokens arrive.
+## 8. Do's and Don'ts
 
-### Composer
+### Every interactive element
 
-- The composer is a drafting surface and the strongest persistent object in
-  the conversation. It is not a chat bubble or search field. It uses the
-  `composer` radius and is `76rem` wide everywhere.
-- Keep the draft as the largest hit area. Mode, model, reasoning, access,
-  attachments, and capabilities stay visible at the point where they affect
-  submission. Before the first send the thread overview hosts the workspace
-  and branch selectors; after it, the overview carries mode, branch, and
-  tasks.
-- An empty composer is one fully rounded capsule row: `+`, the modes, the
-  draft (one 24px line), then the split pill, which holds model and its
-  reasoning level, access, the context label, and the run button. The row has 5px padding (6px on the left) and a 4px gap.
-  Once the draft wraps, it takes the full width on top and the controls drop
-  to a row below; the radius becomes 22px and the draft scrolls past 240px.
-  The capsule also takes two rows whenever the one-row draft column would be
-  under 120px, and returns to one row only when the draft, as a single line,
-  fits the one-row column with 48px to spare, so editing near the wrap point
-  does not flip it back and forth.
-- Width tiers are container queries on the capsule. Below 680px the model
-  part shows its short name, the parts tighten to 7px padding, and the modes
-  show icons only. The model part keeps its name and level at every width,
-  so the selection reads without a hover.
-- Plan and Goal, when on, sit beside `+` as modes in a 36px pill with the
-  panel fill and the split's 1px by 14px dividers. Each mode is 32px high
-  with a 14px icon, its name in Compact, and a 24px remove button; removing it returns
-  focus to the draft. One mode shows its name; two, or a narrow capsule,
-  show icons only, with the name in a tooltip. With no mode on, `+` is a
-  bare 32px button. The `+` menu toggles Plan and a goal not yet sent. A
-  running goal and orchestration stay checked there but turn off only from
-  their own chip.
-- The model part sits in a 36px rounded pill on the right of the capsule,
-  with the panel fill and 2px padding. It is 32px high in Compact with 9px
-  side padding, under a sliding hover highlight. It shows its 14px provider
-  mark and name in `ink`, then a `·` and the reasoning level in `muted`
-  (`ink` while its picker is open, where the stronger fill would drop
-  `muted` below AA), then a 12px lightning mark while Fast is on, then a
-  12px access mark in `warning` while Don't ask (or Devin's Bypass) is on,
-  so an unsupervised run shows before sending. The level sits at its own
-  width, since it changes only as the picker closes. The context label and
-  the run button share the pill after the part, outside the highlight. The
-  picker opens 8px above the right edge of the capsule, covering any tray,
-  so it never moves when content above changes. The `+` menu is 232px.
-- The model picker is 488px, or the composer's width when the window leaves
-  less, so both its edges meet the composer's. It draws its own edges, in
-  columns that each run its full height behind `border` hairlines: the
-  provider rail, the search over the model list, and a 168px reasoning pane,
-  with a footer across all three. The search row and the pane's caption
-  share one row. The search's hairline is the input's own underline, so it
-  stops at the edges of the list rows below it and turns `focus` while the
-  search has focus. The caption's hairline closes the pane's header and,
-  like the column and footer rules, runs edge to edge. The caption is the
-  pane's title: the highlighted model's short name alone, left-aligned in
-  Body small `ink`, since the levels say what the pane is for and the rail
-  or group label already names the provider. A long name wraps rather than
-  fading, and the name fades in when the pane moves to another model. On
-  the list's "Show more" or "Show less" row, which has no levels, the pane
-  keeps the model it showed. The model's own default level carries a
-  `Default` tag in Caption `muted`, before any check. A check marks the
-  committed model and level. When the pane moves to another model, levels
-  both models offer hold still, levels the new model lacks fold shut, new
-  ones fold open, and the tag and check fade onto their new rows. A model
-  with no levels folds its rows away and shows "No reasoning levels". A
-  provider with older models folds them behind a "Show more" row in the
-  same group, with no gap or divider; opening it reveals them, and the row
-  becomes "Show less" after the last of them. Its chevron points down while
-  closed and up while open. The list
-  and pane are eight rows tall, so a provider with eight models opens with
-  Ctrl+1 to Ctrl+8 in view. A list narrower than 240px, in a narrow window,
-  hides the keycaps so model names stay whole; the shortcuts still work.
-  The list's 8px insets sit outside the scroller, so every keyboard stop
-  shows eight whole rows. The pane shares the list's 8px top inset and 33px
-  row pitch, so each level sits level with a model row. On a filled row a
-  keycap takes `ink`, since `muted` over the key's tint and the row's fill
-  falls below AA; a row's star sits before its keycap, so the keycaps form a
-  column near the row's end. Too narrow to share a row (a 320px window, or
-  400% zoom), the pane drops under four and a half rows of the list, its
-  text in line with the model names, and shows three and a half levels, so
-  like the list a level cut at an edge under the scroll fade shows there
-  are more. When the room above the capsule runs short, the list
-  and pane shrink and scroll under the scroll fade, the pane opening on its
-  checked level, which the capsule already names; the footer always shows
-  whole. A hovered row reaches the
-  pane after 100ms, so a pointer crossing rows on its way to the pane keeps
-  it. Right Arrow at the end of the search enters the pane and Left Arrow
-  leaves it. A level sets the model and level and closes; picking a model
-  closes and keeps the level when the model supports it. A search on a
-  provider tab lists that provider's matches first, then each other usable
-  provider's matches, each provider's rows under its name as a group label
-  (the tab's own included once results span providers), so another
-  provider's model and level are a search and one click away. When only
-  other providers match, the tab's provider still heads the list, its label
-  over a muted "Nothing matches" line. Favourites searches only
-  favourites, and a provider-locked thread searches only its provider.
-- The picker's footer holds what applies to the selected model and the turn,
-  whichever row is highlighted, and changes it in place without closing. On
-  the left: a small pill strip, Standard or Fast, when the model offers
-  Fast, then a toggle for each mode the model offers (Thinking on older
-  Claude models, Ultra on Codex and Ultracode on Claude). On the right:
-  access, with its icon, label and an up chevron, opening the access list
-  (232px) above it; choosing closes only that list. Every control is 26px
-  high in Caption with 12px icons, so the footer reads as one slim bar
-  with a single filled strip. The strip's track and thumb are ink tints
-  (7%, then 10% over it), so they never borrow the hairline or row-fill
-  tokens. A mode off rests as bare `muted` text like access, and on takes
-  the 16% ink fill a chosen speed shows over its track, in the same weight,
-  so "on" looks one way across the footer. The
-  context window is a Settings default, not a per-message choice, so the
-  picker has no 1M option. So every model setting the composer offers is two
-  clicks from the closed capsule: open, then a level, a speed, a mode or
-  access. The open part keeps the `button-secondary-hover` fill, a step
-  above the hover. The part names its settings in a tooltip, which stays
-  hidden while the picker is open.
-- Separate configuration from the draft with tone and spacing, not a stack of
-  chips. Use chips only for removable attached entities such as files, images,
-  comments, or enabled capabilities. Capability chips such as Plan use the
-  neutral selected fill.
-- One run button ends the split pill: a 32px circle with a 16px icon, 2px
-  after the context label. Idle with something to send it is Send in the
-  amber fill. Idle and empty it is a disabled Send in the `selected` fill
-  with a `muted` icon that does not look pressable. While a turn runs with
-  an empty draft it is Stop: an `ink` circle with a 12px `background` square
-  of 2px radius. While a turn runs with a draft, a file, or an annotation it
-  is Queue, with the Send look and the tray's queued mark (a corner-down-right
-  arrow), since the tray's Send now keeps the up arrow. A running thread
-  never shows a second button.
-- Editing a queued message while a turn runs puts a one-line caption above
-  the draft, "Editing a queued message" in Caption `muted`, with a ghost
-  "Cancel edit" button at its end, the caption starting at the + glyph's ink
-  and the button's text ending flush with the run button. The run button
-  becomes Save changes, a check in the Send look, and saving returns the
-  message to its place in the queue. Until then the tray keeps that place as
-  a muted "Editing" row with a pencil, so the user can see which message is
-  out for editing. An unsent draft the edit displaced waits behind the queue
-  as a row labelled "Draft" in `muted` before its text, with a page glyph
-  and no actions, and saving or cancelling the edit puts it
-  back in the composer; the queue never sends it.
-- The context label replaces the old ring. It shows nothing below 70% of the
-  context window or when the window is unknown. From 70% it reads "72%
-  context" in `warning`, and from 90% in `destructive`; below the 680px tier
-  it reads only "72%". A low provider quota shows it below 70% in `warning`.
-  It sits behind a divider after the model part, 32px high in Compact with
-  tabular numbers and the parts' 9px sides (7px below the 680px tier), and hover or focus opens the token
-  breakdown card, which adds a "Provider quota: Low" line when quota is low.
-- Trays that belong to the composer (the task row, queued messages, file and
-  image tiles) dock flush on its top edge with the panel fill and no border.
-  Light mode uses `page` instead, because light panel matches the background.
-  A new thread's tab (Local, the branch) has the same look. With tiles under
-  it, the tray squares its top corners, so the tab and the tray read as one
-  panel.
-- `/` at the start of a word opens the slash menu, and `$`, `£` or `₦` opens
-  it with only skills and plugins (a digit after them stays text). It sits in
-  the tray's place and look: the same inset and top corners, 8px padding, its
-  bottom edge on the capsule's top border. Over an open tray or a new
-  thread's tab, each keeps its panel and hides its contents, so a shorter
-  menu still reads as one surface, and the covered controls are inert. The
-  list scrolls past 262px with no scrollbar. Rows are
-  32px pills with a 14px icon (`muted`, `ink` on the active row), the name in
-  Body small with the matched part semibold, and the description in Compact
-  `muted`, both
-  fade-truncated. A 1px `border` rule separates Mcode commands, provider
-  commands, skills and plugins; an empty result reads "No matches". The active
-  row takes the sliding highlight in `ink` at 7%. Arrows move it, hover moves
-  it without scrolling, Enter or Tab picks. Escape closes the menu and keeps
-  the text, and it stays closed until a trigger starts a new word.
-- Tray size: inset 22px from each side of the capsule (`--tray-inset`,
-  shared with the slash menu and the tab above a new thread's composer, so
-  all three have one footprint), 14px top corners,
-  4px 8px 8px padding, and a 4px gap between rows. Tiles are 56px high with
-  a 10px radius, a 1px border and the hover fill: an image tile is 56px
-  square with its thumbnail, a file tile is 156px wide with its name (16px
-  icon, fade truncation) over its size in muted. Each tile has a 20px round
-  remove button at its top right, shown on hover or keyboard focus. The tile
-  row scrolls sideways with no scrollbar.
-- A request that needs the user (approval, plan questions) docks in place of
-  the composer surface and names the waiting state in the status line. A
-  question's picked answer shows a trailing check, because focus follows the
-  pick and the ring alone would be the only sign of it.
+Define default, hover, focus-visible, pressed, selected, disabled, loading,
+and error before you ship. Selection, focus, and live status are three
+different signals: a neutral fill, the focus ring, and the status mark. Never
+put amber on all three.
 
-### Tabs and Toolbars
+### Motion
 
-- **Vertical tabs** are the right panel's rail entries: one per panel tab,
-  icon-led, with the selected fill on the active entry. Opened subagents
-  appear as their own rail entries.
-- **Horizontal tabs** live in a panel header's first row (browser pages,
-  terminals, open files). The active tab has the selected fill. Hovering a tab
-  swaps its leading icon for a 14px close glyph in the same slot, so the tab
-  never changes width. When tabs overflow, inactive tabs shrink to `9.6rem`
-  with a text fade, the strip scrolls with a right-edge fade, and the new-tab
-  button stays pinned.
-- Tabs switch sibling views inside one object. They do not duplicate the
-  sidebar's thread navigation.
-- Toolbars contain direct actions for the visible surface. Keep the common
-  action visible, group alternate methods in an attached menu, and send rare
-  commands to overflow.
-- Icon-only actions keep a stable position across loading and settled states.
-  Replace the glyph in place rather than inserting a new control.
+Motion explains a change of state or place. It never decorates a resting
+surface. Use `--ease-standard` with `--duration-fast`, `--duration-standard`,
+or `--duration-overlay`, and never bounce. Prefer transform and opacity.
+Disclosures reuse `AnimatedCollapsible` (`components/ui/animated-collapsible.tsx`),
+or the `animate-collapsible-*` classes for a Radix `CollapsibleContent`, instead
+of writing a new height animation. Content renders without waiting for an
+animation. With reduced motion, movement becomes an instant change or a short
+fade and no information is lost. Avoid timers that
+re-render a whole tree every second.
 
-### Menus, Pickers, Popovers, Tooltips, and Dialogs
+### Accessibility
 
-- Menus are command lists. Pickers choose one value from a list. Popovers
-  expose lightweight choices or inspection. Dialogs interrupt only for a
-  focused decision, destructive confirmation, or work that cannot safely
-  remain inline.
-- Anchor transient surfaces to their trigger and keep the trigger visible.
-- Escape closes the frontmost transient surface and restores focus to its
-  trigger.
+WCAG 2.1 AA. Every action has a keyboard path, and focus is always visible.
+Colour, icon, position, fade, and motion support text or an accessible name;
+none carries critical state alone. Announce completions, blocking errors, and
+permission requests through a live region, but never stream text token by
+token. At 200% zoom a pane may change posture, but no action or state
+disappears. Tooltips explain; they never hold required instructions
+(`mcode/no-native-title-tooltip`).
 
-**Menus.** A floating card with 4px padding and 32px rows that sit flush
-against each other (`badge` radius, 12px inset). A row holds the name in Body
-small and, only when it improves scanning, a 16px `muted` icon in a 20px slot.
-Shortcuts sit right-aligned in `muted` caption. Rows show names only: no descriptions, counts, operands, or
-group labels. Groups are separated by 1px dividers. The highlighted row takes
-the `hover` fill as the sliding highlight. A checked row shows a check. Destructive rows use `error`
-for icon and label. An unavailable row stays listed and dimmed, and its reason
-appears in a tooltip ("Nothing staged"). A submenu opens to the side.
+### Voice
 
-**Menus open to the side.** A menu opened from a row inside a floating card
-(the thread overview's workspace or branch row) opens beside the card,
-top-aligned to the trigger row, never stacked below it.
+Short technical sentences. Lead with the object and the outcome. Sentence case.
+Buttons start with a verb. Use the words in `CONTEXT.md`, not synonyms.
 
-**Picker anatomy.** One anatomy for every picker (branch, pull request,
-commit, model, project):
-1. A borderless search row on top.
-2. Segmented tabs under it when the list has sibling sources. A single
-   source shows no tab row. Icon tabs, such as the model picker's
-   providers, stand in a rail of 36px squares with 18px marks left of the
-   search instead, behind a `border` hairline, with the search at the top
-   of the column beside it. The rail marks its tab with a 2px `ink` bar on
-   the side facing the list, not a fill, and the other marks keep their
-   brand colours. A second row of icons under the search read as part of the
-   search, so the providers move out of its way.
-3. A flat list with no section labels and no per-row type icons or counts.
-   The selected row shows a trailing check, with a `muted` tag when it helps
-   ("current", "worktree"). About five rows are visible; the list scrolls
-   with top and bottom fades. The arrow keys scroll it by whole rows and keep
-   the row past the highlight in view, and a list beside a pane snaps the
-   wheel to row and group heading edges, so no sliver of a row shows and the
-   first heading is never left under the fade. The highlighted row takes the sliding
-   highlight, and a row the arrow keys reached also takes the 2px `focus`
-   ring, so keyboard and pointer focus look like every other control. The
-   selected row keeps its own `selected` fill.
-4. Silent paging: more rows load as the user scrolls, and a `muted` footer
-   reads "Showing 50 of 568". A search across all history may read
-   "N matches in M commits" instead.
-5. Optional footer toggles below a hairline ("Start from origin").
-
-States: no match reads `Nothing matches "query"` and offers a one-click switch
-when the other tab has matches; a load failure names the failure, shows the
-raw cause in mono, and offers Retry.
-
-**Popovers.** A floating card with 16px padding and a heading in Label.
-Lightweight inspection and settings only; no command lists.
-
-**Tooltips.** `panel` fill, 1px `border`, `menu` radius, caption text in
-`ink`, 32px minimum height, 32rem maximum width, with a small arrow toward the
-trigger. A tooltip may show the command's shortcut in keycaps. A keycap, in
-a tooltip, menu or picker, is a 20px key filled with a 10% tint of its text
-colour, in Caption in the UI font with tabular numerals and no outline, so a
-column of them stays quieter than the labels they serve. Every icon-only
-control has one; native `title` tooltips are not used.
-
-**Dialogs.** Destructive confirmation names the object and cascade. The
-confirming action uses the destructive variant, not Filament Amber.
-
-### Toasts
-
-Toasts report events about something the user cannot see right now. Never
-show a toast for the thread on screen.
-
-- **Lane:** top center of the conversation column, 8px under the 48px header,
-  centered on the column, not the window.
-- **Shape:** `34rem` wide, `selected` fill, `dialog` radius, no border, the
-  `floating` shadow, 12px top and bottom, 16px left, 10px right.
-- **Anatomy:** a status mark, the title in Label (fading when long), a caption
-  meta line (`Finished · 14:32`), and a 24px round close with a 14px glyph.
-  The whole toast is the button that opens its object; there is no separate
-  View button. Hover lifts the fill to `border`.
-- **Lifetime:** a finished event hides after 8 seconds, paused while hovered.
-  Needs-you and failed events stay until opened or closed. At most three
-  stack, newest on top.
-- **Motion:** see Motion and Time.
-
-### Settings and Utility Pages
-
-- A full settings or utility area replaces the project and thread rail with its
-  own navigation and a clear route back. Do not nest a second full-height
-  navigation rail beside the normal app rail.
-- Use a centered task column instead of stretching forms across the available
-  workspace. Start near 72rem to 80rem for settings and narrow utility lists,
-  then widen only when the content requires comparison.
-- Put the page title and optional description above the task column. Routine
-  utility pages use the H5 or H4 role, not the H1 display size.
-- Group related settings in one tonal card. Put the group label outside the
-  card, separate rows with quiet hairlines, and keep larger gaps between groups
-  than between rows.
-- A setting row places its label and one concise description on the left, then
-  its control or current value on the right. Controls align to a stable trailing
-  edge.
-- Flat lists, filters, and scheduled items remain on the page canvas. Use a
-  contained surface only when the group itself needs a boundary.
-- Search spans the task column. Segmented filters may sit below it with one
-  neutral selected state.
-
-### Tool Results, Diffs, and Technical Data
-
-- Show the human meaning first: command, file, provider, branch, outcome, and
-  duration. Keep raw payloads behind disclosure.
-- Code and terminal output use the mono stack with ligatures off. Labels
-  around them remain Public Sans unless fixed-width comparison improves
-  scanning.
-- Diff additions use sage plus a `+` or addition gutter. Removals use clay plus
-  a `-` or removal gutter. Never rely on red and green alone. Diff lines in a
-  compact preview never wrap: they clip with the fade and scroll sideways.
-- File identity stays primary. A state marker supplements the file-type icon;
-  it does not replace it.
-- Long technical output has a bounded region, copy action, and a clear route to
-  the full source. Avoid nested scroll areas when one continuous scroll works.
-
-### Loading, Empty, Error, and Success
-
-| State | Treatment |
-|---|---|
-| Short action under three seconds | Spinner inside the initiating control; keep its label when space allows. |
-| First load with known geometry | Skeleton that matches the final rows or blocks. |
-| Background refresh | Keep stale content visible; add a quiet local progress cue. |
-| Empty first use | Explain the surface and offer one action. |
-| Empty filtered result | Name the active filter and offer clear or edit filter. |
-| Unavailable data | State the unavailable source and preserve the rest of the surface. |
-| Recoverable error | Put technical cause and recovery beside the failed object. |
-| Destructive or blocking error | Use a bounded callout or dialog with the affected scope. |
-| Success | Update the object in place; use a toast only when the originating object is no longer visible. |
-
-### Failure and interruption journeys
-
-| Journey | Preserve | Explain | Primary recovery |
-|---|---|---|---|
-| Permission required | Draft, completed output, and triggering context. | The exact capability, target, duration, and consequence of allowing it. | `Allow once`; keep `Deny` beside it as a neutral action. |
-| Run stopped by user | Completed output, draft, files already changed, and last settled step. | A quiet "You stopped" line; no fill and no button. | None; Revert this turn lives in the turn's menu. |
-| Run interrupted | Completed output and changes. | That Mcode closed while the provider was working. | `Resume`. |
-| Run failed | Completed output, partial answer, and changes. | The cause in plain words with its status, raw detail by disclosure. | `Retry`, or `Sign in` or `Switch model` when that is the cause. |
-| Provider disconnected | Last confirmed output and local changes. | The provider boundary, last confirmed event, and whether remote execution state is unknown. | `Reconnect`; do not imply rollback. |
-| Preview or source is stale | Current content, scroll, and selection. | The last refresh time and source that failed to update. | `Refresh`; keep stale content visibly marked until replaced. |
-| Remote outcome unknown | Request identity and last confirmed state. | That repeating the action may duplicate work. | `Check status`; enable `Retry` only when the operation is known to be idempotent. |
-| Return after interruption | Draft, pane posture, selection, scroll, and run state. | What changed while the user was away. | The current curated next step, not a generic resume dialog. |
-
-### Empty States (signature)
-Empty states explain why content is absent and what can happen next. Match first use, filtered results, completed work, unavailable data, and quiet resting states with suitable compositions. A glyph, diagram, message, or restrained illustration may clarify the state. Use technical copy. Show one nearby action when the user can resolve the condition.
-
-### Next-Step Slot (signature)
-The interface expression of the "Anticipate the next step" product principle. When the thread reaches a state with one likely next move, the interface shows it at the seam between the narrative and the composer, in the same place in every thread: a single primary action with any other valid moves beside it as quiet ghost buttons. When there is no next move, the slot collapses to nothing, no empty chrome. Tab remains reserved for focus traversal. When the primary action has focus, Enter or Space activates it. A product-wide command shortcut may also invoke the current next step when its label and binding are visible in the command menu. Safe, single-outcome transitions (add project -> new chat) do not render here; they auto-advance, landing the user on the next surface with one quiet cue, per Quiet-over-loud.
-
-### Named Rules
-**The One Next-Step Rule.** Each state elevates at most one primary action in Filament Amber. Everything else stays a quiet ghost. Never two competing primaries; the rarity of the lamp is what makes the suggestion legible at a glance.
-
-**The Curated-Not-Clever Rule.** The next step is a fixed function of state, the same every time. It does not learn, reorder, or guess. Predictability is the feature; a suggestion the user has to second-guess is worse than none.
-
-## 8. Interaction States
-
-Every interactive component defines the following states before implementation:
-
-| State | Required signal |
-|---|---|
-| Default | Clear affordance without decorative emphasis. |
-| Hover | One fill or foreground shift; never the only indication of action. |
-| Focus-visible | A 2px focus ring with a 2px offset in the surface color, outside the control. |
-| Active or pressed | A 2px inset ring in the variant's foreground color. Ghost controls take the selected fill instead, with no ring. No translation. |
-| Selected or current | The selected fill plus a check marker or semantic state. |
-| Disabled | 50% opacity, unavailable cursor behavior, and a reason when the cause is not obvious. |
-| Loading | Stable geometry, a spinner in place of the leading icon, and repeat-action prevention. |
-| Error | Error color on the boundary, an icon and technical explanation, and recovery when available. |
-| Reduced motion | Preserve the same state and information; replace movement with an instant change or short fade. |
-
-The table above owns shared state meaning. The contracts below add semantics and
-behavior for components where agents must not invent an interaction model.
-
-### High-risk component contracts
-
-| Component | Semantics | Keyboard and focus | Loading and error | Reduced motion |
-|---|---|---|---|---|
-| Thread row | `treeitem` inside a labeled `tree`; use `aria-selected` for the viewed thread and `aria-expanded` only on expandable project or group rows. | Up and Down Arrow move between visible rows; Left and Right Arrow collapse or expand groups; Enter opens the focused thread. Keep focus on the row after selection. | Preserve the thread identity and last confirmed state. Show the visible label for every attention state (needs the user, failed, finished unseen); running carries its state in the accessible name. Never disable the whole row because status failed. | The spinner stops and holds a steady ring; the row fade and labels remain. |
-| Progress row | A static step is a `listitem`; a row that reveals detail contains a real button with `aria-expanded` and `aria-controls`. | Tab reaches only actionable controls. Enter or Space toggles detail. Restoring a collapsed row returns focus to its disclosure button. | Keep the settled label and elapsed time. A failed step names the boundary and places recovery beside it; loading does not replace earlier steps. | Replace progress shimmer or pulse with a steady icon and text update. |
-| Narrative event | An event is an `article` or labeled list item inside one chronological `log`; tool detail uses a disclosure button. | Reading order follows DOM order. Disclosure uses Enter or Space and does not move focus when content opens. | Stream only the newest event. On failure, preserve completed content and append cause plus recovery without rewriting history. | New content appears immediately or with a `fast` opacity fade; no vertical settle. |
-| Diff hunk | A labeled region identifies file and hunk; additions and removals include textual `+` and `-` markers. | Tab reaches hunk actions, not every code line. Find and review commands move focus to the target hunk heading. | Keep the last confirmed diff visible during refresh. A stale or failed hunk is labeled and offers `Refresh` without discarding selection. | Reveal or replace the hunk without animated line movement. |
-| Review comment | `article` with body and a labeled action group; edit fields use the input contract. Mcode is single-user: no author label, no timestamp on the user's own notes. | Tab follows body actions in visual order. Escape cancels an inline edit and restores focus to Edit; submission returns focus to the updated comment. | Keep the draft and comment context during submission. Put validation or provider failure beside the editor and prevent duplicate submission. | Insert the settled comment without spatial animation; a short opacity fade is optional. |
-| Switch | Native checkbox semantics or `role="switch"` with an accessible label, `aria-checked`, and visible consequence text. | Space toggles the focused switch. Do not bind Enter unless the underlying native control already supports it. Focus remains on the switch after change. | Disable repeat input only while persistence is pending. On failure, restore the confirmed value and place the reason beside the control. | The knob changes position instantly; color and checked state still update. |
-| Tabs | `tablist`, `tab`, and `tabpanel` with stable IDs and relationships. Use manual activation when changing tabs performs work. | Left and Right Arrow (Up and Down for the vertical rail) move roving focus; Home and End reach the first and last tab; Enter or Space activates. Tab then enters the active panel. | Keep the active tab selected while its panel refreshes. Mark failure inside that panel and retain a retry path. | Replace the active fill instantly; do not slide it between tabs. |
-| Pane resizer | Focusable `separator` with vertical orientation and `aria-valuemin`, `aria-valuenow`, and `aria-valuemax`. | Use the resize keys and focus behavior defined in Responsive posture. The seam remains in the tab order whenever resizing is available. | If persistence fails, keep the usable current width for the session and report that it was not saved. Never collapse the pane as a fallback. | Direct resizing is instant. Dock, float, and full-surface transitions use the reduced posture rule. |
-| Menu, picker, or popover | Use `menu` and `menuitem` only for commands. Use a labeled listbox for pickers, and form controls or a plain region for inspection. The trigger exposes `aria-expanded` and `aria-controls`. | Opening a menu moves focus to the current or first enabled item; opening a picker focuses its search field. Arrow keys move between items; Home and End reach the boundaries; Enter or Space invokes; Escape closes and returns focus to the trigger. A non-menu popover follows normal tab order. | Keep the trigger stable while an action runs. Prevent duplicate invocation and place a failed action beside its origin; do not leave a dead menu open as a success-shaped fallback. | Use `instant` or a `fast` opacity fade. Do not scale or slide a menu from its trigger. The one exception is the Genie on the composer's model, reasoning, and access popovers (see Product motion patterns). |
-| Dialog | Labeled `dialog` with `aria-modal="true"`; destructive scope appears in its accessible description. | Move focus to the first task control, or the least destructive action for a destructive confirmation. Trap focus while open. Escape cancels when cancellation is safe and returns focus to the trigger. | The initiating action owns pending state and blocks duplicates. Preserve entered values. Put validation beside its field and blocking failure in a focusable summary inside the dialog. | Use `instant` or a `fast` opacity fade for dialog and backdrop; remove scale and spatial movement. |
-| Toast | A `status` live region for finished events and `alert` for needs-you and failed events; the toast itself is one button named by its title and state, with a separate close button. | Toasts never take focus. A keyboard user reaches them through the region landmark; Enter opens the object, Escape on a focused toast closes it. | A failed open leaves the toast in place. | Appear and leave with a `fast` opacity fade; no slide and no swipe animation. |
-
-Keyboard and pointer interaction share the same state model. Hover-only
-controls must also appear on focus-within, and they must remain reachable in a
-logical tab order. Avoid making routine row actions permanently visible when
-that harms scanning, but never hide them from keyboard or touch users.
-
-Selection, focus, and live status are distinct:
-
-- **Selection** answers "which object am I viewing?" Use the selected fill or tab state.
-- **Focus** answers "where will the next keyboard action land?" Use the focus ring.
-- **Live status** answers "what is happening now?" On glance surfaces or for
-  hidden state, use the status mark and local motion. Open content carries its
-  own state and does not repeat a settled ambient mark.
-
-Do not use Filament Amber for all three on the same element.
-
-## 9. Motion and Time
-
-Motion explains state, continuity, and causality. It never decorates a resting
-surface.
-
-### Timing
-
-| Token | Duration | Use |
-|---|---:|---|
-| Instant | 0ms | Reduced-motion replacement and direct state swap. |
-| Fast | 120ms | Hover, color, press, and small icon feedback. |
-| Standard | 180ms | Menus, popovers, disclosure, and selection. |
-| Overlay | 240ms | Dialogs, panels, posture changes, toast entry, and the first-send move. |
-
-Every transition uses one curve, `cubic-bezier(0.2, 0, 0, 1)`. Never use bounce
-or elastic easing. Avoid animating width, height, top, or left when a transform
-or clip can show the same continuity. Keep content visible by default; motion
-enhances a state change and may not gate rendering.
-
-### Product motion patterns
-
-- A running thread's spinner turns once per second, linear. The row fade does
-  not animate.
-- A new narrative segment enters over `standard` with an opacity fade and a
-  small vertical settle. Earlier segments do not replay.
-- Pane posture changes preserve the relationship to the right edge through an
-  `overlay` transform. Resizing under direct manipulation has no easing.
-- Completion updates status. Do not fire confetti, bounce rows, or animate
-  several unrelated regions.
-- **First send.** The composer is the same width on the new-thread screen and
-  in a running thread, so the first send is a vertical move only: the composer
-  slides down over 240ms (a transform, not a resize). The heading and hint fade
-  out over 0 to 120ms, the new sidebar row fades in over 0 to 180ms, the user's
-  message fades in over 120 to 300ms, and the startup steps fade in over 240 to
-  420ms. The overview's selectors swap instantly.
-- **Toasts.** A toast slides down from under the header with a fade over
-  `overlay`. Dragging it sideways makes it follow the pointer and fade with
-  distance; releasing past 35% of its width, or a flick, sends it off that
-  side in 160ms, otherwise it returns to rest. The stack closes the gap in
-  200ms. Close and auto-hide reverse the entry.
-- **Genie.** Popovers fade, with one exception: the composer's model and
-  access popovers pour out of their trigger in 200ms and back
-  into it in 160ms, like a window minimising to the Dock. The popover takes
-  focus and keys from the first frame; typing during the pour ends it at once.
-  Switching between these popovers swaps them in place without a pour, and
-  reopening mid-close turns the pour around from where it is. Reduced motion
-  keeps the fade.
-- `prefers-reduced-motion: reduce` removes movement and looping animation. The
-  composer docks instantly, toasts and messages fade over `fast`, spinners hold
-  still, and all information remains available, including visible progress
-  text.
-
-Time labels use relative time in compact lists and exact time in tooltips or
-details. Durations and aligned timestamps use tabular numerals. Avoid a timer
-that causes a whole component tree to render every second.
-
-## 10. Accessibility and Content
-
-### Accessibility floor
-
-- Target WCAG 2.1 AA. Body, placeholder, and muted readable text hold at least
-  4.5:1 against their actual surface. Large or bold text holds at least 3:1.
-- Every action has a keyboard path. Focus order follows the visual task order,
-  and focus remains visible against every theme surface.
-- Minimum pointer target is 32px for standalone controls in dense desktop
-  chrome. Inline row actions may use the 24px or 28px boxes described under
-  Buttons when the row is the larger target and adjacent actions keep 4px
-  apart. Use 48px for touch-oriented controls.
-- Color, icon, position, motion, and fade supplement text or an accessible
-  name; none carries critical state alone.
-- Announce asynchronous completion, blocking errors, and incoming permission
-  requests through an appropriate live region. Do not announce streaming text
-  token by token.
-- Preserve useful content at 200% zoom and during text enlargement. A pane may
-  change posture, but no action or state disappears.
-- Faded text keeps its full value in the accessible name.
-- Tooltips describe unfamiliar icon-only actions or clipped values. They do
-  not contain required instructions or interactive content.
-
-### Product voice
-
-Write short technical sentences. Lead with the object and outcome:
-
-| Prefer | Avoid |
+| Write | Not |
 |---|---|
 | `Command failed` | `Oops, something went wrong` |
 | `Failed` | `Errored` |
 | `Worktree removed` | `Success! Your worktree has been removed` |
 | `No files changed` | `Nothing to see here yet` |
-| `Retry` | `Try again now` |
 | `Delete 4 threads and 1 worktree` | `Are you sure?` |
 
-Use sentence case for labels and headings. Use the domain terms in
-`CONTEXT.md`. Do not invent synonyms for thread, turn, worktree, narration,
-handoff, or right panel. Button labels begin with a verb. Empty-state headings
-state the condition; supporting copy explains the next useful move.
+The users are developers. Do not caption ordinary git or developer behaviour.
+Show a count only when it changes what the user does next. Mcode is single-user:
+do not label the user's own notes "You" or timestamp them.
 
-Mcode's users are developers. Keep copy terse:
+### Never
 
-- Do not add captions that explain ordinary git or developer behavior. A
-  toggle such as "Start from origin" stands alone.
-- Show a count only where it changes what the user does next, such as a
-  pager's "Showing 50 of 568". No decorative counts on tabs, groups, or
-  segmented controls.
-- Mcode is single-user and local. Do not label the user's own notes "You" or
-  stamp them with a time.
+- Emoji decoration, marketing voice, hero type, or eyebrow labels on a task
+  surface.
+- Glassmorphism, gradient text, decorative glow, resting card shadows, coloured
+  side stripes, or decorative charts.
+- A second amber primary action in the same state, or two competing next steps.
+- Green or red outside the `success`, `error`, and `destructive` roles.
+- A status shown only by colour.
+- Speech bubbles or typing theatrics in the conversation.
+- Raw wire syntax where a product concept exists.
+- A new raw colour, size, radius, shadow, or z-index in feature code. If a token
+  is missing, add it to `index.css` first and say why.
 
-## 11. Reference Translation and Agent Checklist
+## Keeping this brief short
 
-### What to borrow from Codex
-
-- Calm presentation of a run in flight.
-- A document-like central task surface with restrained chrome.
-- Progressive disclosure for technical detail.
-- A strong composer anchored to the work.
-- Local, in-place feedback instead of global banners.
-- Familiar controls and shallow visual hierarchy.
-
-### What remains distinctly Mcode
-
-- The multi-run sidebar is the primary glance surface.
-- Threads expose provider, branch, worktree, status, and diff as first-class
-  state.
-- Filament Amber on cool slate carries brand identity.
-- Public Sans and tabular mono separate human and machine information.
-- The right panel supports inspection without turning Mcode into an editor.
-- The ambient status mark and the curated next step are signature components.
-
-### External references
-
-A reference is a scalpel, not a template: borrow the one quality named here,
-not the whole look.
-
-- [Introducing the Codex app](https://openai.com/index/introducing-the-codex-app/)
-  defines Codex as a command center for parallel, long-running agent work. Use
-  its published product imagery as an interaction and composition reference.
-  Codex centers one task and one stream; Mcode holds many runs and optimizes
-  for the cross-thread glance.
-- [Zed](https://zed.dev) treats performance as a design property: instant
-  response, no jank, density without lag. Borrow the discipline behind Mcode's
-  targets (sub-2s startup, under 150MB idle, 60fps timeline). Zed is an editor
-  with editor chrome; Mcode sits beside the editor.
-- [T3 Code](https://github.com/pingdotgg/t3code) is Mcode's closest peer, a
-  minimal GUI for coding agents. Borrow its multi-provider control patterns and
-  its build discipline (Vite, oxlint, a fast desktop shell). It centers a single
-  agent view; the sidebar of runs and the worktree as an object stay Mcode's.
-- [Synara](https://github.com/Emanuele-web04/synara), a T3 Code fork, adds
-  broader provider coverage and a multi-tab layout for threads, views, and an
-  embedded browser. Borrow the tab layout and the provider breadth. Mcode's
-  organizing object is the thread on the sidebar, not a tab.
-- [Lucide](https://lucide.dev) is the icon API and asset source of truth. It
-  documents icon names, deprecated aliases, stroke and size props, and the
-  license.
-- [awesome-design-md](https://github.com/VoltAgent/awesome-design-md/tree/main/design-md)
-  is comparative research, not an authority on the referenced brands. Its
-  useful lesson is document completeness: tokens, component recipes, and
-  explicit rules must appear together.
-
-### What not to resemble
-
-If a design wants to convert a visitor, it is wrong.
-
-- SaaS dashboards and admin panels: colorful stat chips, the hero-metric
-  template, "your week in Mcode" summaries.
-- The AI-tool aesthetic: neon or cyan accents on dark, purple-to-blue
-  gradients, glassmorphism, gradient text.
-- Consumer chat apps: speech bubbles, emoji reactions, "typing..." theatrics,
-  soft rounded everything.
-- Marketing-page tropes inside the product: oversized hero type,
-  tracked-uppercase eyebrows above every section, identical repeating card
-  grids, decorative resting shadows, colored side-stripe borders.
-
-### Before an agent changes UI
-
-1. Name the user job and the exact state being designed.
-2. Identify the primary surface, current action, and one likely next step.
-3. Reuse a component from `apps/web/src/components/ui/` or extend its variants.
-4. Use design tokens, the icon map, type roles, spacing scale, and state
-   matrix from this file.
-5. Specify loading, empty, error, disabled, focus, and narrow-posture behavior.
-6. Check that keyboard, pointer, reduced-motion, and accessible-name paths agree.
-7. Compare the result with neighboring Mcode patterns and the reference
-   translation above. Preserve Mcode when the two differ.
-8. Run the live UI checks in `docs/internals/renderer/ui-components.md`, add a focused
-   behavior test, and run typecheck.
-
-### Implementation status
-
-The foundation layer in this document has shipped: the shared `icon-map.tsx`, the
-`text-fade` utility, the round icon button, the split button, the picker, the
-toast lane, and the status mark all live in `apps/web/src/components/ui/` or
-`apps/web/src/index.css`. Lucide is the only outline icon family, and
-`@phosphor-icons/react` is gone. Do not add a second one.
-
-Pane thresholds and layer values in this document are the fallback contract.
-Live measurement may move a posture earlier when real content needs more
-space, but feature code must not invent different global constants.
-
-## 12. Non-negotiable Prohibitions
-
-This section owns system-wide bans. Positive values and behavior stay with their
-normative sections; do not copy them here.
-
-- Do not invent spacing, sizing, radius, motion, layer, shadow, or color values
-  outside frontmatter. Named optical exceptions must be added there before
-  reuse.
-- Do not truncate text with an ellipsis, `text-overflow: ellipsis`, a
-  line-clamp ellipsis, or a `…` appended in code.
-- Do not use a colored side stripe, nested guide rails, gradient text,
-  glassmorphism, decorative glow, resting card shadows, hero metrics, or
-  decorative charts and grids.
-- Do not use raw framework palette colors or literal color values in feature
-  code. Semantic tokens own primary, focus, link, success, error, warning,
-  info, diff, and status color.
-- Do not use color, icon, position, fade, or motion as the only carrier of
-  critical state.
-- Do not show a provider as a generic colored badge or an assigned identity
-  color; use its icon.
-- Do not replace object identity with a generic state glyph, expose raw wire
-  syntax when a product concept exists, or soften technical outcomes into
-  consumer copy.
-- Do not add explanatory captions for ordinary developer behavior or counts
-  that change no decision.
-- Do not duplicate a persistent action, show two primary next steps, or let the
-  next step learn, reorder, or guess.
-- Do not replace a capable resizable pane with a picker, dropdown, or weaker
-  component to accommodate width.
-- Do not add marketing whitespace, emoji decoration, promotional type, or
-  ornamental color to a task surface.
+Add a line here only if it changes decisions across more than one component.
+One component's measurements belong in its code, with a comment when the reason
+is not obvious. If a rule can be checked, write a lint rule instead and link to
+it from here.
