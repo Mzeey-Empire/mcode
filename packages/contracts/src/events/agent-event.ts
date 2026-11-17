@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FastModeStatusSchema } from "../models/fast-mode.js";
 
 /** Live events are replaced by saved records; saved events retain their published form. */
 export const AgentEventDelivery = { Live: "live", Saved: "saved" } as const;
@@ -52,6 +53,7 @@ export const AgentEventType = {
   QuotaUpdate: "quotaUpdate",
   ProviderUnavailable: "providerUnavailable",
   RateLimited: "rateLimited",
+  FastModeStatus: "fastModeStatus",
   ApiRetry: "apiRetry",
   HookStarted: "hookStarted",
   HookProgress: "hookProgress",
@@ -307,6 +309,11 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
     }),
     z.object({
       /** Emitted when the provider starts or stops rejecting requests for its rate limit. */
+      type: z.literal(AgentEventType.FastModeStatus),
+      threadId: z.string(),
+      status: FastModeStatusSchema(),
+    }),
+    z.object({
       type: z.literal(AgentEventType.RateLimited),
       threadId: z.string(),
       /** True only while the provider is rejecting requests. A usage warning is not a block, so it reports false. False clears the indicator. */

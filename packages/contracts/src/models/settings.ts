@@ -327,6 +327,8 @@ export const SettingsSchema = lazySchema(() =>
             devin: z.string().default(""),
           })
           .default({}),
+        /** Claude Code Fast default. */
+        claude: z.object({ fastMode: z.boolean().default(false) }).default({}),
         /** OpenAI Codex CLI (`codex app-server`) tuning (`provider` + `codex` keeps depth ≤ 3). */
         codex: z
           .object({
@@ -627,6 +629,7 @@ export const PartialSettingsSchema = lazySchema(() =>
             priorityProcessing: z.boolean().optional(),
           })
           .optional(),
+        claude: z.object({ fastMode: z.boolean().optional() }).optional(),
         opencode: z
           .object({
             serveUrl: OpenCodeServeUrlSchema.optional(),

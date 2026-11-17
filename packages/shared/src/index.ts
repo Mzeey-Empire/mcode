@@ -37,3 +37,4 @@ export { createBrowserThreadControl, reduceBrowserControl } from "./browser-prev
 export type { BrowserHolder, BrowserThreadControl, BrowserControlEvent, BrowserControlDecision } from "./browser-preview/browser-control.js";
 
 export { PlanFenceParser, isPlanFenceOpener } from "./plan-fence-parser.js";
+export { fastModeDefault } from "./fast-mode/index.js";
