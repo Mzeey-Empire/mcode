@@ -8,6 +8,7 @@ import type { ChecksStatus } from "@mcode/contracts/github";
 import { Button } from "@/components/ui/button";
 import { MoreIcon } from "@/components/ui/icon-map";
 import { Spinner } from "@/components/ui/spinner";
+import { IconOnlyStatus, useSidebarNarrow } from "./sidebar-label-tooltip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -18,7 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 import { threadRowLook } from "@/features/thread-attention/thread-row-presentation";
-import { STATUS_LABEL_TEXT_CLASS, StatusMark } from "@/components/ui/status-mark";
+import { STATUS_LABEL_TEXT_CLASS } from "@/components/ui/status-mark";
 import { useRolledUpThreadRowState } from "@/features/thread-attention/thread-rollup";
 import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
 import { getCiVisual } from "@/lib/ci-status";
@@ -346,13 +347,14 @@ function ProjectGitStatus({ isGitRepository }: { isGitRepository: boolean }) {
 
 function ProjectCollapsedStatus({ status }: { status: ThreadRowState }) {
   const look = threadRowLook(status);
+  const narrow = useSidebarNarrow();
   if (!look) return null;
   return (
-    // Under the pointer or focus the label gives way to the actions and the icon stays, so the
-    // roll-up keeps its meaning. Hidden parts take no width, and nothing crossfades.
+    // Under the pointer or focus the label gives way to the actions and the icon stays, named in the
+    // shared tooltip, so the roll-up keeps its meaning. Hidden parts take no width; nothing crossfades.
     <span className="ml-auto flex shrink-0 items-center gap-1 pl-1 text-caption whitespace-nowrap">
-      <StatusMark state={look.state} label={look.label} icon={look.icon} />
-      <span aria-hidden className={cn("font-medium group-hover/ws:hidden group-focus-within/ws:hidden", STATUS_LABEL_TEXT_CLASS[look.state])}>{look.label}</span>
+      <IconOnlyStatus look={look} />
+      {!narrow && <span aria-hidden className={cn("font-medium group-hover/ws:hidden group-focus-within/ws:hidden", STATUS_LABEL_TEXT_CLASS[look.state])}>{look.label}</span>}
     </span>
   );
 }

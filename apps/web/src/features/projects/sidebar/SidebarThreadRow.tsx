@@ -20,6 +20,7 @@ import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 import { cn } from "@/lib/utils";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
+import { draftHasNoSendableContent, useComposerDraftStore } from "@/stores/composerDraftStore";
 import type { Thread, Workspace } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { selectThreadIndex } from "../state/thread-index";
@@ -32,6 +33,7 @@ import { selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
 import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
 import { ThreadOptionsMenu, useThreadMenuOpenFor, type ThreadMenuActions } from "./thread-menu";
+import { DraftTag, IconOnlyStatus, useSidebarNarrow } from "./sidebar-label-tooltip";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -58,6 +60,11 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ item, ctx }: { 
   return <ThreadRow thread={thread} workspace={workspace} depth={item.depth} treeLine={item.treeLine} showProject={item.layout === "flat"} ctx={ctx} />;
 });
 
+/** The selected thread's draft is the text the user is typing now, so it is tagged once they leave. */
+function useDraftTagShown(threadId: string, isActive: boolean): boolean {
+  return useHasUnsentDraft(threadId) && !isActive;
+}
+
 function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, workspacePath: string): ThreadRowHandlers {
   return useMemo(() => ({
     onInlineEditChange: ctx.onInlineEditChange,
@@ -81,6 +88,7 @@ function ThreadRow({ thread, workspace, depth, treeLine, showProject, ctx }: { t
   const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
   const rowState = useThreadRowState(thread.id, thread.clientPreparing === true, thread.clientError != null);
   const completion = useCompletionStore((s) => s.entries.get(thread.id));
+  const hasDraft = useDraftTagShown(thread.id, isActive);
   const closedScope = useSidebarUiStore(selectClosedScope);
   const presentation = createThreadRowPresentation(thread, rowState, ctx, { startupPending, isActive, closedScope }, completion);
   const lifecycle = useThreadLifecycleActions({
@@ -106,10 +114,18 @@ function ThreadRow({ thread, workspace, depth, treeLine, showProject, ctx }: { t
       isEditing={isEditing}
       inlineEdit={isEditing ? ctx.inlineEdit : null}
       isActive={isActive}
+      hasDraft={hasDraft}
       presentation={presentation}
       lifecycle={lifecycle}
     />
   );
+}
+
+function useHasUnsentDraft(threadId: string): boolean {
+  return useComposerDraftStore((state) => {
+    const draft = state.drafts[threadId];
+    return draft !== undefined && !draftHasNoSendableContent(draft);
+  });
 }
 
 // Blur cancels an inline rename; virtualization unmounts a row without ever firing blur, so
@@ -182,6 +198,7 @@ interface ThreadRowVisualProps {
   threadMenuActions: ThreadMenuActions;
   workspacePath: string;
   isActive: boolean;
+  hasDraft: boolean;
   presentation: ThreadRowPresentation;
   lifecycle: ThreadRowLifecycleActions;
 }
@@ -384,15 +401,16 @@ function FlatThreadRowBody(props: ThreadRowBodyProps) {
 function GroupedThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation } = props;
   const pr = usePullRequestChip(thread);
+  const narrow = useSidebarNarrow();
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <ThreadRowTitleLine {...props} />
+      <ThreadRowTitleLine {...props} iconOnlyDraft={narrow} />
       {/* The status sits on the meta line, so a long title keeps the full width of its own line. */}
       <ThreadRowMetaLine
         thread={thread}
         presentation={presentation}
         chip={pr.chip}
-        trailing={<ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} fallback={<ThreadRowTime thread={thread} />} />} />}
+        trailing={<ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={narrow} fallback={<ThreadRowTime thread={thread} />} />} />}
       />
       {pr.list}
     </div>
@@ -466,6 +484,11 @@ const SURFACE_CLASS: Record<ThreadRowVariant, string> = {
 // draws its own segment and an 8px-radius elbow into its title, so the line survives virtualization.
 const TREE_LINE_CLASS = "ml-4.5 before:pointer-events-none before:absolute before:inset-y-0 before:-left-2 before:w-px before:bg-tree after:pointer-events-none after:absolute after:top-0 after:-left-2 after:w-2 after:rounded-bl-[8px] after:border-b after:border-l after:border-tree";
 const TREE_ELBOW_CLASS: Record<Exclude<ThreadRowVariant, "flat">, string> = { grouped: "after:h-4.5", closed: "after:h-4" };
+
+/** A Projects view row's segment of its project's thread line, curving into a one-line title. */
+export function groupedTreeLineClass(treeLine: ThreadTreeLine): string | undefined {
+  return treeLine === "none" ? undefined : cn(TREE_LINE_CLASS, TREE_ELBOW_CLASS.grouped, treeLine === "end" && "before:hidden");
+}
 
 function treeLineClass(variant: ThreadRowVariant, treeLine: ThreadTreeLine): string | undefined {
   if (treeLine === "none" || variant === "flat") return undefined;
@@ -597,7 +620,7 @@ function ThreadRowProviderSlot({ provider, providersUsed, className }: { provide
   );
 }
 
-type ThreadRowTitleProps = Pick<ThreadRowVisualProps, "thread" | "isEditing" | "inlineEdit" | "presentation" | "onInlineEditChange" | "onInlineEditCommit" | "onInlineEditCancel">;
+type ThreadRowTitleProps = Pick<ThreadRowVisualProps, "thread" | "isEditing" | "inlineEdit" | "hasDraft" | "presentation" | "onInlineEditChange" | "onInlineEditCommit" | "onInlineEditCancel">;
 
 /**
  * Splits a title that ends in a parenthetical, such as "Fix login (continued)", into the words
@@ -632,13 +655,15 @@ function ThreadTitleText({ title, struck, className }: { title: string; struck: 
 function ThreadRowTitleLine({
   className,
   children,
+  iconOnlyDraft = false,
   ...props
-}: ThreadRowTitleProps & { className?: string; children?: React.ReactNode }) {
+}: ThreadRowTitleProps & { className?: string; children?: React.ReactNode; iconOnlyDraft?: boolean }) {
   const { presentation, thread } = props;
   return (
     <div data-title-line data-testid="thread-line-title" className={cn("flex h-5 min-w-0 items-center gap-2", className)}>
       {/* A scaffold row dims what it is, never its status: the status is the part that is live. */}
       <div className={cn("flex min-w-0 flex-1 items-center gap-2", presentation.scaffoldDim)}>
+        {props.hasDraft && !props.isEditing && <DraftTag iconOnly={iconOnlyDraft} />}
         {props.isEditing ? (
           <ThreadRowTitleInput {...props} />
         ) : (
@@ -761,7 +786,7 @@ function statusLook(presentation: ThreadRowPresentation): ThreadStatusLook | nul
   return (presentation.completing ? THREAD_STATUS_LOOK.Closed : presentation.look) ?? null;
 }
 
-function ThreadRowStatus({ thread, presentation, lifecycle, fallback }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle"> & { fallback: React.ReactNode }) {
+function ThreadRowStatus({ thread, presentation, lifecycle, fallback, iconOnly = false }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle"> & { fallback: React.ReactNode; iconOnly?: boolean }) {
   if (presentation.completionFailure !== null) {
     return <ThreadRowCaption role="status" className="text-status-label-error">{presentation.completionFailure}</ThreadRowCaption>;
   }
@@ -771,15 +796,15 @@ function ThreadRowStatus({ thread, presentation, lifecycle, fallback }: Pick<Thr
       ? <ThreadRowStandingCaption thread={thread} presentation={presentation} lifecycle={lifecycle} />
       : fallback;
   }
-  return <ThreadRowLookStatus look={look} />;
+  return <ThreadRowLookStatus look={look} iconOnly={iconOnly} />;
 }
 
 /**
  * Icon then label in the icon's colour; the icon carries the name, so the label is hidden from
- * assistive tech. `iconOnly` drops the label and keeps the named icon.
+ * assistive tech. `iconOnly` drops the label and names the icon in the shared tooltip.
  */
 function ThreadRowLookStatus({ look, iconOnly = false }: { look: ThreadStatusLook; iconOnly?: boolean }) {
-  if (iconOnly) return <StatusMark state={look.state} label={look.label} icon={look.icon} />;
+  if (iconOnly) return <IconOnlyStatus look={look} />;
   return (
     <>
       <StatusMark state={look.state} label={look.label} icon={look.icon} />

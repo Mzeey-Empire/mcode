@@ -36,16 +36,18 @@ import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 import { PreviewScrollGuard } from "./preview-scroll-guard";
 import { ThreadPreviewHandleContext, ThreadPreviewTooltip, type ThreadPreviewPayload } from "./SidebarThreadPreview";
 import { createTooltipHandle } from "@/components/ui/tooltip";
+import { SidebarLabelHandleContext, SidebarLabelTooltip } from "./sidebar-label-tooltip";
 import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 
 /**
  * Provisional heights until the ResizeObserver measures; they shape the first frame, so they match
  * measured heights. A short guess overlaps rows until the measurement lands a frame later.
  */
-const PROVISIONAL_HEIGHT: Record<Exclude<SidebarItem["kind"], "thread">, number> = {
-  project: 32, draft: 32, "show-more": 32, "older-bar": 32, empty: 0, "end-spacer": 12,
+const PROVISIONAL_HEIGHT: Record<Exclude<SidebarItem["kind"], "thread" | "draft">, number> = {
+  project: 32, "draft-divider": 17, "show-more": 32, "older-bar": 32, empty: 0, "end-spacer": 12,
 };
 const PROVISIONAL_THREAD_HEIGHT: Record<Extract<SidebarItem, { kind: "thread" }>["layout"], number> = { grouped: 54, flat: 78 };
+const PROVISIONAL_DRAFT_HEIGHT: Record<Extract<SidebarItem, { kind: "draft" }>["layout"], number> = { grouped: 36, flat: 60 };
 const CLOSED_THREAD_HEIGHT = 32;
 
 // One 20px text-label line inside py-1, the "No closed threads" line rendered below.
@@ -53,6 +55,7 @@ const EMPTY_CLOSED_HEIGHT = 28;
 
 function provisionalHeight(item: SidebarItem, closedScope: boolean): number {
   if (item.kind === "empty" && item.scope === "completed") return EMPTY_CLOSED_HEIGHT;
+  if (item.kind === "draft") return PROVISIONAL_DRAFT_HEIGHT[item.layout];
   if (item.kind !== "thread") return PROVISIONAL_HEIGHT[item.kind];
   return closedScope ? CLOSED_THREAD_HEIGHT : PROVISIONAL_THREAD_HEIGHT[item.layout];
 }
@@ -217,12 +220,26 @@ function ShowMoreRow({ item }: { item: Extract<SidebarItem, { kind: "show-more" 
   );
 }
 
+function DraftDivider() {
+  return (
+    <div role="separator" className="mx-2 flex h-[17px] items-center">
+      <div className="h-px flex-1 bg-tree" />
+    </div>
+  );
+}
+
+function EmptyRow({ item }: { item: Extract<SidebarItem, { kind: "empty" }> }) {
+  return item.scope === "completed" ? <p className="px-2 py-1 text-label text-muted">No closed threads</p> : null;
+}
+
 const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: SidebarItem; ctx: SidebarRowContext; dropEdge: DropEdge | null }) {
   switch (item.kind) {
     case "project":
       return item.section === "recent" ? <SortableProjectRow item={item} ctx={ctx} dropEdge={dropEdge} /> : <ProjectHeader item={item} ctx={ctx} />;
     case "draft":
       return <div data-testid="draft-item" data-draft-id={item.draftId}><SidebarDraftRow item={item} ctx={ctx} /></div>;
+    case "draft-divider":
+      return <DraftDivider />;
     case "thread":
       return <div data-testid="thread-item" data-thread-id={item.threadId}><SidebarThreadRow item={item} ctx={ctx} /></div>;
     case "show-more":
@@ -231,7 +248,7 @@ const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: Sid
     case "older-bar":
       return null;
     case "empty":
-      return item.scope === "completed" ? <p className="px-2 py-1 text-label text-muted">No closed threads</p> : null;
+      return <EmptyRow item={item} />;
     case "end-spacer":
       return <div aria-hidden className="h-3" />;
   }
@@ -413,6 +430,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
   const containerRef = useRef<HTMLDivElement>(null);
   const { controllerRef, hosts, previewGuard } = useSidebarViewport(containerRef);
   const [previewHandle] = useState(() => createTooltipHandle<ThreadPreviewPayload>());
+  const [labelHandle] = useState(() => createTooltipHandle<string>());
   const drag = useProjectDrag(controllerRef);
   const rowCtx = useDragSafeContext(ctx, drag.isClickSuppressed);
   const closedScope = useSidebarUiStore(selectClosedScope);
@@ -453,7 +471,9 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
       >
         <SortableContext items={sortableIds} strategy={STATIC_SORT_STRATEGY}>
           <ThreadPreviewHandleContext.Provider value={previewHandle}>
-            <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
+            <SidebarLabelHandleContext.Provider value={labelHandle}>
+              <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
+            </SidebarLabelHandleContext.Provider>
           </ThreadPreviewHandleContext.Provider>
         </SortableContext>
         <DragOverlay>
@@ -461,6 +481,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
         </DragOverlay>
       </DndContext>
       <ThreadPreviewTooltip handle={previewHandle} guard={previewGuard} />
+      <SidebarLabelTooltip handle={labelHandle} />
       {olderBar && controllerRef.current && <OlderBar item={olderBar} viewport={controllerRef.current} onToggle={toggleOlder} />}
       {overlay}
     </div>
