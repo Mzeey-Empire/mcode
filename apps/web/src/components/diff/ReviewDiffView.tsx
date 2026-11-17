@@ -519,6 +519,9 @@ export function ReviewDiffView({
       diffStyle: renderMode === "unified" ? "unified" : "split",
       overflow: lineWrap ? "wrap" : "scroll",
       lineDiffType: "word-alt",
+      // A + or − mark changed lines by shape, so they never depend on colour
+      // alone (a light-theme heading's red syntax colour reads as a deletion).
+      diffIndicators: "classic",
       // Only git-backed sources can supply the exact old/new contents
       // hydration requires; snapshot diffs stay partial.
       ...(HYDRATABLE_SOURCES.has(source) ? { loadDiffFiles: loadFileContents } : {}),
