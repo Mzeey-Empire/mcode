@@ -139,6 +139,20 @@ describe("BrowserToolbar", () => {
     expect(buttonNames()).toEqual(["Back", "Forward", "Reload", "Open in browser", "More browser actions"]);
   });
 
+  it("hides Forward until there is a later page, then runs it", async () => {
+    const user = userEvent.setup();
+    const log: string[] = [];
+    const props = loadedProps(log, { page: { kind: "error", navigation: navigation(log, { forward: null }) } });
+    const { rerender } = renderToolbar(props);
+
+    expect(screen.queryByRole("button", { name: "Forward" })).not.toBeInTheDocument();
+
+    rerender(<TooltipProvider><BrowserToolbar {...props} page={{ kind: "error", navigation: navigation(log) }} /></TooltipProvider>);
+    await user.click(screen.getByRole("button", { name: "Forward" }));
+
+    expect(log).toEqual(["forward"]);
+  });
+
   it("shows page tools on a loaded page and explains each disabled control", async () => {
     const user = userEvent.setup();
     const log: string[] = [];

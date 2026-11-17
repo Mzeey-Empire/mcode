@@ -30,9 +30,11 @@ function NavigationGroup({ navigation }: { readonly navigation: BrowserNavigatio
       <BrowserActionButton label="Back" action={navigation.back} {...NAV_CONTROL}>
         <ArrowLeft className="size-3.5" aria-hidden />
       </BrowserActionButton>
-      <BrowserActionButton label="Forward" action={navigation.forward} {...NAV_CONTROL}>
-        <ArrowRight className="size-3.5" aria-hidden />
-      </BrowserActionButton>
+      {navigation.forward && (
+        <BrowserActionButton label="Forward" action={navigation.forward} {...NAV_CONTROL}>
+          <ArrowRight className="size-3.5" aria-hidden />
+        </BrowserActionButton>
+      )}
       <BrowserActionButton label="Reload" action={navigation.reload} {...NAV_CONTROL}>
         <RotateCw className="size-3.5" aria-hidden />
       </BrowserActionButton>

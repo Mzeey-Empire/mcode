@@ -86,7 +86,7 @@ function desktopNavigation({
   };
   return {
     back: browserAction(webviewCanBack ? null : "No earlier page", withInvalidation(() => activeWebviewRef()?.goBack())),
-    forward: browserAction(webviewCanFwd ? null : "No later page", withInvalidation(() => activeWebviewRef()?.goForward())),
+    forward: webviewCanFwd ? { kind: "enabled", run: withInvalidation(() => activeWebviewRef()?.goForward()) } : null,
     reload: { kind: "enabled", run: withInvalidation(() => activeWebviewRef()?.reload()) },
   };
 }

@@ -24,7 +24,8 @@ export type BrowserPageActions =
 /** History and reload controls for a page that has an address. */
 export interface BrowserNavigation {
   readonly back: BrowserAction;
-  readonly forward: BrowserAction;
+  /** `null` while there is no later page: a Forward that can never run is hidden, as Edge does. */
+  readonly forward: BrowserAction | null;
   readonly reload: BrowserAction;
 }
 
