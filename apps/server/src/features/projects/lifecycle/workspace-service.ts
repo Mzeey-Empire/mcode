@@ -100,7 +100,7 @@ export class WorkspaceService {
     const admitted = await this.writer.execute(projectLifecycleWriteOperations.beginWorkspaceDeletion, [id]);
     if (!admitted) return false;
     // Teardown can wait on a session stop or fail, and the hidden threads must not hold install-when-idle until then.
-    this.threadDeletion.notifyThreadsHidden();
+    this.threadDeletion.notifyThreadsHidden(admitted.threadIds);
     await this.terminals.killByThread(id);
     for (const threadId of admitted.threadIds) await this.threadDeletion.teardownThread(threadId);
     const deleted = await this.threadDeletion.deletePersistentData(admitted.threadIds,

@@ -52,7 +52,7 @@ function harness() {
     { beginThreadTeardown: unused, stopForThread: unused }, { cancelForRepoPath: unused }, { teardownThread: unused },
     { teardownThread: unused }, { unwatchThreadWorktree: unused });
   deletion.bindAcceptedProgress({ discardThreads: async () => {}, finishThreadDeletion: () => {} });
-  disposers.push(deletion.onPersistentDataDeleted(() => workload.refreshTracked()));
+  disposers.push(deletion.onPersistentDataDeleted((hidden) => workload.refreshTracked(hidden)));
   return { db, store, workload, active, hold, deletion };
 }
 
@@ -122,20 +122,14 @@ describe("AgentWorkload", () => {
     hold("other", "subagent");
 
     new ThreadStore(db).softDelete("hidden");
-    deletion.notifyThreadsHidden();
+    deletion.notifyThreadsHidden(["hidden"]);
 
     expect(workload.count()).toBe(1);
     expect(workload.hasBackgroundSubagent("hidden")).toBe(false);
   });
 
-  it.each([
-    ["waits", () => new Promise<void>(() => {})],
-    ["fails", () => Promise.reject(new Error("Session would not stop"))],
-  ])("drops a deleted workspace's thread whose only work is a background subagent while its teardown %s", async (_teardown, teardownThread) => {
-    const { db, workload, hold, deletion } = harness();
-    hold("idle-parent", "subagent");
-    expect(workload.count()).toBe(1);
-    // Runs the soft deletion against this test's database; the teardown never reaches the later write.
+  /** Soft-deletes workspace `w` through its service; the given teardown never lets it reach the later write. */
+  function deleteWorkspace({ db, deletion }: ReturnType<typeof harness>, teardownThread: () => Promise<void>) {
     const writer = { execute: async (operation: unknown, input: [string]) => {
       if (operation !== projectLifecycleWriteOperations.beginWorkspaceDeletion) throw new Error("Unexpected write");
       return new ProjectLifecycleStore(db).beginWorkspaceDeletion(...input);
@@ -144,10 +138,34 @@ describe("AgentWorkload", () => {
     const workspaces = new WorkspaceService(unusedDependency, unusedDependency, writer,
       { removeForThread: () => {} }, Object.assign(deletion, { teardownThread }), unusedDependency,
       { killByThread: async () => {} });
-
     workspaces.delete("w").catch(() => {});
-    await expect.poll(() => workload.count()).toBe(0);
-    expect(workload.hasBackgroundSubagent("idle-parent")).toBe(false);
+  }
+
+  it.each([
+    ["waits", () => new Promise<void>(() => {})],
+    ["fails", () => Promise.reject(new Error("Session would not stop"))],
+  ])("drops a deleted workspace's thread whose only work is a background subagent while its teardown %s", async (_teardown, teardownThread) => {
+    const test = harness();
+    test.hold("idle-parent", "subagent");
+    expect(test.workload.count()).toBe(1);
+
+    deleteWorkspace(test, teardownThread);
+
+    await expect.poll(() => test.workload.count()).toBe(0);
+    expect(test.workload.hasBackgroundSubagent("idle-parent")).toBe(false);
+  });
+
+  it("drops a deleted workspace's thread whose turn is still running while its teardown waits", async () => {
+    const test = harness();
+    test.db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES ('running', 'w', 'test', 'main', 'claude', ?, ?)").run(NOW, NOW);
+    test.active.add("running");
+    expect(test.workload.count()).toBe(1);
+
+    deleteWorkspace(test, () => new Promise<void>(() => {}));
+
+    await expect.poll(() => test.db.prepare("SELECT deleted_at IS NOT NULL AS hidden FROM threads WHERE id = 'running'").get())
+      .toEqual({ hidden: 1 });
+    expect(test.workload.count()).toBe(0);
   });
 
   it("drops every thread of a deleted workspace", async () => {

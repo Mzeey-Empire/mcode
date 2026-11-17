@@ -19,21 +19,22 @@ export class AgentWorkloadService implements AgentWorkload {
   /** Threads listeners last heard hold a subagent, so an unsaved launch becoming saved is not a second change. */
   private readonly reported = new Set<string>();
   /**
-   * Threads with an unsaved launch that were hidden at the last deletion notice. Kept here because `count` must not
-   * read SQLite, and hiding is final, so the snapshot only goes stale for a launch accepted after the notice.
+   * Threads soft-deleted while their rows remain. Hiding is final, but a hidden thread's turn can keep running and
+   * accepting launches until teardown reaches it, and `count` must not read SQLite to find that out.
    */
-  private hiddenWithUnsavedLaunch: ReadonlySet<string> = new Set();
+  private readonly hidden = new Set<string>();
   private readonly listeners = new Set<(threadId: string) => void>();
 
   constructor(
     private readonly runtime: Pick<AgentRuntimeAccess, "activeTurnThreadIds">,
-    private readonly canonical: Pick<CanonicalAgentBoundary, "listRunningBackgroundSubagentIds" | "listHiddenThreadIds">,
+    private readonly canonical: Pick<CanonicalAgentBoundary, "listRunningBackgroundSubagentIds" | "listMissingThreadIds">,
     private readonly accepted?: Pick<CanonicalAcceptedProgress, "unsavedThreadIds">,
   ) {}
 
   /** Read current occupancy without database access. */
   count(): number {
-    return new Set([...this.runtime.activeTurnThreadIds(), ...this.subagents.keys(), ...this.unsavedLaunchThreadIds()]).size;
+    const threadIds = [...this.runtime.activeTurnThreadIds(), ...this.subagents.keys(), ...this.unsavedLaunchThreadIds()];
+    return new Set(threadIds.filter((threadId) => !this.hidden.has(threadId))).size;
   }
 
   /**
@@ -41,6 +42,7 @@ export class AgentWorkloadService implements AgentWorkload {
    * launching turn may still run, because the turn's reservation can end before its ending is saved.
    */
   hasBackgroundSubagent(threadId: string): boolean {
+    if (this.hidden.has(threadId)) return false;
     return this.subagents.has(threadId) || this.unsavedLaunchThreadIds().includes(threadId);
   }
 
@@ -61,13 +63,15 @@ export class AgentWorkloadService implements AgentWorkload {
   }
 
   /**
-   * Re-read every thread holding a subagent. Deletion hides or removes a thread's rows and discards its unsaved
-   * writes, so no saved event ever reports that its calls stopped. A hidden thread's unsaved launch still saves, and
-   * its saved row is filtered by the query, so it is only excluded here rather than dropped.
+   * Record newly hidden threads, then re-read every thread holding a subagent. Deletion hides or removes a thread's
+   * rows and discards its unsaved writes, so no saved event ever reports that its calls stopped. A deletion can also
+   * remove child threads its caller never listed, so tracked threads are re-read rather than trusted.
    */
-  refreshTracked(): void {
-    this.hiddenWithUnsavedLaunch = new Set(this.canonical.listHiddenThreadIds(
-      this.accepted?.unsavedThreadIds(launchesBackgroundSubagent) ?? []));
+  refreshTracked(hiddenThreadIds: readonly string[] = []): void {
+    for (const threadId of hiddenThreadIds) this.hidden.add(threadId);
+    // Only a removed row ends hiding: a failed deletion, or a workspace deletion that keeps worktree threads for
+    // cleanup, leaves the thread hidden.
+    for (const threadId of this.canonical.listMissingThreadIds([...this.hidden])) this.hidden.delete(threadId);
     for (const threadId of new Set([...this.subagents.keys(), ...this.reported])) this.refresh(threadId);
   }
 
@@ -85,8 +89,7 @@ export class AgentWorkloadService implements AgentWorkload {
 
   /** A turn's reservation ends without waiting for its writes, so a launch still queued for SQLite counts from here. */
   private unsavedLaunchThreadIds(): string[] {
-    return (this.accepted?.unsavedThreadIds(launchesBackgroundSubagent) ?? [])
-      .filter((threadId) => !this.hiddenWithUnsavedLaunch.has(threadId));
+    return this.accepted?.unsavedThreadIds(launchesBackgroundSubagent) ?? [];
   }
 }
 

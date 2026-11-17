@@ -958,10 +958,10 @@ export class CanonicalAgentStore {
     });
   }
 
-  /** Return the given threads that are soft-deleted or gone, keeping the input order. */
-  listHiddenThreadIds(threadIds: readonly string[]): string[] {
-    const visible = this.db.prepare("SELECT 1 FROM threads WHERE id = ? AND deleted_at IS NULL");
-    return threadIds.filter((threadId) => visible.get(threadId) === null);
+  /** Return the given threads that no longer exist, keeping the input order. */
+  listMissingThreadIds(threadIds: readonly string[]): string[] {
+    const exists = this.db.prepare("SELECT 1 FROM threads WHERE id = ?");
+    return threadIds.filter((threadId) => exists.get(threadId) === null);
   }
 
   /** Reopen an unmaterialized terminal checkpoint so ordinary interruption recovery can finish it. */

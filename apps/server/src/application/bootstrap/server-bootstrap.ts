@@ -653,7 +653,7 @@ const threadDeletionTeardownService = container.resolve(ThreadDeletionTeardownSe
 if (workerOwnedTurnRuntime.progress) {
   threadDeletionTeardownService.bindAcceptedProgress(workerOwnedTurnRuntime.progress);
 }
-const stopObservingWorkloadDeletions = threadDeletionTeardownService.onPersistentDataDeleted(() => agentWorkload.refreshTracked());
+const stopObservingWorkloadDeletions = threadDeletionTeardownService.onPersistentDataDeleted((hidden) => agentWorkload.refreshTracked(hidden));
 const cleanupWorker = container.resolve(CleanupWorker);
 const threadCompletionService = container.resolve(ThreadCompletionService);
 const threadAutoCompleteService = new ThreadAutoCompleteService(

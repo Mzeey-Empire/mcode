@@ -2106,7 +2106,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     const launchRecord = () => db.prepare("SELECT status, background FROM tool_call_records WHERE id = 'launch'").get();
 
     /** Launches one background call, then ends its turn and releases the worker while every write is held. */
-    async function releaseWithUnsavedLaunch(kind: "subagent" | "command") {
+    async function releaseWithUnsavedLaunch(kind: "subagent" | "command",
+      beforeLaunch?: (workload: AgentWorkloadService) => Promise<void>) {
       const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [] }, new CanonicalAgentStore(db, () => {}), progress);
       onTestFinished(workload.observeCommittedEvents());
       await send(1, start("claude"));
@@ -2115,6 +2116,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
           ? { toolCallId: "launch", toolName: "Agent", toolInput: { prompt: "Look around" } }
           : { toolCallId: "launch", toolName: "Bash", toolInput: { command: "bun run build" } })] });
       await expect.poll(() => progress.depth().pending).toBe(0);
+      await beforeLaunch?.(workload);
       holdWrites();
       await send(3, { kind: "event", phase: "running", nativeCursor: null,
         events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "launch", kind, label: "Background work" })] });
@@ -2151,15 +2153,14 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(changes).toEqual([execution.threadId]);
     });
 
-    it("stops counting it when its workspace is soft-deleted, and still saves it", async () => {
-      const workload = await releaseWithUnsavedLaunch("subagent");
-      expect(workload.count()).toBe(1);
+    /** Soft-deletes the thread's workspace with its teardown blocked, so the thread stays hidden and its rows stay. */
+    async function hideWorkspace(workload: AgentWorkloadService) {
       const unused = (): never => { throw new Error("Only the soft deletion is under test"); };
       const deletion = new ThreadDeletionTeardownService({ findById: unused }, { beginThreadDeletion: unused, cancelSetupForThread: unused },
         { beginThreadTeardown: unused, stopForThread: unused }, { cancelForRepoPath: unused }, { teardownThread: unused },
         { teardownThread: unused }, { unwatchThreadWorktree: unused });
       deletion.bindAcceptedProgress(progress);
-      onTestFinished(deletion.onPersistentDataDeleted(() => workload.refreshTracked()));
+      onTestFinished(deletion.onPersistentDataDeleted((hidden) => workload.refreshTracked(hidden)));
       // Runs the soft deletion against this test's database; the blocked teardown never reaches the later write.
       const lifecycleWriter = { execute: async (operation: unknown, input: [string]) => {
         if (operation !== projectLifecycleWriteOperations.beginWorkspaceDeletion) throw new Error("Unexpected write");
@@ -2172,13 +2173,30 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       void workspaces.delete("workspace");
       await expect.poll(() => db.prepare("SELECT deleted_at IS NOT NULL AS hidden FROM threads WHERE id = ?").get(execution.threadId))
         .toEqual({ hidden: 1 });
+    }
 
+    async function expectUncountedButSaved(workload: AgentWorkloadService) {
       expect(workload.count()).toBe(0);
       expect(workload.hasBackgroundSubagent(execution.threadId)).toBe(false);
       release?.();
       await expect.poll(() => progress.depth().pending).toBe(0);
       expect(launchRecord()).toEqual({ status: "running", background: 1 });
       expect(workload.count()).toBe(0);
+    }
+
+    it("stops counting it when its workspace is soft-deleted, and still saves it", async () => {
+      const workload = await releaseWithUnsavedLaunch("subagent");
+      expect(workload.count()).toBe(1);
+
+      await hideWorkspace(workload);
+
+      await expectUncountedButSaved(workload);
+    });
+
+    it("does not count one launched after its workspace is soft-deleted, and still saves it", async () => {
+      const workload = await releaseWithUnsavedLaunch("subagent", hideWorkspace);
+
+      await expectUncountedButSaved(workload);
     });
   });
 

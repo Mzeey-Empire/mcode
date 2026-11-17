@@ -131,7 +131,7 @@ export class ThreadService {
       await this.resumeScheduler?.unschedule(threadId);
       if (await this.projectWorktreeService.scheduleCleanup(threadId)) {
         // Cleanup can wait on a session stop or fail, and a hidden thread must not hold install-when-idle until then.
-        this.threadDeletionTeardownService.notifyThreadsHidden();
+        this.threadDeletionTeardownService.notifyThreadsHidden([threadId]);
         // Disarm any resume scheduled while cleanup safety checks were pending.
         await this.resumeScheduler?.unschedule(threadId);
         return true;

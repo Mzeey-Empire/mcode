@@ -15,7 +15,7 @@ import { ThreadStartupService } from "../../thread-startup/thread-startup-servic
 export class ThreadDeletionTeardownService {
   private acceptedProgress: Pick<import("../../agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
     "discardThreads" | "finishThreadDeletion"> | undefined;
-  private readonly deletionListeners = new Set<() => void>();
+  private readonly deletionListeners = new Set<(hiddenThreadIds: readonly string[]) => void>();
 
   /** Compose retained-save disposal for direct deletion, delayed cleanup, and workspace cascades. */
   bindAcceptedProgress(progress: NonNullable<ThreadDeletionTeardownService["acceptedProgress"]>): void {
@@ -24,10 +24,10 @@ export class ThreadDeletionTeardownService {
 
   /**
    * Observe every finished deletion attempt, including failed ones, and every thread hidden until its cleanup
-   * deletes it. A deletion also removes child threads its caller never lists, so listeners re-read the threads
-   * they track instead of trusting the listed ids.
+   * deletes it. A hidden notice carries the hidden thread ids; a finished deletion carries none, because it also
+   * removes child threads its caller never lists, so listeners re-read the threads they track instead.
    */
-  onPersistentDataDeleted(listener: () => void): () => void {
+  onPersistentDataDeleted(listener: (hiddenThreadIds: readonly string[]) => void): () => void {
     this.deletionListeners.add(listener);
     return () => { this.deletionListeners.delete(listener); };
   }
@@ -44,20 +44,20 @@ export class ThreadDeletionTeardownService {
       return result;
     } finally {
       for (const id of threadIds) progress.finishThreadDeletion(id, deleted);
-      this.notifyDeletionListeners();
+      this.notifyDeletionListeners([]);
     }
   }
 
-  /** Report a thread soft-deleted for later cleanup, which must stop counting as running before cleanup finishes. */
-  notifyThreadsHidden(): void {
-    this.notifyDeletionListeners();
+  /** Report threads soft-deleted for later cleanup, which must stop counting as running before cleanup finishes. */
+  notifyThreadsHidden(threadIds: readonly string[]): void {
+    this.notifyDeletionListeners(threadIds);
   }
 
-  private notifyDeletionListeners(): void {
+  private notifyDeletionListeners(hiddenThreadIds: readonly string[]): void {
     for (const listener of this.deletionListeners) {
       // The rows are already gone, so a listener failure must not turn a finished deletion into a failed one.
       try {
-        listener();
+        listener(hiddenThreadIds);
       } catch (error) {
         logger.error("Thread deletion listener failed", { error: error instanceof Error ? error.message : String(error) });
       }

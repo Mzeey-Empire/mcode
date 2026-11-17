@@ -210,9 +210,9 @@ export class CanonicalAgentBoundary {
     return this.reader.listRunningBackgroundSubagentIds(threadId);
   }
 
-  /** Return the given threads that are soft-deleted or gone. */
-  listHiddenThreadIds(threadIds: readonly string[]): string[] {
-    return this.reader.listHiddenThreadIds(threadIds);
+  /** Return the given threads that no longer exist. */
+  listMissingThreadIds(threadIds: readonly string[]): string[] {
+    return this.reader.listMissingThreadIds(threadIds);
   }
 
   /** Load interrupted checkpoints that permit an explicit recovery action. */
