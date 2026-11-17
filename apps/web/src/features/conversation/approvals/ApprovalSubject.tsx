@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { ApprovalSubject as ApprovalSubjectModel } from "@mcode/contracts/models/approval";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { formatReasoningLabel } from "@/lib/format-model-label";
 import { ApprovalPatchPreview } from "./ApprovalPatchPreview";
 
 type SubjectOf<K extends ApprovalSubjectModel["kind"]> = Extract<ApprovalSubjectModel, { kind: K }>;
@@ -97,7 +98,8 @@ const ISOLATION_LABELS: Record<SubjectOf<"delegate_task">["isolation"], string> 
 };
 
 function delegateTaskFacts(subject: SubjectOf<"delegate_task">): string {
-  const parts = [`${subject.providerId} · ${subject.modelId}`, ISOLATION_LABELS[subject.isolation]];
+  const model = subject.reasoningLevel ? `${subject.modelId} ${formatReasoningLabel(subject.reasoningLevel)}` : subject.modelId;
+  const parts = [`${subject.providerId} · ${model}`, ISOLATION_LABELS[subject.isolation]];
   if (subject.commit) parts.push(`at ${subject.commit.slice(0, 7)}`);
   return parts.join(" · ");
 }
