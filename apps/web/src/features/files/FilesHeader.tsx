@@ -116,6 +116,7 @@ export function FilesControlsRow({ checkoutPath, treeOpen, shownPath, actions, o
 /**
  * Names the checkout the tree lists, because a thread can read a worktree rather than the project folder and
  * nothing else in the tool says which. Set like Terminal's working folder: name in ink, full path on hover.
+ * `mr-auto` takes the row's spare width only once the path pill steps aside, so More still ends at the row's edge.
  */
 function CheckoutName({ path }: { readonly path: string | null }) {
   if (!path) return null;
@@ -123,7 +124,7 @@ function CheckoutName({ path }: { readonly path: string | null }) {
     <Tooltip>
       <TooltipTrigger
         render={
-          <span data-testid="files-checkout-name" className="text-fade max-w-40 min-w-0 shrink font-mono text-xs text-ink">
+          <span data-testid="files-checkout-name" className="text-fade mr-auto max-w-40 min-w-0 shrink font-mono text-xs text-ink">
             {basename(path)}
           </span>
         }
