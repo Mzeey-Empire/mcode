@@ -65,7 +65,11 @@ export function PullRequestChip({ threadId, ranked }: { threadId: string; ranked
   const label = <><StateIcon pr={primary} />{ranked.length > 1 ? `+${ranked.length}` : primary.number}</>;
   if (!handle) return <span role="img" {...props}>{label}</span>;
   return (
-    <MenuPrimitive.Trigger handle={handle} payload={{ threadId, ranked }} openOnHover delay={150} {...props}>
+    // Base UI's safe triangle gives up as soon as the pointer moves slower than 0.1px/ms or pauses
+    // 40ms short of the list, even inside the cone, and a steep path to a tall list does both. The
+    // close delay lets the pointer finish the trip: entering the list cancels it, and a pointer that
+    // settles on another row still closes the list, then the thread card opens.
+    <MenuPrimitive.Trigger handle={handle} payload={{ threadId, ranked }} openOnHover delay={150} closeDelay={PULL_REQUEST_LIST_CLOSE_DELAY_MS} {...props}>
       {label}
     </MenuPrimitive.Trigger>
   );
@@ -87,6 +91,9 @@ export function PullRequestLine({ pr, numberWidth }: { pr: ThreadPullRequest; nu
     </>
   );
 }
+
+// 300ms still dropped QA's steep path 4 times in 6 in the desktop app; 700ms kept it 12 of 12.
+const PULL_REQUEST_LIST_CLOSE_DELAY_MS = 700;
 
 /** The classes of one 24px PR line, in the chip's list and in the hover card alike. */
 export const PULL_REQUEST_LINE_CLASS = "flex h-6 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-caption outline-none data-highlighted:bg-selected hover:bg-selected focus-visible:bg-selected";
