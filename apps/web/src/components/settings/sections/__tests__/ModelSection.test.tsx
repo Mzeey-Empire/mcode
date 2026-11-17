@@ -216,4 +216,12 @@ describe("ModelSection reasoning options", () => {
     });
   });
 
+  it("offers Fast mode for Claude and saves it to Claude's setting", () => {
+    const { state } = renderWithModel("claude", "claude-opus-4-7");
+
+    fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
+
+    expect(state.update).toHaveBeenCalledWith({ provider: { claude: { fastMode: true } } });
+  });
+
 });
