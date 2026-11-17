@@ -651,11 +651,14 @@ export class ClaudeEventMapper {
       });
   }
 
-  private emitTurnComplete(message: Message, usage: Usage): void {
+  private resolvedContextWindow(message: Message): number | undefined {
     const cachedWindow = this.lastContextWindow;
-    const contextWindow = cachedWindow?.model === this.callbacks.getSession()?.model
-      ? cachedWindow?.tokens ?? modelUsageWindow(message)
-      : modelUsageWindow(message);
+    if (cachedWindow && cachedWindow.model === this.callbacks.getSession()?.model) return cachedWindow.tokens;
+    return modelUsageWindow(message);
+  }
+
+  private emitTurnComplete(message: Message, usage: Usage): void {
+    const contextWindow = this.resolvedContextWindow(message);
     this.emit({
       type: AgentEventType.TurnComplete,
       threadId: this.threadId,
