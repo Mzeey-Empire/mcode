@@ -82,8 +82,9 @@ function OpenExternalButton({ action }: { readonly action: BrowserAddress["openE
       action={action}
       shape="round"
       variant="ghost"
-      // Opacity, not visibility, so the button stays in the tab order while hidden.
-      className="size-6.5 shrink-0 opacity-0 group-focus-within/url:opacity-100 group-hover/url:opacity-100 focus-visible:opacity-100"
+      // Opacity, not visibility, so the button stays in the tab order while hidden. At rest it also takes no width:
+      // at the panel's 384px minimum its 26px was what cut the address's path off.
+      className="size-6.5 max-w-0 shrink-0 overflow-hidden opacity-0 group-focus-within/url:max-w-6.5 group-focus-within/url:opacity-100 group-hover/url:max-w-6.5 group-hover/url:opacity-100 focus-visible:max-w-6.5 focus-visible:opacity-100"
     >
       <ArrowUpRight className="size-3.5" aria-hidden />
     </BrowserActionButton>
