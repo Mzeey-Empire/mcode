@@ -180,8 +180,6 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
     <PanelHeaderSlot slot="row2">
       <SegmentedControl
         variant="pill"
-        // Row 2 is inset 8px; this lines the switch up with the settings below it, which sit 24px in.
-        className="ml-4"
         aria-label="Project settings section"
         value={section}
         onChange={(value) => setSection(value as SettingsSection)}
