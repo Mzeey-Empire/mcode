@@ -117,7 +117,6 @@ export function persistReasoningLevel(
 
 interface FastOption {
   readonly on: boolean;
-  /** Why Fast cannot be chosen right now, or null when it can. */
   readonly blockedReason: string | null;
   readonly set: (on: boolean) => void;
 }
@@ -170,7 +169,6 @@ function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenc
 
 const FAST_ICON = <Zap aria-hidden className="size-[1.2rem]" />;
 
-/** Standard always stays choosable; a provider block dims Fast and names the reason in its tooltip. */
 function speedOptionsOf(blockedReason: string | null): SegmentedOption[] {
   return [
     { value: "standard", label: "Standard" },

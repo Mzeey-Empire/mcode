@@ -20,7 +20,6 @@ export interface FastModeViewInput {
 export function fastModeView({ supported, chosen, status, modelId }: FastModeViewInput): FastModeView {
   if (!supported) return { kind: "absent" };
   const choice: FastModeView = chosen ? { kind: "on" } : { kind: "off" };
-  // A status describes the model that ran, so it says nothing about a model picked since.
   if (status?.modelId !== modelId) return choice;
   if (status.state === "on") return { kind: "on" };
   if (status.state === "cooldown") return { kind: "cooling" };

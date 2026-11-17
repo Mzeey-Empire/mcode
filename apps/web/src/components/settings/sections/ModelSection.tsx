@@ -418,7 +418,6 @@ interface ModelSettingsContentProps {
   showReasoning: boolean;
   reasoningOptions: ReasoningOptions;
   reasoningHint: string;
-  /** The provider whose Fast default the row edits, or null to hide the row. */
   fastModeProvider: FastModeSettingProvider | null;
   showThinking: boolean;
   utilityProvider: string;
