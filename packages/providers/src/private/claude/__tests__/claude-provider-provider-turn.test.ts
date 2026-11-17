@@ -476,11 +476,13 @@ describe("ClaudeProvider background agents", () => {
     try {
       await sendUserTurn(provider);
       await stepped;
-      expect(userEnded(events)).toBe(true);
-      expect(afterUserTurn(events)).toEqual([]);
     } finally {
+      // Shutdown drains every accepted event to the sink, so a leaked effort report would be recorded by now.
       await provider.shutdown();
     }
+
+    expect(userEnded(events)).toBe(true);
+    expect(afterUserTurn(events)).toEqual([]);
   });
 
   it("publishes nothing to the launching turn after it ends when a background subagent compacts", async () => {

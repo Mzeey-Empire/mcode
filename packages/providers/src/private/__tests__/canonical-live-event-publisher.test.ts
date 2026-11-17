@@ -66,6 +66,25 @@ describe("CanonicalLiveEventPublisher after an execution ends", () => {
     expect(onFailure).not.toHaveBeenCalled();
   });
 
+  // A pending approval keeps the routing it was requested under while the thread runs later turns.
+  it("still drops a late event after many later turns of the same thread end", async () => {
+    const { publisher, submitted, onFailure } = recordingPublisher();
+    publisher.publish(routing, ended(), []);
+    await publisher.waitForExecution(routing);
+    for (let index = 0; index < 20; index += 1) {
+      const later = { ...routing, turnId: `turn-later-${index}`, executionId: `execution-later-${index}` };
+      publisher.publish(later, providerRuntimeEvent({ type: AgentEventType.Ended, threadId: later.threadId,
+        turnExecutionId: later.executionId }), []);
+      await publisher.waitForExecution(later);
+    }
+    submitted.length = 0;
+    publisher.publish(routing, lateToolUse, []);
+    await publisher.waitForExecution(routing);
+
+    expect(submitted).toEqual([]);
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
   it("still submits post-terminal hooks and the Ended that follow a turn completion", async () => {
     const { publisher, submitted } = recordingPublisher();
     publisher.publish(routing, providerRuntimeEvent({ type: AgentEventType.TurnComplete, threadId: routing.threadId }), []);
