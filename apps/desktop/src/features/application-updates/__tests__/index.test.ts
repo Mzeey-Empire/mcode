@@ -74,6 +74,7 @@ function createDependencies() {
     checkInterval: "1hour",
   }));
   const forceReplace = vi.fn().mockResolvedValue(undefined);
+  const getActiveAgentCount = vi.fn<() => Promise<number>>().mockResolvedValue(0);
   const handlers = new Map<string, (event: unknown, payload?: unknown) => unknown>();
   const ipc = {
     handle: vi.fn((channel: string, listener: (event: unknown, payload?: unknown) => unknown) => {
@@ -92,7 +93,9 @@ function createDependencies() {
       settings,
       ipc,
       forceReplace,
+      getActiveAgentCount,
     },
+    getActiveAgentCount,
     listeners,
     beforeQuitListeners,
     updater,
@@ -136,7 +139,11 @@ describe("Application Updates feature seam", () => {
         listener({ preventDefault: vi.fn() });
       }
     });
-    await expect(feature.installUpdate()).resolves.toBe(true);
+    current.getActiveAgentCount.mockResolvedValue(2);
+    await expect(feature.installUpdate()).resolves.toEqual({ kind: "agents-running", runningAgents: 2 });
+    expect(current.forceReplace).not.toHaveBeenCalled();
+    await expect(current.handlers.get("app:install-update")?.({}, { confirmed: true }))
+      .resolves.toEqual({ kind: "started" });
     expect(current.forceReplace).toHaveBeenCalledOnce();
 
     current.settings.mockReturnValue({

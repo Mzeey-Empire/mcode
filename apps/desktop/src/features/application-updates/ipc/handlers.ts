@@ -1,3 +1,4 @@
+import type { InstallUpdateRequest, InstallUpdateResult } from "../lifecycle/installation.js";
 import type { UpdateStatus } from "../state/update-status.js";
 
 /** Minimal IPC registry needed to own update handler registration. */
@@ -16,7 +17,7 @@ export interface ApplicationUpdatesIpcApi {
   getVersion(): string;
   getUpdateStatus(): UpdateStatus;
   checkForUpdatesNow(): Promise<UpdateStatus>;
-  installUpdate(): Promise<boolean>;
+  installUpdate(request?: InstallUpdateRequest): Promise<InstallUpdateResult>;
   /** Arm installation once running agents finish. */
   installWhenIdle(): void;
   /** Cancel a scheduled idle installation. */
@@ -39,6 +40,15 @@ const APPLICATION_UPDATE_CHANNELS = [
   "app:apply-release-line",
 ] as const;
 
+function parseInstallUpdateRequest(payload: unknown): InstallUpdateRequest | undefined {
+  if (payload === undefined) return undefined;
+  if (typeof payload === "object" && payload !== null && Object.keys(payload).every((key) => key === "confirmed")) {
+    const confirmed = (payload as { confirmed?: unknown }).confirmed;
+    if (typeof confirmed === "boolean") return { confirmed };
+  }
+  throw new Error("Invalid install-update request");
+}
+
 /** Register update IPC and return cleanup that removes every owned handler. */
 export function registerApplicationUpdateHandlers(
   ipc: ApplicationUpdateIpc,
@@ -47,7 +57,9 @@ export function registerApplicationUpdateHandlers(
   ipc.handle("app:get-version", () => api.getVersion());
   ipc.handle("app:get-update-status", () => api.getUpdateStatus());
   ipc.handle("app:check-for-updates", () => api.checkForUpdatesNow());
-  ipc.handle("app:install-update", () => api.installUpdate());
+  ipc.handle("app:install-update", (_event, payload) =>
+    api.installUpdate(parseInstallUpdateRequest(payload)),
+  );
   ipc.handle("app:install-when-idle", () => api.installWhenIdle());
   ipc.handle("app:cancel-install-when-idle", () => api.cancelInstallWhenIdle());
   ipc.handle("app:download-update", () => api.downloadUpdate());

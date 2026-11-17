@@ -3,7 +3,11 @@ import {
   registerApplicationUpdateHandlers,
   type ApplicationUpdateIpc,
 } from "./ipc/handlers.js";
-import { createInstallationLifecycle } from "./lifecycle/installation.js";
+import {
+  createInstallationLifecycle,
+  type InstallUpdateRequest,
+  type InstallUpdateResult,
+} from "./lifecycle/installation.js";
 import {
   createUpdaterLifecycle,
   type ApplicationLifecycle,
@@ -44,7 +48,8 @@ export interface ApplicationUpdates {
   getUpdateStatus(): UpdateStatus;
   checkForUpdatesNow(): Promise<UpdateStatus>;
   downloadUpdate(): Promise<void>;
-  installUpdate(): Promise<boolean>;
+  /** Install the downloaded update; answers agents-running unless the request is confirmed. */
+  installUpdate(request?: InstallUpdateRequest): Promise<InstallUpdateResult>;
   /** Arm installation once running agents finish. */
   installWhenIdle(): void;
   /** Cancel a scheduled idle installation. */
@@ -104,7 +109,7 @@ export function createApplicationUpdates(
     getUpdateStatus: () => status.get(),
     checkForUpdatesNow: () => updater.checkForUpdatesNow(),
     downloadUpdate: () => updater.downloadUpdate(),
-    installUpdate: () => installation.installUpdate(),
+    installUpdate: (request) => installation.installUpdate(request),
     installWhenIdle: () => installation.installWhenIdle(),
     cancelInstallWhenIdle: () => installation.cancelInstallWhenIdle(),
     applyReleaseLineSwitch: (releaseLine, options) =>
