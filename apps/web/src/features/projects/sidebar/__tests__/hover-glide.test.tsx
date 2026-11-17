@@ -119,26 +119,23 @@ describe("HoverGlide", () => {
     expect(fill.style).toMatchObject({ transition: "none", opacity: "0" });
   });
 
-  it("drops its box once hidden, so it adds no scrollable overflow", () => {
+  it("adds no scrollable overflow when hidden with a stale box, because a layer filling the content clips it", () => {
     setReducedMotion(false);
     const { scroller, rows, fill } = mountList();
+    const content = rows[0]!.parentElement;
     fireEvent.pointerMove(rows[2]!);
 
+    // Leaving before any fade starts means no transitionend ever fires, so the box stays.
     fireEvent.pointerLeave(scroller);
-    expect(fill.style.height).toBe("54px");
-    fill.dispatchEvent(Object.assign(new Event("transitionend"), { propertyName: "opacity" }));
+    expect(fill.style).toMatchObject({ opacity: "0", height: "54px" });
 
-    expect(fill.style).toMatchObject({ transform: "none", width: "0px", height: "0px" });
-  });
-
-  it("drops its box at once when reduced motion leaves no fade to wait for", () => {
-    setReducedMotion(true);
-    const { scroller, rows, fill } = mountList();
-    fireEvent.pointerMove(rows[2]!);
-
-    fireEvent.pointerLeave(scroller);
-
-    expect(fill.style).toMatchObject({ transform: "none", width: "0px", height: "0px" });
+    const layer = fill.parentElement;
+    if (!layer) throw new Error("fill has no layer");
+    expect(layer.parentElement).toBe(content);
+    expect(layer.hasAttribute("data-index")).toBe(false);
+    const clip = getComputedStyle(layer);
+    expect({ position: clip.position, top: clip.top, right: clip.right, bottom: clip.bottom, left: clip.left, overflow: clip.overflow })
+      .toEqual({ position: "absolute", top: "0px", right: "0px", bottom: "0px", left: "0px", overflow: "hidden" });
   });
 });
 

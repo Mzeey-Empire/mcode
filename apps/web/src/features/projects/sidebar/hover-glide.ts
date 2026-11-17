@@ -58,11 +58,12 @@ function hoverRowAt(target: EventTarget | Element | null): HTMLElement | null {
 
 /**
  * One hover fill per list that glides between rows. It is positioned imperatively from pointer
- * events, so hovering never re-renders React, and it sits first in the scroll content so rows
- * paint over it and a selected row's opaque fill covers it as it did the old per-row hover.
+ * events, so hovering never re-renders React, and its layer sits first in the scroll content so
+ * rows paint over it and a selected row's opaque fill covers it as it did the old per-row hover.
  */
 export class HoverGlide {
   readonly element: HTMLDivElement;
+  private readonly layer: HTMLDivElement;
   private row: HTMLElement | null = null;
   private box: HighlightBox | null = null;
   private pointer: { x: number; y: number } | null = null;
@@ -73,13 +74,18 @@ export class HoverGlide {
     private readonly content: HTMLElement,
     onLayout: (listener: () => void) => () => void,
   ) {
+    // The fill keeps its last box while hidden. Clipping it to a layer that exactly fills the
+    // content means no box it holds can add scroll space, whether or not a fade ever ran. The layer
+    // has no data-index, so the virtual list's recycling leaves it alone.
+    this.layer = document.createElement("div");
+    this.layer.setAttribute("aria-hidden", "true");
+    this.layer.style.cssText = "position:absolute;top:0;right:0;bottom:0;left:0;overflow:hidden;pointer-events:none";
     this.element = document.createElement("div");
-    this.element.setAttribute("aria-hidden", "true");
     this.element.dataset.testid = "sidebar-hover-highlight";
-    this.element.className = "pointer-events-none absolute top-0 left-0 rounded-lg bg-selected/40";
+    this.element.className = "absolute top-0 left-0 rounded-lg bg-selected/40";
     this.element.style.opacity = "0";
-    content.prepend(this.element);
-    this.element.addEventListener("transitionend", this.onTransitionEnd);
+    this.layer.append(this.element);
+    content.prepend(this.layer);
     scroller.addEventListener("pointermove", this.onPointerMove, { passive: true });
     scroller.addEventListener("pointerleave", this.onPointerLeave, { passive: true });
     // Layout listeners run a frame late; scroll events land before paint, so a wheel never shows
@@ -89,12 +95,11 @@ export class HoverGlide {
   }
 
   destroy(): void {
-    this.element.removeEventListener("transitionend", this.onTransitionEnd);
     this.scroller.removeEventListener("pointermove", this.onPointerMove);
     this.scroller.removeEventListener("pointerleave", this.onPointerLeave);
     this.scroller.removeEventListener("scroll", this.onLayout);
     this.detachLayout();
-    this.element.remove();
+    this.layer.remove();
   }
 
   private readonly onPointerMove = (event: PointerEvent): void => {
@@ -130,24 +135,11 @@ export class HoverGlide {
     Object.assign(this.element.style, highlightStyle(box, move, prefersReducedMotion()));
   }
 
-  private readonly onTransitionEnd = (event: TransitionEvent): void => {
-    if (event.propertyName === "opacity" && !this.row) this.collapse();
-  };
-
   private hide(): void {
     if (!this.row) return;
     this.row = null;
     this.box = null;
-    const reducedMotion = prefersReducedMotion();
-    this.element.style.transition = reducedMotion ? "none" : FADE;
+    this.element.style.transition = prefersReducedMotion() ? "none" : FADE;
     this.element.style.opacity = "0";
-    if (reducedMotion) this.collapse();
-  }
-
-  // An invisible fill still counts toward the scroller's overflow, so once it has faded it drops
-  // its box: a list that then gets shorter, or a narrower sidebar, keeps no blank scroll space.
-  // The next show is an `appear`, which fades opacity only, so the box jumps into place unseen.
-  private collapse(): void {
-    Object.assign(this.element.style, { transform: "none", width: "0px", height: "0px" });
   }
 }
