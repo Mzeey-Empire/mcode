@@ -51,6 +51,10 @@ import { AgentWorkloadService } from "../../workload/agent-workload.js";
 import { createMockThread, createMockThreadPullRequest } from "@mcode/contracts/testing";
 import { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
 import { autoCompleteDecision } from "../../../thread-control/lifecycle/thread-auto-complete.js";
+import { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
+import { WorkspaceService } from "../../../projects/lifecycle/workspace-service.js";
+import { ProjectLifecycleStore } from "../../../projects/lifecycle/project-lifecycle-store.js";
+import { projectLifecycleWriteOperations } from "../../../projects/lifecycle/project-lifecycle-write-operations.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -2145,6 +2149,36 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       expect(launchRecord()).toEqual({ status: "running", background: 1 });
       expect(workload.hasBackgroundSubagent(execution.threadId)).toBe(true);
       expect(changes).toEqual([execution.threadId]);
+    });
+
+    it("stops counting it when its workspace is soft-deleted, and still saves it", async () => {
+      const workload = await releaseWithUnsavedLaunch("subagent");
+      expect(workload.count()).toBe(1);
+      const unused = (): never => { throw new Error("Only the soft deletion is under test"); };
+      const deletion = new ThreadDeletionTeardownService({ findById: unused }, { beginThreadDeletion: unused, cancelSetupForThread: unused },
+        { beginThreadTeardown: unused, stopForThread: unused }, { cancelForRepoPath: unused }, { teardownThread: unused },
+        { teardownThread: unused }, { unwatchThreadWorktree: unused });
+      deletion.bindAcceptedProgress(progress);
+      onTestFinished(deletion.onPersistentDataDeleted(() => workload.refreshTracked()));
+      // Runs the soft deletion against this test's database; the blocked teardown never reaches the later write.
+      const lifecycleWriter = { execute: async (operation: unknown, input: [string]) => {
+        if (operation !== projectLifecycleWriteOperations.beginWorkspaceDeletion) throw new Error("Unexpected write");
+        return new ProjectLifecycleStore(db).beginWorkspaceDeletion(...input);
+      } } as unknown as ApplicationDatabaseWriter;
+      const unusedDependency = {} as never;
+      const workspaces = new WorkspaceService(unusedDependency, unusedDependency, lifecycleWriter, { removeForThread: () => {} },
+        Object.assign(deletion, { teardownThread: () => new Promise<void>(() => {}) }), unusedDependency, { killByThread: async () => {} });
+
+      void workspaces.delete("workspace");
+      await expect.poll(() => db.prepare("SELECT deleted_at IS NOT NULL AS hidden FROM threads WHERE id = ?").get(execution.threadId))
+        .toEqual({ hidden: 1 });
+
+      expect(workload.count()).toBe(0);
+      expect(workload.hasBackgroundSubagent(execution.threadId)).toBe(false);
+      release?.();
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(launchRecord()).toEqual({ status: "running", background: 1 });
+      expect(workload.count()).toBe(0);
     });
   });
 

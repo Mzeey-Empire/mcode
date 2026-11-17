@@ -18,11 +18,16 @@ export class AgentWorkloadService implements AgentWorkload {
   private readonly subagents = new Map<string, Set<string>>();
   /** Threads listeners last heard hold a subagent, so an unsaved launch becoming saved is not a second change. */
   private readonly reported = new Set<string>();
+  /**
+   * Threads with an unsaved launch that were hidden at the last deletion notice. Kept here because `count` must not
+   * read SQLite, and hiding is final, so the snapshot only goes stale for a launch accepted after the notice.
+   */
+  private hiddenWithUnsavedLaunch: ReadonlySet<string> = new Set();
   private readonly listeners = new Set<(threadId: string) => void>();
 
   constructor(
     private readonly runtime: Pick<AgentRuntimeAccess, "activeTurnThreadIds">,
-    private readonly canonical: Pick<CanonicalAgentBoundary, "listRunningBackgroundSubagentIds">,
+    private readonly canonical: Pick<CanonicalAgentBoundary, "listRunningBackgroundSubagentIds" | "listHiddenThreadIds">,
     private readonly accepted?: Pick<CanonicalAcceptedProgress, "unsavedThreadIds">,
   ) {}
 
@@ -57,9 +62,12 @@ export class AgentWorkloadService implements AgentWorkload {
 
   /**
    * Re-read every thread holding a subagent. Deletion hides or removes a thread's rows and discards its unsaved
-   * writes, so no saved event ever reports that its calls stopped.
+   * writes, so no saved event ever reports that its calls stopped. A hidden thread's unsaved launch still saves, and
+   * its saved row is filtered by the query, so it is only excluded here rather than dropped.
    */
   refreshTracked(): void {
+    this.hiddenWithUnsavedLaunch = new Set(this.canonical.listHiddenThreadIds(
+      this.accepted?.unsavedThreadIds(launchesBackgroundSubagent) ?? []));
     for (const threadId of new Set([...this.subagents.keys(), ...this.reported])) this.refresh(threadId);
   }
 
@@ -77,7 +85,8 @@ export class AgentWorkloadService implements AgentWorkload {
 
   /** A turn's reservation ends without waiting for its writes, so a launch still queued for SQLite counts from here. */
   private unsavedLaunchThreadIds(): string[] {
-    return this.accepted?.unsavedThreadIds(launchesBackgroundSubagent) ?? [];
+    return (this.accepted?.unsavedThreadIds(launchesBackgroundSubagent) ?? [])
+      .filter((threadId) => !this.hiddenWithUnsavedLaunch.has(threadId));
   }
 }
 

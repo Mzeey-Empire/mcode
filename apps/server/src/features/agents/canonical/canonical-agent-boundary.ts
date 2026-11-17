@@ -210,6 +210,11 @@ export class CanonicalAgentBoundary {
     return this.reader.listRunningBackgroundSubagentIds(threadId);
   }
 
+  /** Return the given threads that are soft-deleted or gone. */
+  listHiddenThreadIds(threadIds: readonly string[]): string[] {
+    return this.reader.listHiddenThreadIds(threadIds);
+  }
+
   /** Load interrupted checkpoints that permit an explicit recovery action. */
   listInterruptedCheckpoints(...args: Parameters<CanonicalAgentStore["listInterruptedCheckpoints"]>): ReturnType<CanonicalAgentStore["listInterruptedCheckpoints"]> {
     return this.reader.listInterruptedCheckpoints(...args);
