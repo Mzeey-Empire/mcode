@@ -138,6 +138,40 @@ describe("routeCodexServerRequest", () => {
     expect(sendResponse).toHaveBeenCalledWith(3, { decision: "approved_for_session" });
   });
 
+  describe("MCP elicitations", () => {
+    const toolApproval = { serverName: "mcode", threadId: "t", mode: "form", message: "Allow?",
+      requestedSchema: { type: "object", properties: {} },
+      _meta: { codex_approval_kind: "mcp_tool_call", tool_name: "delegate_task", persist: ["session", "always"] } };
+    const form = { serverName: "github", threadId: "t", mode: "form", message: "Pick a repo",
+      requestedSchema: { type: "object", properties: { repo: { type: "string" } } } };
+
+    it("allows a tool call for the session when policy is 'never'", async () => {
+      await routeCodexServerRequest({
+        msg: { id: 6, method: "mcpServer/elicitation/request", params: toolApproval },
+        approvalPolicy: "never", approvalHandler: undefined, sendResponse,
+      });
+      expect(sendResponse).toHaveBeenCalledWith(6, { action: "accept", _meta: { persist: "session" } });
+    });
+
+    it("declines a tool call in supervised mode when no handler is set", async () => {
+      await routeCodexServerRequest({
+        msg: { id: 7, method: "mcpServer/elicitation/request", params: toolApproval },
+        approvalPolicy: "on-request", approvalHandler: undefined, sendResponse,
+      });
+      expect(sendResponse).toHaveBeenCalledWith(7, { action: "decline" });
+    });
+
+    it.each(["never", "on-request"] as const)("cancels a form it cannot show without raising a card (policy %s)", async (approvalPolicy) => {
+      const approvalHandler = vi.fn();
+      await routeCodexServerRequest({
+        msg: { id: 8, method: "mcpServer/elicitation/request", params: form },
+        approvalPolicy, approvalHandler, sendResponse,
+      });
+      expect(approvalHandler).not.toHaveBeenCalled();
+      expect(sendResponse).toHaveBeenCalledWith(8, { action: "cancel" });
+    });
+  });
+
   it("auto-denies in supervised mode when no handler is set", async () => {
     await routeCodexServerRequest({
       msg: { id: 4, method: "item/commandExecution/requestApproval", params: {} },

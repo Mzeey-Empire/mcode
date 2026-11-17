@@ -170,6 +170,53 @@ describe("CodexProvider permission flow", () => {
     expect(resolved).toEqual([{ requestId: pending[0].requestId, threadId, outcome: { status: "denied", choiceLabel: "Deny" } }]);
   });
 
+  describe("MCP tool approval", () => {
+    const toolApproval = (persist?: string | string[]): CodexApprovalRequest => ({
+      rpcId: 11,
+      method: "mcpServer/elicitation/request",
+      params: {
+        serverName: "mcode", threadId: "native-parent", turnId: "turn", mode: "form",
+        message: "Allow the mcode MCP server to run tool \"delegate_task\"?",
+        requestedSchema: { type: "object", properties: {} },
+        _meta: { codex_approval_kind: "mcp_tool_call", tool_name: "delegate_task",
+          tool_params: { title: "Level check" }, ...(persist === undefined ? {} : { persist }) },
+      },
+    });
+    const request = (native: CodexApprovalRequest) => (provider as unknown as {
+      handleApprovalRequest: (sessionId: string, threadId: string, req: unknown) => Promise<unknown>;
+    }).handleApprovalRequest(sessionId, threadId, native);
+
+    it.each([
+      ["allow", undefined, { action: "accept" }],
+      ["allow-session", "session", { action: "accept", _meta: { persist: "session" } }],
+      ["allow-session", ["session", "always"], { action: "accept", _meta: { persist: "session" } }],
+      ["deny", "session", { action: "decline" }],
+    ] as const)("answers %s with the elicitation action Codex reads (persist offered: %j)", async (choiceId, persist, expected) => {
+      const native = toolApproval(persist);
+      const reply = request(native);
+      const [pending] = provider.listPendingApprovals!(threadId);
+      const delivery = provider.resolveApproval!(pending.requestId, { choiceId });
+      expect(await reply).toEqual(expected);
+      native.responseWritten?.(true);
+      expect(await delivery).toEqual({ status: "resolved" });
+    });
+
+    it("shows the server, tool, and arguments, and offers the session choice only when Codex does", () => {
+      void request(toolApproval("session"));
+      void request(toolApproval());
+      const [withSession, withoutSession] = provider.listPendingApprovals!(threadId).map(({ body }) => body);
+      expect(withSession.subject).toEqual({ kind: "tool", toolName: "mcode/delegate_task", preview: JSON.stringify({ title: "Level check" }) });
+      expect(withSession.choices.map(({ id }) => id)).toEqual(["allow", "allow-session", "deny"]);
+      expect(withoutSession.choices.map(({ id }) => id)).toEqual(["allow", "deny"]);
+    });
+
+    it("cancels a pending tool approval when the session stops", async () => {
+      const reply = request(toolApproval("session"));
+      await provider.stopSession(sessionId);
+      expect(await reply).toEqual({ action: "cancel" });
+    });
+  });
+
   it.each([true, false])("lets an in-flight answer settle a stop that lands before its write acknowledgement (delivered: %s)", async (delivered) => {
     const resolved: Array<{ requestId: string; outcome: ApprovalOutcome }> = [];
     provider.on("approval_resolved", ({ requestId, outcome }) => resolved.push({ requestId, outcome }));
