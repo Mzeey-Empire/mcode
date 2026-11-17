@@ -406,6 +406,33 @@ describe("SidebarThreadRow", () => {
       expect(setActiveThread).not.toHaveBeenCalled();
     });
 
+    it("opens the card of the row the pointer rests on once the list closes", async () => {
+      const now = new Date().toISOString();
+      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree", last_activity_at: now, pull_requests: TWO_PRS });
+      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree", last_activity_at: now });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [first, second], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      const chip = screen.getByRole("button", { name: "2 pull requests" });
+      await hover(chip);
+      expect(prList()).not.toBeNull();
+
+      const firstRow = screen.getByRole("button", { name: /^First/ });
+      const secondRow = screen.getByRole("button", { name: /^Second/ });
+      fireEvent.mouseLeave(chip, { clientX: 40, clientY: 60 });
+      fireEvent.mouseLeave(firstRow, { clientX: 40, clientY: 60 });
+      fireEvent.pointerOver(secondRow, { pointerType: "mouse" });
+      fireEvent.mouseEnter(secondRow, { clientX: 40, clientY: 60 });
+      fireEvent.mouseMove(secondRow, { clientX: 41, clientY: 60 });
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+
+      expect(prList()).toBeNull();
+      expect(screen.queryByTestId("thread-preview-t2")).not.toBeNull();
+
+      fireEvent.mouseLeave(secondRow, { clientX: 40, clientY: 300 });
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(screen.queryByTestId("thread-preview-t2")).toBeNull();
+    });
+
     it("opens the list from the keyboard and returns focus to the chip on Escape", async () => {
       renderThread({ pull_requests: TWO_PRS });
       const chip = screen.getByRole("button", { name: "2 pull requests" });

@@ -35,22 +35,53 @@ export function ThreadPreviewTooltip({ handle, guard }: { handle: TooltipHandle<
   useEffect(() => () => untrackRef.current?.(), []);
   // A preview drawn over an open thread menu hides the menu's rows, so a menu shuts the preview.
   const menuOpen = useAnyThreadMenuOpen();
+  // A hover refused only because a menu was open. The PR list closes on a delay longer than the
+  // card's, so the pointer can already rest on another row by then, and Base UI never retries it.
+  const deferredRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    if (menuOpen) handle.close();
-  }, [menuOpen, handle]);
+    if (menuOpen) {
+      handle.close();
+      return;
+    }
+    const trigger = deferredRef.current;
+    deferredRef.current = null;
+    if (trigger?.isConnected && trigger.id && guard.allowsOpen("trigger-hover")) handle.open(trigger.id);
+  }, [menuOpen, handle, guard]);
   const onOpenChange = useCallback((open: boolean, details: TooltipChangeDetails) => {
-    if (open && (isAnyThreadMenuOpen() || !guard.allowsOpen(details.reason))) {
+    if (open && refusesOpen(details, guard, deferredRef)) {
       details.cancel();
       return;
     }
     untrackRef.current?.();
-    untrackRef.current = open && details.reason === "trigger-hover" ? guard.trackHoverOpen(() => handle.close()) : undefined;
+    untrackRef.current = open && isHoverOpen(details.reason) ? guard.trackHoverOpen(() => handle.close()) : undefined;
   }, [guard, handle]);
   return (
     <Tooltip handle={handle} onOpenChange={onOpenChange}>
       {({ payload }) => payload ? <ThreadPreviewContent payload={payload} /> : null}
     </Tooltip>
   );
+}
+
+/** Whether an open must be refused. A hover refused only for an open menu is kept for when the menu closes. */
+function refusesOpen(details: TooltipChangeDetails, guard: PreviewScrollGuard, deferredRef: { current: HTMLElement | null }): boolean {
+  if (!guard.allowsOpen(details.reason)) return true;
+  if (!isAnyThreadMenuOpen()) return false;
+  if (details.reason === "trigger-hover") deferHoverOpen(deferredRef, details.trigger);
+  return true;
+}
+
+// The only imperative open is the deferred hover, so a scroll closes it like any hover open.
+function isHoverOpen(reason: string): boolean {
+  return reason === "trigger-hover" || reason === "imperative-action";
+}
+
+/** Remembers `trigger` until the pointer leaves it, so only a row still under the pointer opens later. */
+function deferHoverOpen(deferredRef: { current: HTMLElement | null }, trigger: Element | undefined): void {
+  if (!(trigger instanceof HTMLElement)) return;
+  deferredRef.current = trigger;
+  trigger.addEventListener("mouseleave", () => {
+    if (deferredRef.current === trigger) deferredRef.current = null;
+  }, { once: true });
 }
 
 /**
