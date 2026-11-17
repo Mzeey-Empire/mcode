@@ -264,6 +264,11 @@ export function normalizeReasoningLevelForModel(
     return "low";
   }
 
+  // Discovery supplies the effort choices for new Claude models before our tables know them.
+  if (modelId.startsWith("claude-") && !ALL_KNOWN_BASE_IDS.includes(normalizeModelId(modelId))) {
+    return level;
+  }
+
   // Build the set of tiers this model supports.
   const allowed = new Set<ReasoningLevel>(BASE_ALLOWED_TIERS);
   if (isMaxEffortModel(modelId)) {

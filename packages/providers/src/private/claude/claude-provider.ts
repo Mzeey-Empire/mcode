@@ -3103,7 +3103,7 @@ export class ClaudeProvider
     return listClaudeModels(() => ({
       pathToClaudeCodeExecutable: this.resolveClaudeExecutable(),
       env: { ...this.host.environment.snapshot() },
-    }));
+    }), () => this.createOwnedClaudeProcess("model discovery"));
   }
 
   /** Settle the live SDK callback before reporting a delivered answer. */

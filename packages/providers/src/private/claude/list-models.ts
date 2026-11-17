@@ -2,53 +2,40 @@ import { query, type ModelInfo, type Options, type SDKUserMessage } from "@anthr
 import { logger } from "@mcode/shared";
 import { CLAUDE_STATIC_MODELS, withClaudeLifecycle } from "@mcode/contracts/providers/claude-static-fallback";
 import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import * as NodeOS from "node:os";
+import type { ClaudeOwnedProcess } from "./claude-process.js";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const PROBE_TIMEOUT_MS = 10_000;
 type ProbeOptions = Pick<Options, "pathToClaudeCodeExecutable" | "env">;
 
-let cachedModels: ProviderModelInfo[] | null = null;
-let cacheTimestamp = 0;
-let inflight: Promise<ProviderModelInfo[]> | null = null;
-let loggedFailure = false;
-
-function reasoningMetadata(info: ModelInfo, metadata: ProviderModelInfo | undefined): Partial<ProviderModelInfo> {
-  const efforts = info.supportsEffort === false
-    ? []
-    : info.supportedEffortLevels ?? metadata?.supportedReasoningEfforts;
-  const defaultEffort = metadata?.defaultReasoningEffort;
-  return {
-    supportsReasoning: info.supportsEffort ?? metadata?.supportsReasoning,
-    supportedReasoningEfforts: efforts,
-    defaultReasoningEffort: defaultEffort && efforts?.includes(defaultEffort) ? defaultEffort : undefined,
-  };
-}
+const cache = new Map<string | undefined, { models: Promise<ProviderModelInfo[]>; timestamp: number }>();
+const loggedFailures = new Set<string>();
 
 function fromCliModel(info: ModelInfo, id: string): ProviderModelInfo {
-  const metadata = CLAUDE_STATIC_MODELS.find((model) => model.id === id);
   return withClaudeLifecycle({
-    ...metadata,
-    ...reasoningMetadata(info, metadata),
+    supportsReasoning: info.supportsEffort ?? Boolean(info.supportedEffortLevels?.length),
+    supportedReasoningEfforts: info.supportsEffort === false ? [] : info.supportedEffortLevels,
     id,
     name: info.displayName.trim() || id,
-    supportsFastMode: info.supportsFastMode,
   });
 }
 
 function mapModels(reported: ModelInfo[]): ProviderModelInfo[] {
-  const models = new Map<string, ProviderModelInfo>();
+  const models = new Map(CLAUDE_STATIC_MODELS.map((model) => [model.id, model]));
   for (const info of reported) {
-    if (!info.value.trim() || info.value === "default") continue;
-    const id = info.resolvedModel?.trim() || info.value.trim();
+    let id = (info.resolvedModel?.trim() || info.value.trim()).replace(/\[1m\]$/, "");
+    const undated = id.replace(/-\d{8}$/, "");
+    if (CLAUDE_STATIC_MODELS.some((model) => model.id === undated)) id = undated;
+    if (!/^claude-[a-z0-9-]+$/.test(id)) continue;
     if (models.has(id)) continue;
     models.set(id, fromCliModel(info, id));
   }
-  const order = new Map(CLAUDE_STATIC_MODELS.map((model, index) => [model.id, index]));
-  return [...models.values()].sort((a, b) =>
-    (order.get(a.id) ?? Infinity) - (order.get(b.id) ?? Infinity));
+  return [...models.values()];
 }
 
-async function probeModels(options: ProbeOptions): Promise<ProviderModelInfo[]> {
+async function probeModels(options: ProbeOptions, createProcess: () => ClaudeOwnedProcess): Promise<ProviderModelInfo[]> {
+  const ownedProcess = createProcess();
   const abort = new AbortController();
   // Keep stdin open without yielding a user message: initialization spends no tokens.
   const prompt: AsyncIterable<SDKUserMessage> = {
@@ -59,63 +46,76 @@ async function probeModels(options: ProbeOptions): Promise<ProviderModelInfo[]> 
       }),
     }),
   };
-  const q = query({ prompt, options: {
-    ...options,
-    abortController: abort,
-    persistSession: false,
-    tools: [],
-    settingSources: ["user"],
-    // Discovery must honor user model settings without running their session hooks.
-    settings: { disableAllHooks: true },
-  } });
+  let q: ReturnType<typeof query> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    q = query({ prompt, options: {
+      ...options,
+      abortController: abort,
+      spawnClaudeCodeProcess: ownedProcess.spawn,
+      cwd: NodeOS.tmpdir(),
+      strictMcpConfig: true,
+      mcpServers: {},
+      persistSession: false,
+      tools: [],
+      settingSources: ["user"],
+      // Discovery must honor user model settings without running their session hooks.
+      settings: { disableAllHooks: true },
+    } });
     const init = await Promise.race([
       q.initializationResult(),
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error("Claude model probe timed out")), PROBE_TIMEOUT_MS);
       }),
     ]);
-    const models = mapModels(init.models);
-    if (!models.length) throw new Error("Claude Code reported no selectable models");
-    return models;
+    return mapModels(init.models);
   } finally {
     clearTimeout(timer);
     abort.abort();
-    q.close();
+    try {
+      q?.close();
+    } finally {
+      await ownedProcess.retire();
+    }
   }
 }
 
-async function fetchModels(resolveOptions: () => ProbeOptions): Promise<ProviderModelInfo[]> {
-  let models: ProviderModelInfo[];
+function logFailure(error: unknown): void {
+  const reason = error instanceof Error ? error.message : String(error);
+  if (loggedFailures.has(reason)) return;
+  loggedFailures.add(reason);
+  logger.warn("Claude model discovery failed; using static catalog", { reason });
+}
+
+async function fetchModels(options: ProbeOptions, createProcess: () => ClaudeOwnedProcess): Promise<ProviderModelInfo[]> {
   try {
-    models = await probeModels(resolveOptions());
+    return await probeModels(options, createProcess);
   } catch (error) {
-    if (!loggedFailure) {
-      logger.warn("Claude model discovery failed; using static catalog", {
-        reason: error instanceof Error ? error.message : "Unknown error",
-      });
-      loggedFailure = true;
-    }
-    models = [...CLAUDE_STATIC_MODELS];
+    logFailure(error);
+    return [...CLAUDE_STATIC_MODELS];
   }
-  cachedModels = models;
-  cacheTimestamp = Date.now();
-  return models;
 }
 
 /** Clear discovery state between tests; production refreshes through the five-minute TTL. */
 export function resetModelCache(): void {
-  cachedModels = null;
-  cacheTimestamp = 0;
-  inflight = null;
-  loggedFailure = false;
+  cache.clear();
+  loggedFailures.clear();
 }
 
 /** Discover Claude Code's models, caching success or fallback and sharing one in-flight probe. */
-export async function listClaudeModels(resolveOptions: () => ProbeOptions): Promise<ProviderModelInfo[]> {
-  if (cachedModels && Date.now() - cacheTimestamp < CACHE_TTL_MS) return cachedModels;
-  if (inflight) return inflight;
-  inflight = fetchModels(resolveOptions).finally(() => { inflight = null; });
-  return inflight;
+export async function listClaudeModels(resolveOptions: () => ProbeOptions, createProcess: () => ClaudeOwnedProcess): Promise<ProviderModelInfo[]> {
+  let options: ProbeOptions;
+  try {
+    options = resolveOptions();
+  } catch (error) {
+    logFailure(error);
+    return [...CLAUDE_STATIC_MODELS];
+  }
+  const key = options.pathToClaudeCodeExecutable;
+  const cached = cache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached.models;
+  const entry = { models: fetchModels(options, createProcess), timestamp: Infinity };
+  cache.set(key, entry);
+  void entry.models.then(() => { entry.timestamp = Date.now(); });
+  return entry.models;
 }

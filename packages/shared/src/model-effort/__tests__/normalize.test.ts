@@ -225,13 +225,13 @@ describe("normalizeReasoningLevelForModel", () => {
     });
   });
 
-  describe("unknown Claude model (only supports low, medium, high)", () => {
-    it("downgrades xhigh to high", () => {
-      expect(normalizeReasoningLevelForModel("claude-unknown-model", "xhigh")).toBe("high");
+  describe("unknown Claude model (effort choices come from discovery)", () => {
+    it("passes xhigh through", () => {
+      expect(normalizeReasoningLevelForModel("claude-unknown-model", "xhigh")).toBe("xhigh");
     });
 
-    it("downgrades max to high (walks down from max, skips xhigh and max, lands on high)", () => {
-      expect(normalizeReasoningLevelForModel("claude-unknown-model", "max")).toBe("high");
+    it("passes max through", () => {
+      expect(normalizeReasoningLevelForModel("claude-unknown-model", "max")).toBe("max");
     });
 
     it("passes low through unchanged", () => {

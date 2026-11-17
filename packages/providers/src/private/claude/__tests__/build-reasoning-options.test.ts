@@ -15,6 +15,11 @@ import { logger } from "@mcode/shared";
 import { buildReasoningOptions } from "../build-reasoning-options.js";
 
 describe("buildReasoningOptions", () => {
+  it("sends max effort for a newly discovered Claude model", () => {
+    expect(buildReasoningOptions("max", "claude-sonnet-6")).toEqual({
+      effort: "max", thinking: { type: "adaptive", display: "summarized" },
+    });
+  });
   beforeEach(() => {
     vi.clearAllMocks();
   });

@@ -23,6 +23,10 @@ import {
 import { supportsEffortParameter } from "@mcode/shared/model-effort";
 
 describe("pickProviderModelsForSettings", () => {
+  it("preserves the chosen effort for newly discovered Claude models", () => {
+    expect(normalizeReasoningLevel("claude", "claude-sonnet-6", "max")).toBe("max");
+    expect(normalizeReasoningLevel("claude", "claude-sonnet-4-6", "xhigh")).toBe("high");
+  });
   it("keeps Codex provider order and excludes unavailable static entries", () => {
     const staticModels = MODEL_PROVIDERS.find((provider) => provider.id === "codex")?.models ?? [];
     const dynamic = [
