@@ -13,7 +13,7 @@ export interface ThreadRowLook {
   label: { text: string; className: string } | null;
 }
 
-/** Maps a row state to its status lane mark and third line. Running rows fade through `data-status-mark`. */
+/** Maps a row state to its status mark and corner label. */
 export function threadRowLook(state: ThreadRowState): ThreadRowLook {
   switch (state.kind) {
     case "needs-you":
@@ -22,7 +22,7 @@ export function threadRowLook(state: ThreadRowState): ThreadRowLook {
         label: { text: state.label, className: "text-primary" },
       };
     case "running":
-      return { mark: { state: "running", label: "Running" }, label: null };
+      return { mark: { state: "running", label: "Running" }, label: { text: "Running", className: "text-muted" } };
     case "failed":
       return { mark: { state: "error", label: "Failed" }, label: { text: "Failed", className: "text-error" } };
     case "finished":
@@ -36,11 +36,11 @@ export function threadRowLook(state: ThreadRowState): ThreadRowLook {
 export type ThreadTitleTone = "prominent" | "receded";
 
 /**
- * Quiet rows have nothing new, so their titles recede; the selected row keeps
- * full ink so the thread the user is reading stays legible.
+ * A running thread's title recedes while the agent works, so the rows that need a look stand out;
+ * the selected row keeps full ink so the thread the user is reading stays legible.
  */
 export function threadTitleTone(state: ThreadRowState, selected: boolean): ThreadTitleTone {
-  return state.kind === "quiet" && !selected ? "receded" : "prominent";
+  return state.kind === "running" && !selected ? "receded" : "prominent";
 }
 
 /** Only a setup that is holding the thread's startup shapes its row. */

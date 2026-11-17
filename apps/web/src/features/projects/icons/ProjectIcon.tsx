@@ -16,6 +16,25 @@ export function projectMonogram(name: string): string {
   return first.done ? "?" : first.value.segment.toLocaleUpperCase();
 }
 
+/**
+ * Two-letter fallback for a tinted badge: the first letters of the first two words of a
+ * multi-word name ("orderwise-sync" reads "OS"), else the first two letters ("mcode" reads "Mc").
+ */
+export function projectInitials(name: string): string {
+  const words = name.trim().split(/[\s._-]+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length > 1) return words.slice(0, 2).map(projectMonogram).join("");
+  const letters = [...graphemes.segment(words[0] ?? "")].map((part) => part.segment);
+  return `${(letters[0] ?? "").toLocaleUpperCase()}${(letters[1] ?? "").toLocaleLowerCase()}`;
+}
+
+/** A stable hue from 0 to 359 for a project id, so its tinted badge keeps one colour everywhere. */
+export function projectHue(workspaceId: string): number {
+  let hash = 0;
+  for (const char of workspaceId) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) % 360;
+  return hash;
+}
+
 /** Props for {@link ProjectIcon}. */
 export interface ProjectIconProps {
   workspaceId: string;
@@ -23,17 +42,20 @@ export interface ProjectIconProps {
   name: string;
   size: ProjectIconSize;
   className?: string;
+  /** `tinted` is the sidebar badge: a hue-tinted tile with a two-letter fallback. Defaults to `solid`. */
+  tone?: "solid" | "tinted";
 }
 
 /** A project's icon image, or a monogram tile when it has none or the image fails to load. */
-export function ProjectIcon({ workspaceId, name, size, className }: ProjectIconProps) {
+export function ProjectIcon({ workspaceId, name, size, className, tone = "solid" }: ProjectIconProps) {
   const icon = useProjectIconStore((state) => state.iconsByWorkspaceId[workspaceId]);
   const src = icon && icon.source !== "none" ? buildServerImageUrl(icon.url) : null;
+  const tinted = tone === "tinted" ? projectHue(workspaceId) : null;
   const style = { width: size, height: size, borderRadius: RADIUS_BY_SIZE[size] };
   // Keyed by src so a new version gets a fresh load attempt after an earlier one failed.
   return src
-    ? <ProjectIconImage key={src} src={src} name={name} size={size} style={style} className={className} />
-    : <ProjectMonogram name={name} size={size} style={style} className={className} />;
+    ? <ProjectIconImage key={src} src={src} name={name} size={size} style={style} className={className} tinted={tinted} />
+    : <ProjectMonogram name={name} size={size} style={style} className={className} tinted={tinted} />;
 }
 
 interface TileProps {
@@ -41,6 +63,7 @@ interface TileProps {
   size: ProjectIconSize;
   style: React.CSSProperties;
   className?: string;
+  tinted: number | null;
 }
 
 function ProjectIconImage({ src, ...tile }: TileProps & { src: string }) {
@@ -59,7 +82,20 @@ function ProjectIconImage({ src, ...tile }: TileProps & { src: string }) {
   );
 }
 
-function ProjectMonogram({ name, size, style, className }: TileProps) {
+function ProjectMonogram({ name, size, style, className, tinted }: TileProps) {
+  if (tinted !== null) {
+    const tintStyle: React.CSSProperties & { "--project-hue": number } = { ...style, fontSize: Math.round(size / 2), "--project-hue": tinted };
+    return (
+      <span
+        aria-hidden
+        data-testid="project-monogram"
+        style={tintStyle}
+        className={cn("project-badge inline-flex shrink-0 select-none items-center justify-center font-semibold leading-none", className)}
+      >
+        {projectInitials(name)}
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden

@@ -116,6 +116,14 @@ export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
 );
 
 /**
+ * Whether the list shows closed threads. Rows choose their one-line closed variant from this, not
+ * from the thread, so a row keeps its height while it animates out of the list it is leaving.
+ */
+export function selectClosedScope(state: Pick<SidebarUiState, "scope">): boolean {
+  return state.scope === "completed";
+}
+
+/**
  * Snapshots the clock and every thread's sort key, so rows hold still under the pointer. New
  * threads, absent from the snapshot, still sort by their live activity.
  */
