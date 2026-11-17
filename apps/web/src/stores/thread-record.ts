@@ -61,9 +61,10 @@ export interface ThreadContextUsage {
 
 /** Fork-mode state preserved across thread navigation. */
 export interface ThreadForkMode {
+  /** Agent message the next send forks from. */
   messageId: string;
+  /** First non-empty line of that message, shown in the composer's "Forking from" bar. */
   content: string | null;
-  role: "user" | "assistant";
 }
 
 /** A provider notice collection is scoped to an id or an explicit unscoped boundary. */

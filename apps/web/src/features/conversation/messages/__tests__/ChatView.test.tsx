@@ -7,6 +7,7 @@ import type { Thread } from "@/transport/types";
 import type { ReactNode } from "react";
 import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts/models/workspace-environment";
+import type { ThreadForkPoint } from "../fork-point";
 
 // Store mocks must be declared before importing the component under test.
 
@@ -26,6 +27,7 @@ const {
   chatViewSetPendingPrefillMock,
   chatViewSaveDraftMock,
   chatViewRemoveDraftMock,
+  chatViewForkPointRef,
 } = vi.hoisted(() => {
   const chatViewDisplayLeaseIdsRef = { current: [] as readonly string[] };
   const chatViewDisplayLeaseListeners = new Set<() => void>();
@@ -43,6 +45,7 @@ const {
     chatViewSetPendingPrefillMock: vi.fn(),
     chatViewSaveDraftMock: vi.fn(),
     chatViewRemoveDraftMock: vi.fn(),
+    chatViewForkPointRef: { current: null as ThreadForkPoint | null },
     chatViewResidencyMock: {
       invalidateConversation: vi.fn(),
       refresh: vi.fn().mockResolvedValue(undefined),
@@ -165,16 +168,22 @@ vi.mock("../../composer/Composer", () => ({
   Composer: ({ startingThread }: { readonly startingThread?: unknown }) => <button data-testid="composer" disabled={startingThread !== undefined}>Send</button>,
 }));
 
-vi.mock("../MessageList", () => ({
-  MessageList: ({
+vi.mock("../MessageList", async () => {
+  const { useEffect } = await import("react");
+  return { MessageList: ({
     displayThreadId,
     leadingContent,
     afterFirstUserContent,
+    onForkPointChange,
   }: {
     displayThreadId?: string;
     leadingContent?: ReactNode;
     afterFirstUserContent?: ReactNode;
+    onForkPointChange?: (point: ThreadForkPoint) => void;
   }) => {
+    useEffect(() => {
+      if (chatViewForkPointRef.current) onForkPointChange?.(chatViewForkPointRef.current);
+    }, [onForkPointChange]);
     return (
       <div data-testid="message-list" data-display-thread-id={displayThreadId} data-has-after-first-user-content={String(afterFirstUserContent !== undefined)}>
         {leadingContent}
@@ -182,8 +191,8 @@ vi.mock("../MessageList", () => ({
         {afterFirstUserContent}
       </div>
     );
-  },
-}));
+  } };
+});
 
 vi.mock("@/components/chat/HeaderActions", () => ({
   HeaderActions: () => <div data-testid="header-actions" />,
@@ -362,6 +371,7 @@ function defaultThreadState(overrides: Partial<{
 
 describe("ChatView - Thread Title Double-Click Rename", () => {
   beforeEach(() => {
+    chatViewForkPointRef.current = null;
     chatViewConnectionStatusRef.current = "connected";
     chatViewTransportMock.subscribeThread.mockResolvedValue(undefined);
     chatViewTransportMock.unsubscribeThread.mockResolvedValue(undefined);
@@ -552,6 +562,100 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     await user.dblClick(titleContainer);
 
     expect(screen.getByTestId("chat-header-title-input")).toBeInTheDocument();
+  });
+
+  it("opens the thread menu with Fork thread and the sidebar's actions on a title click", async () => {
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+
+    const menu = await screen.findByRole("menu");
+    for (const name of ["Fork thread", "Rename", "Copy Path", "Copy Thread ID", "Delete"]) {
+      expect(within(menu).getByRole("menuitem", { name })).toBeInTheDocument();
+    }
+  });
+
+  it("renames on double-click without leaving the thread menu open", async () => {
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.dblClick(screen.getByTestId("chat-header-title"));
+
+    expect(screen.getByTestId("chat-header-title-input")).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("forks the thread from the reply the transcript reports, quoting its first line", async () => {
+    const answer = createMockMessage({ id: "answer", thread_id: "thread-1", role: "assistant", content: "\n  Here is the plan.\nStep one" });
+    chatViewForkPointRef.current = { threadId: "thread-1", kind: "ready", message: answer };
+    const threadState = defaultThreadState();
+    chatViewThreadMockRef.current = threadState;
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+    await user.click(await screen.findByRole("menuitem", { name: "Fork thread" }));
+
+    expect(threadState.setForkMode).toHaveBeenCalledWith("thread-1", { messageId: "answer", content: "Here is the plan." });
+  });
+
+  it("quotes the visible first line when the forked reply starts with a plan fence", async () => {
+    const answer = createMockMessage({ id: "answer", thread_id: "thread-1", role: "assistant", content: "```mcode-plan\n# Release plan\n```\nThe plan is in the Plan tab." });
+    const record = { ...createEmptyThreadRecord(), messages: [answer] };
+    chatViewForkPointRef.current = { threadId: "thread-1", kind: "ready", message: answer };
+    const threadState = defaultThreadState({ activeRecord: record, records: new Map([["thread-1", record]]) });
+    chatViewThreadMockRef.current = threadState;
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+    await user.click(await screen.findByRole("menuitem", { name: "Fork thread" }));
+
+    expect(threadState.setForkMode).toHaveBeenCalledWith("thread-1", { messageId: "answer", content: "The plan is in the Plan tab." });
+  });
+
+  it("disables Fork thread while the thread has no agent reply", async () => {
+    chatViewForkPointRef.current = { threadId: "thread-1", kind: "no-reply" };
+    const threadState = defaultThreadState();
+    chatViewThreadMockRef.current = threadState;
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+    const fork = await screen.findByRole("menuitem", { name: "Fork thread" });
+    expect(fork).toHaveAttribute("aria-disabled", "true");
+    await user.click(fork);
+    expect(threadState.setForkMode).not.toHaveBeenCalled();
+  });
+
+  it("disables Fork thread until the latest reply is loaded", async () => {
+    const answer = createMockMessage({ id: "answer", thread_id: "thread-1", role: "assistant", content: "Old reply" });
+    const record = { ...createEmptyThreadRecord(), messages: [answer] };
+    chatViewForkPointRef.current = { threadId: "thread-1", kind: "newer-not-loaded" };
+    const threadState = defaultThreadState({ activeRecord: record, records: new Map([["thread-1", record]]) });
+    chatViewThreadMockRef.current = threadState;
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+    const fork = await screen.findByRole("menuitem", { name: "Fork thread" });
+    expect(fork).toHaveAttribute("aria-disabled", "true");
+    await user.hover(fork);
+    await waitFor(() => expect(screen.getAllByText("Scroll to the latest reply to fork").some((node) => !node.hidden)).toBe(true));
+    await user.click(fork);
+    expect(threadState.setForkMode).not.toHaveBeenCalled();
+  });
+
+  it("focuses the title editor after Rename in the header menu", async () => {
+    const user = userEvent.setup();
+    render(<ChatView />);
+
+    await user.click(screen.getByTestId("chat-header-title"));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
+
+    const input = await screen.findByTestId("chat-header-title-input");
+    await waitFor(() => expect(input).toHaveFocus());
   });
 
   it("saves new title on Enter key", async () => {

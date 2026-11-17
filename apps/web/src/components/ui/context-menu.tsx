@@ -7,13 +7,16 @@ import { POPOVER_SURFACE_CLASS } from "./overlay-surface";
 import { Switch } from "./switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
-interface ActionMenuItem {
+/** An action row that closes the menu, or a divider when `divider` is set. */
+export interface ActionMenuItem {
   kind?: "action";
   label: string;
   onClick: () => void;
   icon?: ReactNode;
   destructive?: boolean;
   divider?: boolean;
+  /** Shown as a tooltip while the row is disabled. A row with a reason is disabled. */
+  disabledReason?: string | null;
 }
 
 /** A switch row whose toggles keep the menu open. */
@@ -65,6 +68,34 @@ function SwitchRow({ item }: { item: SwitchMenuItem }) {
         icon={item.icon}
         trailing={<Switch checked={item.checked} disabled={disabled} readOnly aria-hidden tabIndex={-1} className="pointer-events-none" />}
       />
+    </button>
+  );
+  if (!disabled) return row;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={row} />
+      <TooltipContent side="right">{item.disabledReason}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function ActionRow({ item, onClose }: { item: ActionMenuItem; onClose: () => void }) {
+  const disabled = Boolean(item.disabledReason);
+  const row = (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        if (disabled) return;
+        item.onClick();
+        onClose();
+      }}
+      type="button"
+      role="menuitem"
+      aria-disabled={disabled || undefined}
+      data-disabled={disabled ? "" : undefined}
+      className={cn(MENU_ROW_CLASS, MENU_ROW_DISABLED_CLASS, !disabled && "hover:bg-hover")}
+    >
+      <MenuRowBody label={item.label} icon={item.icon} destructive={item.destructive} />
     </button>
   );
   if (!disabled) return row;
@@ -133,19 +164,7 @@ export function ContextMenu({ x, y, items, onClose, anchor }: ContextMenuProps) 
             className={MENU_SEPARATOR_CLASS}
           />
         ) : (
-          <button
-            key={i}
-            onClick={(e) => {
-              e.stopPropagation();
-              item.onClick();
-              onClose();
-            }}
-            type="button"
-            role="menuitem"
-            className={cn(MENU_ROW_CLASS, "hover:bg-hover")}
-          >
-            <MenuRowBody label={item.label} icon={item.icon} destructive={item.destructive} />
-          </button>
+          <ActionRow key={i} item={item} onClose={onClose} />
         )
       )}
     </div>,

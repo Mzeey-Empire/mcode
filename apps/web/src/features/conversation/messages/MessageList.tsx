@@ -31,6 +31,9 @@ import type { ViewportInsets } from "@/components/ui/virtual-viewport";
 import { useToastStore } from "@/stores/toastStore";
 import { useMessageRevealStore, type MessageRevealRequest } from "./message-reveal-store";
 import { useFollowOnSend } from "./transcript-follow-request";
+import { latestForkableReply, threadForkPoint, type ThreadForkPoint } from "./fork-point";
+import { usePlanStore } from "@/stores/planStore";
+import type { Message } from "@/transport";
 
 const SOURCE_NAVIGATION_MAX_FRAMES = 20;
 const FILL_VIEWPORT_RATIO = 1.5;
@@ -289,7 +292,9 @@ export interface MessageListProps {
   /** Content inserted immediately after the first persisted user message. */
   afterFirstUserContent?: ReactNode;
   /** Called when the user clicks the branch icon on a message. */
-  onBranch?: (messageId: string) => void;
+  onBranch?: (message: Message) => void;
+  /** Reports the reply the thread header forks from whenever its identity changes. */
+  onForkPointChange?: (point: ThreadForkPoint) => void;
   /** Adds one selected-text comment to the active Composer draft. */
   onSelectedTextComment?: (comment: SelectedTextComment) => void;
   /** Removes one saved selected-text comment from the active Composer draft. */
@@ -423,6 +428,28 @@ function withoutKeys(keys: ReadonlySet<string>, removed: ReadonlySet<string>): R
   return removed.size === 0 ? keys : new Set([...keys].filter((key) => !removed.has(key)));
 }
 
+const NO_PLAN_MESSAGES: ReadonlySet<string> = new Set();
+
+/** Publishes the header fork point; reports fire on identity changes only, so streamed tokens never re-render the header. */
+function useForkPointReport(
+  threadId: string | null | undefined,
+  items: readonly MessageListItem[],
+  hasNewer: boolean,
+  onForkPointChange: ((point: ThreadForkPoint) => void) | undefined,
+) {
+  const plans = usePlanStore((state) => threadId ? state.plansByThread[threadId] : undefined);
+  const planMessageIds = useMemo(() => plans ? new Set(plans.flatMap((plan) => plan.messageId === null ? [] : [plan.messageId])) : NO_PLAN_MESSAGES, [plans]);
+  const latestReply = useMemo(() => latestForkableReply(items, planMessageIds), [items, planMessageIds]);
+  const point = threadId ? threadForkPoint(threadId, latestReply, hasNewer) : null;
+  const latestPoint = useRef(point);
+  latestPoint.current = point;
+  const pointKind = point?.kind;
+  const pointMessageId = point?.kind === "ready" ? point.message.id : null;
+  useEffect(() => {
+    if (latestPoint.current) onForkPointChange?.(latestPoint.current);
+  }, [onForkPointChange, threadId, pointKind, pointMessageId]);
+}
+
 function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data: MessageListData }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLElement | null>(null);
@@ -447,6 +474,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
   const { items } =
     useMessageListItems({ ...data, expandedFolds: expandedGroups, expandedGroups: presentGroups, leadingContent: props.leadingContent, afterFirstUserContent: props.afterFirstUserContent });
   const itemsByKey = useMemo(() => new Map(items.map((item) => [item.key, item])), [items]);
+  useForkPointReport(data.renderedThreadId, items, data.hasNewer, props.onForkPointChange);
   const userRows = useMemo(() => items.filter((item) =>
     item.type === "message" && item.message.role === "user" && !item.message.is_internal && !item.message.systemNotice,
   ), [items]);

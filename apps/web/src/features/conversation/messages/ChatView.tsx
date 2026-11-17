@@ -6,13 +6,19 @@ import {
   type SelectedTextCommentEditorDraft,
 } from "@/stores/composerDraftStore";
 import type { SubagentRosterTarget } from "../narrative";
-import { readThreadRecord } from "../state";
+import type { Message } from "@/transport";
+import { stripInjectedFiles } from "@/lib/file-tags";
+import { stripPlanFences } from "@/lib/plan-fences";
 import { useThreadSubscriptionReconciler } from "../subscriptions/useThreadSubscriptionReconciler";
 import { ChatViewSurface, type ChatViewInteractions } from "./chat-view/ChatViewSurface";
 import { useChatViewState } from "./chat-view/useChatViewState";
 import type { SelectedTextCommentSourceNavigationRequest } from "./MessageList";
 
 const CACHE_PRESSURE_BYTES = 20 * 1024 * 1024;
+
+function firstNonEmptyLine(text: string): string | null {
+  return text.split("\n").map((line) => line.trim()).find((line) => line.length > 0) ?? null;
+}
 
 interface DismissedSessionError {
   error: string | null;
@@ -263,17 +269,10 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
     previousThreadIdRef.current = state.activeThreadId;
   }, [state.activeThreadId]);
 
-  const handleBranch = useCallback((messageId: string) => {
+  const handleBranch = useCallback((message: Message) => {
     const activeThreadId = useWorkspaceStore.getState().activeThreadId;
-    const message = activeThreadId
-      ? readThreadRecord(activeThreadId).messages.find((candidate) => candidate.id === messageId)
-      : undefined;
-    if (!activeThreadId || !message) return;
-    setForkMode(activeThreadId, {
-      messageId,
-      content: message.role === "user" ? message.content : null,
-      role: message.role as "user" | "assistant",
-    });
+    if (!activeThreadId) return;
+    setForkMode(activeThreadId, { messageId: message.id, content: firstNonEmptyLine(stripPlanFences(stripInjectedFiles(message.content))) });
   }, [setForkMode]);
 
   const handleDismissCliError = useCallback(() => {

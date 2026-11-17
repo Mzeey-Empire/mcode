@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode, type Ref, type RefObject } from "react";
-import { GitFork } from "lucide-react";
+import { ChevronDown, GitFork } from "lucide-react";
 import type { Message } from "@mcode/contracts/models/message";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { ThreadStartup, ThreadStartupKind } from "@mcode/contracts/thread-startup";
@@ -29,12 +29,16 @@ import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStar
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
+import { ThreadDeleteDialog, useThreadDeletion } from "@/features/projects/sidebar/thread-deletion";
+import { ThreadOptionsMenu, type ThreadMenuActions } from "@/features/projects/sidebar/thread-menu";
+import type { ContextMenuItem } from "@/components/ui/context-menu";
 import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
 import type { ComposerStartingThread } from "../../composer/useComposerStartup";
 import { TurnSavingNotice } from "../../saving/TurnSavingNotice";
 import { MessageBubble } from "../MessageBubble";
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
+import type { ThreadForkPoint } from "../fork-point";
 import { tryGetConversationResidency } from "../../residency/conversation-residency";
 import { TurnRevertAnnouncer } from "../../turn-revert/TurnRevertAnnouncer";
 import type { ChatViewState } from "./useChatViewState";
@@ -43,7 +47,7 @@ import { NewThreadOverview, NewThreadStartColumn } from "./NewThreadStartColumn"
 /** Actions that the visual chat surface routes to stores, transport, and composer state. */
 export interface ChatViewInteractions {
   /** Opens inline fork mode from a transcript message. */
-  onBranch: (messageId: string) => void;
+  onBranch: (message: Message) => void;
   /** Starts a selected-text comment in the composer. */
   onSelectedTextComment: (comment: SelectedTextComment) => void;
   /** Removes one saved selected-text comment from the active Composer draft. */
@@ -317,20 +321,18 @@ interface ThreadHeaderRename {
   readonly editingThreadId: string | null;
   readonly onEditingThreadIdChange: (threadId: string | null) => void;
   readonly onSaveTitle: (title: string) => void;
+  readonly onBranch: (message: Message) => void;
 }
 
 /** Renders the thread header for both surface variants; the preparing variant omits `rename` and `paneWidth` and passes its own `actions`. */
-function ThreadHeader({ state, rename, paneWidth, actions }: { state: ChatViewState; rename?: ThreadHeaderRename; paneWidth?: number; actions?: ReactNode }) {
+function ThreadHeader({ state, rename, forkPoint, paneWidth, actions }: { state: ChatViewState; rename?: ThreadHeaderRename; forkPoint?: ThreadForkPoint | null; paneWidth?: number; actions?: ReactNode }) {
   const thread = state.activeThread!;
   return (
     <CanvasHeader>
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <CanvasBreadcrumb projectName={state.activeWorkspaceName || undefined} workspaceId={thread.workspace_id}>
           {rename ? (
-            // Double-click renames, so the title must not hand the gesture to the window.
-            <div data-testid="chat-header-title" onDoubleClick={() => rename.onEditingThreadIdChange(thread.id)} className="window-no-drag flex min-w-0 cursor-text">
-              <ThreadTitleEditor title={thread.title} isEditing={rename.editingThreadId === thread.id} onSave={rename.onSaveTitle} onCancel={() => rename.onEditingThreadIdChange(null)} />
-            </div>
+            <ThreadHeaderTitle thread={thread} rename={rename} forkPoint={forkPoint ?? null} />
           ) : (
             <span data-testid="chat-header-title" className="text-fade text-label text-ink">{thread.title}</span>
           )}
@@ -344,6 +346,78 @@ function ThreadHeader({ state, rename, paneWidth, actions }: { state: ChatViewSt
       </div>
       {paneWidth !== undefined ? <HeaderActions thread={thread} threadPaneWidth={paneWidth} /> : actions}
     </CanvasHeader>
+  );
+}
+
+const NO_FORKABLE_REPLY = "No finished agent reply to fork from yet";
+const NEWER_REPLY_NOT_LOADED = "Scroll to the latest reply to fork";
+
+function forkDisabledReason(point: ThreadForkPoint | null, threadId: string): string | null {
+  if (point === null || point.threadId !== threadId) return NO_FORKABLE_REPLY;
+  if (point.kind === "newer-not-loaded") return NEWER_REPLY_NOT_LOADED;
+  return point.kind === "ready" ? null : NO_FORKABLE_REPLY;
+}
+
+function ThreadHeaderTitle({ thread, rename, forkPoint }: { thread: WorkspaceThread; rename: ThreadHeaderRename; forkPoint: ThreadForkPoint | null }) {
+  const workspacePath = useWorkspaceStore((s) => s.workspaces.find((workspace) => workspace.id === thread.workspace_id)?.path ?? "");
+  const deletion = useThreadDeletion();
+  const { onEditingThreadIdChange, onBranch } = rename;
+  const openDeletion = deletion.open;
+  const actions = useMemo<ThreadMenuActions>(() => ({
+    onRename: (target) => onEditingThreadIdChange(target.threadId),
+    onDelete: (target) => openDeletion({ threadId: target.threadId, threadTitle: target.threadTitle, worktreePath: target.worktreePath }),
+  }), [onEditingThreadIdChange, openDeletion]);
+  const leadingItems = useMemo<readonly ContextMenuItem[]>(() => [
+    {
+      label: "Fork thread",
+      icon: <GitFork />,
+      disabledReason: forkDisabledReason(forkPoint, thread.id),
+      onClick: () => { if (forkPoint?.kind === "ready" && forkPoint.threadId === thread.id) onBranch(forkPoint.message); },
+    },
+    { label: "", onClick: () => {}, divider: true },
+  ], [forkPoint, onBranch, thread.id]);
+  const target = { threadId: thread.id, threadTitle: thread.title, workspacePath, worktreePath: thread.worktree_path ?? null };
+  const dialog = (
+    <ThreadDeleteDialog
+      dialog={deletion.dialog}
+      deleteWorktree={deletion.deleteWorktree}
+      isDeleting={deletion.isDeleting}
+      onDeleteWorktreeChange={deletion.setDeleteWorktree}
+      onClose={deletion.close}
+      onConfirm={deletion.confirm}
+    />
+  );
+  if (rename.editingThreadId === thread.id) {
+    return (
+      <>
+        <div className="window-no-drag flex min-w-0">
+          <ThreadTitleEditor title={thread.title} isEditing onSave={rename.onSaveTitle} onCancel={() => onEditingThreadIdChange(null)} />
+        </div>
+        {dialog}
+      </>
+    );
+  }
+  return (
+    <>
+      <ThreadOptionsMenu
+        target={target}
+        actions={actions}
+        leadingItems={leadingItems}
+        align="start"
+        trigger={
+          <button
+            type="button"
+            data-testid="chat-header-title"
+            onDoubleClick={() => onEditingThreadIdChange(thread.id)}
+            className="window-no-drag -mx-1 flex min-w-0 items-center gap-1 rounded-sm px-1 outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            <span className="text-fade text-label text-ink">{thread.title}</span>
+            <ChevronDown size={12} className="shrink-0 text-muted" aria-hidden />
+          </button>
+        }
+      />
+      {dialog}
+    </>
   );
 }
 
@@ -455,7 +529,7 @@ function KeptAliveTranscript({
       inert={!visible}
       aria-hidden={!visible}
     >
-      <MessageList {...messageListProps} displayThreadId={threadId} leadingContent={leadingContent} afterFirstUserContent={afterFirstUserContent} />
+      <MessageList {...messageListProps} onForkPointChange={selected ? messageListProps.onForkPointChange : undefined} displayThreadId={threadId} leadingContent={leadingContent} afterFirstUserContent={afterFirstUserContent} />
     </div>
   );
 }
@@ -535,12 +609,13 @@ function shouldKeepPreparingShell(
   return pendingStartup !== undefined && startupResolving;
 }
 
-function ChatMessageStage({ state, interactions, startupTrail, contentPaddingRight, chromeInsets, entrance, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly startupTrail: ReactNode; readonly contentPaddingRight: string | undefined; readonly chromeInsets: ViewportInsets; readonly entrance: boolean }) {
+function ChatMessageStage({ state, interactions, startupTrail, contentPaddingRight, chromeInsets, entrance, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents, onForkPointChange }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly startupTrail: ReactNode; readonly contentPaddingRight: string | undefined; readonly chromeInsets: ViewportInsets; readonly entrance: boolean; readonly onForkPointChange: (point: ThreadForkPoint) => void }) {
   const thread = state.activeThread!;
   const messageListProps = {
     contentPaddingRight,
     chromeInsets,
     onBranch: interactions.onBranch,
+    onForkPointChange,
     onSelectedTextComment: interactions.onSelectedTextComment,
     onDeleteSelectedTextComment: interactions.onDeleteSelectedTextComment,
     onSelectedTextCommentEditorChange: interactions.onSelectedTextCommentEditorChange,
@@ -635,6 +710,7 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
   const topChromeRef = useRef<HTMLDivElement>(null);
   const bottomChromeRef = useRef<HTMLDivElement>(null);
   const chromeInsets = useChromeInsets(topChromeRef, bottomChromeRef);
+  const [forkPoint, setForkPoint] = useState<ThreadForkPoint | null>(null);
   return (
     // The docked card's reserve takes the right gutter's room, so rows and the composer use 24px
     // gutters while docked. That keeps the composer at 520 or wider down to OVERVIEW_DOCK_MIN_CANVAS.
@@ -643,12 +719,12 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
         {/* The transcript fills the pane and scrolls under both chrome blocks. The top block takes the
             sticky layer so it paints over the transcript that follows it in the DOM. */}
         <div ref={topChromeRef} className="relative z-(--layer-sticky)">
-          <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle }} paneWidth={paneWidth} />
+          <ThreadHeader state={state} rename={{ editingThreadId, onEditingThreadIdChange, onSaveTitle: interactions.onSaveTitle, onBranch: interactions.onBranch }} forkPoint={forkPoint} paneWidth={paneWidth} />
           <ActiveThreadBanners state={state} />
           {showConversationLoadError ? <div className="mx-3 mb-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"><p data-testid="conversation-error-banner" role="alert" className="text-sm text-destructive">Could not refresh conversation: {state.sessionError}</p></div> : null}
           <TurnSavingNotice lostProgress={state.lostProgress} />
         </div>
-        <ChatMessageStage state={state} interactions={interactions} contentPaddingRight={overviewReserve} chromeInsets={chromeInsets} entrance={!handedOff} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} />
+        <ChatMessageStage state={state} interactions={interactions} contentPaddingRight={overviewReserve} chromeInsets={chromeInsets} entrance={!handedOff} startupTrail={startup && startup.state !== "completed" ? <ThreadStartupTrail thread={thread} startup={startup} pendingStartup={undefined} /> : undefined} selectedTextCommentEditor={selectedTextCommentEditor} selectedTextCommentSourceNavigation={selectedTextCommentSourceNavigation} onSubagentSelect={onSubagentSelect} onOpenSubagents={onOpenSubagents} onForkPointChange={setForkPoint} />
         <div ref={bottomChromeRef} className="relative mt-auto">
           {showCliError && <CliErrorNotice error={state.sessionError!} onDismiss={interactions.onDismissCliError} onOpenSettings={interactions.onOpenSettings} />}
           <ActiveThreadComposer state={state} interactions={interactions} pendingSelectedTextComment={pendingSelectedTextComment} pendingSelectedTextCommentDeletion={pendingSelectedTextCommentDeletion} pendingSelectedTextCommentEditor={pendingSelectedTextCommentEditor} unavailableSelectedTextCommentIds={unavailableSelectedTextCommentIds} startingThread={startingThread} paddingRight={overviewReserve} />

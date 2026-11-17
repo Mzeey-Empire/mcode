@@ -125,7 +125,6 @@ export interface UseComposerFormControllerOptions {
    */
   draftId?: string | null;
   branchFromMessageId?: string;
-  branchFromMessageContent?: string;
   activeThread?: Thread & {
     clientPreparing?: boolean;
     clientError?: string | null;
@@ -207,7 +206,6 @@ export function useComposerFormController({
   workspaceId,
   draftId,
   branchFromMessageId,
-  branchFromMessageContent,
   activeThread,
 }: UseComposerFormControllerOptions): ComposerFormController {
   const [input, setInput] = useState("");
@@ -794,14 +792,6 @@ export function useComposerFormController({
     if (!threadId || persistedOrchestrationMode === undefined) return;
     updateSelection({ orchestrationMode: persistedOrchestrationMode });
   }, [persistedOrchestrationMode, threadId, updateSelection]);
-
-  useEffect(() => {
-    if (!branchFromMessageId || !branchFromMessageContent || !editorRef.current) return;
-    writeComposerContent(editorRef.current, branchFromMessageContent, [], true);
-    setInput(branchFromMessageContent);
-    setMentions([]);
-    editorRef.current.focus();
-  }, [branchFromMessageContent, branchFromMessageId]);
 
   useEffect(() => {
     if (!pendingPrefill) return;

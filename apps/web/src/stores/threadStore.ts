@@ -87,6 +87,7 @@ import {
   type ThreadHydratorWriteState,
 } from "@/features/conversation/hydration";
 import {
+  type ThreadForkMode,
   type ThreadRecord,
   type ThreadSettings,
   providerNoticeSessionId,
@@ -561,7 +562,7 @@ interface ThreadState {
   clearInterruptStopFileNotice: (threadId: string) => void;
 
   /** Set or clear fork mode for a thread. */
-  setForkMode: (threadId: string, state: { messageId: string; content: string | null; role: "user" | "assistant" } | null) => void;
+  setForkMode: (threadId: string, state: ThreadForkMode | null) => void;
 
   // Per-thread settings
   /** Return current settings for a thread, preferring in-memory overrides over DB-persisted values. */

@@ -235,10 +235,10 @@ const COMPLETED_AGENT_DISPLAY_STATE: AgentDisplayState = { phase: "completed" };
 interface MessageBubbleProps {
   /** The message object to render. */
   message: Message;
-  /** Controls whether user-message actions such as copy or fork are available. */
+  /** Controls whether message actions such as copy or fork are available. */
   interactive?: boolean;
-  /** Called when the user clicks the branch icon on this message. */
-  onBranch?: (messageId: string) => void;
+  /** Called when the user forks from this message. Only agent messages offer Fork. */
+  onBranch?: (message: Message) => void;
   /** Called when the user clicks a quote block to scroll to the original message. */
   onScrollToMessage?: (messageId: string) => void;
   /** Lifecycle state that controls the visible treatment of this agent response. */
@@ -323,7 +323,6 @@ function ImageThumbnail({
 }
 
 const HOVER_COPY_CLASS = "flex h-7 w-7 items-center justify-center rounded-md bg-hover/60 text-muted opacity-0 transition-all hover:bg-hover hover:text-ink group-hover/msg:opacity-100";
-const HOVER_BRANCH_CLASS = "flex h-7 w-7 items-center justify-center rounded-md bg-hover/60 text-muted opacity-0 scale-90 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover/msg:opacity-100 group-hover/msg:scale-100";
 const RESTING_ACTION_CLASS = "flex size-6 items-center justify-center rounded-sm text-muted outline-none transition-colors hover:bg-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-focus";
 
 /** Copy button with check feedback. User messages reveal it on hover. */
@@ -367,8 +366,7 @@ function ForkIcon() {
   );
 }
 
-/** Fork button matching CopyButton. User messages reveal it on hover. */
-function BranchButton({ onClick, resting = false }: { onClick: () => void; resting?: boolean }) {
+function BranchButton({ onClick }: { onClick: () => void }) {
   return (
     <Tooltip>
       <TooltipTrigger
@@ -376,7 +374,7 @@ function BranchButton({ onClick, resting = false }: { onClick: () => void; resti
           <button
             type="button"
             onClick={onClick}
-            className={resting ? RESTING_ACTION_CLASS : HOVER_BRANCH_CLASS}
+            className={RESTING_ACTION_CLASS}
             aria-label="Fork from this message"
           >
             <ForkIcon />
@@ -435,6 +433,15 @@ const FILE_ATTACHMENT_ALIGNMENT_CLASS = {
   end: "flex flex-wrap justify-end gap-2",
 } as const;
 
+/** Splits the attachments a bubble shows into images and files; sent-note snapshots render in their notes tile instead. */
+function splitVisibleAttachments(attachments: Message["attachments"], previewAnnotations: Message["previewAnnotations"]) {
+  const noteSnapshotIds = previewAnnotations ? readSentNotes(previewAnnotations)?.snapshotIds : undefined;
+  return {
+    imageAttachments: attachments?.filter((attachment) => attachment.mimeType.startsWith("image/") && !noteSnapshotIds?.has(attachment.id)) ?? [],
+    fileAttachments: attachments?.filter((attachment) => !attachment.mimeType.startsWith("image/")) ?? [],
+  };
+}
+
 /** Separates a message's image and file attachments and derives its preview slides. */
 function useMessageAttachments(message: Message) {
   const attachmentTransportUrl = useSyncExternalStore(
@@ -442,17 +449,9 @@ function useMessageAttachments(message: Message) {
     getAttachmentTransportUrlSnapshot,
     getAttachmentTransportUrlSnapshot,
   );
-  const noteSnapshotIds = useMemo(
-    () => message.previewAnnotations ? readSentNotes(message.previewAnnotations)?.snapshotIds : undefined,
-    [message.previewAnnotations],
-  );
-  const imageAttachments = useMemo(
-    () => message.attachments?.filter((attachment) => attachment.mimeType.startsWith("image/") && !noteSnapshotIds?.has(attachment.id)) ?? [],
-    [message.attachments, noteSnapshotIds],
-  );
-  const fileAttachments = useMemo(
-    () => message.attachments?.filter((attachment) => !attachment.mimeType.startsWith("image/")) ?? [],
-    [message.attachments],
+  const { imageAttachments, fileAttachments } = useMemo(
+    () => splitVisibleAttachments(message.attachments, message.previewAnnotations),
+    [message.attachments, message.previewAnnotations],
   );
   const imageSlides = useMemo(
     () => {
@@ -545,27 +544,21 @@ function MessageImageLightbox({
 
 /** Renders actions and the timestamp for a user message. */
 function UserMessageFooter({
-  message,
   displayText,
   formattedTime,
   interactive,
-  onBranch,
   userGoal,
 }: {
-  message: Message;
   displayText: string;
   formattedTime: string;
   interactive: boolean;
-  onBranch?: (messageId: string) => void;
   userGoal: { condition: string } | null;
 }) {
   return (
     <div className="flex flex-col items-end gap-0.5 pr-1">
       <UserMessageActions
-        message={message}
         displayText={displayText}
         interactive={interactive}
-        onBranch={onBranch}
       />
       <div className="flex items-center gap-2 font-mono text-xs tabular-nums text-muted/55">
         {userGoal && <GoalReceipt label="Sent as goal" tone="muted" />}
@@ -669,20 +662,14 @@ function ignoreSelectedTextComment(): void {}
 
 /** Renders the user message action controls. */
 function UserMessageActions({
-  message,
   displayText,
   interactive,
-  onBranch,
 }: {
-  message: Message;
   displayText: string;
   interactive: boolean;
-  onBranch?: (messageId: string) => void;
 }) {
   return (
-    // The row holds its button height even when empty, so a bubble that gains Fork, such as a preparing message becoming durable, does not grow.
-    <div className={cn("flex items-center gap-1.5", interactive && "min-h-7")}>
-      {interactive && onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
+    <div className="flex items-center gap-1.5">
       {interactive && displayText.trim() && <CopyButton content={displayText} />}
     </div>
   );
@@ -692,7 +679,6 @@ function UserMessageActions({
 function UserMessageContent({
   message,
   interactive,
-  onBranch,
   onScrollToMessage,
   showParentAgentProvenance,
 }: MessageBubbleProps & { interactive: boolean; showParentAgentProvenance: boolean }) {
@@ -726,11 +712,9 @@ function UserMessageContent({
           <UserMessageComments message={message} />
           <UserMessageText message={message} displayText={displayText} userGoal={userGoal} />
           <UserMessageFooter
-            message={message}
             displayText={displayText}
             formattedTime={formattedTime}
             interactive={interactive}
-            onBranch={onBranch}
             userGoal={userGoal}
           />
         </div>
@@ -826,12 +810,12 @@ function AssistantMessageActions({
   message: Message;
   textContent: string;
   isAgentResponseComplete: boolean;
-  onBranch?: (messageId: string) => void;
+  onBranch?: (message: Message) => void;
 }) {
   if (!isAgentResponseComplete) return null;
   return (
     <div className="flex h-6 items-center gap-1" data-testid="agent-message-actions">
-      {onBranch && <BranchButton resting onClick={() => onBranch(message.id)} />}
+      {onBranch && <BranchButton onClick={() => onBranch(message)} />}
       {textContent.trim() && <CopyButton content={textContent} className={RESTING_ACTION_CLASS} />}
       <PersistedTurnHooks threadId={message.thread_id} messageId={message.id} />
     </div>
@@ -869,6 +853,22 @@ function HiddenPlanResponse({ message, answered, textMayContinue }: { message: M
   return answered ? <AnsweredSummary content={message.content} messageId={message.id} /> : null;
 }
 
+/** Render state an assistant bubble reads from outside its message. */
+export interface AssistantActionRowContext {
+  readonly agentDisplayState?: AgentDisplayState;
+  readonly textIsStreaming?: boolean;
+  readonly hasPlan: boolean;
+}
+
+/** Whether an assistant bubble renders its action row, rather than a goal notice or a hidden plan response. */
+export function assistantShowsActionRow(message: Message, context: AssistantActionRowContext): boolean {
+  if (parseGoalStatusNotice(stripInjectedFiles(message.content))) return false;
+  if (context.hasPlan) return true;
+  if (!isAssistantContentEmpty(message.content, isTextStillArriving(context.textIsStreaming, context.agentDisplayState))) return true;
+  const { imageAttachments, fileAttachments } = splitVisibleAttachments(message.attachments, message.previewAnnotations);
+  return imageAttachments.length > 0 || fileAttachments.length > 0;
+}
+
 /** Renders an assistant message, including its live response state. */
 function AssistantMessageContent({
   message,
@@ -886,8 +886,7 @@ function AssistantMessageContent({
   const goal = parseGoalStatusNotice(textContent);
   if (goal) return <AssistantGoalNotice goal={goal} />;
   const assistantContentEmpty = isAssistantContentEmpty(message.content, isTextStillArriving(textIsStreaming, agentDisplayState));
-  const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
-  if (assistantContentEmpty && !hasAttachments && planVersion === undefined) {
+  if (!assistantShowsActionRow(message, { agentDisplayState, textIsStreaming, hasPlan: planVersion !== undefined })) {
     return <HiddenPlanResponse message={message} answered={isAnsweredPlanMessage}
       textMayContinue={isTextStillArriving(textIsStreaming, agentDisplayState)} />;
   }
@@ -947,7 +946,7 @@ function MessageRoleContent({
   const notice = serverUserNotice(message);
   if (notice) return notice;
   if (message.role === "user") {
-    return <UserMessageContent message={message} interactive={interactive} onBranch={onBranch} onScrollToMessage={onScrollToMessage} agentDisplayState={agentDisplayState} showParentAgentProvenance={showParentAgentProvenance} />;
+    return <UserMessageContent message={message} interactive={interactive} onScrollToMessage={onScrollToMessage} agentDisplayState={agentDisplayState} showParentAgentProvenance={showParentAgentProvenance} />;
   }
   return <AssistantMessageContent textIsStreaming={textIsStreaming} message={message} interactive={interactive} onBranch={onBranch} onScrollToMessage={onScrollToMessage} agentDisplayState={agentDisplayState} showParentAgentProvenance={showParentAgentProvenance} />;
 }
