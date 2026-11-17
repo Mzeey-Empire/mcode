@@ -114,7 +114,7 @@ export function PanelHeaderSlot({
 }
 
 /**
- * Row-1 title for tools without tabs: the tool glyph in its slot, then the title as plain text that fades past 320.
+ * Row-1 title for tools without tabs: the tool glyph in its slot, then the title as plain text that fades at the row's edge.
  * Only a tab that can be switched away from gets the selected fill, so a lone title stays text.
  * `headingLevel` keeps the tool's heading in the outline after it moves here.
  */
