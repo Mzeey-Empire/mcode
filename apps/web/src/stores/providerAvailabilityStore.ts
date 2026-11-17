@@ -14,10 +14,11 @@ interface State {
    */
   fetch: () => Promise<void>;
   /**
-   * Fetch again only while an enabled provider's CLI is missing. The server rechecks missing CLIs on fetch, so a
-   * user who installs one while Mcode is open recovers when they return to the window.
+   * Fetch again only while an enabled provider's CLI is missing or carries a version warning. The server rechecks
+   * those CLIs on fetch, so a user who installs or upgrades one while Mcode is open recovers when they return to the
+   * window.
    */
-  recheckMissing: () => Promise<void>;
+  recheckCliProblems: () => Promise<void>;
   /** Return the full availability record for a provider, or undefined if not in the list. */
   getAvailability: (id: ProviderId) => ProviderAvailability | undefined;
   /** Return true when the provider is marked enabled in settings. */
@@ -44,8 +45,8 @@ export const useProviderAvailabilityStore = create<State>((set, get) => ({
       console.error("[providerAvailabilityStore] Failed to load provider availability", err);
     }
   },
-  recheckMissing: async () => {
-    if (get().providers.some((p) => p.enabled && p.cli.status === "not_found")) await get().fetch();
+  recheckCliProblems: async () => {
+    if (get().providers.some((p) => p.enabled && (p.cli.status === "not_found" || p.cli.warning))) await get().fetch();
   },
   getAvailability: (id) => get().providers.find((p) => p.id === id),
   isEnabled: (id) => get().providers.find((p) => p.id === id)?.enabled ?? false,

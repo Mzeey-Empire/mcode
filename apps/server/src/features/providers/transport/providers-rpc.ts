@@ -91,14 +91,15 @@ const providerRpcHandlers: ProviderRpcHandlerMap = {
   "provider.getUsage": (deps, params) => routeProviderUsage(deps, params.providerId),
   "providers.listAvailability": (deps) => deps.providerAvailability.refreshAvailability(),
   // Status refreshes and CLI updates are where a user expects a fresh install or upgrade to show, so recheck
-  // availability too; it only re-verifies CLIs that are missing or warned.
-  "providers.listStatus": async (deps, params) => {
-    const [statuses] = await Promise.all([deps.providerStatus.listStatus(params), deps.providerAvailability.refreshAvailability()]);
-    return statuses;
+  // availability too. It runs in the background: a change is broadcast, and awaiting it would let a slow probe
+  // delay this reply past newer status pushes, which the reply would then overwrite.
+  "providers.listStatus": (deps, params) => {
+    refreshAvailabilityInBackground(deps);
+    return deps.providerStatus.listStatus(params);
   },
   "providers.updateCli": async (deps, params) => {
     const status = await deps.providerStatus.updateCli(params.providerId);
-    await deps.providerAvailability.refreshAvailability();
+    refreshAvailabilityInBackground(deps);
     return status;
   },
   "providers.acknowledgeModels": (deps, params) => deps.providerStatus.acknowledgeModels(params.providerId),
@@ -315,4 +316,10 @@ function redactedUsageDiagnostic(error: unknown): string {
     .replace(/(token|api[_-]?key|authorization|password|secret)=\S+/gi, "$1=[redacted]")
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted-email]")
     .slice(0, 240);
+}
+
+function refreshAvailabilityInBackground(deps: ProviderRouterDeps): void {
+  deps.providerAvailability.refreshAvailability().catch((error: unknown) => {
+    logger.warn("Provider availability refresh failed", { error: error instanceof Error ? error.message : String(error) });
+  });
 }

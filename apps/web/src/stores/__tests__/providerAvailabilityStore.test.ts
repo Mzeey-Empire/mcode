@@ -49,13 +49,23 @@ describe("providerAvailabilityStore", () => {
       row({ id: "claude", enabled: true }),
       row({ id: "codex", enabled: false, cli: { status: "not_found", resolvedPath: null, configuredPath: "" } }),
     ]);
-    await store.recheckMissing();
+    await store.recheckCliProblems();
     expect(list).not.toHaveBeenCalled();
 
     store.replace([row({ id: "claude", enabled: true, cli: { status: "not_found", resolvedPath: null, configuredPath: "" } })]);
     list.mockResolvedValue([row({ id: "claude", enabled: true })]);
-    await store.recheckMissing();
+    await store.recheckCliProblems();
     expect(useProviderAvailabilityStore.getState().isUsable("claude")).toBe(true);
+  });
+
+  it("rechecks the server while an enabled CLI carries a version warning, and clears it after an upgrade", async () => {
+    const list = vi.mocked(mockTransport.listProviderAvailability).mockReset();
+    const store = useProviderAvailabilityStore.getState();
+    store.replace([row({ id: "claude", enabled: true, cli: { status: "found", resolvedPath: "/a", configuredPath: "", warning: "Update Claude Code." } })]);
+    list.mockResolvedValue([row({ id: "claude", enabled: true })]);
+    await store.recheckCliProblems();
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(useProviderAvailabilityStore.getState().getAvailability("claude")?.cli.warning).toBeUndefined();
   });
 
   it("returns 'unchecked' CLI as usable so the startup race doesn't false-alarm", () => {

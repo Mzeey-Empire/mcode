@@ -141,13 +141,13 @@ describe("providers.listAvailability RPC", () => {
   it.each([
     ["providers.listStatus", {}],
     ["providers.updateCli", { providerId: "claude" }],
-  ])("rechecks availability on %s so a fresh install or upgrade shows", async (method, params) => {
+  ])("rechecks availability on %s without holding the reply for it", async (method, params) => {
     let refreshes = 0;
     const deps = makeMinimalDeps({
       providerAvailability: {
-        refreshAvailability: async () => {
+        refreshAvailability: () => {
           refreshes += 1;
-          return [];
+          return new Promise(() => {});
         },
       } as unknown as RouterDeps["providerAvailability"],
       providerStatus: {
