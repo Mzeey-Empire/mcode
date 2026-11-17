@@ -113,6 +113,11 @@ function stripAxis(iconOnly: boolean, orientation: SegmentedControlProps["orient
   return iconOnly && orientation === "vertical" ? "vertical" : undefined;
 }
 
+/** A title that only repeats the label would make screen readers say the name twice. */
+function titleAddsToLabel(option: SegmentedOption): boolean {
+  return Boolean(option.title) && option.title !== option.label;
+}
+
 /** Keeps a tooltip wrapper sized like the segment it holds. */
 function tooltipWrapperClass(layout: Layout, fill: boolean): string {
   if (layout === "icon") return "flex min-w-0";
@@ -197,7 +202,7 @@ export function SegmentedControl({
         <SlidingHighlight follow={SEGMENT_HOVER} />
         {options.map((option, index) => {
           const isActive = index === activeIndex;
-          const descriptionId = option.title ? `${descriptionIdPrefix}-${index}` : undefined;
+          const descriptionId = titleAddsToLabel(option) ? `${descriptionIdPrefix}-${index}` : undefined;
           const segment = (
             <button
               ref={(node) => {
@@ -236,11 +241,12 @@ export function SegmentedControl({
 
           // Disabled buttons swallow pointer events, so the tooltip hangs off a wrapper instead.
           // The tooltip is pointer-only, so the same text also describes the button for keyboard and screen readers.
+          // `hidden` keeps it out of the reading order; aria-describedby still reads hidden elements it references.
           return (
             <Tooltip key={option.value}>
               <TooltipTrigger render={<span className={tooltipWrapperClass(layout, fill)} />}>
                 {segment}
-                <span id={descriptionId} className="sr-only">{option.title}</span>
+                {descriptionId ? <span id={descriptionId} hidden>{option.title}</span> : null}
               </TooltipTrigger>
               {/* A stacked strip is a picker's left rail, so its tooltips open outward instead of over the next segment. */}
               <TooltipContent side={vertical ? "left" : "top"}>{option.title}</TooltipContent>
