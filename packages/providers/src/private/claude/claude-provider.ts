@@ -494,10 +494,7 @@ interface PendingSpawnTurn {
   uuid: string;
   /** Fully-built SDK query options sans the resume/sessionId discriminator. */
   baseOptions: ClaudeBaseOptions;
-  /**
-   * Bare model id stored on the session state so
-   * detectFallbackModel compares against the dated snapshot ids the SDK reports.
-   */
+  /** Model id the session spawns with. */
   resolvedModel: string;
   /** Orchestration mode encoded into the session's flag settings. */
   orchestrationMode: OrchestrationMode;
