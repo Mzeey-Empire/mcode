@@ -381,11 +381,13 @@ describe("ClaudeProvider permission mode changes", () => {
   ])("resumes the saved conversation when $method rejects (resumeFrom=$resumeFrom)", async ({ method, resumeFrom }) => {
     const methods = queryMethodStubs();
     methods[method].mockRejectedValue(new Error("Live reconfiguration rejected"));
+    // Differs from the thread ID, so the replacement must resume the conversation Claude reported, not the thread ID.
+    const conversationId = resumeFrom ?? "captured-claude-conversation";
     const fakeQuery = makeFakeSdkQuery(sdkCalls, flagSettingsCalls);
     mockQuery.mockImplementation((args: Parameters<typeof fakeQuery>[0]) => {
       const query = fakeQuery(args);
       const stream = (async function* () {
-        yield { type: "system", subtype: "init", session_id: resumeFrom ?? "reconfigure" };
+        yield { type: "system", subtype: "init", session_id: conversationId };
         yield* query;
       })();
       return Object.assign(stream, methods, { close: vi.fn() });
@@ -413,7 +415,7 @@ describe("ClaudeProvider permission mode changes", () => {
 
       expect(methods[method]).toHaveBeenCalledTimes(1);
       expect(sdkCalls).toHaveLength(2);
-      expect(sdkCalls[1]?.options.resume).toBe(resumeFrom ?? "reconfigure");
+      expect(sdkCalls[1]?.options.resume).toBe(conversationId);
       expect(sdkCalls[1]?.options.sessionId).toBeUndefined();
       expect(sdkCalls[1]?.options.model).toBe(method === "setModel" ? "claude-sonnet-4-6" : "claude-opus-4-8");
     } finally {
