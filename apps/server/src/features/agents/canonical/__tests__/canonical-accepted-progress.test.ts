@@ -11,7 +11,7 @@ import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } f
 import { encodeCanonicalSubagentDetailTarget } from "@mcode/contracts/models/tool-call-record";
 import { reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState } from "@mcode/contracts/compat/agent-model";
 import { BoundedProgressRetention } from "../../execution/progress-retention-budget.js";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
@@ -47,6 +47,7 @@ import { TurnSavingStatusSchema, type TurnSavingStatus } from "@mcode/contracts/
 import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 import { AcceptedContentRejected } from "../accepted-save-failure.js";
 import { ParentAssistantTextCheckpointStore } from "../../turns/parent-assistant-text-checkpoint-store.js";
+import { AgentWorkloadService } from "../../workload/agent-workload.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -2041,6 +2042,63 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
 
     const agent = db.prepare("SELECT completed_at FROM tool_call_records WHERE id = 'agent'").get();
     expect(step()).toEqual({ parent_tool_call_id: "agent", message_id: original.id, status: "completed", ...agent });
+  });
+
+  describe("when a background call's late result arrives while its thread is fenced", () => {
+    const next = { ...execution, turnId: "next-turn", executionId: "00000000-0000-4000-8000-000000000127" };
+    const nextLease = { ...lease, leaseId: "next-lease" };
+    const agentStatus = () => db.prepare("SELECT status, output_summary FROM tool_call_records WHERE id = 'agent'").get();
+
+    /** Ends a Claude turn that leaves one background subagent running, and counts the thread's running agents. */
+    async function holdBackgroundSubagent() {
+      const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [] }, new CanonicalAgentStore(db, () => {}));
+      const stopObserving = workload.observeCommittedEvents();
+      onTestFinished(stopObserving);
+      await send(1, start("claude"));
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
+      await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
+      await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "turnComplete")],
+        terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      await send(5, { kind: "release" });
+      expect(workload.count()).toBe(1);
+      return workload;
+    }
+
+    it("saves it once the durable command finishes, keeping a repeated result a no-op", async () => {
+      const workload = await holdBackgroundSubagent();
+      const result = { toolCallId: "agent", status: "completed", output: "Found the bug" } as const;
+
+      await progress.beforeDurableCommand(execution.threadId);
+      progress.acceptLateToolResult(execution.threadId, execution.executionId, result);
+      progress.acceptLateToolResult(execution.threadId, execution.executionId, result);
+      expect(agentStatus()).toEqual({ status: "running", output_summary: "" });
+      progress.cancelDurableCommand(execution.threadId);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+
+      expect(agentStatus()).toEqual({ status: "completed", output_summary: "Found the bug" });
+      expect(workload.count()).toBe(0);
+    });
+
+    it("saves the result its stopped agent sends during an unsaved-turn exit, once the exit ends", async () => {
+      const workload = await holdBackgroundSubagent();
+      await send(1, start("claude", next), next, nextLease);
+      db.run("CREATE TRIGGER fail_progress BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.operation_id = 'next-lease:2' BEGIN SELECT RAISE(ABORT, 'disk checkpoint unavailable'); END");
+      // Stopping a Claude session settles every background call it still holds, as the provider does on stream end.
+      progress.bindUnsavedAgentStop(async () => progress.acceptLateToolResult(execution.threadId, execution.executionId,
+        { toolCallId: "agent", status: "cancelled", output: "Stopped with its session." }));
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 1, "textDelta", { delta: "Unsaved reply", isFinalResponse: true }, next)] }, next, nextLease);
+      await expect.poll(() => turnStatus(next.turnId)).toEqual({ status: "Interrupted" });
+      await admitsCommands();
+      db.run("DROP TRIGGER fail_progress");
+      await expect.poll(() => progress.depth().pending).toBe(0);
+
+      expect(agentStatus()).toEqual({ status: "cancelled", output_summary: "Stopped with its session." });
+      expect(workload.count()).toBe(0);
+    });
   });
 
   it("assigns live plan, task and notice projections before storage and persists those same identities", async () => {

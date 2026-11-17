@@ -200,6 +200,8 @@ export class CanonicalAcceptedProgress {
   private pendingSaved: readonly CanonicalAcceptedWriteReceipt[] = [];
   private closing = false;
   private readonly deletingThreads = new Set<string>();
+  /** Late tool results that arrived while their thread was fenced, kept in arrival order until the fence lifts. */
+  private readonly fencedLateResults = new Map<string, { executionId: string; result: LateToolResult }[]>();
   /** Steer callers wait for their transcript save, keyed by accepted operation id. */
   private readonly steerSaves = new Map<string, { threadId: string; resolve(): void; reject(error: Error): void }>();
 
@@ -247,7 +249,10 @@ export class CanonicalAcceptedProgress {
   /** Release the admission fence if the durable command fails or conflicts. */
   cancelDurableCommand(threadId: string): void {
     const thread = this.threads.get(threadId);
-    if (thread && !thread.exit) thread.commandPending = false;
+    if (thread && !thread.exit) {
+      thread.commandPending = false;
+      this.admitFencedLateResults(threadId);
+    }
   }
 
   /**
@@ -975,12 +980,20 @@ export class CanonicalAcceptedProgress {
 
   /**
    * Settle a background tool call against the finished turn that launched it, even after
-   * another turn starts. A repeated identical result is a no-op.
+   * another turn starts. A repeated identical result is a no-op. A result that arrives while
+   * a durable command or an unsaved-turn exit fences the thread is saved once the fence lifts.
    */
   acceptLateToolResult(threadId: string, executionId: string, result: LateToolResult): void {
     this.assertOpen();
     const thread = this.thread(threadId);
-    this.assertAdmission(thread);
+    if (thread.commandPending) {
+      // The provider sends each result once, often because the fencing command closed its session, so a
+      // refusal here would leave the call running in storage until the next restart.
+      const pending = this.fencedLateResults.get(threadId) ?? [];
+      pending.push({ executionId, result });
+      this.fencedLateResults.set(threadId, pending);
+      return;
+    }
     const turn = acceptedTerminalTurn(thread.state, threadId, executionId);
     const execution = { threadId, turnId: turn.id, executionId };
     const message = exactTerminalAssistant(thread.state, execution);
@@ -1049,6 +1062,7 @@ export class CanonicalAcceptedProgress {
     const ownerId = this.ownerThreadId(threadId);
     if (ownerId !== threadId) throw new Error("Delete the owning conversation before discarding its family progress");
     this.deletingThreads.add(threadId);
+    this.fencedLateResults.delete(threadId);
     const thread = this.threads.get(ownerId);
     if (!thread) return;
     thread.commandPending = true;
@@ -1102,6 +1116,21 @@ export class CanonicalAcceptedProgress {
 
   private assertAdmission(thread: ProgressThread): void {
     if (thread.commandPending) throw new Error("Accepted progress is fenced by a durable thread command");
+  }
+
+  /** Save the late results the fence held back, now that the thread admits progress again. */
+  private admitFencedLateResults(threadId: string): void {
+    const pending = this.fencedLateResults.get(threadId);
+    if (!pending || this.closing) return;
+    this.fencedLateResults.delete(threadId);
+    for (const { executionId, result } of pending) {
+      try {
+        this.acceptLateToolResult(threadId, executionId, result);
+      } catch (error) {
+        logger.error("Background tool result held by a durable command could not be saved", { threadId, executionId,
+          toolCallId: result.toolCallId, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
   }
 
   private saveThread(threadId: string): ProgressThread {
@@ -1357,6 +1386,7 @@ export class CanonicalAcceptedProgress {
       else {
         thread.commandPending = false;
         this.rejectWaiters(thread, batch.execution.threadId, failure.error);
+        this.admitFencedLateResults(batch.execution.threadId);
       }
     }
     logger.error(source === "receipt" ? "Accepted progress receipt processing failed" : "Accepted progress save failed", { threadId: batch.execution.threadId,
@@ -1515,7 +1545,10 @@ export class CanonicalAcceptedProgress {
       thread.exit = undefined;
       thread.commandPending = false;
     }
-    if (current) this.publishSaving(threadId);
+    if (!current) return;
+    this.publishSaving(threadId);
+    // The exit stops the agent first, and a stopped Claude session settles its background calls while this fence holds.
+    this.admitFencedLateResults(threadId);
   }
 
   private saveBlocked(threadId: string, error: Error): ThreadSaveBlockedError {
