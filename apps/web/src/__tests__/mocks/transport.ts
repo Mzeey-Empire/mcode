@@ -82,7 +82,6 @@ const transportDefaults: Partial<McodeTransport> = {
   listPendingApprovals: vi.fn().mockResolvedValue([]),
   answerPlanQuestions: vi.fn().mockResolvedValue(undefined),
   dismissPlanQuestions: vi.fn().mockResolvedValue(undefined),
-  getActiveAgentCount: vi.fn().mockResolvedValue(0),
   listRunning: vi.fn().mockResolvedValue([]),
   subscribeThread: vi.fn().mockResolvedValue(undefined),
   unsubscribeThread: vi.fn().mockResolvedValue(undefined),
