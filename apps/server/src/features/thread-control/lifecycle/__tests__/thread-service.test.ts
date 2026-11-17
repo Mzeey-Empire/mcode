@@ -26,6 +26,7 @@ describe("ThreadService.delete", () => {
   let threadService: ThreadService;
   let teardownThread: ReturnType<typeof vi.fn>;
   let deletePersistentData: ReturnType<typeof vi.fn>;
+  let hiddenStatuses: (string | undefined)[];
 
   beforeEach(() => {
     database = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
@@ -45,12 +46,14 @@ describe("ThreadService.delete", () => {
     } as unknown as GitWorktreeService;
     teardownThread = vi.fn().mockResolvedValue(undefined);
     deletePersistentData = vi.fn(async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove());
+    hiddenStatuses = [];
+    const notifyThreadsHidden = () => { hiddenStatuses.push(threads.findById("thread-1")?.status); };
     threadService = new ThreadService(
       threads,
       new ProjectWorktreeService(threads, workspaces, persistenceRuntime.writer, worktrees, cleanupPolicy),
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
-      { teardownThread, deletePersistentData, bindAcceptedProgress: vi.fn() } as unknown as ThreadDeletionTeardownService,
+      { teardownThread, deletePersistentData, notifyThreadsHidden, bindAcceptedProgress: vi.fn() } as unknown as ThreadDeletionTeardownService,
     );
   });
 
@@ -101,6 +104,9 @@ describe("ThreadService.delete", () => {
       branch: "feature/delete",
     });
     expect(threads.findById("thread-1")?.status).toBe("deleted");
+    // Running-agent occupancy re-reads its threads here, before cleanup removes the hidden thread.
+    expect(hiddenStatuses).toEqual(["deleted"]);
+    expect(deletePersistentData).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -147,7 +147,7 @@ async function harness(
   const projects = new ProjectWorktreeService(threads, workspaces, runtime.writer, worktrees,
     new SandboxWorktreeCleanupPolicy(new WorktreeSafetyService(executor, host), repository, host));
   const threadService = new ThreadService(threads, projects, attachments, new HandoffStorage(), {
-    teardownThread: async () => {}, deletePersistentData: async (_ids, remove) => remove(),
+    teardownThread: async () => {}, deletePersistentData: async (_ids, remove) => remove(), notifyThreadsHidden: () => {},
   });
   const creation = new ThreadCreationCoordinator(threads, () => threadService, admission, repository, workspaces, fetchDecisions,
     undefined, undefined, () => startups);

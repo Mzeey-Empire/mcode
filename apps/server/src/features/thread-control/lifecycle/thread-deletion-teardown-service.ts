@@ -23,8 +23,9 @@ export class ThreadDeletionTeardownService {
   }
 
   /**
-   * Observe every finished deletion attempt, including failed ones. A deletion also removes child threads its
-   * caller never lists, so listeners re-read the threads they track instead of trusting the listed ids.
+   * Observe every finished deletion attempt, including failed ones, and every thread hidden until its cleanup
+   * deletes it. A deletion also removes child threads its caller never lists, so listeners re-read the threads
+   * they track instead of trusting the listed ids.
    */
   onPersistentDataDeleted(listener: () => void): () => void {
     this.deletionListeners.add(listener);
@@ -45,6 +46,11 @@ export class ThreadDeletionTeardownService {
       for (const id of threadIds) progress.finishThreadDeletion(id, deleted);
       this.notifyDeletionListeners();
     }
+  }
+
+  /** Report a thread soft-deleted for later cleanup, which must stop counting as running before cleanup finishes. */
+  notifyThreadsHidden(): void {
+    this.notifyDeletionListeners();
   }
 
   private notifyDeletionListeners(): void {

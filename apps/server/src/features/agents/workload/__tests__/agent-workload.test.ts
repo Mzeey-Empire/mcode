@@ -113,6 +113,18 @@ describe("AgentWorkload", () => {
     expect(changes).toEqual(["parent", "child", "other", "parent", "child"]);
   });
 
+  it("drops a soft-deleted thread before its delayed cleanup removes it", () => {
+    const { db, workload, hold, deletion } = harness();
+    hold("hidden", "subagent");
+    hold("other", "subagent");
+
+    new ThreadStore(db).softDelete("hidden");
+    deletion.notifyThreadsHidden();
+
+    expect(workload.count()).toBe(1);
+    expect(workload.hasBackgroundSubagent("hidden")).toBe(false);
+  });
+
   it("drops every thread of a deleted workspace", async () => {
     const { db, workload, hold, deletion } = harness();
     hold("first", "subagent");
