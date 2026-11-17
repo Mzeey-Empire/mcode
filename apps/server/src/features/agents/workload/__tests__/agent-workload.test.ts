@@ -11,6 +11,9 @@ import { MessageStore } from "../../conversation/persistence/message-store.js";
 import { ThreadStore } from "../../../thread-control/persistence/thread-store.js";
 import { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import { ProjectLifecycleStore } from "../../../projects/lifecycle/project-lifecycle-store.js";
+import { projectLifecycleWriteOperations } from "../../../projects/lifecycle/project-lifecycle-write-operations.js";
+import { WorkspaceService } from "../../../projects/lifecycle/workspace-service.js";
+import type { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 
 const NOW = "2026-11-17T12:00:00.000Z";
 const disposers: (() => void)[] = [];
@@ -123,6 +126,28 @@ describe("AgentWorkload", () => {
 
     expect(workload.count()).toBe(1);
     expect(workload.hasBackgroundSubagent("hidden")).toBe(false);
+  });
+
+  it.each([
+    ["waits", () => new Promise<void>(() => {})],
+    ["fails", () => Promise.reject(new Error("Session would not stop"))],
+  ])("drops a deleted workspace's thread whose only work is a background subagent while its teardown %s", async (_teardown, teardownThread) => {
+    const { db, workload, hold, deletion } = harness();
+    hold("idle-parent", "subagent");
+    expect(workload.count()).toBe(1);
+    // Runs the soft deletion against this test's database; the teardown never reaches the later write.
+    const writer = { execute: async (operation: unknown, input: [string]) => {
+      if (operation !== projectLifecycleWriteOperations.beginWorkspaceDeletion) throw new Error("Unexpected write");
+      return new ProjectLifecycleStore(db).beginWorkspaceDeletion(...input);
+    } } as unknown as ApplicationDatabaseWriter;
+    const unusedDependency = {} as never;
+    const workspaces = new WorkspaceService(unusedDependency, unusedDependency, writer,
+      { removeForThread: () => {} }, Object.assign(deletion, { teardownThread }), unusedDependency,
+      { killByThread: async () => {} });
+
+    workspaces.delete("w").catch(() => {});
+    await expect.poll(() => workload.count()).toBe(0);
+    expect(workload.hasBackgroundSubagent("idle-parent")).toBe(false);
   });
 
   it("drops every thread of a deleted workspace", async () => {

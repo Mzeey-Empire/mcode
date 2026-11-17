@@ -66,6 +66,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       teardownThread: vi.fn().mockResolvedValue(undefined),
       bindAcceptedProgress: vi.fn(),
       deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
+      notifyThreadsHidden: vi.fn(),
     } as unknown as ThreadDeletionTeardownService;
     mutationLock = new RepositoryGitMutationLock(HOST_RUNTIME);
     worker = new CleanupWorker(

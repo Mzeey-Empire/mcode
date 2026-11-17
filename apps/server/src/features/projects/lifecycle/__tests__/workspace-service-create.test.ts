@@ -48,6 +48,7 @@ describe("WorkspaceService.create", () => {
       {
         teardownThread: vi.fn(async () => undefined),
         deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>) => remove(),
+        notifyThreadsHidden: vi.fn(),
       },
       new FakeGitExecutor(),
       { killByThread: vi.fn(async () => undefined) },
