@@ -146,7 +146,11 @@ function contextObservation(
   event: Extract<AgentEvent, { type: "contextEstimate" | "turnComplete" }>,
 ): AcceptedSystemObservation {
   if (event.type === "contextEstimate") {
-    return input.compacting || (event.totalProcessedTokens === undefined && event.contextWindow === undefined) ? { event } : contextUsage(event);
+    if (input.compacting) return { event };
+    if (event.totalProcessedTokens === undefined) {
+      return event.contextWindow === undefined ? { event } : { event, threadPatch: { contextWindow: event.contextWindow } };
+    }
+    return contextUsage(event);
   }
   if (event.providerId !== undefined && event.providerId !== input.providerId) {
     throw new Error("Accepted context usage belongs to another provider");

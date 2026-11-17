@@ -270,8 +270,9 @@ async function retryThreadCleanup(deps: WorkspaceThreadRouterDeps, threadId: str
   return queued;
 }
 
-function updateThreadSettings(
-  deps: WorkspaceThreadRouterDeps,
+/** Applies the thread settings supplied by a validated RPC request. */
+export function updateThreadSettings(
+  deps: { threadService: Pick<ThreadService, "updateSettings"> },
   params: {
     threadId: string;
     reasoningLevel?: string;
@@ -289,6 +290,7 @@ function updateThreadSettings(
     interaction_mode: params.interactionMode,
     orchestration_mode: params.orchestrationMode,
     permission_mode: params.permissionMode,
+    thinking: params.thinking,
     fast_mode: params.fastMode,
     default_open_in_app: params.defaultOpenInApp,
     auto_complete_on_merge: params.autoCompleteOnMerge,

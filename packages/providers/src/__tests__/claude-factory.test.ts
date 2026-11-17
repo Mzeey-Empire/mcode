@@ -107,6 +107,20 @@ async function createNativePlanFixture(proof: string) {
 describe("Claude resolved context window", () => {
   const modelResult = (turn: number) => ({ ...result(`RESULT_${turn}`), modelUsage: { opus: { contextWindow: 1000000 } } });
 
+  it("falls back to the new model window when its probe rejects", async () => {
+    const probe = vi.fn(async () => ({ rawMaxTokens: 300000, totalTokens: 18000 }))
+      .mockResolvedValueOnce({ rawMaxTokens: 300000, totalTokens: 18000 })
+      .mockRejectedValueOnce(new Error("Probe unavailable"));
+    installTransport(turn => [{ ...result(`RESULT_${turn}`), modelUsage: { model: { contextWindow: 200000 } } }], true, probe);
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ model: "claude-opus-5-5" }));
+    await completed(events, 1);
+    await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2, model: "claude-haiku-4-5" }));
+    await completed(events, 2);
+    expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete).map(({ event }) => event.contextWindow))
+      .toEqual([300000, 200000]);
+  });
+
   it("publishes the resolved window before completion and leaves user compaction settings alone", async () => {
     const transport = installTransport(turn => [modelResult(turn)]);
     const { provider, events } = fixture();

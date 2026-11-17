@@ -142,7 +142,7 @@ export class ClaudeEventMapper {
   // The CLI yields each finished block before the API reports stop_reason, so main-thread text waits for message_delta, a tool call, or the result.
   private boundaryAwaitsStopReason = false;
   private lastInputTokens: number | undefined;
-  private lastContextWindow: number | undefined;
+  private lastContextWindow: { model: string | undefined; tokens: number } | undefined;
   private compacting = false;
   private readonly toolUseIds = new Set<string>();
   private readonly toolParents = new Map<string, ClaudeParentEvidence>();
@@ -219,7 +219,7 @@ export class ClaudeEventMapper {
 
   /** Publishes a resolved window only while an execution can own the estimate. */
   observeContextUsage(usage: ClaudeContextUsage): void {
-    this.lastContextWindow = usage.windowTokens;
+    this.lastContextWindow = { model: this.callbacks.getSession()?.model, tokens: usage.windowTokens };
     if (this.callbacks.liveExecutionId()) {
       this.callbacks.emit({
         type: AgentEventType.ContextEstimate,
@@ -652,7 +652,10 @@ export class ClaudeEventMapper {
   }
 
   private emitTurnComplete(message: Message, usage: Usage): void {
-    const contextWindow = this.lastContextWindow ?? modelUsageWindow(message);
+    const cachedWindow = this.lastContextWindow;
+    const contextWindow = cachedWindow?.model === this.callbacks.getSession()?.model
+      ? cachedWindow?.tokens ?? modelUsageWindow(message)
+      : modelUsageWindow(message);
     this.emit({
       type: AgentEventType.TurnComplete,
       threadId: this.threadId,
@@ -920,7 +923,6 @@ export class ClaudeEventMapper {
         type: AgentEventType.ContextEstimate,
         threadId: this.threadId,
         tokensIn: this.lastInputTokens,
-        contextWindow: this.lastContextWindow,
       });
   }
   private emitDelta(delta: Message, index: unknown): void {
