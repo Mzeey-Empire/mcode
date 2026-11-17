@@ -63,7 +63,7 @@ export interface ProviderRouterDeps {
   providerCatalogService: Pick<ProviderCatalogService, "request">;
   providerAvailability: Pick<
     ProviderAvailabilityService,
-    "assertEnabled" | "assertUsable" | "listAvailability"
+    "assertEnabled" | "assertUsable" | "refreshAvailability"
   >;
   modelCacheService: Pick<ModelCacheService, "listModels">;
   providerRegistry: IProviderRegistry;
@@ -89,7 +89,7 @@ const providerRpcHandlers: ProviderRpcHandlerMap = {
     return deps.providerRegistry.resolve(params.providerId).listModes?.() ?? null;
   },
   "provider.getUsage": (deps, params) => routeProviderUsage(deps, params.providerId),
-  "providers.listAvailability": (deps) => deps.providerAvailability.listAvailability(),
+  "providers.listAvailability": (deps) => deps.providerAvailability.refreshAvailability(),
   "providers.listStatus": (deps, params) => deps.providerStatus.listStatus(params),
   "providers.updateCli": (deps, params) => deps.providerStatus.updateCli(params.providerId),
   "providers.acknowledgeModels": (deps, params) => deps.providerStatus.acknowledgeModels(params.providerId),

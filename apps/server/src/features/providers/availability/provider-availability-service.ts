@@ -95,6 +95,18 @@ export class ProviderAvailabilityService {
     });
   }
 
+  /** Rechecks enabled missing CLIs before returning a client-requested snapshot. */
+  async refreshAvailability(): Promise<ProviderAvailability[]> {
+    const missing = this.listAvailability().filter((row) => row.enabled && row.cli.status === "not_found");
+    const changes = await Promise.all(missing.map(async (row) => {
+      const previous = this.cliCache.get(row.id);
+      const current = await this.verifyCli(row.id);
+      return JSON.stringify(previous) !== JSON.stringify(current);
+    }));
+    if (changes.some(Boolean)) this.broadcastAvailability();
+    return this.listAvailability();
+  }
+
   /**
    * Resolve and validate the CLI binary for the given provider.
    * When `settings.provider.cli[id]` is set, checks that exact path for execute

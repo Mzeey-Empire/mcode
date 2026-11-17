@@ -23,7 +23,7 @@ You also need at least one supported provider CLI installed:
 
 | Provider | Install | Min version |
 |----------|---------|-------------|
-| [Claude Code](https://claude.ai/download) | `bun add --global @anthropic-ai/claude-code` | Version required by the installed Claude Agent SDK |
+| [Claude Code](https://claude.ai/download) | `bun add --global @anthropic-ai/claude-code` | SDK-compatible version recommended; older versions show a warning |
 | [Codex](https://github.com/openai/codex) | `bun add --global @openai/codex` | 0.37.0 |
 | [GitHub Copilot](https://github.com/github/copilot) | `bun add --global @github/copilot` | — |
 

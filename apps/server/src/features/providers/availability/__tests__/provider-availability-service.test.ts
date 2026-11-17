@@ -30,6 +30,30 @@ function stubRegistry(ids: string[]): IProviderRegistry {
 }
 
 describe("ProviderAvailabilityService.listAvailability", () => {
+  it("recovers a newly installed CLI when a client refreshes availability and broadcasts once", async () => {
+    let installed = false;
+    const which = vi.fn(async () => {
+      if (!installed) throw new Error("missing");
+      return "/installed/claude";
+    });
+    const service = new ProviderAvailabilityService(stubSettings(), stubRegistry(["claude"]), {
+      which, statExecutable: async () => false,
+    });
+    const changed = vi.fn<(list: ProviderAvailability[]) => void>();
+    service.onChange(changed);
+    await service.verifyAllEnabled();
+    expect(service.listAvailability()[0].cli.status).toBe("not_found");
+    await service.refreshAvailability();
+    expect(changed).not.toHaveBeenCalled();
+
+    installed = true;
+    const recovered = await service.refreshAvailability();
+    expect(recovered[0].cli).toEqual({ status: "found", resolvedPath: "/installed/claude", configuredPath: "" });
+    expect(changed.mock.calls).toEqual([[recovered]]);
+    await service.refreshAvailability();
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(which).toHaveBeenCalledTimes(3);
+  });
   it("warns about incompatible Claude and clears the message after an update", async () => {
     const registry = stubRegistry(["claude"]);
     const provider = registry.resolveAll()[0];
