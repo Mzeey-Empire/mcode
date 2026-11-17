@@ -494,6 +494,7 @@ interface PendingSpawnTurn {
   uuid: string;
   /** Fully-built SDK query options sans the resume/sessionId discriminator. */
   baseOptions: ClaudeBaseOptions;
+  flags: ClaudeFlagSettings;
   /** Model id the session spawns with. */
   resolvedModel: string;
   /** Orchestration mode encoded into the session's flag settings. */
@@ -1432,7 +1433,6 @@ export class ClaudeProvider
       ...(context.params.fallbackModel && {
         fallbackModel: context.params.fallbackModel,
       }),
-      settings: claudeFlagSettings(context.params),
       includePartialMessages: true,
       ...(context.params.maxBudgetUsd != null &&
         context.params.maxBudgetUsd > 0 && {
@@ -1535,6 +1535,7 @@ export class ClaudeProvider
       resumeId,
       uuid: context.threadId,
       baseOptions,
+        flags: claudeFlagSettings(context.params),
       resolvedModel: context.model,
       orchestrationMode: context.params.orchestrationMode,
       planTurn: context.params.planTurn,
@@ -1799,6 +1800,7 @@ export class ClaudeProvider
     );
     const options = {
       ...sdk,
+      settings: staged.flags,
       systemPrompt: {
         type: "preset" as const,
         preset: "claude_code" as const,
@@ -1883,7 +1885,7 @@ export class ClaudeProvider
       closeQueue: queue.close,
       model: staged.resolvedModel,
       contextProbe: 0,
-      flags: claudeFlagSettings(staged),
+      flags: staged.flags,
       permissionMode: args.permissionMode,
       planTurn: staged.planTurn,
       planCaptured: false,

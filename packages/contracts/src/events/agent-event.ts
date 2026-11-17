@@ -308,12 +308,13 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       configuredPath: z.string().optional(),
     }),
     z.object({
-      /** Emitted when the provider starts or stops rejecting requests for its rate limit. */
+      /** Reports the Fast mode currently running for the model. */
       type: z.literal(AgentEventType.FastModeStatus),
       threadId: z.string(),
       status: FastModeStatusSchema(),
     }),
     z.object({
+      /** Emitted when the provider starts or stops rejecting requests for its rate limit. */
       type: z.literal(AgentEventType.RateLimited),
       threadId: z.string(),
       /** True only while the provider is rejecting requests. A usage warning is not a block, so it reports false. False clears the indicator. */

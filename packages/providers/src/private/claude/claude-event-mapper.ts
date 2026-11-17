@@ -242,6 +242,7 @@ export class ClaudeEventMapper {
 
   /** Resets only derived attribution when a new queued execution consumes its prompt. */
   resetExecution(): void {
+    this.lastFastStatus = undefined;
     this.launchLabels.clear();
     this.commandCalls.clear();
     this.deniedCommands.clear();

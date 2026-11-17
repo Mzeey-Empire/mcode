@@ -50,6 +50,7 @@ vi.mock("@/features/preview/automation/browserAutomationStore", () => ({
 
 import { useWorkspaceStore, type WorkspaceRpcCall } from "../workspaceStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useDiffStore } from "@/stores/diffStore";
 import type { Workspace } from "@/transport/types";
 import { rememberComposerMode } from "@/lib/composer-mode-preference";
@@ -79,6 +80,30 @@ beforeEach(() => {
 });
 
 describe("workspace list loaded flag", () => {
+  it("keeps Claude Fast in the placeholder and cancelled startup retry draft", async () => {
+    useWorkspaceStore.setState({ activeWorkspaceId: "ws-1", newThreadMode: "direct", threads: [] });
+    vi.mocked(mockTransport.createAndSendMessage).mockRejectedValue(new Error("Creation cancelled"));
+    await expect(useWorkspaceStore.getState().createAndSendMessage(
+      "First request", "claude-opus-5-5", undefined, undefined, undefined, "claude", undefined, undefined, true,
+    )).rejects.toThrow("Creation cancelled");
+    const placeholderId = useWorkspaceStore.getState().activeThreadId;
+    if (!placeholderId) throw new Error("Missing placeholder");
+    expect.soft(useWorkspaceStore.getState().threads.find(thread => thread.id === placeholderId)?.fast_mode).toBe(true);
+    useComposerDraftStore.getState().saveDraft(placeholderId, {
+      input: "Edited request", attachments: [], modelId: "claude-opus-5-5", provider: "claude", reasoning: "high", fastMode: true,
+    });
+    vi.mocked(mockTransport.getThreadStartup).mockResolvedValueOnce({
+      startupId: placeholderId, workspaceId: "ws-1", kind: "direct", state: "cancelled", phase: "thread",
+      steps: [{ phase: "thread", state: "cancelled" }, { phase: "agent", state: "pending" }],
+      transcript: [], cancellation: "requested", revision: 1,
+      createdAt: "2026-09-02T12:00:00.000Z", updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+    await expect(useWorkspaceStore.getState().retryPreparingThread(placeholderId)).rejects.toThrow("Creation cancelled");
+    expect(mockTransport.createAndSendMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+      content: "Edited request", provider: "claude", fastMode: true,
+    }));
+    useWorkspaceStore.getState().dismissPreparingThread(placeholderId);
+  });
   beforeEach(() => {
     useWorkspaceStore.setState({ workspacesLoaded: false });
   });

@@ -106,6 +106,16 @@ async function createNativePlanFixture(proof: string) {
 }
 
 describe("Claude Fast flags", () => {
+  it("turns Fast off on a reused session that spawned with Fast", async () => {
+    const transport = installTransport();
+    const { provider, events } = fixture();
+    await provider.sendTurn(request({ providerOptions: { fastMode: true } }));
+    await completed(events, 1);
+    await provider.sendTurn(request({ turnExecutionId: execution2, providerOptions: { fastMode: false } }));
+    await completed(events, 2);
+    expect(transport.optionsSeen).toHaveLength(1);
+    expect(transport.applyFlagSettings.mock.calls).toEqual([[{ fastMode: false }]]);
+  });
   it("updates only changed Fast flags and recreates a session when the SDK refuses", async () => {
     const transport = installTransport();
     const { provider, events } = fixture();

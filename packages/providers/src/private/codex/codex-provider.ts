@@ -2795,9 +2795,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): Promise<void> {
     try {
       const turnId = Array.isArray(input) ? await server.sendTurn(input, turnOptions) : await server.startCompaction();
-      this.reportCodexFastStatus(run, input, turnOptions, turnExecutionId);
       if (Array.isArray(input)) this.recordCollaborationMode(run.entry.sessionId, turnOptions?.collaborationMode?.mode);
       if (run.seq !== run.entry.runTurnSeq) return;
+      this.reportCodexFastStatus(run, input, turnOptions, turnExecutionId);
       run.entry.turnStartResponsePending = false;
       run.entry.pendingTurnStartNotification = undefined;
       this.bindCodexTurnStartResponse(run.entry, turnId, turnExecutionId);
