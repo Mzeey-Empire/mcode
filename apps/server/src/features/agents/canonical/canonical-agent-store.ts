@@ -156,7 +156,7 @@ export interface CanonicalHeldBackgroundToolCall {
   threadId: string;
   executionId: string;
   toolCallId: string;
-  kind?: import("@mcode/contracts/events/agent-event").BackgroundCallKind;
+  kind?: import("@mcode/contracts/models/tool-call-record").BackgroundCallKind;
   label?: string;
 }
 

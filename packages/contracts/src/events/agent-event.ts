@@ -16,16 +16,10 @@ import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderBillingModeSchema, QuotaCategorySchema } from "../providers/usage.js";
 import { StoredAttachmentSchema } from "../models/attachment.js";
 import { GoalStateSchema } from "../models/goal.js";
-import { SubagentPresentationSchema, ToolExecutionStatusSchema, ToolCallPhaseSchema } from "../models/tool-call-record.js";
+import { BackgroundCallKindSchema, SubagentPresentationSchema, ToolExecutionStatusSchema, ToolCallPhaseSchema } from "../models/tool-call-record.js";
 import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { TurnFailureSchema } from "../models/turn-failure.js";
 import { ApprovalDecidedPayloadSchema } from "../models/approval-receipt.js";
-
-/** Provider-neutral classification of a call that outlives its launching turn. */
-export type BackgroundCallKind = "subagent" | "command";
-
-/** Valid background call classifications at the provider boundary. */
-export const BackgroundCallKindSchema = lazySchema(() => z.enum(["subagent", "command"]));
 
 
 /**
@@ -74,7 +68,7 @@ export const AgentEventType = {
 export type AgentEventType = typeof AgentEventType[keyof typeof AgentEventType];
 
 /** Discriminated union of all events emitted by an agent provider. */
-const AgentEventPayloadSchema = lazySchema(() => z.discriminatedUnion("type", [
+const AgentEventPayloadSchema = z.discriminatedUnion("type", [
     ApprovalDecidedPayloadSchema().extend({ type: z.literal(AgentEventType.ApprovalDecided) }),
     z.object({
       /** Emitted at the start of a new turn, before any other events. Mirrors TurnComplete/Ended.
@@ -447,7 +441,7 @@ const AgentEventPayloadSchema = lazySchema(() => z.discriminatedUnion("type", [
       error: z.string().optional(),
       failureReason: z.string().optional(),
     }),
-  ]));
+  ]);
 
 /** Canonical publication metadata stamped by the server before broadcast. */
 const AgentEventSequenceSchema = z.object({
@@ -461,7 +455,7 @@ const AgentEventSequenceSchema = z.object({
 export const AgentEventSchema = lazySchema(() =>
   z.preprocess(
     rejectProviderRuntimeFields,
-    z.intersection(AgentEventPayloadSchema(), AgentEventSequenceSchema),
+    z.intersection(AgentEventPayloadSchema, AgentEventSequenceSchema),
   ),
 );
 /** Union of all events emitted by an agent provider. */

@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
-import { BackgroundCallKindSchema } from "../events/agent-event.js";
+
+/** Provider-neutral classification of a call that outlives its launching turn. */
+export type BackgroundCallKind = "subagent" | "command";
+
+/** Valid background call classifications at the provider boundary. */
+export const BackgroundCallKindSchema = lazySchema(() => z.enum(["subagent", "command"]));
 
 /** Maximum persisted length of a sub-agent display identity. */
 export const SUBAGENT_DISPLAY_NAME_MAX_LENGTH = 96;

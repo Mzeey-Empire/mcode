@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMockMessage } from "@mcode/contracts/testing";
-import type { BackgroundCallKind } from "@mcode/contracts/events/agent-event";
+import type { BackgroundCallKind } from "@mcode/contracts/models/tool-call-record";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { CanonicalAgentStore } from "../../canonical/canonical-agent-store.js";
 import { notifyCommittedCanonicalEvents } from "../../canonical/committed-canonical-events.js";
