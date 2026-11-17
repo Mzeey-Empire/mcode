@@ -125,8 +125,16 @@ function pendingOf(entry: PendingCompletion | undefined): SidebarRowPending {
   return entry.phase === "failed" ? "failed" : "completing";
 }
 
+/**
+ * Whether a thread belongs to the Closed scope. A pending local completion keeps it Open even once
+ * a lifecycle push has set its close time, so it does not jump scopes while the user can undo.
+ */
+export function isInClosedScope(closed: boolean, completionPending: boolean): boolean {
+  return closed && !completionPending;
+}
+
 function isInCompletedScope(fact: SidebarThreadFacts, inputs: SidebarInputs): boolean {
-  return !inputs.completions.has(fact.id) && fact.completedMs !== null;
+  return isInClosedScope(fact.completedMs !== null, inputs.completions.has(fact.id));
 }
 
 function activityKey(fact: SidebarThreadFacts, frozen: FrozenOrder | null): number {

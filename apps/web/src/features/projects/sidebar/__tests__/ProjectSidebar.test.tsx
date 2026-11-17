@@ -1585,6 +1585,18 @@ describe("ProjectSidebar action-required indicator", () => {
       expect(within(screen.getByTestId("project-row-ws-1")).queryByRole("img", { name: "Answers required" })).toBeNull();
     });
 
+    it("rolls up a thread whose close is still held as Open, even once its close time arrives", () => {
+      setupStoreMocks({ threads: [
+        makeThread({ id: "thread-held", title: "Held", user_completed_at: "2026-10-11T12:00:00.000Z" }),
+      ] });
+      useSidebarUiStore.setState({ expandedProjects: new Set([]) });
+      useCompletionStore.setState({ entries: new Map([["thread-held", { phase: "holding", attempt: 1 }]]) });
+      applyAttention(attention("thread-held", waitingOn("questions")));
+      render(<ProjectSidebar />);
+
+      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Answers required" })).toBeVisible();
+    });
+
     it("keeps showing activity while Stop is pending", () => {
       threadStoreOverrides.pendingStopCounts = { "thread-pending": 1 };
       installWorkspaceMock();

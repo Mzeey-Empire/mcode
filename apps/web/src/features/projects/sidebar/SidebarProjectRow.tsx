@@ -31,7 +31,8 @@ import { getTransport } from "@/transport";
 import type { Workspace } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useSidebarScope } from "./ScopeBar";
-import type { SidebarItem } from "./sidebar-model";
+import { isInClosedScope, type SidebarItem } from "./sidebar-model";
+import { useCompletionStore } from "./completion-store";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import type { SidebarScope } from "./sidebar-ui-store";
 
@@ -47,8 +48,8 @@ function workspaceThreads(threads: readonly WorkspaceThread[], workspaceId: stri
   return owned.length === 0 ? NO_THREADS : owned;
 }
 
-function inScope(thread: WorkspaceThread, scope: SidebarScope): boolean {
-  return scope === "completed" ? thread.user_completed_at !== null : thread.user_completed_at === null;
+function inScope(thread: WorkspaceThread, scope: SidebarScope, completions: ReadonlyMap<string, unknown>): boolean {
+  return isInClosedScope(thread.user_completed_at !== null, completions.has(thread.id)) === (scope === "completed");
 }
 
 type SortableAttributes = ReturnType<typeof useSortable>["attributes"];
@@ -115,7 +116,8 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
   // Only headers roll up CI, so only they subscribe; a checks poll must not re-render thread rows.
   const checksById = useWorkspaceStore((state) => state.checksById);
   const scope = useSidebarScope();
-  const scopedThreads = useMemo(() => threads.filter((thread) => inScope(thread, scope)), [threads, scope]);
+  const completions = useCompletionStore((state) => state.entries);
+  const scopedThreads = useMemo(() => threads.filter((thread) => inScope(thread, scope, completions)), [threads, scope, completions]);
   const collapsedStatus = useRolledUpThreadRowState(item.collapsed ? scopedThreads : NO_THREADS);
   if (!workspace) return null;
   return (
@@ -128,8 +130,7 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
         sortableAttributes={sortableAttributes}
         checksById={checksById}
         collapsedStatus={collapsedStatus}
-        threads={threads}
-        scope={scope}
+        scopedThreads={scopedThreads}
         ctx={ctx}
       />
       <ProjectEmptyNote item={item} scope={scope} />
@@ -155,8 +156,8 @@ interface ProjectWorkspaceRowProps {
   sortableAttributes: SortableAttributes | undefined;
   checksById: Readonly<Record<string, ChecksStatus>>;
   collapsedStatus: ThreadRowState;
-  threads: readonly WorkspaceThread[];
-  scope: SidebarScope;
+  /** The project's threads in the current scope, as the rollup counts them. */
+  scopedThreads: readonly WorkspaceThread[];
   ctx: SidebarRowContext;
 }
 
@@ -195,12 +196,10 @@ function ProjectWorkspaceRow({
   sortableAttributes,
   checksById,
   collapsedStatus,
-  threads,
-  scope,
+  scopedThreads,
   ctx,
 }: ProjectWorkspaceRowProps) {
   const actions = useProjectActions(workspace, item.section, ctx);
-  const visibleThreads = threads.filter((thread) => inScope(thread, scope));
   return (
     <div
       // The sortable metadata (roledescription, keyboard-instructions ref)
@@ -224,7 +223,7 @@ function ProjectWorkspaceRow({
       <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} tone="tinted" />
       <ProjectTitle workspace={workspace} onClick={actions.toggle} />
       <ProjectGitStatus isGitRepository={workspace.is_git_repo} />
-      <WorkspaceCiRollupChip threads={visibleThreads} checksById={checksById} />
+      <WorkspaceCiRollupChip threads={scopedThreads} checksById={checksById} />
       <ProjectCollapsedStatus status={collapsedStatus} />
       <ProjectRowActions
         workspace={workspace}
