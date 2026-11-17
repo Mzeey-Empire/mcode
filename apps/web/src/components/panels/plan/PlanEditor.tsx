@@ -117,7 +117,18 @@ const planTheme = EditorView.theme({
     fontWeight: "600",
     color: "var(--color-ink)",
   },
+  // Padding sets the item's text column and the matching negative indent pulls
+  // the marker back into it, so wrapped lines start under the text.
+  [`.${PLAN_EDITOR_CLASS.listLine}`]: {
+    paddingLeft: "calc(var(--plan-list-depth, 1) * 2rem)",
+    textIndent: "-2rem",
+  },
+  ".cm-plan-list-depth-2": { "--plan-list-depth": "2" },
+  ".cm-plan-list-depth-3": { "--plan-list-depth": "3" },
+  ".cm-plan-list-depth-4": { "--plan-list-depth": "4" },
   [`.${PLAN_EDITOR_CLASS.listMarker}`]: {
+    // An inline-block inherits the line's negative indent, which would push the bullet out of its box.
+    textIndent: "0",
     display: "inline-block",
     width: "2rem",
     fontFamily: "var(--font-mono)",

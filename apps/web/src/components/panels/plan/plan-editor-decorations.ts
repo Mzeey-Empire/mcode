@@ -9,6 +9,7 @@ export const PLAN_EDITOR_CLASS = {
   section: "cm-plan-section",
   subsection: "cm-plan-subsection",
   listMarker: "cm-plan-list-marker",
+  listLine: "cm-plan-list-line",
   code: "cm-plan-code",
   codeBlock: "cm-plan-code-block",
   rule: "cm-plan-rule",
@@ -58,6 +59,7 @@ const PREVIEW_ONLY_CLASSES: ReadonlySet<string> = new Set([
 ]);
 
 function isPreviewOnly(range: PlanDecorationRange): boolean {
+  if (range.kind === "line" && range.className.startsWith(PLAN_EDITOR_CLASS.listLine)) return true;
   if (range.kind === "line" || range.kind === "mark") return PREVIEW_ONLY_CLASSES.has(range.className);
   return true;
 }
@@ -161,11 +163,37 @@ function fenceDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRan
   return ranges;
 }
 
+// The deepest nesting level the theme indents; deeper items share its column.
+const MAX_LIST_DEPTH = 4;
+
+function listDepth(node: PlanSyntaxNode): number {
+  let depth = 0;
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.name === "BulletList" || parent.name === "OrderedList") depth += 1;
+  }
+  return Math.min(Math.max(depth, 1), MAX_LIST_DEPTH);
+}
+
+// A wrapped item's later lines hang under its text, so the item's line is
+// indented by its depth in marker columns. The source indentation before a
+// nested marker has no fixed width, so it is hidden and the depth class draws
+// the nesting instead.
+function listLineDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRange[] {
+  const lineStart = text.lastIndexOf("\n", node.from - 1) + 1;
+  const depth = listDepth(node);
+  const className = depth === 1 ? PLAN_EDITOR_CLASS.listLine : `${PLAN_EDITOR_CLASS.listLine} cm-plan-list-depth-${depth}`;
+  const ranges: PlanDecorationRange[] = [{ kind: "line", from: lineStart, className }];
+  const indentOnly = /^[ \t]*$/.test(text.slice(lineStart, node.from));
+  if (indentOnly && node.from > lineStart) ranges.push({ kind: "hide", from: lineStart, to: node.from });
+  return indentOnly ? ranges : [];
+}
+
 // The marker column has a fixed width, so the space after the marker is hidden.
 // A bullet's "-", "*" or "+" is drawn as a dot; ordered markers keep their number.
 function listMarkDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRange[] {
   const bullet = node.parent?.parent?.name === "BulletList";
   const ranges: PlanDecorationRange[] = [
+    ...listLineDecorations(text, node),
     bullet
       ? { kind: "replace", from: node.from, to: node.to, text: "•", className: PLAN_EDITOR_CLASS.listMarker }
       : { kind: "mark", from: node.from, to: node.to, className: PLAN_EDITOR_CLASS.listMarker },

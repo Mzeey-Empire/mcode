@@ -16,8 +16,10 @@ describe("planEditorDecorations", () => {
       { kind: "hide", from: 35, to: 36 },
       { kind: "line", from: 39, className: "cm-plan-section" },
       { kind: "hide", from: 39, to: 42 },
+      { kind: "line", from: 49, className: "cm-plan-list-line" },
       { kind: "mark", from: 49, to: 51, className: "cm-plan-list-marker" },
       { kind: "hide", from: 51, to: 52 },
+      { kind: "line", from: 58, className: "cm-plan-list-line" },
       { kind: "mark", from: 58, to: 60, className: "cm-plan-list-marker" },
       { kind: "hide", from: 60, to: 61 },
     ]);
@@ -49,10 +51,26 @@ describe("planEditorDecorations", () => {
     ]);
   });
 
-  it("draws bullet markers as dots in the marker column", () => {
-    expect(planEditorDecorations("- item\n* next\n")).toEqual([
+  it("hangs each list item's lines under its text, one marker column deeper per nesting level", () => {
+    const markdown = "- outer\n  - inner\n";
+
+    expect(planEditorDecorations(markdown)).toEqual([
+      { kind: "line", from: 0, className: "cm-plan-list-line" },
       { kind: "replace", from: 0, to: 1, text: "•", className: "cm-plan-list-marker" },
       { kind: "hide", from: 1, to: 2 },
+      { kind: "line", from: 8, className: "cm-plan-list-line cm-plan-list-depth-2" },
+      { kind: "hide", from: 8, to: 10 },
+      { kind: "replace", from: 10, to: 11, text: "•", className: "cm-plan-list-marker" },
+      { kind: "hide", from: 11, to: 12 },
+    ]);
+  });
+
+  it("draws bullet markers as dots in the marker column", () => {
+    expect(planEditorDecorations("- item\n* next\n")).toEqual([
+      { kind: "line", from: 0, className: "cm-plan-list-line" },
+      { kind: "replace", from: 0, to: 1, text: "•", className: "cm-plan-list-marker" },
+      { kind: "hide", from: 1, to: 2 },
+      { kind: "line", from: 7, className: "cm-plan-list-line" },
       { kind: "replace", from: 7, to: 8, text: "•", className: "cm-plan-list-marker" },
       { kind: "hide", from: 8, to: 9 },
     ]);
@@ -78,6 +96,7 @@ describe("planEditorDecorations", () => {
     const fenceMarks = planEditorDecorations(markdown).filter((range) => range.kind === "hide" && range.from > 11);
 
     expect(codeLines).toEqual([
+      { kind: "line", from: 0, className: "cm-plan-list-line" },
       { kind: "line", from: 12, className: "cm-plan-code-block" },
       { kind: "line", from: 20, className: "cm-plan-code-block" },
       { kind: "line", from: 24, className: "cm-plan-code-block" },
@@ -108,6 +127,7 @@ describe("planEditorDecorations", () => {
   it("shows a coded file path item as its name, then its folder", () => {
     expect(planEditorDecorations("- `apps/web/src/x/File.tsx`\n")).toEqual([
       { kind: "line", from: 0, className: "cm-plan-path-item text-fade" },
+      { kind: "line", from: 0, className: "cm-plan-list-line" },
       { kind: "replace", from: 0, to: 1, text: "•", className: "cm-plan-list-marker" },
       { kind: "hide", from: 1, to: 2 },
       { kind: "hide", from: 2, to: 3 },
@@ -122,6 +142,7 @@ describe("planEditorDecorations", () => {
   it("shows a bare path item as its name, then its folder", () => {
     expect(planEditorDecorations("1. apps/x/File.tsx\n")).toEqual([
       { kind: "line", from: 0, className: "cm-plan-path-item text-fade" },
+      { kind: "line", from: 0, className: "cm-plan-list-line" },
       { kind: "mark", from: 0, to: 2, className: "cm-plan-list-marker" },
       { kind: "hide", from: 2, to: 3 },
       { kind: "hide", from: 3, to: 10 },
@@ -135,6 +156,7 @@ describe("planEditorDecorations", () => {
 
     expect(ranges.filter((range) => range.kind !== "hide")).toEqual([
       { kind: "line", from: 0, className: "cm-plan-path-item text-fade" },
+      { kind: "line", from: 0, className: "cm-plan-list-line" },
       { kind: "replace", from: 0, to: 1, text: "•", className: "cm-plan-list-marker" },
       { kind: "mark", from: 2, to: 13, className: "cm-plan-code" },
       { kind: "mark", from: 3, to: 12, className: "cm-plan-path-name" },
@@ -164,6 +186,7 @@ describe("visibleDecorations", () => {
       { kind: "line", from: 0, className: "cm-plan-title" },
       { kind: "hide", from: 0, to: 2 },
       { kind: "mark", from: 12, to: 20, className: "cm-plan-code" },
+      { kind: "line", from: 34, className: "cm-plan-list-line" },
       { kind: "mark", from: 34, to: 36, className: "cm-plan-list-marker" },
       { kind: "hide", from: 36, to: 37 },
     ]);
