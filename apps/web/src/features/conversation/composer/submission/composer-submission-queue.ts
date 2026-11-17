@@ -94,5 +94,5 @@ function optionalMentions(mentions: MessageMention[]): MessageMention[] | undefi
 
 /** Keeps fast-mode metadata scoped to Codex submissions. */
 function optionalFastMode(selection: ComposerAgentSelection): boolean | undefined {
-  return selection.provider === "codex" ? selection.fastMode ?? undefined : undefined;
+  return selection.fastMode ?? undefined;
 }

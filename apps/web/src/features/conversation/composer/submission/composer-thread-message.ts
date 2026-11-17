@@ -31,7 +31,7 @@ export function providerScopedSelection(selection: ComposerAgentSelection): {
   devinMode: DevinMode | undefined;
 } {
   return {
-    fastMode: selection.provider === "codex" ? selection.fastMode ?? undefined : undefined,
+    fastMode: selection.fastMode ?? undefined,
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
   };
 }

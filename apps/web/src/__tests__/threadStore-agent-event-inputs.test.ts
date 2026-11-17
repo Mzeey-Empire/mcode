@@ -21,6 +21,11 @@ function dispatch(event: unknown): void {
 }
 
 describe("thread store agent-event input boundaries", () => {
+  it("projects the last Fast status for a thread", () => {
+    dispatch({ type: "fastModeStatus", threadId: THREAD_ID, status: { modelId: "opus", state: "on" } });
+    dispatch({ type: "fastModeStatus", threadId: THREAD_ID, status: { modelId: "opus", state: "cooldown" } });
+    expect(useThreadStore.getState().records.get(THREAD_ID)?.fastStatus).toEqual({ modelId: "opus", state: "cooldown" });
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     useWorkspaceStore.setState({

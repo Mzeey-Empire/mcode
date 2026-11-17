@@ -35,7 +35,7 @@ const AFTER_COMPLETION_EVENTS = new Set<AgentEvent["type"]>([
   "ended", "hookStarted", "hookProgress", "hookCompleted", ...BEFORE_START_EVENTS,
 ]);
 const TRANSIENT_STATUS_EVENTS = new Set<AgentEvent["type"]>([
-  "apiRetry", "rateLimited", "quotaUpdate", "providerUnavailable", "modelFallback",
+  "apiRetry", "rateLimited", "fastModeStatus", "quotaUpdate", "providerUnavailable", "modelFallback",
   "toolInputDelta", "toolProgress", "hookProgress", "goalUpdated", "goalCleared",
   "mcpServerStartupStatus",
 ]);
@@ -63,6 +63,7 @@ const UNSUPPORTED_FEATURE_REASON = {
   quotaUpdate: null,
   providerUnavailable: null,
   rateLimited: null,
+  fastModeStatus: null,
   apiRetry: null,
   hookStarted: null,
   hookProgress: null,

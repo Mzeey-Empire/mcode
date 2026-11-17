@@ -1275,9 +1275,7 @@ export class TurnAdmissionDispatchCoordinator {
     prepared: PreparedCommand,
     settings: ReturnType<SettingsService["get"]>,
   ): boolean {
-    // Only Codex has a global Fast default so far; other providers start standard.
-    const globalDefault = prepared.providerId === "codex" ? settings.provider?.codex?.fastMode : undefined;
-    return command.fastMode ?? prepared.thread.fast_mode ?? globalDefault ?? false;
+    return command.fastMode ?? prepared.thread.fast_mode ?? fastModeDefault(settings, prepared.providerId);
   }
 
   private providerSpecificOptions(
@@ -1334,3 +1332,4 @@ function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+import { fastModeDefault } from "@mcode/shared";

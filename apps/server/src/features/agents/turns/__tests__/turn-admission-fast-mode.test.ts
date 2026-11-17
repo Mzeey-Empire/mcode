@@ -96,6 +96,17 @@ async function fixture(providerId: ProviderId, models: TurnModelCatalog = catalo
 }
 
 describe("turn admission Fast mode", () => {
+  it("uses Claude's own default only for supporting models", async () => {
+    settings.update({ provider: { claude: { fastMode: true } } });
+    const { send } = await fixture("claude");
+    expect(await send({ model: FAST_MODEL })).toEqual({ thinking: false, fastMode: true });
+    expect(await send({ model: STANDARD_MODEL })).toEqual({ thinking: false });
+  });
+  it("does not inherit the Codex default for a supporting Claude model", async () => {
+    settings.update({ provider: { codex: { fastMode: true } } });
+    const { send } = await fixture("claude");
+    expect(await send({ model: FAST_MODEL })).toEqual({ thinking: false });
+  });
   it("ignores a legacy Claude window mode stored by an older build", async () => {
     const { send } = await fixture("claude", { listModels: async () => [] }, true);
     expect(await send({ model: "claude-opus-5-5" })).toEqual({ thinking: false });

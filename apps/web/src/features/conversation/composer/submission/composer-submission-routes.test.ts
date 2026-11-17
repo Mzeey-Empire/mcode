@@ -94,6 +94,16 @@ function execution(target: ComposerExecutionTargetController["target"]): Compose
 }
 
 describe("dispatchComposerTarget selected-text comments", () => {
+  it("preserves Claude Fast in the submission payload", async () => {
+    workspaceActions.createAndSendMessage.mockResolvedValue({ id: "thread-fast" });
+    const target = { kind: "new-thread" as const, mode: "direct" as const, branch: "main", branchSource: "branch" as const, branchRemote: null, hasWorktree: false };
+    const prepared = submission("Fast please", []);
+    prepared.snapshot.selection = { ...prepared.snapshot.selection, provider: "claude", fastMode: true };
+    await dispatchComposerTarget({ workspaceId: "workspace-1", target, execution: execution(target), submission: prepared });
+    const payload = workspaceActions.createAndSendMessage.mock.lastCall;
+    expect(payload?.[5]).toBe("claude");
+    expect(payload?.[8]).toBe(true);
+  });
   it("transfers a full new-thread draft to the optimistic placeholder", async () => {
     workspaceActions.createAndSendMessage.mockResolvedValue({ id: "thread-2" });
     const target = { kind: "new-thread" as const, mode: "direct" as const, branch: "main", branchSource: "branch" as const, branchRemote: null, hasWorktree: false };

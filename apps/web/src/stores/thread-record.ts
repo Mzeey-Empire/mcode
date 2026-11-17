@@ -85,6 +85,7 @@ export type ThreadErrorSource = "load" | "send" | "turn";
  * Collapses the former ~30 parallel `Record<string, X>` maps and active-thread mirror fields.
  */
 export interface ThreadRecord {
+  fastStatus?: FastModeStatus;
   /** Canonical durable state installed through the reconnect revision protocol. */
   canonicalAgent: CanonicalAgentReplica;
   /** Mcode-owned identity for the current logical turn. */
@@ -364,3 +365,4 @@ export function deleteThreadRecord(
   next.delete(threadId);
   return next;
 }
+import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";

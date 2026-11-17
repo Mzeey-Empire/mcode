@@ -52,7 +52,7 @@ function serializeQueuedSelection(
     provider: selection.provider,
     thinking: selection.thinking ?? undefined,
     fastMode:
-      selection.provider === "codex" ? selection.fastMode ?? undefined : undefined,
+      selection.fastMode ?? undefined,
     devinMode:
       selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
   };

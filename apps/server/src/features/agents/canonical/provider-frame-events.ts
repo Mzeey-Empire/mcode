@@ -10,6 +10,7 @@ import { AgentEventType } from "@mcode/contracts/events/agent-event";
  * - `error` and `ended`: these mean the turn did not start; the terminal turn event fails or cancels the startup.
  * - `system`, `quotaUpdate`, `contextEstimate`, `mcpServerStartupStatus`, `providerUnavailable`, `modelFallback`:
  *   session noise a provider can emit before or without ever answering the prompt.
+ * - `fastModeStatus` reports session settings before the model answers.
  * - `hookStarted`, `rateLimited`, `assistantMessageBoundary`: Claude emits all three before the model answers, and
  *   before a failure such as an unknown model. A `SessionStart` hook runs before the prompt is sent, the SDK
  *   reports rate-limit status on every request, and the mapper emits a boundary for any assistant text, including the
