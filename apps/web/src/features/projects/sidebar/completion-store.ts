@@ -136,8 +136,9 @@ export function lifecycleBlockedReason(thread: Pick<WorkspaceThread, "clientPrep
 }
 
 /**
- * Why Close cannot start now, or null when it can. The row's Close button and the thread menu's
- * Close thread both read this, so they refuse the same threads.
+ * Why the thread menu's Close thread cannot start now, or null when it can. It adds the menu's own
+ * refusals to {@link lifecycleBlockedReason}, which the row's Close button reads, so both refuse
+ * the same running, starting and updating threads.
  */
 export function closeBlockedReason(
   thread: Pick<WorkspaceThread, "user_completed_at" | "clientPreparing" | "clientError">,
