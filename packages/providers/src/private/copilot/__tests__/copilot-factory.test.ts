@@ -1061,7 +1061,9 @@ describe("Copilot public factory", () => {
       session = new FakeSession();
       sdk.resume.mockResolvedValueOnce(session);
     }
-    await provider.sendTurn(request(mode === "next-turn" ? {} : { resumeFrom: session.sessionId }));
+    const resumed = { resumeFrom: session.sessionId };
+    await provider.sendTurn(request(mode === "next-turn" ? {}
+      : mode === "reconnect" ? { ...resumed, turnId: "turn-2", turnExecutionId: "00000000-0000-4000-8000-000000000002" } : resumed));
     const emitFragments = () => {
       session.emit({ type: "assistant.message_delta", data: { messageId: "reply", deltaContent: "Hello" } }, "replayed-text");
       session.emit({ type: "assistant.reasoning_delta", data: { reasoningId: "thought", deltaContent: "Think".repeat(28_000) } }, "replayed-thought");
