@@ -483,6 +483,39 @@ describe("ClaudeProvider background agents", () => {
     }
   });
 
+  it("publishes nothing to the launching turn after it ends when a background subagent compacts", async () => {
+    type PostCompactHook = (input: Record<string, unknown>) => Promise<unknown>;
+    let compacted!: () => void;
+    const compactedAfterEnd = new Promise<void>((resolve) => { compacted = resolve; });
+    mockQuery.mockImplementation(({ prompt, options }: { prompt: AsyncIterable<unknown>; options: { hooks: { PostCompact: [{ hooks: PostCompactHook[] }] } } }) => {
+      let closeSession!: () => void;
+      const closed = new Promise<void>((resolve) => { closeSession = resolve; });
+      const stream = (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+        yield { type: "result", is_error: false, result: "Started", usage: { output_tokens: 1 } };
+        for (const hook of options.hooks.PostCompact[0].hooks) {
+          await hook({ hook_event_name: "PostCompact", session_id: "sdk-provider-turn", trigger: "auto",
+            compact_summary: "summary", cwd: "/tmp", transcript_path: "fixture" });
+        }
+        compacted();
+        await closed;
+      })();
+      return Object.assign(stream, { close: closeSession });
+    });
+    const events: ProviderRuntimeEvent[] = [];
+    const provider = providerWith(events, { open: vi.fn(async (): Promise<ProviderTurnOpening> => ({ kind: "declined", reason: "busy" })), settleBackgroundTool: vi.fn(async () => {}) });
+    try {
+      await sendUserTurn(provider);
+      await compactedAfterEnd;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(userEnded(events)).toBe(true);
+      expect(afterUserTurn(events)).toEqual([]);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   it("reports background work separately while the call runs and stops it when the session shuts down", async () => {
     mockQuery.mockImplementation(backgroundAgentQuery(false));
     const events: ProviderRuntimeEvent[] = [];
