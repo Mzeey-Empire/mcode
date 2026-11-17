@@ -239,12 +239,15 @@ function labelFor(id: ProviderId): string {
   return getCatalogEntry(id).name;
 }
 
-/** Returns the hint text shown below the provider label. */
+/** Returns the hint text shown below the provider label: every message that applies, most important first. */
 function hintFor(row: ProviderAvailability, isLastEnabled: boolean): string {
-  if (isLastEnabled) return "At least one provider must be enabled.";
-  if (row.enabled && row.cli.status === "not_found") {
-    return row.cli.message ?? `CLI not found${row.cli.configuredPath ? ` at ${row.cli.configuredPath}` : ""}.`;
-  }
-  if (row.enabled && row.cli.warning) return row.cli.warning;
-  return "";
+  return [
+    isLastEnabled ? "At least one provider must be enabled." : undefined,
+    row.enabled ? cliHint(row.cli) : undefined,
+  ].filter(Boolean).join(" ");
+}
+
+function cliHint(cli: ProviderAvailability["cli"]): string | undefined {
+  if (cli.status === "not_found") return cli.message ?? `CLI not found${cli.configuredPath ? ` at ${cli.configuredPath}` : ""}.`;
+  return cli.warning;
 }

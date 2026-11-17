@@ -67,9 +67,12 @@ describe("ProviderAvailabilityService.listAvailability", () => {
     await service.verifyCli("claude");
     expect(service.listAvailability()[0].cli).toMatchObject({ status: "found", warning });
     await expect(service.assertUsable("claude")).resolves.toBeUndefined();
+    const changed = vi.fn<(list: ProviderAvailability[]) => void>();
+    service.onChange(changed);
     warning = undefined;
-    await service.verifyCli("claude");
+    await service.refreshAvailability();
     expect(service.listAvailability()[0].cli).toEqual({ status: "found", resolvedPath: "/installed/claude", configuredPath: "" });
+    expect(changed).toHaveBeenCalledTimes(1);
     await expect(service.assertUsable("claude")).resolves.toBeUndefined();
   });
   beforeEach(() => vi.clearAllMocks());

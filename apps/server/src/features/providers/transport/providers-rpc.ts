@@ -90,8 +90,17 @@ const providerRpcHandlers: ProviderRpcHandlerMap = {
   },
   "provider.getUsage": (deps, params) => routeProviderUsage(deps, params.providerId),
   "providers.listAvailability": (deps) => deps.providerAvailability.refreshAvailability(),
-  "providers.listStatus": (deps, params) => deps.providerStatus.listStatus(params),
-  "providers.updateCli": (deps, params) => deps.providerStatus.updateCli(params.providerId),
+  // Status refreshes and CLI updates are where a user expects a fresh install or upgrade to show, so recheck
+  // availability too; it only re-verifies CLIs that are missing or warned.
+  "providers.listStatus": async (deps, params) => {
+    const [statuses] = await Promise.all([deps.providerStatus.listStatus(params), deps.providerAvailability.refreshAvailability()]);
+    return statuses;
+  },
+  "providers.updateCli": async (deps, params) => {
+    const status = await deps.providerStatus.updateCli(params.providerId);
+    await deps.providerAvailability.refreshAvailability();
+    return status;
+  },
   "providers.acknowledgeModels": (deps, params) => deps.providerStatus.acknowledgeModels(params.providerId),
 };
 

@@ -95,10 +95,13 @@ export class ProviderAvailabilityService {
     });
   }
 
-  /** Rechecks enabled missing CLIs before returning a client-requested snapshot. */
+  /**
+   * Rechecks enabled CLIs that are missing or carry a version warning before returning a client-requested snapshot,
+   * so an install or upgrade made outside Mcode shows without a restart.
+   */
   async refreshAvailability(): Promise<ProviderAvailability[]> {
-    const missing = this.listAvailability().filter((row) => row.enabled && row.cli.status === "not_found");
-    const changes = await Promise.all(missing.map(async (row) => {
+    const stale = this.listAvailability().filter((row) => row.enabled && (row.cli.status === "not_found" || row.cli.warning));
+    const changes = await Promise.all(stale.map(async (row) => {
       const previous = this.cliCache.get(row.id);
       const current = await this.verifyCli(row.id);
       return JSON.stringify(previous) !== JSON.stringify(current);

@@ -74,7 +74,7 @@ beforeEach(() => {
 });
 
 describe("ProviderSection", () => {
-  it("prioritizes the last-enabled constraint over a Claude version warning", () => {
+  it("shows the last-enabled constraint first and still shows a Claude version warning", () => {
     const warning = "Update Claude Code to a supported version.";
     useProviderAvailabilityStore.setState(({ providers }) => ({
       providers: providers.map((row) => ({
@@ -85,8 +85,7 @@ describe("ProviderSection", () => {
     }));
     render(<ProviderSection />);
     expect(screen.getByTestId("provider-switch-claude")).toBeDisabled();
-    expect(screen.getByText("At least one provider must be enabled.")).toBeInTheDocument();
-    expect(screen.queryByText(warning)).not.toBeInTheDocument();
+    expect(screen.getByText(`At least one provider must be enabled. ${warning}`)).toBeInTheDocument();
   });
   it.each(["Claude Code is not installed.", "Point the CLI path at claude.exe or the claude binary."])("shows Claude installation guidance: %s", (message) => {
     useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
