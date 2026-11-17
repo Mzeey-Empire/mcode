@@ -914,7 +914,10 @@ export class CanonicalAgentStore {
   /** List background tool calls still held open under a finished turn. */
   listHeldBackgroundToolCalls(filter?: { threadId: string }): CanonicalHeldBackgroundToolCall[] {
     // The id range keeps the scan on tool call keys, and the substring test skips JSON
-    // parsing for the many calls that never ran in the background.
+    // parsing for the many calls that never ran in the background. With a thread filter,
+    // the unary `+` stops the id range from using the primary key, which statistics can
+    // make the planner prefer over the thread index and so scan every thread's calls.
+    const id = filter ? "+item.id" : "item.id";
     const rows = this.db.prepare(`
       SELECT item.thread_id AS threadId, turn.execution_id AS executionId,
         COALESCE(json_extract(item.payload_json, '$.record.id'), json_extract(item.payload_json, '$.narrative.record.id')) AS toolCallId,
@@ -922,7 +925,7 @@ export class CanonicalAgentStore {
         COALESCE(json_extract(item.payload_json, '$.record.background_label'), json_extract(item.payload_json, '$.narrative.record.background_label')) AS label
       FROM canonical_agent_items item
       JOIN canonical_agent_turns turn ON turn.id = item.turn_id
-      WHERE item.id >= 'toolCall:' AND item.id < 'toolCall;'
+      WHERE ${id} >= 'toolCall:' AND ${id} < 'toolCall;'
         ${filter ? "AND item.thread_id = ?" : ""}
         AND instr(item.payload_json, '"background":true') > 0
         AND turn.status IN ('Completed', 'Cancelled', 'Interrupted', 'Errored')
