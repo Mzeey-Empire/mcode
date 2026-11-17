@@ -571,7 +571,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     await user.click(screen.getByTestId("chat-header-title"));
 
     const menu = await screen.findByRole("menu");
-    for (const name of ["Fork thread", "Rename", "Copy Path", "Copy Thread ID", "Delete"]) {
+    for (const name of ["Fork thread", "Close thread", "Rename thread", "Copy", "Project settings", "Delete"]) {
       expect(within(menu).getByRole("menuitem", { name })).toBeInTheDocument();
     }
   });
@@ -652,7 +652,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     render(<ChatView />);
 
     await user.click(screen.getByTestId("chat-header-title"));
-    await user.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Rename thread" }));
 
     const input = await screen.findByTestId("chat-header-title-input");
     await waitFor(() => expect(input).toHaveFocus());

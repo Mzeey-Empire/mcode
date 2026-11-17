@@ -27,7 +27,7 @@ import { IDLE_CLEANUP_RETRY, useRowLifecycleStore } from "./row-lifecycle-store"
 import type { SidebarItem } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
 import { PullRequestChip, PullRequestList } from "./PullRequestChip";
-import { useCompletionStore } from "./completion-store";
+import { lifecycleActionBlocked, useCompletionStore } from "./completion-store";
 import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
 import { ThreadOptionsMenu, type ThreadMenuActions } from "./thread-menu";
@@ -261,12 +261,7 @@ function useThreadLifecycleActions({
     event.stopPropagation();
     const completions = useCompletionStore.getState();
     if (lifecycleKind === "undo") return completions.undo(thread.id);
-    // Read the stores directly: two clicks in one frame both pass the committed
-    // snapshot before the subscribed re-render lands.
-    if (lifecycleUnavailable
-      || useRowLifecycleStore.getState().pendingLifecycle.has(thread.id)
-      || completions.entries.get(thread.id)?.phase === "holding"
-      || useWorkspaceStore.getState().pendingStartupByThreadId[thread.id] !== undefined) return;
+    if (lifecycleUnavailable || lifecycleActionBlocked(thread.id)) return;
     if (lifecycleKind === "retry") return completions.retry(thread.id);
     if (lifecycleKind === "complete") return completions.complete(thread.id);
     await reopenWithPendingFlag(thread.id, onReopenThread);

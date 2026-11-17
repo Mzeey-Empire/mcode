@@ -31,7 +31,8 @@ import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspa
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
 import { ThreadDeleteDialog, useThreadDeletion } from "@/features/projects/sidebar/thread-deletion";
 import { ThreadOptionsMenu, type ThreadMenuActions } from "@/features/projects/sidebar/thread-menu";
-import type { ContextMenuItem } from "@/components/ui/context-menu";
+import type { ActionMenuItem } from "@/components/ui/context-menu";
+import { openRightPanelTab } from "@/lib/right-panel-layout";
 import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
 import type { ComposerStartingThread } from "../../composer/useComposerStartup";
@@ -361,13 +362,16 @@ function forkDisabledReason(point: ThreadForkPoint | null, threadId: string): st
 function ThreadHeaderTitle({ thread, rename, forkPoint }: { thread: WorkspaceThread; rename: ThreadHeaderRename; forkPoint: ThreadForkPoint | null }) {
   const workspacePath = useWorkspaceStore((s) => s.workspaces.find((workspace) => workspace.id === thread.workspace_id)?.path ?? "");
   const deletion = useThreadDeletion();
-  const { onEditingThreadIdChange, onBranch } = rename;
+  const { onEditingThreadIdChange, onBranch, editingThreadId } = rename;
   const openDeletion = deletion.open;
   const actions = useMemo<ThreadMenuActions>(() => ({
     onRename: (target) => onEditingThreadIdChange(target.threadId),
     onDelete: (target) => openDeletion({ threadId: target.threadId, threadTitle: target.threadTitle, worktreePath: target.worktreePath }),
-  }), [onEditingThreadIdChange, openDeletion]);
-  const leadingItems = useMemo<readonly ContextMenuItem[]>(() => [
+    // The header's thread is already the active one, so only the panel tab needs opening.
+    onOpenProjectSettings: (target, workspaceId) => openRightPanelTab(workspaceId, target.threadId, "environment"),
+    renamingThreadId: editingThreadId,
+  }), [onEditingThreadIdChange, openDeletion, editingThreadId]);
+  const leadingItems = useMemo<readonly ActionMenuItem[]>(() => [
     {
       label: "Fork thread",
       icon: <GitFork />,

@@ -13,7 +13,8 @@ import { useWorkspaceStore } from "./state/workspaceStore";
 import { useSidebarUiStore } from "./sidebar/sidebar-ui-store";
 import type { InlineEditState, SidebarRowContext } from "./sidebar/sidebar-row-context";
 import { ThreadDeleteDialog, useThreadDeletion } from "./sidebar/thread-deletion";
-import { threadMenuItems, useAutoCompleteSwitch, useHoldThreadMenuOpen, type ThreadMenuActions, type ThreadMenuTarget } from "./sidebar/thread-menu";
+import { ThreadContextMenu, type ThreadMenuActions, type ThreadMenuTarget } from "./sidebar/thread-menu";
+import { openRightPanelTab } from "@/lib/right-panel-layout";
 
 /** Time window in ms during which a second click on the same thread row is treated as a double-click. */
 const DOUBLE_CLICK_THRESHOLD_MS = 250;
@@ -254,10 +255,16 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
   const { worktreesLoadedFor, validWorktreePaths, availableProviders } = facts;
   const { setInlineEdit } = rename;
   const openDeletion = deletion.open;
+  const selectThread = clicks.select;
   const threadMenuActions = useMemo<ThreadMenuActions>(() => ({
     onRename: (target) => setInlineEdit({ threadId: target.threadId, title: target.threadTitle, originalTitle: target.threadTitle }),
     onDelete: (target) => openDeletion({ threadId: target.threadId, threadTitle: target.threadTitle, worktreePath: target.worktreePath }),
-  }), [setInlineEdit, openDeletion]);
+    onOpenProjectSettings: (target, workspaceId) => {
+      selectThread(workspaceId, target.threadId);
+      openRightPanelTab(workspaceId, target.threadId, "environment");
+    },
+    renamingThreadId: rename.inlineEdit?.threadId ?? null,
+  }), [setInlineEdit, openDeletion, selectThread, rename.inlineEdit]);
   const ctx = useMemo<SidebarRowContext>(() => ({
     worktreesLoadedFor,
     validWorktreePaths,
@@ -382,10 +389,8 @@ function ThreadContextMenuOverlay({
   onClose: () => void;
   actions: ThreadMenuActions;
 }) {
-  const autoComplete = useAutoCompleteSwitch(contextMenu?.threadId ?? null);
-  useHoldThreadMenuOpen(contextMenu !== null);
   if (!contextMenu) return null;
-  return <ContextMenu x={contextMenu.x} y={contextMenu.y} anchor={contextMenu.anchor} onClose={onClose} items={threadMenuItems(contextMenu, autoComplete, actions)} />;
+  return <ThreadContextMenu key={`${contextMenu.threadId}:${contextMenu.x}:${contextMenu.y}`} target={contextMenu} point={contextMenu} actions={actions} onClose={onClose} />;
 }
 
 function DraftContextMenuOverlay({
