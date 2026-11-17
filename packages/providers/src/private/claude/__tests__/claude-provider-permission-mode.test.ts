@@ -88,7 +88,7 @@ import {
   BrowserAutomationCredentialRegistry,
   BrowserAutomationSessionLease,
 } from "./helpers/provider-fixture.js";
-import { mockProviderHost } from "./helpers/mock-sdk-query.js";
+import { mockProviderHost, queryMethodStubs } from "./helpers/mock-sdk-query.js";
 
 describe("ClaudeProvider permission mode changes", () => {
   let provider: ClaudeProvider;
@@ -371,5 +371,53 @@ describe("ClaudeProvider permission mode changes", () => {
 
     expect(sdkCalls).toHaveLength(1);
     expect(flagSettingsCalls).toEqual([{ ultracode: true }]);
+  });
+
+  it.each([
+    { method: "setModel" as const, resumeFrom: undefined },
+    { method: "setModel" as const, resumeFrom: "saved-claude-conversation" },
+    { method: "applyFlagSettings" as const, resumeFrom: "saved-claude-conversation" },
+    { method: "setPermissionMode" as const, resumeFrom: "saved-claude-conversation" },
+  ])("resumes the saved conversation when $method rejects (resumeFrom=$resumeFrom)", async ({ method, resumeFrom }) => {
+    const methods = queryMethodStubs();
+    methods[method].mockRejectedValue(new Error("Live reconfiguration rejected"));
+    const fakeQuery = makeFakeSdkQuery(sdkCalls, flagSettingsCalls);
+    mockQuery.mockImplementation((args: Parameters<typeof fakeQuery>[0]) => {
+      const query = fakeQuery(args);
+      const stream = (async function* () {
+        yield { type: "system", subtype: "init", session_id: resumeFrom ?? "reconfigure" };
+        yield* query;
+      })();
+      return Object.assign(stream, methods, { close: vi.fn() });
+    });
+    const baseRequest = {
+      sessionId: "mcode-reconfigure",
+      threadId: "reconfigure",
+      cwd: process.cwd(),
+      model: "claude-opus-4-8",
+      permissionMode: "supervised" as const,
+      interactionMode: "build" as const,
+      providerOptions: {},
+      resumeFrom,
+    };
+    try {
+      await provider.sendTurn({ ...baseRequest, turnExecutionId: "first-execution", message: "first" });
+      await provider.sendTurn({
+        ...baseRequest,
+        turnExecutionId: "second-execution",
+        message: "second",
+        ...(method === "setModel" && { model: "claude-sonnet-4-6" }),
+        ...(method === "applyFlagSettings" && { orchestrationMode: "proactive" as const }),
+        ...(method === "setPermissionMode" && { planTurn: { kind: "planning" as const, planFilePath: null } }),
+      });
+
+      expect(methods[method]).toHaveBeenCalledTimes(1);
+      expect(sdkCalls).toHaveLength(2);
+      expect(sdkCalls[1]?.options.resume).toBe(resumeFrom ?? "reconfigure");
+      expect(sdkCalls[1]?.options.sessionId).toBeUndefined();
+      expect(sdkCalls[1]?.options.model).toBe(method === "setModel" ? "claude-sonnet-4-6" : "claude-opus-4-8");
+    } finally {
+      await provider.stopSession(baseRequest.sessionId);
+    }
   });
 });
