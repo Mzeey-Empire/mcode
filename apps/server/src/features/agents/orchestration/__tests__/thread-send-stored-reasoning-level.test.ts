@@ -28,3 +28,28 @@ it("runs a thread_send follow-up at the target thread's stored reasoning level",
     await fixture.close();
   }
 });
+
+it("skips a stored reasoning level the thread_send target model does not support", async () => {
+  const fixture = await openWorkerServiceFixture();
+  try {
+    const coordinator = await fixture.threads.create(fixture.workspace.id, "Coordinator", "direct", "main", true, "codex");
+    await fixture.threads.updateSettings(fixture.thread.id, { reasoning_level: "max", model: "gpt-5.5" });
+    const provider: Pick<IAgentProvider, "listModels"> = fixture.provider;
+    vi.spyOn(provider, "listModels").mockResolvedValue([{
+      id: "gpt-5.5", name: "GPT-5.5", provider: "codex", supportedReasoningEfforts: ["low", "medium", "high"],
+    }]);
+    const control = container.resolve(ThreadControlService);
+    const result = await control.threadSend(
+      {
+        type: "internal", userId: "local-user", sourceThreadId: coordinator.id, sourceTurnId: "turn-1",
+        sourceToolCallId: "call-1", sourceProviderId: "codex", permissionMode: "full",
+      },
+      { threadId: fixture.thread.id, message: "Follow up" },
+    );
+    expect(result.status).toBe("accepted");
+    await vi.waitFor(() => expect(fixture.sent).toHaveLength(1));
+    expect(fixture.sent[0]?.reasoningLevel).toBeUndefined();
+  } finally {
+    await fixture.close();
+  }
+});

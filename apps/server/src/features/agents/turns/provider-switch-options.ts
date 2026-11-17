@@ -80,7 +80,8 @@ function modelSupportsFastMode(model: ProviderModelInfo | null): boolean {
   return model?.supportsFastMode === true;
 }
 
-function modelSupportsReasoningLevel(model: ProviderModelInfo | null, level: string): boolean {
+/** Accept a reasoning level unless the model explicitly lists levels that exclude it. */
+export function modelSupportsReasoningLevel(model: ProviderModelInfo | null, level: string): boolean {
   const levels: readonly string[] | undefined = model?.supportedReasoningEfforts;
   return levels === undefined || levels.includes(level);
 }

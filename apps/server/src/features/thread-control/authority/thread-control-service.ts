@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import { type IProviderRegistry, type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { type ApprovalResponse, type ApprovalRespondResult, type ApprovalRequest } from "@mcode/contracts/models/approval";
-import { ProviderIdSchema } from "@mcode/contracts/models/settings";
+import { ProviderIdSchema, type ReasoningLevel } from "@mcode/contracts/models/settings";
 import { type ResolvedExecution, type ResolvedPlacement, type ThreadCreateBatchInput, type ThreadCreateBatchResult, type ThreadCreateInput, type ThreadCreateItemResult, type ThreadControlError, type ThreadGetInput, type ThreadGetResult, type ThreadSendInput, type ThreadSendResult, type ThreadStopInput, type ThreadStopResult, type ThreadObservedState, type ThreadReadMessage, type ThreadSearchInput, type ThreadSearchResult, type ThreadWaitInput, type ThreadWaitResult, type ThreadWaitItem, type WorkspaceSearchInput, type WorkspaceSearchResult, type WorktreeListInput, type WorktreeListResult, type ThreadTargetListResult, ThreadCreateBatchInputSchema, ThreadGetInputSchema, ThreadSendInputSchema, ThreadStopInputSchema, ThreadSearchInputSchema, ThreadWaitInputSchema, ThreadTargetListResultSchema, THREAD_GET_TRANSCRIPT_MAX_BYTES, THREAD_CREATE_TITLE_MAX_LENGTH, WORKSPACE_SEARCH_QUERY_MAX_LENGTH } from "@mcode/contracts/thread-control";
 import type {
   ExternalThreadControlAuthority,
@@ -31,6 +31,7 @@ import { ThreadControlAuditRepo } from "./persistence/thread-control-audit-repo.
 import { ProviderRegistry } from "../../providers/composition/provider-registry.js";
 import { AgentService, DelegationTargetResolver } from "../../agents/index.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
+import { modelSupportsReasoningLevel } from "../../agents/turns/provider-switch-options.js";
 
 import {
   ThreadControlMutationReservationService,
@@ -1361,7 +1362,7 @@ export class ThreadControlService {
     origin?: { sourceThreadId: string; sourceTurnId: string; sourceProviderId: string },
     mutationReservationToken?: string,
   ): Promise<void> {
-    const reasoningLevel = this.threads.findById(threadId)?.reasoning_level;
+    const reasoningLevel = await this.supportedStoredReasoningLevel(threadId, execution);
     await this.agentService.sendMessage({
       threadId,
       content: prompt,
@@ -1380,6 +1381,15 @@ export class ThreadControlService {
         : {}),
       ...(mutationReservationToken ? { mutationReservationToken } : {}),
     });
+  }
+
+  private async supportedStoredReasoningLevel(threadId: string, execution: ResolvedExecution): Promise<ReasoningLevel | undefined> {
+    const level = this.threads.findById(threadId)?.reasoning_level;
+    if (!level) return undefined;
+
+    const models = await this.models.listModels(execution.providerId);
+    const model = models.find((candidate) => candidate.id === execution.modelId) ?? null;
+    return modelSupportsReasoningLevel(model, level) ? level : undefined;
   }
 
   private async respondToMutationApproval(
