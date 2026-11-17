@@ -37,10 +37,11 @@ export function FilesViewControls({ kind, mode, scale, size, dimensions, onModeC
   );
 }
 
-// Shown at every width because an icon toggle hid which mode is on; the path pill beside it fades first.
+// Shown at every width because an icon toggle hid which mode is on; in a narrow row the path pill gives way to it.
+// `data-files-mode` is the hook FilesHeader's path pill uses to know it shares the row with this pill.
 function ModePill({ mode, onChange }: { readonly mode: FileViewMode; readonly onChange: (mode: FileViewMode) => void }) {
   return (
-    <div role="radiogroup" aria-label="View" className="flex shrink-0 items-center rounded-full bg-selected p-0.5">
+    <div role="radiogroup" aria-label="View" data-files-mode="" className="flex shrink-0 items-center rounded-full bg-selected p-0.5">
       {MODE_OPTIONS.map((option) => (
         <button
           key={option.value}
