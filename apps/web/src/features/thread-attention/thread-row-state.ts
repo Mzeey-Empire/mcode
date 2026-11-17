@@ -1,4 +1,4 @@
-import { isTurnSeen, type ThreadAttention } from "@mcode/contracts/models/thread-attention";
+import { isTurnSeen, threadHasRunningDescendants, type ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 /** Third-line label for a thread that is blocked on the user. */
@@ -38,7 +38,7 @@ const needsYou = (label: NeedsYouLabel): ThreadRowState => ({ kind: "needs-you",
  * never created the thread, so nothing on it can run or wait. A blocking question outranks a running turn because
  * the turn cannot progress without the user; a plan only matters once the turn
  * that wrote it stops. Settled outcomes show only until the user sees them.
- * Delegated tasks still running after the thread's own turn keep it running,
+ * Delegated tasks or background subagents still running after the thread's own turn keep it running,
  * below anything that needs the user and above an unseen settled outcome.
  */
 export function deriveThreadRowState(facts: ThreadRowFacts): ThreadRowState {
@@ -46,7 +46,7 @@ export function deriveThreadRowState(facts: ThreadRowFacts): ThreadRowState {
   const live = liveRowState(facts);
   if (live) return live;
   const settled = settledRowState(facts);
-  if (facts.attention?.hasUnfinishedDelegatedTasks && settled.kind !== "needs-you") return { kind: "running" };
+  if (facts.attention && threadHasRunningDescendants(facts.attention) && settled.kind !== "needs-you") return { kind: "running" };
   return settled;
 }
 

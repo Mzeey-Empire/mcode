@@ -122,7 +122,7 @@ import { WorkspaceTerminalPreferencesService } from "../../features/terminal/pre
 import { TerminalDiagnosticsService } from "../../features/terminal/diagnostics/terminal-diagnostics-service.js";
 import { MessageRepo } from "../../features/agents/conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
-import { invalidateAttentionOnSettledTurns, notifyTasksOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
+import { invalidateAttentionOnSettledTurns, invalidateAttentionOnSubagentChange, notifyTasksOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
 import { ThreadAutoCompleteService } from "../../features/thread-control/lifecycle/thread-auto-complete.js";
 import { subscribeCommittedCanonicalEvents } from "../../features/agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../../features/thread-control/attention/approval-waiting-source.js";
@@ -569,6 +569,7 @@ bindTurnFileEvidenceLedger(fileEvidenceLedger);
 const threadAttentionService = new ThreadAttentionService(db, databaseWriter,
   [approvalWaitingSource(approvalService), planWaitingSource(db, "questions"), planWaitingSource(db, "plan")],
   delegatedTaskService,
+  agentWorkload,
   (attention) => broadcast("thread.attention", attention));
 threadRepo.attention = threadAttentionService;
 workerOwnedTurnRuntime.bindPlanPhaseChanged((threadId) => threadRepo.publishPlanPhase(threadId));
@@ -576,6 +577,7 @@ turnSnapshotRepo.attention = threadAttentionService;
 snapshotRefPins.attention = threadAttentionService;
 invalidateAttentionOnSettledTurns(threadAttentionService, subscribeCommittedCanonicalEvents);
 const stopObservingDelegatedAttention = delegatedTaskService.onRosterChanged((coordinatorThreadId) => threadAttentionService.invalidate(coordinatorThreadId));
+const stopObservingSubagentAttention = invalidateAttentionOnSubagentChange(threadAttentionService, agentWorkload);
 const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService, {
   threads: threadRepo, providers: providerRegistry, commands: container.resolve(AGENT_TURN_COMMAND_PORT),
   startups: threadStartupService, messages: messageRepo, threadService,
@@ -1328,6 +1330,7 @@ async function shutdown(): Promise<void> {
       stopObservingDelegatedStartups();
       stopObservingDelegatedTurns();
       stopObservingDelegatedAttention();
+      stopObservingSubagentAttention();
       shutdownCoordinator.setPhase("close application database writer");
       fileEvidenceLedger.close();
       await captureCleanupFailure(() => databaseWriter.close());

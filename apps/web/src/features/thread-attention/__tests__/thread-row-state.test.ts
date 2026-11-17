@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createMockThreadAttention } from "@mcode/contracts/testing";
 import { threadAttentionNeedsUser, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import {
@@ -16,20 +17,23 @@ function attention({
   turnSequence = 8,
   seen = null,
   delegating = false,
+  background = false,
 }: {
   waiting?: ThreadWaitingKind | null;
   outcome?: TurnOutcome | null;
   turnSequence?: number;
   seen?: number | null;
   delegating?: boolean;
+  background?: boolean;
 }): ThreadAttention {
-  return {
+  return createMockThreadAttention({
     threadId: "a",
     waiting: waiting ? { kind: waiting, since: AT } : null,
     lastTurn: outcome ? { outcome, endedAt: AT, sequence: turnSequence, changedFileCount: null } : null,
     seen: { sequence: seen, at: seen === null ? null : AT },
     hasUnfinishedDelegatedTasks: delegating,
-  };
+    hasRunningBackgroundSubagents: background,
+  });
 }
 
 function facts(overrides: Partial<ThreadRowFacts>): ThreadRowFacts {
@@ -60,6 +64,7 @@ describe("deriveThreadRowState", () => {
     attention({ outcome: "interrupted", seen: 8 }),
     attention({ outcome: "cancelled" }),
     attention({ delegating: true }),
+    attention({ outcome: "completed", seen: 8, background: true }),
   ])("agrees with the shared quiet rule for %j", (input) => {
     expect(deriveThreadRowState(facts({ attention: input })).kind === "quiet")
       .toBe(!threadAttentionNeedsUser(input));
@@ -96,6 +101,11 @@ describe("deriveThreadRowState", () => {
     ["unseen interrupted over delegating", facts({ attention: attention({ outcome: "interrupted", delegating: true }) }), interrupted],
     ["plan ready over delegating", facts({ attention: attention({ waiting: "plan", outcome: "completed", delegating: true }) }), plan],
     ["failed create over running and approval", facts({ createFailed: true, running: true, attention: attention({ waiting: "approval" }) }), FAILED],
+    ["background subagent after a seen completed turn is running", facts({ attention: attention({ outcome: "completed", seen: 8, background: true }) }), RUNNING],
+    ["background subagent over unseen finished", facts({ attention: attention({ outcome: "completed", background: true }) }), RUNNING],
+    ["approval over background subagent", facts({ attention: attention({ waiting: "approval", outcome: "completed", background: true }) }), approval],
+    ["questions over background subagent", facts({ attention: attention({ waiting: "questions", outcome: "completed", background: true }) }), answers],
+    ["unseen interrupted over background subagent", facts({ attention: attention({ outcome: "interrupted", background: true }) }), interrupted],
     ["delegating stays running while on screen", facts({ onScreen: true, attention: attention({ outcome: "completed", delegating: true }) }), RUNNING],
   ])("%s", (_name, input, expected) => {
     expect(deriveThreadRowState(input)).toEqual(expected);

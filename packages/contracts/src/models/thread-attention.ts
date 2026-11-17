@@ -28,6 +28,8 @@ export const ThreadAttentionSchema = lazySchema(() => z.object({
   seen: SeenMarkSchema(),
   /** True while any task this thread delegated is unfinished, so the thread reads as running after its own turn ends. */
   hasUnfinishedDelegatedTasks: z.boolean(),
+  /** True while a subagent this thread started in the background still runs after its parent turn ended. */
+  hasRunningBackgroundSubagents: z.boolean(),
 }).strict());
 /** Durable attention facts plus the current live wait, if any. */
 export type ThreadAttention = z.infer<ReturnType<typeof ThreadAttentionSchema>>;
@@ -37,10 +39,15 @@ export function isTurnSeen(turnSequence: number, seenSequence: number | null | u
   return seenSequence !== null && seenSequence !== undefined && seenSequence >= turnSequence;
 }
 
+/** Whether work this thread started, delegated tasks or background subagents, still runs after its own turn. */
+export function threadHasRunningDescendants(attention: ThreadAttention): boolean {
+  return attention.hasUnfinishedDelegatedTasks || attention.hasRunningBackgroundSubagents;
+}
+
 /** Whether attention prevents a thread from becoming quiet or completing automatically. */
 export function threadAttentionNeedsUser(attention: ThreadAttention | null | undefined): boolean {
   if (!attention) return false;
-  if (attention.waiting || attention.hasUnfinishedDelegatedTasks) return true;
+  if (attention.waiting || threadHasRunningDescendants(attention)) return true;
   const turn = attention.lastTurn;
   return turn !== null && turn.outcome !== "cancelled" && !isTurnSeen(turn.sequence, attention.seen.sequence);
 }

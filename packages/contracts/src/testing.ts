@@ -3,12 +3,21 @@ import type { Workspace } from "./models/workspace.js";
 import type { Thread } from "./models/thread.js";
 import type { Message } from "./models/message.js";
 import type { ThreadPullRequest } from "./models/thread-pull-request.js";
+import type { ThreadAttention } from "./models/thread-attention.js";
 
 const DEFAULT_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 
 /** Build a linked PR with valid defaults for contract consumers' tests. */
 export function createMockThreadPullRequest(overrides: Partial<ThreadPullRequest> = {}): ThreadPullRequest {
   return { number: 42, state: "open", title: null, url: null, ...overrides };
+}
+
+/** Build quiet thread attention: no wait, no settled turn, nothing running after the turn. */
+export function createMockThreadAttention(overrides: Partial<ThreadAttention> = {}): ThreadAttention {
+  return {
+    threadId: "thread-1", waiting: null, lastTurn: null, seen: { sequence: null, at: null },
+    hasUnfinishedDelegatedTasks: false, hasRunningBackgroundSubagents: false, ...overrides,
+  };
 }
 
 /** A valid approval used to arrange transport and store tests. */

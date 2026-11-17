@@ -21,6 +21,7 @@ import { useTurnEndings } from "../turn-ending/useTurnEndings";
 import type { ThoughtSegment } from "../narrative/types";
 import type { RunHoldingSignals, RunRetry } from "../narrative/run-status";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { threadHasRunningDescendants } from "@mcode/contracts/models/thread-attention";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
@@ -121,7 +122,10 @@ function useRunHoldingSignals(threadId: string | null | undefined, awaitingAppro
   const retryKind = useThreadRecord(threadId, (record): RunRetry["kind"] | undefined =>
     record.rateLimit ? "rate-limited" : record.apiRetry ? "retrying" : undefined);
   const retryErrorStatus = useThreadRecord(threadId, (record) => record.apiRetry?.errorStatus);
-  const delegatingNow = threadAttentionStore((state) => threadId ? state.byThreadId[threadId]?.hasUnfinishedDelegatedTasks === true : false);
+  const delegatingNow = threadAttentionStore((state) => {
+    const attention = threadId ? state.byThreadId[threadId] : undefined;
+    return attention ? threadHasRunningDescendants(attention) : false;
+  });
   const waitingFor = awaitingApproval ? "approval" : awaitingAnswers ? "answers" : undefined;
   return useMemo<RunHoldingSignals>(() => {
     const retry: RunRetry | undefined =

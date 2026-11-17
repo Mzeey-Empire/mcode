@@ -1,4 +1,4 @@
-import { createMockThread, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockThread, createMockThreadAttention, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
 import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useState } from "react";
@@ -58,13 +58,10 @@ function renderThread(overrides: Partial<Thread> = {}): HTMLElement {
 }
 
 function finished(threadId: string): ThreadAttention {
-  return {
+  return createMockThreadAttention({
     threadId,
-    waiting: null,
     lastTurn: { outcome: "completed", endedAt: "2026-10-27T11:00:00.000Z", sequence: 3, changedFileCount: null },
-    seen: { sequence: null, at: null },
-    hasUnfinishedDelegatedTasks: false,
-  };
+  });
 }
 
 // Width is module state that persists across tests; each test starts at the app's default.

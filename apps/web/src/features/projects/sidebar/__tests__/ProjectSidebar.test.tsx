@@ -1,4 +1,4 @@
-import { createMockThreadPullRequest, createMockThread } from "@mcode/contracts/testing";
+import { createMockThreadPullRequest, createMockThread, createMockThreadAttention } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { StrictMode } from "react";
 import { render, screen, act, fireEvent, within, cleanup } from "@testing-library/react";
@@ -1372,7 +1372,7 @@ describe("ProjectSidebar action-required indicator", () => {
   });
 
   function attention(threadId: string, overrides: Partial<ThreadAttention> = {}): ThreadAttention {
-    return { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null }, hasUnfinishedDelegatedTasks: false, ...overrides };
+    return createMockThreadAttention({ threadId, ...overrides });
   }
 
   function waitingOn(kind: ThreadWaitingKind): Pick<ThreadAttention, "waiting"> {
