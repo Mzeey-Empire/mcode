@@ -240,8 +240,11 @@ export function listProviderModels(providerId: string): readonly ModelDefinition
  * to their family (`swe-2`) through the same prefix rule.
  */
 function matchDatedVariant(id: string, providerId?: string): ModelDefinition | undefined {
-  return [...SORTED_ALL_MODELS, ...dynamicModelsSorted].find((m) =>
-    (providerId === undefined || m.providerId === providerId) && id.startsWith(`${m.id}-`));
+  const matches = (m: ModelDefinition) => (providerId === undefined || m.providerId === providerId) && id.startsWith(`${m.id}-`);
+  const live = dynamicModelsSorted.find(matches);
+  const fixed = SORTED_ALL_MODELS.find(matches);
+  // Live defs win a tie, as in exact lookups, so a dated id gets the capabilities the provider reported.
+  return live && fixed && fixed.id.length > live.id.length ? fixed : live ?? fixed;
 }
 
 /**

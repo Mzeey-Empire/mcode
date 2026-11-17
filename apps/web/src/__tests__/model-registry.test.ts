@@ -614,6 +614,7 @@ describe("normalizeReasoningLevel", () => {
     ]);
     try {
       expect(normalizeReasoningLevel("claude", "claude-sonnet-4-6", "xhigh")).toBe("xhigh");
+      expect(normalizeReasoningLevel("claude", "claude-sonnet-4-6-20260101", "xhigh")).toBe("xhigh");
       expect(normalizeReasoningLevel("claude", "claude-sonnet-7", "low")).toBe("high");
     } finally {
       registerProviderModels("claude", []);
