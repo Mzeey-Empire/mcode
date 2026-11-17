@@ -359,7 +359,8 @@ const workspaceEnvironmentService = container.resolve(WorkspaceEnvironmentServic
 const projectActionService = container.resolve(ProjectActionService);
 const threadService = container.resolve(ThreadService);
 const agentService = container.resolve(AgentService);
-const agentWorkload = new AgentWorkloadService(agentService.runtimeAccess(), container.resolve(CanonicalAgentBoundary));
+const agentWorkload = new AgentWorkloadService(agentService.runtimeAccess(), container.resolve(CanonicalAgentBoundary),
+  container.resolve(WorkerOwnedTurnRuntime).progress);
 container.registerInstance(AgentWorkloadService, agentWorkload);
 const stopObservingAgentWorkload = agentWorkload.observeCommittedEvents();
 workspaceEnvironmentService.setAutomaticSetupDispatcher({

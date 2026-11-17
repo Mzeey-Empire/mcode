@@ -1,4 +1,5 @@
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
 import type { AgentRuntimeAccess } from "../orchestration/turn-runtime-controller.js";
@@ -12,7 +13,7 @@ export interface AgentWorkload {
   onSubagentChange(listener: (threadId: string) => void): () => void;
 }
 
-/** Maintains background occupancy only from durable canonical changes. */
+/** Maintains background occupancy from durable canonical changes, plus launches accepted but not yet saved. */
 export class AgentWorkloadService implements AgentWorkload {
   private readonly subagents = new Map<string, Set<string>>();
   private readonly listeners = new Set<(threadId: string) => void>();
@@ -20,11 +21,15 @@ export class AgentWorkloadService implements AgentWorkload {
   constructor(
     private readonly runtime: Pick<AgentRuntimeAccess, "activeTurnThreadIds">,
     private readonly canonical: Pick<CanonicalAgentBoundary, "listRunningBackgroundSubagentIds">,
+    private readonly accepted?: Pick<CanonicalAcceptedProgress, "unsavedThreadIds">,
   ) {}
 
   /** Read current occupancy without database access. */
   count(): number {
-    return new Set([...this.runtime.activeTurnThreadIds(), ...this.subagents.keys()]).size;
+    // A turn's reservation ends without waiting for its writes, so a launch still queued for SQLite is
+    // counted from the accepted owner until its saved event refreshes `subagents`.
+    return new Set([...this.runtime.activeTurnThreadIds(), ...this.subagents.keys(),
+      ...this.accepted?.unsavedThreadIds(touchesBackgroundCalls) ?? []]).size;
   }
 
   /**
@@ -70,7 +75,7 @@ export class AgentWorkloadService implements AgentWorkload {
   }
 }
 
-function touchesBackgroundCalls(event: CanonicalAgentEventEnvelope): boolean {
+function touchesBackgroundCalls(event: Pick<CanonicalAgentEventEnvelope, "payload">): boolean {
   const payload = event.payload;
   if (payload.type === "publication.recorded") return payload.event.type === "toolBackgrounded";
   if (payload.type !== "item.recorded" || payload.item.kind !== "tool-call") return false;

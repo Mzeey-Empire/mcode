@@ -21,7 +21,7 @@ import { workerLossIncidentId } from "../execution/execution-worker-loss-coordin
 import type { TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import { publishTurnPersisted } from "../execution/turn-persisted-publication.js";
 import { admittedSessionId, coverageOf, type CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
-import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalAgentBoundary, type CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
@@ -1003,6 +1003,20 @@ export class CanonicalAcceptedProgress {
     ];
     this.acceptAuxiliary(thread, `late-tool:${record.id}`, execution, events, "post-terminal");
     thread.publicationSequence += 1;
+  }
+
+  /**
+   * Threads named by accepted events that match and are not yet in SQLite. A turn's worker can be released while
+   * its writes are still queued, so a reader of saved state alone would miss work the provider already started.
+   */
+  unsavedThreadIds(matches: (event: CanonicalAgentEventDraft) => boolean): string[] {
+    const ids = new Set<string>();
+    for (const thread of this.threads.values()) {
+      for (const batch of thread.owner.recoveryCut().retained) {
+        for (const { draft } of batch.events) if (matches(draft)) ids.add(draft.routing.threadId);
+      }
+    }
+    return [...ids];
   }
 
   /** Resolve once every accepted write for the thread has reached SQLite, releasing its owner slot. */
