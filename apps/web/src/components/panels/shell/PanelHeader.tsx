@@ -137,7 +137,7 @@ export function PanelTitle({
         role={headingLevel ? "heading" : undefined}
         aria-level={headingLevel}
         data-testid="panel-title"
-        className="text-fade min-w-0 max-w-80 text-sm/5 font-medium text-ink"
+        className="text-fade min-w-0 text-sm/5 font-medium text-ink"
       >
         {children}
       </span>

@@ -160,9 +160,9 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
   const header = (
     <PanelHeaderSlot slot="leading">
       <PanelTitle id="project-settings-title" headingLevel={2} icon={<Settings className="size-3.5" aria-hidden />}>
-        {/* The tool's name leads, as on every other tool's title; the project it configures follows, muted.
-            Unlike the other tools it is not per-thread, and the chooser that said so is gone once it opens. */}
-        Project settings <span className="text-muted">{projectName} · all threads</span>
+        {/* The tool's name leads, as on every other tool's title; the project it configures follows, muted. "Project"
+            already says it is not per-thread, and a longer scope note was cut off at the default window width. */}
+        Project settings <span className="text-muted">{projectName}</span>
       </PanelTitle>
     </PanelHeaderSlot>
   );
