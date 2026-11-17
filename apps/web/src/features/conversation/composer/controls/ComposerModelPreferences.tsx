@@ -160,7 +160,8 @@ function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenc
     fast: state.fast.kind === "absent"
       ? null
       : {
-          on: state.fast.kind === "on" || state.fast.kind === "cooling",
+          // The user's choice sets the radio; the status only dims it, so a chosen Fast that cannot run still shows.
+          on: getFastMode(selection, actionProps.defaults),
           blockedReason: fastModeBlockedReason(state.fast),
           note: state.fast.kind === "cooling" ? FAST_MODE_COOLING_COPY : null,
           // Matching the provider's default stores no override, so the thread keeps following the setting.

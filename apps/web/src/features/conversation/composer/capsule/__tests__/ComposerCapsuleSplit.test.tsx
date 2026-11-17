@@ -458,6 +458,8 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
       expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast is cooling down.");
 
       fireEvent.click(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }));
+      expect(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }))
+        .toHaveAttribute("aria-checked", "true");
       expect(fastOption()).not.toBeDisabled();
       fireEvent.click(fastOption());
       expect(fastOption()).toHaveAttribute("aria-checked", "true");
@@ -473,12 +475,31 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
       expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast needs extra usage turned on.");
     });
 
+    it("keeps a chosen Fast selected but dimmed while it is unavailable, and lets Standard clear it", async () => {
+      serveClaudeFast();
+      reportStatus({ modelId: CLAUDE_FAST.id, state: "off", unavailable: "extra_usage" });
+      renderStatefulSplit({ ...CLAUDE_SELECTION, fastMode: true });
+      expect(screen.queryByTestId("composer-fast-mode-icon")).toBeNull();
+      await openModelPicker();
+
+      expect(fastOption()).toHaveAttribute("aria-checked", "true");
+      expect(fastOption()).toBeDisabled();
+      expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast needs extra usage turned on.");
+
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }));
+      expect(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }))
+        .toHaveAttribute("aria-checked", "true");
+      expect(fastOption()).toHaveAttribute("aria-checked", "false");
+    });
+
     it("drops Fast from the model part's name while Fast cools down", async () => {
       serveClaudeFast();
       reportStatus({ modelId: CLAUDE_FAST.id, state: "cooldown" });
       await renderSplit({ threadId: THREAD_ID, selection: { ...CLAUDE_SELECTION, fastMode: true } });
 
-      expect(screen.getByRole("button", { name: /^Model: .*High reasoning$/ })).toBeInTheDocument();
+      const modelPart = screen.getByRole("button", { name: /^Model: / });
+      expect(modelPart).toHaveAccessibleName(/High reasoning/);
+      expect(modelPart).not.toHaveAccessibleName(/Fast/);
       expect(screen.queryByTestId("composer-fast-mode-icon")).toBeNull();
     });
   });
