@@ -57,6 +57,9 @@ export class FakeVirtualViewport {
 
   // jsdom has no layout: nothing scrolls, so chrome that tracks rows sees an empty scroller.
   readonly clientHeight = 0;
+  get content(): HTMLElement {
+    return this.viewport;
+  }
   onLayout(): () => void {
     return () => {};
   }
