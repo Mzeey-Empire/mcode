@@ -77,6 +77,11 @@ const HANDBACK_FRAME_PREFIX = "[Subagent hand-back] ";
 const HANDBACK_REPORT_INDENT = "  ";
 const AGENT_RESUME_TRAILER = /^agentId: \S+ \(use SendMessage/;
 type BackgroundToolStatus = ProviderBackgroundToolSettlement["status"];
+/**
+ * The task list names a launch by its description, falling back to the command. A restart note names a stopped
+ * command by what it ran and a subagent by its description, so the two labels differ for a described Bash call.
+ */
+interface LaunchLabels { task: string; call: string }
 
 /** State read by the Claude SDK event mapper. */
 export interface ClaudeMappedSession {
@@ -132,7 +137,7 @@ export type ClaudeMapOutcome = "none" | "turn_complete" | "result_error";
 /** Converts Claude SDK messages to provider-neutral events. */
 export class ClaudeEventMapper {
   private lastFastStatus: string | undefined;
-  private readonly launchLabels = new Map<string, string>();
+  private readonly launchLabels = new Map<string, LaunchLabels>();
   private liveTasks: ReadonlyMap<string, NativeBackgroundTask> | null = null;
   // Ambient tasks keep their first sighting too, so flipping ambient and back cannot restart the native cap.
   private levelFirstSeenAt = new Map<string, number>();
@@ -367,8 +372,12 @@ export class ClaudeEventMapper {
       const oldest = this.launchLabels.keys().next().value;
       if (oldest !== undefined) this.launchLabels.delete(oldest);
     }
+    const description = stringValue(input.description);
     const command = toolName === "Bash" ? stringValue(input.command) : "";
-    this.launchLabels.set(toolCallId, launchLabel(stringValue(input.description) || command || toolName));
+    this.launchLabels.set(toolCallId, {
+      task: launchLabel(description || command || toolName),
+      call: launchLabel(toolName === "Bash" ? command : description),
+    });
   }
 
   private settleBackgroundTool(toolCallId: string, executionId: string, status: BackgroundToolStatus, output: string): void {
@@ -871,11 +880,12 @@ export class ClaudeEventMapper {
     this.callbacks.getSession()?.pendingToolUses.delete(toolCallId);
     if (!this.backgroundTools.has(toolCallId) && this.backgroundTools.size >= MAX_TRACKED_TOOLS)
       throw new Error("Claude background tool bound exceeded");
-    const label = this.launchLabels.get(toolCallId) ?? toolName;
+    const labels = this.launchLabels.get(toolCallId);
     this.launchLabels.delete(toolCallId);
-    this.backgroundTools.set(toolCallId, { executionId, taskId, startedAt: Date.now(), label });
+    this.backgroundTools.set(toolCallId, { executionId, taskId, startedAt: Date.now(), label: labels?.task ?? toolName });
     this.backgroundDirty = true;
-    this.emit({ type: AgentEventType.ToolBackgrounded, threadId: this.threadId, toolCallId });
+    this.emit({ type: AgentEventType.ToolBackgrounded, threadId: this.threadId, toolCallId,
+      kind: toolName === "Agent" ? "subagent" : "command", label: labels?.call ?? "" });
   }
   private streamEvent(message: Message): ClaudeMapOutcome {
     const event = objectValue(message.event);

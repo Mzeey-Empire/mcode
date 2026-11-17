@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
+import { BackgroundCallKindSchema } from "../events/agent-event.js";
 
 /** Maximum persisted length of a sub-agent display identity. */
 export const SUBAGENT_DISPLAY_NAME_MAX_LENGTH = 96;
@@ -312,6 +313,8 @@ export const ToolCallRecordSchema = lazySchema(() => z.object({
    * leaves such a running call open; only its own late result or a stop settles it.
    */
   background: z.boolean().optional(),
+  background_kind: BackgroundCallKindSchema().optional(),
+  background_label: z.string().max(500).optional(),
   started_at: z.string(),
   completed_at: z.string().nullable(),
   sort_order: z.number(),
