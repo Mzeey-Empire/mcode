@@ -117,23 +117,23 @@ describe("ClaudeProvider.complete()", () => {
     }
   });
 
-  it("retries failed probes, caches successful probes, and runs JavaScript with node", async () => {
+  it("runs a JavaScript entry point with node, and probes its version only for status", async () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-complete-"));
     const executable = NodePath.join(root, "cli.js");
     NodeFS.writeFileSync(executable, "fixture");
     const host = fixtureHost();
-    const run = vi.fn().mockResolvedValueOnce({ stdout: "", stderr: "" }).mockResolvedValue({ stdout: sdkMetadata.claudeCodeVersion, stderr: "" });
+    const run = vi.fn().mockResolvedValue({ stdout: sdkMetadata.claudeCodeVersion, stderr: "" });
     host.processes.run = run;
     const installed = new RuntimeClaudeProvider(host, { cliPath: executable, idleSessionTtlMs: 600_000 });
     mockQuery.mockImplementation(createMockSdkQuery("completed"));
     try {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        expect(await installed.complete("hello", "model", process.cwd())).toBe("completed");
-      }
-      expect(run).toHaveBeenCalledTimes(2);
-      expect(run.mock.calls[0][0]).toMatchObject({ args: [executable, "--version"] });
-      expect(NodePath.basename(run.mock.calls[0][0].command).toLowerCase()).toMatch(/^node(?:\.exe)?$/);
+      expect(await installed.complete("hello", "model", process.cwd())).toBe("completed");
+      expect(run).not.toHaveBeenCalled();
       expect(mockQuery.mock.calls[0][0].options).toMatchObject({ executable: "node", pathToClaudeCodeExecutable: executable });
+      await installed.describeStatus();
+      const probe = run.mock.calls.find(([request]) => request.args?.includes("--version"))?.[0];
+      expect(probe).toMatchObject({ args: [executable, "--version"] });
+      expect(NodePath.basename(probe.command).toLowerCase()).toMatch(/^node(?:\.exe)?$/);
     } finally {
       await installed.shutdown();
       NodeFS.rmSync(root, { recursive: true, force: true });

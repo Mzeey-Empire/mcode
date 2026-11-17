@@ -847,7 +847,6 @@ export class ClaudeProvider
     cwd: string,
     options: CompletionOptions = {},
   ): Promise<string> {
-    await this.requireClaudeInstallation();
     const executable = this.resolveClaudeExecutable();
     const ownedProcess = this.createOwnedClaudeProcess("completion");
     try {
@@ -1705,7 +1704,8 @@ export class ClaudeProvider
     params: ClaudeSendMessageParams,
     routing: ClaudeCanonicalEventRouting,
   ): Promise<void> {
-    await this.requireClaudeInstallation();
+    // Fail a send to a missing Claude Code before any session state changes.
+    this.resolveClaudeExecutable();
     const {
       sessionId,
       message,
@@ -1847,25 +1847,6 @@ export class ClaudeProvider
 
   private resolveClaudeExecutable(): string {
     return resolveClaudeExecutable(this.configuration.cliPath, this.host.environment.snapshot(), this.host.runtime.platform);
-  }
-
-  private claudeVersionCheck: { executable: string; result: ReturnType<typeof checkClaudeVersion> } | undefined;
-
-  private async checkInstalledClaude(executable: string, refresh = false): ReturnType<typeof checkClaudeVersion> {
-    if (refresh || this.claudeVersionCheck?.executable !== executable) {
-      const env = this.host.environment.snapshot();
-      const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.host.runtime.platform, env });
-      const result = await checkClaudeVersion(run, executable);
-      if (result.installed) this.claudeVersionCheck = { executable, result: Promise.resolve(result) };
-      else this.claudeVersionCheck = undefined;
-      return result;
-    }
-    return this.claudeVersionCheck.result;
-  }
-
-  private async requireClaudeInstallation(): Promise<void> {
-    const executable = this.resolveClaudeExecutable();
-    await this.checkInstalledClaude(executable);
   }
 
   private startClaudeSdkQuery(
@@ -3077,7 +3058,7 @@ export class ClaudeProvider
         problem: error instanceof Error ? error.message : "Claude Code is not installed.",
       } };
     }
-    const version = await this.checkInstalledClaude(executable, true);
+    const version = await checkClaudeVersion(run, executable);
     return {
       ...await describeClaudeAuth(run, cliPath, env),
       cli: { ...version, managedBy: "user" as const, resolvedPath: executable, npmPackage: "@anthropic-ai/claude-code" },
