@@ -553,7 +553,6 @@ interface ClaudeTurnContext {
   threadId: string;
   cwd: string;
   model: string;
-  sdkModelSlug: string;
 }
 
 interface ClaudeBrowserReuseState {
@@ -1180,9 +1179,8 @@ export class ClaudeProvider
     threadId: string,
     cwd: string,
     model: string,
-    sdkModelSlug: string,
   ): ClaudeTurnContext {
-    return { params, routing, prompt, threadId, cwd, model, sdkModelSlug };
+    return { params, routing, prompt, threadId, cwd, model };
   }
 
   private async tryReuseClaudeSession(
@@ -1332,10 +1330,10 @@ export class ClaudeProvider
     if (existing.model === context.model) return true;
     logger.info("Model changed, calling setModel()", {
       sessionId: context.params.sessionId,
-      model: context.sdkModelSlug,
+      model: context.model,
     });
     try {
-      await existing.query.setModel(context.sdkModelSlug);
+      await existing.query.setModel(context.model);
       existing.model = context.model;
       return true;
     } catch (error) {
@@ -1417,7 +1415,7 @@ export class ClaudeProvider
     const mcode = await this.host.mcode.attach({ providerId: this.id, sessionId: context.params.sessionId, threadId: context.threadId, threadControl: true });
     const sdk = {
       cwd: context.cwd,
-      model: context.sdkModelSlug,
+      model: context.model,
       settingSources: ["user", "project", "local"],
       systemPrompt: { type: "preset", preset: "claude_code" },
       tools: { type: "preset", preset: "claude_code" },
@@ -1712,7 +1710,6 @@ export class ClaudeProvider
     const tid = uuid;
     const resolvedCwd = cwd || process.cwd();
     const resolvedModel = model || "claude-sonnet-4-6";
-    const sdkModelSlug = resolvedModel;
 
     const prompt = await this.createClaudePrompt(
       message,
@@ -1727,7 +1724,6 @@ export class ClaudeProvider
       tid,
       resolvedCwd,
       resolvedModel,
-      sdkModelSlug,
     );
     const reuseOutcome = await this.tryReuseClaudeSession(context, existing, {
       scope: browserScope,
