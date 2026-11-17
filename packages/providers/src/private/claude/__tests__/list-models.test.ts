@@ -77,6 +77,12 @@ describe("listClaudeModels", () => {
     });
   });
 
+  it("keeps catalog efforts when Claude Code reports none for a known model", async () => {
+    initialize.mockResolvedValue({ models: [{ value: "claude-opus-5", displayName: "Opus", description: "" }] });
+    expect((await listClaudeModels(resolveOptions)).find((model) => model.id === "claude-opus-5"))
+      .toEqual(CLAUDE_STATIC_MODELS.find((model) => model.id === "claude-opus-5"));
+  });
+
   it.each([
     [["low", "medium"], undefined],
     [["low", "high"], "high"],

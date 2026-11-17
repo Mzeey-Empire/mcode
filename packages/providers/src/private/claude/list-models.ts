@@ -22,11 +22,13 @@ function fromCliModel(info: ModelInfo, id: string): ProviderModelInfo {
   });
 }
 
-function withCliEffort(known: ProviderModelInfo, cli: ProviderModelInfo): ProviderModelInfo {
-  const efforts = cli.supportedReasoningEfforts ?? [];
+/** Claude Code builds that report no effort fields leave the catalog's efforts in place. */
+function withCliEffort(known: ProviderModelInfo, info: ModelInfo): ProviderModelInfo {
+  if (info.supportsEffort === undefined && info.supportedEffortLevels === undefined) return known;
+  const efforts = info.supportsEffort === false ? [] : info.supportedEffortLevels ?? known.supportedReasoningEfforts ?? [];
   return {
     ...known,
-    supportsReasoning: cli.supportsReasoning,
+    supportsReasoning: efforts.length > 0,
     supportedReasoningEfforts: efforts,
     defaultReasoningEffort: known.defaultReasoningEffort && efforts.includes(known.defaultReasoningEffort)
       ? known.defaultReasoningEffort : undefined,
@@ -44,8 +46,7 @@ function mapModels(reported: ModelInfo[]): ProviderModelInfo[] {
     if (seen.has(id)) continue;
     seen.add(id);
     const known = models.get(id);
-    const cli = fromCliModel(info, id);
-    models.set(id, known ? withCliEffort(known, cli) : cli);
+    models.set(id, known ? withCliEffort(known, info) : fromCliModel(info, id));
   }
   return [...models.values()];
 }
