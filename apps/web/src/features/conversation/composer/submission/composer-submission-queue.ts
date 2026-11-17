@@ -3,7 +3,7 @@ import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-pr
 import { collectBrowserCaptureSpillPaths, releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { stripPreviewAnnotationFence } from "@/features/preview/capture/preview-annotation-append";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
-import type { ComposerAgentSelection, ComposerFormController } from "../draft/useComposerFormController";
+import type { ComposerFormController } from "../draft/useComposerFormController";
 import type { ComposerQueueEdit } from "../queue/useComposerQueueEditing";
 import { queueHoldingDraftElements } from "../queue/queued-draft-holds";
 import type { PreparedComposerSubmission } from "./composer-submission-types";
@@ -80,7 +80,7 @@ function createPersistentQueuePayload(
     orchestrationMode: selection.orchestrationMode,
     provider: selection.provider,
     thinking: selection.thinking ?? undefined,
-    fastMode: optionalFastMode(selection),
+    fastMode: selection.fastMode ?? undefined,
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
     goalObjective: submission.goalObjective,
     browserCaptureSpillPaths: browserCaptureSpillPaths.length > 0 ? browserCaptureSpillPaths : undefined,
@@ -90,9 +90,4 @@ function createPersistentQueuePayload(
 /** Returns mentions only when the queue entry has at least one. */
 function optionalMentions(mentions: MessageMention[]): MessageMention[] | undefined {
   return mentions.length > 0 ? mentions : undefined;
-}
-
-/** Turn admission drops Fast for models without it, so every provider may carry the choice. */
-function optionalFastMode(selection: ComposerAgentSelection): boolean | undefined {
-  return selection.fastMode ?? undefined;
 }
