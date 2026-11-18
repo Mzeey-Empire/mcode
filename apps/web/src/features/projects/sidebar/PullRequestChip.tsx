@@ -143,9 +143,11 @@ function PullRequestListPopup({ payload, returnFocus }: { payload: PullRequestLi
       <MenuPrimitive.Positioner side="right" align="start" sideOffset={8} className="pointer-events-none isolate z-(--layer-modal) data-anchor-hidden:invisible">
         {/* A hover open focuses the popup itself, which Chromium can match as :focus-visible after typing;
             its PR lines carry the visible focus, so the surface draws no ring. */}
+        {/* The list grows to fit its titles from the thread card's width (w-80) up to w-112, never
+            past the space beside the sidebar; a title longer than that keeps its line's right-edge fade. */}
         <MenuPrimitive.Popup
           finalFocus={returnFocus}
-          className={cn("pointer-events-auto w-80 max-h-[min(var(--available-height),24rem)] overflow-hidden outline-none", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS, POPOVER_FADE_CLASS)}
+          className={cn("pointer-events-auto w-max min-w-[min(--spacing(80),var(--available-width))] max-w-[min(--spacing(112),var(--available-width))] max-h-[min(var(--available-height),24rem)] overflow-hidden outline-none", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS, POPOVER_FADE_CLASS)}
         >
           {/* The fade masks only this inner scroller, so the surface and its border stay whole. It
               stays block layout: as a flex column, a long list squeezed its 24px lines instead of scrolling. */}
