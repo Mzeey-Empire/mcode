@@ -14,6 +14,21 @@ export function useSidebarNarrow(): boolean {
   return useSidebarWidthStore((state) => state.width < SIDEBAR_NARROW_WIDTH);
 }
 
+/**
+ * Sidebar width below which a By project row shows its status icon alone. Measured, not chosen:
+ * at 438px the longest meta line ("Approval required" beside a "2163 +2" chip) first keeps 20
+ * branch characters; below it the status word squeezes the branch to a stub.
+ */
+export const SIDEBAR_STATUS_WORD_WIDTH = 440;
+
+/**
+ * True while the sidebar is narrower than {@link SIDEBAR_STATUS_WORD_WIDTH}. A boolean selector,
+ * so rows re-render only when the tier flips, not on every resize step.
+ */
+export function useSidebarStatusIconOnly(): boolean {
+  return useSidebarWidthStore((state) => state.width < SIDEBAR_STATUS_WORD_WIDTH);
+}
+
 /** The list's shared label tooltip. Null outside a list, where icons render without one. */
 export const SidebarLabelHandleContext = createContext<TooltipHandle<string> | null>(null);
 

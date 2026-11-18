@@ -33,7 +33,7 @@ import { selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
 import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
 import { ThreadOptionsMenu, useThreadMenuOpenFor, type ThreadMenuActions } from "./thread-menu";
-import { DraftTag, IconOnlyStatus, useSidebarNarrow } from "./sidebar-label-tooltip";
+import { DraftTag, IconOnlyStatus, useSidebarNarrow, useSidebarStatusIconOnly } from "./sidebar-label-tooltip";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -403,6 +403,9 @@ function GroupedThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation } = props;
   const pr = usePullRequestChip(thread);
   const narrow = useSidebarNarrow();
+  // The meta line shares its width with the branch, so the status word yields earlier here than
+  // in the Threads view, whose status sits on the roomier project line.
+  const statusIconOnly = useSidebarStatusIconOnly();
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <ThreadRowTitleLine {...props} iconOnlyDraft={narrow} />
@@ -411,7 +414,7 @@ function GroupedThreadRowBody(props: ThreadRowBodyProps) {
         thread={thread}
         presentation={presentation}
         chip={pr.chip}
-        trailing={<ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={narrow} fallback={<ThreadRowTime thread={thread} />} />} />}
+        trailing={<ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={statusIconOnly} fallback={<ThreadRowTime thread={thread} />} />} />}
       />
       {pr.list}
     </div>

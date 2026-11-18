@@ -26,6 +26,7 @@ import { useProjectTreeMenus } from "../../ProjectTree";
 import { SidebarList } from "../SidebarList";
 import { useSidebarModel } from "../use-sidebar-model";
 import { PREVIEW_SCROLL_SETTLE_MS } from "../preview-scroll-guard";
+import { SIDEBAR_STATUS_WORD_WIDTH } from "../sidebar-label-tooltip";
 import { FakeVirtualViewport } from "./fake-virtual-viewport";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useThreadStore } from "@/stores/threadStore";
@@ -87,6 +88,7 @@ describe("SidebarThreadRow", () => {
   });
 
   it("keeps the status icon and drops its label while the row actions show", () => {
+    useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH });
     act(() => threadAttentionStore.getState().apply(finished("t1")));
     const row = renderThread();
     const status = () => screen.getByTestId("thread-status");
@@ -607,6 +609,7 @@ describe("SidebarThreadRow", () => {
     });
 
     it("keeps the status label beside the Draft tag", () => {
+      useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH });
       act(() => threadAttentionStore.getState().apply(finished("t1")));
       useComposerDraftStore.setState({ drafts: { t1: composer({ input: "half typed" }) } });
       const row = renderThread();
@@ -668,10 +671,22 @@ describe("SidebarThreadRow", () => {
       expect(screen.getByText("Approval required")).toBeTruthy();
     });
 
-    it("keeps status labels on wide grouped rows", () => {
+    it("shows a grouped row's status as its named icon below the status word width, and its word at it", () => {
+      useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH - 1 });
       act(() => threadAttentionStore.getState().apply(finished("t1")));
       renderThread();
+      const status = screen.getByTestId("thread-status");
+      expect(within(status).queryByText("Finished")).toBeNull();
+      expect(within(status).getByRole("img", { name: "Finished" })).toBeVisible();
+
+      act(() => useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH }));
       expect(within(screen.getByTestId("thread-status")).getByText("Finished")).toBeTruthy();
+    });
+
+    it("keeps a quiet grouped row's time as text below the status word width", () => {
+      useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH - 1 });
+      renderThread({ last_activity_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString() });
+      expect(within(screen.getByTestId("thread-status")).getByText("5h")).toBeTruthy();
     });
   });
 });
