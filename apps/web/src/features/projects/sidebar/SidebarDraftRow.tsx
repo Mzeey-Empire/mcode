@@ -139,7 +139,8 @@ function DraftCorner({ draft, onDiscard }: Pick<DraftRowProps, "draft" | "onDisc
   const edited = useRelativeTime(new Date(draft.updatedAt).toISOString());
   return (
     <div className="relative grid shrink-0 items-center justify-items-end">
-      <span className="col-start-1 row-start-1 text-caption tabular-nums text-muted transition-opacity group-hover/row:opacity-0 group-focus-visible/row:opacity-0">
+      {/* The time and the trash swap in one frame: a crossfade draws "4m" over the trash icon. */}
+      <span className="col-start-1 row-start-1 text-caption tabular-nums text-muted group-hover/row:opacity-0 group-focus-visible/row:opacity-0">
         {edited}
       </span>
       <Tooltip>
@@ -156,7 +157,7 @@ function DraftCorner({ draft, onDiscard }: Pick<DraftRowProps, "draft" | "onDisc
                 event.stopPropagation();
                 onDiscard(draft.id);
               }}
-              className="col-start-1 row-start-1 size-5 shrink-0 rounded-md p-0 text-muted opacity-0 shadow-none transition-opacity hover:bg-transparent hover:text-ink group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100"
+              className="col-start-1 row-start-1 size-5 shrink-0 rounded-md p-0 text-muted opacity-0 shadow-none hover:bg-transparent hover:text-ink group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100"
             >
               <Trash2 size={12} aria-hidden />
             </Button>
