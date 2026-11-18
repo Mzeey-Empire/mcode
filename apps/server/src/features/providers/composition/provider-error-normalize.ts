@@ -33,13 +33,13 @@ function cursorRateLimitMessage(original: string): string {
 function cliNotFoundMessage(providerId: string): string {
   switch (providerId) {
     case "claude":
-      return "Claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-code\n\nOr set a custom path in Settings > Model.";
+      return "Claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-code\n\nOr set a custom path in Settings > Providers.";
     case "codex":
-      return "Codex CLI not found. Install it with: npm install -g @openai/codex\n\nOr set a custom path in Settings > Model.";
+      return "Codex CLI not found. Install it with: npm install -g @openai/codex\n\nOr set a custom path in Settings > Providers.";
     case "copilot":
-      return "Copilot CLI not found. Install it with: npm install -g @github/copilot\n\nOr set a custom path in Settings > Provider > Copilot CLI path.";
+      return "Copilot CLI not found. Install it with: npm install -g @github/copilot\n\nOr set a custom path in Settings > Providers > Copilot CLI path.";
     default:
-      return `${providerId} CLI not found. Check the CLI path in Settings > Model.`;
+      return `${providerId} CLI not found. Check the CLI path in Settings > Providers.`;
   }
 }
 

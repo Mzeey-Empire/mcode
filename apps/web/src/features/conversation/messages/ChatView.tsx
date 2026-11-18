@@ -279,7 +279,7 @@ export function ChatView({ onSubagentSelect, onOpenSubagents }: ChatViewProps = 
     setDismissedErrorState({ error: state.sessionError, threadEpoch });
   }, [state.sessionError, threadEpoch]);
   const handleOpenSettings = useCallback(() => {
-    window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } }));
+    window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "providers" } }));
   }, []);
   const handleSaveTitle = useCallback((title: string) => {
     if (activeThread) updateThreadTitle(activeThread.id, title);

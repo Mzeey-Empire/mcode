@@ -8,6 +8,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { resetThreadStoreForTests, seedThreadRecord } from "@/stores/thread-store-test-utils";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { mockTransport } from "@/__tests__/mocks/transport";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -270,5 +271,24 @@ describe("Composer capsule", () => {
       await screen.findByRole("button", { name: "Send message" });
       expect(screen.queryByTestId("composer-context-label")).not.toBeInTheDocument();
     });
+  });
+
+  it("opens the Providers settings page from the provider unavailable notice", async () => {
+    useProviderAvailabilityStore.setState({
+      providers: [
+        { id: "codex", enabled: false, hasAdapter: true, beta: false, comingSoon: false, capabilities: [], cli: { status: "found", resolvedPath: "/codex", configuredPath: "" } },
+      ],
+    });
+    const opened: unknown[] = [];
+    const listener = (event: Event) => opened.push((event as CustomEvent).detail);
+    window.addEventListener("mcode:open-settings", listener);
+    try {
+      render(<Composer threadId="thread-1" workspaceId="ws-1" />);
+      await userEvent.setup().click(await screen.findByRole("button", { name: "Open Settings" }));
+      expect(opened).toEqual([{ section: "providers" }]);
+    } finally {
+      window.removeEventListener("mcode:open-settings", listener);
+      useProviderAvailabilityStore.setState({ providers: [] });
+    }
   });
 });
