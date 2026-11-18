@@ -197,6 +197,23 @@ describe("ThreadAutoCompleteService", () => {
     { event: "setting disabled", released: false, apply: (f: HoldFixture) => f.threads.updateSettings(f.thread.id, { auto_complete_on_merge: false }) },
     { event: "repeated snapshot", released: false, apply: (f: HoldFixture) => f.funnel.observe(f.thread.id, [MERGED]) },
     { event: "title change", released: false, apply: (f: HoldFixture) => f.funnel.observe(f.thread.id, [{ ...MERGED, title: "Renamed" }]) },
+    { event: "URL-only change", released: false, apply: (f: HoldFixture) => f.funnel.observe(f.thread.id, [{ ...MERGED, url: "https://github.com/example/repo/pull/42" }]) },
+    {
+      event: "branch round trip: links forgotten, then the same merged PR re-linked",
+      released: false,
+      apply: async (f: HoldFixture) => {
+        await f.funnel.forgetBranch(f.thread.id);
+        await f.funnel.observe(f.thread.id, [MERGED]);
+      },
+    },
+    {
+      event: "links forgotten, then a different merged PR linked",
+      released: true,
+      apply: async (f: HoldFixture) => {
+        await f.funnel.forgetBranch(f.thread.id);
+        await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]);
+      },
+    },
     { event: "links forgotten", released: false, apply: (f: HoldFixture) => f.funnel.forgetBranch(f.thread.id) },
     { event: "new merged PR", released: true, apply: (f: HoldFixture) => f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]) },
     {
