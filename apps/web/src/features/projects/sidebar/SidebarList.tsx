@@ -34,6 +34,7 @@ import { SidebarThreadRow } from "./SidebarThreadRow";
 import { freezeOrder, selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 import { PreviewScrollGuard } from "./preview-scroll-guard";
+import { HOVER_ROW_PROPS, HoverGlide } from "./hover-glide";
 import { ThreadPreviewHandleContext, ThreadPreviewTooltip, type ThreadPreviewPayload } from "./SidebarThreadPreview";
 import { createPullRequestListHandle, PullRequestListHandleContext, PullRequestListMenu } from "./PullRequestChip";
 import { createTooltipHandle } from "@/components/ui/tooltip";
@@ -128,7 +129,9 @@ function useSidebarViewport(containerRef: React.RefObject<HTMLDivElement | null>
     const view = new VirtualViewport(container, setHosts, noopViewportPosition, { classPrefix: "project-tree", ariaLabel: "Projects", flowHostId: OLDER_BAR_KEY });
     controllerRef.current = view;
     const detachGuard = previewGuard.attach(view.viewport);
+    const hoverGlide = new HoverGlide(view.viewport, view.content, (listener) => view.onLayout(listener));
     return () => {
+      hoverGlide.destroy();
       detachGuard();
       view.destroy();
       controllerRef.current = null;
@@ -215,7 +218,7 @@ function ShowMoreRow({ item }: { item: Extract<SidebarItem, { kind: "show-more" 
   const toggleShowMore = useSidebarUiStore((state) => state.toggleShowMore);
   const label = item.expanded ? "Show less" : `Show more (${item.hidden})`;
   return (
-    <Button variant="ghost" size="compact" onClick={() => toggleShowMore(item.workspaceId)} className="mt-0.5 mb-1 h-auto w-full justify-start rounded-md px-2 py-1 text-caption font-normal text-muted/55 hover:bg-selected/40 hover:text-ink">
+    <Button {...HOVER_ROW_PROPS} variant="ghost" size="compact" onClick={() => toggleShowMore(item.workspaceId)} className="mt-0.5 mb-1 h-auto w-full justify-start rounded-md px-2 py-1 text-caption font-normal text-muted/55 hover:bg-transparent hover:text-ink dark:hover:bg-transparent">
       {label}
     </Button>
   );

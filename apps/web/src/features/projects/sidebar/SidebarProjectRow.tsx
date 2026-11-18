@@ -36,6 +36,7 @@ import { isInClosedScope, type SidebarItem } from "./sidebar-model";
 import { useCompletionStore } from "./completion-store";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import type { SidebarScope } from "./sidebar-ui-store";
+import { HOVER_ROW_PROPS } from "./hover-glide";
 
 type ProjectItem = Extract<SidebarItem, { kind: "project" }>;
 
@@ -208,6 +209,7 @@ function ProjectWorkspaceRow({
       // screen readers never announce the drag affordance. role stays "group"
       // because the row contains nested buttons; the DragOverlay clone gets no
       // sortable attributes and drops out of the tab order.
+      {...HOVER_ROW_PROPS}
       {...headerSortableAttributes(sortableAttributes)}
       role="group"
       tabIndex={sortableAttributes ? 0 : -1}
@@ -215,7 +217,7 @@ function ProjectWorkspaceRow({
       data-testid={`project-row-${workspace.id}`}
       onClick={actions.toggle}
       className={cn(
-        "group/ws relative flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2 pl-1 text-label text-muted touch-none outline-none hover:bg-selected/40 focus-visible:ring-2 focus-visible:ring-focus/70 has-[[data-project-title]:focus-visible]:ring-2 has-[[data-project-title]:focus-visible]:ring-focus/70",
+        "group/ws relative flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2 pl-1 text-label text-muted touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70 has-[[data-project-title]:focus-visible]:ring-2 has-[[data-project-title]:focus-visible]:ring-focus/70",
         isProjectDragging && "cursor-grabbing",
       )}
       {...sortableListeners}

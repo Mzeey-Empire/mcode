@@ -223,6 +223,11 @@ export class VirtualViewport {
     return this.flow?.host;
   }
 
+  /** The scroll content that holds every row wrapper; children placed here scroll with the rows. */
+  get content(): HTMLElement {
+    return this.context.dom.content;
+  }
+
   /** Visible height of the scroller. */
   get clientHeight(): number {
     return this.viewportHeight;

@@ -35,6 +35,7 @@ import { THREAD_PREVIEW_ID, ThreadPreviewHandleContext } from "./SidebarThreadPr
 import type { CompletionEntry } from "./completion-machine";
 import { ThreadOptionsMenu, useThreadMenuOpenFor, type ThreadMenuActions } from "./thread-menu";
 import { DraftTag, IconOnlyStatus, SidebarLabelTrigger, useSidebarNarrow, useSidebarStatusIconOnly } from "./sidebar-label-tooltip";
+import { HOVER_ROW_PROPS } from "./hover-glide";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -526,6 +527,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
   const menuOpen = useThreadMenuOpenFor(thread.id);
   return (
     <div
+      {...HOVER_ROW_PROPS}
       {...triggerProps}
       ref={ref}
       data-menu-open={menuOpen ? "" : undefined}
@@ -558,7 +560,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
         "group/row relative flex rounded-lg cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         SURFACE_CLASS[variant],
         treeLineClass(variant, treeLine),
-        isActive ? "bg-selected" : "hover:bg-selected/40 data-menu-open:bg-selected/40",
+        isActive && "bg-selected",
         triggerClassName,
       )}
       style={surfacePaddingLeft(variant, depth)}

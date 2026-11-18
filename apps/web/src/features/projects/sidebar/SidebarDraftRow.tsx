@@ -12,6 +12,7 @@ import type { SidebarItem } from "./sidebar-model";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import { DraftTag, useSidebarNarrow } from "./sidebar-label-tooltip";
 import { groupedTreeLineClass, isThreadRowNavigationEvent } from "./SidebarThreadRow";
+import { HOVER_ROW_PROPS } from "./hover-glide";
 
 type DraftItem = Extract<SidebarItem, { kind: "draft" }>;
 
@@ -53,6 +54,7 @@ function DraftRow({ item, workspaceName, draft, isActive, onOpen, onDiscard, onC
   const grouped = item.layout === "grouped";
   return (
     <div
+      {...HOVER_ROW_PROPS}
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
@@ -66,7 +68,7 @@ function DraftRow({ item, workspaceName, draft, isActive, onOpen, onDiscard, onC
         "group/row relative flex rounded-lg cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         SURFACE_CLASS[item.layout],
         grouped && groupedTreeLineClass(item.treeLine),
-        isActive ? "bg-selected" : "hover:bg-selected/40",
+        isActive && "bg-selected",
       )}
     >
       {grouped
