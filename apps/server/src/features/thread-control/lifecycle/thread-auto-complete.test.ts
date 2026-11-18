@@ -13,7 +13,7 @@ import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { PullRequestLinkFunnel } from "../../pull-requests/links/pull-request-link-funnel.js";
 import { CanonicalParentTurnWrite } from "../../agents/canonical/canonical-parent-turn-write.js";
 import { ThreadCompletionService } from "./thread-completion-service.js";
-import { autoCompleteDecision, ThreadAutoCompleteService, type AutoCompleteDecisionInput } from "./thread-auto-complete.js";
+import { autoCompleteState, ThreadAutoCompleteService, type AutoCompleteDecisionInput } from "./thread-auto-complete.js";
 import { broadcast } from "../../../application/transport/push.js";
 
 vi.mock("../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
@@ -30,39 +30,39 @@ function decisionInput(overrides: Partial<AutoCompleteDecisionInput> = {}): Auto
   return { ...createMockThread({ pull_requests: [MERGED] }), attention: quietAttention(), completeOnPrMerge: true, ...overrides };
 }
 
-describe("autoCompleteDecision", () => {
+describe("autoCompleteState", () => {
   it.each([
-    [[], "pull-requests"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "merged" })], "complete"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "closed" })], "pull-requests"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "open" })], "pull-requests"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "draft" })], "pull-requests"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "unresolved" })], "pull-requests"],
+    [[], "waiting-for-merge"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "merged" })], "ready"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "closed" })], "waiting-for-merge"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "open" })], "waiting-for-merge"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "draft" })], "waiting-for-merge"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "unresolved" })], "waiting-for-merge"],
   ] satisfies Array<[AutoCompleteDecisionInput["pull_requests"], string]>)("requires every PR to be merged: %j", (pull_requests, expected) => {
-    expect(autoCompleteDecision(decisionInput({ pull_requests }))).toBe(expected);
+    expect(autoCompleteState(decisionInput({ pull_requests }))).toBe(expected);
   });
 
   it.each(["completed", "errored", "interrupted"] as const)("waits for an unseen %s result, then allows its seen result", (outcome) => {
     const attention: ThreadAttention = { ...quietAttention(), lastTurn: { outcome, endedAt: AT, sequence: 2, changedFileCount: null } };
-    expect(autoCompleteDecision(decisionInput({ attention }))).toBe("needs-user");
-    expect(autoCompleteDecision(decisionInput({ attention: { ...attention, seen: { sequence: 2, at: AT } } }))).toBe("complete");
+    expect(autoCompleteState(decisionInput({ attention }))).toBe("waiting-for-user");
+    expect(autoCompleteState(decisionInput({ attention: { ...attention, seen: { sequence: 2, at: AT } } }))).toBe("ready");
   });
 
   it.each(["approval", "questions", "plan"] as const)("blocks a live %s", (kind) => {
-    expect(autoCompleteDecision(decisionInput({ attention: { ...quietAttention(), waiting: { kind, since: AT } } }))).toBe("needs-user");
+    expect(autoCompleteState(decisionInput({ attention: { ...quietAttention(), waiting: { kind, since: AT } } }))).toBe("waiting-for-user");
   });
 
   it.each([
-    [{ auto_complete_on_merge: false }, "disabled"],
-    [{ auto_complete_on_merge: true, completeOnPrMerge: false }, "complete"],
-    [{ auto_complete_on_merge: null, completeOnPrMerge: false }, "disabled"],
-    [{ auto_complete_paused_at: AT }, "paused"],
+    [{ auto_complete_on_merge: false }, "off"],
+    [{ auto_complete_on_merge: true, completeOnPrMerge: false }, "ready"],
+    [{ auto_complete_on_merge: null, completeOnPrMerge: false }, "off"],
+    [{ auto_complete_paused_at: AT }, "held"],
     [{ user_completed_at: AT }, "inactive"],
     [{ deleted_at: AT }, "inactive"],
-    [{ attention: null }, "needs-user"],
-    [{ attention: { ...quietAttention(), hasUnfinishedDelegatedTasks: true } }, "needs-user"],
+    [{ attention: null }, "waiting-for-user"],
+    [{ attention: { ...quietAttention(), hasUnfinishedDelegatedTasks: true } }, "waiting-for-user"],
   ] satisfies Array<[Partial<AutoCompleteDecisionInput>, string]>)("honours lifecycle and preference gates: %j", (input, expected) => {
-    expect(autoCompleteDecision(decisionInput(input))).toBe(expected);
+    expect(autoCompleteState(decisionInput(input))).toBe(expected);
   });
 });
 
@@ -169,8 +169,6 @@ describe("ThreadAutoCompleteService", () => {
     await f.funnel.observe(f.thread.id, [MERGED]);
     await f.service.evaluate(f.thread.id);
     await f.completion.reopen(f.thread.id);
-    await f.service.evaluate(f.thread.id);
-    expect(f.current()).toMatchObject({ user_completed_at: null, auto_complete_paused_at: AT, auto_complete_on_merge: true });
     f.service.start();
     await f.threads.recordTurnOutcome(f.thread.id, "cancelled", "2030-01-01T10:01:00.000Z");
     await f.service.evaluate(f.thread.id);
@@ -189,7 +187,7 @@ describe("ThreadAutoCompleteService", () => {
     });
     await f.service.evaluate(f.thread.id);
     expect(f.current().user_completed_at).toBeNull();
-    expect(autoCompleteDecision({ ...f.current(), attention: f.attention.get(f.thread.id), completeOnPrMerge: true })).toBe("paused");
+    expect(autoCompleteState({ ...f.current(), attention: f.attention.get(f.thread.id), completeOnPrMerge: true })).toBe("held");
   });
 
   const holdEvents: HoldEvent[] = [

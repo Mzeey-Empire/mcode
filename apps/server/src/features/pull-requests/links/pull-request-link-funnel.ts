@@ -36,9 +36,9 @@ function mirrorPrimaryIntoLegacyColumnsForOlderBuilds(db: Database, threadId: st
     .where(eq(threads.id, threadId)).run();
 }
 
-function clearPauseOnStateChange(db: Database, threadId: string, current: ThreadPullRequest[], next: ThreadPullRequest[]): void {
+function releaseHoldOnPullRequestChange(db: Database, threadId: string, current: ThreadPullRequest[], next: ThreadPullRequest[]): void {
   const previousStates = new Map(current.map((pr) => [pr.number, pr.state]));
-  const changed = current.length !== next.length || next.some((pr) => previousStates.get(pr.number) !== pr.state);
+  const changed = next.some((pr) => !previousStates.has(pr.number) || previousStates.get(pr.number) !== pr.state);
   if (!changed) return;
   db.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(threadId);
 }
@@ -61,7 +61,7 @@ export function observeThreadPullRequests(db: Database, threadId: string, observ
     const next = mergeObservations(current, observations);
     if (JSON.stringify(rankPullRequests(current)) === JSON.stringify(next)) return null;
     writeLinks(db, threadId, next);
-    clearPauseOnStateChange(db, threadId, current, next);
+    releaseHoldOnPullRequestChange(db, threadId, current, next);
     return next;
   })();
 }
@@ -70,7 +70,6 @@ export function observeThreadPullRequests(db: Database, threadId: string, observ
 export function forgetThreadPullRequests(db: Database, threadId: string): ThreadPullRequest[] | null {
   if (readLinks(db, threadId).length === 0) return null;
   writeLinks(db, threadId, []);
-  db.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(threadId);
   return [];
 }
 

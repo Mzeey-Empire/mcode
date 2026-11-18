@@ -268,7 +268,8 @@ The user's own mark on a thread. A user closes a thread when they are done
 with it, and the sidebar's scope bar splits threads into Open and Closed.
 Mcode may also close a thread when its pull requests merge, and it deletes
 closed threads after the retention period in settings. Reopen removes the
-mark. The mark is separate from the agent's run status (active, completed,
+mark and holds automatic closing until a linked pull request changes.
+The mark is separate from the agent's run status (active, completed,
 errored, interrupted, paused), which search filters by; a closed thread can
 still show an active run status. Code keeps the older `completed` names for
 the mark: `user_completed_at`, the completion machine, and the `"completed"`
