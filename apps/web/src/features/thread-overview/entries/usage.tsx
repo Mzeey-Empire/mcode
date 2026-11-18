@@ -34,13 +34,15 @@ function UsageCategory({ category }: { category: QuotaCategory }) {
     : `${shortLabel} usage ${rounded} percent`;
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3 text-xs text-muted">
+      <div className="flex items-baseline justify-between gap-3 text-caption text-muted">
         <span className="text-fade min-w-0">{category.label.trim()}</span>
         <span
           data-testid="thread-overview-usage-value"
-          className={cn("shrink-0 tabular-nums", isNearLimit && "text-primary")}
+          data-near-limit={isNearLimit || undefined}
+          className="shrink-0 tabular-nums"
         >
-          {resetShort ? `${rounded}% · ${resetShort}` : `${rounded}%`}
+          <span className={isNearLimit ? "text-warning" : "text-ink"}>{rounded}% used</span>
+          {resetShort ? ` · ${resetShort}` : null}
         </span>
       </div>
       <div
@@ -49,10 +51,11 @@ function UsageCategory({ category }: { category: QuotaCategory }) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={rounded}
-        className="h-1 w-full overflow-hidden rounded-[2px] bg-hover"
+        data-near-limit={isNearLimit || undefined}
+        className="h-1 w-full overflow-hidden rounded-[2px] bg-border"
       >
         <div
-          className={cn("h-full rounded-[2px]", isNearLimit ? "bg-primary" : "bg-muted")}
+          className={cn("h-full rounded-[2px]", isNearLimit ? "bg-warning" : "bg-muted")}
           style={{ width: `${percent}%` }}
         />
       </div>
@@ -81,16 +84,16 @@ function ThreadOverviewUsage({
 
   return (
     <section data-testid="thread-overview-usage" aria-label={`Usage, ${summary}`} className="px-3 pb-2">
-      <div className="flex h-6 items-center text-xs font-medium text-muted">Usage</div>
+      <div className="flex h-6 items-center text-caption font-medium text-muted">Usage</div>
       <div className="flex flex-col gap-3">
         {categories.map((category) => (
           <UsageCategory key={category.label} category={category} />
         ))}
         {usageStatus === "stale" ? (
-          <div className="text-xs uppercase tracking-wider text-muted/60">STALE</div>
+          <div className="text-caption text-muted">Stale</div>
         ) : null}
         {sessionCostSummary ? (
-          <div className="flex items-baseline justify-between gap-3 text-xs text-muted">
+          <div className="flex items-baseline justify-between gap-3 text-caption text-muted">
             <span className="text-fade min-w-0">Session cost</span>
             <span className="shrink-0 tabular-nums">{sessionCostSummary}</span>
           </div>

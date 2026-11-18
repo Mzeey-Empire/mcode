@@ -490,12 +490,8 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.queryByTestId("thread-overview-usage")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-usage-popover")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-sources")).not.toBeInTheDocument();
-    expect(screen.getByTestId("thread-overview-recap-text")).toHaveTextContent("No recap yet");
-    expect(screen.getByTestId("thread-overview-recap-refresh")).toHaveAttribute(
-      "aria-label",
-      "Refresh recap",
-    );
-    expect(screen.getByTestId("thread-overview-recap")).not.toHaveTextContent(/stale|out of date|generate/i);
+    // A thread with no messages and no recap has nothing to summarise.
+    expect(screen.queryByTestId("thread-overview-recap")).not.toBeInTheDocument();
   });
 
   it("uses the split-arrow worktree icon in the local overview row for worktree threads", () => {
@@ -582,12 +578,18 @@ describe("HeaderActions - consolidated header", () => {
     const coverage = screen.getByTestId("thread-overview-recap-coverage");
     expect(coverage).toHaveAttribute("aria-label", expect.stringContaining("Covered through"));
     expect(coverage).toHaveAttribute("aria-label", expect.stringContaining("Latest activity"));
-    expect(screen.getByTestId("thread-overview-recap")).not.toHaveTextContent(/stale|out of date|generate/i);
+    expect(coverage).toHaveTextContent("Out of date");
+    expect(screen.getByTestId("thread-overview-recap")).not.toHaveTextContent(/stale|generate/i);
   });
 
   it("renders usage limits as always-open neutral progress bars when quota data exists", () => {
     mockGetProviderUsage.mockResolvedValue(CLAUDE_USAGE);
     seedThreadUsage("thread-1", CLAUDE_USAGE);
+    useThreadStore.setState((state) => ({
+      records: patchThreadRecord(new Map(state.records), "thread-1", {
+        messages: [createMockMessage({ thread_id: "thread-1", content: "Hello" })],
+      }),
+    }));
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
 
     const usage = screen.getByTestId("thread-overview-usage");
@@ -600,7 +602,7 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.getByText("5-hour limit")).toBeInTheDocument();
     expect(screen.getByText("Weekly limit")).toBeInTheDocument();
     const values = screen.getAllByTestId("thread-overview-usage-value");
-    expect(values.map((value) => value.textContent)).toEqual(["12% · resets Jul 3", "47% · resets Jul 7"]);
+    expect(values.map((value) => value.textContent)).toEqual(["12% used · resets Jul 3", "47% used · resets Jul 7"]);
     expect(screen.getByRole("progressbar", { name: /5-hour usage 12 percent\. Resets in/ })).toHaveAttribute(
       "aria-valuenow",
       "12",
@@ -643,14 +645,15 @@ describe("HeaderActions - consolidated header", () => {
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
 
     const values = screen.getAllByTestId("thread-overview-usage-value");
-    const fills = screen.getAllByRole("progressbar").map((bar) => bar.firstElementChild);
-    expect(values[0]).toHaveTextContent("89%");
-    expect(values[0]).not.toHaveClass("text-primary");
+    const bars = screen.getAllByRole("progressbar");
+    const fills = bars.map((bar) => bar.firstElementChild);
+    expect(values[0]).toHaveTextContent("89% used");
+    expect(bars[0]).not.toHaveAttribute("data-near-limit");
     expect(fills[0]).toHaveClass("bg-muted");
-    expect(values[1]).toHaveTextContent("100%");
-    expect(values[1]).toHaveClass("text-primary");
-    expect(fills[1]).toHaveClass("bg-primary");
-    expect(screen.getByTestId("thread-overview-usage").innerHTML).not.toMatch(/destructive|diff-add|diff-remove/);
+    expect(values[1]).toHaveTextContent("100% used");
+    expect(bars[1]).toHaveAttribute("data-near-limit", "true");
+    expect(fills[1]).toHaveClass("bg-warning");
+    expect(screen.getByTestId("thread-overview-usage").innerHTML).not.toMatch(/destructive|primary|diff-add|diff-remove/);
   });
 
   it("does not render Codex usage before provider quota data arrives", () => {

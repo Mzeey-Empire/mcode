@@ -7,7 +7,7 @@ import { useOverviewMessages } from "@/features/thread-overview/use-overview-mes
 import { useThreadRecap } from "@/hooks/useThreadRecap";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
-import { Info, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 interface ThreadOverviewRecapRowProps {
   recapText: string | null;
@@ -54,7 +54,13 @@ function ThreadOverviewRecapControls({
 
   return (
     <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
-      {coverageLabel ? <ThreadOverviewRecapCoverage coverageLabel={coverageLabel} /> : null}
+      {coverageLabel ? (
+        <ThreadOverviewRecapCoverage
+          coverageLabel={coverageLabel}
+          isGenerating={isGenerating}
+          onRefresh={onRefresh}
+        />
+      ) : null}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -66,7 +72,7 @@ function ThreadOverviewRecapControls({
               aria-label={refreshLabel}
               disabled={isGenerating}
               onClick={onRefresh}
-              className={cn("group shrink-0", isGenerating && "text-muted/45")}
+              className={cn("group -my-1 shrink-0", isGenerating && "text-muted/45")}
             >
               <RefreshCw
                 size={13}
@@ -82,26 +88,28 @@ function ThreadOverviewRecapControls({
   );
 }
 
-/** Explains which thread activity the current recap covers. */
+/** Flags a recap that trails recent activity; clicking it refreshes the recap. */
 function ThreadOverviewRecapCoverage({
   coverageLabel,
-}: {
+  isGenerating,
+  onRefresh,
+}: Pick<ThreadOverviewRecapRowProps, "isGenerating" | "onRefresh"> & {
   coverageLabel: NonNullable<ReturnType<typeof getThreadRecapCoverageLabel>>;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button
-            variant="ghost"
-            size="icon-compact"
+          <button
             type="button"
             data-testid="thread-overview-recap-coverage"
-            aria-label={`Covered through ${coverageLabel.coveredThrough}. Latest activity ${coverageLabel.latestActivityAt}`}
-            className="shrink-0 text-muted/55 hover:text-muted focus-visible:text-muted"
+            aria-label={`Out of date, refresh recap. Covered through ${coverageLabel.coveredThrough}. Latest activity ${coverageLabel.latestActivityAt}`}
+            disabled={isGenerating}
+            onClick={onRefresh}
+            className="shrink-0 rounded-sm px-1 text-caption text-muted hover:text-ink focus-visible:text-ink disabled:pointer-events-none"
           >
-            <Info size={12} aria-hidden />
-          </Button>
+            Out of date
+          </button>
         }
       />
       <TooltipContent side="bottom" align="end" className="flex-col items-start gap-0.5">
@@ -121,7 +129,6 @@ function ThreadOverviewRecapRow({
   error,
   onRefresh,
 }: ThreadOverviewRecapRowProps) {
-  const label = recapText ?? (error ? "Recap unavailable" : "No recap yet");
   const refreshLabel = isGenerating ? "Refreshing recap" : "Refresh recap";
   const coverageLabel = getThreadRecapCoverageLabel({
     hasCoverageGap,
@@ -132,10 +139,10 @@ function ThreadOverviewRecapRow({
   return (
     <div
       data-testid="thread-overview-recap"
-      className="w-full px-3 py-2.5"
+      className="w-full px-3 pb-2"
     >
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <span className="shrink-0 text-xs font-medium text-muted">Recap</span>
+      <div className="flex h-6 min-w-0 items-center justify-between gap-2">
+        <span className="shrink-0 text-caption font-medium text-muted">Recap</span>
         <ThreadOverviewRecapControls
           coverageLabel={coverageLabel}
           isGenerating={isGenerating}
@@ -147,7 +154,7 @@ function ThreadOverviewRecapRow({
           data-testid="thread-overview-recap-skeleton"
           role="status"
           aria-label={refreshLabel}
-          className="mt-2 flex w-full flex-col gap-1.5"
+          className="mt-1 flex w-full flex-col gap-1.5"
         >
           <span className="sr-only">{refreshLabel}</span>
           {[0, 1, 2].map((i) => (
@@ -162,15 +169,27 @@ function ThreadOverviewRecapRow({
             />
           ))}
         </div>
+      ) : !recapText && error ? (
+        <p data-testid="thread-overview-recap-text" className="mt-1 text-caption text-muted">
+          Couldn't generate recap{" "}
+          <button
+            type="button"
+            data-testid="thread-overview-recap-retry"
+            onClick={onRefresh}
+            className="rounded-sm text-ink underline-offset-2 hover:underline focus-visible:underline"
+          >
+            Retry
+          </button>
+        </p>
       ) : (
         <p
           data-testid="thread-overview-recap-text"
           className={cn(
-            "mt-2 max-w-[26rem] whitespace-normal break-words text-xs leading-[1.45]",
+            "mt-1 max-w-[26rem] whitespace-normal break-words text-caption leading-[1.45]",
             recapText ? "text-ink/85" : "text-muted",
           )}
         >
-          {label}
+          {recapText ?? "No recap yet"}
         </p>
       )}
     </div>
@@ -180,11 +199,12 @@ function ThreadOverviewRecapRow({
 function useRecapState(thread: Thread) {
   const { open } = useOverviewContext();
   const sourceMessages = useOverviewMessages(thread.id, open);
-  return useThreadRecap({
+  const recap = useThreadRecap({
     threadId: thread.id,
     messages: sourceMessages,
     overviewOpen: open,
   });
+  return { ...recap, hasMessages: sourceMessages.length > 0 };
 }
 
 /** Preserves Recap request state and refs while the overview is closed. */
@@ -192,6 +212,10 @@ export const { Provider: RecapEntryState, useEntryState: useRecapEntryState } = 
 
 function RecapEntry() {
   const threadRecap = useRecapEntryState();
+  // An empty thread has nothing to summarise, so an idle Recap block there is only noise.
+  const hasRecapContent = threadRecap.hasMessages || threadRecap.recapText !== null
+    || threadRecap.isGenerating || threadRecap.error !== null;
+  if (!hasRecapContent) return null;
   return (<>
     <ThreadOverviewRecapRow
       recapText={threadRecap.recapText}
