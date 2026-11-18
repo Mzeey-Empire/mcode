@@ -104,8 +104,31 @@ const planTheme = EditorView.theme({
     color: "var(--color-ink)",
   },
   [`.${PLAN_EDITOR_CLASS.summary}`]: { color: "var(--color-muted)" },
-  [`.${PLAN_EDITOR_CLASS.label}`]: { fontSize: "1.2rem", lineHeight: "1.6rem", color: "var(--color-muted)" },
+  [`.${PLAN_EDITOR_CLASS.section}`]: {
+    paddingTop: "0.8rem",
+    fontSize: "1.6rem",
+    lineHeight: "2.4rem",
+    fontWeight: "600",
+    color: "var(--color-ink)",
+  },
+  [`.${PLAN_EDITOR_CLASS.subsection}`]: {
+    fontSize: "1.4rem",
+    lineHeight: "2rem",
+    fontWeight: "600",
+    color: "var(--color-ink)",
+  },
+  // Padding sets the item's text column and the matching negative indent pulls
+  // the marker back into it, so wrapped lines start under the text.
+  [`.${PLAN_EDITOR_CLASS.listLine}`]: {
+    paddingLeft: "calc(var(--plan-list-depth, 1) * 2rem)",
+    textIndent: "-2rem",
+  },
+  ".cm-plan-list-depth-2": { "--plan-list-depth": "2" },
+  ".cm-plan-list-depth-3": { "--plan-list-depth": "3" },
+  ".cm-plan-list-depth-4": { "--plan-list-depth": "4" },
   [`.${PLAN_EDITOR_CLASS.listMarker}`]: {
+    // An inline-block inherits the line's negative indent, which would push the bullet out of its box.
+    textIndent: "0",
     display: "inline-block",
     width: "2rem",
     fontFamily: "var(--font-mono)",

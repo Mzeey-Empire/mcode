@@ -6,8 +6,10 @@ type PlanSyntaxNode = ReturnType<typeof parser.parse>["topNode"];
 export const PLAN_EDITOR_CLASS = {
   title: "cm-plan-title",
   summary: "cm-plan-summary",
-  label: "cm-plan-label",
+  section: "cm-plan-section",
+  subsection: "cm-plan-subsection",
   listMarker: "cm-plan-list-marker",
+  listLine: "cm-plan-list-line",
   code: "cm-plan-code",
   codeBlock: "cm-plan-code-block",
   rule: "cm-plan-rule",
@@ -33,8 +35,8 @@ export interface PlanLineSpan {
 
 /**
  * Computes the read-view decorations for a plan's markdown: the first H1 is the
- * title, the paragraph right after it is the summary, later headings are
- * labels, list markers sit in a mono column with bullets drawn as dots, fenced
+ * title, the paragraph right after it is the summary, later H1 and H2 headings
+ * are sections, H3 to H6 are subsections, list markers sit in a mono column with bullets drawn as dots, fenced
  * code reads as a code block, and markdown syntax marks are hidden.
  * Sorted by position so the result is stable and easy to compare.
  */
@@ -57,6 +59,7 @@ const PREVIEW_ONLY_CLASSES: ReadonlySet<string> = new Set([
 ]);
 
 function isPreviewOnly(range: PlanDecorationRange): boolean {
+  if (range.kind === "line" && range.className.startsWith(PLAN_EDITOR_CLASS.listLine)) return true;
   if (range.kind === "line" || range.kind === "mark") return PREVIEW_ONLY_CLASSES.has(range.className);
   return true;
 }
@@ -95,8 +98,9 @@ function blockClass(
   const h1 = name === "ATXHeading1" || name === "SetextHeading1";
   if (h1 && !position.titleSeen) return PLAN_EDITOR_CLASS.title;
   if (name === "Paragraph" && position.summaryPending) return PLAN_EDITOR_CLASS.summary;
-  // Agents often write later sections as H1s, so every heading after the title is a label.
-  if (h1 || /^(ATXHeading[2-6]|SetextHeading2)$/.test(name)) return PLAN_EDITOR_CLASS.label;
+  // Agents often write later sections as H1s, so an H1 after the title is a section, not a second title.
+  if (h1 || name === "ATXHeading2" || name === "SetextHeading2") return PLAN_EDITOR_CLASS.section;
+  if (/^ATXHeading[3-6]$/.test(name)) return PLAN_EDITOR_CLASS.subsection;
   return null;
 }
 
@@ -159,11 +163,37 @@ function fenceDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRan
   return ranges;
 }
 
+// The deepest nesting level the theme indents; deeper items share its column.
+const MAX_LIST_DEPTH = 4;
+
+function listDepth(node: PlanSyntaxNode): number {
+  let depth = 0;
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.name === "BulletList" || parent.name === "OrderedList") depth += 1;
+  }
+  return Math.min(Math.max(depth, 1), MAX_LIST_DEPTH);
+}
+
+// A wrapped item's later lines hang under its text, so the item's line is
+// indented by its depth in marker columns. The source indentation before a
+// nested marker has no fixed width, so it is hidden and the depth class draws
+// the nesting instead.
+function listLineDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRange[] {
+  const lineStart = text.lastIndexOf("\n", node.from - 1) + 1;
+  const depth = listDepth(node);
+  const className = depth === 1 ? PLAN_EDITOR_CLASS.listLine : `${PLAN_EDITOR_CLASS.listLine} cm-plan-list-depth-${depth}`;
+  const ranges: PlanDecorationRange[] = [{ kind: "line", from: lineStart, className }];
+  const indentOnly = /^[ \t]*$/.test(text.slice(lineStart, node.from));
+  if (indentOnly && node.from > lineStart) ranges.push({ kind: "hide", from: lineStart, to: node.from });
+  return indentOnly ? ranges : [];
+}
+
 // The marker column has a fixed width, so the space after the marker is hidden.
 // A bullet's "-", "*" or "+" is drawn as a dot; ordered markers keep their number.
 function listMarkDecorations(text: string, node: PlanSyntaxNode): PlanDecorationRange[] {
   const bullet = node.parent?.parent?.name === "BulletList";
   const ranges: PlanDecorationRange[] = [
+    ...listLineDecorations(text, node),
     bullet
       ? { kind: "replace", from: node.from, to: node.to, text: "•", className: PLAN_EDITOR_CLASS.listMarker }
       : { kind: "mark", from: node.from, to: node.to, className: PLAN_EDITOR_CLASS.listMarker },

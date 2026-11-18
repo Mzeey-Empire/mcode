@@ -88,13 +88,13 @@ describe("ProjectSettingsPanel", () => {
     transport.readWorkspaceEnvironment.mockResolvedValue(result([]));
     const user = userEvent.setup();
     render(<ProjectSettingsPanel workspaceId="workspace-1" />);
-    await screen.findByText("No actions");
+    await screen.findByText("Actions run project commands, like tests or a dev server, from Terminal's + menu.");
 
     // getByRole throws on a second match, so this also proves the header copy is gone.
     await user.click(screen.getByRole("button", { name: "Add action" }));
 
     expect(await screen.findByLabelText("Action name")).toHaveValue("action");
-    expect(screen.queryByText("No actions")).toBeNull();
+    expect(screen.queryByText("Actions run project commands, like tests or a dev server, from Terminal's + menu.")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Add action" })).toHaveLength(1);
   });
 
