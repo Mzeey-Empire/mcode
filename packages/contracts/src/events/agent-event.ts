@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FastModeStatusSchema } from "../models/fast-mode.js";
 
 /** Live events are replaced by saved records; saved events retain their published form. */
 export const AgentEventDelivery = { Live: "live", Saved: "saved" } as const;
@@ -52,6 +53,7 @@ export const AgentEventType = {
   QuotaUpdate: "quotaUpdate",
   ProviderUnavailable: "providerUnavailable",
   RateLimited: "rateLimited",
+  FastModeStatus: "fastModeStatus",
   ApiRetry: "apiRetry",
   HookStarted: "hookStarted",
   HookProgress: "hookProgress",
@@ -304,6 +306,12 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
        * enforces this at emission, and consumers can rely on the invariant.
        */
       configuredPath: z.string().optional(),
+    }),
+    z.object({
+      /** Reports whether Fast is running, cooling down, or unavailable for the model. */
+      type: z.literal(AgentEventType.FastModeStatus),
+      threadId: z.string(),
+      status: FastModeStatusSchema(),
     }),
     z.object({
       /** Emitted when the provider starts or stops rejecting requests for its rate limit. */

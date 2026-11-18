@@ -1785,7 +1785,7 @@ function validNarrativeEvent(event: ExecutionLivePublicationIntent["event"]): bo
     : [
       "reasoningDelta", "assistantMessageBoundary", "toolUse", "toolResult", "toolBackgrounded", "hookStarted", "hookCompleted", "approvalDecided",
       "modelFallback", "toolInputDelta", "toolProgress", "providerUnavailable", "hookProgress",
-      "apiRetry", "rateLimited", "quotaUpdate", "goalUpdated", "goalCleared", "mcpServerStartupStatus",
+      "apiRetry", "rateLimited", "fastModeStatus", "quotaUpdate", "goalUpdated", "goalCleared", "mcpServerStartupStatus",
     ].includes(event.type);
 }
 

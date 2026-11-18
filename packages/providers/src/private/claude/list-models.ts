@@ -19,16 +19,18 @@ function fromCliModel(info: ModelInfo, id: string): ProviderModelInfo {
     supportsReasoning: info.supportsEffort ?? Boolean(info.supportedEffortLevels?.length),
     supportedReasoningEfforts: info.supportsEffort === false ? [] : info.supportedEffortLevels,
     id,
+    supportsFastMode: info.supportsFastMode === true,
     name: info.displayName.trim() || id,
   });
 }
 
 /** Claude Code builds that report no effort fields leave the catalog's efforts in place. */
-function withCliEffort(known: ProviderModelInfo, info: ModelInfo): ProviderModelInfo {
-  if (info.supportsEffort === undefined && info.supportedEffortLevels === undefined) return known;
+function withCliCapabilities(known: ProviderModelInfo, info: ModelInfo): ProviderModelInfo {
+  const capabilities = { ...known, supportsFastMode: info.supportsFastMode === true };
+  if (info.supportsEffort === undefined && info.supportedEffortLevels === undefined) return capabilities;
   const efforts = info.supportsEffort === false ? [] : info.supportedEffortLevels ?? known.supportedReasoningEfforts ?? [];
   return {
-    ...known,
+    ...capabilities,
     supportsReasoning: efforts.length > 0,
     supportedReasoningEfforts: efforts,
     defaultReasoningEffort: known.defaultReasoningEffort && efforts.includes(known.defaultReasoningEffort)
@@ -47,7 +49,7 @@ function mapModels(reported: ModelInfo[]): ProviderModelInfo[] {
     if (seen.has(id)) continue;
     seen.add(id);
     const known = models.get(id);
-    models.set(id, known ? withCliEffort(known, info) : fromCliModel(info, id));
+    models.set(id, known ? withCliCapabilities(known, info) : fromCliModel(info, id));
   }
   return [...models.values()];
 }

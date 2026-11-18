@@ -494,6 +494,7 @@ interface PendingSpawnTurn {
   uuid: string;
   /** Fully-built SDK query options sans the resume/sessionId discriminator. */
   baseOptions: ClaudeBaseOptions;
+  flags: ClaudeFlagSettings;
   /** Model id the session spawns with. */
   resolvedModel: string;
   /** Orchestration mode encoded into the session's flag settings. */
@@ -539,6 +540,7 @@ interface ClaudeSendMessageParams {
   reasoningLevel?: ReasoningLevel;
   orchestrationMode: OrchestrationMode;
   thinking?: boolean;
+  fastMode?: boolean;
   maxBudgetUsd?: number;
   maxTurns?: number;
 }
@@ -800,6 +802,7 @@ export class ClaudeProvider
       reasoningLevel: req.reasoningLevel,
       orchestrationMode: req.orchestrationMode ?? "standard",
       thinking: req.providerOptions.thinking,
+      fastMode: req.providerOptions.fastMode,
       maxBudgetUsd: req.maxBudgetUsd,
       maxTurns: req.maxTurns,
     };
@@ -1258,7 +1261,7 @@ export class ClaudeProvider
     context: ClaudeTurnContext,
     existing: ClaudeSessionState,
   ): Promise<boolean> {
-    if (!(await this.updateClaudeOrchestrationMode(context, existing)))
+    if (!(await this.applyClaudeFlagSettings(context, existing)))
       return false;
     if (!(await this.updateClaudeSessionModel(context, existing)))
       return false;
@@ -1285,7 +1288,7 @@ export class ClaudeProvider
     }
   }
 
-  private async updateClaudeOrchestrationMode(
+  private async applyClaudeFlagSettings(
     context: ClaudeTurnContext,
     existing: ClaudeSessionState,
   ): Promise<boolean> {
@@ -1298,7 +1301,7 @@ export class ClaudeProvider
       existing.orchestrationMode = context.params.orchestrationMode;
       return true;
     } catch (error) {
-      logger.error("Ultracode mode change failed, recreating session", {
+      logger.error("Claude flag settings change failed, recreating session", {
         sessionId: context.params.sessionId,
         orchestrationMode: context.params.orchestrationMode,
         error: sideChannelErrorMessage(error),
@@ -1430,7 +1433,6 @@ export class ClaudeProvider
       ...(context.params.fallbackModel && {
         fallbackModel: context.params.fallbackModel,
       }),
-      settings: claudeFlagSettings(context.params),
       includePartialMessages: true,
       ...(context.params.maxBudgetUsd != null &&
         context.params.maxBudgetUsd > 0 && {
@@ -1533,6 +1535,7 @@ export class ClaudeProvider
       resumeId,
       uuid: context.threadId,
       baseOptions,
+      flags: claudeFlagSettings(context.params),
       resolvedModel: context.model,
       orchestrationMode: context.params.orchestrationMode,
       planTurn: context.params.planTurn,
@@ -1797,6 +1800,7 @@ export class ClaudeProvider
     );
     const options = {
       ...sdk,
+      settings: staged.flags,
       systemPrompt: {
         type: "preset" as const,
         preset: "claude_code" as const,
@@ -1881,7 +1885,7 @@ export class ClaudeProvider
       closeQueue: queue.close,
       model: staged.resolvedModel,
       contextProbe: 0,
-      flags: claudeFlagSettings(staged),
+      flags: staged.flags,
       permissionMode: args.permissionMode,
       planTurn: staged.planTurn,
       planCaptured: false,

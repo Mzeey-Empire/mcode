@@ -207,7 +207,7 @@ function createdFastMode(
   thread: Omit<CreateAndSendResult, "runtimeSnapshot" | "warnings">,
   pending: PendingThreadCreation | undefined,
 ): boolean | null {
-  return (pending?.provider === "codex" ? pending.fastMode ?? null : null)
+  return pending?.fastMode
     ?? thread.fast_mode
     ?? null;
 }
@@ -474,7 +474,7 @@ function placeholderWorktreeSettings(pending: PendingThreadCreation) {
 
 function placeholderProviderSettings(pending: PendingThreadCreation) {
   return {
-    fastMode: pending.provider === "codex" ? (pending.fastMode ?? null) : null,
+    fastMode: pending.fastMode ?? null,
     devinMode: pending.provider === "devin" ? (pending.devinMode ?? null) : null,
   };
 }
@@ -579,7 +579,7 @@ function pendingCreationWithCurrentDraft(
     model: draft.modelId,
     provider: draft.provider,
     reasoningLevel: draft.reasoning,
-    fastMode: draft.provider === "codex" ? draft.fastMode ?? undefined : undefined,
+    fastMode: draft.fastMode ?? undefined,
     devinMode: draft.provider === "devin" ? draft.devinMode ?? undefined : undefined,
     composerDraft: draft,
   };

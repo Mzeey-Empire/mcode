@@ -3052,6 +3052,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     quotaUpdate: handleQuotaUpdate,
     providerUnavailable: ignoreAgentEvent,
     rateLimited: handleRateLimited,
+    fastModeStatus: (event) => patchRec(event.threadId, { fastStatus: event.status }),
     apiRetry: handleApiRetry,
     hookStarted: handleHookStarted,
     hookProgress: handleHookProgress,

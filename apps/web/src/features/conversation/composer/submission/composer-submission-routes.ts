@@ -216,7 +216,7 @@ function branchThreadAgentOptions(selection: ComposerAgentSelection) {
     approvalReviewMode: selection.approvalReviewMode,
     reasoningLevel: selection.reasoning,
     thinking: selection.thinking ?? undefined,
-    fastMode: selection.provider === "codex" ? selection.fastMode ?? undefined : undefined,
+    fastMode: selection.fastMode ?? undefined,
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
     orchestrationMode: selection.orchestrationMode,
   };

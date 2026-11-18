@@ -56,8 +56,8 @@ describe("TurnRequest providerOptions discrimination", () => {
       permissionMode: "full",
       approvalReviewMode: "manual",
       interactionMode: "build",
-      // @ts-expect-error fastMode is a Codex knob, not valid on a Claude request
-      providerOptions: { fastMode: true },
+      // @ts-expect-error mode is a Devin knob, not valid on a Claude request
+      providerOptions: { mode: "agent" },
     };
     void bad;
     expect(true).toBe(true);

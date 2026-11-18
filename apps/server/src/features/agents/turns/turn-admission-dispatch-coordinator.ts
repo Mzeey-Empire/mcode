@@ -55,6 +55,7 @@ import type { ExecutionIdentity } from "../execution/execution-mailbox-protocol.
 import type { ExecutionParentStartContext } from "../execution/provider-execution-event-state.js";
 import type { ProviderSwitchService, ProviderSwitchTicket } from "./provider-switch-service.js";
 import { TurnAdmissionError } from "@mcode/shared/turn-admission";
+import { fastModeDefault } from "@mcode/shared";
 
 
 /** Automatic setup dispatch contract exposed to the turn command facade. */
@@ -1275,9 +1276,7 @@ export class TurnAdmissionDispatchCoordinator {
     prepared: PreparedCommand,
     settings: ReturnType<SettingsService["get"]>,
   ): boolean {
-    // Only Codex has a global Fast default so far; other providers start standard.
-    const globalDefault = prepared.providerId === "codex" ? settings.provider?.codex?.fastMode : undefined;
-    return command.fastMode ?? prepared.thread.fast_mode ?? globalDefault ?? false;
+    return command.fastMode ?? prepared.thread.fast_mode ?? fastModeDefault(settings, prepared.providerId);
   }
 
   private providerSpecificOptions(
@@ -1333,4 +1332,3 @@ export function supportsInternalThreadControl(provider: ProviderId): boolean {
 function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-

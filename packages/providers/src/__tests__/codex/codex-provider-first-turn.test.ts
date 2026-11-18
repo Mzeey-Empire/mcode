@@ -249,6 +249,21 @@ describe("CodexProvider first turn on new session", () => {
     await provider.shutdown();
   });
 
+  it.each([true, false])("reports actual Fast tier: %s", async (fastMode) => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.observeCanonicalEvents(event => events.push(event));
+    await provider.sendTurn({
+      turnId: "fast-status", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+      threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: { fastMode }, permissionMode: "supervised",
+    });
+    await vi.waitFor(() => expect(events.filter(({ event }) => event.type === "fastModeStatus").map(({ event }) => event)).toEqual([
+      { type: "fastModeStatus", threadId, turnExecutionId: schemaValidExecutionId, status: { modelId: "gpt-5.4", state: fastMode ? "on" : "off" } },
+    ]));
+    await provider.shutdown();
+  });
+
   it.each([false, true])("enriches a file approval from native changes arriving late: %s", async (late) => {
     const provider = makeProvider();
     const emitted: ApprovalRequestEnvelope[] = [];
@@ -2240,6 +2255,7 @@ describe("CodexProvider first turn on new session", () => {
   it("did not overwrite pendingTurnId when a superseding runTurn finished sendTurn first", async () => {
     const supersedeThreadId = "supersede-turn-thread";
     const supersedeSessionId = `mcode-${supersedeThreadId}`;
+    const events: ProviderRuntimeEvent[] = [];
 
     let resolveSend!: (id: string) => void;
     const sendTurnDeferred = new Promise<string>((resolve) => {
@@ -2249,6 +2265,7 @@ describe("CodexProvider first turn on new session", () => {
 
     const provider = makeProvider();
 
+    provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
     void provider.sendTurn({
       turnId: "test-turn",
       turnExecutionId: "755083ae-6cb3-45dd-810e-7b86bb3de89d",
@@ -2286,6 +2303,7 @@ describe("CodexProvider first turn on new session", () => {
 
     expect(staleSeq).toBeLessThan(entry!.runTurnSeq);
     expect(entry!.pendingTurnId).toBe("superseding-turn");
+    expect(events.filter(({ event }) => event.type === AgentEventType.FastModeStatus)).toEqual([]);
   });
 
   it("sends Codex native skill input for slash skill invocations", async () => {

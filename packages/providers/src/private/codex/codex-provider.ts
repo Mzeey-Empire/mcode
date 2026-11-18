@@ -2797,6 +2797,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       const turnId = Array.isArray(input) ? await server.sendTurn(input, turnOptions) : await server.startCompaction();
       if (Array.isArray(input)) this.recordCollaborationMode(run.entry.sessionId, turnOptions?.collaborationMode?.mode);
       if (run.seq !== run.entry.runTurnSeq) return;
+      this.reportCodexFastStatus(run, input, turnOptions, turnExecutionId);
       run.entry.turnStartResponsePending = false;
       run.entry.pendingTurnStartNotification = undefined;
       this.bindCodexTurnStartResponse(run.entry, turnId, turnExecutionId);
@@ -2805,6 +2806,15 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       cleanup();
       reject(error);
     }
+  }
+
+  private reportCodexFastStatus(run: CodexTurnRun, input: CodexTurnInput, options: CodexTurnOptions | undefined, executionId: string): void {
+    if (!Array.isArray(input) || !options?.model) return;
+    this.emitCodexTurnEvent(run.entry, {
+      type: AgentEventType.FastModeStatus,
+      threadId: run.entry.threadId,
+      status: { modelId: options.model, state: options.serviceTier === "priority" ? "on" : "off" },
+    }, executionId);
   }
 
   private bindCodexTurnStartResponse(entry: CodexSessionState, turnId: string | null | undefined, turnExecutionId: string): void {

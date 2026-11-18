@@ -72,8 +72,8 @@ export interface ITurnDiffSource {
  * field type is selected by the request's `P` type parameter.
  */
 export interface ProviderOptionsByProvider {
-  /** Claude: the Haiku thinking toggle. */
-  claude: { thinking?: boolean };
+  /** Claude: the Haiku thinking toggle and Claude Code's Fast mode. */
+  claude: { thinking?: boolean; fastMode?: boolean };
   /** Codex: request the OpenAI fast service tier. */
   codex: { fastMode?: boolean };
   /** Copilot uses standard per-turn controls and native discovery. */
