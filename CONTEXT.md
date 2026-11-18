@@ -187,7 +187,7 @@ also attach to a branchless worktree.
 ### Composer session
 The composer's per-thread state, treated as one value: draft text,
 attachments, model, provider, reasoning level, composer mode,
-access/permission mode, context window, orchestration mode, and provider-specific toggles. Owned
+access/permission mode, orchestration mode, and provider-specific toggles. Owned
 by one module whose interface is **snapshot** (save the outgoing thread's
 session) and **restore** (install the incoming thread's session as a single
 state transition). Switching threads is one restore; the editor update is an
@@ -232,10 +232,10 @@ before risky operations like edits and shell execution) and **Full** (the
 agent acts without prompting). Default for new threads: **Full**.
 
 ### Context window
-A per-thread selection of the model's context window size, sent to the
-provider as a model slug suffix. Today only Claude exposes multiple tiers
-(`200k` and `1m`); other providers ignore the setting. The 1M tier
-unlocks Claude's extended context but typically costs more per turn.
+The provider decides the context window. For Claude, it comes from the
+user's own Claude Code settings, such as `autoCompactWindow`, and the model.
+Mcode reads the window each provider reports for the usage ring and does not
+pin one.
 
 ### Reasoning level
 A per-thread setting that controls how much reasoning effort the model

@@ -21,7 +21,7 @@ const request: CreateReviewTaskInput = {
     headRepositoryOwner: "owner", headRepositoryName: "repo", headRef: "feature", headOid: "a".repeat(40),
     localBranch: "review-42", pushRemote: "origin", pushRef: "feature", managedRemoteName: null,
   },
-  defaults: { provider: "codex", model: "gpt-6-sol", reasoning: "high", interactionMode: "build", permission: "full", contextWindow: "200k", thinking: false },
+  defaults: { provider: "codex", model: "gpt-6-sol", reasoning: "high", interactionMode: "build", permission: "full", thinking: false },
 };
 
 describe("Review task owner transaction", () => {

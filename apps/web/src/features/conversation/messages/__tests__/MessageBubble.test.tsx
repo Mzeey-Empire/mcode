@@ -108,7 +108,7 @@ describe("hidden plan messages", () => {
     const answer = vi.mocked(mockTransport.answerPlanQuestions).mockResolvedValue(undefined);
     const { getByRole, queryByRole, container } = render(<MessageBubble message={message} />);
     await userEvent.click(getByRole("button", { name: "Continue planning" }));
-    await waitFor(() => expect(answer).toHaveBeenCalledWith("thread-1", [], "full", undefined, undefined, undefined));
+    await waitFor(() => expect(answer).toHaveBeenCalledWith("thread-1", [], "full", undefined, undefined));
     act(() => useThreadStore.getState().markPlanAnswered("thread-1", message.id));
     expect(queryByRole("button", { name: "Continue planning" })).toBeNull();
     expect(container.textContent).toContain("No questions to answer.");

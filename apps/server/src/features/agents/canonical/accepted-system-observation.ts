@@ -132,10 +132,10 @@ function systemMessage(input: SystemMessageInput, content: string, systemNotice?
 }
 
 function contextUsage(event: Extract<AgentEvent, { type: "contextEstimate" | "turnComplete" }>): AcceptedSystemObservation {
-  return event.tokensIn > 0 ? {
+  return event.tokensIn > 0 || event.contextWindow !== undefined ? {
     event,
     threadPatch: {
-      contextTokensUsed: event.tokensIn,
+      ...(event.tokensIn > 0 ? { contextTokensUsed: event.tokensIn } : {}),
       ...(event.contextWindow === undefined ? {} : { contextWindow: event.contextWindow }),
     },
   } : { event };
@@ -146,7 +146,11 @@ function contextObservation(
   event: Extract<AgentEvent, { type: "contextEstimate" | "turnComplete" }>,
 ): AcceptedSystemObservation {
   if (event.type === "contextEstimate") {
-    return event.totalProcessedTokens === undefined || input.compacting ? { event } : contextUsage(event);
+    if (input.compacting) return { event };
+    if (event.totalProcessedTokens === undefined) {
+      return event.contextWindow === undefined ? { event } : { event, threadPatch: { contextWindow: event.contextWindow } };
+    }
+    return contextUsage(event);
   }
   if (event.providerId !== undefined && event.providerId !== input.providerId) {
     throw new Error("Accepted context usage belongs to another provider");

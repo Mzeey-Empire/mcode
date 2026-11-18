@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { DevinMode } from "@mcode/contracts/models/enums";
 import type { DraftBrowserNotePage, DraftDiffComment, DraftFileComment, DraftSubmission } from "@mcode/contracts/models/next-message-draft";
 import type { MessageMention } from "@mcode/contracts/models/mention";
@@ -83,12 +83,6 @@ export interface ComposerDraft {
   /** Provider ID stored alongside the model because multiple providers share model IDs. */
   provider?: string;
   reasoning: ReasoningLevel;
-  /**
-   * Per-thread context window override. Undefined falls back to the thread's
-   * persisted mode (or the global settings default). Honored only by Claude
-   * provider for models that support a 1M-context beta header.
-   */
-  contextWindow?: ContextWindowMode;
   /**
    * Per-thread thinking toggle override. Undefined falls back to the thread's
    * persisted toggle (or the global settings default). Honored only by models

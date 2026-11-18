@@ -56,7 +56,6 @@ const pendingComposerDraft: ComposerDraft = {
   modelId: "gpt-5.5",
   provider: "codex",
   reasoning: "high",
-  contextWindow: "1m",
   fastMode: true,
 };
 
@@ -119,7 +118,6 @@ function expectPreparedBranchThread(
   expect(thread?.model).toBe("claude-opus-4-7");
   expect(thread?.provider).toBe("claude");
   expect(thread?.reasoning_level).toBe("max");
-  expect(thread?.context_window_mode).toBe("1m");
   expect(thread?.thinking).toBe(true);
 }
 
@@ -128,7 +126,6 @@ function expectPersistedBranchSettings(
 ) {
   expect(thread?.model).toBe("claude-opus-4-7");
   expect(thread?.reasoning_level).toBe("max");
-  expect(thread?.context_window_mode).toBe("1m");
 }
 
 vi.mock("@/transport", async () => ({
@@ -894,7 +891,6 @@ describe("Workspace Behavior", () => {
     await useWorkspaceStore.getState().createAndSendMessage(
       "",
       "composer-2-fast",
-      undefined,
       undefined,
       undefined,
       undefined,
@@ -1844,7 +1840,6 @@ describe("Workspace Behavior", () => {
           pendingComposerDraft.reasoning,
           pendingComposerDraft.provider,
           undefined,
-          pendingComposerDraft.contextWindow,
           true,
           pendingComposerDraft.fastMode ?? undefined,
           pendingComposerDraft.input,
@@ -1965,7 +1960,6 @@ describe("Workspace Behavior", () => {
         draft.reasoning,
         draft.provider,
         undefined,
-        draft.contextWindow,
         true,
         draft.fastMode ?? undefined,
         draft.input,
@@ -1998,7 +1992,6 @@ describe("Workspace Behavior", () => {
         retryDraft.reasoning,
         retryDraft.provider,
         undefined,
-        retryDraft.contextWindow,
         true,
         retryDraft.fastMode ?? undefined,
         retryDraft.input,
@@ -2049,7 +2042,6 @@ describe("Workspace Behavior", () => {
           draft.reasoning,
           draft.provider,
           undefined,
-          draft.contextWindow,
           true,
           draft.fastMode ?? undefined,
           draft.input,
@@ -2123,7 +2115,6 @@ describe("Workspace Behavior", () => {
         interactionMode: undefined,
         parentThreadId: undefined,
         forkedFromMessageId: undefined,
-        contextWindow: undefined,
         thinking: undefined,
         fastMode: undefined,
         displayContent: undefined,
@@ -2199,7 +2190,6 @@ describe("Workspace Behavior", () => {
         interactionMode: undefined,
         parentThreadId: undefined,
         forkedFromMessageId: undefined,
-        contextWindow: undefined,
         thinking: undefined,
         fastMode: undefined,
         displayContent: undefined,
@@ -2273,7 +2263,6 @@ describe("Workspace Behavior", () => {
         interactionMode: undefined,
         parentThreadId: undefined,
         forkedFromMessageId: undefined,
-        contextWindow: undefined,
         thinking: undefined,
         fastMode: undefined,
         displayContent: undefined,
@@ -2315,7 +2304,6 @@ describe("Workspace Behavior", () => {
         "high",
         "codex",
         "plan",
-        undefined,
         undefined,
         true,
       );
@@ -2507,7 +2495,6 @@ describe("Workspace Behavior", () => {
         permissionMode: "supervised",
         reasoningLevel: "max",
         interactionMode: "build",
-        contextWindow: "1m",
         thinking: true,
       });
       await Promise.resolve();
@@ -2585,7 +2572,6 @@ describe("Workspace Behavior", () => {
         interactionMode: undefined,
         parentThreadId: parent.id,
         forkedFromMessageId: undefined,
-        contextWindow: undefined,
         thinking: undefined,
         fastMode: undefined,
         displayContent: undefined,

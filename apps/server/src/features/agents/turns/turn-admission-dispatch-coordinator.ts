@@ -4,7 +4,6 @@ import * as NodePath from "node:path";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { previewAnnotationPageSnapshotName, toPreviewAnnotationBundleV2, isDiffAnnotationPayload, isFileAnnotationPayload } from "@mcode/contracts/models/browser-preview";
 import { type AttachmentMeta, type StoredAttachment } from "@mcode/contracts/models/attachment";
-import { type ContextWindowMode } from "@mcode/contracts/models/settings";
 import { type DevinMode, type InteractionMode, type PermissionMode } from "@mcode/contracts/models/enums";
 import { type IAgentProvider, type IProviderRegistry, type ProviderId, type TurnRequest } from "@mcode/contracts/providers/interfaces";
 import { type MessageMention } from "@mcode/contracts/models/mention";
@@ -387,7 +386,6 @@ export class TurnAdmissionDispatchCoordinator {
       orchestrationMode: submission.orchestrationMode as SendMessageCommand["orchestrationMode"],
       maxBudgetUsd: submission.maxBudgetUsd,
       maxTurns: submission.maxTurns,
-      contextWindow: submission.contextWindow as ContextWindowMode | undefined,
       thinking: submission.thinking,
       fastMode: submission.fastMode,
       goalObjective: submission.goalObjective,
@@ -891,7 +889,6 @@ export class TurnAdmissionDispatchCoordinator {
         orchestrationMode: command.orchestrationMode,
         maxBudgetUsd: command.maxBudgetUsd,
         maxTurns: command.maxTurns,
-        contextWindow: command.contextWindow,
         thinking: command.thinking,
         fastMode: command.fastMode,
         goalObjective: command.goalObjective,
@@ -1105,7 +1102,6 @@ export class TurnAdmissionDispatchCoordinator {
     this.assignSetting(settings, "interaction_mode", command.interactionMode);
     this.assignSetting(settings, "orchestration_mode", command.orchestrationMode);
     this.assignPermissionSetting(settings, command.permissionMode);
-    this.assignSetting(settings, "context_window_mode", command.contextWindow);
     this.assignSetting(settings, "thinking", command.thinking);
     this.assignSetting(settings, "fast_mode", command.fastMode);
     this.assignDevinMode(settings, command.devinMode, providerId);
@@ -1261,20 +1257,9 @@ export class TurnAdmissionDispatchCoordinator {
   private providerDefaults(prepared: PreparedCommand, settings: ReturnType<SettingsService["get"]>) {
     const command = prepared.command;
     return {
-      contextWindow: this.contextWindowDefault(command, prepared, settings),
       thinking: this.thinkingDefault(command, prepared, settings),
       devinMode: command.devinMode ?? prepared.thread.devin_mode ?? undefined,
     };
-  }
-
-  private contextWindowDefault(
-    command: SendMessageCommand,
-    prepared: PreparedCommand,
-    settings: ReturnType<SettingsService["get"]>,
-  ): ContextWindowMode {
-    return command.contextWindow
-      ?? (prepared.thread.context_window_mode as ContextWindowMode | null)
-      ?? settings.model.defaults.contextWindow;
   }
 
   private thinkingDefault(
@@ -1297,9 +1282,9 @@ export class TurnAdmissionDispatchCoordinator {
 
   private providerSpecificOptions(
     providerId: ProviderId,
-    defaults: { contextWindow: ContextWindowMode; thinking: boolean; devinMode: DevinMode | undefined },
+    defaults: { thinking: boolean; devinMode: DevinMode | undefined },
   ) {
-    if (providerId === "claude") return { contextWindowMode: defaults.contextWindow, thinking: defaults.thinking };
+    if (providerId === "claude") return { thinking: defaults.thinking };
     if (providerId === "devin") return { mode: defaults.devinMode };
     return {};
   }

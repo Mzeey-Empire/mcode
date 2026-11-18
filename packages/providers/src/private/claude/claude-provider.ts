@@ -36,7 +36,7 @@ import { PLAN_MAX_CONTENT_CHARS } from "@mcode/contracts/models/plan";
 import { isVirtualBrowserContextAttachment } from "@mcode/contracts/models/attachment";
 import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import type { IAgentProvider, IGoalCapable, ISessionEvictable, TurnRequest, CompletionOptions, TurnSteerInput, TurnSteerOutcome, NativePlanFileRef } from "@mcode/contracts/providers/interfaces";
-import type { ReasoningLevel, ContextWindowMode } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { OrchestrationMode } from "@mcode/contracts/models/enums";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { AttachmentMeta } from "@mcode/contracts/models/attachment";
@@ -47,8 +47,8 @@ import type { ApprovalResponse, ApprovalRespondResult, ApprovalRequestEnvelope, 
 import type { NativePlanFileOutcome } from "@mcode/contracts/models/plan";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
 import { discoveredClaudeEfforts, listClaudeModels } from "./list-models.js";
-import { resolveSdkModelSlug } from "./resolve-slug.js";
-import { resolveAutoCompactWindow } from "./context-window.js";
+import { readClaudeContextUsage } from "./context-usage.js";
+import { claudeFlagSettings, changedFlagSettings, type ClaudeFlagSettings } from "./flag-settings.js";
 import { readAnthropicOauthToken } from "@mcode/shared/usage";
 import { createCliStatusRunner } from "../status/cli-status-runner.js";
 import { describeClaudeAuth } from "../status/provider-auth-checks.js";
@@ -143,13 +143,8 @@ interface ClaudeSessionState {
   planCaptured: boolean;
   planWrites: Map<string, string>;
   planRoots: string[];
-  /**
-   * Context window mode the SDK subprocess was spawned with. The 1M window is
-   * encoded into the model slug (`<id>[1m]`), so changing this between turns
-   * requires a fresh subprocess — the same teardown-and-respawn pattern used
-   * for permissionMode.
-   */
-  contextWindowMode: ContextWindowMode | undefined;
+  contextProbe: number;
+  flags: ClaudeFlagSettings;
   /** Session-scoped dynamic workflow orchestration state. */
   orchestrationMode: OrchestrationMode;
   /** When true, the finally block in startStreamLoop should not emit an "ended" event. */
@@ -499,13 +494,8 @@ interface PendingSpawnTurn {
   uuid: string;
   /** Fully-built SDK query options sans the resume/sessionId discriminator. */
   baseOptions: ClaudeBaseOptions;
-  /**
-   * Bare model id (no `[1m]` suffix) stored on the session state so
-   * detectFallbackModel compares against the dated snapshot ids the SDK reports.
-   */
+  /** Model id the session spawns with. */
   resolvedModel: string;
-  /** Context window mode the session was spawned with; gates the in-place reuse check. */
-  contextWindowMode: ContextWindowMode | undefined;
   /** Orchestration mode encoded into the session's flag settings. */
   orchestrationMode: OrchestrationMode;
 }
@@ -548,7 +538,6 @@ interface ClaudeSendMessageParams {
   attachments?: AttachmentMeta[];
   reasoningLevel?: ReasoningLevel;
   orchestrationMode: OrchestrationMode;
-  contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   maxBudgetUsd?: number;
   maxTurns?: number;
@@ -561,7 +550,6 @@ interface ClaudeTurnContext {
   threadId: string;
   cwd: string;
   model: string;
-  sdkModelSlug: string;
 }
 
 interface ClaudeBrowserReuseState {
@@ -811,7 +799,6 @@ export class ClaudeProvider
       attachments: req.attachments,
       reasoningLevel: req.reasoningLevel,
       orchestrationMode: req.orchestrationMode ?? "standard",
-      contextWindowMode: req.providerOptions.contextWindowMode,
       thinking: req.providerOptions.thinking,
       maxBudgetUsd: req.maxBudgetUsd,
       maxTurns: req.maxTurns,
@@ -1189,9 +1176,8 @@ export class ClaudeProvider
     threadId: string,
     cwd: string,
     model: string,
-    sdkModelSlug: string,
   ): ClaudeTurnContext {
-    return { params, routing, prompt, threadId, cwd, model, sdkModelSlug };
+    return { params, routing, prompt, threadId, cwd, model };
   }
 
   private async tryReuseClaudeSession(
@@ -1216,6 +1202,7 @@ export class ClaudeProvider
     existing.planTurn = context.params.planTurn;
     existing.planCaptured = false;
     await this.pushClaudeMessage(existing, context);
+    this.probeContextWindow(existing);
     return "handled";
   }
 
@@ -1227,7 +1214,6 @@ export class ClaudeProvider
     return (
       existing.poisoned !== true &&
       existing.permissionMode === context.params.permissionMode &&
-      existing.contextWindowMode === context.params.contextWindowMode &&
       this.matchesClaudeBrowserScope(existing, browser)
     );
   }
@@ -1255,10 +1241,6 @@ export class ClaudeProvider
       permissionMode: {
         from: existing.permissionMode,
         to: context.params.permissionMode,
-      },
-      contextWindowMode: {
-        from: existing.contextWindowMode,
-        to: context.params.contextWindowMode,
       },
     });
   }
@@ -1307,12 +1289,12 @@ export class ClaudeProvider
     context: ClaudeTurnContext,
     existing: ClaudeSessionState,
   ): Promise<boolean> {
-    if (existing.orchestrationMode === context.params.orchestrationMode)
-      return true;
+    const next = claudeFlagSettings(context.params);
+    const changed = changedFlagSettings(existing.flags, next);
+    if (!changed) return true;
     try {
-      await existing.query.applyFlagSettings({
-        ultracode: context.params.orchestrationMode === "proactive",
-      });
+      await existing.query.applyFlagSettings(changed);
+      existing.flags = next;
       existing.orchestrationMode = context.params.orchestrationMode;
       return true;
     } catch (error) {
@@ -1330,6 +1312,14 @@ export class ClaudeProvider
     }
   }
 
+  private probeContextWindow(session: ClaudeSessionState): void {
+    const ticket = ++session.contextProbe;
+    void readClaudeContextUsage(session.query).then(usage => {
+      if (usage && ticket === session.contextProbe)
+        this.streamStates.get(session.query)?.mapper.observeContextUsage(usage);
+    });
+  }
+
   private async updateClaudeSessionModel(
     context: ClaudeTurnContext,
     existing: ClaudeSessionState,
@@ -1337,10 +1327,10 @@ export class ClaudeProvider
     if (existing.model === context.model) return true;
     logger.info("Model changed, calling setModel()", {
       sessionId: context.params.sessionId,
-      model: context.sdkModelSlug,
+      model: context.model,
     });
     try {
-      await existing.query.setModel(context.sdkModelSlug);
+      await existing.query.setModel(context.model);
       existing.model = context.model;
       return true;
     } catch (error) {
@@ -1420,13 +1410,9 @@ export class ClaudeProvider
   ): Promise<ClaudeBaseOptions> {
     // The session id must be the one the Browser lease was staged under, or the server lists no Browser tools.
     const mcode = await this.host.mcode.attach({ providerId: this.id, sessionId: context.params.sessionId, threadId: context.threadId, threadControl: true });
-    const autoCompactWindow = resolveAutoCompactWindow(
-      context.params.contextWindowMode,
-      context.model,
-    );
     const sdk = {
       cwd: context.cwd,
-      model: context.sdkModelSlug,
+      model: context.model,
       settingSources: ["user", "project", "local"],
       systemPrompt: { type: "preset", preset: "claude_code" },
       tools: { type: "preset", preset: "claude_code" },
@@ -1444,10 +1430,7 @@ export class ClaudeProvider
       ...(context.params.fallbackModel && {
         fallbackModel: context.params.fallbackModel,
       }),
-      settings: {
-        ...(autoCompactWindow !== undefined && { autoCompactWindow }),
-        ultracode: context.params.orchestrationMode === "proactive",
-      },
+      settings: claudeFlagSettings(context.params),
       includePartialMessages: true,
       ...(context.params.maxBudgetUsd != null &&
         context.params.maxBudgetUsd > 0 && {
@@ -1551,7 +1534,6 @@ export class ClaudeProvider
       uuid: context.threadId,
       baseOptions,
       resolvedModel: context.model,
-      contextWindowMode: context.params.contextWindowMode,
       orchestrationMode: context.params.orchestrationMode,
       planTurn: context.params.planTurn,
     });
@@ -1713,7 +1695,6 @@ export class ClaudeProvider
       cwd,
       model,
       attachments,
-      contextWindowMode,
     } = params;
 
     const existing = this.runtime.get(sessionId);
@@ -1726,10 +1707,6 @@ export class ClaudeProvider
     const tid = uuid;
     const resolvedCwd = cwd || process.cwd();
     const resolvedModel = model || "claude-sonnet-4-6";
-    // The "[1m]" suffix is appended only when the user opted into the 1M context
-    // window AND the model supports it. The SDK translates it into the
-    // `context-1m-2025-08-07` beta header.
-    const sdkModelSlug = resolveSdkModelSlug(resolvedModel, contextWindowMode);
 
     const prompt = await this.createClaudePrompt(
       message,
@@ -1744,7 +1721,6 @@ export class ClaudeProvider
       tid,
       resolvedCwd,
       resolvedModel,
-      sdkModelSlug,
     );
     const reuseOutcome = await this.tryReuseClaudeSession(context, existing, {
       scope: browserScope,
@@ -1904,6 +1880,8 @@ export class ClaudeProvider
       pushAndAwaitRead: queue.pushAndAwaitRead,
       closeQueue: queue.close,
       model: staged.resolvedModel,
+      contextProbe: 0,
+      flags: claudeFlagSettings(staged),
       permissionMode: args.permissionMode,
       planTurn: staged.planTurn,
       planCaptured: false,
@@ -1913,7 +1891,6 @@ export class ClaudeProvider
         NodePath.join(args.cwd, ".claude", "plans"),
         NodePath.resolve(args.env.CLAUDE_CONFIG_DIR || NodePath.join(NodeOS.homedir(), ".claude"), "plans"),
       ],
-      contextWindowMode: staged.contextWindowMode,
       orchestrationMode: staged.orchestrationMode,
       pendingToolUses: new Set<string>(),
       backgroundTools: new Map<string, HeldBackgroundCall>(),
@@ -1997,6 +1974,7 @@ export class ClaudeProvider
     );
     state.ownedProcess = ownedProcess;
     this.startClaudeStagedTurn(sessionId, query, staged, queue, state.backgroundTools);
+    this.probeContextWindow(state);
     return { state, pids: [] };
   }
 

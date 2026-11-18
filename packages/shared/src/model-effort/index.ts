@@ -58,26 +58,6 @@ const MAX_EFFORT_MODEL_IDS: readonly string[] = [
 ];
 
 /**
- * Claude model IDs that support the extended 1,000,000-token context window.
- * The same Opus 5.5/5 + Sonnet 5.5 + Fable 5.2/5.1/5 + Sonnet 5 + Opus 4.8/4.7/4.6 + Sonnet 4.6 + Haiku 5.5 cohort
- * that supports the max effort tier.
- */
-const ONE_M_CONTEXT_MODEL_IDS: readonly string[] = [
-  "claude-opus-5-5",
-  "claude-opus-5",
-  "claude-sonnet-5-5",
-  "claude-fable-5-2",
-  "claude-fable-5-1",
-  "claude-fable-5",
-  "claude-sonnet-5",
-  "claude-opus-4-8",
-  "claude-opus-4-7",
-  "claude-opus-4-6",
-  "claude-sonnet-4-6",
-  "claude-haiku-5-5",
-];
-
-/**
  * Claude model IDs that expose a boolean thinking toggle (instead of an effort
  * dial). Currently only Haiku 4.5 fits this shape.
  */
@@ -96,7 +76,6 @@ const ALL_KNOWN_BASE_IDS: readonly string[] = [
   ...new Set([
     ...XHIGH_EFFORT_MODEL_IDS,
     ...MAX_EFFORT_MODEL_IDS,
-    ...ONE_M_CONTEXT_MODEL_IDS,
     ...THINKING_TOGGLE_MODEL_IDS,
     ...EFFORT_UNSUPPORTED_CLAUDE_IDS,
   ]),
@@ -217,18 +196,6 @@ export function isXhighEffortModel(modelId: string): boolean {
  */
 export function isMaxEffortModel(modelId: string): boolean {
   return MAX_EFFORT_MODEL_IDS.includes(normalizeModelId(modelId));
-}
-
-/**
- * Returns true when the model supports the extended 1,000,000-token context
- * window. Applies to opus-5-5, opus-5, sonnet-5-5, fable-5-2, fable-5-1, fable-5, sonnet-5, opus-4-8, opus-4-7, opus-4-6,
- * sonnet-4-6, and haiku-5-5.
- *
- * The window is opted into by appending `[1m]` to the model slug at send
- * time; the Claude Agent SDK handles the beta header internally.
- */
-export function supports1MContextWindow(modelId: string): boolean {
-  return ONE_M_CONTEXT_MODEL_IDS.includes(normalizeModelId(modelId));
 }
 
 /**

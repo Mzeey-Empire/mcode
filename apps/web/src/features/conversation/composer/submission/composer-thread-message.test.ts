@@ -46,7 +46,7 @@ describe("sendComposerThreadMessage", () => {
     const sent = threadActions.sendMessage.mock.calls[0];
     expect(sent?.[0]).toBe("thread-1");
     expect(sent?.[1]).toBe("Explain the tradeoff.");
-    expect(sent?.[17]).toEqual([comment]);
+    expect(sent?.[16]).toEqual([comment]);
   });
 
   it("asks the thread's transcript to follow the prompt it sends", async () => {

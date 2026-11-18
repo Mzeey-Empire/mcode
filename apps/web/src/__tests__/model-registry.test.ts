@@ -11,7 +11,6 @@ import {
   getDefaultModel,
   getDefaultModelId,
   getDefaultReasoningLevel,
-  getModelContextWindow,
   isMaxEffortModel,
   isModelAvailable,
   isXhighEffortModel,
@@ -115,14 +114,13 @@ describe("ModelRegistry", () => {
     }
   });
 
-  it("findModelById returns Opus 5 with the standard-mode context clamp", () => {
+  it("findModelById retains Opus 5 catalog metadata", () => {
     const model = findModelById("claude-opus-5");
     expect(model).toEqual({
       id: "claude-opus-5",
       label: "Claude Opus 5",
       providerId: "claude",
-      contextWindow: 200_000,
-      contextWindowOptions: ["200k", "1m"],
+      contextWindow: 1_000_000,
       supportedReasoningLevels: ["low", "medium", "high", "xhigh", "max"],
       defaultReasoningLevel: "high",
       lifecycle: "legacy",
@@ -209,7 +207,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "high", fallbackId: "", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -222,7 +220,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "codex", id: "nonexistent-model", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          defaults: { provider: "codex", id: "nonexistent-model", reasoning: "high", fallbackId: "", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -235,7 +233,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "cursor", id: "cursor-dynamic-model-xyz", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          defaults: { provider: "cursor", id: "cursor-dynamic-model-xyz", reasoning: "high", fallbackId: "", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -248,7 +246,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-sonnet-4-6", reasoning: "low", fallbackId: "", contextWindow: "200k", thinking: false },
+          defaults: { provider: "claude", id: "claude-sonnet-4-6", reasoning: "low", fallbackId: "", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -261,7 +259,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "max", fallbackId: "", contextWindow: "200k", thinking: false },
+          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "max", fallbackId: "", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -378,7 +376,6 @@ describe("Codex model catalog", () => {
             id: "gpt-5.2-codex",
             reasoning: "medium",
             fallbackId: "",
-            contextWindow: "200k",
             thinking: false,
           },
           utility: { provider: "", id: "" },
@@ -697,17 +694,6 @@ describe("resolveThreadModelId", () => {
 
   it("passes through unknown locked model ID (dynamic listing providers)", () => {
     expect(resolveThreadModelId("cursor-dynamic-123", "claude-sonnet-4-6")).toBe("cursor-dynamic-123");
-  });
-});
-
-describe("getModelContextWindow", () => {
-  it("falls back to 200_000 for Haiku 4.5 even in 1m mode (not supported)", () => {
-    expect(getModelContextWindow("claude-haiku-4-5", "1m")).toBe(200_000);
-  });
-
-  it("resolves dated SDK variants via prefix match", () => {
-    expect(getModelContextWindow("claude-haiku-4-5-20251001", "200k")).toBe(200_000);
-    expect(getModelContextWindow("claude-sonnet-4-6-20260101", "1m")).toBe(1_000_000);
   });
 });
 

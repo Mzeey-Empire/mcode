@@ -20,8 +20,6 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { getCatalogEntry } from "@mcode/contracts/providers/catalog";
-import { getModelContextWindow } from "@mcode/shared/model-context";
-import type { ContextWindowMode } from "@mcode/contracts/models/settings";
 import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
@@ -106,8 +104,6 @@ interface ComposerContentSurfaceProps {
     };
     readonly activeGoal: ComposerAttachedCapabilitiesProps["activeGoal"];
     readonly isProviderLocked: boolean;
-    readonly contextWindow: ContextWindowMode | null;
-    readonly settingsDefaultContextWindow: ContextWindowMode | undefined;
     readonly modelId: ComposerCapsuleSplitProps["selection"]["modelId"];
     readonly contextEntry?: {
       readonly lastTokensIn?: number;
@@ -414,38 +410,19 @@ function keepEditorFocus(event: MouseEvent): void {
   event.preventDefault();
 }
 
-function getTrackerContextWindow(
-  modelId: ComposerCapsuleSplitProps["selection"]["modelId"],
-  contextWindow: ContextWindowMode | null,
-  settingsDefaultContextWindow: ContextWindowMode | undefined,
-  contextEntry: ComposerContentSurfaceProps["model"]["contextEntry"],
-  activeThread: Thread | undefined,
-) {
-  const mode = contextWindow ?? settingsDefaultContextWindow ?? "200k";
-  return getModelContextWindow(modelId, mode)
-    ?? contextEntry?.contextWindow
-    ?? activeThread?.context_window
-    ?? undefined;
-}
-
 function ComposerContextUsage({
   model,
 }: Pick<ComposerContentSurfaceProps, "model">) {
   if (!model.threadId) return null;
 
-  const contextWindow = getTrackerContextWindow(
-    model.modelId,
-    model.contextWindow,
-    model.settingsDefaultContextWindow,
-    model.contextEntry,
-    model.activeThread,
-  );
+  const context = model.contextEntry ?? {};
+  const contextWindow = context.contextWindow ?? model.activeThread?.context_window ?? undefined;
 
   return (
     <ComposerContextLabel
-      tokensIn={model.contextEntry?.lastTokensIn ?? model.activeThread?.last_context_tokens ?? 0}
+      tokensIn={context.lastTokensIn ?? model.activeThread?.last_context_tokens ?? 0}
       contextWindow={contextWindow}
-      totalProcessedTokens={model.contextEntry?.totalProcessedTokens}
+      totalProcessedTokens={context.totalProcessedTokens}
       hasLowQuota={model.hasLowQuota}
     />
   );

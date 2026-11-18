@@ -103,7 +103,7 @@ async function replayClaudePlan(trace: Extract<SyntheticPlanTrace, { providerId:
     await provider.sendTurn({ turnId: "TURN_1", turnExecutionId: "00000000-0000-4000-8000-000000000001", deliveryAttempt: 1,
       sessionId: "mcode-THREAD_1", workspaceId: "WORKSPACE_1", threadId: "THREAD_1", message: "fixture", cwd: process.cwd(),
       planTurn: { kind: "planning", planFilePath: null },
-      model: "claude-sonnet-4-6", permissionMode: "full", providerOptions: { contextWindowMode: "auto", thinking: false } });
+      model: "claude-sonnet-4-6", permissionMode: "full", providerOptions: { thinking: false } });
     await vi.waitFor(() => expect(captures).toHaveLength(1));
     return captures;
   } finally {

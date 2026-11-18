@@ -5,7 +5,7 @@ import {
   type SelectedTextCommentEditorDraft,
 } from "@/stores/composerDraftStore";
 import type { ApprovalReviewMode, DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { PermissionMode } from "@/transport";
@@ -31,7 +31,6 @@ export interface ComposerSession {
   reasoning: ReasoningLevel;
   interactionMode: InteractionMode;
   permissionMode: PermissionMode;
-  contextWindow: ContextWindowMode | null;
   thinking: boolean | null;
   fastMode: boolean | null;
   devinMode: DevinMode | null;
@@ -48,7 +47,6 @@ export interface ResolveComposerSessionInput {
   threadSettings: {
     interactionMode: InteractionMode;
     permissionMode: PermissionMode;
-    contextWindow: ContextWindowMode | null;
     thinking: boolean | null;
     fastMode: boolean | null;
     devinMode: DevinMode | null;
@@ -115,7 +113,6 @@ function buildDefaultComposerSession(
         ? INTERACTION_MODES.PLAN
         : INTERACTION_MODES.BUILD,
     permissionMode: defaults.permissionMode,
-    contextWindow: null,
     thinking: null,
     fastMode: null,
     devinMode: null,
@@ -145,7 +142,6 @@ export function buildSavedComposerSession(
     reasoning: normalizeReasoningLevel(saved.provider, saved.modelId, saved.reasoning),
     interactionMode: threadSettings.interactionMode,
     permissionMode: threadSettings.permissionMode,
-    contextWindow: threadSettings.contextWindow,
     thinking: threadSettings.thinking,
     fastMode: resolveSavedFastMode(saved.fastMode, threadSettings.fastMode),
     devinMode: saved.devinMode === undefined ? threadSettings.devinMode : saved.devinMode,
@@ -206,9 +202,8 @@ function flagOrNull<T>(value: T | null | undefined): T | null {
 
 function buildThreadFlags(
   threadRow: WorkspaceThread | undefined,
-): Pick<ComposerSession, "contextWindow" | "thinking" | "fastMode" | "devinMode"> {
+): Pick<ComposerSession, "thinking" | "fastMode" | "devinMode"> {
   return {
-    contextWindow: flagOrNull(threadRow?.context_window_mode as ContextWindowMode | null | undefined),
     thinking: flagOrNull(threadRow?.thinking),
     fastMode: flagOrNull(threadRow?.fast_mode),
     devinMode: flagOrNull(threadRow?.devin_mode),

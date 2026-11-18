@@ -8,7 +8,6 @@ import { delay, injectable, inject } from "tsyringe";
 import { validateBranchName, logger } from "@mcode/shared";
 import type { Thread, RecentThread } from "@mcode/contracts/models/thread";
 import type { ThreadMode } from "@mcode/contracts/models/enums";
-import type { ContextWindowMode } from "@mcode/contracts/models/settings";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { ProjectWorktreeService } from "../../projects/index.js";
@@ -176,7 +175,6 @@ export class ThreadService {
       interaction_mode?: string;
       orchestration_mode?: string;
       permission_mode?: string;
-      context_window_mode?: ContextWindowMode | null;
       thinking?: boolean | null;
       fast_mode?: boolean | null;
       default_open_in_app?: string | null;
@@ -188,7 +186,6 @@ export class ThreadService {
       ...(settings.interaction_mode !== undefined && { interaction_mode: settings.interaction_mode }),
       ...(settings.orchestration_mode !== undefined && { orchestration_mode: settings.orchestration_mode }),
       ...(settings.permission_mode !== undefined && { permission_mode: settings.permission_mode }),
-      ...("context_window_mode" in settings && { context_window_mode: settings.context_window_mode }),
       ...("thinking" in settings && { thinking: settings.thinking }),
       ...("fast_mode" in settings && { fast_mode: settings.fast_mode }),
       ...("default_open_in_app" in settings && { default_open_in_app: settings.default_open_in_app }),

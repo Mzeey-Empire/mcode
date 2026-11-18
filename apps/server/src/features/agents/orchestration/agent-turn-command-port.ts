@@ -1,5 +1,5 @@
 import type { AttachmentMeta, StoredAttachment } from "@mcode/contracts/models/attachment";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { PermissionMode } from "@mcode/contracts/models/enums";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
@@ -79,7 +79,6 @@ export interface AgentTurnCommand {
   attachments: AttachmentMeta[];
   reasoningLevel?: ReasoningLevel;
   provider?: ProviderId;
-  contextWindow?: ContextWindowMode;
   thinking?: boolean;
   markPlanAnswerForMessageId?: string;
   persistedAttachmentData?: {

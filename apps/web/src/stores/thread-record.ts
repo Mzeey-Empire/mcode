@@ -1,7 +1,7 @@
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode } from "@/transport";
 import type { ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
 import type { ApprovalReceiptRecord } from "@mcode/contracts/models/approval-receipt";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { OrchestrationMode } from "@mcode/contracts/models/enums";
 import type { PlanQuestion, PlanAnswer } from "@mcode/contracts/models/plan-questions";
 import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
@@ -24,7 +24,6 @@ export interface ThreadSettings {
   interactionMode: InteractionMode;
   reasoningLevel?: ReasoningLevel;
   orchestrationMode?: OrchestrationMode;
-  contextWindow?: ContextWindowMode | null;
   thinking?: boolean | null;
   fastMode?: boolean | null;
   /** Devin-only native session mode persisted per thread. */
@@ -50,8 +49,8 @@ export type ThreadNarrativeByMessage = Record<
 
 /** Context window usage snapshot for one thread. */
 export interface ThreadContextUsage {
-  lastTokensIn: number;
   contextWindow?: number;
+  lastTokensIn: number;
   totalProcessedTokens?: number;
   tokensOut?: number;
   cacheReadTokens?: number;

@@ -306,15 +306,11 @@ export function Composer({
       interactionMode: mode,
       permissionMode: access,
       orchestrationMode,
-      contextWindow,
     },
     goalPending,
     isDragOver,
   } = form.state;
   const { editorRef } = form;
-  const {
-    contextWindow: settingsDefaultContextWindow,
-  } = form.defaults;
   const {
     attachmentInputRef,
     preparationRevision: attachmentPreparationRevision,
@@ -673,8 +669,6 @@ export function Composer({
             },
             activeGoal,
             isProviderLocked: surfaceState.isProviderLocked,
-            contextWindow,
-            settingsDefaultContextWindow,
             modelId,
             contextEntry,
             hasLowQuota,

@@ -1,7 +1,7 @@
 import { inject, injectable } from "tsyringe";
 import { newHandoffUlid, validateBranchName } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { CreateAndSendInput } from "@mcode/contracts/ws/methods";
 import type { DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "@mcode/contracts/models/enums";
 import type { IAgentProvider, ProviderId } from "@mcode/contracts/providers/interfaces";
@@ -34,7 +34,6 @@ export interface CreateBranchedThreadInput {
   parentThreadId: string;
   forkedFromMessageId?: string;
   title: string;
-  contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   fastMode?: boolean;
   devinMode?: DevinMode;
@@ -45,7 +44,6 @@ export interface CreateBranchedThreadInput {
 export interface ProvisionedBranchedThread {
   thread: Thread;
   handoffPreamble: string;
-  contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   fastMode?: boolean;
   devinMode?: DevinMode;
@@ -65,7 +63,6 @@ type Fork = {
 };
 
 type InheritedThreadSettings = {
-  contextWindowMode: ContextWindowMode | undefined;
   thinking: boolean | undefined;
   fastMode: boolean | undefined;
   devinMode: DevinMode | undefined;
@@ -107,7 +104,6 @@ export class ThreadBranchingService {
     return {
       thread,
       handoffPreamble: handoff.preamble,
-      contextWindowMode: inherited.contextWindowMode,
       thinking: inherited.thinking,
       fastMode: inherited.fastMode,
       devinMode: inherited.devinMode,
@@ -155,7 +151,6 @@ export class ThreadBranchingService {
 
   private inheritSettings(parent: Thread, input: CreateBranchedThreadInput): InheritedThreadSettings {
     return {
-      contextWindowMode: input.contextWindowMode ?? parent.context_window_mode as ContextWindowMode | null ?? undefined,
       thinking: input.thinking ?? (parent.thinking === null ? undefined : Boolean(parent.thinking)),
       fastMode: input.fastMode ?? parent.fast_mode ?? undefined,
       devinMode: input.devinMode
@@ -247,7 +242,6 @@ function threadSettings(
     ...interactionModeSetting(input),
     ...orchestrationModeSetting(input),
     ...permissionModeSetting(input),
-    ...contextWindowModeSetting(inherited),
     ...thinkingSetting(inherited),
     ...fastModeSetting(inherited),
     ...devinModeSetting(input, inherited),
@@ -268,10 +262,6 @@ function orchestrationModeSetting(input: CreateBranchedThreadInput) {
 
 function permissionModeSetting(input: CreateBranchedThreadInput) {
   return input.permissionMode === "default" ? {} : { permission_mode: input.permissionMode };
-}
-
-function contextWindowModeSetting(inherited: InheritedThreadSettings) {
-  return inherited.contextWindowMode === undefined ? {} : { context_window_mode: inherited.contextWindowMode };
 }
 
 function thinkingSetting(inherited: InheritedThreadSettings) {
@@ -304,7 +294,6 @@ function configuredChildThread(
     interaction_mode: input.interactionMode ?? thread.interaction_mode,
     orchestration_mode: input.orchestrationMode ?? thread.orchestration_mode,
     permission_mode: input.permissionMode === "default" ? thread.permission_mode : input.permissionMode,
-    context_window_mode: inherited.contextWindowMode ?? thread.context_window_mode,
     thinking: inherited.thinking ?? thread.thinking,
     fast_mode: inherited.fastMode ?? thread.fast_mode,
     devin_mode: configuredDevinMode(thread, input, inherited),

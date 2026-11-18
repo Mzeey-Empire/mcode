@@ -79,7 +79,6 @@ function createPersistentQueuePayload(
     reasoningLevel: selection.reasoning,
     orchestrationMode: selection.orchestrationMode,
     provider: selection.provider,
-    contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
     fastMode: optionalFastMode(selection),
     devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,

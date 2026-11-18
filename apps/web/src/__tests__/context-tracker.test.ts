@@ -49,6 +49,12 @@ function dispatch(event: AgentEvent) {
 describe("context tracker — Fix 2: output tokens included", () => {
   beforeEach(() => setup());
 
+  it("applies a window-only estimate without replacing the last token count", () => {
+    dispatch({ type: "contextEstimate", threadId: THREAD, tokensIn: 18000, contextWindow: 1000000 });
+    dispatch({ type: "contextEstimate", threadId: THREAD, tokensIn: 0, contextWindow: 300000 });
+    expect(getTestThreadContext(THREAD)).toMatchObject({ lastTokensIn: 18000, contextWindow: 300000 });
+  });
+
   it("turnComplete stores tokensIn directly (server already adds output tokens)", () => {
     // The server (claude-provider) now includes output_tokens in tokensIn.
     // The frontend stores whatever value it receives.

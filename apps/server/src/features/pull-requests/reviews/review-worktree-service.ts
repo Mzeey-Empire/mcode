@@ -584,8 +584,7 @@ export class ReviewWorktreeService {
         localBranch: provisioned.branch, pushRemote: provisioned.pushRemote, pushRef: provisioned.pushRef, managedRemoteName: provisioned.managedRemoteName,
       },
       defaults: { provider: settings.model.defaults.provider, model: settings.model.defaults.id, reasoning: settings.model.defaults.reasoning,
-        interactionMode: settings.agent.defaults.mode === "plan" ? "plan" : "build", permission: settings.agent.defaults.permission,
-        contextWindow: settings.model.defaults.contextWindow, thinking: settings.model.defaults.thinking },
+        interactionMode: settings.agent.defaults.mode === "plan" ? "plan" : "build", permission: settings.agent.defaults.permission, thinking: settings.model.defaults.thinking },
     });
     return { threadId: committed.thread.id, link: committed.link };
   }
@@ -625,7 +624,6 @@ export class ReviewWorktreeService {
       interactionMode,
       maxBudgetUsd: settings.agent.guardrails.maxBudgetUsd || undefined,
       maxTurns: settings.agent.guardrails.maxTurns || undefined,
-      contextWindow: settings.model.defaults.contextWindow,
       thinking: settings.model.defaults.thinking,
       providerWireOverride: context,
       displayContent: intent,

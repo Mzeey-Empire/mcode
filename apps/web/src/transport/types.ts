@@ -25,7 +25,7 @@ import type { GitRefsListParams, GitRefsListResult, BranchComparison, WorktreeIn
 import type { PullRequestTargetsListParams, PullRequestTargetsListResult, PrInfo, PrDraft, CreatePrResult, ChecksStatus } from "@mcode/contracts/github";
 import type { ProviderCatalogRequest, ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
 import type { PermissionMode, InteractionMode, OrchestrationMode, DevinMode } from "@mcode/contracts/models/enums";
-import type { ReasoningLevel, ContextWindowMode, Settings, PartialSettings } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel, Settings, PartialSettings } from "@mcode/contracts/models/settings";
 import type { ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
 import type { ThoughtSegmentRecord } from "@mcode/contracts/models/thought-segment";
 import type { HookExecutionRecord } from "@mcode/contracts/models/hook-execution";
@@ -63,7 +63,7 @@ export type { Thread, RecentThread } from "@mcode/contracts/models/thread";
 export type { AttachmentMeta, StoredAttachment } from "@mcode/contracts/models/attachment";
 export type { ProviderCatalogRequest, ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
 export type { PermissionMode, InteractionMode } from "@mcode/contracts/models/enums";
-export type { ContextWindowMode, Settings, PartialSettings } from "@mcode/contracts/models/settings";
+export type { Settings, PartialSettings } from "@mcode/contracts/models/settings";
 export type { GitCommit } from "@mcode/contracts/models/git-commit";
 export type { PlanAnswer } from "@mcode/contracts/models/plan-questions";
 export type { ProviderModelInfo } from "@mcode/contracts/providers/models";
@@ -369,7 +369,6 @@ export interface McodeTransport {
     answers: PlanAnswer[],
     permissionMode?: PermissionMode,
     reasoningLevel?: ReasoningLevel,
-    contextWindow?: ContextWindowMode,
     thinking?: boolean,
   ): Promise<void>;
   /**
@@ -415,7 +414,6 @@ export interface McodeTransport {
       interactionMode?: InteractionMode;
       orchestrationMode?: OrchestrationMode;
       permissionMode?: PermissionMode;
-      contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
       fastMode?: boolean | null;
       devinMode?: DevinMode | null;

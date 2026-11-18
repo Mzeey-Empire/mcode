@@ -1,12 +1,11 @@
 import { AgentEventType, type AgentEvent } from "@mcode/contracts/events/agent-event";
-import { type ContextWindowMode } from "@mcode/contracts/models/settings";
 import { type ProviderBillingMode } from "@mcode/contracts/providers/usage";
 import { type ProviderIdentity } from "@mcode/contracts/compat/agent-model";
 import { type TurnFailure } from "@mcode/contracts/models/turn-failure";
 import { logger } from "@mcode/shared";
 import type { ProviderBackgroundToolSettlement } from "../../host-ports.js";
 import type { NativeBackgroundTask } from "../session-runtime.js";
-import { clampContextWindowToMode } from "./context-window.js";
+import type { ClaudeContextUsage } from "./context-usage.js";
 import { parseClaudeGoalCommandResult } from "./claude-goal-command-parser.js";
 import {
   classifyClaudeFailure,
@@ -82,7 +81,6 @@ type BackgroundToolStatus = ProviderBackgroundToolSettlement["status"];
 export interface ClaudeMappedSession {
   permissionMode?: string;
   model: string;
-  contextWindowMode: ContextWindowMode | undefined;
   pendingToolUses: Set<string>;
   hasFiredToolThisTurn: boolean;
   poisoned?: boolean;
@@ -144,7 +142,7 @@ export class ClaudeEventMapper {
   // The CLI yields each finished block before the API reports stop_reason, so main-thread text waits for message_delta, a tool call, or the result.
   private boundaryAwaitsStopReason = false;
   private lastInputTokens: number | undefined;
-  private lastContextWindow: number | undefined;
+  private lastContextWindow: { model: string | undefined; tokens: number } | undefined;
   private compacting = false;
   private readonly toolUseIds = new Set<string>();
   private readonly toolParents = new Map<string, ClaudeParentEvidence>();
@@ -217,6 +215,19 @@ export class ClaudeEventMapper {
     const type = typeof message.type === "string" ? message.type : "";
     const handler = this.handlers.get(type);
     return handler ? await handler(message) : "none";
+  }
+
+  /** Publishes a resolved window only while an execution can own the estimate. */
+  observeContextUsage(usage: ClaudeContextUsage): void {
+    this.lastContextWindow = { model: this.callbacks.getSession()?.model, tokens: usage.windowTokens };
+    if (this.callbacks.liveExecutionId()) {
+      this.callbacks.emit({
+        type: AgentEventType.ContextEstimate,
+        threadId: this.threadId,
+        tokensIn: usage.usedTokens,
+        contextWindow: usage.windowTokens,
+      }, { parent: { kind: "absent" }, sourceIdentities: [] });
+    }
   }
 
   /** Resets only derived attribution when a new queued execution consumes its prompt. */
@@ -640,9 +651,14 @@ export class ClaudeEventMapper {
       });
   }
 
+  private resolvedContextWindow(message: Message): number | undefined {
+    const cachedWindow = this.lastContextWindow;
+    if (cachedWindow && cachedWindow.model === this.callbacks.getSession()?.model) return cachedWindow.tokens;
+    return modelUsageWindow(message);
+  }
+
   private emitTurnComplete(message: Message, usage: Usage): void {
-    const session = this.callbacks.getSession();
-    const contextWindow = resultContextWindow(message, session);
+    const contextWindow = this.resolvedContextWindow(message);
     this.emit({
       type: AgentEventType.TurnComplete,
       threadId: this.threadId,
@@ -659,7 +675,6 @@ export class ClaudeEventMapper {
       cacheWriteTokens: usage.cache_creation_input_tokens ?? undefined,
       providerId: "claude",
     });
-    this.lastContextWindow = contextWindow;
   }
 
   private async emitQuotaUpdate(snapshot: ClaudeUsageSnapshot): Promise<void> {
@@ -911,7 +926,6 @@ export class ClaudeEventMapper {
         type: AgentEventType.ContextEstimate,
         threadId: this.threadId,
         tokensIn: this.lastInputTokens,
-        contextWindow: this.lastContextWindow,
       });
   }
   private emitDelta(delta: Message, index: unknown): void {
@@ -1147,10 +1161,7 @@ function inputTokens(usage: Usage): number {
     (usage.cache_creation_input_tokens ?? 0)
   );
 }
-function resultContextWindow(
-  message: Message,
-  session: ClaudeMappedSession | undefined,
-): number | undefined {
+function modelUsageWindow(message: Message): number | undefined {
   const models = objectValue(message.modelUsage) as Record<
     string,
     { contextWindow?: number }
@@ -1160,11 +1171,7 @@ function resultContextWindow(
       typeof item.contextWindow === "number" &&
       Number.isFinite(item.contextWindow),
   )?.contextWindow;
-  return clampContextWindowToMode(
-    contextWindow,
-    session?.contextWindowMode,
-    session?.model,
-  );
+  return contextWindow;
 }
 function metrics(message: Message, usage: Usage): ClaudeUsageMetrics {
   const serviceTier = usage.service_tier;

@@ -21,8 +21,7 @@ const threadPatchSchema = z.object({
   contextTokensUsed: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   contextWindow: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   compactSummary: z.string().max(MAX_METADATA_BYTES).optional(),
-}).strict().refine((patch) => patch.contextWindow === undefined || patch.contextTokensUsed !== undefined,
-  "Context window requires reported context occupancy");
+}).strict();
 
 /** Bounded feature metadata sent on the final write page after its accepted items materialize. */
 export const AcceptedFeatureWriteMetadataSchema = lazySchema(() => z.object({
@@ -86,7 +85,7 @@ function validateMetadataBounds(metadata: { readonly planRecords?: readonly Plan
 
 function persistThreadPatch(threads: ThreadRepo, threadId: string, patch: AcceptedFeatureWriteMetadata["threadPatch"]): void {
   if (!patch) return;
-  if (patch.contextTokensUsed !== undefined && !threads.updateContextUsage(threadId, patch.contextTokensUsed, patch.contextWindow)) {
+  if ((patch.contextTokensUsed !== undefined || patch.contextWindow !== undefined) && !threads.updateContextUsage(threadId, patch.contextTokensUsed, patch.contextWindow)) {
     throw new Error("Accepted context usage thread is missing");
   }
   if (patch.compactSummary !== undefined) threads.updateCompactSummary(threadId, patch.compactSummary);

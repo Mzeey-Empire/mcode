@@ -32,7 +32,6 @@ function restoreQueuedSelection(message: QueuedMessage): Partial<ComposerAgentSe
     ...(message.reasoningLevel ? { reasoning: message.reasoningLevel } : {}),
     ...(message.orchestrationMode ? { orchestrationMode: message.orchestrationMode } : {}),
     ...(message.permissionMode ? { permissionMode: message.permissionMode } : {}),
-    contextWindow: message.contextWindow ?? null,
     thinking: message.thinking ?? null,
     fastMode: message.fastMode ?? null,
   };

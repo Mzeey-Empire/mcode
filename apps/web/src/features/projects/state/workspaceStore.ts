@@ -38,7 +38,7 @@ import {
   releaseBrowserAutomationWorkspaceScopes,
 } from "@/features/preview/automation/browserAutomationStore";
 import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode } from "@mcode/contracts/models/enums";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { ScheduledTurnResume } from "@mcode/contracts/models/turn-recovery";
 import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 import type { Message } from "@mcode/contracts/models/message";
@@ -181,7 +181,6 @@ function createdThreadPreferenceSettings(
 ) {
   return {
     permission_mode: pending?.permissionMode ?? thread.permission_mode ?? null,
-    context_window_mode: pending?.contextWindow ?? thread.context_window_mode ?? null,
   };
 }
 
@@ -286,7 +285,6 @@ interface PendingThreadCreation {
   orchestrationMode?: OrchestrationMode;
   sourceThreadId?: string;
   forkedFromMessageId?: string;
-  contextWindow?: ContextWindowMode;
   thinking?: boolean;
   fastMode?: boolean;
   devinMode?: DevinMode;
@@ -324,7 +322,6 @@ interface BranchThreadParams {
   reasoningLevel?: ReasoningLevel;
   attachments?: AttachmentMeta[];
   interactionMode?: InteractionMode;
-  contextWindow?: ContextWindowMode;
   thinking?: boolean;
   fastMode?: boolean;
   devinMode?: DevinMode;
@@ -500,7 +497,6 @@ function buildOptimisticThreadPlaceholder(
     interactionMode: pending.interactionMode,
     orchestrationMode: pending.orchestrationMode,
     permissionMode: pending.permissionMode,
-    contextWindow: pending.contextWindow,
     thinking: pending.thinking,
     ...placeholderProviderSettings(pending),
     parentThreadId: pending.sourceThreadId,
@@ -532,7 +528,6 @@ async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateA
     interactionMode: pending.interactionMode,
     parentThreadId: pending.sourceThreadId,
     forkedFromMessageId: pending.forkedFromMessageId,
-    contextWindow: pending.contextWindow,
     thinking: pending.thinking,
     fastMode: pending.fastMode,
     devinMode: pending.devinMode,
@@ -584,7 +579,6 @@ function pendingCreationWithCurrentDraft(
     model: draft.modelId,
     provider: draft.provider,
     reasoningLevel: draft.reasoning,
-    contextWindow: draft.contextWindow,
     fastMode: draft.provider === "codex" ? draft.fastMode ?? undefined : undefined,
     devinMode: draft.provider === "devin" ? draft.devinMode ?? undefined : undefined,
     composerDraft: draft,
@@ -686,7 +680,6 @@ interface WorkspaceState {
     reasoningLevel?: ReasoningLevel,
     provider?: string,
     interactionMode?: InteractionMode,
-    contextWindow?: ContextWindowMode,
     thinking?: boolean,
     fastMode?: boolean,
     displayContent?: string,
@@ -1484,7 +1477,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     reasoningLevel,
     provider,
     interactionMode,
-    contextWindow,
     thinking,
     fastMode,
     displayContent,
@@ -1514,7 +1506,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       provider,
       interactionMode,
       orchestrationMode,
-      contextWindow,
       thinking,
       fastMode,
       devinMode,
@@ -1547,7 +1538,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       orchestrationMode: params.orchestrationMode,
       sourceThreadId: params.sourceThreadId,
       forkedFromMessageId: params.forkedFromMessageId,
-      contextWindow: params.contextWindow,
       thinking: params.thinking,
       fastMode: params.fastMode,
       devinMode: params.devinMode,

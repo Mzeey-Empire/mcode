@@ -102,6 +102,8 @@ describe("prepareAcceptedSystemObservation", () => {
     expect(prepareAcceptedSystemObservation({ ...base, compacting: true, event: estimate })).toEqual({ event: estimate });
     const unsupportedEstimate = event({ type: "contextEstimate", tokensIn: 24_000 });
     expect(prepareAcceptedSystemObservation({ ...base, event: unsupportedEstimate })).toEqual({ event: unsupportedEstimate });
+    const windowEstimate = event({ type: "contextEstimate", tokensIn: 24_000, contextWindow: 300_000 });
+    expect(prepareAcceptedSystemObservation({ ...base, event: windowEstimate })).toEqual({ event: windowEstimate, threadPatch: { contextWindow: 300_000 } });
     const noWindow = event({ type: "contextEstimate", tokensIn: 9, totalProcessedTokens: 0 });
     expect(prepareAcceptedSystemObservation({ ...base, event: noWindow })).toEqual({ event: noWindow, threadPatch: { contextTokensUsed: 9 } });
     for (const tokensIn of [0, -1]) {

@@ -10,7 +10,6 @@ import { useShallow } from "zustand/shallow";
 import type { LexicalEditor } from "lexical";
 import type { AttachmentMeta, Thread } from "@/transport";
 import { INTERACTION_MODES } from "@/transport";
-import type { ContextWindowMode } from "@mcode/contracts/models/settings";
 import type { DevinMode } from "@mcode/contracts/models/enums";
 import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
@@ -136,7 +135,6 @@ export interface ComposerFormController {
   state: ComposerFormState;
   editorRef: RefObject<LexicalEditor | null>;
   defaults: {
-    contextWindow: ContextWindowMode | undefined;
     thinking: boolean | undefined;
     globalCodexFast: boolean;
   };
@@ -242,7 +240,6 @@ export function useComposerFormController({
     modelId: selection.modelId,
     provider: selection.provider,
     reasoning: selection.reasoning,
-    contextWindow: undefined as ContextWindowMode | undefined,
     thinking: undefined as boolean | undefined,
     fastMode: null as boolean | null,
     devinMode: null as DevinMode | null,
@@ -270,9 +267,6 @@ export function useComposerFormController({
   const settingsDefaultReasoning = useSettingsStore((state) => state.settings.model.defaults.reasoning);
   const settingsDefaultMode = useSettingsStore((state) => state.settings.agent.defaults.mode);
   const settingsDefaultPermission = useSettingsStore((state) => state.settings.agent.defaults.permission);
-  const settingsDefaultContextWindow = useSettingsStore(
-    (state) => state.settings.model.defaults.contextWindow,
-  );
   const settingsDefaultThinking = useSettingsStore((state) => state.settings.model.defaults.thinking);
   const settingsGlobalCodexFast = useSettingsStore(
     (state) => state.settings.provider.codex.fastMode === true,
@@ -562,7 +556,6 @@ export function useComposerFormController({
       modelId: selection.modelId,
       provider: selection.provider,
       reasoning: selection.reasoning,
-      contextWindow: selection.contextWindow ?? undefined,
       thinking: selection.thinking ?? undefined,
       fastMode: selection.fastMode,
       devinMode: selection.devinMode,
@@ -735,7 +728,6 @@ export function useComposerFormController({
           : ORCHESTRATION_MODES.STANDARD),
       approvalReviewMode: session.approvalReviewMode ?? current.approvalReviewMode,
       permissionMode: session.permissionMode,
-      contextWindow: session.contextWindow,
       thinking: session.thinking,
       fastMode: session.fastMode,
       devinMode: session.devinMode,
@@ -883,7 +875,6 @@ export function useComposerFormController({
     state,
     editorRef,
     defaults: {
-      contextWindow: settingsDefaultContextWindow,
       thinking: settingsDefaultThinking,
       globalCodexFast: settingsGlobalCodexFast,
     },

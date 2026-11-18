@@ -3,7 +3,7 @@ import { ThreadPullRequestSchema } from "./thread-pull-request.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ScheduledTurnResumeSchema } from "./turn-recovery.js";
 import { DevinModeSchema, ThreadStatusSchema, ThreadModeSchema, InteractionModeSchema, OrchestrationModeSchema, PermissionModeSchema } from "./enums.js";
-import { ContextWindowModeSchema, ReasoningLevelSchema } from "./settings.js";
+import { ReasoningLevelSchema } from "./settings.js";
 
 /** Durable progress of the thread's current planning conversation. */
 export const PlanPhaseSchema = z.enum(["questions", "planning", "ready", "no_plan"]);
@@ -79,8 +79,6 @@ export const ThreadSchema = lazySchema(() =>
   orchestration_mode: OrchestrationModeSchema.nullable(),
   /** Permission mode last used (full or supervised). */
   permission_mode: PermissionModeSchema.nullable(),
-  /** Context window mode last used in this thread ("200k" or "1m"). */
-  context_window_mode: ContextWindowModeSchema.nullable(),
   /** Boolean thinking toggle last used in this thread. Honored only by models with a thinking toggle (Haiku 4.5). */
   thinking: z.boolean().nullable(),
   /**

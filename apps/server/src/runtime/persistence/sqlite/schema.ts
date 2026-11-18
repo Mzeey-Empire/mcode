@@ -145,6 +145,7 @@ export const threads = sqliteTable(
     lastCompactSummary: text("last_compact_summary"),
     /** Devin-only: native session mode (normal|accept-edits|smart|bypass|plan). */
     devinMode: text("devin_mode"),
+    // Stable and nightly share this database; removal needs a later contract migration.
     contextWindowMode: text("context_window_mode"),
     thinking: integer("thinking"),
     /**

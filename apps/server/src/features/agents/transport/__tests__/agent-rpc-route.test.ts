@@ -258,7 +258,6 @@ describe("routeMessage Agent RPCs", () => {
         threadId: "thread-1",
         answers: [],
         reasoningLevel: "high",
-        contextWindow: "1m",
         thinking: true,
       },
     }), {
@@ -271,7 +270,6 @@ describe("routeMessage Agent RPCs", () => {
       [],
       "default",
       "high",
-      "1m",
       true,
     );
   });

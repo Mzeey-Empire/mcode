@@ -1,6 +1,6 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import type { ApprovalReviewMode, DevinMode, OrchestrationMode } from "@mcode/contracts/models/enums";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
 import { INTERACTION_MODES, PERMISSION_MODES, type InteractionMode, type PermissionMode } from "@/transport";
 import {
@@ -18,7 +18,6 @@ export interface ComposerAgentSelection {
   permissionMode: PermissionMode;
   approvalReviewMode: ApprovalReviewMode;
   orchestrationMode: OrchestrationMode;
-  contextWindow: ContextWindowMode | null;
   thinking: boolean | null;
   fastMode: boolean | null;
   devinMode: DevinMode | null;
@@ -32,7 +31,6 @@ export interface ComposerSelectionState {
 }
 
 type NullableSelectionField =
-  | "contextWindow"
   | "thinking"
   | "fastMode"
   | "devinMode";
@@ -68,7 +66,6 @@ function hasSameComposerAgentSelection(
   next: ComposerAgentSelection,
 ): boolean {
   return hasSameCoreComposerAgentSelection(current, next)
-    && current.contextWindow === next.contextWindow
     && current.thinking === next.thinking
     && current.fastMode === next.fastMode
     && current.devinMode === next.devinMode;
@@ -84,7 +81,6 @@ export function createDefaultComposerAgentSelection(): ComposerAgentSelection {
     permissionMode: PERMISSION_MODES.FULL,
     approvalReviewMode: "manual",
     orchestrationMode: ORCHESTRATION_MODES.STANDARD,
-    contextWindow: null,
     thinking: null,
     fastMode: null,
     devinMode: null,
@@ -107,7 +103,6 @@ export function mergeComposerAgentSelection(
       current.orchestrationMode,
       patch.orchestrationMode,
     ),
-    contextWindow: readNullableSelectionPatch(current, patch, "contextWindow"),
     thinking: readNullableSelectionPatch(current, patch, "thinking"),
     fastMode: readNullableSelectionPatch(current, patch, "fastMode"),
     devinMode: readNullableSelectionPatch(current, patch, "devinMode"),

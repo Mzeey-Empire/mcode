@@ -196,7 +196,6 @@ const agentHandlers: AgentRpcHandlerMap = {
       params.answers,
       params.permissionMode ?? "default",
       params.reasoningLevel,
-      params.contextWindow,
       params.thinking,
     );
   },

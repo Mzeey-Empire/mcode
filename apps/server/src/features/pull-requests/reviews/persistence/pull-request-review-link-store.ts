@@ -166,7 +166,7 @@ export class PullRequestReviewLinkStore {
     if (!threads.updateModel(threadId, input.defaults.model)) throw new Error("Failed to persist the Review task model.");
     if (!threads.updateSettings(threadId, {
       reasoning_level: input.defaults.reasoning, interaction_mode: input.defaults.interactionMode,
-      permission_mode: input.defaults.permission, context_window_mode: input.defaults.contextWindow, thinking: input.defaults.thinking,
+      permission_mode: input.defaults.permission, thinking: input.defaults.thinking,
     })) throw new Error("Failed to persist the Review task settings.");
     observeThreadPullRequests(this.db, threadId, [{
       number: input.identity.number, state: normalizeThreadPullRequestState(input.checkout.pullRequestState),

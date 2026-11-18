@@ -11,7 +11,7 @@ import { createThreadPersistenceTestRuntime } from "../../../../thread-control/t
 import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../persistence/workspace-repo.js";
 import { addClient, broadcast, _resetForTest } from "../../../../../application/transport/push.js";
-import { syncThreadPullRequests } from "../workspace-thread-rpc.js";
+import { syncThreadPullRequests, updateThreadSettings } from "../workspace-thread-rpc.js";
 
 const pushSchema = z.object({ channel: z.string(), data: z.unknown() });
 const checks = { aggregate: "passing", runs: [], fetchedAt: 1 } satisfies PullRequestWatchSnapshot["checks"];
@@ -69,6 +69,12 @@ function nextPush(client: WebSocket): Promise<z.infer<typeof pushSchema>> {
 }
 
 afterEach(() => _resetForTest());
+
+it.each([true, null])("passes Thinking %s to the settings service", async (thinking) => {
+  const updateSettings = vi.fn().mockResolvedValue(true);
+  expect(await updateThreadSettings({ threadService: { updateSettings } }, { threadId: "thread-1", thinking })).toBe(true);
+  expect(updateSettings).toHaveBeenCalledWith("thread-1", expect.objectContaining({ thinking }));
+});
 
 describe("global thread PR sync", () => {
   it("publishes a found merge to every client without an active workspace", async () => {
