@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ReleaseLine } from "../../policy/release-line";
 import { createUpdateStatusState } from "../../state/update-status";
 import { createUpdaterLifecycle } from "../updater";
 
@@ -73,22 +74,23 @@ function createLifecycle() {
     installWhenIdle: vi.fn(),
     cancelInstallWhenIdle: vi.fn(),
   };
+  const settings = vi.fn(() => ({
+    releaseLine: "stable" as ReleaseLine,
+    autoDownload: true,
+    autoInstallOnQuit: true,
+    checkInterval: "never",
+  }));
   const lifecycle = createUpdaterLifecycle({
     updater,
     application,
     windows,
     timer,
-    settings: vi.fn(() => ({
-      releaseLine: "stable" as const,
-      autoDownload: true,
-      autoInstallOnQuit: true,
-      checkInterval: "never",
-    })),
+    settings,
     status,
     installation,
   });
   lifecycle.initialize();
-  return { lifecycle, updater, listeners, status, timer, installation };
+  return { lifecycle, updater, listeners, status, timer, installation, settings };
 }
 
 describe("updater lifecycle", () => {
@@ -248,19 +250,32 @@ describe("updater lifecycle", () => {
     });
   });
 
-  it("shares concurrent release-line switches", async () => {
+  it("applies a release line requested while another switch is checking", async () => {
     current = createLifecycle();
+    const { updater, settings } = current;
+    const checkedPrerelease: boolean[] = [];
     let resolveCheck: (() => void) | undefined;
-    current.updater.checkForUpdates.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (resolveCheck = resolve)),
-    );
+    updater.checkForUpdates
+      .mockImplementationOnce(() => {
+        checkedPrerelease.push(updater.allowPrerelease);
+        return new Promise<void>((resolve) => (resolveCheck = resolve));
+      })
+      .mockImplementationOnce(() => {
+        checkedPrerelease.push(updater.allowPrerelease);
+        current.status.publish({ state: "not-available", version: "0.13.0" });
+        return Promise.resolve();
+      });
 
-    const first = current.lifecycle.applyReleaseLineSwitch("nightly");
-    const second = current.lifecycle.applyReleaseLineSwitch("stable");
+    settings.mockReturnValue({ releaseLine: "nightly", autoDownload: true, autoInstallOnQuit: true, checkInterval: "never" });
+    const nightly = current.lifecycle.applyReleaseLineSwitch("nightly");
+    settings.mockReturnValue({ releaseLine: "stable", autoDownload: true, autoInstallOnQuit: true, checkInterval: "never" });
+    const stable = current.lifecycle.applyReleaseLineSwitch("stable");
     resolveCheck?.();
-    const [firstResult, secondResult] = await Promise.all([first, second]);
-    expect(firstResult).toBe(secondResult);
-    expect(firstResult).toEqual({ state: "checking" });
+
+    await expect(nightly).resolves.toEqual({ state: "checking" });
+    await expect(stable).resolves.toEqual({ state: "not-available", version: "0.13.0" });
+    expect(checkedPrerelease).toEqual([true, false]);
+    expect(updater.allowPrerelease).toBe(false);
   });
 
   it("removes listeners and timers and blocks stale results after cleanup", async () => {
