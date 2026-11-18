@@ -13,9 +13,10 @@ import { getTransport, type Thread } from "@/transport";
 import type { BranchTarget } from "@/features/conversation/composer/execution/targets/branch-target";
 import type { TargetPageStatus } from "@/features/conversation/composer/execution/targets/target-page-cache";
 import { useBranchTargets, useDebouncedQuery } from "@/features/conversation/composer/execution/targets/useBranchTargets";
-import { Check, ChevronDown, GitBranch, Plus, Search } from "lucide-react";
+import { Check, ChevronDown, GitBranch, GitBranchPlus, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  OVERVIEW_INLINE_ACTION_CLASS,
   OVERVIEW_ROW_CLASS,
   OverviewRowIcon,
   ThreadOverviewTooltipButton,
@@ -133,15 +134,17 @@ function getCurrentBranchUncommittedLabel(uncommittedFiles: number | null): stri
  * Why a named checkout cannot create and switch to a new branch yet, or null when it can. A new
  * branch only helps when there is work to carry: commits ahead of the base or uncommitted files.
  */
-function createCheckoutBranchBlocker(
+export function createCheckoutBranchBlocker(
   uncommitted: UncommittedFilesState,
   hasCommitsAhead: boolean | null,
 ): string | null {
   if (!uncommitted.settled) return "Checking for changes…";
   if (hasCommitsAhead === true) return null;
-  if (uncommitted.count === null) return "Couldn't check for changes";
+  // Opening the menu re-runs the comparison, so reopening is the retry.
+  if (uncommitted.count === null) return "Couldn't check for changes. Reopen this menu to retry.";
   if (uncommitted.count > 0) return null;
-  return "No commits or uncommitted changes to move";
+  // The commits-ahead check may not have answered; claim only what is known.
+  return hasCommitsAhead === false ? "No commits or uncommitted changes to move" : "No uncommitted changes to move";
 }
 
 function ThreadOverviewBranchMenu({
@@ -236,7 +239,7 @@ function ThreadOverviewBranchRows({
           <button
             type="button"
             onClick={data.retry}
-            className="rounded-sm text-caption text-ink underline-offset-2 hover:underline focus-visible:underline"
+            className={OVERVIEW_INLINE_ACTION_CLASS}
           >
             Retry
           </button>
@@ -324,7 +327,7 @@ function ThreadOverviewBranchCreateAction({
           onCreateBranch();
         }}
       >
-        <Plus aria-hidden className="size-4 shrink-0 text-muted" />
+        <GitBranchPlus aria-hidden className="size-4 shrink-0 text-muted" />
         Create and check out branch…
       </Button>
     </ThreadOverviewTooltipButton>
