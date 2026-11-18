@@ -382,7 +382,6 @@ function FlatThreadRowBody(props: ThreadRowBodyProps) {
           workspaceId={thread.workspace_id}
           name={props.workspaceName}
           size={16}
-          tone="tinted"
           className={presentation.titleTone === "receded" ? RECEDED_BADGE_CLASS : undefined}
         />
         <span className={cn("text-fade min-w-0 flex-1", presentation.scaffoldDim)}>{props.workspaceName}</span>
@@ -437,7 +436,7 @@ function ClosedThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation, lifecycle } = props;
   return (
     <>
-      {props.showProject && <ProjectIcon workspaceId={thread.workspace_id} name={props.workspaceName} size={16} tone="tinted" />}
+      {props.showProject && <ProjectIcon workspaceId={thread.workspace_id} name={props.workspaceName} size={16} />}
       {props.isEditing
         ? <ThreadRowTitleInput {...props} />
         : (

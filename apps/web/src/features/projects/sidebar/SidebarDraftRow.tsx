@@ -84,7 +84,7 @@ function FlatDraftBody({ draft, isActive, workspaceName, onDiscard }: DraftBodyP
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex h-4 min-w-0 items-center gap-1 text-caption text-muted">
-        <ProjectIcon workspaceId={draft.workspaceId} name={workspaceName} size={16} tone="tinted" />
+        <ProjectIcon workspaceId={draft.workspaceId} name={workspaceName} size={16} />
         <span className="text-fade min-w-0 flex-1">{workspaceName}</span>
         <DraftCorner draft={draft} onDiscard={onDiscard} />
       </div>

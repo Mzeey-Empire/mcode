@@ -116,7 +116,7 @@ function SidebarThreadPreview({ workspaceName, thread }: { workspaceName: string
     <div data-testid={`thread-preview-${thread.id}`} className="-mx-2 flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto px-2 text-ink">
       <div className="min-w-0 shrink-0 text-label font-semibold [overflow-wrap:anywhere]">{thread.title}</div>
       <div className="grid shrink-0 gap-1.5 text-xs text-muted">
-        <PreviewFact label={`Project, ${workspaceName}`} icon={<ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} tone="tinted" />}>
+        <PreviewFact label={`Project, ${workspaceName}`} icon={<ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} />}>
           {workspaceName}
         </PreviewFact>
         <ThreadPreviewBranch thread={thread} />

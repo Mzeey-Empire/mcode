@@ -223,7 +223,7 @@ function ProjectWorkspaceRow({
       {...sortableListeners}
     >
       <ProjectDisclosure workspace={workspace} isExpanded={!item.collapsed} onToggle={actions.toggle} />
-      <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} tone="tinted" />
+      <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} />
       <ProjectTitle workspace={workspace} onClick={actions.toggle} />
       <ProjectGitStatus isGitRepository={workspace.is_git_repo} />
       <WorkspaceCiRollupChip threads={scopedThreads} checksById={checksById} />
