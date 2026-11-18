@@ -359,7 +359,7 @@ function ChangesEntry() {
       <OverviewRowIcon>
         <Diff />
       </OverviewRowIcon>
-      <span className="text-fade min-w-0 grow text-ink">Changes</span>
+      <span className="text-fade min-w-0 grow font-medium text-ink">Changes</span>
       <ThreadOverviewWhen when={isChangeSummaryLoading}>
         <span
           data-testid="thread-overview-change-loading"
@@ -368,15 +368,15 @@ function ChangesEntry() {
         />
       </ThreadOverviewWhen>
       <ThreadOverviewWhen when={isChangeSummaryFailed}>
-        <span data-testid="thread-overview-change-failed" className="shrink-0 text-xs text-muted">
-          Unavailable
+        <span data-testid="thread-overview-change-failed" className="shrink-0 text-caption text-muted">
+          Couldn't load
         </span>
       </ThreadOverviewWhen>
       <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
         <span
           data-testid="thread-overview-change-summary"
           aria-label={`${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
-          className="shrink-0 text-xs tabular-nums text-muted"
+          className="shrink-0 text-caption tabular-nums text-muted"
         >
           {`+${changeSummary.additions} −${changeSummary.deletions}`}
         </span>

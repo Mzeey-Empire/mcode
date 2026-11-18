@@ -65,12 +65,12 @@ describe("ThreadOverview changes and branches", () => {
     expect(vi.mocked(mockTransport.getReviewState)).not.toHaveBeenCalled();
   });
 
-  it("says the Changes row is unavailable when its comparison fails", async () => {
+  it("says the Changes row could not load when its comparison fails", async () => {
     vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({
       status: "failed", failure: { kind: "git-error", summary: "Git reported an error", detail: "fatal" },
     });
     render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={1400} />);
-    expect(await screen.findByTestId("thread-overview-change-failed")).toHaveTextContent("Unavailable");
+    expect(await screen.findByTestId("thread-overview-change-failed")).toHaveTextContent("Couldn't load");
     expect(screen.queryByTestId("thread-overview-change-loading")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-change-summary")).not.toBeInTheDocument();
   });

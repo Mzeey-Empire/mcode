@@ -70,7 +70,7 @@ describe("ThreadOverview actions", () => {
 
     render(<ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} />);
 
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Run project action" }));
     const action = await screen.findByTestId("project-action-success");
     await user.click(action);
 
@@ -105,7 +105,7 @@ describe("ThreadOverview actions", () => {
     render(<><ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} /><ProjectSettingsPanel workspaceId="ws-1" threadId="thread-1" /></>);
 
     await user.click(await screen.findByRole("button", { name: /Success/, expanded: false }));
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Run project action" }));
     expect(await screen.findByRole("menuitem", { name: /Success/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
@@ -116,7 +116,7 @@ describe("ThreadOverview actions", () => {
     await waitFor(() => expect(vi.mocked(mockTransport.saveWorkspaceEnvironment)).toHaveBeenCalledOnce());
     await waitFor(() => expect(vi.mocked(mockTransport.readWorkspaceEnvironment)).toHaveBeenCalledTimes(3));
 
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Run project action" }));
     expect(await screen.findByRole("menuitem", { name: /Renamed Action/ })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /Success/ })).not.toBeInTheDocument();
   });
@@ -137,7 +137,7 @@ describe("ThreadOverview actions", () => {
     });
     render(<ThreadOverview thread={branchlessThread(thread)} threadPaneWidth={1400} />);
 
-    await user.click(screen.getByRole("button", { name: "Actions" }));
+    await user.click(screen.getByRole("button", { name: "Run project action" }));
     await screen.findByRole("menuitem", { name: /Success/ });
     expect(screen.queryByRole("menuitem", { name: "Run Setup" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open Project settings" })).toBeInTheDocument();

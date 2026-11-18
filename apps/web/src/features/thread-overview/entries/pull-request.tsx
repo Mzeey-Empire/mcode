@@ -9,7 +9,7 @@ import { registerCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
 import type { ChecksStatus } from "@mcode/contracts/github";
-import { ChevronDown, GitPullRequest, Plus } from "lucide-react";
+import { ChevronDown, GitCommitHorizontal, GitPullRequest, Plus } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type MouseEvent } from "react";
 import {
   OVERVIEW_ROW_CLASS,
@@ -151,12 +151,12 @@ function ThreadOverviewPrActionRow({
             data-testid="workspace-menu-commit"
             className={cn(
               OVERVIEW_ROW_CLASS,
-              "cursor-pointer justify-start text-ink/75 hover:bg-hover/40 hover:text-ink",
+              "cursor-pointer justify-start text-ink",
             )}
             onClick={onCommit}
           >
             <OverviewRowIcon>
-              <GitPullRequest />
+              <GitCommitHorizontal />
             </OverviewRowIcon>
             <span className="font-medium">Commit…</span>
           </Button>
@@ -178,7 +178,7 @@ function ThreadOverviewPrActionRow({
           data-testid="workspace-menu-create-pr"
           className={cn(
             OVERVIEW_ROW_CLASS,
-            "cursor-pointer justify-start text-ink/75 hover:bg-hover/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50",
+            "cursor-pointer justify-start text-ink disabled:cursor-not-allowed disabled:opacity-50",
           )}
           onClick={onCreatePr}
           disabled={!hasCommitsAhead}

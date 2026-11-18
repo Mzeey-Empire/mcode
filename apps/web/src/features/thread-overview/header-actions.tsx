@@ -1,6 +1,5 @@
-import { Button, IconButton } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/button";
 import { MoreIcon } from "@/components/ui/icon-map";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ThreadActionRunMenu } from "@/features/projects/actions/ThreadActionRunMenu";
 import { useProjectActions } from "@/features/projects/actions/useProjectActions";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
@@ -30,7 +29,7 @@ function ProjectActions({ thread }: { thread: Thread }) {
       projectActions={projectActions}
       onEdit={openProjectSettings}
       trigger={
-        <IconButton aria-label="Actions" className="aria-expanded:bg-selected">
+        <IconButton aria-label="Run project action" className="aria-expanded:bg-selected">
           <MoreIcon size={14} aria-hidden />
         </IconButton>
       }
@@ -38,25 +37,11 @@ function ProjectActions({ thread }: { thread: Thread }) {
   );
 }
 function ProjectSettingsButton({ onOpen }: { onOpen: () => void }) {
-  return (<Tooltip>
-    <TooltipTrigger
-      render={
-        <Button
-          variant="ghost"
-          size="icon-compact"
-          type="button"
-          aria-label="Open Project settings"
-          onClick={onOpen}
-          className="cursor-pointer text-muted hover:bg-hover/40 hover:text-ink"
-        >
-          <Settings size={14} aria-hidden />
-        </Button>
-      }
-    />
-    <TooltipContent side="bottom" className="text-xs">
-      Open Project settings
-    </TooltipContent>
-  </Tooltip>);
+  return (
+    <IconButton aria-label="Open Project settings" onClick={onOpen}>
+      <Settings size={14} aria-hidden />
+    </IconButton>
+  );
 }
 function ThreadProjectSettings() {
   return <ProjectSettingsButton onOpen={useOverviewContext().openProjectSettings} />;

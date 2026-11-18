@@ -430,11 +430,11 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.getByTestId("thread-overview-ci-green")).toBeInTheDocument();
   });
 
-  it("places one Actions control before Project settings in the Overview header", () => {
+  it("places one Run project action control before Project settings in the Overview header", () => {
     renderHeaderActions();
 
     const header = screen.getByTestId("thread-overview-card-header");
-    const projectActions = within(header).getAllByRole("button", { name: "Actions" });
+    const projectActions = within(header).getAllByRole("button", { name: "Run project action" });
     const projectSettings = within(header).getByRole("button", {
       name: "Open Project settings",
     });

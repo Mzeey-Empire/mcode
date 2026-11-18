@@ -53,7 +53,7 @@ function ThreadOverviewRecapControls({
   const refreshLabel = isGenerating ? "Refreshing recap" : "Refresh recap";
 
   return (
-    <div className="-mr-1 flex shrink-0 items-center gap-0.5">
+    <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
       {coverageLabel ? <ThreadOverviewRecapCoverage coverageLabel={coverageLabel} /> : null}
       <Tooltip>
         <TooltipTrigger
