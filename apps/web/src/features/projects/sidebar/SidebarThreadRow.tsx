@@ -386,21 +386,29 @@ function GroupedThreadRowBody(props: ThreadRowBodyProps) {
   const pr = usePullRequestChip(thread);
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <ThreadRowTitleLine {...props}>
-        <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} fallback={<ThreadRowTime thread={thread} />} />} />
-      </ThreadRowTitleLine>
-      <ThreadRowMetaLine thread={thread} presentation={presentation} chip={pr.chip} />
+      <ThreadRowTitleLine {...props} />
+      {/* The status sits on the meta line, so a long title keeps the full width of its own line. */}
+      <ThreadRowMetaLine
+        thread={thread}
+        presentation={presentation}
+        chip={pr.chip}
+        trailing={<ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} fallback={<ThreadRowTime thread={thread} />} />} />}
+      />
       {pr.list}
     </div>
   );
 }
 
-function ThreadRowMetaLine({ thread, presentation, chip }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { chip: React.ReactNode }) {
+function ThreadRowMetaLine({ thread, presentation, chip, trailing }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { chip: React.ReactNode; trailing?: React.ReactNode }) {
   return (
-    <div data-testid="thread-line-branch" className={cn("mt-0.5 flex h-4 min-w-0 items-center gap-1 text-caption text-muted", presentation.scaffoldDim)}>
-      <ThreadModeIcon thread={thread} stale={presentation.isStaleWorktree} />
-      <ThreadRowBranch thread={thread} stale={presentation.isStaleWorktree} />
-      <div className="flex shrink-0 items-center gap-2 pl-1">
+    // A scaffold row dims its content but never its status, so the dim skips the trailing slot.
+    <div data-testid="thread-line-branch" className="mt-0.5 flex h-4 min-w-0 items-center gap-1 text-caption text-muted">
+      <div className={cn("flex min-w-0 flex-1 items-center gap-1", presentation.scaffoldDim)}>
+        <ThreadModeIcon thread={thread} stale={presentation.isStaleWorktree} />
+        <ThreadRowBranch thread={thread} stale={presentation.isStaleWorktree} />
+      </div>
+      {trailing}
+      <div className={cn("flex shrink-0 items-center gap-2 pl-1", presentation.scaffoldDim)}>
         {chip}
         <ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} className="opacity-(--provider-mark-opacity)" />
       </div>

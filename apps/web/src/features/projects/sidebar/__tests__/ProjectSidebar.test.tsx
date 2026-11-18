@@ -805,7 +805,7 @@ describe("ProjectSidebar thread interactions", () => {
     expect(projectRow).not.toHaveTextContent(/\d/);
   });
 
-  it("reads the title and status on one line, then the checkout, with no project line in the Projects view", () => {
+  it("reads the title on its own line, then the checkout with the status, with no project line in the Projects view", () => {
     setupStoreMocks();
     render(<ProjectSidebar />);
 
@@ -816,7 +816,8 @@ describe("ProjectSidebar thread interactions", () => {
     expect(within(row).queryByTestId("thread-line-project")).toBeNull();
     expect(row).not.toHaveTextContent("Test Project");
     expect(within(titleLine).getByTestId("thread-title")).toHaveTextContent("My Thread");
-    expect(within(titleLine).getByTestId("thread-status")).toBeInTheDocument();
+    expect(within(titleLine).queryByTestId("thread-status")).toBeNull();
+    expect(within(branchLine).getByTestId("thread-status")).toBeInTheDocument();
     expect(titleLine.compareDocumentPosition(branchLine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(within(branchLine).getByLabelText("Local mode")).toBeInTheDocument();
     expect(within(branchLine).getByLabelText("Provider, Claude")).toBeInTheDocument();
@@ -1508,7 +1509,7 @@ describe("ProjectSidebar action-required indicator", () => {
     setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt, last_activity_at: updatedAt }) });
     render(<ProjectSidebar />);
 
-    const row = screen.getByRole("button", { name: /^Updated Thread 5m .*Local mode Branch, main Provider, Claude$/i });
+    const row = screen.getByRole("button", { name: /^Updated Thread .*Local mode Branch, main 5m .*Provider, Claude$/i });
     const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(updatedAt));
     row.focus();
     expect(await screen.findByTestId("thread-preview-thread-updated")).toHaveTextContent(`Updated ${exactTime}`);
