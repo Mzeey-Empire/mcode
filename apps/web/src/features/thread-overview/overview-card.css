@@ -11,5 +11,6 @@
   border-top-width: 1px;
   border-top-style: solid;
   border-top-color: var(--color-border);
-  padding-top: 12px;
+  /* Rows already hold about 8px above and below their text, so 4px here keeps a divider 12px from it. */
+  padding-top: 4px;
 }
