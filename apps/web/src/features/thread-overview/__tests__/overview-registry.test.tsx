@@ -65,13 +65,13 @@ describe("overview registry", () => {
       ["create-branch", "lane", 75],
       ["commit", "lane", 80],
       ["terminals", "terminals", 85],
-      ["usage", "summary", 90],
+      ["usage", "usage", 90],
       ["repository", "lane", 95],
       ["subagents", "activity", 100],
       ["pull-request", "lane", 110],
       ["browser", "activity", 120],
       ["sources", "activity", 130],
-      ["recap", "summary", 140],
+      ["recap", "recap", 140],
     ]);
     expect(getOverviewHeaderActions(subject).map(({ id }) => id)).toEqual(["project-actions", "settings"]);
   });
@@ -94,6 +94,9 @@ describe("overview registry", () => {
 
   it("renders the direct-thread rows grouped by section under the header", async () => {
     mockLoadedEntries();
+    const record = createEmptyThreadRecord();
+    record.messages = [createMockMessage({ thread_id: thread.id, content: "Hello" })];
+    useThreadStore.setState({ records: new Map([[thread.id, record]]) });
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
     await screen.findByTestId("thread-overview-change-summary");
     expect(mockTransport.getRemoteUrl).toHaveBeenCalledWith(thread.workspace_id, thread.id);
@@ -290,8 +293,28 @@ describe("overview registry", () => {
     await act(async () => { rejectRequest(new Error("Recap request failed")); });
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
     expect(screen.queryByTestId("thread-overview-recap-skeleton")).not.toBeInTheDocument();
-    expect(screen.getByTestId("thread-overview-recap-text")).toHaveTextContent("Recap unavailable");
+    expect(screen.getByTestId("thread-overview-recap-text")).toHaveTextContent("Couldn't generate recap");
     expect(screen.getByTestId("thread-overview-recap-refresh")).toBeEnabled();
     expect(mockTransport.generateRecap).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a failed Recap from the inline Retry action", async () => {
+    vi.mocked(mockTransport.generateRecap)
+      .mockRejectedValueOnce(new Error("Recap request failed"))
+      .mockResolvedValueOnce({ text: "Recovered recap." });
+    const record = createEmptyThreadRecord();
+    record.messages = [createMockMessage({ thread_id: thread.id, content: "Summarise this thread" })];
+    useThreadStore.setState({ records: new Map([[thread.id, record]]) });
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    fireEvent.click(screen.getByTestId("thread-overview-recap-refresh"));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("thread-overview-recap-text")).toHaveTextContent("Recovered recap."));
+    expect(mockTransport.generateRecap).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides Recap on a thread with no messages and no recap", () => {
+    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    expect(screen.getByTestId("thread-overview-card")).toBeInTheDocument();
+    expect(screen.queryByTestId("thread-overview-recap")).not.toBeInTheDocument();
   });
 });

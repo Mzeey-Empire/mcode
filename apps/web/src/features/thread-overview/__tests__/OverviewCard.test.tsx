@@ -54,7 +54,8 @@ describe("OverviewCard", () => {
           entry("lane-row", "lane", true),
           entry("activity-empty", "activity", false),
           entry("terminal-row", "terminals", true),
-          entry("summary-empty", "summary", false),
+          entry("usage-empty", "usage", false),
+          entry("recap-row", "recap", true),
         ]}
       />,
     );
@@ -62,7 +63,8 @@ describe("OverviewCard", () => {
     expect(sectionStyle("lane")).toEqual({ hidden: false, divider: false });
     expect(sectionStyle("activity").hidden).toBe(true);
     expect(sectionStyle("terminals")).toEqual({ hidden: false, divider: true });
-    expect(sectionStyle("summary").hidden).toBe(true);
+    expect(sectionStyle("usage").hidden).toBe(true);
+    expect(sectionStyle("recap")).toEqual({ hidden: false, divider: true });
   });
 
   it("puts the first non-empty section directly under the header without a divider", () => {
@@ -71,12 +73,12 @@ describe("OverviewCard", () => {
         subject={subject}
         presentation="overlay"
         headerActions={[]}
-        entries={[entry("lane-empty", "lane", false), entry("summary-row", "summary", true)]}
+        entries={[entry("lane-empty", "lane", false), entry("usage-row", "usage", true)]}
       />,
     );
 
     expect(screen.getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "overlay");
-    expect(sectionStyle("summary")).toEqual({ hidden: false, divider: false });
+    expect(sectionStyle("usage")).toEqual({ hidden: false, divider: false });
     expect(screen.getByTestId("thread-overview-card-header")).toHaveTextContent("Overview");
   });
 });

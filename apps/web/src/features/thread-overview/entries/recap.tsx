@@ -2,12 +2,13 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import { OVERVIEW_INLINE_ACTION_CLASS } from "@/features/thread-overview/overview-row";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { useOverviewMessages } from "@/features/thread-overview/use-overview-messages";
 import { useThreadRecap } from "@/hooks/useThreadRecap";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
-import { Info, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 interface ThreadOverviewRecapRowProps {
   recapText: string | null;
@@ -54,8 +55,14 @@ function ThreadOverviewRecapControls({
 
   return (
     <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
-      {coverageLabel ? <ThreadOverviewRecapCoverage coverageLabel={coverageLabel} /> : null}
-      <Tooltip>
+      {/* "Out of date" already refreshes, so the icon would be a second control for the same action. */}
+      {coverageLabel ? (
+        <ThreadOverviewRecapCoverage
+          coverageLabel={coverageLabel}
+          isGenerating={isGenerating}
+          onRefresh={onRefresh}
+        />
+      ) : <Tooltip>
         <TooltipTrigger
           render={
             <Button
@@ -66,10 +73,9 @@ function ThreadOverviewRecapControls({
               aria-label={refreshLabel}
               disabled={isGenerating}
               onClick={onRefresh}
-              className={cn("group shrink-0", isGenerating && "text-muted/45")}
+              className={cn("group -my-1 shrink-0 text-muted hover:text-ink", isGenerating && "text-muted/45")}
             >
               <RefreshCw
-                size={13}
                 aria-hidden
                 className="transition-transform duration-200 ease-out group-active:rotate-45 motion-reduce:transition-none"
               />
@@ -77,31 +83,33 @@ function ThreadOverviewRecapControls({
           }
         />
         <TooltipContent>{refreshLabel}</TooltipContent>
-      </Tooltip>
+      </Tooltip>}
     </div>
   );
 }
 
-/** Explains which thread activity the current recap covers. */
+/** Flags a recap that trails recent activity; clicking it refreshes the recap. */
 function ThreadOverviewRecapCoverage({
   coverageLabel,
-}: {
+  isGenerating,
+  onRefresh,
+}: Pick<ThreadOverviewRecapRowProps, "isGenerating" | "onRefresh"> & {
   coverageLabel: NonNullable<ReturnType<typeof getThreadRecapCoverageLabel>>;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <Button
-            variant="ghost"
-            size="icon-compact"
+          <button
             type="button"
             data-testid="thread-overview-recap-coverage"
-            aria-label={`Covered through ${coverageLabel.coveredThrough}. Latest activity ${coverageLabel.latestActivityAt}`}
-            className="shrink-0 text-muted/55 hover:text-muted focus-visible:text-muted"
+            aria-label={`Out of date, refresh recap. Covered through ${coverageLabel.coveredThrough}. Latest activity ${coverageLabel.latestActivityAt}`}
+            disabled={isGenerating}
+            onClick={onRefresh}
+            className="shrink-0 rounded-sm px-1 text-muted hover:text-ink focus-visible:text-ink disabled:pointer-events-none"
           >
-            <Info size={12} aria-hidden />
-          </Button>
+            Out of date
+          </button>
         }
       />
       <TooltipContent side="bottom" align="end" className="flex-col items-start gap-0.5">
@@ -121,7 +129,6 @@ function ThreadOverviewRecapRow({
   error,
   onRefresh,
 }: ThreadOverviewRecapRowProps) {
-  const label = recapText ?? (error ? "Recap unavailable" : "No recap yet");
   const refreshLabel = isGenerating ? "Refreshing recap" : "Refresh recap";
   const coverageLabel = getThreadRecapCoverageLabel({
     hasCoverageGap,
@@ -130,12 +137,14 @@ function ThreadOverviewRecapRow({
   });
 
   return (
+    // Recap's name reads like a usage name above it, and the bottom inset matches the space a row
+    // keeps under its text.
     <div
       data-testid="thread-overview-recap"
-      className="w-full px-3 py-2.5"
+      className="w-full px-3 pb-1.5 text-body-small"
     >
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <span className="shrink-0 text-xs font-medium text-muted">Recap</span>
+      <div className="flex h-row-compact min-w-0 items-center justify-between gap-2">
+        <span className="shrink-0 text-muted">Recap</span>
         <ThreadOverviewRecapControls
           coverageLabel={coverageLabel}
           isGenerating={isGenerating}
@@ -147,7 +156,9 @@ function ThreadOverviewRecapRow({
           data-testid="thread-overview-recap-skeleton"
           role="status"
           aria-label={refreshLabel}
-          className="mt-2 flex w-full flex-col gap-1.5"
+          // 10px bars on a 20px pitch sit where three lines of body text will land, so the recap
+          // replaces them without shifting the card.
+          className="flex w-full flex-col gap-2.5 py-[0.5rem]"
         >
           <span className="sr-only">{refreshLabel}</span>
           {[0, 1, 2].map((i) => (
@@ -162,15 +173,24 @@ function ThreadOverviewRecapRow({
             />
           ))}
         </div>
+      ) : !recapText && error ? (
+        <p data-testid="thread-overview-recap-text" className="text-muted">
+          Couldn't generate recap{" "}
+          <button
+            type="button"
+            data-testid="thread-overview-recap-retry"
+            onClick={onRefresh}
+            className={OVERVIEW_INLINE_ACTION_CLASS}
+          >
+            Retry
+          </button>
+        </p>
       ) : (
         <p
           data-testid="thread-overview-recap-text"
-          className={cn(
-            "mt-2 max-w-[26rem] whitespace-normal break-words text-xs leading-[1.45]",
-            recapText ? "text-ink/85" : "text-muted",
-          )}
+          className={cn("whitespace-normal break-words", recapText ? "text-ink" : "text-muted")}
         >
-          {label}
+          {recapText ?? "No recap yet"}
         </p>
       )}
     </div>
@@ -180,11 +200,12 @@ function ThreadOverviewRecapRow({
 function useRecapState(thread: Thread) {
   const { open } = useOverviewContext();
   const sourceMessages = useOverviewMessages(thread.id, open);
-  return useThreadRecap({
+  const recap = useThreadRecap({
     threadId: thread.id,
     messages: sourceMessages,
     overviewOpen: open,
   });
+  return { ...recap, hasMessages: sourceMessages.length > 0 };
 }
 
 /** Preserves Recap request state and refs while the overview is closed. */
@@ -192,6 +213,10 @@ export const { Provider: RecapEntryState, useEntryState: useRecapEntryState } = 
 
 function RecapEntry() {
   const threadRecap = useRecapEntryState();
+  // An empty thread has nothing to summarise, so an idle Recap block there is only noise.
+  const hasRecapContent = threadRecap.hasMessages || threadRecap.recapText !== null
+    || threadRecap.isGenerating || threadRecap.error !== null;
+  if (!hasRecapContent) return null;
   return (<>
     <ThreadOverviewRecapRow
       recapText={threadRecap.recapText}

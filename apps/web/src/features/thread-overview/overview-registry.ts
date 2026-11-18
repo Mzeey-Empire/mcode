@@ -19,7 +19,7 @@ import { OverviewProjectActions, OverviewProjectActionsState, OverviewProjectSet
 import type { OverviewSubject } from "./overview-subject";
 
 /** Card sections, top to bottom. A divider separates each pair of non-empty sections. */
-export const OVERVIEW_SECTIONS = ["lane", "activity", "terminals", "summary"] as const;
+export const OVERVIEW_SECTIONS = ["lane", "activity", "terminals", "usage", "recap"] as const;
 
 /** One card section. */
 export type OverviewSectionId = (typeof OVERVIEW_SECTIONS)[number];
@@ -60,12 +60,12 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock, State: BranchEntryState },
   { id: "commit", section: "lane", order: 80, subjects: ["thread"], Entry: CommitEntryBlock },
   { id: "terminals", section: "terminals", order: 85, subjects: ["thread"], Entry: OverviewTerminalsSection },
-  { id: "usage", section: "summary", order: 90, subjects: ["thread"], Entry: UsageEntryBlock },
+  { id: "usage", section: "usage", order: 90, subjects: ["thread"], Entry: UsageEntryBlock },
   { id: "subagents", section: "activity", order: 100, subjects: ["thread"], Entry: SubagentsEntryBlock },
   { id: "pull-request", section: "lane", order: 110, subjects: ["thread"], Entry: PullRequestEntryBlock },
   { id: "browser", section: "activity", order: 120, subjects: ["thread"], Entry: BrowserEntryBlock, State: BrowserEntryState },
   { id: "sources", section: "activity", order: 130, subjects: ["thread"], Entry: SourcesEntryBlock },
-  { id: "recap", section: "summary", order: 140, subjects: ["thread"], Entry: RecapEntryBlock, State: RecapEntryState },
+  { id: "recap", section: "recap", order: 140, subjects: ["thread"], Entry: RecapEntryBlock, State: RecapEntryState },
 ];
 
 /** Header actions in their existing visual order. */
