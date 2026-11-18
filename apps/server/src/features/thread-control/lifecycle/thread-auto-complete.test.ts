@@ -223,6 +223,23 @@ describe("ThreadAutoCompleteService", () => {
       },
     },
     {
+      event: "unreadable hold snapshot with a branch round trip",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = '{not json' WHERE id = ?").run(f.thread.id);
+        await f.funnel.forgetBranch(f.thread.id);
+        await f.funnel.observe(f.thread.id, [MERGED]);
+      },
+    },
+    {
+      event: "unreadable hold snapshot with a title-only change",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = '{not json' WHERE id = ?").run(f.thread.id);
+        await f.funnel.observe(f.thread.id, [{ ...MERGED, title: "Renamed" }]);
+      },
+    },
+    {
       event: "stale hold snapshot after an older build reopens with a different merged PR",
       released: false,
       apply: async (f) => {

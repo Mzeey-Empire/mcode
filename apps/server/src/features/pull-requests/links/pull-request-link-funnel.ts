@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
+import { logger } from "@mcode/shared";
 import { rankPullRequests, ThreadPullRequestSchema, ThreadPullRequestStateSchema, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { databaseWriteHandler } from "../../../runtime/persistence/sqlite/database-write-operation.js";
@@ -43,12 +44,23 @@ function mirrorPrimaryIntoLegacyColumnsForOlderBuilds(db: Database, threadId: st
     .where(eq(threads.id, threadId)).run();
 }
 
+// A damaged snapshot must not block PR updates or branch checkout, so it is re-baselined like a missing one.
+function parseStoredJson(threadId: string, text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    logger.warn("Discarding unreadable auto-complete hold snapshot", { threadId, error: error.message });
+    return null;
+  }
+}
+
 function resolveHoldSnapshot(db: Database, threadId: string, current: ThreadPullRequest[]): HoldSnapshot | null {
   const thread = drizzle(db).select({ heldAt: threads.autoCompletePausedAt, holdSnapshot: threads.autoCompleteHoldPullRequests })
     .from(threads).where(eq(threads.id, threadId)).get();
   if (!thread || thread.heldAt === null) return null;
   if (thread.holdSnapshot !== null) {
-    const stored = holdSnapshotSchema.safeParse(JSON.parse(thread.holdSnapshot));
+    const stored = holdSnapshotSchema.safeParse(parseStoredJson(threadId, thread.holdSnapshot));
     if (stored.success && stored.data.heldAt === thread.heldAt) return stored.data;
   }
   // Older builds set holds without a matching snapshot, so adopt the links before this write.
