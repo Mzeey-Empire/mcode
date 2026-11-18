@@ -3,6 +3,7 @@ import { getDefaultSettings, SettingsSchema, type Settings, type PartialSettings
 import { type TerminalSettings } from "@mcode/contracts/models/terminal-settings";
 import { getTransport } from "@/transport";
 import { rpcFailureMessage } from "@/transport/rpc-failure-message";
+import { trackLocalSettingsWrite } from "./settings-write-origin";
 
 /**
  * Recursive deep-partial utility type.
@@ -146,7 +147,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  update: async (partial) => {
+  update: (partial) => trackLocalSettingsWrite(async () => {
     try {
       const transport = getTransport();
       const settings = await transport.updateSettings(partial as PartialSettings);
@@ -155,7 +156,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (error) {
       return rpcFailureMessage(error);
     }
-  },
+  }),
 
   _applyTerminalPreferences: (terminal) => {
     set((state) => ({

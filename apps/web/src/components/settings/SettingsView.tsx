@@ -6,6 +6,8 @@ import { useShallow } from "zustand/shallow";
 import { selectSettingsCanvas, useSettingsLocation } from "@/stores/settingsLocationStore";
 import { SETTINGS_PAGES } from "./settings-nav";
 import { SettingsSearchResults } from "./SettingsSearchResults";
+import { RevertVisitButton } from "./RevertVisitButton";
+import { useSettingsVisit } from "./settings-visit";
 
 /**
  * Settings canvas: a "Settings / page" header pill over the active page in a centred column.
@@ -19,6 +21,7 @@ export function SettingsView() {
   const ActiveSection = page.component;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const shownSection = useRef(section);
+  useSettingsVisit(section);
 
   // Moving focus to the new page's heading makes the next Tab start on that page; skip the first mount so opening Settings keeps focus where it was.
   useEffect(() => {
@@ -35,6 +38,7 @@ export function SettingsView() {
         <CanvasBreadcrumb projectName="Settings" workspaceId={undefined} icon={<Settings size={14} className="shrink-0" aria-hidden />}>
           <span className="text-fade text-label text-ink">{canvas.kind === "results" ? "Search" : page.label}</span>
         </CanvasBreadcrumb>
+        {canvas.kind === "page" ? <RevertVisitButton onReverted={() => headingRef.current?.focus()} /> : null}
       </CanvasHeader>
       <div data-settings-surface="" className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] px-10 pt-6 pb-24">

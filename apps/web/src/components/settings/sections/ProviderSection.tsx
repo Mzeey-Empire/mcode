@@ -122,6 +122,14 @@ function OpenCodeServeUrlRow({ def, variant }: SettingRowProps) {
   const update = useSettingsStore((s) => s.update);
   const [draft, setDraft] = useState(saved);
   const [invalid, setInvalid] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [shownSaved, setShownSaved] = useState(saved);
+  // A write from elsewhere, such as Revert, must reach the input; a draft being typed wins until blur.
+  if (saved !== shownSaved && !editing) {
+    setShownSaved(saved);
+    setDraft(saved);
+    setInvalid(false);
+  }
 
   const commit = () => {
     const normalized = parseServeUrlDraft(draft);
@@ -150,7 +158,11 @@ function OpenCodeServeUrlRow({ def, variant }: SettingRowProps) {
         setDraft(event.target.value);
         setInvalid(false);
       }}
-      onBlur={commit}
+      onFocus={() => setEditing(true)}
+      onBlur={() => {
+        setEditing(false);
+        commit();
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter") event.currentTarget.blur();
       }}
