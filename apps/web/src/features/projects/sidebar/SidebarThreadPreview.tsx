@@ -102,7 +102,7 @@ function ThreadPreviewContent({ payload }: { payload: ThreadPreviewPayload }) {
       side="right"
       align="start"
       sideOffset={8}
-      className={cn("w-72 max-w-[calc(100vw-16px)] max-h-(--available-height) items-stretch p-3", !body && "invisible")}
+      className={cn("w-80 max-w-[calc(100vw-16px)] max-h-(--available-height) items-stretch p-3", !body && "invisible")}
     >
       {body ? <SidebarThreadPreview workspaceName={body.workspaceName} thread={body.thread} /> : null}
     </TooltipContent>

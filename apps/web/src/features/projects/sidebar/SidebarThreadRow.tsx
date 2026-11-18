@@ -408,7 +408,8 @@ function GroupedThreadRowBody(props: ThreadRowBodyProps) {
         presentation={presentation}
         chip={<ThreadPullRequestChip thread={thread} />}
         trailing={<ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={statusIconOnly} fallback={<ThreadRowTime thread={thread} />} />} />}
-      />    </div>
+      />
+    </div>
   );
 }
 

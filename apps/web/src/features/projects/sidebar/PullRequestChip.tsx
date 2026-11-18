@@ -133,7 +133,7 @@ function PullRequestListPopup({ payload }: { payload: PullRequestListPayload | u
         {/* A hover open focuses the popup itself, which Chromium can match as :focus-visible after typing;
             its PR lines carry the visible focus, so the surface draws no ring. */}
         <MenuPrimitive.Popup
-          className={cn("pointer-events-auto w-72 max-h-(--available-height) overflow-hidden outline-none", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS, POPOVER_FADE_CLASS)}
+          className={cn("pointer-events-auto w-80 max-h-[min(var(--available-height),24rem)] overflow-hidden outline-none", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS, POPOVER_FADE_CLASS)}
         >
           {/* The fade masks only this inner scroller, so the surface and its border stay whole. It
               stays block layout: as a flex column, a long list squeezed its 24px lines instead of scrolling. */}
