@@ -13,7 +13,7 @@ import { getTransport, type Thread } from "@/transport";
 import type { BranchTarget } from "@/features/conversation/composer/execution/targets/branch-target";
 import type { TargetPageStatus } from "@/features/conversation/composer/execution/targets/target-page-cache";
 import { useBranchTargets, useDebouncedQuery } from "@/features/conversation/composer/execution/targets/useBranchTargets";
-import { Check, ChevronDown, GitBranch, GitBranchPlus, Search } from "lucide-react";
+import { Check, ChevronDown, GitBranch, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   OVERVIEW_INLINE_ACTION_CLASS,
@@ -167,9 +167,12 @@ function ThreadOverviewBranchMenu({
       data-testid="thread-overview-branch-popover"
       className="p-2"
     >
-      {/* Matches the shared Picker's search field: the menu focuses it on open, so a ring would always show; the caret marks focus. */}
+      {/*
+        Matches the shared Picker's search field: the menu focuses it on open, so a ring would always show; the caret marks focus.
+        Branch rows carry no glyph, so the search glyph starts on their text edge and the menu reads from one left edge.
+      */}
       <div className="flex h-control-compact items-center gap-2 px-3">
-        <Search aria-hidden className="size-4 shrink-0 text-muted" />
+        <Search aria-hidden className="size-[1.4rem] shrink-0 text-muted" />
         <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
@@ -179,17 +182,19 @@ function ThreadOverviewBranchMenu({
         />
       </div>
 
-      <div className="pl-9 pb-1 pt-3 text-caption text-muted">Branches</div>
       <ScrollArea
         data-testid="thread-overview-branch-list"
-        className={cn(shouldConstrainBranchList && "h-60")}
+        className={cn("mt-1", shouldConstrainBranchList && "h-60")}
       >
-        <ThreadOverviewBranchRows
-          thread={thread}
-          data={data}
-          currentBranchUncommittedLabel={currentBranchUncommittedLabel}
-          onOpenChange={onOpenChange}
-        />
+        {/* Room for the scrollbar only when the list can scroll, so the check keeps the text's inset otherwise. */}
+        <div className={cn(shouldConstrainBranchList && "pr-2")}>
+          <ThreadOverviewBranchRows
+            thread={thread}
+            data={data}
+            currentBranchUncommittedLabel={currentBranchUncommittedLabel}
+            onOpenChange={onOpenChange}
+          />
+        </div>
       </ScrollArea>
 
       {offersCreateBranch ? (
@@ -222,7 +227,7 @@ function ThreadOverviewBranchRows({
   const isEmpty = data.status !== "loading" && data.rows.length === 0;
 
   return (
-    <div className="space-y-0.5 pr-2">
+    <div className="space-y-0.5">
       {showBranches ? null : <ThreadOverviewBranchLoadingRow />}
       {showBranches ? data.rows.map((branch) => (
         <ThreadOverviewBranchRow
@@ -234,9 +239,9 @@ function ThreadOverviewBranchRows({
           onOpenChange={onOpenChange}
         />
       )) : null}
-      {isEmpty ? <div className="py-2 pl-9 pr-3 text-body-small text-muted">No branches match</div> : null}
+      {isEmpty ? <div className="px-3 py-2 text-body-small text-muted">No branches match</div> : null}
       {data.status === "failed" ? (
-        <div className="py-2 pl-9 pr-3 text-body-small text-muted">
+        <div className="px-3 py-2 text-body-small text-muted">
           Couldn't load branches{" "}
           <button
             type="button"
@@ -280,24 +285,22 @@ function ThreadOverviewBranchRow({
       }}
       aria-current={isCurrent ? "true" : undefined}
       data-testid={isCurrent ? "thread-overview-current-branch" : undefined}
-      className={cn(MENU_ROW_CLASS, "h-auto min-h-row-compact justify-between border-0 py-1 font-normal", isCurrent && "bg-hover")}
+      // The check alone marks the current branch, as in the shared menus; a fill would read as hover.
+      className={cn(MENU_ROW_CLASS, "h-auto min-h-row-compact justify-between border-0 py-1 font-normal")}
     >
-      <span className="flex min-w-0 items-center gap-2">
-        <GitBranch aria-hidden className="size-4 shrink-0 text-muted" />
-        <span className="min-w-0">
-          {branch.detached ? (
-            <span className="flex min-w-0">
-              <CheckoutLabel label={branch.name} detached sha={headSha} />
-            </span>
-          ) : (
-            <span className="block text-fade font-mono">{branch.name}</span>
-          )}
-          {isCurrent && currentBranchUncommittedLabel ? (
-            <span className="block text-fade text-caption text-muted">
-              {currentBranchUncommittedLabel}
-            </span>
-          ) : null}
-        </span>
+      <span className="min-w-0">
+        {branch.detached ? (
+          <span className="flex min-w-0">
+            <CheckoutLabel label={branch.name} detached sha={headSha} />
+          </span>
+        ) : (
+          <span className="block text-fade font-mono">{branch.name}</span>
+        )}
+        {isCurrent && currentBranchUncommittedLabel ? (
+          <span className="block text-fade text-caption text-muted">
+            {currentBranchUncommittedLabel}
+          </span>
+        ) : null}
       </span>
       {isCurrent ? <Check className="shrink-0 text-muted" /> : null}
     </Button>
@@ -329,7 +332,6 @@ function ThreadOverviewBranchCreateAction({
           onCreateBranch();
         }}
       >
-        <GitBranchPlus aria-hidden className="size-4 shrink-0 text-muted" />
         Create and check out branch…
       </Button>
     </ThreadOverviewTooltipButton>
