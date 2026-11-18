@@ -134,6 +134,35 @@ NodeTest.test("skips worktrees that gain an outside junction or a commit after i
   }
 });
 
+NodeTest.test("skips a worktree whose commits lose their last remote ref after inspection", GIT_TEST_TIMEOUT, async () => {
+  const repository = makeRepository();
+  try {
+    const carried = NodePath.join(repository.root, "worktrees", "carried");
+    git(repository.main, ["worktree", "add", "-q", "-b", "carried", carried, "main"]);
+    commitFile(carried, "carried.txt");
+    git(carried, ["push", "-q", "-u", "origin", "carried"]);
+    git(carried, ["push", "-q", "origin", "HEAD:carrier"]);
+    git(repository.main, ["push", "-q", "origin", "--delete", "carried"]);
+    git(repository.main, ["fetch", "-q", "--prune"]);
+    const entries = await listWorktrees({
+      cwd: repository.current,
+      loadPullRequests: async () => repository.pullRequests,
+      warn: () => {},
+    });
+    NodeAssertStrict.default.deepEqual(byBranch(entries).carried.keepReasons, []);
+
+    git(repository.main, ["push", "-q", "origin", "--delete", "carrier"]);
+    git(repository.main, ["fetch", "-q", "--prune"]);
+    const { skipped } = await removeWorktrees(entries, { cwd: repository.current });
+    const skippedCarried = skipped.find(({ entry }) => entry.branch === "carried");
+    NodeAssertStrict.default.ok(skippedCarried);
+    NodeAssertStrict.default.match(skippedCarried.reason, /unpushed commits/);
+    NodeAssertStrict.default.ok(NodeFS.existsSync(carried));
+  } finally {
+    NodeFS.rmSync(repository.root, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("keeps a pushed reused branch whose HEAD is newer than its merged pull request", GIT_TEST_TIMEOUT, async () => {
   const repository = makeRepository();
   try {

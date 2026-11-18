@@ -30,6 +30,7 @@ const BRANCH_STATE_REASONS = {
  *   head: string | null,
  *   origin: string,
  *   branchState: BranchState,
+ *   mergedHeads: string[],
  *   uncommittedFiles: number,
  *   unpushedCommits: number,
  *   bytes: number,
@@ -259,6 +260,7 @@ async function inspectWorktree(record, context) {
     head: record.head,
     origin: worktreeOrigin(record.path),
     branchState: "detached",
+    mergedHeads: [],
     uncommittedFiles: 0,
     unpushedCommits: 0,
     bytes: 0,
@@ -271,6 +273,7 @@ async function inspectWorktree(record, context) {
 
   const { branchState, mergedHeads } = await resolveBranchState(record.path, record.branch, context.pullRequestsByBranch, context.tracking);
   entry.branchState = branchState;
+  entry.mergedHeads = mergedHeads;
   // The main checkout's branch is the default branch, which is never "merged", so a reason would mislead.
   if (!record.isMain && !REMOVABLE_BRANCH_STATES.has(branchState)) entry.keepReasons.push(BRANCH_STATE_REASONS[branchState]);
 
@@ -343,9 +346,8 @@ export async function removeWorktrees(entries, { cwd = process.cwd() } = {}) {
   const removed = [];
   const failed = [];
   const skipped = [];
-  const records = parseWorktreeList(await git(cwd, ["worktree", "list", "--porcelain", "-z"]));
   for (const entry of entries.filter((candidate) => candidate.keepReasons.length === 0)) {
-    const reason = await removalSkipReason(entry, records);
+    const reason = await removalSkipReason(entry, cwd);
     if (reason) {
       skipped.push({ entry, reason: `changed since inspection: ${reason}` });
       continue;
@@ -360,13 +362,15 @@ export async function removeWorktrees(entries, { cwd = process.cwd() } = {}) {
   return { removed, failed, skipped };
 }
 
-async function removalSkipReason(entry, records) {
-  if (!records.some((record) => samePath(record.path, entry.path))) return "worktree is no longer listed";
+async function removalSkipReason(entry, cwd) {
   try {
+    const records = parseWorktreeList(await git(cwd, ["worktree", "list", "--porcelain", "-z"]));
+    if (!records.some((record) => samePath(record.path, entry.path))) return "worktree is no longer listed";
     const head = (await git(entry.path, ["rev-parse", "HEAD"])).trim();
     if (head !== entry.head) return "HEAD moved";
     const branch = (await git(entry.path, ["symbolic-ref", "--short", "HEAD"])).trim();
     if (branch !== entry.branch) return "branch changed";
+    if (await countUnpushedCommits(entry.path, entry.mergedHeads) > 0) return "unpushed commits";
     if (await countUncommittedFiles(entry.path) !== 0) return "uncommitted files";
     const directory = await inspectDirectory(entry, records.map((record) => record.path));
     return directory.keepReasons.join("; ");
