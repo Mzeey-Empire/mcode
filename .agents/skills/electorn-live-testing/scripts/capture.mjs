@@ -17,7 +17,7 @@ import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 
 import { connectElectronSession, disconnectElectronSession } from "./electron-session.mjs";
-import { applyUsageCaptureFixture, USAGE_CAPTURE_FIXTURE_SUFFIX } from "./usage-fixture.mjs";
+import { applyUsageCaptureFixture, restoreUsageCaptureFixture, USAGE_CAPTURE_FIXTURE_SUFFIX } from "./usage-fixture.mjs";
 import { setElectronWindowSize } from "./window-state.mjs";
 
 const REPO_ROOT = NodeURL.fileURLToPath(new URL("../../../../", import.meta.url));
@@ -70,21 +70,27 @@ function markUsageFixture(outPath, usesFixture) {
 
 /** Captures the connected app page as described by {@link parseCaptureArguments}. */
 export async function capture(page, { outPath, size, hover, usageFixtureProviderId }) {
+  await restoreUsageCaptureFixture(page);
   if (size) await setElectronWindowSize(page, size);
   if (usageFixtureProviderId) await applyUsageCaptureFixture(page, { providerId: usageFixtureProviderId });
-  if (hover) {
-    await page.locator(hover).hover();
-    await page.waitForTimeout(TOOLTIP_OPEN_DELAY_MS);
+  try {
+    if (hover) {
+      await page.locator(hover).hover();
+      await page.waitForTimeout(TOOLTIP_OPEN_DELAY_MS);
+    }
+    await waitForFiniteAnimations(page);
+    NodeFS.mkdirSync(NodePath.dirname(outPath), { recursive: true });
+    await page.screenshot({ path: outPath });
+    return outPath;
+  } finally {
+    await restoreUsageCaptureFixture(page);
   }
-  await waitForFiniteAnimations(page);
-  NodeFS.mkdirSync(NodePath.dirname(outPath), { recursive: true });
-  await page.screenshot({ path: outPath });
-  return outPath;
 }
 
 // Hover backgrounds and tooltips fade in. Infinite animations, such as spinners, never finish.
 async function waitForFiniteAnimations(page) {
   await page.evaluate(async (timeoutMs) => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const finite = document.getAnimations().filter((animation) => animation.effect?.getComputedTiming().endTime !== Infinity);
     await Promise.race([
       Promise.allSettled(finite.map((animation) => animation.finished)),
@@ -101,8 +107,7 @@ function loadPlaywright() {
   return NodeModule.createRequire(scratchPackage)("playwright");
 }
 
-const invokedScript = process.argv[1] ? NodePath.resolve(process.argv[1]) : null;
-if (invokedScript === NodePath.resolve(NodeURL.fileURLToPath(import.meta.url))) {
+if (import.meta.main) {
   const options = parseCaptureArguments(process.argv.slice(2));
   const session = await connectElectronSession({ playwright: loadPlaywright(), repoRoot: REPO_ROOT, reload: false });
   try {

@@ -122,7 +122,7 @@ Measure motion on every frame inside the page. A screen recording holds only the
 
 Store screenshots, logs, and measurements under `.dev/verification/`. Keep exploratory specifications under `.dev/playwright-scratch/`; do not commit them.
 
-To screenshot, drive the app to the screen, then run the capture script instead of writing one. It connects without a reload, so the app keeps its state, and it creates the output folder:
+To screenshot, drive the app to the screen, then run the capture script instead of writing one. It connects without a reload, so the app keeps its state, and it creates the output folder. Connect once with a reload as shown in the session section above before the first capture, or the app may still be signed out:
 
 ```powershell
 node .agents/skills/electorn-live-testing/scripts/capture.mjs --out .dev/verification/<name>.png --width 1280 --height 800 --hover 'role=button[name="Settings"]'
@@ -130,7 +130,7 @@ node .agents/skills/electorn-live-testing/scripts/capture.mjs --out .dev/verific
 
 `--width` and `--height` resize the real window. `--hover` takes a Playwright selector that matches one element, and the script waits for the tooltip delay and any fade before the capture. From the Node REPL, call `capture(electronPage, parseCaptureArguments([...]))` from the same script.
 
-When the live usage source is down, `--usage-fixture <providerId>` fills the open thread's usage with invented quota readings so the Usage row renders. Wait until the thread has started: a starting thread's Overview has no Usage row, so the fixture changes nothing on screen. The script adds `.usage-fixture` to the file name. A capture taken with it is not live data: say so wherever you show it, including the PR body. From the REPL, call `applyUsageCaptureFixture(electronPage, { providerId })` from `scripts/usage-fixture.mjs` and name the file the same way.
+When the live usage source is down, `--usage-fixture <providerId>` fills the open thread's usage with invented quota readings so the Usage row renders. Wait until the thread has started: a starting thread's Overview has no Usage row, so the fixture changes nothing on screen. The script adds `.usage-fixture` to the file name and restores the previous usage after the capture, including on failure. A capture taken with it is not live data: say so wherever you show it, including the PR body. From the REPL, call `applyUsageCaptureFixture(electronPage, { providerId })` from `scripts/usage-fixture.mjs`, capture with a file named the same way, then call `restoreUsageCaptureFixture(electronPage)`. Every `capture.mjs` run also restores a leftover fixture before it captures.
 
 ## Record before and after evidence
 

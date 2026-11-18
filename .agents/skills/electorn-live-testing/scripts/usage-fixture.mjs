@@ -30,7 +30,16 @@ export async function applyUsageCaptureFixture(page, { providerId }) {
   });
 }
 
-async function writeUsageFixture({ threadStoreUrl, providerId, diagnostic }) {
+/** Restores usage replaced by the fixture unless a live refresh has superseded it. */
+export async function restoreUsageCaptureFixture(page) {
+  return page.evaluate(undoUsageFixture);
+}
+
+/** Writes fixture usage in the page and remembers the provider value it replaced. */
+export async function writeUsageFixture({ threadStoreUrl, providerId, diagnostic }) {
+  if (window.__liveTestingUsageFixture) {
+    throw new Error("A usage capture fixture is already applied; restore it first");
+  }
   const { useThreadStore } = await import(threadStoreUrl);
   const state = useThreadStore.getState();
   const threadId = state.currentThreadId;
@@ -55,8 +64,41 @@ async function writeUsageFixture({ threadStoreUrl, providerId, diagnostic }) {
     fetchedAt: new Date(now).toISOString(),
     diagnostic,
   };
+  window.__liveTestingUsageFixture = {
+    threadStoreUrl,
+    threadId,
+    providerId,
+    hadPrevious: Object.hasOwn(record.usageByProvider ?? {}, providerId),
+    previous: record.usageByProvider?.[providerId],
+    quotaCategories: usage.quotaCategories,
+  };
   const records = new Map(state.records);
   records.set(threadId, { ...record, usageByProvider: { ...record.usageByProvider, [providerId]: usage } });
   useThreadStore.setState({ records });
   return { threadId, providerId };
+}
+
+/** Undoes fixture usage in the page, including stale copies made by a failed refresh. */
+export async function undoUsageFixture() {
+  const fixture = window.__liveTestingUsageFixture;
+  if (!fixture) return { restored: false };
+  try {
+    const { threadStoreUrl, threadId, providerId, hadPrevious, previous, quotaCategories } = fixture;
+    const { useThreadStore } = await import(threadStoreUrl);
+    const state = useThreadStore.getState();
+    const record = state.records.get(threadId);
+    // A failed refresh copies the usage object but keeps its categories array; live data replaces it.
+    if (record?.usageByProvider?.[providerId]?.quotaCategories !== quotaCategories) {
+      return { restored: false };
+    }
+    const usageByProvider = { ...record.usageByProvider };
+    if (hadPrevious) usageByProvider[providerId] = previous;
+    else delete usageByProvider[providerId];
+    const records = new Map(state.records);
+    records.set(threadId, { ...record, usageByProvider });
+    useThreadStore.setState({ records });
+    return { restored: true };
+  } finally {
+    delete window.__liveTestingUsageFixture;
+  }
 }
