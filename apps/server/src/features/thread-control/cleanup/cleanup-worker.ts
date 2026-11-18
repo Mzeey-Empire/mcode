@@ -306,6 +306,11 @@ export class CleanupWorker {
     if (!removal.completed) {
       throw new Error(`Worktree directory still exists after removal: ${worktreePath}`);
     }
+    for (const threadId of removal.threadIds) {
+      if (threadId === job.thread_id) continue;
+      const thread = this.threadRepo.findById(threadId);
+      if (thread) await this.delegatedChildren.deleteDelegatedChildren(thread, true);
+    }
     await this.completeThreads(job, removal.threadIds);
     await this.finalizeWorkspaceIfDone(job.workspace_path);
   }
