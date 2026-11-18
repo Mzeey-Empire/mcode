@@ -97,6 +97,20 @@ describe("HoverGlide", () => {
     expect(fill.style.transition).toMatch(/transform/);
   });
 
+  it("keeps the fill on a row whose menu is open after the pointer leaves, and drops it when the menu closes", async () => {
+    setReducedMotion(false);
+    const { scroller, rows, fill } = mountList();
+
+    fireEvent.pointerMove(rows[1]!);
+    rows[1]!.setAttribute("data-menu-open", "");
+    fireEvent.pointerLeave(scroller);
+    await Promise.resolve();
+    expect(fill.style).toMatchObject({ transform: "translate(18px, 32px)", opacity: "1" });
+
+    rows[1]!.removeAttribute("data-menu-open");
+    await vi.waitFor(() => expect(fill.style.opacity).toBe("0"));
+  });
+
   it("skips an inert row, which is closing and takes no hover", () => {
     setReducedMotion(false);
     const { rows, fill } = mountList({ inertRow: 2 });

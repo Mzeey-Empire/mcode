@@ -49,6 +49,9 @@ function sameBox(a: HighlightBox | null, b: HighlightBox): boolean {
   return a !== null && a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
 }
 
+// A row whose thread menu is open keeps the fill, so the user can see which thread the menu acts on.
+const MENU_OPEN_ROW = `[${HOVER_ROW_ATTRIBUTE}][data-menu-open]`;
+
 function hoverRowAt(target: EventTarget | Element | null): HTMLElement | null {
   if (!(target instanceof Element)) return null;
   const row = target.closest<HTMLElement>(`[${HOVER_ROW_ATTRIBUTE}]`);
@@ -68,6 +71,7 @@ export class HoverGlide {
   private box: HighlightBox | null = null;
   private pointer: { x: number; y: number } | null = null;
   private readonly detachLayout: () => void;
+  private readonly menuObserver: MutationObserver;
 
   constructor(
     private readonly scroller: HTMLElement,
@@ -92,6 +96,8 @@ export class HoverGlide {
     // the fill on the row that just scrolled out from under the pointer.
     scroller.addEventListener("scroll", this.onLayout, { passive: true });
     this.detachLayout = onLayout(this.onLayout);
+    this.menuObserver = new MutationObserver(this.onMenuChange);
+    this.menuObserver.observe(content, { subtree: true, attributeFilter: ["data-menu-open"] });
   }
 
   destroy(): void {
@@ -99,28 +105,40 @@ export class HoverGlide {
     this.scroller.removeEventListener("pointerleave", this.onPointerLeave);
     this.scroller.removeEventListener("scroll", this.onLayout);
     this.detachLayout();
+    this.menuObserver.disconnect();
     this.layer.remove();
   }
 
   private readonly onPointerMove = (event: PointerEvent): void => {
     if (event.pointerType === "touch") return;
     this.pointer = { x: event.clientX, y: event.clientY };
-    const row = hoverRowAt(event.target);
+    const row = this.menuRow() ?? hoverRowAt(event.target);
     if (row !== this.row) this.moveTo(row, this.row ? "glide" : "appear");
   };
 
   private readonly onPointerLeave = (): void => {
     this.pointer = null;
-    this.moveTo(null, "appear");
+    this.moveTo(this.menuRow(), "appear");
   };
 
   // Scrolling, collapsing or a row folding away moves rows under a still pointer; follow the row
   // now under it without a slide so the fill never trails or strands on empty space.
   private readonly onLayout = (): void => {
-    if (!this.pointer) return;
-    const row = hoverRowAt(document.elementFromPoint(this.pointer.x, this.pointer.y));
+    const held = this.menuRow();
+    if (!this.pointer && !held) return;
+    const row = held ?? (this.pointer ? hoverRowAt(document.elementFromPoint(this.pointer.x, this.pointer.y)) : null);
     this.moveTo(row, this.row ? "snap" : "appear");
   };
+
+  // A menu opening holds the fill on its row; closing returns it to the row under the pointer.
+  private readonly onMenuChange = (): void => {
+    const row = this.menuRow() ?? (this.pointer ? hoverRowAt(document.elementFromPoint(this.pointer.x, this.pointer.y)) : null);
+    if (row !== this.row) this.moveTo(row, this.row && row ? "glide" : "appear");
+  };
+
+  private menuRow(): HTMLElement | null {
+    return this.content.querySelector<HTMLElement>(MENU_OPEN_ROW);
+  }
 
   private moveTo(row: HTMLElement | null, move: HighlightMove): void {
     if (!row) {
