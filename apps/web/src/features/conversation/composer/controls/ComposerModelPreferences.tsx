@@ -34,6 +34,12 @@ export interface ComposerModelPreferencesProps {
   onSelectionChange(patch: Partial<ComposerAgentSelection>): void;
 }
 
+/** Props for {@link ComposerModelOptions}. */
+export interface ComposerModelOptionsProps extends ComposerModelPreferencesProps {
+  /** False drops the orchestration toggle for a host that has nowhere to keep it, such as the Settings defaults. */
+  readonly withOrchestration?: boolean;
+}
+
 interface ModelPreferenceState {
   hasThinking: boolean;
   thinking: boolean;
@@ -136,7 +142,7 @@ interface ModelOptions {
   readonly toggles: readonly ModelOptionToggle[];
 }
 
-function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenceActionProps): ModelOptions {
+function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenceActionProps, withOrchestration: boolean): ModelOptions {
   const change = (patch: Partial<ThreadSettings> & Partial<ComposerAgentSelection>) => {
     actionProps.onSelectionChange(patch);
     persistThreadSetting(actionProps, patch, { skipForks: true });
@@ -146,7 +152,7 @@ function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenc
     toggles.push({ label: "Thinking", icon: Brain, on: state.thinking, set: (thinking) => change({ thinking }) });
   }
   const { selection } = actionProps;
-  const orchestration = resolveComposerCapabilities({ providerId: selection.provider, modelId: selection.modelId })
+  const orchestration = withOrchestration && resolveComposerCapabilities({ providerId: selection.provider, modelId: selection.modelId })
     .find((capability) => capability.id === "orchestration");
   if (orchestration) {
     toggles.push({
@@ -190,10 +196,11 @@ export function ComposerModelOptions({
   selection,
   defaults,
   onSelectionChange,
-}: ComposerModelPreferencesProps) {
+  withOrchestration = true,
+}: ComposerModelOptionsProps) {
   const status = useThreadRecord(threadId, (record) => record.fastStatus);
   const state = getModelPreferenceState(selection, defaults, status);
-  const { fast, toggles } = modelOptionsOf(state, { threadId, branchFromMessageId, selection, defaults, onSelectionChange });
+  const { fast, toggles } = modelOptionsOf(state, { threadId, branchFromMessageId, selection, defaults, onSelectionChange }, withOrchestration);
   if (!fast && toggles.length === 0) return null;
 
   return (

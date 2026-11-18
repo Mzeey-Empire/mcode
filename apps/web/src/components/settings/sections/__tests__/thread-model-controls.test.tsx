@@ -6,6 +6,7 @@ const { mockPmState } = vi.hoisted(() => ({
   mockPmState: {
     models: {} as Record<string, import("@/lib/model-registry").ModelDefinition[]>,
     loading: {} as Record<string, boolean>,
+    modes: {} as Record<string, readonly string[] | undefined>,
     fetchModels: vi.fn(),
     initialize: vi.fn(),
   },
@@ -36,7 +37,13 @@ vi.mock("@/components/ui/tooltip", () => ({
 
 import { getDefaultSettings, type ReasoningLevel, type SettingsProviderId } from "@mcode/contracts/models/settings";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { ThreadsSection } from "../ThreadsSection";
+import { Setting } from "../../Setting";
+import { THREADS, ThreadsSection } from "../ThreadsSection";
+
+/** Every Threads setting drawn as its own row, as search results draw them; the page folds the model ones into a capsule. */
+function ThreadSettingRows() {
+  return <>{THREADS.all.map((def) => <Setting key={def.id} def={def} />)}</>;
+}
 
 /**
  * Renders the Threads page with the given default provider and model.
@@ -55,7 +62,7 @@ function renderWithModel(provider: string, modelId: string, reasoning = "high") 
     },
     update,
   });
-  return { state: { update }, ...render(<ThreadsSection />) };
+  return { state: { update }, ...render(<ThreadSettingRows />) };
 }
 
 /** The Reasoning effort row; the page has several segmented controls, so queries stay inside it. */
@@ -66,7 +73,7 @@ function getReasoningRow(): HTMLElement {
 describe("Threads page model controls", () => {
   it("keeps the primary model controls without a fallback model setting", () => {
     renderWithModel("claude", "claude-opus-4-7");
-    expect(screen.getByText("Default model")).toBeInTheDocument();
+    expect(screen.getByText("Provider and model")).toBeInTheDocument();
     expect(screen.queryByText("Fallback model")).not.toBeInTheDocument();
   });
 
@@ -76,6 +83,7 @@ describe("Threads page model controls", () => {
 
   it("groups model controls into new-thread defaults and the model for small tasks", () => {
     renderWithModel("claude", "claude-opus-4-7");
+    render(<ThreadsSection />);
 
     for (const name of [
       "New threads start with",

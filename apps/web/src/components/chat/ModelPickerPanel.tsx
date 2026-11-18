@@ -87,7 +87,15 @@ interface LegacyFoldOption {
   readonly group: string | undefined;
 }
 
-type ModelPickerOption = ModelOption | LegacyFoldOption;
+/** The host's own first row, such as Auto, listed above every catalog. */
+interface LeadOption {
+  readonly kind: "lead";
+  readonly label: string;
+}
+
+type ModelPickerOption = ModelOption | LegacyFoldOption | LeadOption;
+
+const LEAD_KEY = "lead";
 
 /**
  * The fold follows the selected model until the user toggles it: `auto` opens it only when the
@@ -477,6 +485,28 @@ export interface ModelPickerPanelProps {
   readonly footer?: ReactNode;
   /** Shows the highlighted model's reasoning levels in a pane beside the list, so one click picks the model and its level. */
   readonly reasoning?: ModelPickerReasoning;
+  /** A choice that is not a model, such as Auto, listed first on every tab. Omit for the catalog alone. Keep it stable across renders. */
+  readonly lead?: ModelPickerLead;
+}
+
+/** The leading row of {@link ModelPickerPanel}. */
+export interface ModelPickerLead {
+  readonly label: string;
+  /** True when the lead is the current choice, so it takes the selected mark instead of a model. */
+  readonly selected: boolean;
+  readonly onSelect: () => void;
+}
+
+/** Lists the lead first while no search runs or the search matches its label. */
+function withLead(results: ModelSearchResults, lead: ModelPickerLead | undefined, searchQuery: string): ModelSearchResults {
+  if (!lead || !matchesAllTokens([lead.label], tokenizeSearch(searchQuery))) return results;
+  return { ...results, options: [{ kind: "lead", label: lead.label }, ...results.options] };
+}
+
+/** The lead's key while it is the current choice, else the selected model's. */
+function selectedRowKey(lead: ModelPickerLead | undefined, presentation: SelectedModelPresentation): string | undefined {
+  if (lead?.selected) return LEAD_KEY;
+  return presentation.selectedProviderId ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId) : undefined;
 }
 
 /** The current reasoning level and what choosing a level in the pane does. */
@@ -537,6 +567,7 @@ export function ModelPickerPanel({
   onSelect,
   footer,
   reasoning,
+  lead,
 }: ModelPickerPanelProps) {
   const presentation = getSelectedModelPresentation(selectedModelId, selectedProviderId);
   const { displayProvider } = presentation;
@@ -580,7 +611,7 @@ export function ModelPickerPanel({
   );
 
   const selectedModelInTab = presentation.selectedProviderId === activeTab ? presentation.normalizedModelId : undefined;
-  const results = useMemo((): ModelSearchResults => {
+  const catalogResults = useMemo((): ModelSearchResults => {
     if (activeTab === FAVORITES_TAB) {
       return { options: favoriteModelOptions(filterFavoritesBySearchQuery(favoritesVisible, query), getModels) };
     }
@@ -591,13 +622,14 @@ export function ModelPickerPanel({
     const own = providerModelOptions(provider.id, models, query, legacyExpanded);
     return searchAcrossProviders(provider, own, searchedProviders, getModels, query);
   }, [activeTab, favoritesVisible, getModels, query, legacyFold, selectedModelInTab, searchedProviders]);
+  const results = useMemo(() => withLead(catalogResults, lead, query), [catalogResults, lead, query]);
 
-  const selectedKey = presentation.selectedProviderId
-    ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId)
-    : undefined;
+  const selectedKey = selectedRowKey(lead, presentation);
   const renderItem = useCallback(
     (option: ModelPickerOption): PickerRow => {
       if (option.kind === "legacy-fold") return legacyFoldRow(option);
+      // Its own group, so a divider parts it from the catalog below.
+      if (option.kind === "lead") return { key: LEAD_KEY, name: option.label, group: LEAD_KEY };
       const key = optionKey(option.providerId, option.modelId);
       const starred = starredKeys.has(key);
       return {
@@ -642,6 +674,10 @@ export function ModelPickerPanel({
   const handlePick = (option: ModelPickerOption) => {
     if (option.kind === "legacy-fold") {
       setLegacyFold(option.expanded ? "closed" : "open");
+      return;
+    }
+    if (option.kind === "lead") {
+      lead?.onSelect();
       return;
     }
     onSelect(option.modelId, option.providerId);

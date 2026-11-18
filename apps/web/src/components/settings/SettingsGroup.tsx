@@ -9,8 +9,21 @@ export interface SettingsGroupProps {
   title?: string;
   /** Short explanation of what the group controls. */
   description?: string;
+  /** Muted caption at the heading's right end, such as where else the group's values are set. */
+  aside?: ReactNode;
   /** Setting rows rendered inside the group surface. */
   children: ReactNode;
+}
+
+function GroupHeading({ id, title, aside }: { readonly id: string; readonly title: string; readonly aside: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <h2 id={id} className="text-body-small font-semibold text-ink">
+        {title}
+      </h2>
+      {aside ? <span className="text-caption text-muted">{aside}</span> : null}
+    </div>
+  );
 }
 
 /**
@@ -21,6 +34,7 @@ export function SettingsGroup({
   group,
   title = group?.title,
   description = group?.description,
+  aside,
   children,
 }: SettingsGroupProps) {
   const headingId = useId();
@@ -29,11 +43,7 @@ export function SettingsGroup({
     <section aria-labelledby={title ? headingId : undefined}>
       {(title || description) && (
         <div className="mb-2 px-1">
-          {title && (
-            <h2 id={headingId} className="text-body-small font-semibold text-ink">
-              {title}
-            </h2>
-          )}
+          {title && <GroupHeading id={headingId} title={title} aside={aside} />}
           {description && (
             <p className="mt-0.5 max-w-[56rem] text-caption text-muted">
               {description}

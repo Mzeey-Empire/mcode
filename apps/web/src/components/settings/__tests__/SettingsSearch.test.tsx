@@ -92,7 +92,7 @@ describe("Settings search", () => {
     seedSettings();
     renderSettings();
     search("retention");
-    const link = await screen.findByRole("button", { name: /^Go to Closed thread retention in Threads/ });
+    const link = await screen.findByRole("button", { name: /^Go to Delete closed threads after in Threads/ });
     fireEvent.click(link);
 
     const row = document.querySelector('[data-setting-id="threads.retention"]');
@@ -103,14 +103,14 @@ describe("Settings search", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to results" }));
     expect(screen.getByRole("heading", { name: 'Best match for "retention"' })).toBeInTheDocument();
     expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveValue("retention");
-    expect(screen.getByRole("button", { name: /^Go to Closed thread retention in Threads/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Go to Delete closed threads after in Threads/ })).toHaveFocus();
   });
 
   it("clears the mark when typing again and clears the query when a page is chosen", async () => {
     seedSettings();
     renderSettings();
     search("retention");
-    fireEvent.click(await screen.findByRole("button", { name: /^Go to Closed thread retention/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Go to Delete closed threads after/ }));
     search("retentio");
     expect(document.querySelector("[data-search-hit]")).toBeNull();
     expect(screen.getByRole("heading", { name: 'Best match for "retentio"' })).toBeInTheDocument();
@@ -144,6 +144,16 @@ describe("Settings search", () => {
     expect(within(result).queryByRole("switch")).not.toBeInTheDocument();
     fireEvent.click(within(result).getByRole("button", { name: /^Go to Thinking/ }));
     expect(document.querySelector("[data-search-hit]")).toHaveAttribute("data-setting-id", "threads.model");
+  });
+
+  it("marks and focuses the Threads model part for a reasoning hit", async () => {
+    seedSettings();
+    renderSettings();
+    search("reasoning");
+    fireEvent.click(await screen.findByRole("button", { name: /^Go to Reasoning effort in Threads/ }));
+    const marked = document.querySelector("[data-search-hit]");
+    expect(marked).toBe(screen.getByRole("button", { name: /^Model:/ }));
+    expect(marked).toHaveFocus();
   });
 
   it("opens a collapsed provider's details for a CLI path hit and marks the row with the input inside", async () => {
