@@ -89,12 +89,12 @@ function ThreadOverviewUsage({
 }: ThreadOverviewUsageProps) {
   return (
     // The lines share one set of columns sized to their content, so each meter sits just after the
-    // longest name and stacked meters and percents still line up. With no glyph, the left padding
-    // (12px row inset, 20px icon lane, 8px gap) keeps the names on the other rows' label edge.
+    // longest name and stacked meters and percents still line up. The summary section has no glyphs,
+    // so it starts on the card title's edge like Recap below it, which needs the width for prose.
     <section
       data-testid="thread-overview-usage"
       aria-label={`Usage, ${summary}`}
-      className="grid grid-cols-[minmax(0,max-content)_max-content_max-content] gap-x-3 pl-10 pr-3 text-body-small"
+      className="grid grid-cols-[minmax(0,max-content)_max-content_max-content] gap-x-3 px-3 text-body-small"
     >
       {categories.map((category) => (
         <UsageCategory key={category.label} category={category} stale={usageStatus === "stale"} />

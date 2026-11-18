@@ -73,7 +73,7 @@ function ThreadOverviewRecapControls({
               aria-label={refreshLabel}
               disabled={isGenerating}
               onClick={onRefresh}
-              className={cn("group -my-1 shrink-0", isGenerating && "text-muted/45")}
+              className={cn("group -my-1 shrink-0 text-muted hover:text-ink", isGenerating && "text-muted/45")}
             >
               <RefreshCw
                 aria-hidden
@@ -106,7 +106,7 @@ function ThreadOverviewRecapCoverage({
             aria-label={`Out of date, refresh recap. Covered through ${coverageLabel.coveredThrough}. Latest activity ${coverageLabel.latestActivityAt}`}
             disabled={isGenerating}
             onClick={onRefresh}
-            className="shrink-0 rounded-sm px-1 text-caption text-muted hover:text-ink focus-visible:text-ink disabled:pointer-events-none"
+            className="shrink-0 rounded-sm px-1 text-muted hover:text-ink focus-visible:text-ink disabled:pointer-events-none"
           >
             Out of date
           </button>
@@ -137,12 +137,14 @@ function ThreadOverviewRecapRow({
   });
 
   return (
+    // Recap shares the summary section with Usage, so its name reads like a usage name, and the
+    // bottom inset matches the space a row keeps under its text.
     <div
       data-testid="thread-overview-recap"
-      className="w-full px-3 pb-2"
+      className="w-full px-3 pb-1.5 text-body-small"
     >
-      <div className="flex h-6 min-w-0 items-center justify-between gap-2">
-        <span className="shrink-0 text-caption font-medium text-muted">Recap</span>
+      <div className="flex h-row-compact min-w-0 items-center justify-between gap-2">
+        <span className="shrink-0 text-muted">Recap</span>
         <ThreadOverviewRecapControls
           coverageLabel={coverageLabel}
           isGenerating={isGenerating}
@@ -154,7 +156,9 @@ function ThreadOverviewRecapRow({
           data-testid="thread-overview-recap-skeleton"
           role="status"
           aria-label={refreshLabel}
-          className="mt-1 flex w-full flex-col gap-1.5"
+          // 10px bars on a 20px pitch sit where three lines of body text will land, so the recap
+          // replaces them without shifting the card.
+          className="flex w-full flex-col gap-2.5 py-[0.5rem]"
         >
           <span className="sr-only">{refreshLabel}</span>
           {[0, 1, 2].map((i) => (
@@ -170,7 +174,7 @@ function ThreadOverviewRecapRow({
           ))}
         </div>
       ) : !recapText && error ? (
-        <p data-testid="thread-overview-recap-text" className="mt-1 text-caption text-muted">
+        <p data-testid="thread-overview-recap-text" className="text-muted">
           Couldn't generate recap{" "}
           <button
             type="button"
@@ -184,10 +188,7 @@ function ThreadOverviewRecapRow({
       ) : (
         <p
           data-testid="thread-overview-recap-text"
-          className={cn(
-            "mt-1 max-w-[26rem] whitespace-normal break-words text-caption leading-[1.45]",
-            recapText ? "text-ink/85" : "text-muted",
-          )}
+          className={cn("whitespace-normal break-words", recapText ? "text-ink" : "text-muted")}
         >
           {recapText ?? "No recap yet"}
         </p>
