@@ -13,9 +13,16 @@ export type LocalWriteScope =
   // A null profile resets the project to the global default.
   | { readonly sink: "terminalProjectDefault"; readonly workspaceId: string; readonly profileId: TerminalProfileReference | null };
 
+/** One in-flight local write: its start sequence and what it sends. */
+export interface LocalWrite {
+  readonly seq: number;
+  readonly scope: LocalWriteScope;
+}
+
 let lastWriteSeq = 0;
 const inFlight = new Map<number, LocalWriteScope>();
 const listeners = new Set<() => void>();
+const failureListeners = new Set<(seq: number) => void>();
 
 function notify(): void {
   for (const listener of listeners) listener();
@@ -24,16 +31,21 @@ function notify(): void {
 /**
  * Marks a local settings write and what it writes, so a Settings visit can tell it from a push from elsewhere.
  * Nested and parallel writes count. Every store action that writes a revertible setting must run inside this, or its
- * changes look external.
+ * changes look external. `landed` tells from the write's result whether it was saved; a write that throws or did not
+ * land is reported to `subscribeFailedLocalSettingsWrites` listeners.
  */
-export async function trackLocalSettingsWrite<T>(scope: LocalWriteScope, write: () => Promise<T>): Promise<T> {
+export async function trackLocalSettingsWrite<T>(scope: LocalWriteScope, write: () => Promise<T>, landed: (result: T) => boolean): Promise<T> {
   const seq = ++lastWriteSeq;
   inFlight.set(seq, scope);
   notify();
+  let saved = false;
   try {
-    return await write();
+    const result = await write();
+    saved = landed(result);
+    return result;
   } finally {
     inFlight.delete(seq);
+    if (!saved) for (const listener of failureListeners) listener(seq);
     notify();
   }
 }
@@ -49,9 +61,17 @@ export function isLocalSettingsWriteInFlight(sinceSeq = 0): boolean {
   return false;
 }
 
-/** Scopes of the local writes in flight that started after `sinceSeq`. */
-export function localSettingsWriteScopes(sinceSeq: number): readonly LocalWriteScope[] {
-  return [...inFlight].filter(([seq]) => seq > sinceSeq).map(([, scope]) => scope);
+/** The local writes in flight that started after `sinceSeq`. */
+export function localSettingsWrites(sinceSeq: number): readonly LocalWrite[] {
+  return [...inFlight].filter(([seq]) => seq > sinceSeq).map(([seq, scope]) => ({ seq, scope }));
+}
+
+/** Calls `listener` with the sequence of each local write that failed or did not land. Returns the unsubscribe function. */
+export function subscribeFailedLocalSettingsWrites(listener: (seq: number) => void): () => void {
+  failureListeners.add(listener);
+  return () => {
+    failureListeners.delete(listener);
+  };
 }
 
 /** Calls `listener` whenever a local write starts or ends. Returns the unsubscribe function. */

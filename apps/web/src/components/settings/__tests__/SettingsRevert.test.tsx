@@ -248,6 +248,38 @@ describe("Settings Revert", () => {
     expect(useSettingsStore.getState().settings.appearance.theme).toBe("light");
   });
 
+  async function pushLightWhileLocalLightIsPending(settle: "land" | "fail") {
+    render(<SettingsView />);
+    await chooseDark();
+    let finish: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => new Promise((resolve, reject) => {
+      finish = settle === "land" ? () => resolve(mergeSettings(useSettingsStore.getState().settings, patch)) : () => reject(new Error("offline"));
+    }));
+    let lightWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      lightWrite = useSettingsStore.getState().update({ appearance: { theme: "light" } });
+    });
+    act(() => useSettingsStore.getState()._applyPush(themeOf(useSettingsStore.getState().settings, "light")));
+    await act(async () => {
+      finish();
+      await lightWrite;
+    });
+  }
+
+  it("releases a setting claimed for a pending local write once that write fails", async () => {
+    await pushLightWhileLocalLightIsPending("fail");
+
+    expect(revertButton()).toBeNull();
+    expect(mockTransport.updateSettings).toHaveBeenCalledTimes(2);
+    expect(useSettingsStore.getState().settings.appearance.theme).toBe("light");
+  });
+
+  it("keeps the claim of a pending local write that lands", async () => {
+    await pushLightWhileLocalLightIsPending("land");
+
+    expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
+  });
+
   it("claims its own write when the push for it arrives before the write's response", async () => {
     render(<SettingsView />);
     vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => {

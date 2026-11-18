@@ -114,7 +114,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     } finally {
       set({ pending: false });
     }
-  }),
+  }, (ok) => ok),
 
   setWorkspaceDefault: (workspaceId, profileId) => trackLocalSettingsWrite({ sink: "terminalProjectDefault", workspaceId, profileId }, async () => {
     set({ pending: true, error: null });
@@ -128,7 +128,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     } finally {
       set({ pending: false });
     }
-  }),
+  }, (ok) => ok),
 
   resetWorkspaceDefault: (workspaceId) => trackLocalSettingsWrite({ sink: "terminalProjectDefault", workspaceId, profileId: null }, async () => {
     set({ pending: true, error: null });
@@ -142,7 +142,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     } finally {
       set({ pending: false });
     }
-  }),
+  }, (ok) => ok),
 
   createProfile: async (input) => {
     set({ pending: true, error: null, deleteReferences: null });
@@ -200,7 +200,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     } finally {
       set({ pending: false });
     }
-  }),
+  }, (ok) => ok),
 
   resetPreferences: async (workspaceId) => {
     set({ pending: true, error: null });

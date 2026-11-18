@@ -6,8 +6,10 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import {
   isLocalSettingsWriteInFlight,
   latestLocalSettingsWriteSeq,
-  localSettingsWriteScopes,
+  localSettingsWrites,
+  subscribeFailedLocalSettingsWrites,
   subscribeLocalSettingsWrites,
+  type LocalWrite,
   type LocalWriteScope,
 } from "@/stores/settings-write-origin";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -253,6 +255,8 @@ const useVisitStore = create<{ readonly visit: Visit | null }>(() => ({ visit: n
 let nextVisitId = 0;
 let lastSource: RevertSource | null = null;
 let stopListening: (() => void) | null = null;
+/** For each claimed setting, the in-flight writes its latest local attribution relied on to land. */
+let reliedOn = new Map<SettingId, readonly number[]>();
 
 function sameSource(a: RevertSource, b: RevertSource): boolean {
   return a.settings === b.settings
@@ -271,20 +275,48 @@ function onSourceChange(): void {
   const next = readRevertSource();
   if (sameSource(lastSource, next)) return;
   // A revert's own writes are local writes too, so the same per-setting attribution covers it.
-  const journal = journalTransition(visit.journal, REVERTIBLE_DEFS, lastSource, next, localSettingsWriteScopes(visit.startSeq));
+  const writes = localSettingsWrites(visit.startSeq);
+  const journal = journalTransition(visit.journal, REVERTIBLE_DEFS, lastSource, next, writes.map((write) => write.scope));
+  recordReliance(journal, lastSource, next, writes);
   lastSource = next;
   if (journal !== visit.journal) patchVisit(visit.id, { journal, failures: [] });
+}
+
+function recordReliance(journal: ReadonlyMap<SettingId, JournalEntry>, prev: RevertSource, next: RevertSource, writes: readonly LocalWrite[]): void {
+  const scopes = writes.map((write) => write.scope);
+  for (const def of REVERTIBLE_DEFS) {
+    if (sameValue(def.value.read(prev), def.value.read(next))) continue;
+    const explaining = journal.has(def.id) ? explainingWrites(def, scopes, prev, next) : null;
+    if (explaining === null) reliedOn.delete(def.id);
+    else reliedOn.set(def.id, explaining.map((index) => writes[index]?.seq ?? 0));
+  }
+}
+
+/** A failed write landed nothing, so a setting claimed on the assumption it would was changed by someone else. */
+function onWriteFailed(seq: number): void {
+  const visit = useVisitStore.getState().visit;
+  if (visit === null) return;
+  const released = [...reliedOn].filter(([, seqs]) => seqs.includes(seq)).map(([id]) => id);
+  if (released.length === 0) return;
+  const journal = new Map(visit.journal);
+  for (const id of released) {
+    reliedOn.delete(id);
+    journal.delete(id);
+  }
+  patchVisit(visit.id, { journal, failures: [] });
 }
 
 function startVisit(): number {
   stopListening?.();
   const id = ++nextVisitId;
   lastSource = readRevertSource();
+  reliedOn = new Map();
   useVisitStore.setState({ visit: { id, journal: new Map(), startSeq: latestLocalSettingsWriteSeq(), reverting: false, failures: [] } });
   const unsubscribers = [
     useSettingsStore.subscribe(onSourceChange),
     useWorkspaceStore.subscribe(onSourceChange),
     useTerminalSettingsStore.subscribe(onSourceChange),
+    subscribeFailedLocalSettingsWrites(onWriteFailed),
   ];
   stopListening = () => {
     for (const unsubscribe of unsubscribers) unsubscribe();

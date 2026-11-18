@@ -156,7 +156,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (error) {
       return rpcFailureMessage(error);
     }
-  }),
+  }, (reason) => reason === undefined),
 
   _applyTerminalPreferences: (terminal) => {
     set((state) => ({
