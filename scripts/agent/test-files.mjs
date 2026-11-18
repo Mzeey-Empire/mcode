@@ -17,22 +17,30 @@ import { readWorkspaces, workspaceOf } from "./check-changed.mjs";
 
 const USAGE = "Usage: bun run test:files <path> [<path> ...]";
 const VITEST_FLAGS = ["--reporter=dot", "--silent=passed-only"];
+// Only a script that ends in the Vitest CLI receives appended paths; packages/oxlint-plugin starts Vitest from inline
+// code that ignores them, so a named file there would run nothing or everything.
+const TAKES_FILE_ARGUMENTS = /\bvitest(?:\.mjs)?\s+run\b/;
 
 /**
  * One Vitest run per workspace that owns a requested path, in first-mention order. Throws before any run when the list
- * is empty or a path is missing or outside every workspace with a test script.
+ * is empty, or a path is missing or outside every workspace whose test script takes file arguments.
  */
 export function planTestRuns({ paths, root, workspaces, exists }) {
-  if (paths.length === 0) {
+  // A quoted "$files" from a failed pipeline arrives as one empty argument.
+  const given = paths.filter((path) => path.trim() !== "");
+  if (given.length === 0) {
     throw new Error(`No test files given, so nothing ran. An empty list would run the whole suite. ${USAGE}`);
   }
   const runs = new Map();
-  for (const path of paths) {
+  for (const path of given) {
     const absolute = NodePath.resolve(root, path);
     const relative = NodePath.relative(root, absolute).split(NodePath.sep).join("/");
     if (!exists(absolute)) throw new Error(`No such file or folder: ${path}. Nothing ran.`);
     const workspace = workspaceOf(relative, workspaces);
     if (!workspace?.scripts.test) throw new Error(`${path} is not inside a workspace with a test script. Nothing ran.`);
+    if (!TAKES_FILE_ARGUMENTS.test(workspace.scripts.test)) {
+      throw new Error(`${workspace.dir}'s test script cannot run named files; run its whole suite with bun run --cwd ${workspace.dir} test. Nothing ran.`);
+    }
     const run = runs.get(workspace.dir) ?? { cwd: workspace.dir, files: [] };
     run.files.push(relative.slice(workspace.dir.length + 1));
     runs.set(workspace.dir, run);
@@ -57,7 +65,7 @@ function main() {
     if (result.error) throw result.error;
     if (result.status !== 0) failed = true;
   }
-  console.log("\nBefore you commit, run bun run check:changed: it also runs the tests these files do not cover.");
+  console.log("\nBefore you commit, run bun run check:changed.");
   process.exitCode = failed ? 1 : 0;
 }
 
