@@ -169,7 +169,7 @@ function ShellToolCallTranscript({
               {toolCall.output}
             </pre>
           </ScrollArea>
-          <CopyButton text={toolCall.output} label="Copy output" className="absolute right-3 top-1 bg-hover text-muted opacity-0 group-hover/copy:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
+          <CopyButton text={toolCall.output} label="Copy output" className="absolute right-3 top-1 bg-hover-solid text-muted opacity-0 group-hover/copy:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100" />
         </div>
       )}
 

@@ -267,7 +267,7 @@ function ToastCard({ entry, placement, layer, onHeight, onExited }: ToastCardPro
           role={kind.role}
           data-toast-kind={toast.kind}
           className={cn(
-            "group pointer-events-auto relative flex touch-pan-y items-start gap-3 rounded-dialog bg-selected py-3 pr-2.5 pl-4 shadow-floating transition-colors hover:bg-border *:transition-opacity *:duration-200 motion-reduce:*:transition-none",
+            "group pointer-events-auto relative flex touch-pan-y items-start gap-3 rounded-dialog bg-selected-solid py-3 pr-2.5 pl-4 shadow-floating transition-colors hover:bg-border *:transition-opacity *:duration-200 motion-reduce:*:transition-none",
             // A toast tucked behind the front one shows only its edge, never text bleeding past the front card.
             behind && "*:opacity-0",
           )}

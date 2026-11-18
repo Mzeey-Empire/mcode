@@ -113,7 +113,7 @@ export function ProviderDiscStack({ providers, max = 3, className }: ProviderDis
           // Providers repeat within a stack, so the position is the identity.
           key={index}
           data-testid="provider-disc"
-          className="absolute top-0 flex size-5 items-center justify-center rounded-full border-[1.5px] border-panel bg-selected"
+          className="absolute top-0 flex size-5 items-center justify-center rounded-full border-[1.5px] border-panel bg-selected-solid"
           style={{ left: DISC_STEP_PX * index }}
         >
           <ProviderIcon provider={provider} size={12} />

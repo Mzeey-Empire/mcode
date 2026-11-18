@@ -137,7 +137,7 @@ export function TaskTray({ id, progress, tasks, trayRef, headerRef, bodyRef, onC
       aria-label={progress.title}
       className={cn(
         "tab-fillets absolute right-[24px] bottom-[calc(100%-1px)] left-[24px] flex flex-col",
-        "rounded-t-[14px] border border-b-0 border-border bg-selected px-[6px] pt-[4px] pb-[6px]",
+        "rounded-t-[14px] border border-b-0 border-border bg-selected-solid px-[6px] pt-[4px] pb-[6px]",
       )}
     >
       <button

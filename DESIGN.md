@@ -60,8 +60,8 @@ first-class state.
 A matte, cool-slate canvas with one warm lamp. Mcode is designed dark-first,
 because it is used in the evening. It defaults to the system theme; the user
 can choose light or dark. Light is the daytime counterpart with the same
-roles. Neutrals carry a faint cool tint and are never pure grey, white, or
-black.
+roles. Neutrals carry a faint cool tint and are never pure grey or white. In
+dark, the page alone is pure black.
 
 Use colors by role, never by value. The lint rule `mcode/no-raw-color` enforces
 this.
@@ -69,8 +69,8 @@ this.
 | Role | Means | Use it for |
 |---|---|---|
 | `primary` (Filament Amber) | "Act here" or "this needs you" | One primary action per state, a live mode the user turned on, a thread that needs the user. |
-| `page`, `background`, `panel` | Depth | Panels sit a few percent lighter than the page, so surfaces separate without lines. |
-| `hover`, `selected` | Pointer and selection | Selection is a neutral fill, never amber. |
+| `page`, `background`, `panel` | Depth | Panels sit a few percent lighter than the page, so surfaces separate without lines. Where two black surfaces meet in dark, a hairline marks the edge. |
+| `hover`, `selected` | Pointer and selection | Selection is a neutral fill, never amber. In dark, both are see-through ink tints, so one value works on the page, on panels, and in menus. |
 | `ink`, `muted` | Text priority | `muted` for meta and resting icons. It must still hold 4.5:1 on its surface. |
 | `success`, `error` | Added or finished; removed, failed, or invalid | Diffs, run state, invalid fields, and destructive menu rows. Never decoration. |
 | `destructive` | "This deletes or discards" | The confirming action of a destructive dialog. Never amber. |

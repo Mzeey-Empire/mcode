@@ -75,7 +75,7 @@ export function StickyUserMessage({
     >
       <div className="w-full" style={{ paddingRight: contentPaddingRight }}>
       <div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>
-        <div className="pointer-events-auto overflow-hidden rounded-lg bg-selected text-sm text-ink">
+        <div className="pointer-events-auto overflow-hidden rounded-lg bg-selected-solid text-sm text-ink">
           <p
             ref={textRef}
             className={cn(

@@ -819,7 +819,7 @@ function ActivityRailView({
       <div
         data-testid="activity-rail-surface"
         className={cn(
-          "absolute top-row-comfortable right-0 bottom-0 flex flex-col items-stretch gap-1 overflow-hidden bg-page p-2 transition-[width,border-radius] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
+          "absolute top-row-comfortable right-0 bottom-0 flex flex-col items-stretch gap-1 overflow-hidden bg-page p-2 dark:border-l dark:border-border transition-[width,border-radius] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:duration-0 motion-reduce:transition-none",
           // The caption strip above never widens, so only the expanded surface has a free top-left corner to round.
           expanded ? "w-(--container-right-rail-expanded) rounded-tl-xl" : "w-(--container-right-rail)",
         )}

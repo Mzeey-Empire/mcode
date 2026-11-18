@@ -33,7 +33,7 @@ function copyOf(line: HTMLElement, rect: DOMRect): HTMLElement {
     pointerEvents: "none",
     zIndex: "var(--layer-toast)",
   });
-  copy.classList.add("rounded-md", "bg-selected", "shadow-floating");
+  copy.classList.add("rounded-md", "bg-selected-solid", "shadow-floating");
   return copy;
 }
 

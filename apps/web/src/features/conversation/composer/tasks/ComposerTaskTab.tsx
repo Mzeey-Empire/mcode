@@ -87,7 +87,7 @@ export function ComposerTaskTab({ threadId, covered }: ComposerTaskTabProps) {
           onClick={tray.toggle}
           className={cn(
             "tab-fillets pointer-events-auto relative flex h-[21px] max-w-(--task-tab-max-width) shrink-0 items-center",
-            "rounded-t-[10px] border border-b-0 border-border bg-selected px-[9px]",
+            "rounded-t-[10px] border border-b-0 border-border bg-selected-solid px-[9px]",
             "text-caption text-muted tabular-nums hover:text-ink",
             mounted && "invisible",
           )}
