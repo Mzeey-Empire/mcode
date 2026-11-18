@@ -26,13 +26,15 @@ function getThreadOverviewLocalMode(thread: Thread) {
 }
 
 interface ThreadOverviewLocalMenuProps {
+  /** "Worktree path" for a worktree thread; a Direct thread works in the project checkout itself. */
+  pathLabel: string;
   worktreePath: string | null;
   branch: string;
   /** False for a detached checkout, whose label is a description and not a ref to paste. */
   branchCopyable: boolean;
 }
 
-function ThreadOverviewLocalMenu({ worktreePath, branch, branchCopyable }: ThreadOverviewLocalMenuProps) {
+function ThreadOverviewLocalMenu({ pathLabel, worktreePath, branch, branchCopyable }: ThreadOverviewLocalMenuProps) {
   const [copied, setCopied] = useState<LocalCopyTarget | null>(null);
 
   const copyValue = useCallback(async (target: LocalCopyTarget, value: string) => {
@@ -46,7 +48,7 @@ function ThreadOverviewLocalMenu({ worktreePath, branch, branchCopyable }: Threa
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
           <span className="min-w-0">
-            <span className="block text-xs font-medium text-ink">Worktree path</span>
+            <span className="block text-xs font-medium text-ink">{pathLabel}</span>
             <span
               data-testid="thread-overview-local-path"
               className="block max-w-56 text-fade font-mono text-xs text-muted"
@@ -58,7 +60,7 @@ function ThreadOverviewLocalMenu({ worktreePath, branch, branchCopyable }: Threa
             variant="ghost"
             size="icon-compact"
             type="button"
-            aria-label="Copy worktree path"
+            aria-label={`Copy ${pathLabel.toLowerCase()}`}
             disabled={!worktreePath}
             onClick={() => {
               if (worktreePath) void copyValue("path", worktreePath);
@@ -141,7 +143,7 @@ function LocalEntry({ thread }: { thread: Thread }) {
       }
     />
     <OverviewSideMenu rowRef={localRowRef} className="w-80">
-      <ThreadOverviewLocalMenu worktreePath={dirPath} branch={checkoutLabel} branchCopyable={!isDetachedCheckout(thread)} />
+      <ThreadOverviewLocalMenu pathLabel={thread.mode === "worktree" ? "Worktree path" : "Path"} worktreePath={dirPath} branch={checkoutLabel} branchCopyable={!isDetachedCheckout(thread)} />
     </OverviewSideMenu>
   </Popover>);
 }

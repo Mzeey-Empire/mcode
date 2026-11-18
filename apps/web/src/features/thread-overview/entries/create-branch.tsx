@@ -29,7 +29,7 @@ function CreateBranchEntry() {
         <OverviewRowIcon className="text-primary/80 group-hover:text-primary/80">
           <GitBranch />
         </OverviewRowIcon>
-        <span className="font-medium">Create branch</span>
+        <span className="font-medium">Create branch…</span>
       </Button>
     </ThreadOverviewTooltipButton>
   </ThreadOverviewWhen>);

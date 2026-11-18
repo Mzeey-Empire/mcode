@@ -83,10 +83,10 @@ describe("ThreadOverview branch create and commit", () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     await user.click(screen.getByTestId("thread-overview-local"));
-    expect(await screen.findByText("detached from release")).toBeInTheDocument();
+    expect(await screen.findByTestId("thread-overview-local-branch")).toHaveTextContent("detached from release");
     expect(screen.queryByLabelText("Copy branch")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("thread-overview-local"));
-    expect(screen.queryByTestId("workspace-menu-branch")).not.toBeInTheDocument();
+    expect(screen.getByTestId("workspace-menu-branch")).toHaveTextContent("detached from release");
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
     expect(screen.getByTestId("workspace-menu-commit")).toBeEnabled();
 
@@ -110,6 +110,16 @@ describe("ThreadOverview branch create and commit", () => {
     });
     expect(mockWorkspaceState.worktreesLoadedForWorkspace).toBeNull();
     expect(screen.queryByTestId("create-pr-dialog")).not.toBeInTheDocument();
+  });
+
+  it("states where a detached worktree's HEAD sits before offering to create a branch", () => {
+    render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+
+    const branchRow = screen.getByTestId("workspace-menu-branch");
+    const createRow = screen.getByTestId("thread-overview-create-branch");
+    expect(branchRow).toHaveTextContent("detached at 3f9a1c2");
+    expect(createRow).toHaveTextContent("Create branch…");
+    expect(branchRow.compareDocumentPosition(createRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("clears stale PR metadata and caches when creating a named branch", async () => {

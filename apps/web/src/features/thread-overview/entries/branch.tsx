@@ -7,7 +7,8 @@ import { Separator } from "@/components/ui/separator";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
-import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
+import { isDetachedCheckout, resolveThreadCheckoutLabel } from "@/lib/checkout-label";
+import { MENU_ROW_CLASS } from "@/components/ui/menu-row";
 import { cn } from "@/lib/utils";
 import { getTransport, type Thread } from "@/transport";
 import type { BranchTarget } from "@/features/conversation/composer/execution/targets/branch-target";
@@ -19,7 +20,6 @@ import {
   OVERVIEW_ROW_CLASS,
   OverviewRowIcon,
   ThreadOverviewTooltipButton,
-  ThreadOverviewWhen,
 } from "@/features/thread-overview/overview-row";
 
 interface OverviewBranchRow {
@@ -41,7 +41,7 @@ interface BranchMenuData {
 }
 
 function uncommittedFilesLabel(count: number): string {
-  return `Uncommitted: ${count} ${count === 1 ? "file" : "files"}`;
+  return `${count} uncommitted ${count === 1 ? "file" : "files"}`;
 }
 
 function matchesQuery(name: string, query: string): boolean {
@@ -149,9 +149,8 @@ function ThreadOverviewBranchMenu({
     >
       <div className="relative">
         <Search
-          size={13}
           aria-hidden
-          className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted"
+          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
         />
         <Input
           size="compact"
@@ -159,11 +158,11 @@ function ThreadOverviewBranchMenu({
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search branches"
           aria-label="Search branches"
-          className="h-7 pl-7"
+          className="h-7 pl-9"
         />
       </div>
 
-      <div className="px-1 pb-1 pt-3 text-xs text-muted">Branches</div>
+      <div className="pl-9 pb-1 pt-3 text-caption text-muted">Branches</div>
       <ScrollArea
         data-testid="thread-overview-branch-list"
         className={cn(shouldConstrainBranchList && "h-60")}
@@ -213,8 +212,8 @@ function ThreadOverviewBranchRows({
           onOpenChange={onOpenChange}
         />
       )) : null}
-      {isEmpty ? <div className="rounded-md px-2 py-2 text-xs text-muted">No branches match</div> : null}
-      {data.status === "failed" ? <div className="rounded-md px-2 py-2 text-xs text-muted">Branches unavailable</div> : null}
+      {isEmpty ? <div className="py-2 pl-9 pr-3 text-body-small text-muted">No branches match</div> : null}
+      {data.status === "failed" ? <div className="py-2 pl-9 pr-3 text-body-small text-muted">Couldn't load branches</div> : null}
     </div>
   );
 }
@@ -246,14 +245,14 @@ function ThreadOverviewBranchRow({
       }}
       aria-current={isCurrent ? "true" : undefined}
       data-testid={isCurrent ? "thread-overview-current-branch" : undefined}
-      className={cn("h-auto w-full justify-between gap-3 px-2 py-1.5 text-left", isCurrent && "bg-hover text-ink")}
+      className={cn(MENU_ROW_CLASS, "h-auto min-h-row-compact justify-between border-0 py-1 font-normal", isCurrent && "bg-hover")}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <GitBranch size={13} className="shrink-0 text-muted" />
+        <GitBranch aria-hidden className="size-4 shrink-0 text-muted" />
         <span className="min-w-0">
-          <span className="block text-fade text-xs font-medium">{branch.name}</span>
+          <span className="block text-fade font-mono">{branch.name}</span>
           {isCurrent && currentBranchUncommittedLabel ? (
-            <span className="block text-fade text-xs font-normal text-muted">
+            <span className="block text-fade text-caption text-muted">
               {currentBranchUncommittedLabel}
             </span>
           ) : null}
@@ -275,7 +274,7 @@ function ThreadOverviewBranchCreateAction({
   onCreateBranch: () => void;
 }) {
   const title = canCreateCheckoutBranch
-    ? "Create and checkout a new branch"
+    ? "Create and check out branch…"
     : "Detected changes required";
 
   return (
@@ -286,17 +285,33 @@ function ThreadOverviewBranchCreateAction({
         type="button"
         disabled={!canCreateCheckoutBranch}
         data-testid="thread-overview-create-checkout-branch"
-        className="h-8 w-full justify-start gap-2 px-2 text-xs disabled:opacity-60"
+        className={cn(MENU_ROW_CLASS, "justify-start border-0 font-normal disabled:opacity-60")}
         onClick={() => {
           if (!canCreateCheckoutBranch) return;
           onOpenChange(false);
           onCreateBranch();
         }}
       >
-        <Plus size={14} className="text-muted" />
-        Create and checkout new branch...
+        <Plus aria-hidden className="size-4 shrink-0 text-muted" />
+        Create and check out branch…
       </Button>
     </ThreadOverviewTooltipButton>
+  );
+}
+
+/**
+ * A detached checkout's label states where HEAD sits rather than naming a branch, so it reads
+ * muted; only the SHA inside it is a machine fact set in mono.
+ */
+function CheckoutLabel({ label, detached, sha }: { label: string; detached: boolean; sha: string | null | undefined }) {
+  if (!detached) return <span className="text-fade font-mono font-medium">{label}</span>;
+  const shaAt = sha ? label.lastIndexOf(sha) : -1;
+  if (!sha || shaAt < 0) return <span className="text-fade text-muted">{label}</span>;
+  return (
+    <span className="text-fade text-muted">
+      {label.slice(0, shaAt)}
+      <span className="font-mono">{sha}</span>
+    </span>
   );
 }
 
@@ -306,11 +321,12 @@ export const { Provider: BranchEntryState, useEntryState: useBranchEntryState } 
 });
 
 function BranchEntry({ thread }: { thread: Thread }) {
-  const { branchCreation, branchlessCreatePr, hasCommitsAhead } = useOverviewContext();
+  const { branchCreation, hasCommitsAhead } = useOverviewContext();
   const [branchOpen, setBranchOpen] = useBranchEntryState();
   const branchRowRef = useRef<HTMLButtonElement>(null);
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
-  return (<ThreadOverviewWhen when={!branchlessCreatePr}>
+  const detached = isDetachedCheckout(thread);
+  return (
     <Popover open={branchOpen} onOpenChange={setBranchOpen}>
       <PopoverTrigger
         ref={branchRowRef}
@@ -330,7 +346,7 @@ function BranchEntry({ thread }: { thread: Thread }) {
               <OverviewRowIcon>
                 <GitBranch />
               </OverviewRowIcon>
-              <span className="text-fade font-medium">{checkoutLabel}</span>
+              <CheckoutLabel label={checkoutLabel} detached={detached} sha={thread.head_sha} />
             </span>
             <ChevronDown
               aria-hidden
@@ -352,7 +368,7 @@ function BranchEntry({ thread }: { thread: Thread }) {
         />
       </OverviewSideMenu>
     </Popover>
-  </ThreadOverviewWhen>);
+  );
 }
 
 /** Branch block in the thread overview, preserving its existing row position. */
