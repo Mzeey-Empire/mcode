@@ -137,6 +137,7 @@
   /* Hairlines sit between neutral-100 and neutral-200: one step off the panel reads as structure, while
      neutral-200 drew every divider as firmly as a selected row's fill. Controls keep --control-border. */
   --border: oklch(92.5% 0.005 260);
+  --tree: oklch(80% 0.005 260);
   --control-border: var(--neutral-300);
   --focus: var(--blue-600);
   /* Links stay blue so the amber accent is reserved for actions and live state
@@ -204,6 +205,7 @@
   --button-destructive-hover: var(--clay-400);
   /* Between the panel and neutral-500, for the same reason as the light hairline. */
   --border: oklch(25% 0.005 260);
+  --tree: oklch(34% 0.005 260);
   --control-border: var(--neutral-400);
   --focus: var(--blue-500);
   --link: var(--blue-400);
@@ -314,6 +316,7 @@
   --color-button-secondary-hover: var(--button-secondary-hover);
   --color-button-destructive-hover: var(--button-destructive-hover);
   --color-border: var(--border);
+  --color-tree: var(--tree);
   --color-control-border: var(--control-border);
   --color-focus: var(--focus);
   --color-link: var(--link);

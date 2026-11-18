@@ -49,7 +49,7 @@ function renderThread(overrides: Partial<Thread> = {}): HTMLElement {
   const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString(), ...overrides });
   useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
   render(<Harness />);
-  return screen.getByRole("button", { name: /^Provider, Claude Row title/ });
+  return screen.getByRole("button", { name: /^Row title/ });
 }
 
 function finished(threadId: string): ThreadAttention {
@@ -447,7 +447,7 @@ describe("SidebarThreadRow", () => {
       await clickOptions(optionsButton("First"));
       expect(menu()).not.toBeNull();
 
-      const secondRow = screen.getByRole("button", { name: /^Provider, Claude Second/ });
+      const secondRow = screen.getByRole("button", { name: /^Second/ });
       fireEvent.pointerOver(secondRow, { pointerType: "mouse" });
       fireEvent.mouseEnter(secondRow, { clientX: 40, clientY: 60 });
       fireEvent.mouseMove(secondRow, { clientX: 41, clientY: 60 });
@@ -506,7 +506,7 @@ describe("SidebarThreadRow", () => {
       const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString() });
       useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [first, second], activeWorkspaceId: "ws-1", activeThreadId: null });
       render(<Harness />);
-      const row = (title: string) => screen.getByRole("button", { name: new RegExp(`^Provider, Claude ${title}`) });
+      const row = (title: string) => screen.getByRole("button", { name: new RegExp(`^${title}`) });
       await hoverOpen(row("First"));
       expect(preview()).not.toBeNull();
 
@@ -525,7 +525,7 @@ describe("SidebarThreadRow", () => {
       const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Before", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString() });
       useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
       render(<Harness />);
-      await hoverOpen(screen.getByRole("button", { name: /^Provider, Claude Before/ }));
+      await hoverOpen(screen.getByRole("button", { name: /^Before/ }));
       expect(preview()).not.toBeNull();
 
       const removed: Node[] = [];

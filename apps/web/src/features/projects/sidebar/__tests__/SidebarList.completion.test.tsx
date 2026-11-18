@@ -45,7 +45,7 @@ function renderedThreadIds(): string[] {
 }
 
 function targetRow(): HTMLElement {
-  return within(document.querySelector<HTMLElement>("[data-thread-id='target']")!).getByRole("button", { name: /^Provider, Claude Title target/ });
+  return within(document.querySelector<HTMLElement>("[data-thread-id='target']")!).getByRole("button", { name: /^Title target/ });
 }
 
 function closingRow(): Element | null {

@@ -66,13 +66,19 @@ export type SidebarSection = "recent" | "older";
 export type SidebarRowPending = "none" | "completing" | "failed";
 
 /**
+ * The project's thread line through a row: it runs on below the row, ends at the row, or is absent
+ * (the flat Threads view, and a selected thread kept under a collapsed project).
+ */
+export type ThreadTreeLine = "through" | "end" | "none";
+
+/**
  * One virtual row. Keys are typed per kind so two kinds never collide in the virtual list, and a
  * thread appears under exactly one key whatever its section.
  */
 export type SidebarItem =
   | { readonly kind: "project"; readonly key: `project:${string}` | `older-project:${string}`; readonly workspaceId: string; readonly section: SidebarSection; readonly collapsed: boolean; readonly count: number }
   | { readonly kind: "draft"; readonly key: `draft:${string}`; readonly draftId: string; readonly workspaceId: string }
-  | { readonly kind: "thread"; readonly key: `thread:${string}`; readonly threadId: string; readonly section: SidebarSection; readonly layout: "grouped" | "flat"; readonly depth: number; readonly pending: SidebarRowPending }
+  | { readonly kind: "thread"; readonly key: `thread:${string}`; readonly threadId: string; readonly section: SidebarSection; readonly layout: "grouped" | "flat"; readonly depth: number; readonly pending: SidebarRowPending; readonly treeLine: ThreadTreeLine }
   | { readonly kind: "show-more"; readonly key: `more:${string}`; readonly workspaceId: string; readonly hidden: number; readonly expanded: boolean }
   | { readonly kind: "older-bar"; readonly key: "older-bar"; readonly count: number; readonly open: boolean }
   | { readonly kind: "empty"; readonly key: "empty"; readonly scope: SidebarScope }
@@ -83,7 +89,7 @@ export interface SidebarModel {
   /** The scope the user chose; it stays chosen when it lists nothing. */
   readonly scope: SidebarScope;
   readonly items: readonly SidebarItem[];
-  /** Null when no thread is Older (the bar exists only then) or the scope is Completed. */
+  /** Null when no thread is Older (the bar exists only then) or the scope is Closed. */
   readonly olderBar: { readonly count: number; readonly open: boolean } | null;
   /** Thread ids in Older, for the motion layer's clock-crossing diff. */
   readonly olderIds: ReadonlySet<string>;
@@ -119,8 +125,16 @@ function pendingOf(entry: PendingCompletion | undefined): SidebarRowPending {
   return entry.phase === "failed" ? "failed" : "completing";
 }
 
+/**
+ * Whether a thread belongs to the Closed scope. A pending local completion keeps it Open even once
+ * a lifecycle push has set its close time, so it does not jump scopes while the user can undo.
+ */
+export function isInClosedScope(closed: boolean, completionPending: boolean): boolean {
+  return closed && !completionPending;
+}
+
 function isInCompletedScope(fact: SidebarThreadFacts, inputs: SidebarInputs): boolean {
-  return !inputs.completions.has(fact.id) && fact.completedMs !== null;
+  return isInClosedScope(fact.completedMs !== null, inputs.completions.has(fact.id));
 }
 
 function activityKey(fact: SidebarThreadFacts, frozen: FrozenOrder | null): number {
@@ -187,7 +201,7 @@ function collectFamily(root: Placed, children: ReadonlyMap<string, Placed[]>): F
   return { rows, key };
 }
 
-function threadItem(row: FamilyRow, section: SidebarSection, layout: "grouped" | "flat"): SidebarItem {
+function threadItem(row: FamilyRow, section: SidebarSection, layout: "grouped" | "flat", treeLine: ThreadTreeLine = layout === "flat" ? "none" : "through"): SidebarItem {
   return {
     kind: "thread",
     key: `thread:${row.placed.fact.id}`,
@@ -196,6 +210,7 @@ function threadItem(row: FamilyRow, section: SidebarSection, layout: "grouped" |
     layout,
     depth: layout === "flat" ? 0 : row.depth,
     pending: row.placed.pending,
+    treeLine,
   };
 }
 
@@ -288,19 +303,32 @@ interface ProjectGroupOptions {
   readonly drafts: boolean;
 }
 
+/**
+ * Marks the group's last thread row, where the project's thread line stops. Each row draws its own
+ * line segment, so the line stays whole across virtualization and the cap.
+ */
+function endThreadLine(items: readonly SidebarItem[]): SidebarItem[] {
+  let lastIndex = -1;
+  items.forEach((item, index) => {
+    if (item.kind === "thread") lastIndex = index;
+  });
+  return items.map((item, index) => (index === lastIndex && item.kind === "thread" ? { ...item, treeLine: "end" } : item));
+}
+
 function projectGroup(workspaceId: string, placed: readonly Placed[], ctx: SectionContext, options: ProjectGroupOptions): SidebarItem[] {
   const families = buildFamilies(placed);
   const collapsed = options.collapsedSet.has(workspaceId);
   const header = projectHeader(workspaceId, ctx.section, collapsed, placed.length);
   if (collapsed) {
     const selected = selectedRow(families, ctx.inputs.selectedThreadId);
-    return selected ? [header, threadItem(selected, ctx.section, "grouped")] : [header];
+    // The kept selected row hangs off its project on the end segment, as it would when expanded.
+    return selected ? [header, threadItem(selected, ctx.section, "grouped", "end")] : [header];
   }
   const drafts = options.drafts ? draftItems(workspaceId, ctx.inputs) : [];
   const rows = options.capped
     ? cappedProjectRows(workspaceId, families, ctx)
     : families.flatMap((family) => family.rows.map((row) => threadItem(row, ctx.section, "grouped")));
-  return [header, ...drafts, ...rows];
+  return [header, ...drafts, ...endThreadLine(rows)];
 }
 
 function recentProjectsView(parts: Partitioned, inputs: SidebarInputs): SidebarItem[] {
@@ -375,8 +403,8 @@ function nextBoundary(parts: Partitioned, inputs: SidebarInputs): number | null 
 }
 
 /**
- * Derives sidebar rows, effective scope and aging boundaries without side effects.
- * Pending completions stay Active; an empty Completed scope stays chosen and lists one empty line.
+ * Derives sidebar rows, the chosen scope and aging boundaries without side effects.
+ * Pending completions stay Open; an empty Closed scope stays chosen and lists one empty line.
  */
 export function deriveSidebarModel(inputs: SidebarInputs): SidebarModel {
   const parts = partition(inputs);

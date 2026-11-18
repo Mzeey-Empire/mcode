@@ -9,7 +9,6 @@ interface PullRequestChipProps {
   readonly ranked: readonly ThreadPullRequest[];
   readonly expanded: boolean;
   readonly onToggleExpanded: () => void;
-  readonly dimmed: boolean;
 }
 
 function stopRowEvent(event: React.SyntheticEvent): void {
@@ -29,7 +28,7 @@ function StateIcon({ pr }: { pr: ThreadPullRequest }) {
 const CHIP_CLASS = "flex h-5 shrink-0 items-center gap-1 rounded-md px-1 text-caption tabular-nums text-muted outline-none transition-colors hover:bg-selected/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/70";
 
 /** Opens a single PR or toggles the ranked list when several PRs are linked. */
-export function PullRequestChip({ threadId, ranked, expanded, onToggleExpanded, dimmed }: PullRequestChipProps) {
+export function PullRequestChip({ threadId, ranked, expanded, onToggleExpanded }: PullRequestChipProps) {
   const [primary] = ranked;
   if (!primary) return null;
   const common = { onPointerDown: stopRowEvent, onKeyDown: stopRowEvent, onDoubleClick: stopRowEvent, "data-testid": `thread-pr-indicator-${threadId}` };
@@ -44,7 +43,7 @@ export function PullRequestChip({ threadId, ranked, expanded, onToggleExpanded, 
           event.stopPropagation();
           onToggleExpanded();
         }}
-        className={cn(CHIP_CLASS, expanded && "bg-selected/60", dimmed && "grayscale opacity-45")}
+        className={cn(CHIP_CLASS, expanded && "bg-selected/60")}
       >
         <StateIcon pr={primary} />+{ranked.length - 1}
       </button>
@@ -57,7 +56,7 @@ export function PullRequestChip({ threadId, ranked, expanded, onToggleExpanded, 
       aria-label={`PR #${primary.number}, ${primary.state}`}
       disabled={primary.url === null}
       onClick={(event) => openPullRequest(primary, threadId, event)}
-      className={cn(CHIP_CLASS, "disabled:cursor-default disabled:hover:bg-transparent", dimmed && "grayscale opacity-45")}
+      className={cn(CHIP_CLASS, "disabled:cursor-default disabled:hover:bg-transparent")}
     >
       <StateIcon pr={primary} />
       {primary.number}

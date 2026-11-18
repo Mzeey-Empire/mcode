@@ -6,7 +6,7 @@ import type { ModelCause, SidebarItem, SidebarModel } from "../sidebar-model";
 import { CLOSE_MS, MAX_OLDER_FLIGHTS, OLDER_FLIGHT_STAGGER_MS, planTransitions, useSidebarMotion, type MotionContext, type MotionEnvironment, type SidebarTransition } from "../sidebar-motion";
 
 function threadItem(id: string): SidebarItem {
-  return { kind: "thread", key: `thread:${id}`, threadId: id, section: "recent", layout: "grouped", depth: 0, pending: "none" };
+  return { kind: "thread", key: `thread:${id}`, threadId: id, section: "recent", layout: "grouped", depth: 0, pending: "none", treeLine: "through" };
 }
 
 function model(ids: readonly string[], completed: readonly string[] = [], older: readonly string[] = []): SidebarModel {
