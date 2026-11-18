@@ -736,7 +736,7 @@ describe("HeaderActions - consolidated header", () => {
 
     const usageTrigger = screen.getByTestId("thread-overview-usage");
     expect(usageTrigger).toHaveAttribute("aria-label", "Usage, $12.34 session");
-    expect(usageTrigger).toHaveTextContent("$12.34 session");
+    expect(usageTrigger).toHaveTextContent(/^Session cost\s*\$12\.34$/);
   });
 
   it("suppresses session cost for plan billing mode even when cost exists", () => {
@@ -750,7 +750,7 @@ describe("HeaderActions - consolidated header", () => {
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
 
     expect(screen.queryByTestId("thread-overview-usage")).not.toBeInTheDocument();
-    expect(screen.queryByText("$12.34 session")).not.toBeInTheDocument();
+    expect(screen.queryByText("$12.34", { exact: false })).not.toBeInTheDocument();
   });
 
   it("suppresses session cost when billing mode is missing or unknown", () => {
@@ -770,7 +770,7 @@ describe("HeaderActions - consolidated header", () => {
       sessionCostUsd: 12.34,
     });
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
-    expect(screen.queryByText("$12.34 session")).not.toBeInTheDocument();
+    expect(screen.queryByText("$12.34", { exact: false })).not.toBeInTheDocument();
   });
 
   it("opens the Commit sheet on Review from the PR row when the branch is not ahead", () => {

@@ -19,7 +19,7 @@ const USAGE_WARNING_PERCENT = 90;
 interface ThreadOverviewUsageProps {
   categories: QuotaCategory[];
   summary: string;
-  sessionCostSummary: string | null;
+  sessionCost: string | null;
   usageStatus?: ProviderUsageInfo["usageStatus"];
 }
 
@@ -57,7 +57,7 @@ function UsageCategory({ category, stale }: { category: QuotaCategory; stale: bo
   return (
     <UsageLine
       icon={<Gauge />}
-      name={<>{sentenceCase(shortLabel)}{stale ? <span className="text-caption"> · stale</span> : null}</>}
+      name={stale ? `${sentenceCase(shortLabel)} · stale` : sentenceCase(shortLabel)}
     >
       <div
         role="progressbar"
@@ -75,11 +75,11 @@ function UsageCategory({ category, stale }: { category: QuotaCategory; stale: bo
           style={{ width: `${percent}%` }}
         />
       </div>
-      {/* A fixed width fits "100%", so the meters of stacked limits line up. */}
+      {/* A fixed width fits "100%", whose "%" is wider than a digit, so the meters of stacked limits line up. */}
       <span
         data-testid="thread-overview-usage-value"
         data-near-limit={isNearLimit || undefined}
-        className={cn("w-[4ch] shrink-0 text-right tabular-nums", isNearLimit ? "text-warning" : "text-ink")}
+        className={cn("w-[5ch] shrink-0 text-right tabular-nums", isNearLimit ? "text-warning" : "text-ink")}
       >
         {rounded}%
       </span>
@@ -90,7 +90,7 @@ function UsageCategory({ category, stale }: { category: QuotaCategory; stale: bo
 function ThreadOverviewUsage({
   categories,
   summary,
-  sessionCostSummary,
+  sessionCost,
   usageStatus,
 }: ThreadOverviewUsageProps) {
   return (
@@ -98,20 +98,20 @@ function ThreadOverviewUsage({
       {categories.map((category) => (
         <UsageCategory key={category.label} category={category} stale={usageStatus === "stale"} />
       ))}
-      {sessionCostSummary ? (
-        <UsageLine icon={<CircleDollarSign />} name="Cost">
-          <span className="shrink-0 tabular-nums text-ink">{sessionCostSummary}</span>
+      {sessionCost ? (
+        <UsageLine icon={<CircleDollarSign />} name="Session cost">
+          <span className="shrink-0 tabular-nums text-ink">{sessionCost}</span>
         </UsageLine>
       ) : null}
       {/* With nothing to measure, the summary is a status such as "Usage unavailable" and names itself. */}
-      {categories.length === 0 && !sessionCostSummary ? <UsageLine icon={<Gauge />} name={summary} /> : null}
+      {categories.length === 0 && !sessionCost ? <UsageLine icon={<Gauge />} name={summary} /> : null}
     </section>
   );
 }
 
 function UsageEntry({ thread }: { thread: Thread }) {
   const { open } = useOverviewContext();
-  const { usageInfo, usageCategories, usageSummary, sessionCostSummary } = useOverviewUsage(thread);
+  const { usageInfo, usageCategories, usageSummary, sessionCost } = useOverviewUsage(thread);
   const fetchProviderUsage = useThreadStore((state) => state.fetchProviderUsage);
   useEffect(() => {
     if (!open) return;
@@ -121,7 +121,7 @@ function UsageEntry({ thread }: { thread: Thread }) {
     <ThreadOverviewUsage
       categories={usageCategories}
       summary={usageSummary ?? ""}
-      sessionCostSummary={sessionCostSummary}
+      sessionCost={sessionCost}
       usageStatus={usageInfo?.usageStatus}
     />
   </ThreadOverviewWhen>);

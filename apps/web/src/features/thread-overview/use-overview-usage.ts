@@ -29,15 +29,25 @@ function usageCategoryPriority(category: QuotaCategory): number {
 }
 
 /**
- * Returns the Overview session-cost label only for provider-proven API-key billing.
+ * Returns the session's cost as an amount, such as "$1.23", only for provider-proven API-key billing.
  */
-export function formatThreadOverviewSessionCost(
+export function formatThreadOverviewSessionCostAmount(
   usageInfo: ProviderUsageInfo | undefined,
 ): string | null {
   if (usageInfo?.billingMode !== "api_key") return null;
   const sessionCostUsd = usageInfo.sessionCostUsd;
   if (typeof sessionCostUsd !== "number" || !Number.isFinite(sessionCostUsd)) return null;
-  return `$${sessionCostUsd.toFixed(2)} session`;
+  return `$${sessionCostUsd.toFixed(2)}`;
+}
+
+/**
+ * Returns the Overview session-cost label only for provider-proven API-key billing.
+ */
+export function formatThreadOverviewSessionCost(
+  usageInfo: ProviderUsageInfo | undefined,
+): string | null {
+  const amount = formatThreadOverviewSessionCostAmount(usageInfo);
+  return amount ? `${amount} session` : null;
 }
 
 /**
@@ -104,9 +114,9 @@ export function useOverviewUsage(thread: Thread) {
     () => formatThreadOverviewUsage(usageInfo, thread.provider),
     [thread.provider, usageInfo],
   );
-  const sessionCostSummary = useMemo(
-    () => formatThreadOverviewSessionCost(usageInfo),
+  const sessionCost = useMemo(
+    () => formatThreadOverviewSessionCostAmount(usageInfo),
     [usageInfo],
   );
-  return { usageInfo, usageCategories, usageSummary, sessionCostSummary };
+  return { usageInfo, usageCategories, usageSummary, sessionCost };
 }
