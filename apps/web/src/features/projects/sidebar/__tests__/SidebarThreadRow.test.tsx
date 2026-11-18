@@ -815,7 +815,7 @@ describe("SidebarThreadRow", () => {
         ],
       });
       act(() => threadAttentionStore.getState().apply(finished("t1")));
-      expect(row).toHaveTextContent("Finished");
+      expect(within(row).getByRole("img", { name: "Finished" })).toBeTruthy();
       const card = await openCard(row);
       const lines = within(card).getAllByRole("link");
       expect(lines.map((line) => line.textContent)).toEqual(["#11Open change", "#10Merged change"]);
