@@ -17,7 +17,7 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary-solid text-primary-solid-ink hover:bg-primary-solid-hover active:bg-primary-solid-hover active:inset-ring-2 active:inset-ring-primary-solid-ink",
+          "bg-primary text-primary-ink hover:bg-primary-hover active:bg-primary-hover active:inset-ring-2 active:inset-ring-primary-ink",
         outline:
           "border-control-border bg-background text-ink hover:bg-hover aria-expanded:bg-hover active:bg-selected active:inset-ring-2 active:inset-ring-ink",
         secondary:

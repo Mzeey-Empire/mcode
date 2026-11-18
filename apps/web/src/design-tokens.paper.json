@@ -12,7 +12,7 @@
     "--color-ink": "var(--color-neutral-100)",
     "--color-muted": "var(--color-neutral-300)",
     "--color-primary": "var(--color-amber-500)",
-    "--color-primary-ink": "var(--color-neutral-900)",
+    "--color-primary-ink": "var(--color-neutral-50)",
     "--color-focus": "var(--color-blue-500)",
     "--color-link": "var(--color-blue-400)",
     "--color-success": "var(--color-sage-400)",

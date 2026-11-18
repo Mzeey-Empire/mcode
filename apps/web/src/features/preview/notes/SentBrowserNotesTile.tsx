@@ -47,7 +47,7 @@ function Thumbnail({ src, stacked }: { readonly src: string | null; readonly sta
 function NoteRowBody({ number, target, text }: { readonly number: number; readonly target: string; readonly text: string }) {
   return (
     <>
-      <AnnotationMarker displayNumber={number} className="-my-0.5 size-5 text-primary-solid" numberClassName="text-caption text-primary-solid-ink" />
+      <AnnotationMarker displayNumber={number} className="-my-0.5 size-5 text-primary" numberClassName="text-caption text-primary-ink" />
       <span className="flex min-w-0 grow basis-0 flex-col">
         <span className="text-fade font-code text-caption text-muted">{target}</span>
         <span className="whitespace-pre-wrap break-words text-body-small text-ink">{text}</span>

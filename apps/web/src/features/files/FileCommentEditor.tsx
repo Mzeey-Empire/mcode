@@ -131,7 +131,7 @@ export function FileCommentEditor({ threadId, target, annotation, workspaceId, e
             <button
               type="button"
               aria-label={annotation ? "Save comment" : "Add comment"}
-              className="flex size-7 items-center justify-center rounded-full bg-primary-solid text-primary-solid-ink"
+              className="flex size-7 items-center justify-center rounded-full bg-primary text-primary-ink"
               onClick={save}
             >
               <Check size={14} aria-hidden />

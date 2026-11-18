@@ -24,7 +24,7 @@ interface MarkerPalette {
 
 function readMarkerPalette(): MarkerPalette {
   const style = getComputedStyle(document.documentElement);
-  return { fill: style.getPropertyValue("--primary-solid").trim(), ink: style.getPropertyValue("--primary-solid-ink").trim() };
+  return { fill: style.getPropertyValue("--primary").trim(), ink: style.getPropertyValue("--primary-ink").trim() };
 }
 
 /** Where a marker lands in snapshot pixels, or null when its box is wholly outside the screenshot. */

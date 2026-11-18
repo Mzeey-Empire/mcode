@@ -395,7 +395,7 @@ function LineContent({
             key={index}
             data-find-match={piece.match}
             ref={piece.match === "current" ? revealCurrent : undefined}
-            className={cn("rounded-[3px] text-inherit", piece.match === "current" ? "bg-primary-solid text-primary-solid-ink" : "bg-primary/30")}
+            className={cn("rounded-[3px] text-inherit", piece.match === "current" ? "bg-primary text-primary-ink" : "bg-primary/30")}
           >
             {piece.content}
           </mark>

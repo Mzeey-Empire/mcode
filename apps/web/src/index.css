@@ -36,7 +36,6 @@
   --amber-400: oklch(80% 0.130 75);
   --amber-500: oklch(72% 0.170 75);
   --amber-600: oklch(68% 0.170 75);
-  --amber-650: oklch(56% 0.170 75);
   --amber-700: oklch(52% 0.170 75);
   --amber-800: oklch(48% 0.170 75);
   --amber-900: oklch(34% 0.100 75);
@@ -120,11 +119,6 @@
   --primary: var(--amber-700);
   --primary-hover: var(--amber-800);
   --primary-ink: var(--neutral-50);
-  /* An amber fill that carries a label, glyph, or thumb (buttons, switches, checkboxes, markers). It
-     splits from --primary only in dark, where amber text and outlines stay bright. */
-  --primary-solid: var(--primary);
-  --primary-solid-hover: var(--primary-hover);
-  --primary-solid-ink: var(--primary-ink);
   --button-secondary: var(--neutral-100);
   --hover: var(--neutral-100);
   /* neutral-400 reads 4.45:1 on the neutral-200 selected fill, which the composer uses, so muted text there fell
@@ -200,12 +194,8 @@
   --panel: var(--neutral-800);
   --primary: var(--amber-500);
   --primary-hover: var(--amber-600);
-  --primary-ink: var(--neutral-900);
-  /* Light ink on a deeper amber than the accent. Amber 650 is the lightest step where it still reads 4.5:1;
-     the brighter --primary would give it 2.5:1. */
-  --primary-solid: var(--amber-650);
-  --primary-solid-hover: var(--amber-700);
-  --primary-solid-ink: var(--neutral-50);
+  /* White on amber-500 is about 2.5:1, below WCAG AA; accepted because dark ink made filled controls look heavy. */
+  --primary-ink: var(--neutral-50);
   --button-secondary: var(--neutral-600);
   --hover: var(--neutral-700);
   --muted: var(--neutral-300);
@@ -317,9 +307,6 @@
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-ink: var(--primary-ink);
-  --color-primary-solid: var(--primary-solid);
-  --color-primary-solid-hover: var(--primary-solid-hover);
-  --color-primary-solid-ink: var(--primary-solid-ink);
   --color-button-secondary: var(--button-secondary);
   --color-hover: var(--hover);
   --color-muted: var(--muted);

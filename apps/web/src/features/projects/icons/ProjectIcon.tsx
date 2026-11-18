@@ -101,7 +101,7 @@ function ProjectMonogram({ name, size, style, className, tinted }: TileProps) {
       aria-hidden
       data-testid="project-monogram"
       style={{ ...style, fontSize: size === 40 ? 18 : Math.round(size * 0.6) }}
-      className={cn("inline-flex shrink-0 select-none items-center justify-center bg-primary-solid leading-none text-primary-solid-ink", size === 40 ? "font-bold" : "font-semibold", className)}
+      className={cn("inline-flex shrink-0 select-none items-center justify-center bg-primary leading-none text-primary-ink", size === 40 ? "font-bold" : "font-semibold", className)}
     >
       {projectMonogram(name)}
     </span>
