@@ -15,7 +15,7 @@ function Switch({
     <SwitchPrimitive.Root
       data-slot="switch"
       className={cn(
-        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-control-border bg-field p-px transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:not-aria-invalid:border-muted hover:bg-hover aria-invalid:border-error data-[checked]:not-aria-invalid:border-primary data-[checked]:bg-primary data-[checked]:hover:not-aria-invalid:border-primary-hover data-[checked]:hover:bg-primary-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-control-border bg-field p-px transition-colors duration-(--duration-fast) ease-(--ease-standard) hover:not-aria-invalid:border-muted hover:bg-hover aria-invalid:border-error data-[checked]:not-aria-invalid:border-primary-solid data-[checked]:bg-primary-solid data-[checked]:hover:not-aria-invalid:border-primary-solid-hover data-[checked]:hover:bg-primary-solid-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         FOCUS_RING_CLASS,
         className
       )}
@@ -23,7 +23,7 @@ function Switch({
     >
       <SwitchPrimitive.Thumb
         data-slot="switch-thumb"
-        className="pointer-events-none block size-4 rounded-full bg-muted data-[checked]:translate-x-4 data-[checked]:bg-primary-ink"
+        className="pointer-events-none block size-4 rounded-full bg-muted data-[checked]:translate-x-4 data-[checked]:bg-primary-solid-ink"
       />
     </SwitchPrimitive.Root>
   )

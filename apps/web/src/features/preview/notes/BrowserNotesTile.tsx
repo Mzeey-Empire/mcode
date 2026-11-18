@@ -122,8 +122,8 @@ function NoteRow({
       >
         <AnnotationMarker
           displayNumber={note.displayNumber}
-          className="-my-0.5 size-5 text-primary"
-          numberClassName="text-caption text-primary-ink"
+          className="-my-0.5 size-5 text-primary-solid"
+          numberClassName="text-caption text-primary-solid-ink"
         />
         <span className="flex min-w-0 grow basis-0 flex-col">
           <span className="text-fade font-code text-caption text-muted">{target}</span>

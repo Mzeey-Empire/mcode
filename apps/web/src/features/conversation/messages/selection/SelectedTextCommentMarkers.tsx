@@ -211,8 +211,8 @@ export function SelectedTextCommentMarkers({
               >
                 <AnnotationMarker
                   displayNumber={marker.displayNumber}
-                  className="size-8 text-primary/80"
-                  numberClassName="text-xs text-primary-ink"
+                  className="size-8 text-primary-solid/80"
+                  numberClassName="text-xs text-primary-solid-ink"
                 />
               </span>
             );
@@ -236,8 +236,8 @@ export function SelectedTextCommentMarkers({
             >
               <AnnotationMarker
                 displayNumber={marker.displayNumber}
-                className="size-8 text-primary/80 group-hover/marker:text-primary group-focus-visible/marker:text-primary"
-                numberClassName="text-xs text-primary-ink"
+                className="size-8 text-primary-solid/80 group-hover/marker:text-primary-solid group-focus-visible/marker:text-primary-solid"
+                numberClassName="text-xs text-primary-solid-ink"
               />
             </Button>
           );
