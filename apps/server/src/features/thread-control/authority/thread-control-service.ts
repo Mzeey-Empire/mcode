@@ -1025,7 +1025,10 @@ export class ThreadControlService {
   }
 
   private approvalSubject(approval: PendingThreadControlApproval): ApprovalRequest["subject"] {
-    if (approval.operation === "delegate_task") return approval.subject;
+    if (approval.operation === "delegate_task") {
+      const reasoningLevel = this.delegatedTasks?.pinnedReasoningLevel(approval.approvalId);
+      return { ...approval.subject, ...(reasoningLevel ? { reasoningLevel } : {}) };
+    }
     return { kind: "thread_operation", operation: approval.operation, targetThreadId: approval.threadId,
       ...(approval.operation === "thread_send" ? { message: approval.message } : {}) };
   }

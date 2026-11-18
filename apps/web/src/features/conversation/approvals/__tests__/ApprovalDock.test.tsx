@@ -375,6 +375,18 @@ describe("ApprovalDock subjects", () => {
     expect(screen.getByText("claude · opus · new worktree · at 0123456")).toBeInTheDocument();
   });
 
+  it("shows the pinned reasoning level beside the model of a delegated task launch", () => {
+    addApproval({
+      subject: {
+        kind: "delegate_task", taskId: "task-1", title: "Fix flaky login test",
+        providerId: "claude", modelId: "opus", isolation: "worktree", commit: "0123456789abcdef", reasoningLevel: "low",
+      },
+    });
+    render(<DockHarness />);
+
+    expect(screen.getByText("claude · opus Low · new worktree · at 0123456")).toBeInTheDocument();
+  });
+
   it("offers no note row when the provider cannot take a note", () => {
     addApproval();
     render(<DockHarness />);

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
-import { ProviderIdSchema } from "./settings.js";
+import { ProviderIdSchema, ReasoningLevelSchema } from "./settings.js";
 import { THREAD_SEND_MESSAGE_MAX_LENGTH } from "../thread-control.js";
 
 /** Longest answer or option label an approval accepts. */
@@ -33,6 +33,7 @@ export const DelegateTaskApprovalSubjectSchema = lazySchema(() => z.object({
   kind: z.literal("delegate_task"), taskId: z.string().min(1).max(128), title: z.string().min(1).max(256),
   providerId: z.string().min(1).max(128), modelId: z.string().min(1).max(128),
   isolation: z.enum(["shared", "worktree"]), commit: z.string().max(64).optional(),
+  reasoningLevel: ReasoningLevelSchema.optional(),
 }).strict());
 /** Complete scope of the operation being authorized. */
 export const ApprovalSubjectSchema = lazySchema(() => z.discriminatedUnion("kind", [

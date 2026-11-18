@@ -1184,6 +1184,21 @@ describe("delegated task reasoning effort", { timeout: 30_000 }, () => {
     expect(f.threads.findById(task.threadId ?? "")?.reasoning_level).toBe("high");
   });
 
+  it("shows the pinned level on a supervised worktree launch approval", async () => {
+    const f = await harness("supervised", false, "direct", LEVELED);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, ...level("low") }));
+    expect(f.control.listPendingApprovals(f.coordinator.id)[0]?.subject).toMatchObject({ kind: "delegate_task", taskId: task.taskId, reasoningLevel: "low" });
+  });
+
+  it("stores the approval subject in the shape older builds can read", async () => {
+    const f = await harness("supervised", false, "direct", LEVELED);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, ...level("low") }));
+    const approval = f.approvals.listPending().find((pending) => pending.approvalId === task.taskId);
+    if (!approval || !("subject" in approval)) throw new Error("Expected delegated task approval");
+    expect(approval.subject).toMatchObject({ kind: "delegate_task", taskId: task.taskId });
+    expect(approval.subject).not.toHaveProperty("reasoningLevel");
+  });
+
   it("rejects an unsupported level before claiming a task or creating a child", async () => {
     const f = await harness("full", false, "direct", LEVELED);
     const result = await f.service.delegate(f.source, shared(f, level("max")));
