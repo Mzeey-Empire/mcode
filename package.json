@@ -49,6 +49,7 @@
     "agent:ready": "bun scripts/agent/agent-ready.mjs",
     "agent:down": "bun scripts/agent/agent-down.mjs",
     "agent:reset": "bun scripts/agent/agent-reset.mjs",
+    "agent:worktrees": "bun scripts/agent/agent-worktrees.mjs",
     "sync:cursor-models": "bun apps/server/scripts/sync-cursor-models-snapshot.ts",
     "audit:baseline": "bun scripts/security/check-bun-audit-baseline.mjs",
     "test:scripts": "bun scripts/agent/test-scripts.mjs"
