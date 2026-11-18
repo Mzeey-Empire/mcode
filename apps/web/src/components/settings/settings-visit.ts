@@ -99,35 +99,49 @@ function valueAt(value: unknown, path: readonly string[]): unknown {
   return path.reduce<unknown>((node, key) => (isRecord(node) ? node[key] : undefined), value);
 }
 
-/** True when the patches share a path and agree on every path they share. */
-function patchSends(a: unknown, b: unknown): boolean {
-  const bPaths = leafPaths(b);
-  const shared = leafPaths(a).flatMap((path) =>
-    bPaths.filter((other) => isPrefix(path, other) || isPrefix(other, path)).map((other) => (path.length >= other.length ? path : other)));
-  return shared.length > 0 && shared.every((path) => sameValue(valueAt(a, path), valueAt(b, path)));
+/** Leaf paths whose values differ between two patches. */
+function changedPaths(a: unknown, b: unknown): (readonly string[])[] {
+  const unique = new Map([...leafPaths(a), ...leafPaths(b)].map((path) => [path.join("\0"), path]));
+  return [...unique.values()].filter((path) => !sameValue(valueAt(a, path), valueAt(b, path)));
 }
 
-function sendsStep(scope: LocalWriteScope, step: RestoreStep): boolean {
-  switch (scope.sink) {
-    case "settings":
-      return step.sink === "settings" && patchSends(step.patch, scope.patch);
-    case "terminalPreferences":
-      return step.sink === "terminalPreferences" && patchSends(step.patch, scope.patch);
-    case "terminalGlobalDefault":
-      return step.sink === "terminalGlobalDefault" && sameValue(step.profileId, scope.profileId);
-    case "terminalProjectDefault":
-      return step.sink === "terminalProjectDefault" && step.workspaceId === scope.workspaceId && sameValue(step.profileId, scope.profileId);
+/** True when `patch` writes `path` (or a path inside or around it) with the value `target` has there. */
+function patchSendsPath(patch: unknown, path: readonly string[], target: unknown): boolean {
+  return leafPaths(patch).some((leaf) => isPrefix(leaf, path) || isPrefix(path, leaf))
+    && sameValue(valueAt(patch, path), valueAt(target, path));
+}
+
+function sendsProfile(scope: LocalWriteScope, step: RestoreStep): boolean {
+  if (step.sink === "terminalGlobalDefault") return scope.sink === step.sink && sameValue(step.profileId, scope.profileId);
+  if (step.sink === "terminalProjectDefault") {
+    return scope.sink === step.sink && step.workspaceId === scope.workspaceId && sameValue(step.profileId, scope.profileId);
   }
+  return false;
 }
 
 /**
- * True when one of `scopes` sends the value `def` now reads. `restore(next, next)` names what writing that value
- * sends. Matching the value, not just the setting, keeps a pending local write from claiming an outside change to the
- * same setting; the window's own push can arrive before its RPC response, so arrival path alone cannot tell them apart.
+ * Indexes into `scopes` of the in-flight writes that explain how `def` changed from `prev` to `next`, or null when
+ * some changed field is not sent, with its new value, by any of them. `restore(x, x)` names what writing a value sends,
+ * so the fields that differ between the two steps are what changed. Matching each changed field and its value, not the
+ * whole value, keeps a pending write to one field of a grouped row (both Fast flags) from claiming an outside change
+ * to another; the window's own push can arrive before its RPC response, so arrival path alone cannot tell them apart.
  */
-function writtenLocally(def: RevertibleDef, scopes: readonly LocalWriteScope[], next: RevertSource): boolean {
-  const step = def.value.restore(next, next);
-  return scopes.some((scope) => sendsStep(scope, step));
+function explainingWrites(def: RevertibleDef, scopes: readonly LocalWriteScope[], prev: RevertSource, next: RevertSource): number[] | null {
+  const before = def.value.restore(prev, prev);
+  const after = def.value.restore(next, next);
+  if (after.sink !== "settings" && after.sink !== "terminalPreferences") {
+    const index = scopes.findIndex((scope) => sendsProfile(scope, after));
+    return index === -1 ? null : [index];
+  }
+  const paths = before.sink === after.sink ? changedPaths(before.patch, after.patch) : leafPaths(after.patch);
+  if (paths.length === 0) return null;
+  const used = new Set<number>();
+  for (const path of paths) {
+    const index = scopes.findIndex((scope) => scope.sink === after.sink && patchSendsPath(scope.patch, path, after.patch));
+    if (index === -1) return null;
+    used.add(index);
+  }
+  return [...used];
 }
 
 /**
@@ -146,7 +160,7 @@ export function journalTransition(
   // A local write claims an untouched row; an outside write releases a claimed one. Anything else keeps the journal.
   // A local change to a row whose switch-back failed also clears that mark.
   const affected = changed
-    .map((def) => ({ def, local: writtenLocally(def, scopes, next) }))
+    .map((def) => ({ def, local: explainingWrites(def, scopes, prev, next) !== null }))
     .filter(({ def, local }) => journal.has(def.id) !== local || (local && journal.get(def.id)?.afterWriteFailed));
   if (affected.length === 0) return journal;
   const out = new Map(journal);

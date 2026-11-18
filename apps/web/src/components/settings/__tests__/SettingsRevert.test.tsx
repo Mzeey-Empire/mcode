@@ -264,6 +264,34 @@ describe("Settings Revert", () => {
     expect(useSettingsStore.getState().settings.appearance.theme).toBe("system");
   });
 
+  it("does not claim another window's change to one Fast flag while a local write to the other is pending", async () => {
+    render(<SettingsView />);
+    let land: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => {
+      const pushed = mergeSettings(useSettingsStore.getState().settings, patch);
+      useSettingsStore.getState()._applyPush(pushed);
+      return new Promise((resolve) => {
+        land = () => resolve(mergeSettings(useSettingsStore.getState().settings, patch));
+      });
+    });
+    let codexWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      codexWrite = useSettingsStore.getState().update({ provider: { codex: { fastMode: true } } });
+    });
+    act(() => {
+      const settings = useSettingsStore.getState().settings;
+      useSettingsStore.getState()._applyPush({ ...settings, provider: { ...settings.provider, claude: { ...settings.provider.claude, fastMode: true } } });
+    });
+    await act(async () => {
+      land();
+      await codexWrite;
+    });
+
+    expect(useSettingsStore.getState().settings.provider.claude.fastMode).toBe(true);
+    expect(revertButton()).toBeNull();
+    expect(mockTransport.updateSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("releases the terminal default another window set while a local default write is pending", async () => {
     openPage("terminal");
     render(<SettingsView />);
