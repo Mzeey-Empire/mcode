@@ -379,9 +379,26 @@ export async function waitForProcessExit(pid, timeoutMs, options = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (processExited(target, processKill)) return;
+    if (target < 0 && onlyZombiesRemain(-target, platform)) return;
     await sleep(POLL_INTERVAL_MS);
   }
   throw new Error(`Owned process tree ${pid} survived cleanup${describeSurvivors(target, platform)}`);
+}
+
+/**
+ * A zombie has exited and holds no memory, ports, or files; it stays in its group
+ * only until its parent collects its exit status, which this harness cannot force.
+ * Any live member, or a list that cannot be read, keeps the group counted as running.
+ */
+function onlyZombiesRemain(group, platform) {
+  if (platform === "win32") return false;
+  let members;
+  try {
+    members = listProcesses(platform).filter((entry) => entry.group === group);
+  } catch {
+    return false;
+  }
+  return members.length > 0 && members.every((entry) => entry.state.startsWith("Z"));
 }
 
 /**

@@ -169,6 +169,48 @@ describe.skipIf(process.platform === "win32")("packaged reliability cleanup of a
     await expect(waitForProcessExit(child.pid, 200, { useProcessGroup: true }))
       .rejects.toThrow(new RegExp(`survived cleanup; still running:\\n\\s+${child.pid} \\[\\S+\\] sleep 30`));
   });
+
+  const parents = [];
+  afterEach(() => {
+    for (const parent of parents.splice(0)) parent.kill("SIGKILL");
+  });
+
+  /**
+   * Starts a group whose leader has exited but stays a zombie: its parent sleeps
+   * without collecting it, like a launcher or server whose parent is slow to reap.
+   * With `liveMember`, the leader first forks a member that keeps running.
+   */
+  async function startGroupWithZombieLeader({ liveMember }) {
+    const startMember = liveMember ? `my $m = fork; if (!$m) { exec "sleep", "30" } print W "$m\\n";` : `print W "\\n";`;
+    const script = `$| = 1; pipe(R, W); my $p = fork; if (!$p) { close R; setpgrp(0, 0); ${startMember} close W; exit 0 } close W; my $m = <R>; chomp $m; print "$p $m\\n"; sleep 30`;
+    const parent = NodeChildProcess.spawn("perl", ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+    parents.push(parent);
+    const line = await new Promise((resolvePromise, reject) => {
+      let output = "";
+      parent.once("error", reject);
+      parent.once("exit", (code, signal) => reject(new Error(`Zombie parent exited early (code ${code}, signal ${signal})`)));
+      parent.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+        if (output.includes("\n")) resolvePromise(output.split("\n")[0]);
+      });
+    });
+    const [leader, member] = line.trim().split(" ").map(Number);
+    groups.push(leader);
+    // The group must exist, or a missing group would pass the zombie-only test without the fix.
+    expect(() => process.kill(-leader, 0)).not.toThrow();
+    return { leader, member };
+  }
+
+  it("treats a group whose only member is an unreaped zombie as gone", async () => {
+    const { leader } = await startGroupWithZombieLeader({ liveMember: false });
+    await expect(waitForProcessExit(leader, 2_000, { useProcessGroup: true })).resolves.toBeUndefined();
+  });
+
+  it("still fails when a zombie leader's group keeps a live member", async () => {
+    const { leader, member } = await startGroupWithZombieLeader({ liveMember: true });
+    await expect(waitForProcessExit(leader, 300, { useProcessGroup: true }))
+      .rejects.toThrow(new RegExp(`survived cleanup; still running:[\\s\\S]*\\n\\s+${member} \\[S\\S*\\] sleep 30`));
+  });
 });
 
 function runCli(command, args, cwd) {
