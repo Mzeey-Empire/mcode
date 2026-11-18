@@ -88,7 +88,7 @@ export function FilesControlsRow({ checkoutPath, treeOpen, shownPath, actions, o
   const findShortcut = keybindingKeycaps(getKeybindingForCommand("files.findInFile")?.key ?? "mod+f", isMac);
   return (
     <PanelHeaderSlot slot="row2">
-      <div data-files-tool="" className="@container flex h-10 min-w-0 flex-1 items-center gap-2">
+      <div data-files-tool="" className="group/files-row @container flex h-10 min-w-0 flex-1 items-center gap-2">
         <IconButton shape="round" aria-label={treeOpen ? "Hide files tree" : "Show files tree"} pressed={treeOpen} onClick={onToggleTree}>
           <FolderTree />
         </IconButton>
@@ -116,6 +116,7 @@ export function FilesControlsRow({ checkoutPath, treeOpen, shownPath, actions, o
 /**
  * Names the checkout the tree lists, because a thread can read a worktree rather than the project folder and
  * nothing else in the tool says which. Set like Terminal's working folder: name in ink, full path on hover.
+ * `mr-auto` takes the row's spare width only once the path pill steps aside, so More still ends at the row's edge.
  */
 function CheckoutName({ path }: { readonly path: string | null }) {
   if (!path) return null;
@@ -123,7 +124,7 @@ function CheckoutName({ path }: { readonly path: string | null }) {
     <Tooltip>
       <TooltipTrigger
         render={
-          <span data-testid="files-checkout-name" className="text-fade max-w-40 min-w-0 shrink font-mono text-xs text-ink">
+          <span data-testid="files-checkout-name" className="text-fade mr-auto max-w-40 min-w-0 shrink font-mono text-xs text-ink">
             {basename(path)}
           </span>
         }
@@ -162,7 +163,9 @@ function PathPill({ path, onRevealFolder }: { readonly path: string; readonly on
   };
   return (
     // Plain breadcrumb text continuing the checkout name: a filled pill here read as a second copy of the active tab.
-    <div data-testid="files-path-pill" className="flex h-8 min-w-0 flex-1 items-center font-mono text-xs">
+    // Beside the Preview/Source pill, a row under 440px left the breadcrumb only its leading "/", so it steps aside;
+    // the row-1 tab names the file and More holds Copy path and Reveal.
+    <div data-testid="files-path-pill" className="flex h-8 min-w-0 flex-1 items-center font-mono text-xs @max-[440px]:group-has-[[data-files-mode]]/files-row:hidden">
       <span aria-hidden className="-ml-1 shrink-0 pr-1 text-muted">/</span>
       {/* The folders give way almost entirely before the file name starts to fade. */}
       {segments.length > 0 ? (

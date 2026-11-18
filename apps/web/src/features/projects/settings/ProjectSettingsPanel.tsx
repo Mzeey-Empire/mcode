@@ -162,7 +162,11 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
       <PanelTitle id="project-settings-title" headingLevel={2} icon={<Settings className="size-3.5" aria-hidden />}>
         {/* The tool's name leads, as on every other tool's title; the project it configures follows, muted. "Project"
             already says it is not per-thread, and a longer scope note was cut off at the default window width. */}
-        Project settings <span className="text-muted">{projectName}</span>
+        {/* The project is the item the tool is open on, so a short row drops the tool's words instead. The glyph is
+            already gone below 208px, and "Project settings" 110 + space 4 + a 12-character name 76 = 190, so 192px.
+            sr-only, not hidden, keeps the words in the heading's accessible name. Alone, the name is the title, so ink. */}
+        <span className="@max-[192px]/panel-title:sr-only">Project settings </span>
+        <span className="text-muted @max-[192px]/panel-title:text-ink">{projectName}</span>
       </PanelTitle>
     </PanelHeaderSlot>
   );
@@ -176,8 +180,6 @@ export function ProjectSettingsPanel({ workspaceId, threadId, active = true }: {
     <PanelHeaderSlot slot="row2">
       <SegmentedControl
         variant="pill"
-        // Row 2 is inset 8px; this lines the switch up with the settings below it, which sit 24px in.
-        className="ml-4"
         aria-label="Project settings section"
         value={section}
         onChange={(value) => setSection(value as SettingsSection)}

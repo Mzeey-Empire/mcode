@@ -147,7 +147,7 @@ type OverflowTrigger = "labelled" | "chevron";
 /**
  * Lists every tab while some do not fit. The standalone button counts the hidden ones, because a bare chevron beside
  * the add button read as a profile picker, and a new user could not tell the hidden tabs existed. The chevron form
- * sits inside the active tab, so it reads as switching that tab.
+ * sits inside the active tab, so it reads as switching that tab, and still shows the count.
  */
 function PanelTabOverflowMenu({
   items,
@@ -174,9 +174,11 @@ function PanelTabOverflowMenu({
               size="inline-sm"
               aria-label={name}
               tooltip={`${hiddenCount} more`}
-              // Above the tab's stretched hit area, like the close button.
-              className="relative z-(--layer-sticky) shrink-0"
+              // Above the tab's stretched hit area, like the close button. The count keeps two and five tabs from
+              // looking alike, and it never shrinks: the tab label fades first.
+              className="relative z-(--layer-sticky) size-auto h-6 shrink-0 gap-0.5 px-1.5 text-body-small font-medium tabular-nums"
             >
+              <span aria-hidden>{hiddenCount}</span>
               <ChevronDown aria-hidden className="size-3.5" />
             </IconButton>
           ) : (

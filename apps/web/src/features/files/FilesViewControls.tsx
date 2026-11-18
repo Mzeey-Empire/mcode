@@ -1,5 +1,4 @@
-import { ChevronDown, CodeXml } from "lucide-react";
-import { IconButton } from "@/components/ui/button";
+import { ChevronDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatFileSize } from "./CodeFileView";
 import type { FileViewKind } from "./file-view-kind";
@@ -34,14 +33,15 @@ export function FilesViewControls({ kind, mode, scale, size, dimensions, onModeC
       {showsImage ? <ImageChip size={size} dimensions={dimensions} /> : null}
       {showsImage ? <ScalePill scale={scale} onChange={onScaleChange} narrowHidden={kind === "svg"} /> : null}
       {kind === "image" ? null : <ModePill mode={mode} onChange={onModeChange} />}
-      {kind === "image" ? null : <ModeToggle mode={mode} onChange={onModeChange} />}
     </>
   );
 }
 
+// Shown at every width because an icon toggle hid which mode is on; in a narrow row the path pill gives way to it.
+// `data-files-mode` is the hook FilesHeader's path pill uses to know it shares the row with this pill.
 function ModePill({ mode, onChange }: { readonly mode: FileViewMode; readonly onChange: (mode: FileViewMode) => void }) {
   return (
-    <div role="radiogroup" aria-label="View" className="hidden shrink-0 items-center @[440px]:flex rounded-full bg-selected p-0.5">
+    <div role="radiogroup" aria-label="View" data-files-mode="" className="flex shrink-0 items-center rounded-full bg-selected p-0.5">
       {MODE_OPTIONS.map((option) => (
         <button
           key={option.value}
@@ -49,31 +49,12 @@ function ModePill({ mode, onChange }: { readonly mode: FileViewMode; readonly on
           role="radio"
           aria-checked={mode === option.value}
           onClick={() => onChange(option.value)}
-          className={`h-7 rounded-full px-2.5 text-body-small font-medium ${mode === option.value ? "bg-border text-ink" : "text-muted hover:text-ink"}`}
+          className={`h-7 rounded-full px-2 text-body-small font-medium ${mode === option.value ? "bg-border text-ink" : "text-muted hover:text-ink"}`}
         >
           {option.label}
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * The narrow row's form of {@link ModePill}. Below 440px the segmented pill would leave the path pill a few
- * letters, so the same choice becomes one round control like the rest of row 2.
- */
-function ModeToggle({ mode, onChange }: { readonly mode: FileViewMode; readonly onChange: (mode: FileViewMode) => void }) {
-  const showsSource = mode === "source";
-  return (
-    <IconButton
-      shape="round"
-      aria-label="Show source"
-      pressed={showsSource}
-      className="@[440px]:hidden"
-      onClick={() => onChange(showsSource ? "rendered" : "source")}
-    >
-      <CodeXml />
-    </IconButton>
   );
 }
 

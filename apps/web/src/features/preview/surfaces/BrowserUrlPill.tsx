@@ -18,17 +18,22 @@ export interface BrowserUrlPillProps {
 }
 
 interface UrlDisplay {
-  readonly origin: string;
+  readonly host: string;
   readonly rest: string;
 }
+
+// Dropping http(s):// at rest, as Chrome does, keeps the port and path visible in a narrow panel.
+const HIDDEN_SCHEMES = new Set(["http:", "https:"]);
 
 function urlDisplay(url: string): UrlDisplay {
   try {
     const parsed = new URL(url);
-    if (parsed.origin === "null") return { origin: "", rest: url };
-    return { origin: parsed.origin, rest: url.slice(parsed.origin.length) };
+    if (parsed.origin === "null") return { host: "", rest: url };
+    const rest = url.slice(parsed.origin.length);
+    if (!HIDDEN_SCHEMES.has(parsed.protocol)) return { host: parsed.origin, rest };
+    return { host: parsed.host, rest };
   } catch {
-    return { origin: "", rest: url };
+    return { host: "", rest: url };
   }
 }
 
@@ -44,10 +49,10 @@ function useFocusRequest(focusRequest: number | undefined, inputRef: RefObject<H
 }
 
 function UrlAtRest({ url }: { readonly url: string }) {
-  const { origin, rest } = urlDisplay(url);
+  const { host, rest } = urlDisplay(url);
   return (
     <span aria-hidden className="text-fade pointer-events-none absolute inset-0 flex items-center whitespace-nowrap">
-      <span className="text-muted">{origin}</span>
+      <span className="text-muted">{host}</span>
       <span className="text-ink">{rest}</span>
     </span>
   );
@@ -77,8 +82,9 @@ function OpenExternalButton({ action }: { readonly action: BrowserAddress["openE
       action={action}
       shape="round"
       variant="ghost"
-      // Opacity, not visibility, so the button stays in the tab order while hidden.
-      className="size-6.5 shrink-0 opacity-0 group-focus-within/url:opacity-100 group-hover/url:opacity-100 focus-visible:opacity-100"
+      // Opacity, not visibility, so the button stays in the tab order while hidden. At rest it also takes no width:
+      // at the panel's 384px minimum its 26px was what cut the address's path off.
+      className="size-6.5 max-w-0 shrink-0 overflow-hidden opacity-0 group-focus-within/url:max-w-6.5 group-focus-within/url:opacity-100 group-hover/url:max-w-6.5 group-hover/url:opacity-100 focus-visible:max-w-6.5 focus-visible:opacity-100"
     >
       <ArrowUpRight className="size-3.5" aria-hidden />
     </BrowserActionButton>

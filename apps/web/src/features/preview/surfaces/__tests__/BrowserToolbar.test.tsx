@@ -118,6 +118,14 @@ describe("BrowserToolbar", () => {
     expect(log).toEqual(["stop-trusting"]);
   });
 
+  it("shows the address without its scheme at rest and keeps the full URL in the input", () => {
+    const url = "http://127.0.0.1:41594/alpha.html";
+    renderToolbar(loadedProps([], { address: address([], { url }) }));
+
+    expect(screen.getByTestId("browser-url-pill").textContent).toBe("127.0.0.1:41594/alpha.html");
+    expect(screen.getByRole("textbox", { name: "Preview URL" })).toHaveValue(url);
+  });
+
   it("shows no Not secure mark for a normally verified page", () => {
     renderToolbar(loadedProps([]));
 
@@ -129,6 +137,20 @@ describe("BrowserToolbar", () => {
     renderToolbar({ page: { kind: "error", navigation: navigation(log) }, address: address(log), tools: tools(log), control: { kind: "none" } });
 
     expect(buttonNames()).toEqual(["Back", "Forward", "Reload", "Open in browser", "More browser actions"]);
+  });
+
+  it("hides Forward until there is a later page, then runs it", async () => {
+    const user = userEvent.setup();
+    const log: string[] = [];
+    const props = loadedProps(log, { page: { kind: "error", navigation: navigation(log, { forward: null }) } });
+    const { rerender } = renderToolbar(props);
+
+    expect(screen.queryByRole("button", { name: "Forward" })).not.toBeInTheDocument();
+
+    rerender(<TooltipProvider><BrowserToolbar {...props} page={{ kind: "error", navigation: navigation(log) }} /></TooltipProvider>);
+    await user.click(screen.getByRole("button", { name: "Forward" }));
+
+    expect(log).toEqual(["forward"]);
   });
 
   it("shows page tools on a loaded page and explains each disabled control", async () => {

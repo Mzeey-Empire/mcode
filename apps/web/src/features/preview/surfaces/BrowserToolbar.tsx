@@ -30,9 +30,11 @@ function NavigationGroup({ navigation }: { readonly navigation: BrowserNavigatio
       <BrowserActionButton label="Back" action={navigation.back} {...NAV_CONTROL}>
         <ArrowLeft className="size-3.5" aria-hidden />
       </BrowserActionButton>
-      <BrowserActionButton label="Forward" action={navigation.forward} {...NAV_CONTROL}>
-        <ArrowRight className="size-3.5" aria-hidden />
-      </BrowserActionButton>
+      {navigation.forward && (
+        <BrowserActionButton label="Forward" action={navigation.forward} {...NAV_CONTROL}>
+          <ArrowRight className="size-3.5" aria-hidden />
+        </BrowserActionButton>
+      )}
       <BrowserActionButton label="Reload" action={navigation.reload} {...NAV_CONTROL}>
         <RotateCw className="size-3.5" aria-hidden />
       </BrowserActionButton>
@@ -73,7 +75,7 @@ function PageActions({ actions }: { readonly actions: BrowserPageActions }) {
 export function BrowserToolbar({ page, address, tools, control, focusRequest }: BrowserToolbarProps) {
   const showPageActions = page.kind === "loaded" && control.kind !== "agent-acting";
   return (
-    <div data-testid="browser-toolbar" className="flex h-10 min-w-0 flex-1 items-center gap-2 px-2">
+    <div data-testid="browser-toolbar" className="flex h-10 min-w-0 flex-1 items-center gap-2">
       {page.kind === "new" ? null : <NavigationGroup navigation={page.navigation} />}
       <BrowserUrlPill
         address={address}

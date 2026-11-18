@@ -1,5 +1,5 @@
 import { Files } from "lucide-react";
-import { IconButton } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { FilesNavigator, type FilesNavigatorModel } from "./FilesNavigator";
 
@@ -17,16 +17,18 @@ export function FilesPopover({ open, onOpenChange, disabled, navigator }: FilesP
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
         render={
-          <IconButton
+          <Button
+            variant="subtle"
             shape="round"
-            aria-label="Files"
-            pressed={open}
+            aria-pressed={open}
             disabled={disabled}
             data-testid="review-files-toggle"
+            className="shrink-0 text-body-small font-medium"
           />
         }
       >
-        <Files />
+        <Files aria-hidden className="@max-[400px]/review-controls:hidden" />
+        Files
       </PopoverTrigger>
       <PopoverContent
         align="end"

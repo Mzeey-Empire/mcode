@@ -54,6 +54,15 @@ describe("ReviewHeader view menu", () => {
     expect(await screen.findByTestId("review-view-unstaged")).toHaveTextContent(/^Unstaged$/);
   });
 
+  it("switches the diff to split from the View menu's Layout choice", async () => {
+    const user = userEvent.setup();
+    useDiffStore.setState({ renderMode: "unified" });
+    render(header());
+    await user.click(screen.getByRole("button", { name: "View" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Split" }));
+    expect(useDiffStore.getState().renderMode).toBe("side-by-side");
+  });
+
   it("names both sides of a fixed comparison in row 2", async () => {
     render(header());
     expect(await screen.findByTestId("review-operand-slot")).toHaveTextContent(/^Working tree→againststaged$/);

@@ -1,6 +1,6 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { FileReadResult, WorkspaceFileChanges } from "@mcode/contracts/models/workspace-file";
 import { FilesTool } from "../FilesTool";
 import { useFilesTabsStore } from "../filesTabsStore";
@@ -110,17 +110,16 @@ describe("ImageFileView", () => {
     expect(screen.getByRole("img", { name: "icons/logo.svg" })).toBeTruthy();
   });
 
-  it("flips an SVG between Preview and Source with the narrow row's single toggle", async () => {
+  it("offers an SVG's Preview and Source only as the labelled View choice", async () => {
     openImage("icons/logo.svg", "image/svg+xml");
     await screen.findByRole("img", { name: "icons/logo.svg" });
-    const toggle = screen.getByRole("button", { name: "Show source" });
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    const view = screen.getByRole("radiogroup", { name: "View" });
 
-    fireEvent.click(toggle);
+    expect(within(view).getByRole("radio", { name: "Preview" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("button", { name: "Show source" })).toBeNull();
+
+    fireEvent.click(within(view).getByRole("radio", { name: "Source" }));
     await waitFor(() => expect(screen.getByTestId("code-file-view").textContent).toContain('<rect width="4"'));
-    expect(screen.getByRole("button", { name: "Show source" })).toHaveAttribute("aria-pressed", "true");
-
-    fireEvent.click(screen.getByRole("button", { name: "Show source" }));
-    expect(screen.getByRole("img", { name: "icons/logo.svg" })).toBeTruthy();
+    expect(within(screen.getByRole("radiogroup", { name: "View" })).getByRole("radio", { name: "Source" })).toHaveAttribute("aria-checked", "true");
   });
 });
