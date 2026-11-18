@@ -192,14 +192,16 @@ function ThreadOverviewBranchMenu({
         />
       </ScrollArea>
 
-      {offersCreateBranch ? (<>
-        <Separator className="my-2" />
-        <ThreadOverviewBranchCreateAction
-          blocker={createCheckoutBranchBlocker(data.uncommitted, hasCommitsAhead)}
-          onOpenChange={onOpenChange}
-          onCreateBranch={onCreateBranch}
-        />
-      </>) : null}
+      {offersCreateBranch ? (
+        <>
+          <Separator className="my-2" />
+          <ThreadOverviewBranchCreateAction
+            blocker={createCheckoutBranchBlocker(data.uncommitted, hasCommitsAhead)}
+            onOpenChange={onOpenChange}
+            onCreateBranch={onCreateBranch}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
