@@ -45,6 +45,13 @@ export function useSettingHit(defs: readonly SettingDef[]): SettingHit {
   return { hitId, ref, attrs: hitId === null ? {} : { "data-search-hit": "", tabIndex: -1 } };
 }
 
+// Search rows sit under their location link, so they drop the page row's top padding and minimum height.
+const ROW_SPACING: Record<SettingVariant, string> = {
+  page: "min-h-18 py-2.5",
+  best: "pt-1.5 pb-3",
+  match: "min-h-10 pt-0.5 pb-1.5",
+};
+
 /** Props for the standard row layout that custom rows reuse. */
 export interface SettingRowFrameProps {
   readonly def: SettingDef;
@@ -67,7 +74,7 @@ export function SettingRowFrame({ def, variant, hint, children, className }: Set
       ref={hit.ref}
       {...hit.attrs}
       data-setting-id={def.id}
-      className={cn(SETTING_ROW_GRID_CLASS, SEARCH_HIT_CLASS, "min-h-18 content-center px-4 py-2.5", className)}
+      className={cn(SETTING_ROW_GRID_CLASS, SEARCH_HIT_CLASS, "content-center px-4", ROW_SPACING[variant], className)}
     >
       <div className="min-w-0">
         <span className="text-body-small font-semibold text-ink">{def.label}</span>

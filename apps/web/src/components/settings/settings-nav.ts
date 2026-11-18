@@ -8,6 +8,7 @@ import { KEYBOARD, KeyboardShortcutsSection } from "./sections/KeyboardShortcuts
 import { TROUBLESHOOTING, TroubleshootingSection } from "./sections/TroubleshootingSection";
 import { ABOUT, AboutSection } from "./sections/AboutSection";
 import type { SettingDef } from "./setting-def";
+import type { IndexedSetting } from "./settings-search";
 import type { SettingsSection } from "./settings-sections";
 
 export type { SettingsSection } from "./settings-sections";
@@ -32,3 +33,8 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "troubleshooting", label: "Troubleshooting", icon: Bug, component: TroubleshootingSection, settings: TROUBLESHOOTING.all },
   { id: "about", label: "About", icon: Info, component: AboutSection, settings: ABOUT.all },
 ];
+
+/** Every registered setting with its page label, in sidebar then page order. Search reads only this. */
+export const SETTINGS_INDEX: readonly IndexedSetting[] = SETTINGS_PAGES.flatMap((page) =>
+  page.settings.map((def) => ({ def, pageLabel: page.label })),
+);

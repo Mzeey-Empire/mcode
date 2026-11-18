@@ -1,18 +1,23 @@
 import { cn } from "@/lib/utils";
 import { useUpdateStore } from "@/stores/updateStore";
-import { useSettingsLocation } from "@/stores/settingsLocationStore";
+import { selectSettingsCanvas, useSettingsLocation } from "@/stores/settingsLocationStore";
 import { SETTINGS_PAGES } from "./settings-nav";
 import { SETTINGS_SIDEBAR_ROW_CLASS } from "./settings-sidebar-row";
+import { SettingsSearchField } from "./SettingsSearchField";
 
-/** Settings page navigation rendered inside the app sidebar. */
+/** Settings search and page navigation rendered inside the app sidebar. */
 export function SettingsNav() {
   const version = useUpdateStore((s) => s.version);
   const section = useSettingsLocation((s) => s.page);
   const openPage = useSettingsLocation((s) => s.openPage);
+  // While results show, no page is the one on screen.
+  const showingResults = useSettingsLocation((s) => selectSettingsCanvas(s).kind === "results");
   return (
+    <>
+    <SettingsSearchField />
     <div className="flex flex-col gap-0.5 px-2 py-3">
       {SETTINGS_PAGES.map((page) => {
-        const current = section === page.id;
+        const current = !showingResults && section === page.id;
         const Icon = page.icon;
         return (
           <button
@@ -31,5 +36,6 @@ export function SettingsNav() {
         );
       })}
     </div>
+    </>
   );
 }
