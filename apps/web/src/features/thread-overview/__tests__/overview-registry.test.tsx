@@ -65,13 +65,13 @@ describe("overview registry", () => {
       ["create-branch", "lane", 75],
       ["commit", "lane", 80],
       ["terminals", "terminals", 85],
-      ["usage", "summary", 90],
+      ["usage", "usage", 90],
       ["repository", "lane", 95],
       ["subagents", "activity", 100],
       ["pull-request", "lane", 110],
       ["browser", "activity", 120],
       ["sources", "activity", 130],
-      ["recap", "summary", 140],
+      ["recap", "recap", 140],
     ]);
     expect(getOverviewHeaderActions(subject).map(({ id }) => id)).toEqual(["project-actions", "settings"]);
   });

@@ -137,8 +137,8 @@ function ThreadOverviewRecapRow({
   });
 
   return (
-    // Recap shares the summary section with Usage, so its name reads like a usage name, and the
-    // bottom inset matches the space a row keeps under its text.
+    // Recap's name reads like a usage name above it, and the bottom inset matches the space a row
+    // keeps under its text.
     <div
       data-testid="thread-overview-recap"
       className="w-full px-3 pb-1.5 text-body-small"

@@ -23,7 +23,7 @@ interface ThreadOverviewUsageProps {
 }
 
 /**
- * One read-only Usage line: a muted name, then its value right beside it. It has no icon, because
+ * One read-only Usage line: a muted name, then its value ending on the right edge. It has no icon, because
  * the section reads as one block of figures, and no hover, because nothing in it acts.
  */
 function UsageLine({ name, children }: { name: ReactNode; children?: ReactNode }) {
@@ -63,7 +63,7 @@ function UsageCategory({ category, stale }: { category: QuotaCategory; stale: bo
         data-near-limit={isNearLimit || undefined}
         // Track and fill are picked for contrast in both themes: the track about 2.1:1 against the panel
         // so the 100% end reads, and each fill (ink, or warning near the limit) at least 3.2:1 against the track.
-        className="h-1 w-16 shrink-0 overflow-hidden rounded-[2px] bg-control-border/70"
+        className="h-1 w-full overflow-hidden rounded-[2px] bg-control-border/70"
       >
         <div
           className={cn("h-full rounded-[2px]", isNearLimit ? "bg-warning" : "bg-ink")}
@@ -73,7 +73,7 @@ function UsageCategory({ category, stale }: { category: QuotaCategory; stale: bo
       <span
         data-testid="thread-overview-usage-value"
         data-near-limit={isNearLimit || undefined}
-        className={cn("tabular-nums", isNearLimit ? "text-warning" : "text-ink")}
+        className={cn("text-right tabular-nums", isNearLimit ? "text-warning" : "text-ink")}
       >
         {rounded}%
       </span>
@@ -88,20 +88,20 @@ function ThreadOverviewUsage({
   usageStatus,
 }: ThreadOverviewUsageProps) {
   return (
-    // The lines share one set of columns sized to their content, so each meter sits just after the
-    // longest name and stacked meters and percents still line up. The summary section has no glyphs,
-    // so it starts on the card title's edge like Recap below it, which needs the width for prose.
+    // The lines share one set of columns: names sized to the longest, then each meter fills the
+    // rest so every percent ends on the card's right edge, where the Changes totals end. Usage has
+    // no glyphs, so it starts on the card title's edge like Recap below it.
     <section
       data-testid="thread-overview-usage"
       aria-label={`Usage, ${summary}`}
-      className="grid grid-cols-[minmax(0,max-content)_max-content_max-content] gap-x-3 px-3 text-body-small"
+      className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)_max-content] gap-x-3 px-3 text-body-small"
     >
       {categories.map((category) => (
         <UsageCategory key={category.label} category={category} stale={usageStatus === "stale"} />
       ))}
       {sessionCost ? (
         <UsageLine name="Session cost">
-          <span className="col-span-2 tabular-nums text-ink">{sessionCost}</span>
+          <span className="col-span-2 text-right tabular-nums text-ink">{sessionCost}</span>
         </UsageLine>
       ) : null}
       {/* With nothing to measure, the summary is a status such as "Usage unavailable" and names itself. */}
