@@ -111,7 +111,9 @@ evaluates these states in order:
 | `ready` | Every linked PR is merged and nothing needs the user. |
 
 Reopening by hand or sending a message to a closed thread enters held.
-Only linking a new PR or changing a linked PR's state releases it. Activity,
+The hold remembers the PR numbers and states linked when it began. Only linking
+a PR outside that snapshot or changing a remembered PR's state releases it, so
+forgetting and re-linking the same PR keeps the hold. Activity,
 the thread's setting, removing links, and title or URL changes do not release it.
 The hold leaves the override intact and is stored as `auto_complete_paused_at`.
 Older builds sharing the database under [ADR 0030](../../adr/0030-shared-database-with-ledger-guard-and-compatibility-floor.md)

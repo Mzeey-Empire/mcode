@@ -26,7 +26,8 @@ export type AutoCompleteDecisionInput = Pick<Thread,
  * ready: the thread can complete automatically.
  *
  * Held enters on reopen, by hand or by sending a message to a closed thread.
- * It leaves only when a new PR is linked or a linked PR changes state; nothing else releases it.
+ * It remembers the PRs linked when it began and leaves only when a PR outside that set is linked
+ * or a remembered PR changes state. Forgetting and re-linking the same PR keeps the hold.
  * Held is stored as auto_complete_paused_at, whose name stays because older builds share the database.
  */
 export type AutoCompleteState = "inactive" | "off" | "held" | "waiting-for-merge" | "waiting-for-user" | "ready";

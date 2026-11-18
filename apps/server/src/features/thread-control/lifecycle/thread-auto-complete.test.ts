@@ -235,6 +235,8 @@ describe("ThreadAutoCompleteService", () => {
     if (released) {
       await f.expectCompleted();
       expect(f.current().auto_complete_paused_at).toBeNull();
+      expect(f.database.query("SELECT auto_complete_hold_pull_requests FROM threads WHERE id = ?").get(f.thread.id))
+        .toEqual({ auto_complete_hold_pull_requests: null });
     } else {
       await f.service.evaluate(f.thread.id);
       expect(f.current().auto_complete_paused_at).not.toBeNull();

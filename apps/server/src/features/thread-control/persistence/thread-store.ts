@@ -5,7 +5,7 @@
 
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
-import { forgetThreadPullRequests } from "../../pull-requests/links/pull-request-link-funnel.js";
+import { forgetThreadPullRequests, readLinks } from "../../pull-requests/links/pull-request-link-funnel.js";
 import { rankPullRequests, ThreadPullRequestSchema } from "@mcode/contracts/models/thread-pull-request";
 import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
 import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
@@ -754,10 +754,13 @@ export class ThreadStore {
   /** Clear user-completion metadata in one transaction-safe statement. */
   reopen(id: string, reopenedAt = new Date().toISOString()): Thread | null {
     return this.orm.transaction((tx) => {
+      if (!tx.select({ id: threads.id }).from(threads).where(eq(threads.id, id)).get()) return null;
+      const holdPullRequests = readLinks(this.db, id).map(({ number, state }) => ({ number, state }));
       const result = runChanges(tx.update(threads)
         .set({
           userCompletedAt: null,
           autoCompletePausedAt: reopenedAt,
+          autoCompleteHoldPullRequests: JSON.stringify(holdPullRequests),
           scheduledDeletionAt: null,
           cleanupState: null,
           cleanupReason: null,

@@ -1,11 +1,14 @@
 import type { Database } from "bun:sqlite";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { rankPullRequests, ThreadPullRequestSchema, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
+import { z } from "zod";
+import { rankPullRequests, ThreadPullRequestSchema, ThreadPullRequestStateSchema, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { databaseWriteHandler } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { threadPullRequests, threads } from "../../../runtime/persistence/sqlite/schema.js";
 import { threadPullRequestWriteOperations } from "./thread-pull-request-write-operations.js";
+
+const heldPullRequestsSchema = z.array(z.object({ number: z.number().int().positive(), state: ThreadPullRequestStateSchema }));
 
 function mergeObservations(current: ThreadPullRequest[], observations: readonly ThreadPullRequest[]): ThreadPullRequest[] {
   const byNumber = new Map(current.map((pr) => [pr.number, pr]));
@@ -37,13 +40,19 @@ function mirrorPrimaryIntoLegacyColumnsForOlderBuilds(db: Database, threadId: st
 }
 
 function releaseHoldOnPullRequestChange(db: Database, threadId: string, current: ThreadPullRequest[], next: ThreadPullRequest[]): void {
-  const previousStates = new Map(current.map((pr) => [pr.number, pr.state]));
+  const thread = drizzle(db).select({ heldAt: threads.autoCompletePausedAt, snapshot: threads.autoCompleteHoldPullRequests })
+    .from(threads).where(eq(threads.id, threadId)).get();
+  if (!thread || thread.heldAt === null) return;
+  let remembered: Array<Pick<ThreadPullRequest, "number" | "state">> = current;
+  if (thread.snapshot !== null) remembered = heldPullRequestsSchema.parse(JSON.parse(thread.snapshot));
+  const previousStates = new Map(remembered.map((pr) => [pr.number, pr.state]));
   const changed = next.some((pr) => !previousStates.has(pr.number) || previousStates.get(pr.number) !== pr.state);
   if (!changed) return;
-  db.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(threadId);
+  db.query("UPDATE threads SET auto_complete_paused_at = NULL, auto_complete_hold_pull_requests = NULL WHERE id = ?").run(threadId);
 }
 
-function readLinks(db: Database, threadId: string): ThreadPullRequest[] {
+/** Read linked PRs with the legacy fallback used by both observation and hold capture. */
+export function readLinks(db: Database, threadId: string): ThreadPullRequest[] {
   const orm = drizzle(db);
   const thread = orm.select({ number: threads.prNumber }).from(threads).where(eq(threads.id, threadId)).get();
   if (!thread) throw new Error(`Thread ${threadId} not found`);

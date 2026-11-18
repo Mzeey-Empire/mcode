@@ -150,9 +150,9 @@ describe("successful database migration recovery", () => {
       db.prepare("INSERT INTO workspaces (id, name, path) VALUES (?, ?, ?)").run("ws", "Workspace", "/fixture");
       db.prepare("INSERT INTO threads (id, workspace_id, title, branch) VALUES (?, ?, ?, ?)").run("thread", "ws", "Thread", "main");
       migrate(drizzle(db), { migrationsFolder: migrationsFolderForDrizzle(current) });
-      expectColumns(db, "threads", { present: ["auto_complete_on_merge", "auto_complete_paused_at"] });
-      expect(db.prepare("SELECT auto_complete_on_merge, auto_complete_paused_at FROM threads WHERE id = ?").get("thread"))
-        .toEqual({ auto_complete_on_merge: null, auto_complete_paused_at: null });
+      expectColumns(db, "threads", { present: ["auto_complete_on_merge", "auto_complete_paused_at", "auto_complete_hold_pull_requests"] });
+      expect(db.prepare("SELECT auto_complete_on_merge, auto_complete_paused_at, auto_complete_hold_pull_requests FROM threads WHERE id = ?").get("thread"))
+        .toEqual({ auto_complete_on_merge: null, auto_complete_paused_at: null, auto_complete_hold_pull_requests: null });
     } finally {
       db.close(true);
     }

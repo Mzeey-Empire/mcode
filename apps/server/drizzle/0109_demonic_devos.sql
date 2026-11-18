@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `auto_complete_hold_pull_requests` text;
