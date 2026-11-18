@@ -132,6 +132,17 @@ describe("ThreadOverview branch create and commit", () => {
     expect(within(picker).queryByRole("button", { name: /Create and check out branch/ })).not.toBeInTheDocument();
   });
 
+  it("lists a detached worktree's checkout under the card's label, not as a HEAD branch", async () => {
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+
+    const picker = await screen.findByTestId("thread-overview-branch-popover");
+    await within(picker).findByRole("button", { name: "feature/other" });
+    expect(within(picker).getByTestId("thread-overview-current-branch")).toHaveTextContent("detached at 3f9a1c2");
+    expect(within(picker).queryByRole("button", { name: "HEAD" })).not.toBeInTheDocument();
+  });
+
   it("clears stale PR metadata and caches when creating a named branch", async () => {
     mockWorkspaceState.threads = [
       branchlessThread({

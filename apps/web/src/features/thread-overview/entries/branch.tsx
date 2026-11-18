@@ -24,6 +24,8 @@ import {
 interface OverviewBranchRow {
   readonly name: string;
   readonly isCurrent: boolean;
+  /** The row stands for a detached checkout, so `name` is its checkout label rather than a branch. */
+  readonly detached: boolean;
 }
 
 interface UncommittedFilesState {
@@ -48,16 +50,21 @@ function matchesQuery(name: string, query: string): boolean {
   return name.toLowerCase().includes(query.toLowerCase());
 }
 
-function branchRows(targets: readonly BranchTarget[], currentBranch: string, query: string): OverviewBranchRow[] {
+function branchRows(
+  targets: readonly BranchTarget[],
+  currentBranch: string,
+  detached: boolean,
+  query: string,
+): OverviewBranchRow[] {
   const localBranches = new Map<string, OverviewBranchRow>();
   for (const target of targets) {
     if (target.kind !== "branch" || target.remote !== null) continue;
-    localBranches.set(target.name, { name: target.name, isCurrent: target.isCurrent });
+    localBranches.set(target.name, { name: target.name, isCurrent: target.isCurrent, detached: false });
   }
 
-  // The server lists real branches only; a branchless checkout's HEAD still gets a row, as long as the search matches it.
+  // The server lists real branches only; a detached checkout still gets a row, as long as the search matches it.
   if (!localBranches.has(currentBranch) && matchesQuery(currentBranch, query)) {
-    localBranches.set(currentBranch, { name: currentBranch, isCurrent: true });
+    localBranches.set(currentBranch, { name: currentBranch, isCurrent: true, detached });
   }
 
   return [...localBranches.values()].sort((a, b) => {
@@ -106,8 +113,13 @@ function useThreadOverviewBranchData(thread: Thread, open: boolean, search: stri
     ? { workspaceId: thread.workspace_id, threadId: thread.id, purpose: "new-thread", query }
     : null);
   const uncommitted = useUncommittedFiles(thread, open);
-  const displayBranch = thread.checkout_state === "branchless" ? "HEAD" : thread.branch;
-  const rows = useMemo(() => branchRows(refs.items, displayBranch, query), [refs.items, displayBranch, query]);
+  // The detached row repeats the card's checkout label; a bare "HEAD" would name the same state two ways.
+  const detached = isDetachedCheckout(thread);
+  const displayBranch = detached ? resolveThreadCheckoutLabel(thread) : thread.branch;
+  const rows = useMemo(
+    () => branchRows(refs.items, displayBranch, detached, query),
+    [refs.items, displayBranch, detached, query],
+  );
   return { status: refs.status.kind, hasListedBranches: refs.items.length > 0, rows, uncommitted, retry: refs.retry };
 }
 
@@ -211,7 +223,8 @@ function ThreadOverviewBranchRows({
         <ThreadOverviewBranchRow
           key={branch.name}
           branch={branch}
-          isCurrent={thread.checkout_state === "named" && (branch.name === thread.branch || branch.isCurrent)}
+          isCurrent={branch.detached || (thread.checkout_state === "named" && (branch.name === thread.branch || branch.isCurrent))}
+          headSha={thread.head_sha}
           currentBranchUncommittedLabel={currentBranchUncommittedLabel}
           onOpenChange={onOpenChange}
         />
@@ -242,11 +255,13 @@ function ThreadOverviewBranchLoadingRow() {
 function ThreadOverviewBranchRow({
   branch,
   isCurrent,
+  headSha,
   currentBranchUncommittedLabel,
   onOpenChange,
 }: {
   branch: OverviewBranchRow;
   isCurrent: boolean;
+  headSha: string | null | undefined;
   currentBranchUncommittedLabel: string | null;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -265,7 +280,13 @@ function ThreadOverviewBranchRow({
       <span className="flex min-w-0 items-center gap-2">
         <GitBranch aria-hidden className="size-4 shrink-0 text-muted" />
         <span className="min-w-0">
-          <span className="block text-fade font-mono">{branch.name}</span>
+          {branch.detached ? (
+            <span className="flex min-w-0">
+              <CheckoutLabel label={branch.name} detached sha={headSha} />
+            </span>
+          ) : (
+            <span className="block text-fade font-mono">{branch.name}</span>
+          )}
           {isCurrent && currentBranchUncommittedLabel ? (
             <span className="block text-fade text-caption text-muted">
               {currentBranchUncommittedLabel}
