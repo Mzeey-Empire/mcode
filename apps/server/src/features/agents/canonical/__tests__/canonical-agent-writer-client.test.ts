@@ -1028,6 +1028,8 @@ describe("canonical SQLite writer", () => {
       .get("toolCall:writer-recovery-tool")).toEqual({ count: 0 });
   });
 
+  // Waits on four writer-worker starts in a row, each 0.2 to 1.6 s, which overran 5 s on loaded CI
+  // runners. The six other worker-heavy tests in this file carry the same limit.
   it("stops after three lost replies and permits explicit replay later", async () => {
     let created = 0;
     writer = new CanonicalAgentWriterClient(dbPath, () => {
@@ -1041,7 +1043,7 @@ describe("canonical SQLite writer", () => {
     await writer.close();
     writer = new CanonicalAgentWriterClient(dbPath);
     expect(await writer.commit("lost-three-times", batch)).toMatchObject({ outcome: "committed" });
-  });
+  }, 30_000);
 
   it("rejects reused operation IDs with changed phase or native cursor", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);

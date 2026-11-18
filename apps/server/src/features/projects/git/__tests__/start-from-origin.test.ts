@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodeNet from "node:net";
 import { describe, expect, it } from "vitest";
 import { GitRepositoryService, OriginFetchError } from "../git-repository-service.js";
 import { createOriginFixture, git } from "./start-from-origin-fixture.js";
@@ -61,9 +62,25 @@ describe("start from origin", { timeout: 20_000 }, () => {
 
   it("distinguishes a timed-out Git invocation", async () => {
     const { workspaces, executor, repoPath } = await createOriginFixture();
-    const repository = new GitRepositoryService(workspaces, {
-      exec: (args, options) => executor.exec(args, { ...options, timeout: 1 }),
+    // A listener that accepts and never answers keeps the fetch waiting for refs, so the timeout always fires.
+    // A deadline shorter than git's own runtime would race: git can finish first on a fast runner.
+    const sockets = new Set<NodeNet.Socket>();
+    const silentOrigin = NodeNet.createServer((socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
     });
-    await expect(repository.fetchOriginTrackingBranch(repoPath, "main")).rejects.toMatchObject({ code: "timed_out" });
+    await new Promise<void>((resolve) => silentOrigin.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = silentOrigin.address();
+      if (address === null || typeof address === "string") throw new Error("Silent origin has no TCP port");
+      git(repoPath, "remote", "set-url", "origin", `git://127.0.0.1:${address.port}/origin.git`);
+      const repository = new GitRepositoryService(workspaces, {
+        exec: (args, options) => executor.exec(args, args.includes("fetch") ? { ...options, timeout: 500 } : options),
+      });
+      await expect(repository.fetchOriginTrackingBranch(repoPath, "main")).rejects.toMatchObject({ code: "timed_out" });
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => silentOrigin.close(() => resolve()));
+    }
   });
 });
