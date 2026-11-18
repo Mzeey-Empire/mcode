@@ -61,6 +61,7 @@ import {
   type TerminalLinkTarget,
 } from "./terminalLinkProvider";
 import { openTerminalUrl } from "./openTerminalUrl";
+import { TERMINAL_FONT_SIZES, TERMINAL_LINE_HEIGHTS } from "../terminal-metrics";
 import {
   observeTerminalTheme,
   resolveTerminalColor,
@@ -86,19 +87,6 @@ function resolveTerminalSearchDecorations() {
     activeMatchColorOverviewRuler: resolveTerminalColor("--focus"),
   };
 }
-
-const TERMINAL_FONT_SIZES: Record<TerminalSettings["presentation"]["fontSize"], number> = {
-  xs: 11,
-  sm: 13,
-  md: 15,
-  lg: 17,
-  xl: 19,
-};
-const TERMINAL_LINE_HEIGHTS: Record<TerminalSettings["presentation"]["lineHeight"], number> = {
-  compact: 1.1,
-  normal: 1.2,
-  relaxed: 1.4,
-};
 
 function getTerminalOptions(settings: TerminalSettings): {
   readonly scrollback: number;

@@ -36,6 +36,8 @@ export interface PickerRow {
   readonly icon?: ReactNode;
   /** Draws the name in the mono face, for branch names, ids and paths. */
   readonly mono?: boolean;
+  /** Draws the name in this CSS font family, such as a font picker previewing each face. */
+  readonly fontFamily?: string;
   /** A short mono label in a fixed-width lane before the name, such as a commit's short sha, so names align. */
   readonly prefix?: string;
   /** Short muted detail on the right, such as a group or a source. */
@@ -1011,7 +1013,7 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
         <span className="w-[5.6rem] shrink-0 font-mono text-caption text-muted">{row.prefix}</span>
       ) : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className={cn("text-fade", row.mono && "font-mono text-caption")}>{row.name}</span>
+        <span className={cn("text-fade", row.mono && "font-mono text-caption")} style={{ fontFamily: row.fontFamily }}>{row.name}</span>
         {row.description != null ? (
           <span className="flex min-w-0 items-center gap-1.5 text-caption text-muted">{row.description}</span>
         ) : null}

@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { ProviderIcon } from "@/components/ui/provider-icon";
-import { createTooltipHandle, Tooltip, TooltipContent, TooltipTrigger, type TooltipHandle } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, type TooltipHandle } from "@/components/ui/tooltip";
+import { PathLine, PathTooltipRoot, usePathTooltip } from "../PathLine";
 import { cn } from "@/lib/utils";
 import { getCatalogEntry, PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
 import { getDefaultSettings, PartialSettingsSchema } from "@mcode/contracts/models/settings";
@@ -170,19 +171,6 @@ function cliPathFor(row: ProviderAvailability): string {
   return row.cli.resolvedPath ?? (row.cli.configuredPath || getCatalogEntry(row.id).cliBinary);
 }
 
-/** File name first in ink, then the folder in muted fading at the right edge, so the file name always shows. */
-function PathLine({ path, tooltip }: { path: string; tooltip: TooltipHandle<string> }) {
-  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  const file = path.slice(cut + 1);
-  const dir = cut < 0 ? "" : path.slice(0, cut);
-  return <TooltipTrigger handle={tooltip} payload={path} render={
-    <span aria-label={path} data-testid="provider-cli-path-line" className="flex min-w-0 gap-2 font-mono text-caption [font-variant-ligatures:none]">
-      <span className="shrink-0 text-ink">{file}</span>
-      {dir && <span className="text-fade text-muted">{dir}</span>}
-    </span>
-  } />;
-}
-
 interface ProviderRowProps {
   /** Availability and configuration snapshot for this provider. */
   row: ProviderAvailability;
@@ -254,7 +242,7 @@ function ProviderSummary({ row, hint, pathTooltip }: { row: ProviderAvailability
     <div className="flex items-center gap-2 text-body-small font-medium whitespace-nowrap text-ink">{labelFor(row.id)}{row.beta && <BetaTag id={row.id} />}</div>
     {hint
       ? <p className={cn("text-caption", row.enabled && row.cli.status === "not_found" ? "text-warning" : "text-muted")}>{hint}</p>
-      : <PathLine path={cliPathFor(row)} tooltip={pathTooltip} />}
+      : <PathLine path={cliPathFor(row)} tooltip={pathTooltip} data-testid="provider-cli-path-line" />}
   </div>;
 }
 
@@ -382,7 +370,7 @@ export function CliUpdateChecksSetting() {
 export function ProviderSection() {
   const providers = useProviderAvailabilityStore((s) => s.providers);
   const toggle = useProviderToggle();
-  const [pathTooltip] = useState(() => createTooltipHandle<string>());
+  const pathTooltip = usePathTooltip();
 
   return (
     <div>
@@ -403,9 +391,7 @@ export function ProviderSection() {
         })}
         {providers.map((p) => (p.comingSoon ? <ComingSoonProviderRow key={p.id} row={p} /> : null))}
       </SettingsGroup>
-      <Tooltip handle={pathTooltip}>
-        {({ payload }) => (payload ? <TooltipContent side="top" align="start" className="font-mono">{payload}</TooltipContent> : null)}
-      </Tooltip>
+      <PathTooltipRoot handle={pathTooltip} />
       {toggle.dialog}
     </div>
   );

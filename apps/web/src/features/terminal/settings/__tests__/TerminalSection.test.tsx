@@ -1,8 +1,10 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import type { TerminalProfileReference } from "@mcode/contracts/models/terminal";
+import type { TerminalPreferencesUpdate } from "@mcode/contracts/models/terminal-settings";
 
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
@@ -16,6 +18,49 @@ import { TerminalSection } from "../TerminalSection";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTerminalSettingsStore } from "../terminalSettingsStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+
+const PWSH_PATH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+
+function detected(slug: string, name: string) {
+  return {
+    id: `certified:${slug}` as const,
+    name,
+    executable: slug === "pwsh" ? PWSH_PATH : `C:\\Windows\\System32\\${slug}.exe`,
+    arguments: [],
+    source: "certified" as const,
+    platform: "windows" as const,
+  };
+}
+
+function setDefaultProfile(id: TerminalProfileReference) {
+  const settings = useSettingsStore.getState().settings;
+  useSettingsStore.setState({ settings: { ...settings, terminal: { ...settings.terminal, defaultProfileId: id } } });
+}
+
+/** Stands in for the server: a preference write lands in the settings store, as the real terminal store does. */
+function applyPreferenceWrites() {
+  useTerminalSettingsStore.setState({
+    updatePreferences: vi.fn(async (input: TerminalPreferencesUpdate) => {
+      const terminal = useSettingsStore.getState().settings.terminal;
+      useSettingsStore.getState()._applyTerminalPreferences({
+        ...terminal,
+        presentation: { ...terminal.presentation, ...input.presentation },
+      });
+      return true;
+    }),
+  });
+}
+
+async function openFontPicker() {
+  fireEvent.click(screen.getByRole("button", { name: /^Terminal font family/ }));
+  return screen.findByRole("combobox", { name: "Search fonts" });
+}
+
+function profileRowOf(name: string): HTMLElement {
+  const row = within(screen.getByRole("region", { name: "Available profiles" })).getByText(name).parentElement;
+  if (!row) throw new Error(`No row for ${name}`);
+  return row;
+}
 
 describe("TerminalSection", () => {
   beforeEach(() => {
@@ -49,8 +94,9 @@ describe("TerminalSection", () => {
   it("shows complete sections and bounded, named Terminal controls", { timeout: 15_000 }, () => {
     render(<TerminalSection />);
 
-    expect(screen.getByRole("heading", { name: "Profiles and defaults" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Presentation" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Profiles" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Available profiles" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Font and cursor" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Behavior" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Accessibility" })).toBeInTheDocument();
     expect(screen.getByLabelText("Scrollback lines")).toHaveAttribute("min", "100");
@@ -58,7 +104,7 @@ describe("TerminalSection", () => {
     expect(screen.getByLabelText("Session limit")).toHaveAttribute("min", "1");
     expect(screen.getByLabelText("Session limit")).toHaveAttribute("max", "20");
     expect(screen.getByRole("button", { name: "Reset Terminal preferences" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Default Terminal profile" })).toHaveTextContent("Automatic");
+    expect(screen.getByRole("button", { name: "Default Terminal profile" })).toHaveTextContent("Automatic");
   });
 
   it("keeps inherited and explicit Automatic workspace profiles distinct", { timeout: 15_000 }, async () => {
@@ -67,7 +113,7 @@ describe("TerminalSection", () => {
     useWorkspaceStore.setState({ activeWorkspaceId: workspaceId });
     render(<TerminalSection />);
 
-    const trigger = screen.getByRole("combobox", { name: "Workspace Terminal profile" });
+    const trigger = screen.getByRole("button", { name: "Workspace Terminal profile" });
     expect(trigger).toHaveTextContent("Use inherited global profile");
     await user.click(trigger);
     await screen.findByRole("option", { name: "Use inherited global profile" });
@@ -76,22 +122,67 @@ describe("TerminalSection", () => {
     expect(setWorkspaceDefault).toHaveBeenCalledWith(workspaceId, "automatic");
   });
 
-  it("commits a non-empty font draft once and restores it on Escape", () => {
+  // Fails if picking a font stops writing a quoted family with the fallback list behind it, or the sample stops following it.
+  it("writes a picked font in the stored format and the sample draws in it", async () => {
+    applyPreferenceWrites();
     render(<TerminalSection />);
-    const input = screen.getByLabelText("Terminal font family");
-    const updatePreferences = useTerminalSettingsStore.getState().updatePreferences as ReturnType<typeof vi.fn>;
 
-    input.focus();
-    fireEvent.change(input, { target: { value: "JetBrains Mono" } });
-    expect(updatePreferences).not.toHaveBeenCalled();
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(updatePreferences).toHaveBeenCalledTimes(1);
-    expect(updatePreferences).toHaveBeenCalledWith({ presentation: { fontFamily: "JetBrains Mono" } });
+    await openFontPicker();
+    fireEvent.click(await screen.findByRole("option", { name: "Consolas" }));
 
-    fireEvent.change(input, { target: { value: "Unconfirmed Font" } });
-    fireEvent.keyDown(input, { key: "Escape" });
-    expect(input).toHaveValue(getDefaultSettings().terminal.presentation.fontFamily);
-    expect(updatePreferences).toHaveBeenCalledTimes(1);
+    const stored = useSettingsStore.getState().settings.terminal.presentation.fontFamily;
+    expect(stored).toBe('"Consolas", "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "Cascadia Code", monospace');
+    expect(screen.getByRole("img", { name: "Terminal preview" }).style.fontFamily).toBe(stored);
+    expect(screen.getByRole("button", { name: "Terminal font family: Consolas" })).toBeInTheDocument();
+  });
+
+  // Fails if a name the list does not know can no longer be used.
+  it("offers a typed name with no match and writes it", async () => {
+    applyPreferenceWrites();
+    render(<TerminalSection />);
+
+    const search = await openFontPicker();
+    fireEvent.change(search, { target: { value: "My  Odd Font" } });
+    fireEvent.click(await screen.findByRole("option", { name: 'Use "My Odd Font"' }));
+
+    expect(useSettingsStore.getState().settings.terminal.presentation.fontFamily).toMatch(/^"My Odd Font", .*monospace$/);
+  });
+
+  // Fails if the size labels stop matching the terminal's pixel sizes, or the sample loses its fixed height and pushes the rows below.
+  it("changes font size in the sample and the store while the sample keeps its height", async () => {
+    applyPreferenceWrites();
+    render(<TerminalSection />);
+    const sample = screen.getByRole("img", { name: "Terminal preview" });
+    const heightBefore = sample.style.height;
+
+    fireEvent.click(screen.getByRole("radio", { name: "17" }));
+
+    expect(useSettingsStore.getState().settings.terminal.presentation.fontSize).toBe("lg");
+    expect(sample.style.fontSize).toBe("17px");
+    expect(sample.style.height).toBe(heightBefore);
+    expect(heightBefore).not.toBe("");
+  });
+
+  // Fails if "In use" stops following the default profile, or Automatic stops resolving to the first detected profile.
+  it("tags the profile a new terminal opens with", () => {
+    useTerminalSettingsStore.setState({ certifiedProfiles: [detected("pwsh", "PowerShell"), detected("cmd", "Command Prompt")] });
+    const { rerender } = render(<TerminalSection />);
+    expect(profileRowOf("PowerShell")).toHaveTextContent("In use");
+    expect(profileRowOf("Command Prompt")).not.toHaveTextContent("In use");
+
+    setDefaultProfile("certified:cmd");
+    rerender(<TerminalSection />);
+    expect(profileRowOf("PowerShell")).not.toHaveTextContent("In use");
+    expect(profileRowOf("Command Prompt")).toHaveTextContent("In use");
+  });
+
+  // Fails if the path line drops the file name or hides the full path from name and tooltip.
+  it("shows a profile's file name and names its full path", () => {
+    useTerminalSettingsStore.setState({ certifiedProfiles: [detected("pwsh", "PowerShell")] });
+    render(<TerminalSection />);
+
+    const path = screen.getByLabelText(PWSH_PATH);
+    expect(path).toHaveTextContent(/^pwsh\.exe/);
   });
 
   it("shows blocked profiles and the unavailable selected reference for repair", () => {
@@ -121,7 +212,7 @@ describe("TerminalSection", () => {
     expect(screen.getByText(/Terminal settings need repair/)).toBeInTheDocument();
     expect(screen.getByText("Recovered shell")).toBeInTheDocument();
     expect(screen.getByText(/Selected profile is unavailable/)).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Default Terminal profile" })).toHaveTextContent("Unavailable: Custom profile");
+    expect(screen.getByRole("button", { name: "Default Terminal profile" })).toHaveTextContent("Unavailable: Custom profile");
   });
 
   it("shows the selected custom profile name in the trigger", () => {
@@ -141,6 +232,6 @@ describe("TerminalSection", () => {
 
     render(<TerminalSection />);
 
-    expect(screen.getByRole("combobox", { name: "Default Terminal profile" })).toHaveTextContent("Live Test Profile");
+    expect(screen.getByRole("button", { name: "Default Terminal profile" })).toHaveTextContent("Live Test Profile");
   });
 });
