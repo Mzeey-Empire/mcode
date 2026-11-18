@@ -20,6 +20,8 @@ export interface SourceLabel {
   readonly host: string;
   /** Empty when the host alone is unique, or for the site root among same-host sources. */
   readonly detail: string;
+  /** Set only when another label reads the same; numbers them in source order. */
+  readonly ordinal?: number;
 }
 
 function pathSegments(url: URL): string[] {
@@ -103,7 +105,8 @@ function elideSharedStart(detail: string, peers: readonly string[]): string {
  * Names each source by its host. When another source shares the host, it adds the shortest path
  * suffix that tells them apart, then the query or fragment for sources on the same path, so two
  * links on one site stay distinguishable without hovering. A long detail is shortened in the middle,
- * or, when that would make two same-host labels read alike, loses the start they share.
+ * or, when that would make two same-host labels read alike, loses the start they share. Labels that
+ * still read alike are numbered.
  */
 export function sourceLabelParts(sources: readonly ThreadSource[]): SourceLabel[] {
   const urls = sources.map((source) => new URL(source.url));
@@ -120,18 +123,31 @@ export function sourceLabelParts(sources: readonly ThreadSource[]): SourceLabel[
     if (peers.length === 0) return label;
     return { host: label.host, detail: elideSharedStart(full[index].detail, peers.map((peer) => peer.detail)) };
   });
-  // Each label is cut on its own, so in repetitive text two cuts can still land on the same words.
-  // Those labels keep their full detail, which always differs, even if the fade hides some of it.
-  return elided.map((label, index) => {
-    const clashes = elided.some((other, otherIndex) =>
-      otherIndex !== index && other.host === label.host && other.detail === label.detail && full[otherIndex].detail !== full[index].detail);
-    return clashes ? full[index] : label;
+  return numberAlikeLabels(elided);
+}
+
+/**
+ * Labels that still read the same, such as a link and its www twin, or repetitive paths whose cuts
+ * land on the same words, get " (n)" in source order, as terminal tabs that share a name do. The
+ * number sits outside the fade, so the chips read apart however long their text is.
+ */
+function numberAlikeLabels(labels: readonly SourceLabel[]): SourceLabel[] {
+  const text = ({ host, detail }: SourceLabel) => `${host}/${detail}`;
+  const totals = new Map<string, number>();
+  for (const label of labels) totals.set(text(label), (totals.get(text(label)) ?? 0) + 1);
+  const numbered = new Map<string, number>();
+  return labels.map((label) => {
+    if ((totals.get(text(label)) ?? 0) < 2) return label;
+    const ordinal = (numbered.get(text(label)) ?? 0) + 1;
+    numbered.set(text(label), ordinal);
+    return { ...label, ordinal };
   });
 }
 
 /** Each source's label as one string, the text its chip shows. */
 export function sourceLabels(sources: readonly ThreadSource[]): string[] {
-  return sourceLabelParts(sources).map(({ host, detail }) => (detail ? `${host}/${detail}` : host));
+  return sourceLabelParts(sources).map(({ host, detail, ordinal }) =>
+    `${detail ? `${host}/${detail}` : host}${ordinal ? ` (${ordinal})` : ""}`);
 }
 
 interface ThreadOverviewSourcesProps {
@@ -182,6 +198,11 @@ function ThreadOverviewSources({ sources, onOpen }: ThreadOverviewSourcesProps) 
                         className="text-fade min-w-0"
                       >
                         /{labels[index].detail}
+                      </span>
+                    ) : null}
+                    {labels[index].ordinal ? (
+                      <span data-testid="thread-overview-source-ordinal" className="shrink-0 whitespace-pre">
+                        {` (${labels[index].ordinal})`}
                       </span>
                     ) : null}
                   </span>

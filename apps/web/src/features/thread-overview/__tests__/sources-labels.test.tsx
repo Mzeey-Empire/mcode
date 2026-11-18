@@ -96,26 +96,30 @@ describe("overview source labels", () => {
     ]);
   });
 
-  it("never gives two different links the same label, even in repetitive text", () => {
-    const a = "a".repeat(30);
+  it("numbers labels whose shortened text still matches, so the difference never hides in the fade", () => {
+    const a = "a".repeat(1000);
     const z = "z".repeat(30);
     const labels = sourceLabels(sources(
       `https://example.com/docs/${a}1${z}`,
       `https://example.com/docs/${a}2${a}1${z}`,
       `https://example.com/docs/${a}2${a}2${z}`,
     ));
-    expect(new Set(labels).size).toBe(3);
+    expect(labels[0]).toMatch(/ \(1\)$/);
+    expect(labels[1]).toBe(labels[0].replace(/ \(1\)$/, " (2)"));
+    expect(labels[2]).not.toMatch(/\(\d\)$/);
   });
 
-  it("keeps the readable end for links that differ only by www or a trailing slash", () => {
+  it("keeps the readable end for links that differ only by www or a trailing slash, numbered", () => {
     expect(sourceLabels(sources(
       "https://www.example.com/docs/getting-started",
       "https://example.com/docs/getting-started",
       "https://example.com/docs/getting-started/",
+      "https://example.com/docs/install",
     ))).toEqual([
-      "example.com/…/getting-started",
-      "example.com/…/getting-started",
-      "example.com/…/getting-started",
+      "example.com/…/getting-started (1)",
+      "example.com/…/getting-started (2)",
+      "example.com/…/getting-started (3)",
+      "example.com/…/install",
     ]);
   });
 
