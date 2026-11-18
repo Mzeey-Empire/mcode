@@ -155,7 +155,7 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 
 - Before you write or keep a test, read [docs/internals/testing/writing-tests.md](docs/internals/testing/writing-tests.md). A test must fail for a real bug; source-text, class-name, mock-echo, and set-then-read tests do not.
 - Before you commit, check the changed scope with `bun run check:changed`, or `bun run check:changed --since origin/main` for the whole branch. It runs the tests, lint, and typecheck that your changes can affect, including in workspaces that depend on them, and prints failures in full.
-- To rerun test files or folders: `bun run test:files <path> [<path> ...]`. Paths are repository-relative and may span workspaces. It refuses an empty list and missing paths, so a failed file-list pipeline cannot run a whole suite.
+- To rerun test files or folders: `bun run test:files <path> [<path> ...]`. Paths are repository-relative and may span workspaces. It refuses an empty list and missing paths, so a failed file-list pipeline cannot run a whole suite. `packages/oxlint-plugin` runs only whole: `bun run test:oxlint-plugin`.
 - Its output is short so failures are not truncated: passing tests print a dot, while failing tests keep their diff, stack trace, and console output. If a failure needs more context, rerun that file with `bun run --cwd <workspace> test -- <test-file>`.
 - Do not use `bun test`: it invokes Bun's native test runner and bypasses the workspace Vitest configuration.
 - To lint files by hand: `bun run lint <file> [<file> ...]`. It runs oxlint with the Mcode rules.

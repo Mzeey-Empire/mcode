@@ -83,9 +83,20 @@ NodeTest.test("refuses an empty list, a missing path, and a path that would sele
   NodeAssertStrict.throws(() => plan(["apps/web"]), /not inside a workspace/);
   NodeAssertStrict.throws(() => plan(["packages/no-tests/src/a.test.ts"]), /not inside a workspace with a test script/);
   NodeAssertStrict.throws(() => plan(["packages/oxlint-plugin/src/a.test.ts"]), /packages\/oxlint-plugin's test script cannot run named files/);
+  const chained = [{ dir: "apps/web", name: "@mcode/web", scripts: { test: "vitest run && echo done" }, dependsOn: [] }];
+  NodeAssertStrict.throws(() => planTestRuns({ paths: ["apps/web/src/a.test.ts"], root: ROOT, workspaces: chained, exists: everyPathExists }), /cannot run named files/);
 });
 
-NodeTest.test("the command exits 1 without starting Vitest when a failed pipeline leaves the list empty or partial", () => {
+// A cold Vitest start can pass Bun's 5 s default, so the tests that spawn the command get the agent-test budget.
+NodeTest.test("real Vitest runs only the named file, not its siblings", { timeout: 75_000 }, () => {
+  // truncate-patch.test.ts sits beside the named file, so a dropped filter would run at least two files.
+  const { status, output } = runScript(REPO_ROOT, ["packages/shared/src/git/__tests__/text-patch.test.ts"]);
+
+  NodeAssertStrict.equal(status, 0, output);
+  NodeAssertStrict.match(output, /Test Files\s+1 passed \(1\)/);
+});
+
+NodeTest.test("the command exits 1 without starting Vitest when a failed pipeline leaves the list empty or partial", { timeout: 75_000 }, () => {
   for (const args of [[], [""], ["apps/web/src/__tests__/does-not-exist.test.ts"]]) {
     const { status, output } = runScript(REPO_ROOT, args);
 
@@ -94,7 +105,7 @@ NodeTest.test("the command exits 1 without starting Vitest when a failed pipelin
   }
 });
 
-NodeTest.test("runs each workspace's named files with short output and passes a test failure through", (context) => {
+NodeTest.test("runs each workspace's named files with short output and passes a test failure through", { timeout: 75_000 }, (context) => {
   const root = makeFixtureRepo();
   context.after(() => NodeFS.rmSync(root, { recursive: true, force: true }));
   const recordFile = NodePath.join(root, "record.jsonl");
