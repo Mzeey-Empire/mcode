@@ -107,7 +107,17 @@ function loadPlaywright() {
   return NodeModule.createRequire(scratchPackage)("playwright");
 }
 
-if (import.meta.main) {
+// Node before 22.18 and 24.2 leaves import.meta.main undefined; without the fallback the
+// command would exit without a capture or an error.
+function isEntryPoint() {
+  if (typeof import.meta.main === "boolean") return import.meta.main;
+  if (!process.argv[1]) return false;
+  const invoked = NodePath.resolve(process.argv[1]);
+  const self = NodeURL.fileURLToPath(import.meta.url);
+  return process.platform === "win32" ? invoked.toLowerCase() === self.toLowerCase() : invoked === self;
+}
+
+if (isEntryPoint()) {
   const options = parseCaptureArguments(process.argv.slice(2));
   const session = await connectElectronSession({ playwright: loadPlaywright(), repoRoot: REPO_ROOT, reload: false });
   try {
