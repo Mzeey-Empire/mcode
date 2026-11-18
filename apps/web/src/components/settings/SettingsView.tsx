@@ -1,4 +1,4 @@
-import { SECTION_MAP, type SettingsSection } from "./settings-nav";
+import { SETTINGS_PAGES, type SettingsSection } from "./settings-nav";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { cn } from "@/lib/utils";
 
@@ -12,7 +12,7 @@ interface SettingsViewProps {
  * Navigation and header are handled by the Sidebar.
  */
 export function SettingsView({ section }: SettingsViewProps) {
-  const ActiveSection = SECTION_MAP[section];
+  const ActiveSection = (SETTINGS_PAGES.find((page) => page.id === section) ?? SETTINGS_PAGES[0]).component;
 
   return (
     <div className="h-full overflow-y-auto bg-background">

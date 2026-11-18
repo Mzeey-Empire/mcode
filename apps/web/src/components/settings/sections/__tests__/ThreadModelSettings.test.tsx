@@ -54,9 +54,9 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import { ModelSection } from "../ModelSection";
+import { ThreadModelSettings } from "../ThreadModelSettings";
 
-/** Builds the full settings state shape required by ModelSection. */
+/** Builds the full settings state shape required by ThreadModelSettings. */
 function makeState(provider: string, modelId: string, reasoning = "high") {
   return {
     settings: {
@@ -75,7 +75,7 @@ function makeState(provider: string, modelId: string, reasoning = "high") {
 }
 
 /**
- * Renders ModelSection after configuring the store mock to return the given
+ * Renders ThreadModelSettings after configuring the store mock to return the given
  * provider and model. Returns the rendered component for optional further querying.
  */
 function renderWithModel(provider: string, modelId: string, reasoning = "high") {
@@ -83,7 +83,7 @@ function renderWithModel(provider: string, modelId: string, reasoning = "high") 
   mockSettingsSelector.mockImplementation((selector: (s: unknown) => unknown) =>
     selector(state),
   );
-  return { state, ...render(<ModelSection />) };
+  return { state, ...render(<ThreadModelSettings />) };
 }
 
 /**
@@ -98,7 +98,7 @@ function getReasoningRow(): HTMLElement {
   return row;
 }
 
-describe("ModelSection reasoning options", () => {
+describe("ThreadModelSettings reasoning options", () => {
   it("keeps the primary model controls without a fallback model setting", () => {
     renderWithModel("claude", "claude-opus-4-7");
     expect(screen.getByText("Default model")).toBeInTheDocument();
@@ -109,16 +109,12 @@ describe("ModelSection reasoning options", () => {
     vi.clearAllMocks();
   });
 
-  it("groups provider and model controls under a clear page hierarchy", () => {
+  it("groups model controls into new-thread defaults and the model for small tasks", () => {
     renderWithModel("claude", "claude-opus-4-7");
 
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Models & providers" }),
-    ).toBeInTheDocument();
     for (const name of [
-      "Providers",
-      "Model defaults",
-      "Utility model",
+      "New threads start with",
+      "Model for small tasks",
     ]) {
       expect(screen.getByRole("region", { name })).toBeInTheDocument();
     }

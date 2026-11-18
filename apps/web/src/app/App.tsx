@@ -358,7 +358,7 @@ export function App() {
   const settingsLoaded = useSettingsStore((s) => s.loaded);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] =
-    useState<SettingsSection>("model");
+    useState<SettingsSection>("general");
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
   const primarySurface = useUiStore((s) => s.primarySurface);
@@ -534,7 +534,7 @@ export function App() {
     const handler = (e: Event) => {
       const section =
         (e as CustomEvent<{ section: SettingsSection }>).detail?.section ??
-        "model";
+        "general";
       setSettingsSection(section);
       setSettingsOpen(true);
     };
@@ -708,7 +708,7 @@ export function App() {
         handler: () => {
           window.dispatchEvent(
             new CustomEvent("mcode:open-settings", {
-              detail: { section: "model" },
+              detail: { section: "general" },
             }),
           );
         },

@@ -1,5 +1,5 @@
 import { registerCommand } from "@/lib/command-registry";
-import type { SettingsSection } from "@/components/settings/settings-nav";
+import { SETTINGS_PAGES } from "@/components/settings/settings-nav";
 import type { DesktopWindowAction } from "@/transport/desktop-bridge";
 
 type DesktopWindowBridge = NonNullable<Window["desktopBridge"]>["window"];
@@ -28,11 +28,6 @@ export const WINDOW_COMMANDS: readonly WindowCommand[] = [
   },
 ];
 
-const SETTINGS_COMMANDS: readonly { id: string; title: string; section: SettingsSection }[] = [
-  { id: "settings.keyboard", title: "Keyboard Settings", section: "keyboard" },
-  { id: "settings.about", title: "About Mcode", section: "about" },
-];
-
 /** Register the native window commands. Desktop only; returns disposers. */
 export function registerWindowCommands(
   desktopWindow: DesktopWindowBridge,
@@ -51,14 +46,14 @@ export function registerWindowCommands(
 
 /** Register palette shortcuts into specific Settings sections; returns disposers. */
 export function registerSettingsSectionCommands(): (() => void)[] {
-  return SETTINGS_COMMANDS.map((command) =>
+  return SETTINGS_PAGES.map((page) =>
     registerCommand({
-      id: command.id,
-      title: command.title,
+      id: `settings.${page.id}`,
+      title: `Settings: ${page.label}`,
       category: "General",
       handler: () =>
         window.dispatchEvent(
-          new CustomEvent("mcode:open-settings", { detail: { section: command.section } }),
+          new CustomEvent("mcode:open-settings", { detail: { section: page.id } }),
         ),
     }),
   );

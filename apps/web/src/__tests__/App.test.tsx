@@ -235,7 +235,7 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
     const main = await screen.findByRole("main");
-    expect(await within(main).findByRole("heading", { name: "Models & providers", level: 1 })).toBeInTheDocument();
+    expect(await within(main).findByRole("heading", { name: "General" })).toBeInTheDocument();
   });
 
   function installDesktopWindow(isDevelopment: boolean) {

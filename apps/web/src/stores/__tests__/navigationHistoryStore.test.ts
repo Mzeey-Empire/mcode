@@ -25,11 +25,11 @@ describe("navigationHistoryStore", () => {
     expect(useNavigationHistoryStore.getState().entries).toHaveLength(2);
     expect(history.back(valid)).toEqual(first);
     history.record(first);
-    history.record({ kind: "settings", workspaceId: "one", section: "model" });
+    history.record({ kind: "settings", workspaceId: "one", section: "threads" });
 
     expect(useNavigationHistoryStore.getState().entries).toEqual([
       first,
-      { kind: "settings", workspaceId: "one", section: "model" },
+      { kind: "settings", workspaceId: "one", section: "threads" },
     ]);
     expect(history.forward(valid)).toBeNull();
   });
