@@ -1,16 +1,14 @@
 import { cn } from "@/lib/utils";
 import { useUpdateStore } from "@/stores/updateStore";
-import { SETTINGS_PAGES, type SettingsSection } from "./settings-nav";
+import { useSettingsLocation } from "@/stores/settingsLocationStore";
+import { SETTINGS_PAGES } from "./settings-nav";
 import { SETTINGS_SIDEBAR_ROW_CLASS } from "./settings-sidebar-row";
 
-interface SettingsNavProps {
-  section: SettingsSection;
-  onSection: (s: SettingsSection) => void;
-}
-
 /** Settings page navigation rendered inside the app sidebar. */
-export function SettingsNav({ section, onSection }: SettingsNavProps) {
+export function SettingsNav() {
   const version = useUpdateStore((s) => s.version);
+  const section = useSettingsLocation((s) => s.page);
+  const openPage = useSettingsLocation((s) => s.openPage);
   return (
     <div className="flex flex-col gap-0.5 px-2 py-3">
       {SETTINGS_PAGES.map((page) => {
@@ -21,7 +19,7 @@ export function SettingsNav({ section, onSection }: SettingsNavProps) {
             key={page.id}
             type="button"
             aria-current={current ? "page" : undefined}
-            onClick={() => onSection(page.id)}
+            onClick={() => openPage(page.id)}
             className={cn(SETTINGS_SIDEBAR_ROW_CLASS, current && "bg-selected font-medium text-ink hover:bg-selected")}
           >
             <Icon size={16} aria-hidden className="shrink-0" />

@@ -2,11 +2,16 @@ import { useEffect, useState } from "react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { SettingRow } from "../SettingRow";
+import { Setting } from "../Setting";
+import { settingsPage } from "../setting-def";
 import { SettingsGroup } from "../SettingsGroup";
 
-function HardwareAccelerationSetting() {
-  const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
+function hardwareAccelerationBridge() {
+  return typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
+}
+
+function HardwareAccelerationControl() {
+  const bridge = hardwareAccelerationBridge();
   const savedEnabled = useSettingsStore((s) => s.settings.graphics?.hardwareAcceleration ?? false);
   const updateSettings = useSettingsStore((s) => s.update);
   const [runningEnabled, setRunningEnabled] = useState<boolean | null>(null);
@@ -21,24 +26,47 @@ function HardwareAccelerationSetting() {
     };
   }, [bridge]);
 
-  if (!bridge?.getHardwareAcceleration || !bridge.relaunch) return null;
   const needsRestart = runningEnabled !== null && runningEnabled !== savedEnabled;
   // The switch sits on the row's anchored edge in both layouts, so Restart appearing never moves it.
-  return <SettingRow label="Hardware acceleration" hint="Applies after Mcode restarts."><div className="flex items-center gap-3 min-[80rem]:flex-row-reverse"><Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} />{needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge.relaunch?.()}>Restart</Button>}</div></SettingRow>;
+  return <div className="flex items-center gap-3 min-[80rem]:flex-row-reverse"><Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} />{needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge?.relaunch?.()}>Restart</Button>}</div>;
 }
 
-function DiagnosticsRecordingSetting() {
+function DiagnosticsRecordingControl() {
   const recording = useSettingsStore((s) => s.settings.diagnostics?.recording ?? true);
   const updateSettings = useSettingsStore((s) => s.update);
-  return <SettingRow label="Troubleshooting logs" hint="Keeps a 7-day record of what your agents did, so you can find out why a thread got stuck. It stays on this computer and leaves out your messages and code."><Switch aria-label="Troubleshooting logs" checked={recording} onCheckedChange={(value) => void updateSettings({ diagnostics: { recording: value } })} /></SettingRow>;
+  return <Switch aria-label="Troubleshooting logs" checked={recording} onCheckedChange={(value) => void updateSettings({ diagnostics: { recording: value } })} />;
 }
+
+/** Settings on the Troubleshooting page. */
+export const TROUBLESHOOTING = settingsPage("troubleshooting", {
+  logs: {
+    label: "Troubleshooting logs",
+    hint: "Keeps a 7-day record of what your agents did, so you can find out why a thread got stuck. It stays on this computer and leaves out your messages and code.",
+    synonyms: "logs log diagnostics debug record stuck trace recording",
+    configKey: "diagnostics.recording",
+    Control: DiagnosticsRecordingControl,
+  },
+  hardwareAcceleration: {
+    label: "Hardware acceleration",
+    hint: "Applies after Mcode restarts.",
+    synonyms: "gpu graphics hardware acceleration rendering blank flicker blurry render",
+    problems: "window blank flicker screen black terminal flicker terminal blank",
+    configKey: "graphics.hardwareAcceleration",
+    // Only the desktop app can switch the GPU and relaunch, so the browser build hides the row and its search result.
+    exists: () => {
+      const bridge = hardwareAccelerationBridge();
+      return Boolean(bridge?.getHardwareAcceleration && bridge.relaunch);
+    },
+    Control: HardwareAccelerationControl,
+  },
+});
 
 /** Troubleshooting settings page: troubleshooting logs and hardware acceleration. */
 export function TroubleshootingSection() {
   return (
     <SettingsGroup>
-      <DiagnosticsRecordingSetting />
-      <HardwareAccelerationSetting />
+      <Setting def={TROUBLESHOOTING.logs} />
+      <Setting def={TROUBLESHOOTING.hardwareAcceleration} />
     </SettingsGroup>
   );
 }

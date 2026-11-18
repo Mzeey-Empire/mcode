@@ -15,8 +15,6 @@ import React from "react";
 describe('Sidebar "Edit settings.json" button', () => {
   let Sidebar: React.ComponentType<{
     settingsOpen?: boolean;
-    settingsSection?: string;
-    onSettingsSection?: (s: string) => void;
     onOpenSettings: () => void;
     onCloseSettings?: () => void;
   }>;
@@ -55,8 +53,6 @@ describe('Sidebar "Edit settings.json" button', () => {
     return render(
       React.createElement(Sidebar, {
         settingsOpen: true,
-        settingsSection: "general",
-        onSettingsSection: vi.fn(),
         onOpenSettings: vi.fn(),
         onCloseSettings: vi.fn(),
       }),
@@ -134,8 +130,6 @@ describe('Sidebar "Edit settings.json" button', () => {
     render(
       React.createElement(Sidebar, {
         settingsOpen: true,
-        settingsSection: "general",
-        onSettingsSection: vi.fn(),
         onOpenSettings: vi.fn(),
         onCloseSettings,
       }),

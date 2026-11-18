@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { SettingsGroup } from "../SettingsGroup";
-import { SettingRow } from "../SettingRow";
+import { Setting } from "../Setting";
+import { settingsPage } from "../setting-def";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/stores/uiStore";
 import { getAllCommands } from "@/lib/command-registry";
@@ -8,68 +9,74 @@ import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-mana
 import { useToastStore } from "@/stores/toastStore";
 import { isMac, isWindows } from "@/lib/platform";
 
+const KEYBINDINGS_PATH = isWindows ? "%USERPROFILE%\\.mcode\\keybindings.json" : "~/.mcode/keybindings.json";
+
+function openKeybindingsFile() {
+  if (!window.desktopBridge) {
+    useToastStore
+      .getState()
+      .show({
+        kind: "failed",
+        title: "Desktop integration unavailable",
+        meta: "Keybindings cannot be opened in this environment",
+      });
+    return;
+  }
+  window.desktopBridge.openKeybindingsFile().catch((err) => {
+    useToastStore
+      .getState()
+      .show({
+        kind: "failed",
+        title: "Could not open keybindings file",
+        meta: String(err?.message ?? err),
+      });
+  });
+}
+
+function CustomKeybindingsControl() {
+  const setShortcutHelpOpen = useUiStore((s) => s.setShortcutHelpOpen);
+  return (
+    <div className="flex gap-2">
+      <Button
+        variant="outline"
+        size="compact"
+        disabled={!window.desktopBridge}
+        onClick={openKeybindingsFile}
+      >
+        Edit keybindings.json
+      </Button>
+      <Button
+        variant="outline"
+        size="compact"
+        onClick={() => setShortcutHelpOpen(true)}
+      >
+        View All Shortcuts
+      </Button>
+    </div>
+  );
+}
+
+/** Settings on the Keyboard shortcuts page. Individual shortcuts are not settings; the command palette finds those. */
+export const KEYBOARD = settingsPage("keyboard", {
+  custom: {
+    label: "Custom keybindings",
+    hint: `Override default shortcuts by editing ${KEYBINDINGS_PATH}.`,
+    synonyms: "keybindings json keyboard shortcuts hotkeys remap",
+    Control: CustomKeybindingsControl,
+  },
+});
+
 /** Settings section showing keyboard shortcuts and the path to the user override file. */
 export function KeyboardShortcutsSection() {
-  const setShortcutHelpOpen = useUiStore((s) => s.setShortcutHelpOpen);
-
-  const configPath = isWindows
-    ? "%USERPROFILE%\\.mcode\\keybindings.json"
-    : "~/.mcode/keybindings.json";
-
   const boundCommands = useMemo(() => {
     const commands = getAllCommands().filter((c) => c.id !== "escape.handle");
     return commands.filter((c) => getKeybindingForCommand(c.id));
   }, []);
 
-  const hasDesktopBridge = !!window.desktopBridge;
-
-  const handleOpenKeybindings = () => {
-    if (!window.desktopBridge) {
-      useToastStore
-        .getState()
-        .show({
-          kind: "failed",
-          title: "Desktop integration unavailable",
-          meta: "Keybindings cannot be opened in this environment",
-        });
-      return;
-    }
-    window.desktopBridge.openKeybindingsFile().catch((err) => {
-      useToastStore
-        .getState()
-        .show({
-          kind: "failed",
-          title: "Could not open keybindings file",
-          meta: String(err?.message ?? err),
-        });
-    });
-  };
-
   return (
     <div>
       <SettingsGroup>
-      <SettingRow
-        label="Custom keybindings"
-        hint={`Override default shortcuts by editing ${configPath}.`}
-      >
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="compact"
-            disabled={!hasDesktopBridge}
-            onClick={handleOpenKeybindings}
-          >
-            Edit keybindings.json
-          </Button>
-          <Button
-            variant="outline"
-            size="compact"
-            onClick={() => setShortcutHelpOpen(true)}
-          >
-            View All Shortcuts
-          </Button>
-        </div>
-      </SettingRow>
+        <Setting def={KEYBOARD.custom} />
       </SettingsGroup>
 
       <div className="mt-8 space-y-1">

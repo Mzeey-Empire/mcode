@@ -3,7 +3,6 @@ import { ProjectSidebar, useWorkspaceStore } from "@/features/projects";
 import { FolderPlus, Search, SquarePen } from "lucide-react";
 import { IconButton } from "@/components/ui/button";
 import { SettingsNav } from "@/components/settings/SettingsNav";
-import type { SettingsSection } from "@/components/settings/settings-nav";
 import { useUiStore } from "@/stores/uiStore";
 import { SidebarHeader } from "@/components/shell/SidebarHeader";
 import { cn } from "@/lib/utils";
@@ -20,18 +19,10 @@ interface SidebarProps {
   className?: string;
   /** Whether the settings view is active. */
   settingsOpen?: boolean;
-  /** Active settings section. */
-  settingsSection?: SettingsSection;
-  /** Called when the user selects a settings section. */
-  onSettingsSection?: (s: SettingsSection) => void;
   /** Called when the user clicks the Settings button. */
   onOpenSettings: () => void;
   /** Called when the user clicks back from settings. */
   onCloseSettings?: () => void;
-}
-
-function getSettingsNavProps(settingsOpen: boolean | undefined, settingsSection: SettingsSection | undefined, onSettingsSection: ((section: SettingsSection) => void) | undefined): { section: SettingsSection; onSection: (section: SettingsSection) => void } | null {
-  return settingsOpen && settingsSection && onSettingsSection ? { section: settingsSection, onSection: onSettingsSection } : null;
 }
 
 function useCommandBinding(commandId: string): Keybinding | undefined {
@@ -74,10 +65,9 @@ function SidebarGoZone() {
   </div>;
 }
 
-function SidebarBody({ settingsOpen, settingsSection, onSettingsSection }: { settingsOpen: boolean | undefined; settingsSection: SettingsSection | undefined; onSettingsSection: ((section: SettingsSection) => void) | undefined }) {
-  const settingsNavProps = getSettingsNavProps(settingsOpen, settingsSection, onSettingsSection);
-  if (settingsNavProps) {
-    return <div data-testid="sidebar-body" className="min-h-0 flex-1 overflow-y-auto overscroll-contain"><SettingsNav {...settingsNavProps} /></div>;
+function SidebarBody({ settingsOpen }: { settingsOpen: boolean | undefined }) {
+  if (settingsOpen) {
+    return <div data-testid="sidebar-body" className="min-h-0 flex-1 overflow-y-auto overscroll-contain"><SettingsNav /></div>;
   }
   return <>
     <SidebarGoZone />
@@ -97,15 +87,13 @@ function SidebarFrame({ settingsOpen, className, children }: { settingsOpen: boo
 export function Sidebar({
   className,
   settingsOpen,
-  settingsSection,
-  onSettingsSection,
   onOpenSettings,
   onCloseSettings,
 }: SidebarProps) {
   return (
     <SidebarFrame settingsOpen={settingsOpen} className={className}>
       <SidebarHeader />
-      <SidebarBody settingsOpen={settingsOpen} settingsSection={settingsSection} onSettingsSection={onSettingsSection} />
+      <SidebarBody settingsOpen={settingsOpen} />
       <SidebarFooter settingsOpen={settingsOpen} onOpenSettings={onOpenSettings} onCloseSettings={onCloseSettings} />
     </SidebarFrame>
   );

@@ -2,18 +2,15 @@ import { useEffect, useRef } from "react";
 import { Settings } from "lucide-react";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { CanvasBreadcrumb } from "@/components/shell/CanvasBreadcrumb";
-import { SETTINGS_PAGES, type SettingsSection } from "./settings-nav";
-
-interface SettingsViewProps {
-  /** Active settings section to render. */
-  section: SettingsSection;
-}
+import { useSettingsLocation } from "@/stores/settingsLocationStore";
+import { SETTINGS_PAGES } from "./settings-nav";
 
 /**
  * Settings canvas: a "Settings / page" header pill over the active page in a centred column.
  * Page navigation lives in the sidebar.
  */
-export function SettingsView({ section }: SettingsViewProps) {
+export function SettingsView() {
+  const section = useSettingsLocation((s) => s.page);
   const page = SETTINGS_PAGES.find((candidate) => candidate.id === section) ?? SETTINGS_PAGES[0];
   const ActiveSection = page.component;
   const headingRef = useRef<HTMLHeadingElement>(null);

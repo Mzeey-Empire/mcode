@@ -7,7 +7,8 @@ import type { OpenInApp } from "@/transport/types";
 import type { Theme } from "@mcode/contracts/models/settings";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
-import { SettingRow } from "../SettingRow";
+import { Setting } from "../Setting";
+import { settingsPage } from "../setting-def";
 import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
 
@@ -58,36 +59,26 @@ export function buildOpenInAppOptions(
   return options;
 }
 
-function ThemeSetting() {
+function ThemeControl() {
   const theme = useSettingsStore((s) => s.settings.appearance.theme);
   const update = useSettingsStore((s) => s.update);
   return (
-    <SettingRow label="Theme" configKey="appearance.theme" hint="Color scheme for the interface.">
-      <SegmentedControl
-        options={[
-          { value: "system", label: "System" },
-          { value: "dark", label: "Dark" },
-          { value: "light", label: "Light" },
-        ]}
-        value={theme}
-        onChange={(v) => update({ appearance: { theme: v as Theme } })}
-      />
-    </SettingRow>
+    <SegmentedControl
+      options={[
+        { value: "system", label: "System" },
+        { value: "dark", label: "Dark" },
+        { value: "light", label: "Light" },
+      ]}
+      value={theme}
+      onChange={(v) => update({ appearance: { theme: v as Theme } })}
+    />
   );
 }
 
-function NotificationsSetting() {
+function NotificationsControl() {
   const enabled = useSettingsStore((s) => s.settings.notifications.enabled);
   const update = useSettingsStore((s) => s.update);
-  return (
-    <SettingRow
-      label="Notifications"
-      configKey="notifications.enabled"
-      hint="Notify when a thread finishes, fails or needs you while Mcode is in the background."
-    >
-      <Switch checked={enabled} onCheckedChange={(v) => update({ notifications: { enabled: v } })} />
-    </SettingRow>
-  );
+  return <Switch aria-label="Notifications" checked={enabled} onCheckedChange={(v) => update({ notifications: { enabled: v } })} />;
 }
 
 /**
@@ -95,36 +86,55 @@ function NotificationsSetting() {
  * of the three-tier resolution). New threads with no per-thread override open
  * in this app; "Auto" clears the setting and falls back to auto-resolution.
  */
-function DefaultOpenInAppSetting() {
+function DefaultOpenInAppControl() {
   const defaultEditor = useSettingsStore((s) => s.settings.externalApps.defaultEditor);
   const update = useSettingsStore((s) => s.update);
   const apps = useOpenInApps();
   const options = useMemo(() => buildOpenInAppOptions(apps, defaultEditor), [apps, defaultEditor]);
 
   return (
-    <SettingRow
-      label="Default open-in app"
-      configKey="externalApps.defaultEditor"
-      hint="New threads open in this app. Auto picks your highest-priority installed editor and falls back to File Explorer."
-    >
-      <SettingsSelectPicker
-        value={defaultEditor}
-        onChange={(v) => void update({ externalApps: { defaultEditor: v } })}
-        options={options}
-        searchPlaceholder="Search apps"
-        data-testid="settings-default-open-in-trigger"
-      />
-    </SettingRow>
+    <SettingsSelectPicker
+      value={defaultEditor}
+      onChange={(v) => void update({ externalApps: { defaultEditor: v } })}
+      options={options}
+      searchPlaceholder="Search apps"
+      data-testid="settings-default-open-in-trigger"
+    />
   );
 }
+
+/** Settings on the General page. */
+export const GENERAL = settingsPage("general", {
+  theme: {
+    label: "Theme",
+    hint: "Color scheme for the interface.",
+    synonyms: "theme dark light mode appearance color colour scheme system",
+    configKey: "appearance.theme",
+    Control: ThemeControl,
+  },
+  notifications: {
+    label: "Notifications",
+    hint: "Notify when a thread finishes, fails or needs you while Mcode is in the background.",
+    synonyms: "notifications notify alert toast sound desktop",
+    configKey: "notifications.enabled",
+    Control: NotificationsControl,
+  },
+  openIn: {
+    label: "Default open-in app",
+    hint: "New threads open in this app. Auto picks your highest-priority installed editor and falls back to File Explorer.",
+    synonyms: "open in editor vscode cursor ide external app explorer",
+    configKey: "externalApps.defaultEditor",
+    Control: DefaultOpenInAppControl,
+  },
+});
 
 /** General settings page: theme, notifications, and the default open-in app. */
 export function GeneralSection() {
   return (
     <SettingsGroup>
-      <ThemeSetting />
-      <NotificationsSetting />
-      <DefaultOpenInAppSetting />
+      <Setting def={GENERAL.theme} />
+      <Setting def={GENERAL.notifications} />
+      <Setting def={GENERAL.openIn} />
     </SettingsGroup>
   );
 }
