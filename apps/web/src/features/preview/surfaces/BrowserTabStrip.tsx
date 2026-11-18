@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Globe, MousePointer2 } from "lucide-react";
 import type { BrowserTabInfo, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
@@ -29,6 +29,7 @@ interface PageIconProps {
 /** The page favicon, swapped for a filled pointer while the agent acts on that page. */
 function PageIcon({ workspaceId, scopeId, page, active }: PageIconProps) {
   const acting = useBrowserActing(workspaceId, scopeId, page.id);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   if (acting) {
     return (
       <span className="grid place-items-center">
@@ -38,10 +39,18 @@ function PageIcon({ workspaceId, scopeId, page, active }: PageIconProps) {
   }
   return (
     <span className={cn("grid place-items-center", !active && "opacity-60")}>
-      {page.faviconUrl ? (
-        <img src={page.faviconUrl} alt="" width={14} height={14} className="rounded-[3px]" />
+      {/* Remembering which URL failed lets a new favicon load after an old one 404s. */}
+      {page.faviconUrl && page.faviconUrl !== failedUrl ? (
+        <img
+          src={page.faviconUrl}
+          alt=""
+          width={14}
+          height={14}
+          className="rounded-[3px]"
+          onError={() => setFailedUrl(page.faviconUrl ?? null)}
+        />
       ) : (
-        <Globe aria-hidden />
+        <Globe data-testid="browser-page-globe" aria-hidden />
       )}
     </span>
   );
@@ -73,10 +82,10 @@ export function BrowserTabStrip({ workspaceId, threadId, scopeId, tabSet }: Brow
     <PanelHeaderSlot slot="leading">
       <div data-browser-chrome="" className="flex min-w-0 flex-1 items-center">
         <PanelTabStrip
-          appearance="browser"
           items={items}
           activeId={activeId}
           label="Browser pages"
+          tool={{ icon: <Globe />, name: "Browser" }}
           addLabel="New page"
           onSelect={(pageId) => void store().activatePage(workspaceId, scopeId, pageId)}
           onClose={(pageId) => void store().closePage(workspaceId, scopeId, pageId, {

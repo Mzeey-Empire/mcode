@@ -1,5 +1,5 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
-import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { RpcError } from "@/transport/ws-transport";
 import { executeCommand, getCommand } from "@/lib/command-registry";
+import { PanelHeaderSlotScope } from "@/components/panels/shell/PanelHeader";
 import { usePlanCommands } from "./use-plan-commands";
 import { PlanPanel, planEditorAccess } from "./PlanPanel";
 import { planSaveScheduler } from "./plan-draft-sessions";
@@ -106,6 +107,7 @@ describe("PlanPanel", () => {
     expect(editorText()).toContain("Step for v2");
     expect(editorText()).not.toContain("#");
     expect(screen.getByTestId("plan-version-picker")).toHaveTextContent("v2Codex");
+    expect(screen.getByRole("textbox", { name: "Plan v2" })).toBeInTheDocument();
   });
 
   it("shows an older version's content after it is picked", async () => {
@@ -124,6 +126,7 @@ describe("PlanPanel", () => {
     await waitFor(() => expect(editorText()).toContain("Step for v1"));
     expect(editorText()).not.toContain("Step for v2");
     expect(screen.getByTestId("plan-version-picker")).toHaveTextContent("v1Older version");
+    expect(screen.getByRole("textbox", { name: "Plan v1" })).toBeInTheDocument();
   });
 
   it("reopens on the version an unfinished comment note was written on", () => {
@@ -151,10 +154,49 @@ describe("PlanPanel", () => {
     expect(screen.queryByRole("button", { name: /implement/i })).toBeNull();
   });
 
-  it("renders nothing when the thread has no plan", () => {
-    const { container } = render(<PlanPanel threadId={THREAD} />);
+  describe("header rows", () => {
+    function renderInShell() {
+      const leading = document.createElement("div");
+      const row2 = document.createElement("div");
+      document.body.append(leading, row2);
+      render(
+        <PanelHeaderSlotScope active elements={{ leading, row2, row3: null }}>
+          <PlanPanel threadId={THREAD} />
+        </PanelHeaderSlotScope>,
+      );
+      return { leading, row2 };
+    }
 
-    expect(container).toBeEmptyDOMElement();
+    it("names the tool in row 1 and puts the version picker and Implement in row 2", () => {
+      usePlanStore.setState({ plansByThread: { [THREAD]: [makePlan(1, { status: "superseded" }), makePlan(2)] } });
+
+      const { leading, row2 } = renderInShell();
+
+      expect(within(leading).getByText("Plan")).toBeVisible();
+      expect(within(leading).queryByTestId("plan-version-picker")).toBeNull();
+      expect(within(row2).getByTestId("plan-version-picker")).toHaveTextContent("v2Codex");
+      expect(within(row2).getByRole("button", { name: "Implement v2" })).toBeInTheDocument();
+    });
+
+    it("switches versions from the row 2 picker", async () => {
+      usePlanStore.setState({ plansByThread: { [THREAD]: [makePlan(1, { status: "superseded" }), makePlan(2)] } });
+      const { row2 } = renderInShell();
+      const user = userEvent.setup();
+
+      await user.click(within(row2).getByTestId("plan-version-picker"));
+      await user.click(await screen.findByRole("menuitemradio", { name: "v1 Older version" }));
+
+      await waitFor(() => expect(screen.getByRole("textbox", { name: "Plan v1" })).toBeInTheDocument());
+      expect(within(row2).getByTestId("plan-version-picker")).toHaveTextContent("v1Older version");
+    });
+
+    it("shows only the title, with no row 2, when the thread has no plan", () => {
+      const { leading, row2 } = renderInShell();
+
+      expect(within(leading).getByText("Plan")).toBeVisible();
+      expect(row2).toBeEmptyDOMElement();
+      expect(screen.queryByRole("textbox")).toBeNull();
+    });
   });
 
   it("edits only the latest draft or ready version while no turn runs", async () => {

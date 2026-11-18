@@ -251,6 +251,7 @@ function TerminalPoolPortal({
         key={mountedTerm.id}
         ptyId={mountedTerm.id}
         ownerScopeId={mountedTerm.kind === "action" ? undefined : mountedTerm.threadId}
+        shellLabel={mountedTerm.label}
         sessionState={mountedTerm.state === "pending" ? "starting" : mountedTerm.state ?? "running"}
         exit={mountedTerm.exit}
         diagnosticsAvailable={terminalDiagnosticsAvailable(terminalCapabilities)}

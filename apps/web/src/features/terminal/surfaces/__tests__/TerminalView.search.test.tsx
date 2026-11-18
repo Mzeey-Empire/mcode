@@ -148,6 +148,7 @@ beforeEach(() => {
   vi.mocked(mockTransport.ptyDeleteLastSeq).mockReset();
 });
 
+import { TERMINAL_THEME_TOKENS } from "../terminalTheme";
 import { TerminalView } from "../TerminalView";
 
 async function settle(): Promise<void> {
@@ -171,9 +172,9 @@ function resetTerminalSearchState(): void {
 beforeEach(() => {
   document.documentElement.style.setProperty("--page", "rgb(245, 245, 245)");
   document.documentElement.style.setProperty("--ink", "rgb(24, 24, 24)");
-  document.documentElement.style.setProperty("--success", "rgb(30, 120, 50)");
-  document.documentElement.style.setProperty("--error", "rgb(140, 40, 30)");
-  document.documentElement.style.setProperty("--link", "rgb(30, 60, 150)");
+  for (const token of Object.values(TERMINAL_THEME_TOKENS.light)) {
+    if (token !== "--page" && token !== "--ink") document.documentElement.style.setProperty(token, "rgb(30, 60, 150)");
+  }
   vi.clearAllMocks();
   term.options.allowProposedApi = false;
   searchHarness.load.mockReset().mockResolvedValue({ SearchAddon: searchHarness.FakeSearchAddon });

@@ -12,7 +12,7 @@ import { OpenFileView } from "./OpenFileView";
 import { fileViewKind } from "./file-view-kind";
 import { buildFilesTree, flattenFileTree, folderNodesToReveal, indexFileChanges } from "./file-tree-model";
 import { FILES_SCOPE_DEFAULTS, getFilesScope, useFilesTabsStore, type FilesScopeState } from "./filesTabsStore";
-import { useFileActions } from "./useFileActions";
+import { useFileActions, useScopeRoot } from "./useFileActions";
 import { useFilesData, type FileReadState, type FilesData } from "./useFilesData";
 import { useFindInFile, type FindHighlight } from "./useFindInFile";
 
@@ -95,6 +95,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
   const scope = useMemo(() => ({ workspaceId, threadId }), [workspaceId, threadId]);
   const data = useFilesData(scope, state.openPaths);
   const actions = useFileActions(workspaceId, threadId);
+  const checkoutPath = useScopeRoot(workspaceId, threadId);
   const layout = filesLayout(bodyWidth, state);
   const store = useFilesTabsStore.getState;
   const setGoToFileOpen = (open: boolean) => store().setGoToFileOpen(scopeId, open);
@@ -133,6 +134,7 @@ export function FilesTool({ workspaceId, threadId, scopeId }: FilesToolProps) {
         onAdd={() => setGoToFileOpen(true)}
       />
       <FilesControlsRow
+        checkoutPath={checkoutPath}
         treeOpen={layout.dockedTree || layout.body === "tree"}
         shownPath={shownPath}
         actions={actions}

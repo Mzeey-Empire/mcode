@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { GitCommitHorizontal } from "lucide-react";
-import { IconButton } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { useReviewState } from "@/hooks/useReviewState";
 import { useDiffStore } from "@/stores/diffStore";
 import { CommitSheet } from "./CommitSheet";
@@ -39,17 +39,17 @@ export function CommitControls({ workspaceId, threadId, scopeId, activePath }: C
           className="pointer-events-auto"
         />
       ) : null}
-      <IconButton
+      {/* A labelled button, not an icon: a newcomer must find the commit action without hovering. */}
+      <Button
         ref={trigger}
-        shape="round"
-        floating
-        aria-label="Commit"
-        pressed={open}
+        size="default"
+        aria-pressed={open}
         onClick={() => setCommitSheetScopeId(scopeId)}
-        className="pointer-events-auto"
+        className="pointer-events-auto shadow-floating"
       >
-        <GitCommitHorizontal />
-      </IconButton>
+        <GitCommitHorizontal data-icon="inline-start" aria-hidden />
+        Commit
+      </Button>
     </div>
   );
 }

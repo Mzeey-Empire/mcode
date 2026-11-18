@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { GitPullRequest, GitBranch, ChevronDown, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -21,7 +21,7 @@ import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 
-const PreviewMarkdown = lazy(() => import("./MarkdownContent"));
+import { LazyMarkdownContent as PreviewMarkdown } from "./LazyMarkdownContent";
 
 // ---------------------------------------------------------------------------
 // BaseBranchSelect — searchable local-branch picker for the PR dialog sidebar

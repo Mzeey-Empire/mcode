@@ -150,7 +150,7 @@ describe("App", () => {
     await waitFor(() => expect(panel).toHaveAttribute("data-visible", "true"));
     expect(row).toHaveAttribute("data-right-panel-visible", "true");
 
-    fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide panel" }));
     expect(panel).toHaveAttribute("data-visible", "false");
     expect(row).toHaveAttribute("data-right-panel-visible", "false");
 

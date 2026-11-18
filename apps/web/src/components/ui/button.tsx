@@ -29,8 +29,10 @@ const buttonVariants = cva(
         link: "text-link underline underline-offset-4 hover:text-focus active:text-ink",
         // The round icon button's resting fill; switched on, it takes the control-border fill.
         // Hover sits halfway between the two: no role token differs from `selected` in both themes.
+        // Light control-border is a 65% grey, so a switched-on toggle became the darkest shape in a panel. In light it
+        // rests at the halfway fill and reaches control-border only under the pointer.
         subtle:
-          "bg-selected text-ink hover:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] aria-expanded:bg-control-border aria-pressed:bg-control-border active:inset-ring-2 active:inset-ring-ink",
+          "bg-selected text-ink hover:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] aria-expanded:bg-control-border aria-pressed:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] aria-pressed:hover:bg-control-border dark:aria-pressed:bg-control-border active:inset-ring-2 active:inset-ring-ink",
         // Composer Stop: neutral by rule, never amber or red.
         ink: "bg-ink text-background hover:bg-ink/90 active:inset-ring-2 active:inset-ring-background",
       },

@@ -1,6 +1,6 @@
-import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
+import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
-import { Kbd } from "@/components/ui/kbd";
+import { ShortcutCombo } from "@/components/ui/shortcut-keys";
 import { Button } from "@/components/ui/button";
 import {
   shownTabTypes,
@@ -9,11 +9,11 @@ import {
 } from "@/lib/panel-tabs";
 import type { RightPanelTool } from "@/stores/diffStore";
 
-/** The mcode keycap for a tab type, or null when it has no binding. */
-function tabKeycap(type: PanelTabType): string | null {
+/** A tab type's shortcut keys, split the way the rail's Open tool menu shows them, or null when unbound. */
+function tabKeycaps(type: PanelTabType): readonly string[] | null {
   if (!type.commandId) return null;
   const binding = getKeybindingForCommand(type.commandId);
-  return binding ? formatKeybinding(binding.key, isMac) : null;
+  return binding ? keybindingKeycaps(binding.key, isMac) : null;
 }
 
 /**
@@ -48,38 +48,46 @@ export function PanelEmptyState({
       {/* m-auto centers the block when there's room and lets it scroll from the
           top when the list is taller than the panel (auto margins collapse
           rather than clip, unlike justify-center). */}
-      <div className="m-auto w-full max-w-sm">
+      {/* The root font size makes 1rem 10px, so max-w-sm would be only 240px: too narrow for a
+          blurb beside a three-key shortcut. */}
+      <div className="m-auto w-full max-w-[38rem]">
         <header className="mb-5 text-center">
           <h2 className="text-lg font-semibold tracking-tight text-ink">
             Open a tool
           </h2>
-          <p className="mt-1 text-xs text-muted">
-            Pick one to open it in this panel.
-          </p>
         </header>
-        <div className="flex flex-col gap-1.5">
+        {/* One list of quiet rows, like a menu: seven outlined cards read as seven competing panels. */}
+        <div className="flex flex-col gap-0.5">
           {rows.map((type) => {
             const Icon = type.icon;
-            const keycap = tabKeycap(type);
+            const keycaps = tabKeycaps(type);
             return (
               <Button
                 key={type.id}
                 type="button"
-                variant="outline"
+                variant="ghost"
                 size="compact"
                 data-testid={`panel-card-${type.id}`}
                 aria-label={`Open ${type.label}`}
                 onClick={() => onOpen(type.id)}
-                className="h-auto w-full justify-start gap-3 whitespace-normal bg-panel px-3 py-3 text-left transition-colors hover:border-primary/50 hover:bg-panel/80"
+                // The shortcut shares the title's line, which is short, so the blurb below gets the
+                // row's full width and reads whole at the panel's minimum width.
+                className="grid h-auto w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-3 rounded-control px-3 py-2.5 text-left"
               >
-                <span className="grid size-9 flex-none place-items-center rounded-md bg-hover/40 text-muted">
+                <span className="grid size-8 flex-none place-items-center text-muted">
                   <Icon size={18} />
                 </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium text-ink">{type.label}</span>
+                <span className="min-w-0">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="text-fade min-w-0 text-sm font-medium text-ink">{type.label}</span>
+                    {keycaps && keycaps.length > 0 ? (
+                      <span aria-hidden className="ml-auto flex shrink-0 items-center text-muted">
+                        <ShortcutCombo keys={keycaps} />
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="block text-fade text-xs text-muted">{type.blurb}</span>
                 </span>
-                {keycap && <Kbd>{keycap}</Kbd>}
               </Button>
             );
           })}

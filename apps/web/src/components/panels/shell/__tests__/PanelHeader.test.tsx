@@ -6,11 +6,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { OverlayGateContext } from "@/components/ui/overlay-gate";
 import { PanelHeader, PanelHeaderSlot, PanelHeaderSlotScope, PanelToggleButton } from "../PanelHeader";
 
-function renderHeader(maximized: boolean, sidebarDocked: boolean) {
+function renderHeader(maximized: boolean, sidebarDocked: boolean, hasOpenTool = true) {
   return render(
     <ShellChromeProvider sidebarDocked={sidebarDocked} canGoBack canGoForward={false}>
       <PanelHeader
         maximized={maximized}
+        fullSurface={false}
+        hasOpenTool={hasOpenTool}
+        onReturnToChat={vi.fn()}
         leadingRef={null}
         row2Ref={null}
         row3Ref={null}
@@ -22,14 +25,15 @@ function renderHeader(maximized: boolean, sidebarDocked: boolean) {
 }
 
 function buttonNames(): Set<string> {
-  return new Set(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? ""));
+  // A labelled button takes its name from its text; an icon button from aria-label.
+  return new Set(screen.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent?.trim() ?? ""));
 }
 
 describe("PanelHeader", () => {
   it("takes over the sidebar and history controls when a maximized panel replaces the canvas", () => {
     renderHeader(true, false);
 
-    expect(buttonNames()).toEqual(new Set(["Expand sidebar", "Back", "Forward", "Restore", "Close panel"]));
+    expect(buttonNames()).toEqual(new Set(["Expand sidebar", "Back", "Forward", "Restore", "Hide panel"]));
     expect(screen.getByRole("button", { name: "Back" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
   });
@@ -40,7 +44,16 @@ describe("PanelHeader", () => {
   ])("keeps only the panel controls for %s", (_case, maximized, sidebarDocked, expandLabel) => {
     renderHeader(maximized, sidebarDocked);
 
-    expect(buttonNames()).toEqual(new Set([expandLabel, "Close panel"]));
+    expect(buttonNames()).toEqual(new Set([expandLabel, "Hide panel"]));
+  });
+
+  it("offers no Expand on the empty launcher, but keeps Restore so a maximized panel can still shrink", () => {
+    const { unmount } = renderHeader(false, true, false);
+    expect(buttonNames()).toEqual(new Set(["Hide panel"]));
+    unmount();
+
+    renderHeader(true, true, false);
+    expect(buttonNames()).toEqual(new Set(["Restore", "Hide panel"]));
   });
 });
 

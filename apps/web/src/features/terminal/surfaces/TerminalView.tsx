@@ -6,8 +6,10 @@ import type { TerminalExitMetadata, TerminalSessionState } from "@mcode/contract
 import type { TerminalSettings } from "@mcode/contracts/models/terminal-settings";
 import { getTransport } from "@/transport";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { resolveDefaultOpenInApp } from "@/lib/resolveDefaultOpenInApp";
+import { matchesCommandKeybinding } from "@/lib/keybinding-manager";
 import { isAwaitingApproval } from "@/features/terminal/state/isAwaitingApproval";
 import { useTerminalStore, type TerminalSearchOptions } from "@/features/terminal/state/terminalStore";
 import {
@@ -126,6 +128,20 @@ function getTerminalOptions(settings: TerminalSettings): {
  */
 function focusUnlessAwaitingApproval(term: Terminal, ptyId: string): void {
   if (!isAwaitingApproval(ptyId)) term.focus();
+}
+
+// CSI, OSC, string-type (DCS, SOS, PM, APC), then any other escape, then C0 controls, DEL, and spaces.
+// Final bytes are optional so a sequence cut off at the end of a chunk does not read as text.
+const NON_PRINTING_OUTPUT = /\x1b\[[0-?]*[ -/]*[@-~]?|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[PX^_][^\x1b]*(?:\x1b\\)?|\x1b[ -/]*[0-~]?|[\x00-\x20\x7f]/g;
+const outputDecoder = new TextDecoder();
+
+/**
+ * Whether a chunk paints anything. ConPTY opens a shell by sending mode and cursor sequences before the
+ * banner, so a chunk's length alone would hide the "Starting" status over a still-blank terminal.
+ */
+function paintsVisibleText(data: string | Uint8Array): boolean {
+  const text = typeof data === "string" ? data : outputDecoder.decode(data);
+  return text.replace(NON_PRINTING_OUTPUT, "").length > 0;
 }
 
 function applyTerminalSettings(term: Terminal, settings: TerminalSettings): void {
@@ -452,6 +468,8 @@ interface TerminalViewProps {
    * Omitted for action terminals, whose Run again relaunches in the same terminal.
    */
   readonly ownerScopeId?: string;
+  /** Shell name shown while the shell starts, such as "pwsh". */
+  readonly shellLabel?: string;
   /** Server-authoritative lifecycle state for the rendered PTY. */
   readonly sessionState?: TerminalSessionState;
   /** Retained exit metadata for a completed or failed PTY. */
@@ -483,9 +501,23 @@ function terminalStatusMessage(
   exit: TerminalExitMetadata | undefined,
 ): string {
   if (recoveryNotice !== null) return recoveryNotice;
-  if (sessionState === "failed") return "This terminal failed. Its completed output is retained.";
-  if (exit?.code === null) return "This terminal exited without an exit code. Its completed output is retained.";
-  return `This terminal exited with code ${exit?.code ?? 0}. Its completed output is retained.`;
+  if (sessionState === "failed") return `Terminal failed: ${terminalFailureReason(exit)}.`;
+  if (exit?.code === null || exit?.code === undefined) return "Process exited";
+  return `Process exited with code ${exit.code}`;
+}
+
+function terminalFailureReason(exit: TerminalExitMetadata | undefined): string {
+  switch (exit?.reason) {
+    case "host-crash": return "the terminal host crashed";
+    case "containment-failure": return "the shell could not be isolated";
+    case "protocol-failure": return "the terminal host sent an invalid message";
+    default: return "the shell stopped unexpectedly";
+  }
+}
+
+function terminalRetryLabel(sessionState: TerminalSessionState, sessionEnded: boolean): string {
+  if (!sessionEnded) return "Reload available output";
+  return sessionState === "failed" ? "Retry" : "Restart";
 }
 
 function shouldShowTerminalRetry(
@@ -525,16 +557,16 @@ function TerminalStatus({
 
   return (
     <div
-      className="mx-3 mt-2 rounded border border-border/70 bg-hover/30 px-2 py-1 text-xs text-muted"
+      className="flex flex-wrap items-center gap-2 border-t border-border/70 bg-hover/30 px-3 py-1.5 text-xs text-muted"
       data-testid="terminal-status"
     >
-      <div role="status" aria-live="polite" aria-atomic="true">
+      <div className="min-w-0 flex-1" role="status" aria-live="polite" aria-atomic="true">
         {terminalStatusMessage(recoveryNotice, sessionState, exit)}
       </div>
-      <div className="mt-1 flex items-center gap-2">
+      <div className="flex items-center gap-2">
         {showRetry ? (
           <Button type="button" size="compact" variant="outline" onClick={onRetry}>
-            {sessionEnded ? "Retry terminal" : "Reload available output"}
+            {terminalRetryLabel(sessionState, sessionEnded)}
           </Button>
         ) : null}
         {sessionEnded ? (
@@ -552,12 +584,36 @@ function TerminalStatus({
   );
 }
 
+interface TerminalStartingProps {
+  readonly shellLabel: string;
+  readonly fontFamily: string;
+}
+
+/**
+ * Stands in for the prompt until the shell writes its first output, so a new
+ * terminal never sits blank while the shell loads its profile.
+ */
+function TerminalStarting({ shellLabel, fontFamily }: TerminalStartingProps) {
+  return (
+    <div
+      className="pointer-events-none absolute top-3 left-3.5 flex items-center gap-2 text-xs text-muted"
+      aria-live="polite"
+      style={{ fontFamily }}
+    >
+      <Spinner size={12} />
+      <span>{`Starting ${shellLabel}`}</span>
+    </div>
+  );
+}
+
 interface TerminalViewFrameProps {
   readonly containerRef: React.RefObject<HTMLDivElement | null>;
   readonly fitHostRef: React.RefObject<HTMLDivElement | null>;
   readonly hydrated: boolean;
   readonly shown: boolean;
   readonly status: TerminalStatusProps;
+  /** Set while the shell has not produced output yet; null once it has, or once the session ended. */
+  readonly starting: TerminalStartingProps | null;
   readonly termReady: boolean;
   readonly search: {
     readonly ptyId: string;
@@ -575,13 +631,14 @@ function TerminalViewFrame({
   hydrated,
   shown,
   status,
+  starting,
   termReady,
   search,
 }: TerminalViewFrameProps) {
   return (
     <div
       ref={containerRef}
-      className="mx-[8px] mb-[8px] flex h-[calc(100%-8px)] min-h-0 w-[calc(100%-16px)] flex-col overflow-hidden rounded-[10px]"
+      className="relative mx-[8px] mb-[8px] flex h-[calc(100%-8px)] min-h-0 w-[calc(100%-16px)] flex-col overflow-hidden rounded-[10px]"
       data-terminal-hydrated={hydrated}
       data-testid="terminal-render-content"
       role="region"
@@ -591,8 +648,9 @@ function TerminalViewFrame({
         visibility: shown && hydrated ? "visible" : "hidden",
       }}
     >
-      <TerminalStatus {...status} />
       <div ref={fitHostRef} className="min-h-0 w-full flex-1 px-3.5 py-3" />
+      {starting ? <TerminalStarting {...starting} /> : null}
+      <TerminalStatus {...status} />
       {termReady ? <TerminalSearchShelf active={shown} {...search} /> : null}
     </div>
   );
@@ -602,6 +660,7 @@ function TerminalViewFrame({
 export const TerminalView = memo(function TerminalView({
   ptyId,
   ownerScopeId,
+  shellLabel = "shell",
   sessionState = "running",
   exit,
   diagnosticsAvailable = false,
@@ -644,6 +703,11 @@ export const TerminalView = memo(function TerminalView({
 
   const prevShownRef = useRef(shown);
   const [hydrated, setHydrated] = useState(false);
+  /** The element that had focus when this view mounted, so the view can tell whether the user moved focus while it loaded. */
+  const focusAtMountRef = useRef<Element | null>(null);
+  // The server marks a PTY running once it spawns, but the shell can take seconds to print its
+  // prompt; the first written byte is the earliest signal that the user has something to read.
+  const [hasOutput, setHasOutput] = useState(false);
 
   const terminalSettings = useSettingsStore((s) => s.settings.terminal);
   const terminalSettingsRef = useRef(terminalSettings);
@@ -662,6 +726,7 @@ export const TerminalView = memo(function TerminalView({
     let disposedNotified = false;
     let disposed = false;
     const mountStart = performance.now();
+    focusAtMountRef.current = document.activeElement;
 
     async function init(el: HTMLElement) {
       const options = getTerminalOptions(terminalSettingsRef.current);
@@ -781,6 +846,9 @@ export const TerminalView = memo(function TerminalView({
       // Only call getSelection() (a DOM range query) when the key event actually
       // matches the copy shortcut — avoids the cost on every regular keystroke.
       term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+        // xterm stops a key it turns into shell input, such as Ctrl+J's line feed, so the app never saw the Terminal
+        // toggle while the shell had focus. Skipping it here lets the key that opened the shell also close it.
+        if (matchesCommandKeybinding("terminal.toggle", event)) return false;
         if (isTerminalSearchShortcut(event)) {
           event.preventDefault();
           openSearchRef.current();
@@ -898,12 +966,17 @@ export const TerminalView = memo(function TerminalView({
       // when resume drains it), and the resume drain lands after the gate closes.
       let lastWrittenSeq = Number.NEGATIVE_INFINITY;
       const pendingWrites = new Set<Promise<void>>();
+      let paintedText = false;
 
       const trackedWrite = (
         data: string | Uint8Array,
         callback?: () => void,
       ) => {
         if (disposed) return;
+        if (!paintedText && paintsVisibleText(data)) {
+          paintedText = true;
+          setHasOutput(true);
+        }
         let finishWrite = () => {};
         const completed = new Promise<void>((resolve) => {
           finishWrite = resolve;
@@ -1260,14 +1333,6 @@ export const TerminalView = memo(function TerminalView({
       // DOM renderer only at init; WebGL loads when this terminal becomes shown
       // (see shown effect) so the pool never holds multiple GL contexts.
       setActiveRenderer("dom");
-
-      // Auto-focus: the visibility effect's term.focus() fires before
-      // init completes (termRef is still null at that point), so newly
-      // created terminals wouldn't receive focus. Pull focus here after
-      // init when the terminal is visible.
-      if (shownRef.current) {
-        focusUnlessAwaitingApproval(term, ptyId);
-      }
     }
 
     // init() awaits dynamic imports and may construct/attach xterm before
@@ -1370,7 +1435,7 @@ export const TerminalView = memo(function TerminalView({
       terminalScroll.restore(ptyId, t);
     };
 
-    const finishShow = () => {
+    const finishShow = (revealed: boolean) => {
       if (!shownRef.current) return;
       const t = termRef.current;
       if (!t) return;
@@ -1382,36 +1447,51 @@ export const TerminalView = memo(function TerminalView({
       if (!pinned && !terminalScroll.shouldDeferFitRefresh(ptyId)) {
         t.refresh(0, t.rows - 1);
       }
-      if (!pinned) {
+      // Every reveal pins the scroll anchor, so gating on the pin alone left a reopened terminal, such as one summoned
+      // with Ctrl+J, without keyboard focus. xterm focuses with preventScroll, so focusing cannot move the anchor.
+      // A layout refit keeps the pin gate so resizing the panel does not pull focus out of the composer.
+      if (revealed || !pinned) {
         focusUnlessAwaitingApproval(t, ptyId);
       }
     };
 
-    const runShowSequence = () => {
+    const runShowSequence = (revealed: boolean) => {
       requestAnimationFrame(() => {
         applyRestore();
         requestAnimationFrame(() => {
           applyRestore();
-          requestAnimationFrame(finishShow);
+          requestAnimationFrame(() => finishShow(revealed));
         });
       });
     };
 
     const onPoolRefit = () => {
       if (!shownRef.current) return;
-      runShowSequence();
+      runShowSequence(false);
     };
 
     window.addEventListener(TERMINAL_POOL_REFIT, onPoolRefit);
 
     if (shown) {
-      runShowSequence();
+      runShowSequence(true);
     }
 
     return () => {
       window.removeEventListener(TERMINAL_POOL_REFIT, onPoolRefit);
     };
   }, [shown, ptyId]);
+
+  // A mounting view stays hidden until its replay paints, and a browser ignores focus() on a hidden element, so a
+  // terminal shown by mounting (a new shell, or one summoned with Ctrl+J whose view went cold) takes focus here. It
+  // skips if focus moved while the view loaded, so keys typed into the composer meanwhile never reach the shell.
+  // A layout effect focuses in the commit that reveals the view; a passive one ran up to 600ms later after a long
+  // replay, so the first keys typed after Ctrl+J landed in the composer.
+  useLayoutEffect(() => {
+    const term = termRef.current;
+    if (!hydrated || !term || !shownRef.current) return;
+    if (document.activeElement !== focusAtMountRef.current) return;
+    focusUnlessAwaitingApproval(term, ptyId);
+  }, [hydrated, ptyId]);
 
   useEffect(() => {
     const onClear = (event: Event) => {
@@ -1657,6 +1737,9 @@ export const TerminalView = memo(function TerminalView({
         onClose: closeRetainedTerminal,
         onCopyDiagnostics: copyDiagnostics,
       }}
+      starting={hasOutput || terminalSessionEnded(sessionState) || recoveryNotice !== null
+        ? null
+        : { shellLabel, fontFamily: terminalSettings.presentation.fontFamily }}
       termReady={termReady}
       search={{
         ptyId,

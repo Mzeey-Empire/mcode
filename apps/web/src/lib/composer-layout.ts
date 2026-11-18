@@ -2,6 +2,8 @@ import {
   COMPOSER_MIN_WIDTH,
   PANEL_MIN_WIDTH,
   PANEL_SPLIT_GAP_PX,
+  RIGHT_PANEL_CONVERSATION_MIN_WIDTH,
+  type RightPanelTool,
 } from "@/stores/diffStore";
 import { useLayoutStore } from "@/stores/layoutStore";
 import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
@@ -22,18 +24,6 @@ export function getContentRowWidth(): number {
 }
 
 /**
- * Minimum content-row width for composer + inline panel at the given stored width.
- */
-export function minContentWidthForSideBySidePanel(panelWidth: number): number {
-  return COMPOSER_MIN_WIDTH + PANEL_SPLIT_GAP_PX + Math.max(PANEL_MIN_WIDTH, panelWidth);
-}
-
-/** Whether the content row can host composer and an inline panel side by side. */
-export function canFitSideBySidePanel(contentRowWidth: number, panelWidth: number): boolean {
-  return contentRowWidth >= minContentWidthForSideBySidePanel(panelWidth);
-}
-
-/**
  * Preferred panel width when it first opens: a fraction (default half) of the
  * content row, clamped so the panel never drops below its minimum and always
  * leaves the composer its minimum width. Lets the panel open to ~50% of the
@@ -42,8 +32,88 @@ export function canFitSideBySidePanel(contentRowWidth: number, panelWidth: numbe
  */
 export function preferredSplitPanelWidth(contentRowWidth: number, fraction = 0.5): number {
   const target = Math.round(contentRowWidth * fraction);
-  const max = Math.max(PANEL_MIN_WIDTH, contentRowWidth - COMPOSER_MIN_WIDTH - PANEL_SPLIT_GAP_PX);
+  const max = Math.max(PANEL_MIN_WIDTH, contentRowWidth - RIGHT_PANEL_CONVERSATION_MIN_WIDTH - PANEL_SPLIT_GAP_PX);
   return Math.max(PANEL_MIN_WIDTH, Math.min(target, max));
+}
+
+/**
+ * Narrowest content row that still shows the conversation beside a floating panel: DESIGN.md's narrow posture
+ * starts below `76rem` (760px at the app's 10px root). Below it, one primary surface shows at a time.
+ */
+export const RIGHT_PANEL_NARROW_POSTURE_WIDTH = 760;
+
+/**
+ * Minimum usable widths from DESIGN.md's responsive posture table, in px at the app's 10px root, for the tools
+ * that need more than the panel's own minimum.
+ */
+const RIGHT_PANEL_TOOL_MIN_WIDTHS: ReadonlyMap<string, number> = new Map<RightPanelTool, number>([
+  ["changes", 560],
+  ["preview", 640],
+]);
+
+/** The tools a right panel holds, as the store keeps them. */
+export interface RightPanelTools {
+  readonly activeTab: string | null;
+  readonly openTabs: readonly string[];
+}
+
+/**
+ * Width the panel needs before it changes posture: the widest minimum among its open tools, and never less than
+ * the panel's own minimum. Switching tools therefore never resizes the panel or changes its posture; only opening
+ * or closing a wider tool does.
+ */
+export function rightPanelMinWidth({ activeTab, openTabs }: RightPanelTools): number {
+  const tools = activeTab === null ? openTabs : [activeTab, ...openTabs];
+  return Math.max(PANEL_MIN_WIDTH, ...tools.map((tool) => RIGHT_PANEL_TOOL_MIN_WIDTHS.get(tool) ?? 0));
+}
+
+/**
+ * How the right panel sits beside the conversation. `docked` shares the content row, `floating` overlays the
+ * conversation's right edge and leaves its width alone, and `full-surface` replaces the conversation.
+ */
+export type RightPanelPosture = "docked" | "floating" | "full-surface";
+
+/** Measurements that decide {@link rightPanelPosture}. */
+export interface RightPanelPostureInput {
+  /** Width of the row that holds the conversation and the panel. */
+  readonly contentRowWidth: number;
+  /** {@link rightPanelMinWidth} for the panel. */
+  readonly toolMinWidth: number;
+  /** Narrowest width the conversation may take beside a docked panel. */
+  readonly conversationMinWidth: number;
+}
+
+/**
+ * Picks the panel's posture: dock while the tool and the conversation both keep their minimum widths, float rather
+ * than squeeze either one, and take the full surface only when the row is too narrow to show both.
+ */
+export function rightPanelPosture({
+  contentRowWidth,
+  toolMinWidth,
+  conversationMinWidth,
+}: RightPanelPostureInput): RightPanelPosture {
+  if (contentRowWidth >= conversationMinWidth + toolMinWidth) return "docked";
+  if (contentRowWidth >= minContentWidthForFloatingPanel(toolMinWidth)) return "floating";
+  return "full-surface";
+}
+
+/** {@link rightPanelPosture} for the panel's tools beside {@link RIGHT_PANEL_CONVERSATION_MIN_WIDTH}. */
+export function rightPanelPostureForPanel(contentRowWidth: number, panel: RightPanelTools): RightPanelPosture {
+  return rightPanelPosture({
+    contentRowWidth,
+    toolMinWidth: rightPanelMinWidth(panel),
+    conversationMinWidth: RIGHT_PANEL_CONVERSATION_MIN_WIDTH,
+  });
+}
+
+/** Narrowest content row that docks the panel beside the conversation, per {@link rightPanelPostureForPanel}. */
+export function minContentWidthForDockedPanel(panel: RightPanelTools): number {
+  return RIGHT_PANEL_CONVERSATION_MIN_WIDTH + rightPanelMinWidth(panel);
+}
+
+/** Narrowest content row that keeps a floating panel from taking the full surface. */
+export function minContentWidthForFloatingPanel(toolMinWidth: number): number {
+  return Math.max(RIGHT_PANEL_NARROW_POSTURE_WIDTH, toolMinWidth);
 }
 
 /** Overview card width, from the Paper board. */

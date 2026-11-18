@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { FolderTree, Ellipsis, Search } from "lucide-react";
+import { Files, FolderTree, Ellipsis, Search } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
-import { PanelHeaderSlot } from "@/components/panels/shell/PanelHeader";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { PanelHeaderSlot, PanelTitle } from "@/components/panels/shell/PanelHeader";
 import { PanelTabStrip, type PanelTabStripItem } from "@/components/panels/shell/PanelTabStrip";
 import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-manager";
+import { basename } from "@/lib/path";
 import { isMac } from "@/lib/platform";
 import type { FileActions } from "./useFileActions";
 
 const COPIED_FEEDBACK_MS = 1200;
 
-/** Row 1: one tab per open file, with + opening Go to file. */
+/**
+ * Row 1: one tab per open file, with + opening Go to file. With none open, row 1 names the
+ * tool instead, because row 2's Go to file field already offers the same action.
+ */
 export function FilesTabStrip({
   openPaths,
   activePath,
@@ -34,6 +39,13 @@ export function FilesTabStrip({
       })),
     [openPaths],
   );
+  if (openPaths.length === 0) {
+    return (
+      <PanelHeaderSlot slot="leading">
+        <PanelTitle icon={<Files size={14} aria-hidden />}>Files</PanelTitle>
+      </PanelHeaderSlot>
+    );
+  }
   return (
     <PanelHeaderSlot slot="leading">
       <div data-files-tool="" className="contents">
@@ -41,6 +53,7 @@ export function FilesTabStrip({
           items={items}
           activeId={activePath}
           label="Open files"
+          tool={{ icon: <Files />, name: "Files" }}
           addLabel="Go to file"
           onSelect={onSelect}
           onClose={onClose}
@@ -52,6 +65,8 @@ export function FilesTabStrip({
 }
 
 export interface FilesControlsRowProps {
+  /** Absolute folder the tree and Go to file read from, or null before the checkout resolves. */
+  readonly checkoutPath: string | null;
   readonly treeOpen: boolean;
   /** The file the body shows, or null when the body shows the tree. */
   readonly shownPath: string | null;
@@ -65,8 +80,11 @@ export interface FilesControlsRowProps {
   readonly controls?: ReactNode;
 }
 
-/** Row 2: tree toggle, then the path pill (or the Go to file field when no file shows), view controls, Find, then More. */
-export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, onRevealFolder, onGoToFile, find, controls }: FilesControlsRowProps) {
+/**
+ * Row 2: tree toggle and checkout name, then the path pill (or the Go to file field when no file shows), view
+ * controls, Find, then More.
+ */
+export function FilesControlsRow({ checkoutPath, treeOpen, shownPath, actions, onToggleTree, onRevealFolder, onGoToFile, find, controls }: FilesControlsRowProps) {
   const findShortcut = keybindingKeycaps(getKeybindingForCommand("files.findInFile")?.key ?? "mod+f", isMac);
   return (
     <PanelHeaderSlot slot="row2">
@@ -74,21 +92,44 @@ export function FilesControlsRow({ treeOpen, shownPath, actions, onToggleTree, o
         <IconButton shape="round" aria-label={treeOpen ? "Hide files tree" : "Show files tree"} pressed={treeOpen} onClick={onToggleTree}>
           <FolderTree />
         </IconButton>
+        <CheckoutName path={checkoutPath} />
         {shownPath ? <PathPill path={shownPath} onRevealFolder={onRevealFolder} /> : <GoToFileField onClick={onGoToFile} />}
         {shownPath ? controls : null}
-        <IconButton
-          shape="round"
-          aria-label="Find in file"
-          tooltipShortcut={findShortcut}
-          pressed={find?.open ?? false}
-          disabled={!find}
-          onClick={find?.onToggle}
-        >
-          <Search />
-        </IconButton>
+        {shownPath ? (
+          <IconButton
+            shape="round"
+            aria-label="Find in file"
+            tooltipShortcut={findShortcut}
+            pressed={find?.open ?? false}
+            disabled={!find}
+            onClick={find?.onToggle}
+          >
+            <Search />
+          </IconButton>
+        ) : null}
         <MoreMenu path={shownPath} actions={actions} />
       </div>
     </PanelHeaderSlot>
+  );
+}
+
+/**
+ * Names the checkout the tree lists, because a thread can read a worktree rather than the project folder and
+ * nothing else in the tool says which. Set like Terminal's working folder: name in ink, full path on hover.
+ */
+function CheckoutName({ path }: { readonly path: string | null }) {
+  if (!path) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span data-testid="files-checkout-name" className="text-fade max-w-40 min-w-0 shrink font-mono text-xs text-ink">
+            {basename(path)}
+          </span>
+        }
+      />
+      <TooltipContent className="max-w-72 break-all font-mono">{path}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -120,19 +161,26 @@ function PathPill({ path, onRevealFolder }: { readonly path: string; readonly on
     void navigator.clipboard.writeText(path).then(() => setCopied(true), () => setCopied(false));
   };
   return (
-    <div data-testid="files-path-pill" className="text-fade flex h-8 min-w-0 flex-1 items-center rounded-[18px] bg-selected px-3 text-body-small">
-      {segments.map((segment, index) => {
-        const folder = segments.slice(0, index + 1).join("/");
-        return (
-          <span key={folder} className="flex shrink-0 items-center text-muted">
-            <button type="button" className="hover:text-ink" aria-label={`Reveal ${folder} in tree`} onClick={() => onRevealFolder(folder)}>
-              {segment}
-            </button>
-            <span aria-hidden className="px-0.5">/</span>
-          </span>
-        );
-      })}
-      <button type="button" className="shrink-0 text-ink" aria-label={`Copy ${path}`} onClick={copy}>
+    // Plain breadcrumb text continuing the checkout name: a filled pill here read as a second copy of the active tab.
+    <div data-testid="files-path-pill" className="flex h-8 min-w-0 flex-1 items-center font-mono text-xs">
+      <span aria-hidden className="-ml-1 shrink-0 pr-1 text-muted">/</span>
+      {/* The folders give way almost entirely before the file name starts to fade. */}
+      {segments.length > 0 ? (
+        <span className="text-fade flex shrink-[100] items-center">
+          {segments.map((segment, index) => {
+            const folder = segments.slice(0, index + 1).join("/");
+            return (
+              <span key={folder} className="flex shrink-0 items-center text-muted">
+                <button type="button" className="hover:text-ink" aria-label={`Reveal ${folder} in tree`} onClick={() => onRevealFolder(folder)}>
+                  {segment}
+                </button>
+                <span aria-hidden className="px-1">/</span>
+              </span>
+            );
+          })}
+        </span>
+      ) : null}
+      <button type="button" className="text-fade text-ink" aria-label={`Copy ${path}`} onClick={copy}>
         {name}
       </button>
       {copied ? <span role="status" className="ml-2 shrink-0 text-caption text-muted">Copied</span> : null}

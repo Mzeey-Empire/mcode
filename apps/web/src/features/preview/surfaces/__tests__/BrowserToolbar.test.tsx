@@ -81,7 +81,7 @@ function buttonNames(): string[] {
 }
 
 async function openMore(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "More" }));
+  await user.click(screen.getByRole("button", { name: "More browser actions" }));
   return screen.findByRole("menu");
 }
 
@@ -99,7 +99,7 @@ describe("BrowserToolbar", () => {
     const log: string[] = [];
     renderToolbar({ page: { kind: "new" }, address: address(log, { url: "" }), tools: tools(log), control: { kind: "none" } });
 
-    expect(buttonNames()).toEqual(["More"]);
+    expect(buttonNames()).toEqual(["More browser actions"]);
     expect(screen.getByRole("textbox", { name: "Preview URL" })).toHaveAttribute("placeholder", "Search or enter URL");
   });
 
@@ -128,7 +128,7 @@ describe("BrowserToolbar", () => {
     const log: string[] = [];
     renderToolbar({ page: { kind: "error", navigation: navigation(log) }, address: address(log), tools: tools(log), control: { kind: "none" } });
 
-    expect(buttonNames()).toEqual(["Back", "Forward", "Reload", "Open in browser", "More"]);
+    expect(buttonNames()).toEqual(["Back", "Forward", "Reload", "Open in browser", "More browser actions"]);
   });
 
   it("shows page tools on a loaded page and explains each disabled control", async () => {
@@ -148,7 +148,7 @@ describe("BrowserToolbar", () => {
       },
     }));
 
-    expect(buttonNames()).toEqual(["Back", "Forward", "Reload", "Open in browser", "Design", "Screenshot", "More"]);
+    expect(buttonNames()).toEqual(["Back", "Forward", "Reload", "Open in browser", "Design", "Screenshot", "More browser actions"]);
     const back = screen.getByRole("button", { name: "Back" });
     const screenshot = screen.getByRole("button", { name: "Screenshot" });
     expect(back).toHaveAttribute("aria-disabled", "true");
@@ -379,7 +379,7 @@ describe("BrowserToolbar", () => {
       </TooltipProvider>
     );
     const { rerender } = render(toolbar(true));
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    fireEvent.click(screen.getByRole("button", { name: "More browser actions" }));
     expect(await screen.findByRole("menuitem", { name: "Clear cache" })).toBeInTheDocument();
 
     rerender(toolbar(false));

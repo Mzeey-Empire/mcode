@@ -81,7 +81,21 @@ describe("ProjectSettingsPanel", () => {
 
     expect(screen.getByRole("radio", { name: "General" })).toBeChecked();
     expect(screen.getByLabelText("Name")).toHaveValue("Caravan");
-    expect(screen.queryByRole("button", { name: "Action" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add action" })).toBeNull();
+  });
+
+  it("offers one add control under the empty line, and adding opens the new action", async () => {
+    transport.readWorkspaceEnvironment.mockResolvedValue(result([]));
+    const user = userEvent.setup();
+    render(<ProjectSettingsPanel workspaceId="workspace-1" />);
+    await screen.findByText("No actions");
+
+    // getByRole throws on a second match, so this also proves the header copy is gone.
+    await user.click(screen.getByRole("button", { name: "Add action" }));
+
+    expect(await screen.findByLabelText("Action name")).toHaveValue("action");
+    expect(screen.queryByText("No actions")).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Add action" })).toHaveLength(1);
   });
 
   it("adds an action, takes its command and saves it", async () => {
@@ -89,7 +103,7 @@ describe("ProjectSettingsPanel", () => {
     render(<ProjectSettingsPanel workspaceId="workspace-1" />);
     await screen.findByRole("button", { name: /^Build/ });
 
-    await user.click(screen.getByRole("button", { name: "Action" }));
+    await user.click(screen.getByRole("button", { name: "Add action" }));
     expect(await screen.findByLabelText("Action name")).toHaveValue("action");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByText("Add a command to save this action.")).toBeInTheDocument();

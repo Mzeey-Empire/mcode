@@ -1,10 +1,10 @@
-import { lazy, memo, Suspense, useCallback, useId, useState } from "react";
+import { memo, Suspense, useCallback, useId, useState } from "react";
 import { Brain } from "lucide-react";
 import { formatDuration } from "@/lib/time";
 import { NarrativeToolRow, type RowExpansion } from "./NarrativeToolRow";
 import type { ThoughtSegment } from "./types";
 
-const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
+import { LazyMarkdownContent } from "@/components/chat/LazyMarkdownContent";
 
 /** Props for {@link ThoughtRow}. */
 export interface ThoughtRowProps {

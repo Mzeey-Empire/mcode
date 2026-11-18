@@ -127,11 +127,22 @@ describe("SubagentDetailTab", () => {
   it("labels the agent, model, and effort the way the composer does, and leaves out what was not reported", async () => {
     transport.loadSubagentDetail.mockResolvedValue(detail());
     await renderTab([entry({ subagentType: "Hubble", model: "gpt-5.6-sol", reasoningEffort: "xhigh" })]);
-    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^Hubble · GPT-5\.6 Sol X-High9s$/);
+    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^Hubble · GPT-5\.6 Sol X-HighDone9s$/);
 
     cleanup();
     await renderTab([entry({ provider: "claude" })]);
-    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^9s$/);
+    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^Done9s$/);
+  });
+
+  it("says activity is loading until the subagent's steps arrive", async () => {
+    let finish: ((value: ReturnType<typeof detail>) => void) | undefined;
+    transport.loadSubagentDetail.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    await renderTab([entry()]);
+    expect(screen.getByText("Loading activity")).toBeInTheDocument();
+
+    await act(async () => { finish?.(detail()); });
+    expect(screen.queryByText("Loading activity")).not.toBeInTheDocument();
+    expect(screen.getByText("No steps were recorded.")).toBeInTheDocument();
   });
 
   it("says no steps were recorded only after a finished entry recorded none", async () => {

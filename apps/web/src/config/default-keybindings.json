@@ -34,6 +34,8 @@
   { "key": "Escape", "command": "escape.handle" },
   { "key": "mod+t", "command": "tasks.toggle", "when": "!inputFocused" },
   { "key": "mod+d", "command": "changes.toggle", "when": "!inputFocused" },
+  { "key": "mod+shift+e", "command": "files.toggle", "when": "!inputFocused" },
+  { "key": "mod+shift+a", "command": "subagents.toggle", "when": "!inputFocused" },
   {
     "key": "mod+shift+b",
     "command": "preview.toggle",

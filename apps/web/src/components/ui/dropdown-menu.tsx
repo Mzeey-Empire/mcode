@@ -186,20 +186,27 @@ function DisabledReasonTooltip({
 /** Props for {@link DropdownMenuCheckboxItem}. */
 export type DropdownMenuCheckboxItemProps =
   Omit<MenuPrimitive.CheckboxItem.Props, "children" | "label"> &
-  Omit<MenuRowContent, "checked" | "shortcut" | "trailing" | "description">
+  Omit<MenuRowContent, "checked" | "shortcut" | "trailing" | "description"> &
+  Pick<DropdownMenuItemProps, "disabledReason">
 
 /** A row that toggles on its own. The check sits on the right, matching checked rows. */
 function DropdownMenuCheckboxItem({
   label,
   icon,
   destructive,
+  disabled,
+  disabledReason,
   className,
   ...props
 }: DropdownMenuCheckboxItemProps) {
-  return (
+  const reasonId = React.useId()
+  const hasReason = Boolean(disabledReason)
+  const item = (
     <MenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
       label={label}
+      disabled={disabled || hasReason}
+      aria-describedby={hasReason ? reasonId : undefined}
       className={cn(MENU_ITEM_ROW_CLASS, className)}
       {...props}
     >
@@ -213,8 +220,10 @@ function DropdownMenuCheckboxItem({
           </MenuPrimitive.CheckboxItemIndicator>
         }
       />
+      {hasReason ? <span id={reasonId} hidden>{disabledReason}</span> : null}
     </MenuPrimitive.CheckboxItem>
   )
+  return <DisabledReasonTooltip reason={disabledReason}>{item}</DisabledReasonTooltip>
 }
 
 /** Divides groups of rows with a line as wide as the rows. */

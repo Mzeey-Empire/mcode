@@ -49,6 +49,8 @@ const END_IN_VIEW_SLACK = 8;
  */
 const STICKY_BOUNDARY = STICKY_USER_MESSAGE_ESTIMATED_HEIGHT - TRANSCRIPT_TOP_GAP;
 const NO_CHROME: ViewportInsets = { top: 0, bottom: 0 };
+/** How far above the header's bottom edge the transcript starts to show. */
+const HEADER_EDGE_FADE_PX = 12;
 
 /** A card source request that MessageList resolves through its resident transcript. */
 export interface SelectedTextCommentSourceNavigationRequest {
@@ -668,11 +670,14 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
 
   return (
     <div className="relative h-full" data-testid="message-list">
-      {/* Rows fade out under the header and stay visible around the composer card. */}
+      {/* Rows fade out across the header's bottom edge and stay visible around the composer card. A fade spanning
+          the whole header left text half-visible in the gaps between its controls. */}
       <div
         ref={containerRef}
         className="h-full"
-        style={{ maskImage: `linear-gradient(to bottom, transparent, black ${chrome.top}px)` }}
+        style={{
+          maskImage: `linear-gradient(to bottom, transparent ${Math.max(0, chrome.top - HEADER_EDGE_FADE_PX)}px, black ${chrome.top}px)`,
+        }}
       />
       <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={(item, id) => (
           <div className={cn("w-full px-4 sm:px-[var(--chat-gutter,--spacing(8))]", transcriptRowPadding(item))} data-performance-virtual-item-key={isMessageListPerformanceBuild() ? item.key : undefined}>

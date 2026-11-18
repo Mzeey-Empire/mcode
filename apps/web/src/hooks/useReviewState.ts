@@ -35,22 +35,27 @@ export function forgetInFlightReviewProbes(): void {
 /** Refresh Review availability and dirty state on checkout revisions and menu opens. */
 export function useReviewState(workspaceId: string | null, threadId?: string | null, refresh = 0) {
   const revision = useDiffStore((store) => selectDiffRevision(store, threadId ?? workspaceId ?? ""));
+  const checkout = JSON.stringify([workspaceId, threadId]);
   const key = JSON.stringify([workspaceId, threadId, revision, refresh]);
-  const [result, setResult] = useState<{ key: string; state: ReviewState | null; error: unknown } | null>(null);
+  const [result, setResult] = useState<{ checkout: string; state: ReviewState | null; error: unknown } | null>(null);
   useEffect(() => {
     if (!workspaceId) return;
     let cancelled = false;
     void probeReviewState(key, workspaceId, threadId ?? undefined).then(
-      (state) => { if (!cancelled) setResult({ key, state, error: null }); },
-      (error: unknown) => { if (!cancelled) setResult({ key, state: null, error }); },
+      (state) => { if (!cancelled) setResult({ checkout, state, error: null }); },
+      (error: unknown) => { if (!cancelled) setResult({ checkout, state: null, error }); },
     );
     return () => { cancelled = true; };
-  }, [workspaceId, threadId, key]);
-  const state = workspaceId && result?.key === key ? result.state : null;
-  const counts = state?.isGitRepo ? state.uncommitted : null;
-  return {
-    state,
-    isDirty: counts !== null && counts.staged + counts.unstaged + counts.untracked > 0,
-    error: result?.key === key ? result.error : null,
-  };
+  }, [workspaceId, threadId, checkout, key]);
+  // A refresh keeps the checkout's last answer until the new one lands, so controls that depend on it, such as
+  // Review's Commit button, do not vanish and return on every revision.
+  const current = workspaceId && result?.checkout === checkout ? result : null;
+  const state = current?.state ?? null;
+  return { state, isDirty: hasUncommittedChanges(state), error: current?.error ?? null };
+}
+
+function hasUncommittedChanges(state: ReviewState | null): boolean {
+  if (!state?.isGitRepo) return false;
+  const { staged, unstaged, untracked } = state.uncommitted;
+  return staged + unstaged + untracked > 0;
 }

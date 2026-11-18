@@ -29,7 +29,7 @@ describe("FilesPanel", () => {
       name: "Resize Changed files",
     });
     fireEvent.keyDown(separator, { key: "ArrowLeft" });
-    expect(onWidthChange).toHaveBeenCalledWith(266, "user");
+    expect(onWidthChange).toHaveBeenCalledWith(272, "user");
     fireEvent.keyDown(separator, { key: "Enter" });
     expect(onWidthChange).toHaveBeenCalledWith(480, "user");
   });

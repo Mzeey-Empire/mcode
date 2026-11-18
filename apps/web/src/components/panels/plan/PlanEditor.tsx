@@ -142,11 +142,18 @@ function editability(editable: boolean): Extension {
   return [EditorState.readOnly.of(!editable), EditorView.editable.of(editable)];
 }
 
+// CodeMirror's content element is the textbox screen readers land on, so the name goes there.
+function accessibleName(label: string): Extension {
+  return EditorView.contentAttributes.of({ "aria-label": label });
+}
+
 /** Props for {@link PlanEditor}. */
 interface PlanEditorProps {
   /** Markdown the editor shows. A change replaces the document. */
   readonly contentMd: string;
   readonly editable: boolean;
+  /** Accessible name of the editing surface, such as "Plan v2". */
+  readonly label: string;
   /** Receives the full document after each user edit. */
   readonly onChange?: (text: string) => void;
   readonly onBlur?: () => void;
@@ -160,11 +167,12 @@ interface PlanEditorProps {
  * CodeMirror live preview of a plan version. Markdown syntax stays in the
  * document but its marks are hidden, except on the lines being edited.
  */
-export function PlanEditor({ contentMd, editable, onChange, onBlur, extensions, onViewChange }: PlanEditorProps) {
+export function PlanEditor({ contentMd, editable, label, onChange, onBlur, extensions, onViewChange }: PlanEditorProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const editableCompartment = useRef(new Compartment()).current;
-  const initialRef = useRef({ contentMd, editable });
+  const labelCompartment = useRef(new Compartment()).current;
+  const initialRef = useRef({ contentMd, editable, label });
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
   const extensionsRef = useRef(extensions);
@@ -187,6 +195,7 @@ export function PlanEditor({ contentMd, editable, onChange, onBlur, extensions, 
         doc: initialRef.current.contentMd,
         extensions: [
           editableCompartment.of(editability(initialRef.current.editable)),
+          labelCompartment.of(accessibleName(initialRef.current.label)),
           implementKey,
           EditorView.lineWrapping,
           planDecorations,
@@ -203,11 +212,15 @@ export function PlanEditor({ contentMd, editable, onChange, onBlur, extensions, 
       view.destroy();
       viewRef.current = null;
     };
-  }, [editableCompartment]);
+  }, [editableCompartment, labelCompartment]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: editableCompartment.reconfigure(editability(editable)) });
   }, [editable, editableCompartment]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: labelCompartment.reconfigure(accessibleName(label)) });
+  }, [label, labelCompartment]);
 
   useEffect(() => {
     const view = viewRef.current;

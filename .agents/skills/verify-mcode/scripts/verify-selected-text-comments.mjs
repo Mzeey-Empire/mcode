@@ -817,7 +817,7 @@ async function run() {
 }
 
 async function assertSubagentCommentScope(mainContent) {
-  await page.getByRole("button", { name: "Toggle panel", exact: true }).click();
+  await page.getByRole("button", { name: "Show panel", exact: true }).click();
   await page.getByRole("button", { name: "Open Subagents", exact: true }).click();
   await page.locator('[data-subagent-id="mcode-verification-selected-text-child"]').click();
   const details = page.getByRole("region", { name: "Subagent subagent details", exact: true });
@@ -829,7 +829,7 @@ async function assertSubagentCommentScope(mainContent) {
   mark("subagent_selection_has_no_comment_editor", await page.getByRole("button", { name: "Close comment editor", exact: true }).count() === 0);
   await page.screenshot({ path: SUBAGENT_SCREENSHOT, fullPage: true });
   await page.getByRole("button", { name: "Back to subagents", exact: true }).click();
-  await page.getByRole("button", { name: "Toggle panel", exact: true }).click();
+  await page.getByRole("button", { name: "Show panel", exact: true }).click();
   await page.evaluate(() => window.getSelection()?.removeAllRanges());
   await mainContent.waitFor({ state: "visible" });
 }

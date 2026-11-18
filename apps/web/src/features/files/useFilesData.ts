@@ -3,6 +3,7 @@ import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
 import { type FileReadResult, type WorkspaceFileChanges, type WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 import { getTransport, pushEmitter } from "@/transport";
 import { refreshWorkspaceFiles, useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
+import { useConnectionStore } from "@/stores/connectionStore";
 
 /** Message the server's `file.read` rejects with when the path is gone. */
 export const FILE_NOT_FOUND_MESSAGE = "This file no longer exists.";
@@ -40,9 +41,12 @@ export interface FilesData {
   readonly reads: Readonly<Record<string, FileReadState>>;
 }
 
-function useFileList(scope: FilesScope, revision: number) {
+// The transport rejects requests still in flight when the socket drops, so the loaders wait for
+// a connection and run again after a reconnect instead of keeping that rejection on screen.
+function useFileList(scope: FilesScope, revision: number, connected: boolean) {
   const [state, setState] = useState<{ list: WorkspaceFileList | null; error: string | null }>({ list: null, error: null });
   useEffect(() => {
+    if (!connected) return;
     let cancelled = false;
     getTransport()
       .listWorkspaceFiles(scope.workspaceId, scope.threadId ?? undefined)
@@ -53,13 +57,14 @@ function useFileList(scope: FilesScope, revision: number) {
     return () => {
       cancelled = true;
     };
-  }, [scope.workspaceId, scope.threadId, revision]);
+  }, [scope.workspaceId, scope.threadId, revision, connected]);
   return state;
 }
 
-function useFileChanges(scope: FilesScope, revision: number): WorkspaceFileChanges | null {
+function useFileChanges(scope: FilesScope, revision: number, connected: boolean): WorkspaceFileChanges | null {
   const [changes, setChanges] = useState<WorkspaceFileChanges | null>(null);
   useEffect(() => {
+    if (!connected) return;
     let cancelled = false;
     getTransport()
       .getWorkspaceFileChanges(scope.workspaceId, scope.threadId ?? undefined)
@@ -71,7 +76,7 @@ function useFileChanges(scope: FilesScope, revision: number): WorkspaceFileChang
     return () => {
       cancelled = true;
     };
-  }, [scope.workspaceId, scope.threadId, revision]);
+  }, [scope.workspaceId, scope.threadId, revision, connected]);
   return changes;
 }
 
@@ -149,8 +154,9 @@ export function useFilesData(scope: FilesScope, openPaths: readonly string[]): F
   const [revision, setRevision] = useState(0);
   useWorkspaceFileRefresh(scope.workspaceId, scope.threadId);
   useDiffChangedRefresh(scope);
-  const { list, error } = useFileList(scope, revision);
-  const changes = useFileChanges(scope, revision);
+  const connected = useConnectionStore((state) => state.status === "connected");
+  const { list, error } = useFileList(scope, revision, connected);
+  const changes = useFileChanges(scope, revision, connected);
   const { reads, read } = useFileReads(scope, openPaths);
   useFilesChanged(scope, (paths) => {
     setRevision((current) => current + 1);

@@ -3,7 +3,7 @@ import { Check, Layers } from "lucide-react";
 import { isLiveSubagentStatus, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { type CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
 import { Button, IconButton } from "@/components/ui/button";
-import { PanelHeaderSlot, PanelTitlePill } from "@/components/panels/shell/PanelHeader";
+import { PanelHeaderSlot, PanelTitle } from "@/components/panels/shell/PanelHeader";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -34,7 +34,7 @@ function partitionRows(entries: readonly SubagentRosterEntry[]) {
 }
 
 function rowMeta(row: SubagentRosterEntry): string {
-  return [subagentKind(row), row.stepCount > 0 ? `${row.stepCount} steps` : null].filter(Boolean).join(" · ");
+  return [subagentKind(row), row.stepCount > 0 ? `${row.stepCount} ${row.stepCount === 1 ? "step" : "steps"}` : null].filter(Boolean).join(" · ");
 }
 
 function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly now: number }) {
@@ -49,7 +49,10 @@ function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly
         <span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}
       </span>;
     case "done":
-      return <span className="flex items-center gap-1.5 text-muted"><Check size={12} aria-hidden />{time}</span>;
+      return <span className="flex items-center gap-1.5 text-muted">
+        <Check size={12} aria-hidden />
+        <span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}
+      </span>;
     case "failed":
       return <span className="flex items-center gap-1.5 text-muted">
         <span aria-hidden className="size-[7px] rounded-full bg-error" />
@@ -121,7 +124,7 @@ export function SubagentList({ roster, error, viewportRef, onRetry, onSelect, on
   const renderRow = (row: SubagentRosterEntry) => <SubagentListRow key={row.id} row={row} now={now} onSelect={onSelect} onStop={onStop} />;
   return (
     <section className="flex min-h-0 flex-1 flex-col" aria-label="Subagents">
-      <PanelHeaderSlot slot="leading"><PanelTitlePill icon={<Layers size={14} aria-hidden />}>Subagents</PanelTitlePill></PanelHeaderSlot>
+      <PanelHeaderSlot slot="leading"><PanelTitle icon={<Layers size={14} aria-hidden />}>Subagents</PanelTitle></PanelHeaderSlot>
       {error && <div data-testid="subagents-error" role="alert" className="flex items-center gap-2 px-4 py-3 text-sm text-ink">
         Couldn't load subagents <Button variant="ghost" size="compact" onClick={onRetry}>Retry</Button>
       </div>}

@@ -11,7 +11,7 @@ import { PlanCommentLayer } from "./PlanCommentLayer";
 import { createPlanCommentBinding } from "./plan-comment-extension";
 import { PlanConflictNotice } from "./PlanConflictNotice";
 import { PlanEditor } from "./PlanEditor";
-import { PlanPanelHeader } from "./PlanPanelHeader";
+import { PlanControlsRow, PlanTitle } from "./PlanPanelHeader";
 import { planSaveScheduler } from "./plan-draft-sessions";
 import type { PlanDraftState } from "./plan-save-scheduler";
 import { dismissImplementNotice, showPlanPanel, usePlanImplementStore } from "./plan-implement";
@@ -26,9 +26,10 @@ interface PlanPanelProps {
 }
 
 /**
- * Plan tab content: the version picker and Implement split in the panel
- * header, and the plan editor. Typing into the latest draft or ready version
- * autosaves it as a draft. Renders nothing until the thread has a plan.
+ * Plan tab content: the "Plan" title in header row 1, the version picker and
+ * Implement split in row 2, and the plan editor. Typing into the latest draft
+ * or ready version autosaves it as a draft. Until the thread has a plan, only
+ * the title renders.
  */
 export function PlanPanel({ threadId }: PlanPanelProps) {
   const versions = usePlanStore((s) => s.plansByThread[threadId] ?? EMPTY_PLANS);
@@ -50,13 +51,14 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   // Closing the panel or switching threads must not strand debounced text.
   useEffect(() => () => scheduler.flush(), [scheduler]);
 
-  if (!viewed || !latest) return null;
+  if (!viewed || !latest) return <PlanTitle />;
 
   const { heldText, editable, canComment } = planEditorAccess(viewed, latest, draft, executing);
 
   return (
     <div className="flex min-h-0 flex-1 basis-0 flex-col overflow-hidden">
-      <PlanPanelHeader threadId={threadId} versions={versions} viewed={viewed} executing={executing} />
+      <PlanTitle />
+      <PlanControlsRow threadId={threadId} versions={versions} viewed={viewed} executing={executing} />
       {draft.kind === "conflict" && (
         <PlanConflictNotice canKeep={draft.canKeep} onKeepMine={() => scheduler.keepMine()} onUseSaved={() => scheduler.useSaved()} />
       )}
@@ -65,6 +67,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
       <PlanEditor
         contentMd={heldText ?? viewed.contentMd}
         editable={editable}
+        label={`Plan v${viewed.version}`}
         onChange={(text) => {
           // Only the latest version is editable, and the first save makes a
           // newer one, so a pinned pick must follow it or the edit vanishes.

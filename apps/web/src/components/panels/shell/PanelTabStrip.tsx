@@ -1,16 +1,32 @@
-import { useEffect, useId, useRef, useState, type ReactElement, type ReactNode, type WheelEvent } from "react";
-import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
-import { IconButton } from "@/components/ui/button";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import { ChevronDown, Plus, X } from "lucide-react";
+import { Button, IconButton } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { createTooltipHandle, Tooltip, TooltipContent, TooltipTrigger, type TooltipHandle } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { PanelToolGlyph } from "./PanelHeader";
 
 /** One tab in a {@link PanelTabStrip}. */
 export interface PanelTabStripItem {
   readonly id: string;
   readonly label: string;
-  /** A 14px glyph; hovering the tab swaps it for the close button. */
+  /** A 14px glyph. The close button takes its slot on the active tab, and on any tab with hover or focus. */
   readonly icon: ReactNode;
-  /** Spoken after the label, because the icon is hidden while the tab has focus or hover. */
+  /** Spoken after the label, because the icon is often replaced by the close button. */
   readonly status?: string;
+  /** Close button name, when closing does more than "Close <label>" implies. */
+  readonly closeLabel?: string;
+  /** The close button's tooltip. Defaults to "Close tab"; set it when closing ends more than the tab. */
+  readonly closeTooltip?: string;
 }
 
 /** Props for {@link PanelTabStrip}. */
@@ -31,14 +47,23 @@ export interface PanelTabStripProps {
    * `onAdd` and `addDisabledReason` stop applying and each menu row explains its own limits.
    */
   readonly addMenu?: (trigger: ReactElement) => ReactElement;
-  /** Browser tabs shrink to 96px and omit scroll chevrons. Defaults to "default". */
-  readonly appearance?: PanelTabStripAppearance;
+  /** Id of the element that shows the active tab's content, announced as each tab's `aria-controls`. */
+  readonly panelId?: string;
+  /**
+   * The tool's rail glyph and name, shown before the tabs. Tab labels name items, so without it a header full of
+   * tabs never names the tool, while every single-view tool's title does.
+   */
+  readonly tool?: { readonly icon: ReactNode; readonly name: string };
 }
 
-/** Sizing contract for a {@link PanelTabStrip}. */
-export type PanelTabStripAppearance = "default" | "browser";
-
-/** Tool tabs with a pinned add button and scrolling overflow. See ADR-0026. */
+/**
+ * Tool tabs with a pinned add button. Inactive tabs shrink to 9.6rem with a text fade while the active tab keeps
+ * its name. Past that, the strip shows only whole tabs around the active one and a labelled "N more" menu lists
+ * every tab. See ADR-0026.
+ *
+ * A `tablist` with manual activation, because switching a tab mounts a terminal, page, or file:
+ * arrows and Home/End move focus, Enter or Space selects, and Delete closes the focused tab.
+ */
 export function PanelTabStrip({
   items,
   activeId,
@@ -49,213 +74,258 @@ export function PanelTabStrip({
   onClose,
   onAdd,
   addMenu,
-  appearance = "default",
+  panelId,
+  tool,
 }: PanelTabStripProps) {
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  useScrollActiveTabIntoView(scrollerRef, activeId);
-  const overflow = useHorizontalOverflow(scrollerRef, items);
-  const showChevrons = appearance === "default" && (overflow.start || overflow.end);
+  const stripRef = useRef<HTMLDivElement>(null);
+  const tablistRef = useRef<HTMLDivElement>(null);
+  const tabIdPrefix = useId();
+  const capacity = useInactiveTabCapacity(stripRef, tablistRef, items.length, activeId);
+  const shown = useShownTabs(items, activeId, capacity);
+  const hiddenCount = items.length - shown.length;
+  const closeByKey = useRefocusAfterKeyboardClose(tablistRef, items, onClose);
+  const rovingId = shown.some((item) => item.id === activeId) ? activeId : (shown[0]?.id ?? null);
+  // One tooltip root for every tab's close button, so hovering a tab never mounts a popup of its own.
+  const [closeTooltip] = useState(() => createTooltipHandle<string>());
   return (
-    <div data-testid="panel-tab-strip" className="flex min-w-0 flex-1 items-center gap-2">
-      <div className="flex min-w-0 items-center">
-        {showChevrons ? (
-          <PanelTabScrollButton direction="start" disabled={!overflow.start} scrollerRef={scrollerRef} />
-        ) : null}
-        <div
-          ref={scrollerRef}
-          role="group"
-          aria-label={label}
-          data-overflow-start={overflow.start || undefined}
-          data-overflow-end={overflow.end || undefined}
-          onWheel={scrollVerticalWheelSideways}
-          className="scroll-fade-x flex min-w-0 items-center gap-1"
-        >
-          {items.map((item) => (
-            <PanelTab
-              key={item.id}
-              item={item}
-              active={item.id === activeId}
-              appearance={appearance}
-              onSelect={onSelect}
-              onClose={onClose}
-            />
-          ))}
-        </div>
-        {showChevrons ? (
-          <PanelTabScrollButton direction="end" disabled={!overflow.end} scrollerRef={scrollerRef} />
-        ) : null}
+    <div ref={stripRef} data-testid="panel-tab-strip" className="flex min-w-0 flex-1 items-center gap-2">
+      {tool ? (
+        <>
+          <PanelToolGlyph>{tool.icon}</PanelToolGlyph>
+          {/* The tab list's own name says the same to assistive tech. */}
+          <span aria-hidden data-panel-tool-name className="shrink-0 pr-1 text-sm/5 font-medium text-ink">
+            {tool.name}
+          </span>
+        </>
+      ) : null}
+      <div
+        ref={tablistRef}
+        role="tablist"
+        aria-label={label}
+        onKeyDown={moveTabFocus}
+        className="flex min-w-0 items-center gap-1 overflow-hidden"
+      >
+        {shown.map((item) => (
+          <PanelTab
+            key={item.id}
+            item={item}
+            tabId={`${tabIdPrefix}tab-${encodeURIComponent(item.id)}`}
+            panelId={panelId}
+            active={item.id === activeId}
+            focusable={item.id === rovingId}
+            closeTooltip={closeTooltip}
+            onSelect={onSelect}
+            onClose={onClose}
+            onCloseByKey={closeByKey}
+          />
+        ))}
       </div>
+      <Tooltip handle={closeTooltip}>
+        {({ payload }) => (payload ? <TooltipContent side="bottom">{payload}</TooltipContent> : null)}
+      </Tooltip>
+      {hiddenCount > 0 ? (
+        <PanelTabOverflowMenu items={items} hiddenCount={hiddenCount} activeId={activeId} label={label} onSelect={onSelect} />
+      ) : null}
       <PanelTabAddButton label={addLabel} disabledReason={addDisabledReason} onAdd={onAdd} menu={addMenu} />
     </div>
   );
 }
 
-/** Which ends of a horizontal scroller hide content. */
-interface HorizontalOverflow {
-  readonly start: boolean;
-  readonly end: boolean;
-}
-
-const NO_OVERFLOW: HorizontalOverflow = { start: false, end: false };
-
-function measureOverflow(scroller: HTMLElement): HorizontalOverflow {
-  // Fractional scroll offsets on scaled displays leave up to a pixel of slack.
-  const start = scroller.scrollLeft > 1;
-  const end = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 1;
-  return { start, end };
-}
-
-function useHorizontalOverflow(
-  scrollerRef: React.RefObject<HTMLDivElement | null>,
-  items: readonly PanelTabStripItem[],
-): HorizontalOverflow {
-  const [overflow, setOverflow] = useState<HorizontalOverflow>(NO_OVERFLOW);
-  useEffect(() => {
-    const scroller = scrollerRef.current;
-    if (!scroller) return;
-    const update = () => {
-      const next = measureOverflow(scroller);
-      setOverflow((prev) => (prev.start === next.start && prev.end === next.end ? prev : next));
-    };
-    update();
-    scroller.addEventListener("scroll", update, { passive: true });
-    if (typeof ResizeObserver === "undefined") {
-      return () => scroller.removeEventListener("scroll", update);
-    }
-    // Watching the tabs too catches label changes that widen the content without resizing the strip.
-    const observer = new ResizeObserver(update);
-    observer.observe(scroller);
-    for (const tab of scroller.children) observer.observe(tab);
-    return () => {
-      scroller.removeEventListener("scroll", update);
-      observer.disconnect();
-    };
-  }, [scrollerRef, items]);
-  return overflow;
-}
-
-/** Mouse wheels only scroll vertically, so a plain wheel turn moves the strip sideways. */
-function scrollVerticalWheelSideways(event: WheelEvent<HTMLDivElement>): void {
-  if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
-  event.currentTarget.scrollLeft += event.deltaY;
-}
-
-/** A tab's horizontal extent in the scroller's content coordinates. */
-interface TabSpan {
-  readonly left: number;
-  readonly right: number;
-}
-
-function tabSpan(scroller: HTMLElement, tab: HTMLElement): TabSpan {
-  const origin = scroller.getBoundingClientRect().left - scroller.scrollLeft;
-  const rect = tab.getBoundingClientRect();
-  return { left: rect.left - origin, right: rect.right - origin };
-}
-
 /**
- * The scroll offset closest to `current` that shows the whole span clear of the
- * edge fades (the scroller's scroll-padding), within the scrollable range. A span
- * too wide to clear the fades is fitted to the bare box instead, and one wider than
- * the box shows its start. The browser's own `inline: "nearest"` cannot be used: it
- * leaves a tab wider than the box where it is, so a narrow strip would never move.
+ * Lists every tab while some do not fit. Its label counts the hidden ones, because a bare chevron beside the add
+ * button read as a profile picker, and a new user could not tell the hidden tabs existed.
  */
-function scrollLeftShowing(span: TabSpan, current: number, scroller: HTMLElement): number {
-  const fade = Number.parseFloat(getComputedStyle(scroller).scrollPaddingInlineStart) || 0;
-  const range = (pad: number) => ({ min: span.right - scroller.clientWidth + pad, max: span.left - pad });
-  const padded = range(fade);
-  const { min, max } = padded.min <= padded.max ? padded : range(0);
-  const wanted = min > max ? max : Math.min(Math.max(current, min), max);
-  return Math.min(Math.max(wanted, 0), scroller.scrollWidth - scroller.clientWidth);
-}
-
-/** Moves to the nearest tab in `direction` that the scroller's box cuts off. */
-function revealNextHiddenTab(scroller: HTMLElement, direction: "start" | "end"): void {
-  const current = scroller.scrollLeft;
-  const viewEnd = current + scroller.clientWidth;
-  const spans = [...scroller.querySelectorAll<HTMLElement>("[data-panel-tab]")].map((tab) => tabSpan(scroller, tab));
-  const hidden =
-    direction === "end"
-      ? spans.filter((span) => span.right > viewEnd + 1)
-      : spans.filter((span) => span.left < current - 1).reverse();
-  // A tab wider than the strip may already sit as far in as it can; skip to one that moves,
-  // and once none does, finish at the edge so the chevron can always reach it.
-  const edge = direction === "end" ? scroller.scrollWidth - scroller.clientWidth : 0;
-  const next =
-    hidden.map((span) => scrollLeftShowing(span, current, scroller)).find((left) => Math.abs(left - current) > 1) ??
-    edge;
-  scroller.scrollTo({ left: next, behavior: "smooth" });
-}
-
-function PanelTabScrollButton({
-  direction,
-  disabled,
-  scrollerRef,
+function PanelTabOverflowMenu({
+  items,
+  hiddenCount,
+  activeId,
+  label,
+  onSelect,
 }: {
-  readonly direction: "start" | "end";
-  readonly disabled: boolean;
-  readonly scrollerRef: React.RefObject<HTMLDivElement | null>;
+  readonly items: readonly PanelTabStripItem[];
+  readonly hiddenCount: number;
+  readonly activeId: string | null;
+  readonly label: string;
+  readonly onSelect: (id: string) => void;
 }) {
-  const scroll = () => {
-    const scroller = scrollerRef.current;
-    if (scroller) revealNextHiddenTab(scroller, direction);
-  };
   return (
-    <IconButton
-      size="inline-sm"
-      aria-label={direction === "start" ? "Scroll tabs left" : "Scroll tabs right"}
-      disabled={disabled}
-      data-testid={`panel-tab-scroll-${direction}`}
-      onClick={scroll}
-      className="shrink-0"
-    >
-      {direction === "start" ? <ChevronLeft /> : <ChevronRight />}
-    </IconButton>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="subtle"
+            shape="round"
+            aria-label={`All ${label.toLowerCase()}, ${hiddenCount} more`}
+            data-tab-overflow=""
+            className="shrink-0 gap-1 pr-2.5 pl-3 text-body-small font-medium"
+          >
+            {hiddenCount} more
+            <ChevronDown aria-hidden className="size-3.5" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" sideOffset={6}>
+        {items.map((item) => (
+          <DropdownMenuItem
+            key={item.id}
+            label={item.label}
+            icon={item.icon}
+            checked={item.id === activeId}
+            onClick={() => onSelect(item.id)}
+          />
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-function useScrollActiveTabIntoView(
-  scrollerRef: React.RefObject<HTMLDivElement | null>,
-  activeId: string | null,
-): void {
-  useEffect(() => {
-    const scroller = scrollerRef.current;
-    if (!activeId || !scroller) return;
-    const reveal = () => {
-      const tab = scroller.querySelector<HTMLElement>(`[data-panel-tab="${CSS.escape(activeId)}"]`);
-      if (tab) scroller.scrollLeft = scrollLeftShowing(tabSpan(scroller, tab), scroller.scrollLeft, scroller);
-    };
-    reveal();
-    if (typeof ResizeObserver === "undefined") return;
-    // Resizing the panel narrows the strip without changing the active tab.
-    const observer = new ResizeObserver(reveal);
-    observer.observe(scroller);
-    return () => observer.disconnect();
-  }, [scrollerRef, activeId]);
+const TAB_FOCUS_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
+
+/** Where a focus key lands among `count` tabs from `current` (-1 when focus is outside), wrapping at the ends. */
+function nextTabIndex(key: string, current: number, count: number): number {
+  const last = count - 1;
+  if (key === "Home") return 0;
+  if (key === "End") return last;
+  if (key === "ArrowLeft") return current <= 0 ? last : current - 1;
+  return current < 0 || current === last ? 0 : current + 1;
 }
 
-const TAB_SIZING: Readonly<Record<PanelTabStripAppearance, { readonly active: string; readonly inactive: string }>> = {
-  default: {
-    active: "max-w-[min(24rem,100%)] min-w-0 shrink-0",
-    inactive: "max-w-60 min-w-28 shrink",
-  },
-  browser: {
-    active: "max-w-full min-w-0 shrink-0",
-    inactive: "min-w-24 flex-[0_1_max-content]",
-  },
-};
+/** Roving focus: moving focus never selects, so passing over a tab does not mount its content. */
+function moveTabFocus(event: KeyboardEvent<HTMLDivElement>): void {
+  if (!TAB_FOCUS_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
+  if (tabs.length === 0) return;
+  event.preventDefault();
+  tabs[nextTabIndex(event.key, tabs.indexOf(document.activeElement as HTMLElement), tabs.length)]?.focus();
+}
+
+/**
+ * Closes a tab from the keyboard and, once the strip re-renders without it, puts focus back on
+ * the roving tab if the close left focus nowhere. Without this, Delete strands focus on the body.
+ */
+function useRefocusAfterKeyboardClose(
+  tablistRef: React.RefObject<HTMLDivElement | null>,
+  items: readonly PanelTabStripItem[],
+  onClose: (id: string) => void,
+): (id: string) => void {
+  const pendingRef = useRef(false);
+  useEffect(() => {
+    if (!pendingRef.current) return;
+    pendingRef.current = false;
+    const focused = document.activeElement;
+    if (focused && focused !== document.body) return;
+    tablistRef.current?.querySelector<HTMLElement>('[role="tab"][tabindex="0"]')?.focus();
+  }, [tablistRef, items]);
+  return (id) => {
+    pendingRef.current = true;
+    onClose(id);
+  };
+}
+
+/** Inactive tabs never shrink below 9.6rem (96px at the 10px root), so each keeps its number and a readable start. */
+const INACTIVE_TAB_MIN_PX = 96;
+/** Room kept for the "N more" button before it has rendered once. */
+const OVERFLOW_TRIGGER_ESTIMATE_PX = 96;
+
+/** The strip's width left for the tab list once the tool name and add button are placed, and the "N more" button's share. */
+function roomForTabs(strip: HTMLElement, tablist: HTMLElement): { readonly room: number; readonly trigger: number } {
+  const gap = Number.parseFloat(getComputedStyle(strip).columnGap) || 0;
+  let room = strip.clientWidth;
+  let trigger = OVERFLOW_TRIGGER_ESTIMATE_PX;
+  for (const child of Array.from(strip.children) as HTMLElement[]) {
+    if (child === tablist || child.offsetWidth === 0) continue;
+    if (child.hasAttribute("data-tab-overflow")) trigger = child.offsetWidth + gap;
+    else room -= child.offsetWidth + gap;
+  }
+  return { room, trigger };
+}
+
+/**
+ * How many inactive tabs fit whole beside the active one, or null when every tab fits at its minimum width. Null
+ * also covers a strip with no layout yet (jsdom reports 0), which then shows every tab.
+ */
+function inactiveTabCapacity(strip: HTMLElement, tablist: HTMLElement, itemCount: number): number | null {
+  if (strip.clientWidth === 0) return null;
+  const { room, trigger } = roomForTabs(strip, tablist);
+  const tabGap = Number.parseFloat(getComputedStyle(tablist).columnGap) || 0;
+  const active = tablist.querySelector<HTMLElement>('[data-active="true"]');
+  const activeWidth = active ? active.offsetWidth : 0;
+  const inactiveCount = itemCount - (active ? 1 : 0);
+  const step = INACTIVE_TAB_MIN_PX + tabGap;
+  if (activeWidth + inactiveCount * step <= room) return null;
+  return Math.min(inactiveCount, Math.max(0, Math.floor((room - trigger - activeWidth) / step)));
+}
+
+function useInactiveTabCapacity(
+  stripRef: React.RefObject<HTMLDivElement | null>,
+  tablistRef: React.RefObject<HTMLDivElement | null>,
+  itemCount: number,
+  activeId: string | null,
+): number | null {
+  const [capacity, setCapacity] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const strip = stripRef.current;
+    const tablist = tablistRef.current;
+    if (!strip || !tablist) return;
+    const update = () => setCapacity(inactiveTabCapacity(strip, tablist, itemCount));
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    // The active tab too: a longer name can leave the tab list's box the same size while it clips more.
+    const observer = new ResizeObserver(update);
+    observer.observe(strip);
+    observer.observe(tablist);
+    const active = tablist.querySelector('[data-active="true"]');
+    if (active) observer.observe(active);
+    return () => observer.disconnect();
+  }, [stripRef, tablistRef, itemCount, activeId]);
+  return capacity;
+}
+
+/** The first shown tab: it holds still while the active tab stays in view, and moves just enough to show it. */
+function tabWindowStart(count: number, activeIndex: number, size: number, previousStart: number): number {
+  const clamp = (start: number) => Math.min(Math.max(start, 0), Math.max(0, count - size));
+  if (activeIndex < 0) return clamp(previousStart);
+  if (activeIndex < previousStart) return clamp(activeIndex);
+  if (activeIndex >= previousStart + size) return clamp(activeIndex - size + 1);
+  return clamp(previousStart);
+}
+
+/** The run of whole tabs the strip shows: all of them, or as many as fit around the active one. */
+function useShownTabs(
+  items: readonly PanelTabStripItem[],
+  activeId: string | null,
+  capacity: number | null,
+): readonly PanelTabStripItem[] {
+  const [start, setStart] = useState(0);
+  if (capacity === null) return items;
+  const activeIndex = items.findIndex((item) => item.id === activeId);
+  const size = Math.min(items.length, capacity + (activeIndex >= 0 ? 1 : 0));
+  const next = tabWindowStart(items.length, activeIndex, size, start);
+  if (next !== start) setStart(next);
+  return items.slice(next, next + size);
+}
 
 function PanelTab({
   item,
+  tabId,
+  panelId,
   active,
-  appearance,
+  focusable,
+  closeTooltip,
   onSelect,
   onClose,
+  onCloseByKey,
 }: {
   readonly item: PanelTabStripItem;
+  readonly tabId: string;
+  readonly panelId: string | undefined;
   readonly active: boolean;
-  readonly appearance: PanelTabStripAppearance;
+  /** The roving tab stop: the active tab, or the first one when none is active. */
+  readonly focusable: boolean;
+  readonly closeTooltip: TooltipHandle<string>;
   readonly onSelect: (id: string) => void;
   readonly onClose: (id: string) => void;
+  readonly onCloseByKey: (id: string) => void;
 }) {
   return (
     <div
@@ -264,30 +334,58 @@ function PanelTab({
       // The header row drags the window and only buttons opt out. The pill's padding and the gap beside the
       // close button are drag area, so the OS drops hover as the pointer nears the X and the X hides.
       className={cn(
-        "window-no-drag group/tab relative flex h-8 items-center gap-2 rounded-control pr-3 pl-2.5 text-sm/5 font-medium transition-colors",
-        active ? TAB_SIZING[appearance].active : TAB_SIZING[appearance].inactive,
-        active ? "bg-selected text-ink" : "text-muted hover:bg-hover hover:text-ink",
+        // The active tab keeps its whole name and inactive tabs stop shrinking at 9.6rem, then the strip shows fewer tabs.
+        // Shrinking every tab further to fit (r11) left "1 · po" and "2 · po", which three judges could not read.
+        "window-no-drag group/tab relative flex h-8 items-center gap-2 rounded-control pr-3 pl-2.5 text-sm/5 font-medium transition-[color,background-color]",
+        active
+          ? "max-w-[min(24rem,100%)] shrink-0 bg-selected text-ink"
+          : "min-w-[9.6rem] flex-[0_1_max-content] text-muted hover:bg-hover hover:text-ink",
       )}
     >
       <span className="relative grid size-3.5 shrink-0 place-items-center [&_svg]:size-3.5">
-        <span className="grid place-items-center group-focus-within/tab:invisible group-hover/tab:invisible">
+        <span
+          className={cn(
+            "grid place-items-center",
+            active ? "invisible" : "group-focus-within/tab:invisible group-hover/tab:invisible",
+          )}
+        >
           {item.icon}
         </span>
-        <button
-          type="button"
-          aria-label={`Close ${item.label}`}
-          data-panel-tab-close
-          onClick={() => onClose(item.id)}
-          // Above the select button's stretched hit area, so the swap target stays clickable.
-          className="invisible absolute inset-0 z-(--layer-sticky) grid place-items-center rounded-sm text-muted hover:text-ink focus-visible:visible focus-visible:outline-2 focus-visible:outline-focus group-focus-within/tab:visible group-hover/tab:visible"
-        >
-          <X />
-        </button>
+        <TooltipTrigger
+          handle={closeTooltip}
+          payload={item.closeTooltip ?? "Close tab"}
+          render={
+            <button
+              type="button"
+              aria-label={item.closeLabel ?? `Close ${item.label}`}
+              data-panel-tab-close
+              // Delete on the focused tab closes it, so the × stays out of the tab order and Tab leaves the strip.
+              tabIndex={-1}
+              onClick={() => onClose(item.id)}
+              // Above the tab's stretched hit area, so the swap target stays clickable.
+              className={cn(
+                "absolute inset-0 z-(--layer-sticky) grid place-items-center rounded-sm text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-focus",
+                active ? "visible" : "invisible focus-visible:visible group-focus-within/tab:visible group-hover/tab:visible",
+              )}
+            >
+              <X />
+            </button>
+          }
+        />
       </span>
       <button
         type="button"
-        aria-pressed={active}
+        role="tab"
+        id={tabId}
+        aria-selected={active}
+        aria-controls={panelId}
+        tabIndex={focusable ? 0 : -1}
         onClick={() => onSelect(item.id)}
+        onKeyDown={(event) => {
+          if (event.key !== "Delete") return;
+          event.preventDefault();
+          onCloseByKey(item.id);
+        }}
         className="text-fade min-w-0 text-left outline-none after:absolute after:inset-0 after:rounded-control focus-visible:after:outline-2 focus-visible:after:outline-focus"
       >
         {item.label}

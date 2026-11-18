@@ -26,12 +26,7 @@ const {
   mockSetCommitSheetScopeId: vi.fn(),
   mockWorkspaceSelector: vi.fn(),
 
-  mockGetRightPanel: vi.fn().mockReturnValue({
-    visible: false,
-    width: 380,
-    widthSource: "auto",
-    activeTab: "tasks",
-  }),
+  mockGetRightPanel: vi.fn(),
   mockGetRightPanelVisible: vi.fn().mockReturnValue(false),
   mockShowRightPanel: vi.fn(),
   mockSetRightPanelTab: vi.fn(),
@@ -156,6 +151,7 @@ vi.mock("@/hooks/useHasCommitsAhead", () => ({
 }));
 
 import { HeaderActions } from "./HeaderActions";
+import { createRightPanelState } from "@/stores/diffStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { createEmptyThreadRecord, patchThreadRecord } from "@/stores/thread-record";
 import {
@@ -257,7 +253,7 @@ function renderHeaderActions(thread: Thread = makeThread()) {
 beforeEach(() => {
   mockGetProviderUsage.mockReset();
   mockGetProviderUsage.mockImplementation(() => new Promise(() => {}));
-  mockGetRightPanel.mockClear();
+  mockGetRightPanel.mockReset().mockReturnValue(createRightPanelState({ visible: false, width: 380, widthSource: "auto" }));
   mockGetRightPanelVisible.mockReset().mockReturnValue(false);
   mockShowRightPanel.mockClear();
   mockSetRightPanelTab.mockClear();
@@ -763,12 +759,12 @@ describe("HeaderActions - consolidated header", () => {
   it("renders the right-panel toggle only while the panel is closed", () => {
     mockGetRightPanelVisible.mockReturnValue(false);
     const { unmount } = renderHeaderActions();
-    expect(screen.getByRole("button", { name: "Toggle panel" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show panel" })).toBeInTheDocument();
     unmount();
 
     mockGetRightPanelVisible.mockReturnValue(true);
     renderHeaderActions();
-    expect(screen.queryByRole("button", { name: "Toggle panel" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show panel" })).not.toBeInTheDocument();
   });
 
   it("collapses the old per-tab toggle icons (no terminal/preview/changes buttons)", () => {

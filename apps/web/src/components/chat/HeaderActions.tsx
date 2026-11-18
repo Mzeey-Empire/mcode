@@ -59,7 +59,7 @@ export function HeaderActions({ thread, threadPaneWidth }: HeaderActionsProps) {
         <IconButton
           shape="round"
           onClick={togglePanel}
-          aria-label="Toggle panel"
+          aria-label="Show panel"
           tooltipShortcut={panelShortcut}
           data-testid="header-panel-toggle"
         >
