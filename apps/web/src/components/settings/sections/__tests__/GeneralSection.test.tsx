@@ -69,10 +69,9 @@ function renderSection(defaultEditor: string) {
 }
 
 describe("GeneralSection", () => {
-  it("renders theme, notifications and the default open-in app under General", () => {
+  it("renders theme, notifications and the default open-in app", () => {
     mockApps.value = [CODE];
     renderSection("");
-    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByText("Theme")).toBeInTheDocument();
     expect(screen.getByText("Notifications")).toBeInTheDocument();
     expect(screen.getByText("Default open-in app")).toBeInTheDocument();

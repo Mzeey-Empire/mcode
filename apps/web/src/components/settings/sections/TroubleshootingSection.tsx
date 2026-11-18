@@ -3,7 +3,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SettingRow } from "../SettingRow";
-import { SectionHeading } from "../SectionHeading";
+import { SettingsGroup } from "../SettingsGroup";
 
 function HardwareAccelerationSetting() {
   const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
@@ -36,10 +36,9 @@ function DiagnosticsRecordingSetting() {
 /** Troubleshooting settings page: troubleshooting logs and hardware acceleration. */
 export function TroubleshootingSection() {
   return (
-    <div>
-      <SectionHeading>Troubleshooting</SectionHeading>
+    <SettingsGroup>
       <DiagnosticsRecordingSetting />
       <HardwareAccelerationSetting />
-    </div>
+    </SettingsGroup>
   );
 }

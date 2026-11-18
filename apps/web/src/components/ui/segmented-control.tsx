@@ -189,6 +189,8 @@ export function SegmentedControl({
     <TooltipProvider>
       <div
         role="radiogroup"
+        data-slot="segmented-control"
+        data-variant={layout}
         aria-label={ariaLabel}
         aria-orientation={axis}
         onKeyDown={handleKeyDown}

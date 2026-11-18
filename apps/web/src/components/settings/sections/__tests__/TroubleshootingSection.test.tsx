@@ -108,9 +108,8 @@ describe("TroubleshootingSection hardware acceleration", () => {
 });
 
 describe("TroubleshootingSection page", () => {
-  it("shows the page title and the troubleshooting logs row", () => {
+  it("shows the troubleshooting logs row", () => {
     render(<TroubleshootingSection />);
-    expect(screen.getByRole("heading", { name: "Troubleshooting" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Troubleshooting logs" })).toBeInTheDocument();
   });
 });

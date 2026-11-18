@@ -1,7 +1,7 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Switch } from "@/components/ui/switch";
 import { SettingRow } from "../SettingRow";
-import { SectionHeading } from "../SectionHeading";
+import { SettingsGroup } from "../SettingsGroup";
 import { ProviderSection } from "./ProviderSection";
 
 function CliUpdateChecksSetting() {
@@ -21,12 +21,11 @@ function CliUpdateChecksSetting() {
 /** Providers settings page: the provider list, then one shared CLI update check switch. */
 export function ProvidersSection() {
   return (
-    <div>
-      <SectionHeading>Providers</SectionHeading>
-      <div className="space-y-8">
-        <ProviderSection />
+    <div className="space-y-8">
+      <ProviderSection />
+      <SettingsGroup>
         <CliUpdateChecksSetting />
-      </div>
+      </SettingsGroup>
     </div>
   );
 }

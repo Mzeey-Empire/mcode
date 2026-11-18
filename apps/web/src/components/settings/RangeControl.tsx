@@ -44,28 +44,27 @@ export function RangeControl({
 
   const VALUE_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
 
+  const trackStyle: React.CSSProperties & Record<"--range-fraction", number> = {
+    "--range-fraction": max > min ? (display - min) / (max - min) : 0,
+  };
+
   return (
-    <div className="flex w-52 items-center gap-3">
-      <div className="relative flex-1">
-        <input
-          type="range"
-          min={min}
-          max={max}
-          step={step}
-          value={display}
-          aria-label={ariaLabel}
-          onChange={(e) => setLocal(Number(e.target.value))}
-          onMouseUp={handlePointerCommit}
-          onKeyUp={(e) => { if (VALUE_KEYS.has(e.key)) commit(Number(e.currentTarget.value)); }}
-          onTouchEnd={() => { if (local !== null) commit(local); }}
-          className="settings-range w-full"
-        />
-        <div className="flex justify-between text-xs text-muted mt-1">
-          <span>{min}</span>
-          <span>{max}</span>
-        </div>
-      </div>
-      <span className="min-w-[2.5rem] text-right font-mono text-xs text-ink">
+    <div className="flex items-center gap-3">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={display}
+        aria-label={ariaLabel}
+        onChange={(e) => setLocal(Number(e.target.value))}
+        onMouseUp={handlePointerCommit}
+        onKeyUp={(e) => { if (VALUE_KEYS.has(e.key)) commit(Number(e.currentTarget.value)); }}
+        onTouchEnd={() => { if (local !== null) commit(local); }}
+        style={trackStyle}
+        className="settings-range w-40"
+      />
+      <span className="min-w-12 text-right text-body-small text-ink tabular-nums">
         {formatted}
       </span>
     </div>

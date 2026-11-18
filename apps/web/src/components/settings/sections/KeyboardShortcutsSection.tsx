@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { SectionHeading } from "../SectionHeading";
+import { SettingsGroup } from "../SettingsGroup";
 import { SettingRow } from "../SettingRow";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/stores/uiStore";
@@ -47,8 +47,7 @@ export function KeyboardShortcutsSection() {
 
   return (
     <div>
-      <SectionHeading>Keyboard Shortcuts</SectionHeading>
-
+      <SettingsGroup>
       <SettingRow
         label="Custom keybindings"
         hint={`Override default shortcuts by editing ${configPath}.`}
@@ -71,8 +70,9 @@ export function KeyboardShortcutsSection() {
           </Button>
         </div>
       </SettingRow>
+      </SettingsGroup>
 
-      <div className="mt-4 space-y-1">
+      <div className="mt-8 space-y-1">
         {boundCommands.map((cmd) => {
           const binding = getKeybindingForCommand(cmd.id)!;
           return (
