@@ -731,7 +731,7 @@ NodeTest.test("agentSetup stops before any setup work when the drive is nearly f
     await NodeAssertStrict.default.rejects(
       () => agentSetup(repo),
       new Error(
-        `agent:setup needs 3 GB free on ${NodePath.parse(repo).root}, and only 1.00 GB is free. `
+        `agent:setup needs 3.1 GB free on ${NodePath.parse(repo).root}, and only 1.00 GB is free. `
           + "Run `bun run agent:worktrees` to list worktrees that can be removed.",
       ),
     );

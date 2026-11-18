@@ -89,6 +89,70 @@ function byBranch(entries) {
 // About 40 real git commands per repository; on Windows that exceeds Bun's 5 s default.
 const GIT_TEST_TIMEOUT = { timeout: 120_000 };
 
+NodeTest.test("does not count hardlinked files as space freed by removal", GIT_TEST_TIMEOUT, async () => {
+  const repository = makeRepository();
+  try {
+    const source = NodePath.join(repository.outside, "cache.bin");
+    NodeFS.writeFileSync(source, Buffer.alloc(1024 * 1024));
+    const modules = NodePath.join(repository.root, "worktrees", "merged", "node_modules");
+    NodeFS.mkdirSync(modules);
+    NodeFS.linkSync(source, NodePath.join(modules, "package.bin"));
+    const entries = await listWorktrees({
+      cwd: repository.current,
+      loadPullRequests: async () => repository.pullRequests,
+      warn: () => {},
+    });
+    const entry = byBranch(entries).merged;
+    NodeAssertStrict.default.ok(entry.bytes < 1024 * 1024, `freeable bytes: ${entry.bytes}`);
+    NodeAssertStrict.default.deepEqual(entry.keepReasons, []);
+  } finally {
+    NodeFS.rmSync(repository.root, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("skips worktrees that gain an outside junction or a commit after inspection", GIT_TEST_TIMEOUT, async () => {
+  const repository = makeRepository();
+  try {
+    const entries = await listWorktrees({
+      cwd: repository.current,
+      loadPullRequests: async () => repository.pullRequests,
+      warn: () => {},
+    });
+    const branches = byBranch(entries);
+    NodeFS.mkdirSync(NodePath.join(branches.merged.path, "node_modules"));
+    NodeFS.symlinkSync(repository.outside, NodePath.join(branches.merged.path, "node_modules", "outside"), "junction");
+    commitFile(branches.gone.path, "late.txt");
+    const { removed, failed, skipped } = await removeWorktrees(entries, { cwd: repository.current });
+    NodeAssertStrict.default.deepEqual(failed, []);
+    NodeAssertStrict.default.deepEqual(removed.map((entry) => entry.branch), ["squashed"]);
+    NodeAssertStrict.default.deepEqual(skipped.map(({ entry }) => entry.branch).sort(), ["gone", "merged"]);
+    NodeAssertStrict.default.match(skipped.find(({ entry }) => entry.branch === "gone").reason, /HEAD moved/);
+    NodeAssertStrict.default.match(skipped.find(({ entry }) => entry.branch === "merged").reason, /links outside/);
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(NodePath.join(repository.outside, "keep.txt"), "utf8"), "keep\n");
+  } finally {
+    NodeFS.rmSync(repository.root, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("keeps a pushed reused branch whose HEAD is newer than its merged pull request", GIT_TEST_TIMEOUT, async () => {
+  const repository = makeRepository();
+  try {
+    const reused = NodePath.join(repository.root, "worktrees", "reused");
+    git(repository.main, ["worktree", "add", "-q", "-b", "reused", reused, "main"]);
+    const base = git(reused, ["rev-parse", "HEAD"]);
+    commitFile(reused, "new-work.txt");
+    git(reused, ["push", "-q", "-u", "origin", "reused"]);
+    const entries = await listWorktrees({
+      cwd: repository.current,
+      loadPullRequests: async () => [...repository.pullRequests, { headRefName: "reused", headRefOid: base, state: "MERGED" }],
+      warn: () => {},
+    });
+    NodeAssertStrict.default.deepEqual(byBranch(entries).reused.keepReasons, ["branch is pushed but not merged"]);
+  } finally {
+    NodeFS.rmSync(repository.root, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("removes only clean worktrees with nothing unpushed and a merged or gone branch", GIT_TEST_TIMEOUT, async () => {
   const repository = makeRepository();
   try {
@@ -102,7 +166,7 @@ NodeTest.test("removes only clean worktrees with nothing unpushed and a merged o
     const removable = entries.filter((entry) => entry.keepReasons.length === 0).map((entry) => entry.branch).sort();
     NodeAssertStrict.default.deepEqual(removable, ["gone", "merged", "squashed"]);
     NodeAssertStrict.default.deepEqual(branches.uncommitted.keepReasons, ["1 uncommitted files"]);
-    NodeAssertStrict.default.deepEqual(branches.unpushed.keepReasons, ["1 unpushed commits"]);
+    NodeAssertStrict.default.deepEqual(branches.unpushed.keepReasons, ["branch was never pushed", "1 unpushed commits"]);
     NodeAssertStrict.default.deepEqual(branches.open.keepReasons, ["branch has an open pull request"]);
     NodeAssertStrict.default.match(branches.linked.keepReasons.join(), /^links outside the worktree/);
     NodeAssertStrict.default.deepEqual(branches.current.keepReasons, ["this command runs from it"]);

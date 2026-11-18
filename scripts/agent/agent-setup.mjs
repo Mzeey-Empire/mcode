@@ -24,7 +24,8 @@ import { ensureRuntimeDatabase } from "../db-seed.mjs";
 // Measured on 2026-11-18 in a T3 Code worktree on F:: node_modules held 1.93 GB in 57,094
 // files, copied rather than hardlinked because Bun's cache was on another drive. After
 // setup and builds, .dev held up to 0.61 GB and apps/desktop/dist up to 0.52 GB.
-const DEFAULT_MINIMUM_FREE_GB = 3;
+// 1.93 + 0.61 + 0.52 = 3.06 GB, rounded up.
+const DEFAULT_MINIMUM_FREE_GB = 3.1;
 // Overrides the limit, for example to prove the failure without filling a disk.
 const MINIMUM_FREE_GB_ENV = "MCODE_AGENT_SETUP_MIN_FREE_GB";
 

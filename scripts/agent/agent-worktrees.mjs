@@ -27,6 +27,7 @@ const BRANCH_STATE_REASONS = {
  * @typedef {{
  *   path: string,
  *   branch: string | null,
+ *   head: string | null,
  *   origin: string,
  *   branchState: BranchState,
  *   uncommittedFiles: number,
@@ -54,20 +55,22 @@ export async function loadPullRequestsFromGitHub(repoRoot) {
   return JSON.parse(stdout).filter((pullRequest) => !pullRequest.isCrossRepository);
 }
 
-/** Parses `git worktree list --porcelain`; the first record is always the main checkout. */
+/** Parses `git worktree list --porcelain -z`; the first record is always the main checkout. */
 export function parseWorktreeList(porcelain) {
   const records = [];
-  for (const line of porcelain.split(/\r?\n/)) {
+  for (const line of porcelain.split("\0")) {
     if (line.startsWith("worktree ")) {
-      records.push({ path: line.slice("worktree ".length), branch: null, bare: false, locked: false, prunable: false });
+      records.push({ path: line.slice("worktree ".length), head: null, branch: null, bare: false, locked: false, prunable: false });
       continue;
     }
     const record = records.at(-1);
     if (!record) continue;
+    const field = line.split(" ", 1)[0];
     if (line.startsWith("branch ")) record.branch = line.slice("branch ".length).replace(/^refs\/heads\//, "");
+    else if (line.startsWith("HEAD ")) record.head = line.slice("HEAD ".length);
     else if (line === "bare") record.bare = true;
-    else if (line === "locked" || line.startsWith("locked ")) record.locked = true;
-    else if (line === "prunable" || line.startsWith("prunable ")) record.prunable = true;
+    else if (field === "locked") record.locked = true;
+    else if (field === "prunable") record.prunable = true;
   }
   return records;
 }
@@ -101,15 +104,26 @@ async function readBranchTracking(repoRoot) {
   return tracking;
 }
 
-function resolveBranchState(branch, pullRequestsByBranch, tracking) {
+async function resolveBranchState(worktreePath, branch, pullRequestsByBranch, tracking) {
   if (!branch) return { branchState: "detached", mergedHeads: [] };
   const pullRequests = pullRequestsByBranch.get(branch) ?? [];
   if (pullRequests.some((pullRequest) => pullRequest.state === "OPEN")) return { branchState: "open", mergedHeads: [] };
   const mergedHeads = pullRequests.filter((pullRequest) => pullRequest.state === "MERGED").map((pullRequest) => pullRequest.headRefOid);
-  if (mergedHeads.length > 0) return { branchState: "merged", mergedHeads };
+  for (const oid of mergedHeads) {
+    if (await headIsMerged(worktreePath, oid)) return { branchState: "merged", mergedHeads };
+  }
   const branchTracking = tracking.get(branch);
-  if (branchTracking?.gone) return { branchState: "gone", mergedHeads: [] };
-  return { branchState: branchTracking?.upstream ? "unmerged" : "local", mergedHeads: [] };
+  if (branchTracking?.gone) return { branchState: "gone", mergedHeads };
+  return { branchState: branchTracking?.upstream ? "unmerged" : "local", mergedHeads };
+}
+
+async function headIsMerged(worktreePath, oid) {
+  try {
+    await git(worktreePath, ["merge-base", "--is-ancestor", "HEAD", oid]);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function countUncommittedFiles(worktreePath) {
@@ -148,10 +162,11 @@ function readLinkTarget(linkPath, rawTarget) {
 }
 
 /**
- * Sums file sizes under a worktree without following links, and records every link whose
- * target is outside the worktree, because `git worktree remove` follows Windows junctions
- * and would delete what they point at. Nested worktrees are skipped: they are not part of
- * this one and are listed on their own.
+ * Estimates the space removal would free, without following links. Files with more than
+ * one hard link are left out, because deleting one name frees nothing while Bun's cache
+ * holds another. Records every link whose target is outside the worktree, because
+ * `git worktree remove` follows Windows junctions and would delete what they point at.
+ * Nested worktrees are skipped: they are not part of this one and are listed on their own.
  */
 async function scanWorktreeDirectory(root, nestedWorktrees) {
   const scan = { bytes: 0, outsideLinks: [], unreadableFolders: 0 };
@@ -181,8 +196,8 @@ async function scanWorktreeDirectory(root, nestedWorktrees) {
       }
       try {
         // Read the size before adding: `scan.bytes += await ...` would add to a stale total.
-        const { size } = await NodeFS.promises.lstat(entryPath);
-        scan.bytes += size;
+        const { size, nlink } = await NodeFS.promises.lstat(entryPath);
+        if (nlink === 1) scan.bytes += size;
       } catch {
         // A file deleted mid-scan only makes the size estimate smaller.
       }
@@ -241,6 +256,7 @@ async function inspectWorktree(record, context) {
   const entry = {
     path: record.path,
     branch: record.branch,
+    head: record.head,
     origin: worktreeOrigin(record.path),
     branchState: "detached",
     uncommittedFiles: 0,
@@ -253,7 +269,7 @@ async function inspectWorktree(record, context) {
     return entry;
   }
 
-  const { branchState, mergedHeads } = resolveBranchState(record.branch, context.pullRequestsByBranch, context.tracking);
+  const { branchState, mergedHeads } = await resolveBranchState(record.path, record.branch, context.pullRequestsByBranch, context.tracking);
   entry.branchState = branchState;
   // The main checkout's branch is the default branch, which is never "merged", so a reason would mislead.
   if (!record.isMain && !REMOVABLE_BRANCH_STATES.has(branchState)) entry.keepReasons.push(BRANCH_STATE_REASONS[branchState]);
@@ -290,7 +306,7 @@ async function mapWithConcurrency(items, limit, worker) {
  */
 export async function listWorktrees({ cwd = process.cwd(), loadPullRequests = loadPullRequestsFromGitHub, warn = console.warn } = {}) {
   const currentRoot = (await git(cwd, ["rev-parse", "--show-toplevel"])).trim();
-  const records = parseWorktreeList(await git(cwd, ["worktree", "list", "--porcelain"]));
+  const records = parseWorktreeList(await git(cwd, ["worktree", "list", "--porcelain", "-z"]));
   const mainRoot = records[0].path;
 
   let pullRequests = [];
@@ -317,17 +333,23 @@ export async function listWorktrees({ cwd = process.cwd(), loadPullRequests = lo
 }
 
 /**
- * Removes each removable worktree with `git worktree remove`, which itself refuses a
- * worktree that gained changes since it was inspected.
+ * Rechecks each removable worktree immediately before asking Git to remove it.
  *
  * @param {WorktreeEntry[]} entries
  * @param {{ cwd?: string }} [options]
- * @returns {Promise<{ removed: WorktreeEntry[], failed: { entry: WorktreeEntry, error: string }[] }>}
+ * @returns {Promise<{ removed: WorktreeEntry[], failed: { entry: WorktreeEntry, error: string }[], skipped: { entry: WorktreeEntry, reason: string }[] }>}
  */
 export async function removeWorktrees(entries, { cwd = process.cwd() } = {}) {
   const removed = [];
   const failed = [];
+  const skipped = [];
+  const records = parseWorktreeList(await git(cwd, ["worktree", "list", "--porcelain", "-z"]));
   for (const entry of entries.filter((candidate) => candidate.keepReasons.length === 0)) {
+    const reason = await removalSkipReason(entry, records);
+    if (reason) {
+      skipped.push({ entry, reason: `changed since inspection: ${reason}` });
+      continue;
+    }
     try {
       await git(cwd, ["worktree", "remove", entry.path]);
       removed.push(entry);
@@ -335,7 +357,22 @@ export async function removeWorktrees(entries, { cwd = process.cwd() } = {}) {
       failed.push({ entry, error: errorMessage(error) });
     }
   }
-  return { removed, failed };
+  return { removed, failed, skipped };
+}
+
+async function removalSkipReason(entry, records) {
+  if (!records.some((record) => samePath(record.path, entry.path))) return "worktree is no longer listed";
+  try {
+    const head = (await git(entry.path, ["rev-parse", "HEAD"])).trim();
+    if (head !== entry.head) return "HEAD moved";
+    const branch = (await git(entry.path, ["symbolic-ref", "--short", "HEAD"])).trim();
+    if (branch !== entry.branch) return "branch changed";
+    if (await countUncommittedFiles(entry.path) !== 0) return "uncommitted files";
+    const directory = await inspectDirectory(entry, records.map((record) => record.path));
+    return directory.keepReasons.join("; ");
+  } catch (error) {
+    return `recheck failed: ${errorMessage(error)}`;
+  }
 }
 
 /** Formats bytes as gigabytes, the unit disk space is discussed in. */
@@ -374,9 +411,10 @@ async function main(args) {
   console.log(formatReport(entries));
   if (!args.includes("--remove")) return;
 
-  const { removed, failed } = await removeWorktrees(entries);
+  const { removed, failed, skipped } = await removeWorktrees(entries);
   console.log("");
   for (const entry of removed) console.log(`Removed ${entry.path} (${formatGigabytes(entry.bytes)})`);
+  for (const { entry, reason } of skipped) console.log(`Skipped ${entry.path}: ${reason}`);
   for (const { entry, error } of failed) console.error(`Could not remove ${entry.path}: ${error}`);
   console.log(`Removed ${removed.length} worktrees, freeing ${formatGigabytes(removed.reduce((total, entry) => total + entry.bytes, 0))}.`);
   if (failed.length > 0) process.exitCode = 1;
