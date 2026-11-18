@@ -77,11 +77,28 @@ function shortenDetail(detail: string): string {
   return `${detail.slice(0, DETAIL_HEAD_LENGTH)}…${detail.slice(-tailLength)}`;
 }
 
+function sharedPrefixLength(left: string, right: string): number {
+  let length = 0;
+  while (length < left.length && length < right.length && left[length] === right[length]) length += 1;
+  return length;
+}
+
+/**
+ * For details that read alike once shortened: they share the head and the end, so they first
+ * differ in the middle, where the full text could fade before the difference shows. The shared
+ * start gives way instead, keeping a little of it as context.
+ */
+function elideSharedStart(detail: string, peers: readonly string[]): string {
+  const sharedLength = Math.min(...peers.map((peer) => sharedPrefixLength(detail, peer)));
+  if (sharedLength <= DETAIL_HEAD_LENGTH) return detail;
+  return `…${detail.slice(sharedLength - DETAIL_HEAD_LENGTH)}`;
+}
+
 /**
  * Names each source by its host. When another source shares the host, it adds the shortest path
  * suffix that tells them apart, then the query or fragment for sources on the same path, so two
- * links on one site stay distinguishable without hovering. A long detail is shortened in the middle
- * unless that would make two same-host labels read alike.
+ * links on one site stay distinguishable without hovering. A long detail is shortened in the middle,
+ * or, when that would make two same-host labels read alike, loses the start they share.
  */
 export function sourceLabelParts(sources: readonly ThreadSource[]): SourceLabel[] {
   const urls = sources.map((source) => new URL(source.url));
@@ -93,9 +110,10 @@ export function sourceLabelParts(sources: readonly ThreadSource[]): SourceLabel[
   });
   const short = full.map(({ host, detail }) => ({ host, detail: shortenDetail(detail) }));
   return short.map((label, index) => {
-    const clashes = short.some((other, otherIndex) =>
-      otherIndex !== index && other.host === label.host && other.detail === label.detail);
-    return clashes ? full[index] : label;
+    const peers = full.filter((_, otherIndex) =>
+      otherIndex !== index && short[otherIndex].host === label.host && short[otherIndex].detail === label.detail);
+    if (peers.length === 0) return label;
+    return { host: label.host, detail: elideSharedStart(full[index].detail, peers.map((peer) => peer.detail)) };
   });
 }
 

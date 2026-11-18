@@ -72,6 +72,17 @@ describe("overview source labels", () => {
     ]);
   });
 
+  it("drops the shared start when two long labels first differ deep in the middle", () => {
+    const labels = sourceLabels(sources(
+      "https://example.com/docs/a-very-long-shared-introduction-one-and-shared-closing-words",
+      "https://example.com/docs/a-very-long-shared-introduction-two-and-shared-closing-words",
+    ));
+    expect(labels).toEqual([
+      "example.com/…roduction-one-and-shared-closing-words",
+      "example.com/…roduction-two-and-shared-closing-words",
+    ]);
+  });
+
   it("keeps the bare host for a shared-host source at the site root", () => {
     expect(sourceLabels(sources("https://example.com/", "https://example.com/blog")))
       .toEqual(["example.com", "example.com/blog"]);
