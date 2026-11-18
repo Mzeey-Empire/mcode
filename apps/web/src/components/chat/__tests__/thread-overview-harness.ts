@@ -57,7 +57,8 @@ export function refsPage(items: GitRef[]) {
   return { ok: true as const, items, total: items.length, nextCursor: null };
 }
 
-function runningActionRun(): WorkspaceEnvironmentActionRun {
+/** A running run of the harness's "Success" Action; overrides describe another run. */
+export function runningActionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): WorkspaceEnvironmentActionRun {
   return {
     threadId: "thread-1",
     workspaceId: "ws-1",
@@ -80,6 +81,7 @@ function runningActionRun(): WorkspaceEnvironmentActionRun {
     startedAt: "2026-08-22T12:00:00.000Z",
     finishedAt: null,
     exitCode: null,
+    ...overrides,
   };
 }
 

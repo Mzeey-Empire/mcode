@@ -1,11 +1,7 @@
 import { cn } from "@/lib/utils";
 import type { OverviewPresentation } from "@/stores/overviewStore";
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import {
-  OVERVIEW_SECTIONS,
-  type OverviewEntry,
-  type OverviewHeaderAction,
-} from "./overview-registry";
+import { OVERVIEW_SECTIONS, type OverviewEntry } from "./overview-registry";
 import type { OverviewSubject } from "./overview-subject";
 import "./overview-card.css";
 
@@ -13,7 +9,6 @@ import "./overview-card.css";
 export interface OverviewCardProps {
   subject: OverviewSubject;
   entries: readonly OverviewEntry[];
-  headerActions: readonly OverviewHeaderAction[];
   presentation: Exclude<OverviewPresentation, "hidden">;
   className?: string;
   style?: CSSProperties;
@@ -42,10 +37,10 @@ function useMoreBelow() {
 }
 
 /**
- * The Overview card: a header with the registered actions, then the registered entries grouped by
- * section. Sections with nothing to show, and the dividers around them, hide themselves in CSS.
+ * The Overview card: its title, then the registered entries grouped by section. Sections with
+ * nothing to show, and the dividers around them, hide themselves in CSS.
  */
-export function OverviewCard({ subject, entries, headerActions, presentation, className, style }: OverviewCardProps) {
+export function OverviewCard({ subject, entries, presentation, className, style }: OverviewCardProps) {
   const { scrollerRef, contentRef, moreBelow, measure } = useMoreBelow();
   return (
     <div
@@ -57,9 +52,8 @@ export function OverviewCard({ subject, entries, headerActions, presentation, cl
     >
       <div ref={scrollerRef} onScroll={measure} className="min-h-0 overflow-y-auto">
         <div ref={contentRef} className="flex flex-col gap-1 p-4">
-          <div data-testid="thread-overview-card-header" className="-mr-2 flex h-8 shrink-0 items-center gap-1">
+          <div data-testid="thread-overview-card-header" className="flex h-8 shrink-0 items-center">
             <span className="min-w-0 flex-1 text-fade text-sm font-medium text-muted">Overview</span>
-            {headerActions.map(({ id, Action }) => <Action key={id} subject={subject} />)}
           </div>
           <div className="flex flex-col gap-1">
             {OVERVIEW_SECTIONS.map((section) => (

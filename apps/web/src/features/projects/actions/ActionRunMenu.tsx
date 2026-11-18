@@ -36,7 +36,7 @@ function actionScript(action: WorkspaceEnvironmentAction): string {
 /**
  * The Actions menu (Paper 12i/12j): every Project Action with its icon, then New terminal, then Edit actions.
  * An idle action starts in a new terminal. One that is running or waiting for approval opens its
- * terminal instead, and only a running one carries the green badge.
+ * terminal instead. A running one carries the green badge; one waiting for approval, the needs-you ring.
  */
 export function ActionRunMenu({
   trigger,
@@ -96,7 +96,7 @@ function ActionRunMenuItem({
     <DropdownMenuItem
       data-testid={`project-action-${action.id}`}
       label={action.name}
-      icon={<ActionMenuGlyph action={action} running={run?.status === "running"} />}
+      icon={<ActionMenuGlyph action={action} status={run?.status ?? null} />}
       trailing={live ? <span className="sr-only">{run?.status === "running" ? "Running" : "Approval required"}</span> : <RunHint />}
       disabledReason={live ? null : terminalCapReason}
       className="group/action"
@@ -105,14 +105,28 @@ function ActionRunMenuItem({
   );
 }
 
-/** The Action's icon, with the running badge at its corner. */
-function ActionMenuGlyph({ action, running }: { readonly action: WorkspaceEnvironmentAction; readonly running: boolean }) {
+/**
+ * The Action's icon, with the running badge at its corner. A run waiting for approval shows the
+ * hollow needs-you ring in its place, as its terminal tab does, because that run needs the user.
+ */
+export function ActionMenuGlyph({ action, status }: {
+  readonly action: WorkspaceEnvironmentAction;
+  readonly status: WorkspaceEnvironmentActionRun["status"] | null;
+}) {
+  if (status === "awaiting-approval") {
+    return (
+      <span data-testid="action-menu-badge" data-badge="pending" aria-hidden className="inline-flex size-4 items-center justify-center">
+        <span className="size-2 rounded-full border-[1.5px] border-primary" />
+      </span>
+    );
+  }
   return (
     <span className="relative inline-flex">
       <ActionIcon iconId={action.icon} command={actionScript(action)} size={16} />
-      {running ? (
+      {status === "running" ? (
         <span
           data-testid="action-menu-badge"
+          data-badge="running"
           aria-hidden
           className="absolute -right-[3px] -bottom-[3px] size-2 rounded-full bg-success ring-2 ring-page"
         />

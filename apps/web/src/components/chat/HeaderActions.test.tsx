@@ -128,7 +128,9 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuTrigger: ({ render }: { render: ReactElement }) => render,
   DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  DropdownMenuItem: ({ children, ...props }: any) => <button {...props}>{children}</button>,
+  DropdownMenuItem: ({ children, label, icon: _icon, trailing: _trailing, disabledReason: _disabledReason, ...props }: any) => (
+    <button {...props}>{label}{children}</button>
+  ),
   DropdownMenuSeparator: () => <hr />,
 }));
 
@@ -430,39 +432,22 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.getByTestId("thread-overview-ci-green")).toBeInTheDocument();
   });
 
-  it("places one Run project action control before Project settings in the Overview header", () => {
+  it("keeps the Overview title free of controls, with Project actions as the card's first row", () => {
     renderHeaderActions();
 
-    const header = screen.getByTestId("thread-overview-card-header");
-    const projectActions = within(header).getAllByRole("button", { name: "Run project action" });
-    const projectSettings = within(header).getByRole("button", {
-      name: "Open Project settings",
-    });
-
-    expect(projectActions).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Open Project settings" })).toHaveLength(1);
-    expect(Boolean(projectActions[0].compareDocumentPosition(projectSettings) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(header.lastElementChild).toBe(projectSettings);
+    expect(within(screen.getByTestId("thread-overview-card-header")).queryAllByRole("button")).toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: "Project actions" })).toHaveLength(1);
   });
 
-  it("opens the Project environment panel through the adaptive route", () => {
-    renderHeaderActions();
-
-    fireEvent.click(screen.getByRole("button", { name: "Open Project settings" }));
-
-    expect(mockShowRightPanel).toHaveBeenCalledWith("ws-1", "thread-1");
-    expect(mockSetRightPanelWidth).toHaveBeenCalled();
-    expect(mockSetRightPanelTab).toHaveBeenCalledWith("ws-1", "thread-1", "environment");
-  });
-
-  it("activates Project settings from the keyboard through Button semantics", async () => {
+  it("opens the Project environment panel from Edit actions through the adaptive route", async () => {
     const user = userEvent.setup();
     renderHeaderActions();
 
-    const projectSettings = screen.getByRole("button", { name: "Open Project settings" });
-    projectSettings.focus();
-    await user.keyboard("{Enter}");
+    // The menu renders inline here, so its items are already present as buttons.
+    await user.click(screen.getByRole("button", { name: "Edit actions" }));
 
+    expect(mockShowRightPanel).toHaveBeenCalledWith("ws-1", "thread-1");
+    expect(mockSetRightPanelWidth).toHaveBeenCalled();
     expect(mockSetRightPanelTab).toHaveBeenCalledWith("ws-1", "thread-1", "environment");
   });
 
