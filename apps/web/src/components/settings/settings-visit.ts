@@ -255,7 +255,7 @@ const useVisitStore = create<{ readonly visit: Visit | null }>(() => ({ visit: n
 let nextVisitId = 0;
 let lastSource: RevertSource | null = null;
 let stopListening: (() => void) | null = null;
-/** For each claimed setting, the in-flight writes its latest local attribution relied on to land. */
+/** For each claimed setting, every in-flight write its local attributions relied on to land. */
 let reliedOn = new Map<SettingId, readonly number[]>();
 
 function sameSource(a: RevertSource, b: RevertSource): boolean {
@@ -287,8 +287,14 @@ function recordReliance(journal: ReadonlyMap<SettingId, JournalEntry>, prev: Rev
   for (const def of REVERTIBLE_DEFS) {
     if (sameValue(def.value.read(prev), def.value.read(next))) continue;
     const explaining = journal.has(def.id) ? explainingWrites(def, scopes, prev, next) : null;
-    if (explaining === null) reliedOn.delete(def.id);
-    else reliedOn.set(def.id, explaining.map((index) => writes[index]?.seq ?? 0));
+    if (explaining === null) {
+      reliedOn.delete(def.id);
+      continue;
+    }
+    // Keep earlier writes: a grouped row (both Fast flags) can rely on a pending write to one field while a write to
+    // the other lands. A write that already landed never fails, so keeping it is harmless.
+    const seqs = explaining.map((index) => writes[index]?.seq ?? 0);
+    reliedOn.set(def.id, [...new Set([...(reliedOn.get(def.id) ?? []), ...seqs])]);
   }
 }
 

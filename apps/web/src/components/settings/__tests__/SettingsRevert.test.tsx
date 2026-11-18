@@ -324,6 +324,33 @@ describe("Settings Revert", () => {
     expect(mockTransport.updateSettings).toHaveBeenCalledTimes(1);
   });
 
+  it("releases the Fast row when a pending write to one flag fails after a write to the other lands", async () => {
+    render(<SettingsView />);
+    let fail: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      fail = () => reject(new Error("offline"));
+    }));
+    let codexWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      codexWrite = useSettingsStore.getState().update({ provider: { codex: { fastMode: true } } });
+    });
+    act(() => {
+      const settings = useSettingsStore.getState().settings;
+      useSettingsStore.getState()._applyPush({ ...settings, provider: { ...settings.provider, codex: { ...settings.provider.codex, fastMode: true } } });
+    });
+    await act(async () => {
+      await useSettingsStore.getState().update({ provider: { claude: { fastMode: true } } });
+    });
+    expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
+    await act(async () => {
+      fail();
+      await codexWrite;
+    });
+
+    expect(useSettingsStore.getState().settings.provider.codex.fastMode).toBe(true);
+    expect(revertButton()).toBeNull();
+  });
+
   it("releases the terminal default another window set while a local default write is pending", async () => {
     openPage("terminal");
     render(<SettingsView />);
