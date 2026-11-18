@@ -102,7 +102,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     }
   },
 
-  setGlobalDefault: (profileId) => trackLocalSettingsWrite({ sink: "terminalGlobalDefault" }, async () => {
+  setGlobalDefault: (profileId) => trackLocalSettingsWrite({ sink: "terminalGlobalDefault", profileId }, async () => {
     set({ pending: true, error: null });
     try {
       await getTransport().terminalProfileSetDefault(profileId);
@@ -116,7 +116,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     }
   }),
 
-  setWorkspaceDefault: (workspaceId, profileId) => trackLocalSettingsWrite({ sink: "terminalProjectDefault", workspaceId }, async () => {
+  setWorkspaceDefault: (workspaceId, profileId) => trackLocalSettingsWrite({ sink: "terminalProjectDefault", workspaceId, profileId }, async () => {
     set({ pending: true, error: null });
     try {
       const result = await getTransport().terminalWorkspacePreferencesUpdate(workspaceId, profileId);
@@ -130,7 +130,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     }
   }),
 
-  resetWorkspaceDefault: (workspaceId) => trackLocalSettingsWrite({ sink: "terminalProjectDefault", workspaceId }, async () => {
+  resetWorkspaceDefault: (workspaceId) => trackLocalSettingsWrite({ sink: "terminalProjectDefault", workspaceId, profileId: null }, async () => {
     set({ pending: true, error: null });
     try {
       await getTransport().terminalWorkspacePreferencesReset(workspaceId);

@@ -1,15 +1,17 @@
+import type { TerminalProfileReference } from "@mcode/contracts/models/terminal";
 import type { TerminalPreferencesUpdate } from "@mcode/contracts/models/terminal-settings";
 import type { SettingsPatch } from "./settingsStore";
 
 /**
- * What one local write addresses. A Settings visit counts a changed setting as this window's own only when an
- * in-flight write addresses it; a write that pulls in the whole settings object (a fetch) must not claim the rest.
+ * What one local write sends. A Settings visit counts a changed setting as this window's own only when an in-flight
+ * write sends the value it now reads; a write that pulls in the whole settings object (a fetch) must not claim the rest.
  */
 export type LocalWriteScope =
   | { readonly sink: "settings"; readonly patch: SettingsPatch }
   | { readonly sink: "terminalPreferences"; readonly patch: TerminalPreferencesUpdate }
-  | { readonly sink: "terminalGlobalDefault" }
-  | { readonly sink: "terminalProjectDefault"; readonly workspaceId: string };
+  | { readonly sink: "terminalGlobalDefault"; readonly profileId: TerminalProfileReference }
+  // A null profile resets the project to the global default.
+  | { readonly sink: "terminalProjectDefault"; readonly workspaceId: string; readonly profileId: TerminalProfileReference | null };
 
 let lastWriteSeq = 0;
 const inFlight = new Map<number, LocalWriteScope>();

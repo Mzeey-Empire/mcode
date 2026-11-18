@@ -222,6 +222,69 @@ describe("Settings Revert", () => {
     });
   });
 
+  it("releases a setting another window changed while a local write of a different value to it is pending", async () => {
+    render(<SettingsView />);
+    await chooseDark();
+    let fail: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      fail = () => reject(new Error("offline"));
+    }));
+    let systemWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      systemWrite = useSettingsStore.getState().update({ appearance: { theme: "system" } });
+    });
+    act(() => useSettingsStore.getState()._applyPush(themeOf(useSettingsStore.getState().settings, "light")));
+    await act(async () => {
+      fail();
+      await systemWrite;
+    });
+
+    expect(revertButton()).toBeNull();
+    expect(mockTransport.updateSettings).toHaveBeenCalledTimes(2);
+    expect(useSettingsStore.getState().settings.appearance.theme).toBe("light");
+  });
+
+  it("claims its own write when the push for it arrives before the write's response", async () => {
+    render(<SettingsView />);
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => {
+      const pushed = mergeSettings(useSettingsStore.getState().settings, patch);
+      useSettingsStore.getState()._applyPush(pushed);
+      return Promise.resolve(pushed);
+    });
+    await chooseDark();
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert 1 change" }));
+    await flush();
+
+    expect(vi.mocked(mockTransport.updateSettings).mock.calls.at(-1)?.[0]).toEqual({ appearance: { theme: "system" } });
+    expect(useSettingsStore.getState().settings.appearance.theme).toBe("system");
+  });
+
+  it("releases the terminal default another window set while a local default write is pending", async () => {
+    openPage("terminal");
+    render(<SettingsView />);
+    await flush();
+    let fail: () => void = () => {};
+    vi.mocked(mockTransport.terminalProfileSetDefault).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      fail = () => reject(new Error("offline"));
+    }));
+    let defaultWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      defaultWrite = useTerminalSettingsStore.getState().setGlobalDefault("certified:windows-cmd");
+    });
+    act(() => {
+      const settings = useSettingsStore.getState().settings;
+      useSettingsStore.getState()._applyPush({ ...settings, terminal: { ...settings.terminal, defaultProfileId: "certified:windows-git-bash" } });
+    });
+    await act(async () => {
+      fail();
+      await defaultWrite;
+    });
+
+    expect(useSettingsStore.getState().settings.terminal.defaultProfileId).toBe("certified:windows-git-bash");
+    expect(revertButton()).toBeNull();
+  });
+
   it("does not overwrite an outside change that lands between two Revert writes", async () => {
     openPage("terminal");
     render(<SettingsView />);

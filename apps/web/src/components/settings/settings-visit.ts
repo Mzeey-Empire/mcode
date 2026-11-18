@@ -90,28 +90,39 @@ function isPrefix(a: readonly string[], b: readonly string[]): boolean {
   return a.length <= b.length && a.every((key, index) => key === b[index]);
 }
 
-function patchesOverlap(a: unknown, b: unknown): boolean {
-  const bPaths = leafPaths(b);
-  return leafPaths(a).some((path) => bPaths.some((other) => isPrefix(path, other) || isPrefix(other, path)));
+function valueAt(value: unknown, path: readonly string[]): unknown {
+  return path.reduce<unknown>((node, key) => (isRecord(node) ? node[key] : undefined), value);
 }
 
-function addressesDef(scope: LocalWriteScope, step: RestoreStep): boolean {
+/** True when the patches share a path and agree on every path they share. */
+function patchSends(a: unknown, b: unknown): boolean {
+  const bPaths = leafPaths(b);
+  const shared = leafPaths(a).flatMap((path) =>
+    bPaths.filter((other) => isPrefix(path, other) || isPrefix(other, path)).map((other) => (path.length >= other.length ? path : other)));
+  return shared.length > 0 && shared.every((path) => sameValue(valueAt(a, path), valueAt(b, path)));
+}
+
+function sendsStep(scope: LocalWriteScope, step: RestoreStep): boolean {
   switch (scope.sink) {
     case "settings":
-      return step.sink === "settings" && patchesOverlap(step.patch, scope.patch);
+      return step.sink === "settings" && patchSends(step.patch, scope.patch);
     case "terminalPreferences":
-      return step.sink === "terminalPreferences" && patchesOverlap(step.patch, scope.patch);
+      return step.sink === "terminalPreferences" && patchSends(step.patch, scope.patch);
     case "terminalGlobalDefault":
-      return step.sink === "terminalGlobalDefault";
+      return step.sink === "terminalGlobalDefault" && sameValue(step.profileId, scope.profileId);
     case "terminalProjectDefault":
-      return step.sink === "terminalProjectDefault" && step.workspaceId === scope.workspaceId;
+      return step.sink === "terminalProjectDefault" && step.workspaceId === scope.workspaceId && sameValue(step.profileId, scope.profileId);
   }
 }
 
-/** True when one of `scopes` writes the value `def` reads; its restore step on either side names what it writes. */
-function writtenLocally(def: RevertibleDef, scopes: readonly LocalWriteScope[], prev: RevertSource, next: RevertSource): boolean {
-  const steps = [def.value.restore(prev, prev), def.value.restore(next, next)];
-  return scopes.some((scope) => steps.some((step) => addressesDef(scope, step)));
+/**
+ * True when one of `scopes` sends the value `def` now reads. `restore(next, next)` names what writing that value
+ * sends. Matching the value, not just the setting, keeps a pending local write from claiming an outside change to the
+ * same setting; the window's own push can arrive before its RPC response, so arrival path alone cannot tell them apart.
+ */
+function writtenLocally(def: RevertibleDef, scopes: readonly LocalWriteScope[], next: RevertSource): boolean {
+  const step = def.value.restore(next, next);
+  return scopes.some((scope) => sendsStep(scope, step));
 }
 
 /**
@@ -129,7 +140,7 @@ export function journalTransition(
   const changed = defs.filter((def) => !sameValue(def.value.read(prev), def.value.read(next)));
   // A local write claims an untouched row; an outside write releases a claimed one. Anything else keeps the journal.
   const affected = changed
-    .map((def) => ({ def, local: writtenLocally(def, scopes, prev, next) }))
+    .map((def) => ({ def, local: writtenLocally(def, scopes, next) }))
     .filter(({ def, local }) => journal.has(def.id) !== local);
   if (affected.length === 0) return journal;
   const out = new Map(journal);
