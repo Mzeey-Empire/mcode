@@ -26,7 +26,8 @@ export type AutoCompleteStateInput = Pick<Thread,
  * ready: the thread can complete automatically.
  *
  * Held enters on reopen, by hand or by sending a message to a closed thread.
- * It remembers the PRs linked when it began and leaves only when a PR outside that set is linked
+ * Its hold snapshot remembers the PRs linked when it began, or when first observed for an older build's hold.
+ * It leaves only when a PR outside that set is linked
  * or a remembered PR changes state. Forgetting and re-linking the same PR keeps the hold.
  * Held is stored as auto_complete_paused_at, whose name stays because older builds share the database.
  */

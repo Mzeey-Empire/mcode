@@ -8,7 +8,11 @@ import { databaseWriteHandler } from "../../../runtime/persistence/sqlite/databa
 import { threadPullRequests, threads } from "../../../runtime/persistence/sqlite/schema.js";
 import { threadPullRequestWriteOperations } from "./thread-pull-request-write-operations.js";
 
-const heldPullRequestsSchema = z.array(z.object({ number: z.number().int().positive(), state: ThreadPullRequestStateSchema }));
+const holdSnapshotSchema = z.object({
+  heldAt: z.string(),
+  pullRequests: z.array(z.object({ number: z.number().int().positive(), state: ThreadPullRequestStateSchema })),
+});
+type HoldSnapshot = z.infer<typeof holdSnapshotSchema>;
 
 function mergeObservations(current: ThreadPullRequest[], observations: readonly ThreadPullRequest[]): ThreadPullRequest[] {
   const byNumber = new Map(current.map((pr) => [pr.number, pr]));
@@ -39,13 +43,24 @@ function mirrorPrimaryIntoLegacyColumnsForOlderBuilds(db: Database, threadId: st
     .where(eq(threads.id, threadId)).run();
 }
 
-function releaseHoldOnPullRequestChange(db: Database, threadId: string, current: ThreadPullRequest[], next: ThreadPullRequest[]): void {
-  const thread = drizzle(db).select({ heldAt: threads.autoCompletePausedAt, snapshot: threads.autoCompleteHoldPullRequests })
+function resolveHoldSnapshot(db: Database, threadId: string, current: ThreadPullRequest[]): HoldSnapshot | null {
+  const thread = drizzle(db).select({ heldAt: threads.autoCompletePausedAt, holdSnapshot: threads.autoCompleteHoldPullRequests })
     .from(threads).where(eq(threads.id, threadId)).get();
-  if (!thread || thread.heldAt === null) return;
-  let remembered: Array<Pick<ThreadPullRequest, "number" | "state">> = current;
-  if (thread.snapshot !== null) remembered = heldPullRequestsSchema.parse(JSON.parse(thread.snapshot));
-  const previousStates = new Map(remembered.map((pr) => [pr.number, pr.state]));
+  if (!thread || thread.heldAt === null) return null;
+  if (thread.holdSnapshot !== null) {
+    const stored = holdSnapshotSchema.safeParse(JSON.parse(thread.holdSnapshot));
+    if (stored.success && stored.data.heldAt === thread.heldAt) return stored.data;
+  }
+  // Older builds set holds without a matching snapshot, so adopt the links before this write.
+  const holdSnapshot = { heldAt: thread.heldAt, pullRequests: current.map(({ number, state }) => ({ number, state })) };
+  drizzle(db).update(threads).set({ autoCompleteHoldPullRequests: JSON.stringify(holdSnapshot) })
+    .where(eq(threads.id, threadId)).run();
+  return holdSnapshot;
+}
+
+function releaseHoldOnPullRequestChange(db: Database, threadId: string, holdSnapshot: HoldSnapshot | null, next: ThreadPullRequest[]): void {
+  if (!holdSnapshot) return;
+  const previousStates = new Map(holdSnapshot.pullRequests.map((pr) => [pr.number, pr.state]));
   const changed = next.some((pr) => !previousStates.has(pr.number) || previousStates.get(pr.number) !== pr.state);
   if (!changed) return;
   db.query("UPDATE threads SET auto_complete_paused_at = NULL, auto_complete_hold_pull_requests = NULL WHERE id = ?").run(threadId);
@@ -67,17 +82,20 @@ export function readLinks(db: Database, threadId: string): ThreadPullRequest[] {
 export function observeThreadPullRequests(db: Database, threadId: string, observations: readonly ThreadPullRequest[]): ThreadPullRequest[] | null {
   return db.transaction(() => {
     const current = readLinks(db, threadId);
+    const holdSnapshot = resolveHoldSnapshot(db, threadId, current);
     const next = mergeObservations(current, observations);
     if (JSON.stringify(rankPullRequests(current)) === JSON.stringify(next)) return null;
     writeLinks(db, threadId, next);
-    releaseHoldOnPullRequestChange(db, threadId, current, next);
+    releaseHoldOnPullRequestChange(db, threadId, holdSnapshot, next);
     return next;
   })();
 }
 
 /** Clear PR links inside a checkout transaction on the writable owner. */
 export function forgetThreadPullRequests(db: Database, threadId: string): ThreadPullRequest[] | null {
-  if (readLinks(db, threadId).length === 0) return null;
+  const current = readLinks(db, threadId);
+  resolveHoldSnapshot(db, threadId, current);
+  if (current.length === 0) return null;
   writeLinks(db, threadId, []);
   return [];
 }

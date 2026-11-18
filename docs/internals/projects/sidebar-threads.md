@@ -111,7 +111,9 @@ evaluates these states in order:
 | `ready` | Every linked PR is merged and nothing needs the user. |
 
 Reopening by hand or sending a message to a closed thread enters held.
-The hold remembers the PR numbers and states linked when it began. Only linking
+The hold snapshot records which hold it belongs to and the PR numbers and states
+linked when it began. A hold without a valid snapshot, set by an older build,
+takes the thread's links at that moment as its snapshot. Only linking
 a PR outside that snapshot or changing a remembered PR's state releases it, so
 forgetting and re-linking the same PR keeps the hold. Activity,
 the thread's setting, removing links, and title or URL changes do not release it.

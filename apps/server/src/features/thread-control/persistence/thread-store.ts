@@ -755,12 +755,15 @@ export class ThreadStore {
   reopen(id: string, reopenedAt = new Date().toISOString()): Thread | null {
     return this.orm.transaction((tx) => {
       if (!tx.select({ id: threads.id }).from(threads).where(eq(threads.id, id)).get()) return null;
-      const holdPullRequests = readLinks(this.db, id).map(({ number, state }) => ({ number, state }));
+      const holdSnapshot = {
+        heldAt: reopenedAt,
+        pullRequests: readLinks(this.db, id).map(({ number, state }) => ({ number, state })),
+      };
       const result = runChanges(tx.update(threads)
         .set({
           userCompletedAt: null,
           autoCompletePausedAt: reopenedAt,
-          autoCompleteHoldPullRequests: JSON.stringify(holdPullRequests),
+          autoCompleteHoldPullRequests: JSON.stringify(holdSnapshot),
           scheduledDeletionAt: null,
           cleanupState: null,
           cleanupReason: null,
