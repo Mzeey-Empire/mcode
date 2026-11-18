@@ -600,10 +600,10 @@ describe("HeaderActions - consolidated header", () => {
     expect(usage).not.toHaveAttribute("aria-expanded");
     expect(Boolean(usage.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
     expect(Boolean(usage.compareDocumentPosition(recap) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
-    expect(screen.getByText("5-hour limit")).toBeInTheDocument();
-    expect(screen.getByText("Weekly limit")).toBeInTheDocument();
+    expect(screen.getByText("5-hour")).toBeInTheDocument();
+    expect(screen.getByText("Weekly")).toBeInTheDocument();
     const values = screen.getAllByTestId("thread-overview-usage-value");
-    expect(values.map((value) => value.textContent)).toEqual(["12% used · resets Jul 3", "47% used · resets Jul 7"]);
+    expect(values.map((value) => value.textContent)).toEqual(["12%", "47%"]);
     expect(screen.getByRole("progressbar", { name: /5-hour usage 12 percent\. Resets in/ })).toHaveAttribute(
       "aria-valuenow",
       "12",
@@ -648,13 +648,34 @@ describe("HeaderActions - consolidated header", () => {
     const values = screen.getAllByTestId("thread-overview-usage-value");
     const bars = screen.getAllByRole("progressbar");
     const fills = bars.map((bar) => bar.firstElementChild);
-    expect(values[0]).toHaveTextContent("89% used");
+    expect(values[0]).toHaveTextContent("89%");
     expect(bars[0]).not.toHaveAttribute("data-near-limit");
     expect(fills[0]).toHaveClass("bg-ink");
-    expect(values[1]).toHaveTextContent("100% used");
+    expect(values[1]).toHaveTextContent("100%");
     expect(bars[1]).toHaveAttribute("data-near-limit", "true");
     expect(fills[1]).toHaveClass("bg-warning");
     expect(screen.getByTestId("thread-overview-usage").innerHTML).not.toMatch(/destructive|primary|diff-add|diff-remove/);
+  });
+
+  it("marks each limit stale on its own line when the provider's numbers are stale", () => {
+    seedThreadUsage("thread-1", {
+      providerId: "claude",
+      usageStatus: "stale",
+      quotaCategories: [
+        {
+          label: "Weekly limit",
+          used: 40,
+          total: 100,
+          remainingPercent: 0.6,
+          resetDate: "2099-07-07T14:14:00.000Z",
+          isUnlimited: false,
+        },
+      ],
+    });
+
+    renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
+
+    expect(screen.getByTestId("thread-overview-usage")).toHaveTextContent(/^Weekly · stale\s*40%$/);
   });
 
   it("does not render Codex usage before provider quota data arrives", () => {

@@ -1,13 +1,14 @@
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { useOverviewUsage } from "@/features/thread-overview/use-overview-usage";
-import { formatUsageResetShort, formatUsageResetText } from "@/lib/usage-reset-format";
+import { formatUsageResetText } from "@/lib/usage-reset-format";
 import { cn } from "@/lib/utils";
 import { useThreadStore } from "@/stores/threadStore";
 import { type Thread } from "@/transport";
 import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
-import { useEffect } from "react";
-import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { CircleDollarSign, Gauge } from "lucide-react";
+import { useEffect, type ReactNode } from "react";
+import { OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 import {
   usageCategoryPercent,
   usageCategoryShortLabel,
@@ -22,29 +23,42 @@ interface ThreadOverviewUsageProps {
   usageStatus?: ProviderUsageInfo["usageStatus"];
 }
 
-function UsageCategory({ category }: { category: QuotaCategory }) {
+/**
+ * One read-only Usage line in the row anatomy: icon lane, a muted name, then the value. It has no
+ * hover, because nothing in it acts.
+ */
+function UsageLine({ icon, name, children }: { icon: ReactNode; name: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="flex h-row-compact items-center gap-2 px-3 text-body-small">
+      <OverviewRowIcon>{icon}</OverviewRowIcon>
+      <span className="min-w-0 flex-1 text-fade text-muted">{name}</span>
+      {children}
+    </div>
+  );
+}
+
+function sentenceCase(label: string): string {
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/**
+ * A limit on one line: its short name, a meter and the percent used. The reset time is left to the
+ * meter's accessible name; at a glance only how close the limit is matters.
+ */
+function UsageCategory({ category, stale }: { category: QuotaCategory; stale: boolean }) {
   const percent = Math.min(Math.max(usageCategoryPercent(category), 0), 100);
   const rounded = Math.round(percent);
   const isNearLimit = percent >= USAGE_WARNING_PERCENT;
-  const resetShort = formatUsageResetShort(category.resetDate);
   const resetText = formatUsageResetText(category.resetDate);
   const shortLabel = usageCategoryShortLabel(category.label);
   const progressDescription = resetText
     ? `${shortLabel} usage ${rounded} percent. ${resetText}`
     : `${shortLabel} usage ${rounded} percent`;
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3 text-caption text-muted">
-        <span className="text-fade min-w-0">{category.label.trim()}</span>
-        <span
-          data-testid="thread-overview-usage-value"
-          data-near-limit={isNearLimit || undefined}
-          className="shrink-0 tabular-nums"
-        >
-          <span className={isNearLimit ? "text-warning" : "text-ink"}>{rounded}% used</span>
-          {resetShort ? ` · ${resetShort}` : null}
-        </span>
-      </div>
+    <UsageLine
+      icon={<Gauge />}
+      name={<>{sentenceCase(shortLabel)}{stale ? <span className="text-caption"> · stale</span> : null}</>}
+    >
       <div
         role="progressbar"
         aria-label={progressDescription}
@@ -54,14 +68,22 @@ function UsageCategory({ category }: { category: QuotaCategory }) {
         data-near-limit={isNearLimit || undefined}
         // Track and fill are picked for contrast in both themes: the track about 2.1:1 against the panel
         // so the 100% end reads, and each fill (ink, or warning near the limit) at least 3.2:1 against the track.
-        className="h-1 w-full overflow-hidden rounded-[2px] bg-control-border/70"
+        className="h-1 w-16 shrink-0 overflow-hidden rounded-[2px] bg-control-border/70"
       >
         <div
           className={cn("h-full rounded-[2px]", isNearLimit ? "bg-warning" : "bg-ink")}
           style={{ width: `${percent}%` }}
         />
       </div>
-    </div>
+      {/* A fixed width fits "100%", so the meters of stacked limits line up. */}
+      <span
+        data-testid="thread-overview-usage-value"
+        data-near-limit={isNearLimit || undefined}
+        className={cn("w-[4ch] shrink-0 text-right tabular-nums", isNearLimit ? "text-warning" : "text-ink")}
+      >
+        {rounded}%
+      </span>
+    </UsageLine>
   );
 }
 
@@ -71,36 +93,18 @@ function ThreadOverviewUsage({
   sessionCostSummary,
   usageStatus,
 }: ThreadOverviewUsageProps) {
-  if (categories.length === 0) {
-    return (
-      <div
-        data-testid="thread-overview-usage"
-        aria-label={`Usage, ${summary}`}
-        className="flex h-row-compact w-full items-center justify-between gap-3 px-3 text-body-small text-muted"
-      >
-        <span className="font-medium">Usage</span>
-        <span className="shrink-0 tabular-nums">{summary}</span>
-      </div>
-    );
-  }
-
   return (
-    <section data-testid="thread-overview-usage" aria-label={`Usage, ${summary}`} className="px-3 pb-2">
-      <div className="flex h-6 items-center text-caption font-medium text-muted">Usage</div>
-      <div className="flex flex-col gap-3">
-        {categories.map((category) => (
-          <UsageCategory key={category.label} category={category} />
-        ))}
-        {usageStatus === "stale" ? (
-          <div className="text-caption text-muted">Stale</div>
-        ) : null}
-        {sessionCostSummary ? (
-          <div className="flex items-baseline justify-between gap-3 text-caption text-muted">
-            <span className="text-fade min-w-0">Session cost</span>
-            <span className="shrink-0 tabular-nums">{sessionCostSummary}</span>
-          </div>
-        ) : null}
-      </div>
+    <section data-testid="thread-overview-usage" aria-label={`Usage, ${summary}`} className="flex flex-col">
+      {categories.map((category) => (
+        <UsageCategory key={category.label} category={category} stale={usageStatus === "stale"} />
+      ))}
+      {sessionCostSummary ? (
+        <UsageLine icon={<CircleDollarSign />} name="Cost">
+          <span className="shrink-0 tabular-nums text-ink">{sessionCostSummary}</span>
+        </UsageLine>
+      ) : null}
+      {/* With nothing to measure, the summary is a status such as "Usage unavailable" and names itself. */}
+      {categories.length === 0 && !sessionCostSummary ? <UsageLine icon={<Gauge />} name={summary} /> : null}
     </section>
   );
 }
