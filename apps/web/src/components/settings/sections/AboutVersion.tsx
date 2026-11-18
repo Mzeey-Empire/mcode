@@ -172,7 +172,14 @@ function useVersionActions(
   setServerAgents: (count: number | null) => void,
 ): VersionActions {
   // The desktop publishes why a call failed; reading the status back shows it even if that push was missed.
-  const readBackStatus = async () => useUpdateStore.getState().setStatus(await app.getUpdateStatus());
+  // A failed read-back must not reject its caller, or a held Restart would never return to idle.
+  const readBackStatus = async () => {
+    try {
+      useUpdateStore.getState().setStatus(await app.getUpdateStatus());
+    } catch (error) {
+      console.error("[updates] getUpdateStatus failed", error);
+    }
+  };
   const readBackOnFailure = (name: string, call: () => Promise<void>) => async () => {
     try {
       await call();
