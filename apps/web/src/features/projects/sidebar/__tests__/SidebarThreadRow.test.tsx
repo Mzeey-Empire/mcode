@@ -26,9 +26,14 @@ import { useProjectTreeMenus } from "../../ProjectTree";
 import { SidebarList } from "../SidebarList";
 import { useSidebarModel } from "../use-sidebar-model";
 import { PREVIEW_SCROLL_SETTLE_MS } from "../preview-scroll-guard";
+import { SIDEBAR_STATUS_WORD_WIDTH } from "../sidebar-label-tooltip";
 import { FakeVirtualViewport } from "./fake-virtual-viewport";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useThreadStore } from "@/stores/threadStore";
+import { useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraftStore";
+import { useThreadDraftStore, type ThreadDraft } from "@/stores/threadDraftStore";
+import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
+import { INTERACTION_MODES, ORCHESTRATION_MODES, PERMISSION_MODES } from "@mcode/contracts/models/enums";
 import { statusGlyph } from "@/features/thread-attention/__tests__/status-glyph";
 
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
@@ -49,7 +54,7 @@ function renderThread(overrides: Partial<Thread> = {}): HTMLElement {
   const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString(), ...overrides });
   useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
   render(<Harness />);
-  return screen.getByRole("button", { name: /^Row title/ });
+  return screen.getByRole("button", { name: /^(Draft )?Row title/ });
 }
 
 function finished(threadId: string): ThreadAttention {
@@ -61,6 +66,9 @@ function finished(threadId: string): ThreadAttention {
     hasUnfinishedDelegatedTasks: false,
   };
 }
+
+// Width is module state that persists across tests; each test starts at the app's default.
+const INITIAL_SIDEBAR_WIDTH = useSidebarWidthStore.getState().width;
 
 describe("SidebarThreadRow", () => {
   const openExternalUrl = vi.fn();
@@ -79,10 +87,12 @@ describe("SidebarThreadRow", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     Reflect.deleteProperty(window, "desktopBridge");
+    useSidebarWidthStore.setState({ width: INITIAL_SIDEBAR_WIDTH });
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });
 
   it("keeps the status icon and drops its label while the row actions show", () => {
+    useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH });
     act(() => threadAttentionStore.getState().apply(finished("t1")));
     const row = renderThread();
     const status = () => screen.getByTestId("thread-status");
@@ -99,6 +109,28 @@ describe("SidebarThreadRow", () => {
     fireEvent.mouseLeave(row);
     expect(within(status()).getByText("Finished")).toBeVisible();
     expect(complete).not.toBeVisible();
+  });
+
+  it.each(["projects", "threads"] as const)("shows a narrow %s row's Close as its icon, named Close", async (view) => {
+    useSidebarWidthStore.setState({ width: 220 });
+    useSidebarUiStore.setState({ view });
+    useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title" })], activeWorkspaceId: "ws-1", activeThreadId: null });
+    render(<Harness />);
+    fireEvent.mouseEnter(screen.getByRole("button", { name: view === "threads" ? /^Alpha / : /^Row title/ }));
+    const close = screen.getByRole("button", { name: "Close Row title" });
+    expect(close).toBeVisible();
+    expect(close).not.toHaveTextContent("Close");
+    fireEvent.pointerOver(close, { pointerType: "mouse" });
+    fireEvent.mouseEnter(close, { clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(close, { clientX: 11, clientY: 10 });
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.getByText("Close")).toBeTruthy();
+  });
+
+  it("keeps the word on Close at the default width", () => {
+    const row = renderThread();
+    fireEvent.mouseEnter(row);
+    expect(screen.getByRole("button", { name: "Close Row title" })).toHaveTextContent("Close");
   });
 
   it("keeps the row's hover look while its options menu is open", async () => {
@@ -549,6 +581,138 @@ describe("SidebarThreadRow", () => {
       fireEvent.keyDown(row, { key: "Tab" });
       await act(() => vi.advanceTimersByTimeAsync(1000));
       expect(preview()).not.toBeNull();
+    });
+  });
+
+  describe("drafts", () => {
+    const composer = (overrides: Partial<ComposerDraft> = {}): ComposerDraft => ({ input: "", attachments: [], modelId: "m", provider: "claude", reasoning: "high", ...overrides });
+    const ATTACHMENT = { id: "a1", name: "shot.png", mimeType: "image/png", sizeBytes: 10, previewUrl: "blob:x", filePath: "C:/tmp/shot.png" };
+
+    function newThreadDraft(id: string, input: string): ThreadDraft {
+      return {
+        id,
+        workspaceId: "ws-1",
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        draft: composer({ input }),
+        selection: { interactionMode: INTERACTION_MODES.PLAN, permissionMode: PERMISSION_MODES.FULL, orchestrationMode: ORCHESTRATION_MODES.STANDARD, approvalReviewMode: "manual", thinking: null },
+        target: { mode: "direct", branch: "main", branchSource: "branch", branchRemote: null, startFromOrigin: false, selectedWorktree: null },
+      };
+    }
+
+    function listOrder(): string[] {
+      return [...screen.getByTestId("thread-list").querySelectorAll("[data-testid='draft-item'], [data-testid='thread-item'], [role='separator']")]
+        .map((node) => node.getAttribute("data-draft-id") ?? node.getAttribute("data-thread-id") ?? "separator");
+    }
+
+    afterEach(() => {
+      useComposerDraftStore.setState({ drafts: {} });
+      useThreadDraftStore.setState({ drafts: {} });
+      useSidebarWidthStore.setState({ width: 304 });
+      act(() => threadAttentionStore.getState().apply({ ...finished("t1"), lastTurn: null }));
+    });
+
+    it("tags a thread whose composer holds text or only an attachment, and not an empty one", () => {
+      useComposerDraftStore.setState({ drafts: { t1: composer({ input: "half typed" }) } });
+      const row = renderThread();
+      expect(within(row).getByText("Draft")).toBeTruthy();
+
+      act(() => useComposerDraftStore.setState({ drafts: { t1: composer({ attachments: [ATTACHMENT] }) } }));
+      expect(within(row).getByText("Draft")).toBeTruthy();
+
+      act(() => useComposerDraftStore.setState({ drafts: { t1: composer() } }));
+      expect(within(row).queryByText("Draft")).toBeNull();
+    });
+
+    it("leaves the selected thread untagged while the user types, and tags it once they leave", () => {
+      useComposerDraftStore.setState({ drafts: { t1: composer({ input: "half typed" }) } });
+      const row = renderThread();
+      act(() => useWorkspaceStore.setState({ activeThreadId: "t1" }));
+      expect(within(row).queryByText("Draft")).toBeNull();
+
+      act(() => useWorkspaceStore.setState({ activeThreadId: null }));
+      expect(within(row).getByText("Draft")).toBeTruthy();
+    });
+
+    it("keeps the status label beside the Draft tag", () => {
+      useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH });
+      act(() => threadAttentionStore.getState().apply(finished("t1")));
+      useComposerDraftStore.setState({ drafts: { t1: composer({ input: "half typed" }) } });
+      const row = renderThread();
+      expect(within(row).getByText("Draft")).toBeTruthy();
+      expect(within(screen.getByTestId("thread-status")).getByText("Finished")).toBeTruthy();
+    });
+
+    it("lists new-thread drafts first in the Threads view, then a separator, then threads", () => {
+      useSidebarUiStore.setState({ view: "threads" });
+      useThreadDraftStore.setState({ drafts: { d1: newThreadDraft("d1", "Typed idea\nmore") } });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [createMockThread({ id: "t1", workspace_id: "ws-1" })], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      expect(listOrder()).toEqual(["d1", "separator", "t1"]);
+      const draft = screen.getByTestId("draft-item");
+      expect(within(draft).getByText("Typed idea")).toBeTruthy();
+      expect(within(draft).getByText("Draft")).toBeTruthy();
+      expect(within(draft).getByText("now")).toBeTruthy();
+      expect(within(draft).getByLabelText("Provider, Claude")).toBeTruthy();
+    });
+
+    it("lists a new-thread draft first in its project without a separator", () => {
+      useThreadDraftStore.setState({ drafts: { d1: newThreadDraft("d1", "Typed idea") } });
+      renderThread();
+      expect(listOrder()).toEqual(["d1", "t1"]);
+      expect(within(screen.getByTestId("draft-item")).getByRole("button", { name: "Delete draft" })).toBeTruthy();
+    });
+
+    it("names a narrow grouped row's status by its icon and keeps Draft as the tag's name", async () => {
+      useSidebarWidthStore.setState({ width: 220 });
+      act(() => threadAttentionStore.getState().apply(finished("t1")));
+      useComposerDraftStore.setState({ drafts: { t1: composer({ input: "half typed" }) } });
+      renderThread();
+      const status = screen.getByTestId("thread-status");
+      expect(within(status).queryByText("Finished")).toBeNull();
+      expect(statusGlyph(within(status).getByRole("img", { name: "Finished" }))).toBe("circle-check");
+
+      const tag = screen.getByTestId("draft-tag");
+      expect(tag).toHaveTextContent("Draft");
+      fireEvent.pointerOver(tag, { pointerType: "mouse" });
+      fireEvent.mouseEnter(tag, { clientX: 10, clientY: 10 });
+      fireEvent.mouseMove(tag, { clientX: 11, clientY: 10 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(screen.getAllByText("Draft").length).toBeGreaterThan(1);
+    });
+
+    it("names a narrow Threads row's status by its icon, with no clipped label", async () => {
+      useSidebarWidthStore.setState({ width: 220 });
+      useSidebarUiStore.setState({ view: "threads" });
+      act(() => threadAttentionStore.getState().apply({ ...finished("t1"), waiting: { kind: "approval", since: "2026-10-27T11:00:00.000Z" } }));
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", last_activity_at: new Date().toISOString() })], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      const status = screen.getByTestId("thread-status");
+      expect(within(status).queryByText("Approval required")).toBeNull();
+      const mark = within(status).getByRole("img", { name: "Approval required" }).parentElement!;
+      fireEvent.pointerOver(mark, { pointerType: "mouse" });
+      fireEvent.mouseEnter(mark, { clientX: 10, clientY: 10 });
+      fireEvent.mouseMove(mark, { clientX: 11, clientY: 10 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(screen.getByText("Approval required")).toBeTruthy();
+    });
+
+    it("shows a grouped row's status as its named icon below the status word width, and its word at it", () => {
+      useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH - 1 });
+      act(() => threadAttentionStore.getState().apply(finished("t1")));
+      renderThread();
+      const status = screen.getByTestId("thread-status");
+      expect(within(status).queryByText("Finished")).toBeNull();
+      expect(within(status).getByRole("img", { name: "Finished" })).toBeVisible();
+
+      act(() => useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH }));
+      expect(within(screen.getByTestId("thread-status")).getByText("Finished")).toBeTruthy();
+    });
+
+    it("keeps a quiet grouped row's time as text below the status word width", () => {
+      useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH - 1 });
+      renderThread({ last_activity_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString() });
+      expect(within(screen.getByTestId("thread-status")).getByText("5h")).toBeTruthy();
     });
   });
 });

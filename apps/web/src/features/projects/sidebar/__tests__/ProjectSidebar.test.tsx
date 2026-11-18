@@ -191,6 +191,8 @@ afterEach(() => {
 // Import after mocks are registered.
 import { useWorkspaceStore } from "../../state/workspaceStore";
 import { useSidebarUiStore } from "../sidebar-ui-store";
+import { SIDEBAR_STATUS_WORD_WIDTH } from "../sidebar-label-tooltip";
+import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
 import { useCompletionStore } from "../completion-store";
 import { useUiStore } from "@/stores/uiStore";
 import { prefetchOnPointerDown } from "@/features/conversation";
@@ -1335,6 +1337,8 @@ describe("ProjectSidebar action-required indicator", () => {
     installWorkspaceMock();
     // Pre-expand the workspace so its threads render.
     useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
+    // These cases name statuses by their word, which By project rows show only from this width.
+    useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH });
   });
 
   afterEach(() => {

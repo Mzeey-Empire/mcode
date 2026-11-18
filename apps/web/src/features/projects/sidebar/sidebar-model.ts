@@ -77,7 +77,8 @@ export type ThreadTreeLine = "through" | "end" | "none";
  */
 export type SidebarItem =
   | { readonly kind: "project"; readonly key: `project:${string}` | `older-project:${string}`; readonly workspaceId: string; readonly section: SidebarSection; readonly collapsed: boolean; readonly count: number }
-  | { readonly kind: "draft"; readonly key: `draft:${string}`; readonly draftId: string; readonly workspaceId: string }
+  | { readonly kind: "draft"; readonly key: `draft:${string}`; readonly draftId: string; readonly workspaceId: string; readonly layout: "grouped" | "flat"; readonly treeLine: ThreadTreeLine }
+  | { readonly kind: "draft-divider"; readonly key: "draft-divider" }
   | { readonly kind: "thread"; readonly key: `thread:${string}`; readonly threadId: string; readonly section: SidebarSection; readonly layout: "grouped" | "flat"; readonly depth: number; readonly pending: SidebarRowPending; readonly treeLine: ThreadTreeLine }
   | { readonly kind: "show-more"; readonly key: `more:${string}`; readonly workspaceId: string; readonly hidden: number; readonly expanded: boolean }
   | { readonly kind: "older-bar"; readonly key: "older-bar"; readonly count: number; readonly open: boolean }
@@ -293,8 +294,8 @@ function projectHeader(workspaceId: string, section: SidebarSection, collapsed: 
   return { kind: "project", key, workspaceId, section, collapsed, count };
 }
 
-function draftItems(workspaceId: string, inputs: SidebarInputs): SidebarItem[] {
-  return (inputs.draftsByWorkspace.get(workspaceId) ?? []).map((draftId) => ({ kind: "draft", key: `draft:${draftId}`, draftId, workspaceId }));
+function draftItems(workspaceId: string, inputs: SidebarInputs, layout: "grouped" | "flat"): SidebarItem[] {
+  return (inputs.draftsByWorkspace.get(workspaceId) ?? []).map((draftId) => ({ kind: "draft", key: `draft:${draftId}`, draftId, workspaceId, layout, treeLine: layout === "flat" ? "none" : "through" }));
 }
 
 interface ProjectGroupOptions {
@@ -303,16 +304,20 @@ interface ProjectGroupOptions {
   readonly drafts: boolean;
 }
 
+function onThreadLine(item: SidebarItem): item is Extract<SidebarItem, { kind: "thread" | "draft" }> {
+  return item.kind === "thread" || item.kind === "draft";
+}
+
 /**
- * Marks the group's last thread row, where the project's thread line stops. Each row draws its own
- * line segment, so the line stays whole across virtualization and the cap.
+ * Marks the group's last thread or draft row, where the project's thread line stops. Each row draws
+ * its own line segment, so the line stays whole across virtualization and the cap.
  */
 function endThreadLine(items: readonly SidebarItem[]): SidebarItem[] {
   let lastIndex = -1;
   items.forEach((item, index) => {
-    if (item.kind === "thread") lastIndex = index;
+    if (onThreadLine(item)) lastIndex = index;
   });
-  return items.map((item, index) => (index === lastIndex && item.kind === "thread" ? { ...item, treeLine: "end" } : item));
+  return items.map((item, index) => (index === lastIndex && onThreadLine(item) ? { ...item, treeLine: "end" } : item));
 }
 
 function projectGroup(workspaceId: string, placed: readonly Placed[], ctx: SectionContext, options: ProjectGroupOptions): SidebarItem[] {
@@ -324,11 +329,11 @@ function projectGroup(workspaceId: string, placed: readonly Placed[], ctx: Secti
     // The kept selected row hangs off its project on the end segment, as it would when expanded.
     return selected ? [header, threadItem(selected, ctx.section, "grouped", "end")] : [header];
   }
-  const drafts = options.drafts ? draftItems(workspaceId, ctx.inputs) : [];
+  const drafts = options.drafts ? draftItems(workspaceId, ctx.inputs, "grouped") : [];
   const rows = options.capped
     ? cappedProjectRows(workspaceId, families, ctx)
     : families.flatMap((family) => family.rows.map((row) => threadItem(row, ctx.section, "grouped")));
-  return [header, ...drafts, ...endThreadLine(rows)];
+  return [header, ...endThreadLine([...drafts, ...rows])];
 }
 
 function recentProjectsView(parts: Partitioned, inputs: SidebarInputs): SidebarItem[] {
@@ -349,8 +354,10 @@ function flatRows(placed: readonly Placed[], section: SidebarSection): SidebarIt
 }
 
 function recentThreadsView(parts: Partitioned, inputs: SidebarInputs): SidebarItem[] {
-  const drafts = inputs.projectOrder.flatMap((workspaceId) => draftItems(workspaceId, inputs));
-  return [...drafts, ...flatRows(parts.recent, "recent")];
+  const drafts = inputs.projectOrder.flatMap((workspaceId) => draftItems(workspaceId, inputs, "flat"));
+  const threads = flatRows(parts.recent, "recent");
+  const divider: SidebarItem[] = drafts.length > 0 && threads.length > 0 ? [{ kind: "draft-divider", key: "draft-divider" }] : [];
+  return [...drafts, ...divider, ...threads];
 }
 
 function olderOpenItems(older: readonly Placed[], inputs: SidebarInputs): SidebarItem[] {

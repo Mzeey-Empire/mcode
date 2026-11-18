@@ -190,7 +190,27 @@ describe("deriveSidebarModel", () => {
     const facts = [fact("a", { activityMs: NOW - 2000 }), fact("b", { workspaceId: "ws-b", activityMs: NOW - 1000, parentId: "a" })];
     const items = deriveSidebarModel(inputs({ facts, draftsByWorkspace: new Map([["ws-b", ["d1"]]]), ui: { view: "threads" } })).items;
 
-    expect(keys(items)).toEqual(["draft:d1", "thread:b", "thread:a", "end-spacer"]);
+    expect(keys(items)).toEqual(["draft:d1", "draft-divider", "thread:b", "thread:a", "end-spacer"]);
+  });
+
+  it("separates new-thread drafts from threads only when both are listed", () => {
+    const drafts = new Map([["ws-a", ["d1", "d2"]]]);
+    const onlyDrafts = deriveSidebarModel(inputs({ draftsByWorkspace: drafts, ui: { view: "threads" } })).items;
+    const onlyThreads = deriveSidebarModel(inputs({ facts: [fact("a")], ui: { view: "threads" } })).items;
+    const grouped = deriveSidebarModel(inputs({ facts: [fact("a")], draftsByWorkspace: drafts })).items;
+
+    expect(keys(onlyDrafts)).toEqual(["draft:d1", "draft:d2", "end-spacer"]);
+    expect(keys(onlyThreads)).toEqual(["thread:a", "end-spacer"]);
+    expect(keys(grouped)).toEqual(["project:ws-a", "draft:d1", "draft:d2", "thread:a", "project:ws-b", "end-spacer"]);
+  });
+
+  it("draws a project's thread line through its drafts, ending at a draft when no thread follows", () => {
+    const items = deriveSidebarModel(inputs({ facts: [fact("a")], draftsByWorkspace: new Map([["ws-a", ["d1"]], ["ws-b", ["d2"]]]) })).items;
+    const draft = (id: string) => items.find((item): item is Extract<SidebarItem, { kind: "draft" }> => item.kind === "draft" && item.draftId === id);
+
+    expect(draft("d1")).toMatchObject({ layout: "grouped", treeLine: "through" });
+    expect(threadItem(items, "a")?.treeLine).toBe("end");
+    expect(draft("d2")).toMatchObject({ layout: "grouped", treeLine: "end" });
   });
 
   it("ends each project's thread line at its last listed row", () => {
