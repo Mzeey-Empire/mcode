@@ -27,7 +27,7 @@ export type VersionPhase =
   | { readonly kind: "downloading"; readonly next: string | null; readonly percent: number }
   | { readonly kind: "ready"; readonly next: string; readonly runningAgents: number | null }
   | { readonly kind: "when-idle"; readonly next: string }
-  | { readonly kind: "failed"; readonly operation: FailedUpdateOperation; readonly message: string; readonly runningAgents: number };
+  | { readonly kind: "failed"; readonly operation: FailedUpdateOperation; readonly message: string; readonly runningAgents: number | null };
 
 /** Renderer facts the desktop status cannot carry. */
 export interface VersionPhaseContext {
@@ -54,7 +54,7 @@ export function deriveVersionPhase(status: UpdateStatus, context: VersionPhaseCo
     case "downloaded":
       return downloadedPhase(status, readyAgents(context));
     case "error":
-      return { kind: "failed", operation: status.failedOperation, message: status.message, runningAgents: context.runningAgents };
+      return { kind: "failed", operation: status.failedOperation, message: status.message, runningAgents: readyAgents(context) };
     case "idle":
     case "not-available":
       return restingPhase(status, context.checksOff);
@@ -205,7 +205,7 @@ function useVersionActions(
   };
 }
 
-const RETRY: Record<FailedUpdateOperation, keyof VersionActions> = { check: "check", download: "download", install: "restart" };
+const RETRY: Record<FailedUpdateOperation, keyof VersionActions> = { check: "check", download: "download", install: "restartIfIdle" };
 
 function holdName(runningAgents: number | null): string {
   if (runningAgents === null) return "Hold to restart. Agents may be running.";
@@ -235,7 +235,7 @@ function ReadyAction({ runningAgents, actions }: { readonly runningAgents: numbe
 }
 
 function RetryAction({ phase, actions }: { readonly phase: Extract<VersionPhase, { kind: "failed" }>; readonly actions: VersionActions }) {
-  if (phase.operation === "install" && phase.runningAgents > 0) {
+  if (phase.operation === "install" && phase.runningAgents !== 0) {
     return <HoldToRestartButton accessibleName={holdName(phase.runningAgents)} onCommit={actions.restart} />;
   }
   return <ActionButton onClick={actions[RETRY[phase.operation]]}>Retry</ActionButton>;
@@ -325,7 +325,8 @@ function DesktopVersionRow({ def, variant, app }: SettingRowProps & { readonly a
   const pendingVersion = useUpdateStore((s) => s.pendingVersion);
   const checksOff = useSettingsStore((s) => s.settings.updates?.checkInterval === "never");
   const runningAgents = useRunningAgentCount();
-  const serverAgents = useServerAgentCount(status.state === "downloaded" && !status.installWhenIdle, runningAgents);
+  const installPending = (status.state === "downloaded" && !status.installWhenIdle) || (status.state === "error" && status.failedOperation === "install");
+  const serverAgents = useServerAgentCount(installPending, runningAgents);
   const [checking, setChecking] = useState(false);
   const actions = useVersionActions(app, setChecking, serverAgents.set);
   const phase = deriveVersionPhase(status, { checking, checksOff, pendingVersion, runningAgents, serverAgents: serverAgents.count });

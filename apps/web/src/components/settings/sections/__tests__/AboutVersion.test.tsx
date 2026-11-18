@@ -224,6 +224,18 @@ describe("About version row server agent count", () => {
     expect(hintText()).toBe("v0.17.0 is ready. Agents may be running.");
     expect(screen.getByRole("status").textContent).toBe("v0.17.0 is ready. Agents may be running.");
   });
+
+  // Fails if Retry after a failed install restarts over agents the re-check finds.
+  it("re-checks the server before retrying a failed install", async () => {
+    getActiveAgentCount.mockResolvedValueOnce(0).mockResolvedValueOnce(3);
+    setStatuses({ state: "error", message: "Update installation blocked: busy", failedOperation: "install" });
+    render(<AboutSection />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(app.installUpdate).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Hold to restart. Ends 3 running agents." })).toBeTruthy();
+  });
 });
 
 describe("About version row label", () => {
