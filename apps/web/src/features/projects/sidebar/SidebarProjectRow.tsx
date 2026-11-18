@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 import { threadRowLook } from "@/features/thread-attention/thread-row-presentation";
-import { STATUS_MARK_TEXT_CLASS, StatusMark } from "@/components/ui/status-mark";
+import { STATUS_LABEL_TEXT_CLASS, StatusMark } from "@/components/ui/status-mark";
 import { useRolledUpThreadRowState } from "@/features/thread-attention/thread-rollup";
 import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
 import { getCiVisual } from "@/lib/ci-status";
@@ -268,7 +268,7 @@ const WorkspaceCiRollupChip = memo(function WorkspaceCiRollupChip({
           <span
             aria-label={rollup.label}
             className={cn(
-              "shrink-0 inline-flex items-center gap-0.5 px-1 h-4 rounded-[3px] border transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none",
+              "shrink-0 inline-flex items-center gap-0.5 px-1 h-4 rounded-[3px] border group-hover/ws:hidden group-focus-within/ws:hidden",
               "text-caption font-medium tabular-nums",
               chromeClass,
             )}
@@ -330,7 +330,7 @@ function ProjectTitle({ workspace, onClick }: { workspace: Workspace; onClick: (
   return (
     <Tooltip disabled={dragging}>
       <TooltipTrigger render={
-        <Button data-project-title type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left font-medium text-muted hover:bg-transparent hover:text-muted group-hover/ws:pr-12 group-focus-within/ws:pr-12 focus-visible:outline-none dark:hover:bg-transparent">
+        <Button data-project-title type="button" variant="ghost" size="compact" aria-label={`Open project ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onClick(); }} className="h-auto min-w-0 flex-1 shrink justify-start rounded-sm p-0 text-left font-medium text-muted hover:bg-transparent hover:text-muted focus-visible:outline-none dark:hover:bg-transparent">
           <span className="flex-1 text-fade">{workspace.name}</span>
         </Button>
       } />
@@ -348,9 +348,11 @@ function ProjectCollapsedStatus({ status }: { status: ThreadRowState }) {
   const look = threadRowLook(status);
   if (!look) return null;
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1 pl-1 text-caption whitespace-nowrap transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none">
+    // Under the pointer or focus the label gives way to the actions and the icon stays, so the
+    // roll-up keeps its meaning. Hidden parts take no width, and nothing crossfades.
+    <span className="ml-auto flex shrink-0 items-center gap-1 pl-1 text-caption whitespace-nowrap">
       <StatusMark state={look.state} label={look.label} icon={look.icon} />
-      <span aria-hidden className={cn("font-medium", STATUS_MARK_TEXT_CLASS[look.state])}>{look.label}</span>
+      <span aria-hidden className={cn("font-medium group-hover/ws:hidden group-focus-within/ws:hidden", STATUS_LABEL_TEXT_CLASS[look.state])}>{look.label}</span>
     </span>
   );
 }
@@ -373,7 +375,7 @@ function ProjectRowActions({
   onCreateThread,
 }: { workspace: Workspace; onOpenInExplorer: (event: React.MouseEvent) => void; onRename: (event: React.MouseEvent) => void; onDelete: (event: React.MouseEvent) => void; onCreateThread: (event: React.MouseEvent) => void }) {
   return (
-    <div data-testid={`project-row-actions-${workspace.id}`} className="pointer-events-none absolute inset-y-0 right-2 z-(--layer-dropdown) flex items-center justify-end gap-1 opacity-0 transition-opacity duration-150 group-hover/ws:pointer-events-auto group-hover/ws:opacity-100 group-focus-within/ws:pointer-events-auto group-focus-within/ws:opacity-100 motion-reduce:transition-none">
+    <div data-testid={`project-row-actions-${workspace.id}`} className="hidden shrink-0 items-center justify-end gap-1 group-hover/ws:flex group-focus-within/ws:flex has-data-popup-open:flex">
       <Tooltip>
         <TooltipTrigger
           render={<Button variant="ghost" size="icon-compact" aria-label={`New thread in ${workspace.name}`} onKeyDown={stopDragStartKeys} onClick={onCreateThread} className={PROJECT_ACTION_CLASS}><SquarePen aria-hidden className="size-3.5" /></Button>}
