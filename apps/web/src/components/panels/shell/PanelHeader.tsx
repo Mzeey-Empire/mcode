@@ -114,7 +114,7 @@ export function PanelHeaderSlot({
 }
 
 /**
- * Row-1 title for tools without tabs: the tool glyph in its slot, then the title as plain text that fades past 320.
+ * Row-1 title for tools without tabs: the tool glyph in its slot, then the title as plain text that fades at the row's edge.
  * Only a tab that can be switched away from gets the selected fill, so a lone title stays text.
  * `headingLevel` keeps the tool's heading in the outline after it moves here.
  */
@@ -137,7 +137,7 @@ export function PanelTitle({
         role={headingLevel ? "heading" : undefined}
         aria-level={headingLevel}
         data-testid="panel-title"
-        className="text-fade min-w-0 max-w-80 text-sm/5 font-medium text-ink"
+        className="text-fade min-w-0 text-sm/5 font-medium text-ink"
       >
         {children}
       </span>
