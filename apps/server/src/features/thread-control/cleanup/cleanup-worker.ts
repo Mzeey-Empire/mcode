@@ -24,7 +24,7 @@ import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { HandoffStorage } from "../../handoff/index.js";
 import { pruneStaleToolOutputArtifacts } from "@mcode/providers";
-import { ThreadControlMutationReservationService } from "../index.js";
+import { ThreadControlMutationReservationService, ThreadService } from "../index.js";
 import { ThreadDeletionTeardownService } from "../lifecycle/thread-deletion-teardown-service.js";
 import { CleanupActionRunner } from "./cleanup-action-runner.js";
 import { launchTelemetry } from "../../../runtime/diagnostics/launch-telemetry.js";
@@ -84,6 +84,7 @@ export class CleanupWorker {
     @inject(ThreadDeletionTeardownService)
     private readonly threadDeletionTeardownService: ThreadDeletionTeardownService,
     @inject(CleanupActionRunner) private readonly cleanupActions: Pick<CleanupActionRunner, "run">,
+    @inject(ThreadService) private readonly delegatedChildren: Pick<ThreadService, "deleteDelegatedChildren">,
     @inject("HostRuntime") private readonly hostRuntime: HostRuntime,
     @inject(ThreadControlMutationReservationService, { isOptional: true })
     mutationReservations?: ThreadControlMutationReservationService,
@@ -251,6 +252,9 @@ export class CleanupWorker {
     const retentionThread = await this.claimRetentionCleanup(job);
     if (job.kind === "retention" && !retentionThread) return;
     const thread = this.threadRepo.findById(job.thread_id);
+    if (job.kind === "retention" && thread) {
+      await this.delegatedChildren.deleteDelegatedChildren(thread, true);
+    }
     if (!thread && job.kind === "explicit") {
       await this.cleanupJobRepo.delete(job.id);
       return;

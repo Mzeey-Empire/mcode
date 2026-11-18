@@ -117,6 +117,7 @@ describe("Cleanup integration", () => {
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
       mockThreadDeletion,
       { run: vi.fn().mockResolvedValue(undefined) },
+      threadService,
       TEST_HOST_RUNTIME,
       undefined,
       0,
@@ -277,6 +278,33 @@ describe("Cleanup integration", () => {
       "coordinator-wt",
       expect.objectContaining({ worktreePath: wtPath }),
     );
+  });
+
+  it("retention cleanup of a coordinator detaches its running delegated child as a visible thread", async () => {
+    const ws = await workspaceRepo.create("retention-running-test", "/test-repo-running");
+    const coordinator = await threadRepo.create(ws.id, "Coordinator", "direct", "main");
+    const child = await threadRepo.create(ws.id, "Running council seat", "direct", "main", true, "codex", {
+      delegation: { coordinatorThreadId: coordinator.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, ?, ?, 'codex', 'Active', ?, ?)`).run(child.id, ws.id, child.id, now, now);
+    db.prepare(`INSERT INTO canonical_agent_turns
+      (id, thread_id, execution_id, status, trigger_json, permission_mode, created_at, updated_at)
+      VALUES ('running-turn', ?, 'running-execution', 'Running', '{"kind":"user"}', 'supervised', ?, ?)`)
+      .run(child.id, now, now);
+    db.prepare("UPDATE threads SET user_completed_at = ?, scheduled_deletion_at = ? WHERE id = ?")
+      .run("2026-08-12T09:00:00.000Z", "2026-08-12T09:01:00.000Z", coordinator.id);
+
+    await worker.poll();
+
+    expect(threadRepo.findById(coordinator.id)).toBeNull();
+    expect(threadRepo.findById(child.id)).toMatchObject({
+      delegation_coordinator_thread_id: null,
+      status: "active",
+    });
+    expect(threadService.list(ws.id).map((thread) => thread.id)).toEqual([child.id]);
   });
 
   it("duplicate delete is idempotent (INSERT OR IGNORE)", async () => {
