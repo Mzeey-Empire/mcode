@@ -430,7 +430,7 @@ function ClosedThreadRowBody(props: ThreadRowBodyProps) {
 
 function ClosedRowCleanupStatus({ presentation, lifecycle }: Pick<ThreadRowVisualProps, "presentation" | "lifecycle">) {
   if (lifecycle.cleanupStatusLabel) return <CleanupRetryCaption lifecycle={lifecycle} />;
-  if (presentation.cleanupBlocked) return <ThreadRowCaption className="text-error">Cleanup blocked</ThreadRowCaption>;
+  if (presentation.cleanupBlocked) return <ThreadRowCaption className="text-status-label-error">Cleanup blocked</ThreadRowCaption>;
   return null;
 }
 
@@ -751,7 +751,7 @@ function statusLook(presentation: ThreadRowPresentation): ThreadStatusLook | nul
 
 function ThreadRowStatus({ thread, presentation, lifecycle, fallback }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle"> & { fallback: React.ReactNode }) {
   if (presentation.completionFailure !== null) {
-    return <ThreadRowCaption role="status" className="text-error">{presentation.completionFailure}</ThreadRowCaption>;
+    return <ThreadRowCaption role="status" className="text-status-label-error">{presentation.completionFailure}</ThreadRowCaption>;
   }
   const look = statusLook(presentation);
   if (!look) {
@@ -783,17 +783,17 @@ function hasStandingCaption(presentation: ThreadRowPresentation, lifecycle: Thre
 function ThreadRowStandingCaption({ thread, presentation, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
   // A retry in flight or its failure is newer news than the standing block it retries.
   if (lifecycle.cleanupStatusLabel) return <CleanupRetryCaption lifecycle={lifecycle} />;
-  if (presentation.cleanupBlocked) return <ThreadRowCaption className="text-error">Cleanup blocked</ThreadRowCaption>;
-  if (presentation.isStaleWorktree) return <ThreadRowCaption className="text-error">Worktree unavailable</ThreadRowCaption>;
+  if (presentation.cleanupBlocked) return <ThreadRowCaption className="text-status-label-error">Cleanup blocked</ThreadRowCaption>;
+  if (presentation.isStaleWorktree) return <ThreadRowCaption className="text-status-label-error">Worktree unavailable</ThreadRowCaption>;
   if (presentation.unusable) {
-    return <ThreadRowCaption className="text-error" data-testid={`sidebar-unusable-${thread.id}`}>{presentation.unusableReason}</ThreadRowCaption>;
+    return <ThreadRowCaption className="text-status-label-error" data-testid={`sidebar-unusable-${thread.id}`}>{presentation.unusableReason}</ThreadRowCaption>;
   }
   return null;
 }
 
 function CleanupRetryCaption({ lifecycle }: Pick<ThreadRowVisualProps, "lifecycle">) {
   return (
-    <ThreadRowCaption role="status" className={lifecycle.cleanupRetryFailed ? "text-error" : "text-muted"}>
+    <ThreadRowCaption role="status" className={lifecycle.cleanupRetryFailed ? "text-status-label-error" : "text-muted"}>
       {lifecycle.cleanupRetryFailed ? null : <Spinner size={12} />}
       <span className="text-fade min-w-0">{lifecycle.cleanupStatusLabel}</span>
     </ThreadRowCaption>
