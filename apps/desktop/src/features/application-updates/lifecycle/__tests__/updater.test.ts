@@ -318,6 +318,28 @@ describe("updater lifecycle", () => {
     expect(current.updater.checkForUpdates).toHaveBeenCalledTimes(2);
   });
 
+  it("drops a release switch queued before cleanup", async () => {
+    current = createLifecycle();
+    let resolveCheck: (() => void) | undefined;
+    current.updater.checkForUpdates.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (resolveCheck = resolve)),
+    );
+    const running = current.lifecycle.applyReleaseLineSwitch("stable");
+    const queued = current.lifecycle.applyReleaseLineSwitch("nightly", { allowDowngrade: true });
+
+    current.lifecycle.cleanup();
+    current.lifecycle.initialize();
+    const channel = current.updater.channel;
+    const allowPrerelease = current.updater.allowPrerelease;
+    resolveCheck?.();
+    await Promise.all([running, queued]);
+
+    expect(current.updater.channel).toBe(channel);
+    expect(current.updater.allowPrerelease).toBe(allowPrerelease);
+    expect(current.updater.allowDowngrade).toBe(false);
+    expect(current.updater.checkForUpdates).toHaveBeenCalledOnce();
+  });
+
   it("starts a fresh release switch after cleanup cancels a pending switch", async () => {
     current = createLifecycle();
     let resolveOldCheck: (() => void) | undefined;

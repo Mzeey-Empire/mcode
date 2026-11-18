@@ -194,8 +194,11 @@ export function createUpdaterLifecycle(
     // Switches run in request order so the last line asked for is the one the updater ends on.
     // With none running the switch starts now, so its "checking" status publishes synchronously.
     const previousSwitch = inFlightReleaseLineSwitch;
+    // A switch queued before cleanup must not touch the reinitialised updater: it would skip restoring allowDowngrade.
+    const runQueuedSwitch = () =>
+      operationGeneration === generation && initialized ? runSwitch() : Promise.resolve(status.get());
     const thisSwitch = previousSwitch
-      ? previousSwitch.catch(() => undefined).then(runSwitch)
+      ? previousSwitch.catch(() => undefined).then(runQueuedSwitch)
       : runSwitch();
     inFlightReleaseLineSwitch = thisSwitch;
     try {
