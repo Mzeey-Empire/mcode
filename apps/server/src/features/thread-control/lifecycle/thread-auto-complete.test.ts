@@ -197,6 +197,42 @@ describe("ThreadAutoCompleteService", () => {
     { event: "setting disabled", released: false, apply: (f) => f.threads.updateSettings(f.thread.id, { auto_complete_on_merge: false }) },
     { event: "repeated snapshot", released: false, apply: (f) => f.funnel.observe(f.thread.id, [MERGED]) },
     { event: "title change", released: false, apply: (f) => f.funnel.observe(f.thread.id, [{ ...MERGED, title: "Renamed" }]) },
+    {
+      event: "null hold snapshot with a title-only change",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = NULL WHERE id = ?").run(f.thread.id);
+        await f.funnel.observe(f.thread.id, [{ ...MERGED, title: "Renamed" }]);
+      },
+    },
+    {
+      event: "null hold snapshot with a new merged PR",
+      released: true,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = NULL WHERE id = ?").run(f.thread.id);
+        await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]);
+      },
+    },
+    {
+      event: "null hold snapshot with a branch round trip",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = NULL WHERE id = ?").run(f.thread.id);
+        await f.funnel.forgetBranch(f.thread.id);
+        await f.funnel.observe(f.thread.id, [MERGED]);
+      },
+    },
+    {
+      event: "stale hold snapshot after an older build reopens with a different merged PR",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(f.thread.id);
+        await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]);
+        f.database.query("UPDATE threads SET auto_complete_paused_at = ? WHERE id = ?")
+          .run("2030-01-01T10:02:00.000Z", f.thread.id);
+        await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged", title: "Renamed" })]);
+      },
+    },
     { event: "URL-only change", released: false, apply: (f) => f.funnel.observe(f.thread.id, [{ ...MERGED, url: "https://github.com/example/repo/pull/42" }]) },
     {
       event: "branch round trip: links forgotten, then the same merged PR re-linked",
@@ -230,8 +266,8 @@ describe("ThreadAutoCompleteService", () => {
     await f.service.evaluate(f.thread.id);
     if (linkWhileClosed) await f.funnel.observe(f.thread.id, linkWhileClosed);
     await f.completion.reopen(f.thread.id);
-    f.service.start();
     await apply(f);
+    f.service.start();
     if (released) {
       await f.expectCompleted();
       expect(f.current().auto_complete_paused_at).toBeNull();
