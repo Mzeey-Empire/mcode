@@ -67,6 +67,9 @@ function finished(threadId: string): ThreadAttention {
   };
 }
 
+// Width is module state that persists across tests; each test starts at the app's default.
+const INITIAL_SIDEBAR_WIDTH = useSidebarWidthStore.getState().width;
+
 describe("SidebarThreadRow", () => {
   const openExternalUrl = vi.fn();
   const resolveNavigation = vi.fn(() => new Promise<never>(() => {}));
@@ -84,6 +87,7 @@ describe("SidebarThreadRow", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     Reflect.deleteProperty(window, "desktopBridge");
+    useSidebarWidthStore.setState({ width: INITIAL_SIDEBAR_WIDTH });
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });
 
@@ -105,6 +109,28 @@ describe("SidebarThreadRow", () => {
     fireEvent.mouseLeave(row);
     expect(within(status()).getByText("Finished")).toBeVisible();
     expect(complete).not.toBeVisible();
+  });
+
+  it.each(["projects", "threads"] as const)("shows a narrow %s row's Close as its icon, named Close", async (view) => {
+    useSidebarWidthStore.setState({ width: 220 });
+    useSidebarUiStore.setState({ view });
+    useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title" })], activeWorkspaceId: "ws-1", activeThreadId: null });
+    render(<Harness />);
+    fireEvent.mouseEnter(screen.getByRole("button", { name: view === "threads" ? /^Alpha / : /^Row title/ }));
+    const close = screen.getByRole("button", { name: "Close Row title" });
+    expect(close).toBeVisible();
+    expect(close).not.toHaveTextContent("Close");
+    fireEvent.pointerOver(close, { pointerType: "mouse" });
+    fireEvent.mouseEnter(close, { clientX: 10, clientY: 10 });
+    fireEvent.mouseMove(close, { clientX: 11, clientY: 10 });
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.getByText("Close")).toBeTruthy();
+  });
+
+  it("keeps the word on Close at the default width", () => {
+    const row = renderThread();
+    fireEvent.mouseEnter(row);
+    expect(screen.getByRole("button", { name: "Close Row title" })).toHaveTextContent("Close");
   });
 
   it("keeps the row's hover look while its options menu is open", async () => {

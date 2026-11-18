@@ -33,7 +33,7 @@ import { selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
 import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
 import { ThreadOptionsMenu, useThreadMenuOpenFor, type ThreadMenuActions } from "./thread-menu";
-import { DraftTag, IconOnlyStatus, useSidebarNarrow, useSidebarStatusIconOnly } from "./sidebar-label-tooltip";
+import { DraftTag, IconOnlyStatus, SidebarLabelTrigger, useSidebarNarrow, useSidebarStatusIconOnly } from "./sidebar-label-tooltip";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -771,6 +771,9 @@ const HIDDEN_ACTIONS: CSSProperties = { ...HIDDEN_LAYER, position: "absolute", i
  */
 function ThreadRowTrailingSlot({ status, ...props }: ThreadRowBodyProps & { status: React.ReactNode }) {
   const { isEditing, lifecycle, revealed } = props;
+  // At 220px a hovered row with a PR chip needs about 209px on a 173px meta line, so the worded
+  // Close pushed the options button and provider mark past the row edge.
+  const narrow = useSidebarNarrow();
   if (isEditing) return null;
   const swapped = revealed && !lifecycle.closeHidden;
   const swappedLook = swapped ? statusLook(props.presentation) : null;
@@ -779,7 +782,7 @@ function ThreadRowTrailingSlot({ status, ...props }: ThreadRowBodyProps & { stat
       <div data-testid="thread-status" className="flex min-w-0 max-w-full items-center gap-1 empty:hidden">
         {swapped ? (swappedLook && <ThreadRowLookStatus look={swappedLook} iconOnly />) : status}
       </div>
-      <div style={revealed ? undefined : HIDDEN_ACTIONS} className="flex items-center gap-1"><ThreadRowActions {...props} /></div>
+      <div style={revealed ? undefined : HIDDEN_ACTIONS} className="flex items-center gap-1"><ThreadRowActions {...props} iconOnlyLifecycle={narrow} /></div>
     </div>
   );
 }
@@ -849,12 +852,12 @@ function ThreadRowCaption({ className, children, ...props }: ComponentPropsWitho
   );
 }
 
-function ThreadRowActions(props: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle" | "threadMenuActions" | "workspacePath">) {
+function ThreadRowActions({ iconOnlyLifecycle = false, ...props }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle" | "threadMenuActions" | "workspacePath"> & { iconOnlyLifecycle?: boolean }) {
   const { thread, presentation, lifecycle } = props;
   return (
     <>
       {presentation.cleanupBlocked ? <ThreadCleanupRetry thread={thread} lifecycle={lifecycle} /> : null}
-      {lifecycle.closeHidden ? null : <ThreadLifecycleAction thread={thread} presentation={presentation} lifecycle={lifecycle} />}
+      {lifecycle.closeHidden ? null : <ThreadLifecycleAction thread={thread} presentation={presentation} lifecycle={lifecycle} iconOnly={iconOnlyLifecycle} />}
       <ThreadRowOptions {...props} />
     </>
   );
@@ -897,13 +900,14 @@ function stopActivationKeys(event: React.KeyboardEvent): void {
   if (event.key === "Enter" || event.key === " ") event.stopPropagation();
 }
 
-function ThreadLifecycleAction({ thread, presentation, lifecycle }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle">) {
+/** `iconOnly` drops the word and names the action in the shared label tooltip, as narrow statuses do. */
+function ThreadLifecycleAction({ thread, presentation, lifecycle, iconOnly = false }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle"> & { iconOnly?: boolean }) {
   const kind = presentation.lifecycleKind;
-  return (
+  const button = (
     <Button
       type="button"
       variant="ghost"
-      size="compact"
+      size={iconOnly ? "icon-compact" : "compact"}
       aria-label={`${LIFECYCLE_ACTION[kind].verb} ${thread.title}`}
       disabled={kind !== "undo" && lifecycle.lifecycleUnavailable}
       onPointerDown={(event) => event.stopPropagation()}
@@ -912,12 +916,13 @@ function ThreadLifecycleAction({ thread, presentation, lifecycle }: Pick<ThreadR
         event.stopPropagation();
         void lifecycle.handleLifecycleClick(event);
       }}
-      className="h-6 shrink-0 gap-1 rounded-md px-1 text-caption font-medium text-ink shadow-none disabled:cursor-not-allowed"
+      className={cn("shrink-0 gap-1 rounded-md text-caption font-medium text-ink shadow-none disabled:cursor-not-allowed", iconOnly ? "size-5 p-0" : "h-6 px-1")}
     >
       <ThreadLifecycleIcon isPending={lifecycle.isLifecyclePending} kind={kind} />
-      {LIFECYCLE_ACTION[kind].text}
+      {iconOnly ? null : LIFECYCLE_ACTION[kind].text}
     </Button>
   );
+  return iconOnly ? <SidebarLabelTrigger label={LIFECYCLE_ACTION[kind].text}>{button}</SidebarLabelTrigger> : button;
 }
 
 function ThreadLifecycleIcon({ isPending, kind }: { isPending: boolean; kind: ThreadLifecycleKind }) {
