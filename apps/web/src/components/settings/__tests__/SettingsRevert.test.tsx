@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings, type Settings } from "@mcode/contracts/models/settings";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -59,6 +59,10 @@ beforeEach(() => {
   vi.mocked(mockTransport.terminalProfileList).mockResolvedValue({ certified: [], custom: [] });
   vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
   Element.prototype.scrollIntoView = vi.fn();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("Settings Revert", () => {
@@ -322,7 +326,6 @@ describe("Settings Revert", () => {
 
     expect(useSettingsStore.getState().settings.updates.channel).toBe("stable");
     expect(applyReleaseLine.mock.calls.at(-1)).toEqual([{ releaseLine: "stable", allowDowngrade: false }]);
-    vi.unstubAllGlobals();
   });
 
   it("keeps Revert offered when the updater could not switch back, and a retry switches it", async () => {
@@ -347,7 +350,6 @@ describe("Settings Revert", () => {
     expect(applyReleaseLine).toHaveBeenCalledTimes(2);
     expect(applyReleaseLine.mock.calls.at(-1)).toEqual([{ releaseLine: "stable", allowDowngrade: false }]);
     expect(revertButton()).toBeNull();
-    vi.unstubAllGlobals();
   });
 
   it("shows the restored serve URL in its input", async () => {
