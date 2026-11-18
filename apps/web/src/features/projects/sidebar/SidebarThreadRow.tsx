@@ -378,6 +378,7 @@ function usePullRequestChip(thread: WorkspaceThread) {
 function FlatThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation } = props;
   const pr = usePullRequestChip(thread);
+  const narrow = useSidebarNarrow();
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div data-testid="thread-line-project" className="flex h-4 min-w-0 items-center gap-1 text-caption text-muted">
@@ -389,7 +390,7 @@ function FlatThreadRowBody(props: ThreadRowBodyProps) {
           className={presentation.titleTone === "receded" ? RECEDED_BADGE_CLASS : undefined}
         />
         <span className={cn("text-fade min-w-0 flex-1", presentation.scaffoldDim)}>{props.workspaceName}</span>
-        <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} fallback={<ThreadRowTime thread={thread} />} />} />
+        <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={narrow} fallback={<ThreadRowTime thread={thread} />} />} />
       </div>
       <ThreadRowTitleLine {...props} className="mt-2" />
       <ThreadRowMetaLine thread={thread} presentation={presentation} chip={pr.chip} />

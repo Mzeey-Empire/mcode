@@ -652,6 +652,22 @@ describe("SidebarThreadRow", () => {
       expect(screen.getAllByText("Draft").length).toBeGreaterThan(1);
     });
 
+    it("names a narrow Threads row's status by its icon, with no clipped label", async () => {
+      useSidebarWidthStore.setState({ width: 220 });
+      useSidebarUiStore.setState({ view: "threads" });
+      act(() => threadAttentionStore.getState().apply({ ...finished("t1"), waiting: { kind: "approval", since: "2026-10-27T11:00:00.000Z" } }));
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", last_activity_at: new Date().toISOString() })], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      const status = screen.getByTestId("thread-status");
+      expect(within(status).queryByText("Approval required")).toBeNull();
+      const mark = within(status).getByRole("img", { name: "Approval required" }).parentElement!;
+      fireEvent.pointerOver(mark, { pointerType: "mouse" });
+      fireEvent.mouseEnter(mark, { clientX: 10, clientY: 10 });
+      fireEvent.mouseMove(mark, { clientX: 11, clientY: 10 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      expect(screen.getByText("Approval required")).toBeTruthy();
+    });
+
     it("keeps status labels on wide grouped rows", () => {
       act(() => threadAttentionStore.getState().apply(finished("t1")));
       renderThread();
