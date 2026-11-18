@@ -1,5 +1,4 @@
 import { IconButton } from "@/components/ui/button";
-import { MoreIcon } from "@/components/ui/icon-map";
 import { ThreadActionRunMenu } from "@/features/projects/actions/ThreadActionRunMenu";
 import { useProjectActions } from "@/features/projects/actions/useProjectActions";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
@@ -9,7 +8,7 @@ import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
 import { newThreadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { type Thread } from "@/transport";
-import { Settings } from "lucide-react";
+import { Play, Settings } from "lucide-react";
 
 function useThreadProjectActions(thread: Thread) {
   return useProjectActions(thread.workspace_id, thread.id);
@@ -30,7 +29,7 @@ function ProjectActions({ thread }: { thread: Thread }) {
       onEdit={openProjectSettings}
       trigger={
         <IconButton aria-label="Run project action" className="aria-expanded:bg-selected">
-          <MoreIcon size={14} aria-hidden />
+          <Play aria-hidden />
         </IconButton>
       }
     />
@@ -39,7 +38,7 @@ function ProjectActions({ thread }: { thread: Thread }) {
 function ProjectSettingsButton({ onOpen }: { onOpen: () => void }) {
   return (
     <IconButton aria-label="Open Project settings" onClick={onOpen}>
-      <Settings size={14} aria-hidden />
+      <Settings aria-hidden />
     </IconButton>
   );
 }

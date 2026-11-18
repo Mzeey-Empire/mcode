@@ -67,7 +67,7 @@ function PlanEntry({ thread }: { thread: Thread }) {
       <span className="text-fade min-w-0 grow text-ink">
         <PlanTitle title={latest.title} />
       </span>
-      <span className="shrink-0 text-xs tabular-nums text-muted">{trailing}</span>
+      <span className="shrink-0 text-caption tabular-nums text-muted">{trailing}</span>
     </Button>
   );
 }

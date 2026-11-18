@@ -75,6 +75,20 @@ describe("ThreadOverview changes and branches", () => {
     expect(screen.queryByTestId("thread-overview-change-summary")).not.toBeInTheDocument();
   });
 
+  it("re-runs the comparison when Retry is pressed after a failed load", async () => {
+    vi.mocked(mockTransport.getReviewComparison).mockResolvedValueOnce({
+      status: "failed", failure: { kind: "git-error", summary: "Git reported an error", detail: "fatal" },
+    }).mockResolvedValue({ status: "ready", comparison: {
+      files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 2, deletions: 1, untracked: true }],
+      additions: 2, deletions: 1,
+    } });
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={1400} />);
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("thread-overview-change-summary")).toHaveAttribute("aria-label", "2 additions, 1 deletions");
+    expect(screen.queryByTestId("thread-overview-change-failed")).not.toBeInTheDocument();
+  });
+
   it("keeps branch choices when the uncommitted comparison fails", async () => {
     vi.mocked(mockTransport.getReviewComparison).mockRejectedValue(new Error("Comparison unavailable"));
     const user = userEvent.setup();

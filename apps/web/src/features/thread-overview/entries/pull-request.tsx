@@ -249,12 +249,11 @@ function ThreadOverviewPrActiveRow({
           >
             <span className="flex min-w-0 items-center gap-2">
               <ThreadOverviewCiStatusCircle checks={checks} />
-              <span className="text-fade font-mono text-xs tabular-nums">
+              <span className="text-fade font-mono text-caption tabular-nums">
                 {getCiOverviewSummaryLabel(checks)}
               </span>
             </span>
             <ChevronDown
-              size={12}
               aria-hidden
               className={cn(
                 "shrink-0 text-muted transition-transform duration-150",
@@ -268,7 +267,7 @@ function ThreadOverviewPrActiveRow({
       status.label ? (
         <span
           data-testid="thread-overview-pr-status"
-          className="inline-flex h-7 w-full items-center gap-2 px-3 font-mono text-xs text-muted"
+          className="inline-flex h-7 w-full items-center gap-2 px-3 font-mono text-caption text-muted"
         >
           <span aria-hidden className="size-5 shrink-0" />
           <span className="text-fade">{status.label}</span>

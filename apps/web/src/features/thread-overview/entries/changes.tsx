@@ -251,6 +251,7 @@ function useChangesState(thread: Thread) {
   }));
   const [loadedChangeSummary, setLoadedChangeSummary] = useState<LoadedChangeSummary | null>(null);
   const [changeSummaryStatus, setChangeSummaryStatus] = useState<LoadStatus>("idle");
+  const [retryCount, setRetryCount] = useState(0);
   const stayedOpenRef = useRef(false);
   const cachedSnapshots = useDiffStore((s) => s.snapshotsByThread[thread.id]);
   const setSnapshots = useDiffStore((s) => s.setSnapshots);
@@ -287,7 +288,9 @@ function useChangesState(thread: Thread) {
   const hasChanges = showChangeSummary || changeSummary.files > 0;
   const isSettledResolvePending = !isRunning && !hasCurrentChangeSummary;
   const isChangeSummaryLoading = open && isSettledResolvePending && !showChangeSummary
-    && hasKnownChanges(hasChanges, loadedChangeSummary, thread.id) && changeSummaryStatus !== "error";
+    // A retry keeps the row on screen even when no changes are known yet, so it does not vanish mid-load.
+    && (hasKnownChanges(hasChanges, loadedChangeSummary, thread.id) || changeSummaryStatus === "loading")
+    && changeSummaryStatus !== "error";
   // The fallback summary has no line totals, so a failed load must say so rather than show nothing.
   const isChangeSummaryFailed = isSettledResolvePending && changeSummaryStatus === "error";
   useEffect(() => {
@@ -332,22 +335,30 @@ function useChangesState(thread: Thread) {
       clearTimeout(timer);
     };
   }, [
-    cachedSnapshotKey, cachedSnapshots, diffRevision, hasCurrentChangeSummary, isRunning, open, setSnapshots,
-    thread.id, thread.workspace_id,
+    cachedSnapshotKey, cachedSnapshots, diffRevision, hasCurrentChangeSummary, isRunning, open, retryCount,
+    setSnapshots, thread.id, thread.workspace_id,
   ]);
-  return { changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary };
+  const retryChangeSummary = useCallback(() => {
+    setChangeSummaryStatus("loading");
+    setRetryCount((count) => count + 1);
+  }, []);
+  return {
+    changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, retryChangeSummary, showChangeSummary,
+  };
 }
 
 /** Preserves the loaded summary and its status while the overview is closed. */
 export const { Provider: ChangesEntryState, useEntryState: useChangesEntryState } = createOverviewEntryState(useChangesState);
 
 function ChangesEntry() {
-  const { changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary } =
-    useChangesEntryState();
+  const {
+    changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, retryChangeSummary, showChangeSummary,
+  } = useChangesEntryState();
   const openChanges = useCallback(() => {
     executeCommand("changes.toggle");
   }, []);
   return (<ThreadOverviewWhen when={isChangeSummaryLoading || isChangeSummaryFailed || hasChanges}>
+    <div className="relative">
     <Button
       variant="ghost"
       size="compact"
@@ -367,11 +378,6 @@ function ChangesEntry() {
           className="animate-thread-overview-loading h-3 w-14 shrink-0 overflow-hidden rounded-sm bg-hover/45"
         />
       </ThreadOverviewWhen>
-      <ThreadOverviewWhen when={isChangeSummaryFailed}>
-        <span data-testid="thread-overview-change-failed" className="shrink-0 text-caption text-muted">
-          Couldn't load
-        </span>
-      </ThreadOverviewWhen>
       <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
         <span
           data-testid="thread-overview-change-summary"
@@ -382,6 +388,24 @@ function ChangesEntry() {
         </span>
       </ThreadOverviewWhen>
     </Button>
+    {/* Sits over the row rather than inside it: a button cannot nest in the row's button. */}
+    <ThreadOverviewWhen when={isChangeSummaryFailed}>
+      <span
+        data-testid="thread-overview-change-failed"
+        className="absolute top-1/2 right-3 -translate-y-1/2 text-caption text-muted"
+      >
+        Couldn't load{" "}
+        <button
+          type="button"
+          data-testid="thread-overview-change-retry"
+          onClick={retryChangeSummary}
+          className="rounded-sm text-ink underline-offset-2 hover:underline focus-visible:underline"
+        >
+          Retry
+        </button>
+      </span>
+    </ThreadOverviewWhen>
+    </div>
   </ThreadOverviewWhen>);
 }
 

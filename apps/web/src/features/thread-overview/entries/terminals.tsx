@@ -94,7 +94,7 @@ function TerminalRowItem({ row, onOpen }: { readonly row: TerminalRow; readonly 
           <ActionIcon iconId={row.icon.iconId} command={row.icon.command} size={16} />
         </OverviewRowIcon>
         <span className="min-w-0 flex-1 text-fade text-ink">{row.name}</span>
-        <span className="shrink-0 text-xs/4 text-muted group-focus-within/terminal:invisible group-hover/terminal:invisible">
+        <span className="shrink-0 text-caption text-muted group-focus-within/terminal:invisible group-hover/terminal:invisible">
           {rowMeta(row)}
         </span>
       </Button>
@@ -125,7 +125,7 @@ function TerminalsSection({ thread }: { readonly thread: Thread }) {
   };
   return (
     <section aria-label="Terminals" className="flex flex-col gap-1">
-      <h3 className="flex h-6 items-center px-3 text-xs/4 font-medium text-muted">Terminals</h3>
+      <h3 className="flex h-6 items-center px-3 text-caption font-medium text-muted">Terminals</h3>
       {visible.map((row) => <TerminalRowItem key={row.id} row={row} onOpen={openTerminal} />)}
       {hidden > 0 ? (
         <Button
