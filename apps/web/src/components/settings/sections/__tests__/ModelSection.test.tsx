@@ -19,7 +19,7 @@ vi.mock("@/stores/settingsStore", () => {
       getState: vi.fn().mockReturnValue({
         settings: {
         model: {
-            defaults: { provider: "claude", id: "claude-opus-4-7", reasoning: "high", fallbackId: "" },
+            defaults: { provider: "claude", id: "claude-opus-4-7", reasoning: "high" },
             utility: { provider: "", id: "" },
           },
           provider: { cli: { codex: "", claude: "", copilot: "", cursor: "" } },
@@ -61,7 +61,7 @@ function makeState(provider: string, modelId: string, reasoning = "high") {
   return {
     settings: {
       model: {
-        defaults: { provider, id: modelId, reasoning, fallbackId: "" },
+        defaults: { provider, id: modelId, reasoning },
         utility: { provider: "", id: "" },
       },
       provider: {
@@ -88,7 +88,7 @@ function renderWithModel(provider: string, modelId: string, reasoning = "high") 
 
 /**
  * Finds the reasoning effort segmented control radiogroup.
- * The component renders multiple radiogroups (provider, model, fallback, reasoning);
+ * The component renders multiple radiogroups (provider, model, reasoning);
  * we locate ours by finding the "Reasoning effort" label and querying within its row.
  */
 function getReasoningRow(): HTMLElement {
@@ -99,6 +99,12 @@ function getReasoningRow(): HTMLElement {
 }
 
 describe("ModelSection reasoning options", () => {
+  it("keeps the primary model controls without a fallback model setting", () => {
+    renderWithModel("claude", "claude-opus-4-7");
+    expect(screen.getByText("Default model")).toBeInTheDocument();
+    expect(screen.queryByText("Fallback model")).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });

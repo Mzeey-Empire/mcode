@@ -390,8 +390,6 @@ export class TurnAdmissionDispatchCoordinator {
       reasoningLevel: submission.reasoningLevel as SendMessageCommand["reasoningLevel"],
       interactionMode: submission.interactionMode as InteractionMode | undefined,
       orchestrationMode: submission.orchestrationMode as SendMessageCommand["orchestrationMode"],
-      maxBudgetUsd: submission.maxBudgetUsd,
-      maxTurns: submission.maxTurns,
       thinking: submission.thinking,
       fastMode: submission.fastMode,
       goalObjective: submission.goalObjective,
@@ -894,8 +892,6 @@ export class TurnAdmissionDispatchCoordinator {
         reasoningLevel: command.reasoningLevel,
         interactionMode: command.interactionMode,
         orchestrationMode: command.orchestrationMode,
-        maxBudgetUsd: command.maxBudgetUsd,
-        maxTurns: command.maxTurns,
         thinking: command.thinking,
         fastMode: command.fastMode,
         goalObjective: command.goalObjective,
@@ -1199,7 +1195,6 @@ export class TurnAdmissionDispatchCoordinator {
   ): Promise<TurnRequest> {
     const settings = await this.settings.get();
     const model = prepared.command.model ?? "claude-sonnet-4-6";
-    const guardrails = this.guardrails(prepared.command, settings);
     const mentions = [...prepared.mentions, ...prepared.commentMentions];
     return {
       sessionId: `mcode-${prepared.command.threadId}`,
@@ -1212,7 +1207,6 @@ export class TurnAdmissionDispatchCoordinator {
       mentions: mentions.length > 0 ? mentions : undefined,
       cwd,
       model,
-      fallbackModel: this.fallbackModel(settings, model),
       permissionMode: this.effectivePermissionMode(prepared.command.permissionMode, prepared.thread.permission_mode ?? "supervised"),
       approvalReviewMode: review.mode,
       interactionMode: this.effectiveInteractionMode(prepared),
@@ -1220,25 +1214,10 @@ export class TurnAdmissionDispatchCoordinator {
       orchestrationMode: prepared.command.orchestrationMode ?? prepared.thread.orchestration_mode ?? "standard",
       attachments: attachments.persisted.length > 0 ? attachments.persisted : undefined,
       reasoningLevel: prepared.command.reasoningLevel,
-      ...guardrails,
       resumeFrom: this.resumeFrom(prepared, attachments),
       ...(prepared.command.resumeRequired ? { resumeRequired: true } : {}),
       providerOptions: await this.providerOptions(prepared, settings, model),
     } as TurnRequest;
-  }
-
-  private fallbackModel(settings: ReturnType<SettingsService["get"]>, model: string): string | undefined {
-    const fallback = settings.model.defaults.fallbackId;
-    return fallback && fallback !== model ? fallback : undefined;
-  }
-
-  private guardrails(command: SendMessageCommand, settings: ReturnType<SettingsService["get"]>) {
-    const maxBudgetUsd = this.effectiveBudget(command, settings);
-    const maxTurns = this.effectiveTurns(command, settings);
-    return {
-      ...(maxBudgetUsd > 0 ? { maxBudgetUsd } : {}),
-      ...(maxTurns > 0 ? { maxTurns } : {}),
-    };
   }
 
   private async providerOptions(prepared: PreparedCommand, settings: ReturnType<SettingsService["get"]>, model: string) {
@@ -1292,14 +1271,6 @@ export class TurnAdmissionDispatchCoordinator {
     if (providerId === "claude") return { thinking: defaults.thinking };
     if (providerId === "devin") return { mode: defaults.devinMode };
     return {};
-  }
-
-  private effectiveBudget(command: SendMessageCommand, settings: ReturnType<SettingsService["get"]>): number {
-    return command.maxBudgetUsd ?? settings.agent.guardrails.maxBudgetUsd;
-  }
-
-  private effectiveTurns(command: SendMessageCommand, settings: ReturnType<SettingsService["get"]>): number {
-    return command.maxTurns ?? settings.agent.guardrails.maxTurns;
   }
 
   private resumeFrom(prepared: PreparedCommand, attachments: PersistedAttachmentData): string | undefined {

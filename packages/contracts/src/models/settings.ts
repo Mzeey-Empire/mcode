@@ -161,8 +161,6 @@ export const SettingsSchema = lazySchema(() =>
     /** Agent orchestration settings. */
     agent: z
       .object({
-        /** Maximum number of concurrent agent sessions. */
-        maxConcurrent: z.number().int().positive().default(5),
         /** Default values for new agent sessions. */
         defaults: z
           .object({
@@ -170,15 +168,6 @@ export const SettingsSchema = lazySchema(() =>
             mode: AgentDefaultModeSchema.default("build"),
             /** Default permission mode. */
             permission: PermissionModeSchema.default("full"),
-          })
-          .default({}),
-        /** Per-session safety limits (Claude provider only). */
-        guardrails: z
-          .object({
-            /** Stop the agent if session cost exceeds this USD amount. 0 disables. */
-            maxBudgetUsd: z.number().nonnegative().finite().default(0),
-            /** Stop the agent after this many turns. 0 disables. */
-            maxTurns: z.number().int().nonnegative().default(0),
           })
           .default({}),
       })
@@ -196,8 +185,6 @@ export const SettingsSchema = lazySchema(() =>
             id: z.string().default("claude-opus-4-8"),
             /** Default reasoning effort level. */
             reasoning: ReasoningLevelSchema.default("high"),
-            /** Fallback model when the primary is unavailable. Empty string disables fallback. */
-            fallbackId: z.string().trim().default("claude-sonnet-4-6"),
             /**
              * Default boolean thinking toggle. Honored only by models that expose
              * thinking as a boolean (Haiku 4.5). Effort-tier models ignore this and
@@ -500,17 +487,10 @@ export const PartialSettingsSchema = lazySchema(() =>
       .optional(),
     agent: z
       .object({
-        maxConcurrent: z.number().int().positive().optional(),
         defaults: z
           .object({
             mode: AgentDefaultModeSchema.optional(),
             permission: PermissionModeSchema.optional(),
-          })
-          .optional(),
-        guardrails: z
-          .object({
-            maxBudgetUsd: z.number().nonnegative().finite().optional(),
-            maxTurns: z.number().int().nonnegative().optional(),
           })
           .optional(),
       })
@@ -522,7 +502,6 @@ export const PartialSettingsSchema = lazySchema(() =>
             provider: ProviderIdSchema.optional(),
             id: z.string().optional(),
             reasoning: ReasoningLevelSchema.optional(),
-            fallbackId: z.string().trim().optional(),
             thinking: z.boolean().optional(),
           })
           .optional(),

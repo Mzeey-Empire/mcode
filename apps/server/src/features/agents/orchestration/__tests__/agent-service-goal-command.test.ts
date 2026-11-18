@@ -148,8 +148,7 @@ async function buildService(database: OwnedTestDatabase) {
   const settingsService = {
     get: vi.fn(() =>
       Promise.resolve({
-        model: { defaults: { fallbackId: undefined, contextWindow: "auto", thinking: false } },
-        agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+        model: { defaults: { contextWindow: "auto", thinking: false } },
         provider: { enabled: {}, cli: {}, claude: { fastMode: false }, codex: { fastMode: false } },
       }),
     ),

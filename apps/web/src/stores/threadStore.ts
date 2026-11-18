@@ -2618,8 +2618,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   };
 
   const TERMINAL_STOP_REASON_MESSAGES: Record<string, string> = {
-    error_max_budget_usd: "Budget cap reached. You can adjust guardrails in Settings > Agent.",
-    max_turns: "Max turns reached. You can adjust guardrails in Settings > Agent.",
+    error_max_budget_usd: "Budget cap reached. Check your Claude Code settings.",
+    max_turns: "Max turns reached. Check your Claude Code settings.",
     max_turn_requests: "Request limit reached. Send a message to continue.",
     max_tokens: "Output token limit reached. Send a message to continue.",
     output_truncated: "Response was cut short at the output token limit. Send a message to continue.",

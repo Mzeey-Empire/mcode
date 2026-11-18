@@ -530,7 +530,6 @@ interface ClaudeSendMessageParams {
   message: string;
   cwd: string;
   model: string;
-  fallbackModel?: string;
   resume: boolean;
   /** The saved session must be resumed; a failed resume ends the turn instead of starting fresh. */
   resumeRequired: boolean;
@@ -541,8 +540,6 @@ interface ClaudeSendMessageParams {
   orchestrationMode: OrchestrationMode;
   thinking?: boolean;
   fastMode?: boolean;
-  maxBudgetUsd?: number;
-  maxTurns?: number;
 }
 
 interface ClaudeTurnContext {
@@ -793,7 +790,6 @@ export class ClaudeProvider
       message: req.message,
       cwd: req.cwd,
       model: req.model,
-      fallbackModel: req.fallbackModel,
       resume: req.resumeFrom !== undefined,
       resumeRequired: req.resumeRequired === true,
       permissionMode: req.permissionMode,
@@ -803,8 +799,6 @@ export class ClaudeProvider
       orchestrationMode: req.orchestrationMode ?? "standard",
       thinking: req.providerOptions.thinking,
       fastMode: req.providerOptions.fastMode,
-      maxBudgetUsd: req.maxBudgetUsd,
-      maxTurns: req.maxTurns,
     };
     try {
       await this.doSendMessage(params, routing);
@@ -1430,16 +1424,7 @@ export class ClaudeProvider
         context.params.thinking,
         discoveredClaudeEfforts(this.resolveClaudeExecutable(), context.model),
       ),
-      ...(context.params.fallbackModel && {
-        fallbackModel: context.params.fallbackModel,
-      }),
       includePartialMessages: true,
-      ...(context.params.maxBudgetUsd != null &&
-        context.params.maxBudgetUsd > 0 && {
-          maxBudgetUsd: context.params.maxBudgetUsd,
-        }),
-      ...(context.params.maxTurns != null &&
-        context.params.maxTurns > 0 && { maxTurns: context.params.maxTurns }),
       hooks: this.createClaudeHooks(context),
     };
     return { sdk, mcodeToolkits: mcode?.toolkits ?? NO_MCODE_TOOLKITS };

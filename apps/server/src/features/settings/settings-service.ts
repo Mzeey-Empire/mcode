@@ -145,6 +145,31 @@ function removeLegacyCursorUsageEmailSetting(value: unknown): {
   return { changed: true, document };
 }
 
+function removeLegacyAgentLimits(value: unknown): {
+  readonly changed: boolean;
+  readonly document: unknown;
+} {
+  if (!isRecord(value)) {
+    return { changed: false, document: value };
+  }
+  const document = { ...value };
+  let changed = false;
+  if (isRecord(value.agent) && ("maxConcurrent" in value.agent || "guardrails" in value.agent)) {
+    const agent = { ...value.agent };
+    delete agent.maxConcurrent;
+    delete agent.guardrails;
+    document.agent = agent;
+    changed = true;
+  }
+  if (isRecord(value.model) && isRecord(value.model.defaults) && "fallbackId" in value.model.defaults) {
+    const defaults = { ...value.model.defaults };
+    delete defaults.fallbackId;
+    document.model = { ...value.model, defaults };
+    changed = true;
+  }
+  return { changed, document };
+}
+
 function getSettingsDefaults(): Settings {
   const defaults = getDefaultSettings();
   if (process.env.MCODE_AGENT_RUNTIME !== "1") {
@@ -159,7 +184,6 @@ function getSettingsDefaults(): Settings {
         ...defaults.model.defaults,
         provider: "codex",
         id: "gpt-5.6-luna",
-        fallbackId: "",
       },
     },
   };
@@ -352,7 +376,8 @@ export class SettingsService {
     const previewMigration = removeLegacyPreviewRenderingSetting(parsed);
     const worktreeMigration = removeLegacyUnsafeWorktreePolicy(previewMigration.document);
     const cursorUsageEmailMigration = removeLegacyCursorUsageEmailSetting(worktreeMigration.document);
-    const terminalMigration = migrateTerminalSettingsDocument(cursorUsageEmailMigration.document);
+    const agentLimitsMigration = removeLegacyAgentLimits(cursorUsageEmailMigration.document);
+    const terminalMigration = migrateTerminalSettingsDocument(agentLimitsMigration.document);
     if (terminalMigration.status === "blocked") {
       this.blockTerminalMigration(terminalMigration.reason, terminalMigration.original);
       logger.warn("Settings file failed Terminal migration, returning temporary defaults", {
@@ -378,6 +403,7 @@ export class SettingsService {
       previewMigration.changed
         || worktreeMigration.changed
         || cursorUsageEmailMigration.changed
+        || agentLimitsMigration.changed
         || migratedTerminalSettings,
       migratedTerminalSettings,
     );

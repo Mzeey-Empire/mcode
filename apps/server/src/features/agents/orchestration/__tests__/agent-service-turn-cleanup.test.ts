@@ -211,8 +211,7 @@ async function buildService(
 
   const settingsService = {
     get: vi.fn(() => ({
-      model: { defaults: { fallbackId: undefined } },
-      agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+      model: { defaults: {} },
       provider: { enabled: {}, cli: {}, claude: { fastMode: false }, codex: { fastMode: false } },
     })),
     on: vi.fn(),
@@ -1034,8 +1033,7 @@ describe("AgentService Ended finalization through the production execution worke
     } as unknown as MemoryPressureService;
     const settingsService = {
       get: vi.fn(() => ({
-        model: { defaults: { fallbackId: undefined } },
-        agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+        model: { defaults: {} },
         provider: { enabled: {}, cli: {}, claude: { fastMode: false }, codex: { fastMode: false } },
       })),
       on: vi.fn(),

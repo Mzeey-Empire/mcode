@@ -115,8 +115,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
 
     const settingsServiceStub = {
       get: vi.fn(async () => ({
-        model: { defaults: { fallbackId: undefined } },
-        agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+        model: { defaults: {} },
         provider: { claude: { fastMode: false }, codex: { fastMode: false } },
       })),
     } as unknown as SettingsService;

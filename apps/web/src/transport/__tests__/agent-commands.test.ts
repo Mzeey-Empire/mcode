@@ -408,7 +408,9 @@ describe("agent command transport", () => {
     const firstSocket = mockWs;
     const firstRequest = firstSocket.sent.map((row) => JSON.parse(row) as { id: string; method: string; params: Record<string, unknown> })
       .find((row) => row.method === "agent.createAndSend")!;
-    expect(firstRequest.params).toMatchObject({ startupId, maxBudgetUsd: expect.anything(), maxTurns: expect.anything() });
+    expect(firstRequest.params).toMatchObject({ startupId });
+    expect(firstRequest.params).not.toHaveProperty("maxBudgetUsd");
+    expect(firstRequest.params).not.toHaveProperty("maxTurns");
 
     // A healthy server request can outlast the offline wait budget.
     now += 121_000;
