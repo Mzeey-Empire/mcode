@@ -29,9 +29,10 @@ describe("threadTitleTone", () => {
     ["unseen finished outcome is ink", { kind: "finished" }, false, "prominent"],
     ["unseen failure is ink", { kind: "failed" }, false, "prominent"],
     ["blocked on the user is ink", { kind: "needs-you", label: "Approval required" }, false, "prominent"],
-    ["seen thread recedes", { kind: "quiet" }, false, "receded"],
-    ["selected seen thread stays ink", { kind: "quiet" }, true, "prominent"],
-    ["running thread keeps ink under the row fade", { kind: "running" }, false, "prominent"],
+    ["quiet thread recedes", { kind: "quiet" }, false, "receded"],
+    ["running thread is ink", { kind: "running" }, false, "prominent"],
+    ["selected quiet thread stays ink", { kind: "quiet" }, true, "prominent"],
+    ["selected running thread stays ink", { kind: "running" }, true, "prominent"],
   ])("%s", (_name, state, selected, tone) => {
     expect(threadTitleTone(state, selected)).toBe(tone);
   });

@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { selectThreadIndex } from "../state/thread-index";
 import { useCompletionStore } from "./completion-store";
@@ -17,13 +16,12 @@ interface CompletionUndoLineProps {
 }
 
 /**
- * The line under the scope bar after this client completes a thread: project tile, title and
+ * The line under the scope bar after this client completes a thread: "Closed", the title and
  * Undo. The title opens Completed with the thread selected. It hides after {@link UNDO_LINE_MS}.
  */
 export function CompletionUndoLine({ onOpen, flying }: CompletionUndoLineProps) {
   const threadId = useCompletionStore((state) => state.undoLineThreadId);
   const thread = useWorkspaceStore((state) => (threadId === null ? undefined : selectThreadIndex(state.threads).get(threadId)));
-  const workspaceName = useWorkspaceStore((state) => state.workspaces.find((workspace) => workspace.id === thread?.workspace_id)?.name ?? "");
   const visible = thread !== undefined && thread.user_completed_at !== null && !(threadId !== null && flying?.has(threadId));
 
   useEffect(() => {
@@ -39,12 +37,12 @@ export function CompletionUndoLine({ onOpen, flying }: CompletionUndoLineProps) 
     onOpen(thread.workspace_id, thread.id);
   };
   return (
-    <div data-testid="completion-undo-line" className="flex h-7 shrink-0 items-center gap-2 pl-2.5 pr-1 text-caption text-muted">
-      <ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} className="shrink-0" />
+    <div data-testid="completion-undo-line" className="mx-2 mb-1 flex h-8 shrink-0 items-center gap-2 px-2 text-label text-muted">
+      <span className="shrink-0">Closed</span>
       <button type="button" onClick={open} className="text-fade min-w-0 flex-1 text-left text-ink hover:underline hover:underline-offset-2">
         {thread.title}
       </button>
-      <Button variant="ghost" size="compact" className="h-6 shrink-0 px-2" onClick={() => useCompletionStore.getState().undoFromLine()}>
+      <Button variant="ghost" size="compact" className="h-6 shrink-0 px-2 text-ink" onClick={() => useCompletionStore.getState().undoFromLine()}>
         Undo
       </Button>
     </div>

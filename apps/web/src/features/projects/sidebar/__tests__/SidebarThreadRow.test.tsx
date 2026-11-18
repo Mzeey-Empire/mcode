@@ -1,6 +1,7 @@
 import { createMockThread, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
 import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import { mockTransport } from "@/__tests__/mocks/transport";
+import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
@@ -27,6 +28,8 @@ import { useSidebarModel } from "../use-sidebar-model";
 import { PREVIEW_SCROLL_SETTLE_MS } from "../preview-scroll-guard";
 import { FakeVirtualViewport } from "./fake-virtual-viewport";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { useThreadStore } from "@/stores/threadStore";
+import { statusGlyph } from "@/features/thread-attention/__tests__/status-glyph";
 
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
 const PR_URL = (number: number) => `https://github.com/acme/app/pull/${number}`;
@@ -79,21 +82,239 @@ describe("SidebarThreadRow", () => {
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });
 
-  it("swaps the status label for the row actions on hover", () => {
+  it("keeps the status icon and drops its label while the row actions show", () => {
     act(() => threadAttentionStore.getState().apply(finished("t1")));
     const row = renderThread();
-    const label = within(screen.getByTestId("thread-status")).getByText("Finished");
+    const status = () => screen.getByTestId("thread-status");
     const complete = screen.getByRole("button", { name: "Close Row title" });
-    expect(label).toBeVisible();
+    expect(within(status()).getByText("Finished")).toBeVisible();
     expect(complete).not.toBeVisible();
 
     fireEvent.mouseEnter(row);
-    expect(label).not.toBeVisible();
+    expect(within(status()).queryByText("Finished")).toBeNull();
+    expect(within(status()).getByRole("img", { name: "Finished" })).toBeVisible();
     expect(complete).toBeVisible();
+    expect(status().compareDocumentPosition(complete) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.mouseLeave(row);
-    expect(label).toBeVisible();
+    expect(within(status()).getByText("Finished")).toBeVisible();
     expect(complete).not.toBeVisible();
+  });
+
+  it("keeps the row's hover look while its options menu is open", async () => {
+    const row = renderThread();
+    vi.useRealTimers();
+    fireEvent.mouseEnter(row);
+    fireEvent.click(screen.getByRole("button", { name: "Thread options for Row title" }));
+    await screen.findByRole("menu");
+    fireEvent.mouseLeave(row);
+    expect(row).toHaveAttribute("data-menu-open");
+
+    fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+    await vi.waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(row).not.toHaveAttribute("data-menu-open");
+    // The menu needs real timers to open and close; the shared teardown expects fake ones.
+    vi.useFakeTimers();
+  });
+
+  describe("flat Threads row", () => {
+    function renderFlat(overrides: Partial<Thread> = {}): HTMLElement {
+      useSidebarUiStore.setState({ view: "threads" });
+      const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", provider: "claude", mode: "worktree", last_activity_at: new Date().toISOString(), ...overrides });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      return screen.getByRole("button", { name: /^Alpha / });
+    }
+
+    function waiting(threadId: string): ThreadAttention {
+      return { ...finished(threadId), waiting: { kind: "approval", since: "2026-10-27T11:00:00.000Z" } };
+    }
+
+    afterEach(() => {
+      useThreadStore.setState({ runningThreadIds: new Set() });
+      act(() => threadAttentionStore.getState().apply({ ...finished("t1"), lastTurn: null }));
+    });
+
+    it("reads project, title, then branch with the provider mark last", () => {
+      const row = renderFlat({ branch: "feat/rows" });
+      const lines = within(row).getAllByTestId(/^thread-line-/).map((line) => line.dataset.testid);
+      expect(lines).toEqual(["thread-line-project", "thread-line-title", "thread-line-branch"]);
+      const branchLine = within(row).getByTestId("thread-line-branch");
+      const provider = within(branchLine).getByLabelText("Provider, Claude");
+      expect(branchLine.lastElementChild?.contains(provider)).toBe(true);
+    });
+
+    it("shows the relative time in the corner of a quiet row", () => {
+      renderFlat();
+      expect(screen.getByTestId("thread-status")).toHaveTextContent(/^now$/);
+    });
+
+    it("hides the time while the row actions show", () => {
+      const row = renderFlat();
+      fireEvent.mouseEnter(row);
+      expect(screen.getByTestId("thread-status")).toHaveTextContent(/^$/);
+      expect(screen.getByRole("button", { name: "Close Row title" })).toBeVisible();
+    });
+
+    it("shows an unseen outcome over the time", () => {
+      act(() => threadAttentionStore.getState().apply(finished("t1")));
+      renderFlat();
+      expect(screen.getByTestId("thread-status")).toHaveTextContent(/^Finished$/);
+    });
+
+    it("shows Running over an unseen outcome, without an elapsed clock", () => {
+      act(() => threadAttentionStore.getState().apply(finished("t1")));
+      useThreadStore.setState({ runningThreadIds: new Set(["t1"]) });
+      renderFlat();
+      expect(screen.getByTestId("thread-status")).toHaveTextContent(/^Running$/);
+    });
+
+    it.each<[string, (attention: ThreadAttention) => ThreadAttention, boolean, string]>([
+      ["Approval required", (a) => ({ ...a, waiting: { kind: "approval", since: a.lastTurn!.endedAt } }), false, "shield-alert"],
+      ["Answers required", (a) => ({ ...a, waiting: { kind: "questions", since: a.lastTurn!.endedAt } }), false, "message-circle-question-mark"],
+      ["Plan ready", (a) => ({ ...a, waiting: { kind: "plan", since: a.lastTurn!.endedAt } }), false, "list-checks"],
+      ["Interrupted", (a) => ({ ...a, lastTurn: { ...a.lastTurn!, outcome: "interrupted" } }), false, "circle-pause"],
+      ["Failed", (a) => ({ ...a, lastTurn: { ...a.lastTurn!, outcome: "errored" } }), false, "circle-alert"],
+      ["Finished", (a) => a, false, "circle-check"],
+      ["Running", (a) => ({ ...a, lastTurn: null }), true, "spinner"],
+    ])("shows %s as its icon beside its label", (label, shape, running, icon) => {
+      act(() => threadAttentionStore.getState().apply(shape(finished("t1"))));
+      if (running) useThreadStore.setState({ runningThreadIds: new Set(["t1"]) });
+      renderFlat();
+      const status = screen.getByTestId("thread-status");
+      const mark = within(status).getByRole("img", { name: label });
+      expect(statusGlyph(mark)).toBe(icon);
+      expect(within(status).getByText(label)).toBeInTheDocument();
+    });
+
+    it("shows what needs the user over Running", () => {
+      act(() => threadAttentionStore.getState().apply(waiting("t1")));
+      useThreadStore.setState({ runningThreadIds: new Set(["t1"]) });
+      renderFlat();
+      expect(screen.getByTestId("thread-status")).toHaveTextContent(/^Approval required$/);
+    });
+
+    it("swaps the corner for Close on hover and keyboard focus", () => {
+      act(() => threadAttentionStore.getState().apply(finished("t1")));
+      const row = renderFlat();
+      const close = screen.getByRole("button", { name: "Close Row title" });
+      expect(close).not.toBeVisible();
+
+      fireEvent.mouseEnter(row);
+      expect(close).toBeVisible();
+      expect(close).toHaveTextContent("Close");
+      expect(screen.getByTestId("thread-status")).toHaveTextContent(/^$/);
+      expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Finished" })).toBeVisible();
+      fireEvent.mouseLeave(row);
+
+      act(() => row.focus());
+      expect(close).toBeVisible();
+    });
+
+    it("offers no Close on a running row and keeps its status", () => {
+      useThreadStore.setState({ runningThreadIds: new Set(["t1"]) });
+      const row = renderFlat();
+      fireEvent.mouseEnter(row);
+      expect(screen.queryByRole("button", { name: "Close Row title" })).toBeNull();
+      expect(screen.getByTestId("thread-status")).toHaveTextContent("Running");
+      expect(screen.getByTestId("thread-status")).toBeVisible();
+    });
+
+    it("offers no Close on a row waiting for approval and keeps its status", () => {
+      act(() => threadAttentionStore.getState().apply(waiting("t1")));
+      const row = renderFlat();
+      fireEvent.mouseEnter(row);
+      expect(screen.queryByRole("button", { name: "Close Row title" })).toBeNull();
+      expect(screen.getByTestId("thread-status")).toHaveTextContent("Approval required");
+      expect(screen.getByTestId("thread-status")).toBeVisible();
+    });
+
+    it("lets Escape on Close reach the document, so open menus and popups still dismiss", () => {
+      const row = renderFlat();
+      fireEvent.mouseEnter(row);
+      const onDocumentKeyDown = vi.fn();
+      document.addEventListener("keydown", onDocumentKeyDown);
+      try {
+        fireEvent.keyDown(screen.getByRole("button", { name: "Close Row title" }), { key: "Escape" });
+      } finally {
+        document.removeEventListener("keydown", onDocumentKeyDown);
+      }
+      expect(onDocumentKeyDown).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("keeps a closing row's open layout while it leaves the Open list", () => {
+    useSidebarUiStore.setState({ view: "threads" });
+    const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", provider: "claude", mode: "worktree", branch: "feat/rows", last_activity_at: new Date().toISOString() });
+    useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
+    // The motion layer keeps a closing row's last item listed while it folds away, so the list's
+    // items stay frozen while the thread itself turns closed.
+    function FrozenHarness() {
+      const { model } = useSidebarModel();
+      const [items] = useState(model.items);
+      const { ctx } = useProjectTreeMenus();
+      return <SidebarList items={items} ctx={ctx} />;
+    }
+    render(<FrozenHarness />);
+
+    act(() => useWorkspaceStore.setState({ threads: [{ ...thread, user_completed_at: new Date().toISOString() }] }));
+
+    expect(screen.getByTestId("thread-line-branch")).toBeInTheDocument();
+  });
+
+  it.each(["projects", "threads"] as const)("keeps a title's parenthetical ending whole in the %s view", (view) => {
+    useSidebarUiStore.setState({ view });
+    const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Fix login (continued)", last_activity_at: new Date().toISOString() });
+    useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
+    render(<Harness />);
+    expect(screen.getByTestId("thread-title-head")).toHaveTextContent(/^Fix login$/);
+    expect(screen.getByTestId("thread-title-ending")).toHaveTextContent(/^\(continued\)$/);
+  });
+
+  describe("closed row", () => {
+    const CLOSED_AT = "2026-10-27T11:00:00.000Z";
+
+    function renderClosed(overrides: Partial<Thread> = {}, view: "threads" | "projects" = "threads"): HTMLElement {
+      useSidebarUiStore.setState({ view, scope: "completed" });
+      const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Row title", provider: "claude", last_activity_at: new Date().toISOString(), user_completed_at: CLOSED_AT, ...overrides });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      return screen.getByRole("button", { name: /^Row title/ });
+    }
+
+    it("is one line with the title and no branch line", () => {
+      const row = renderClosed();
+      expect(within(row).getByTestId("thread-title")).toHaveTextContent("Row title");
+      expect(within(row).queryByTestId("thread-line-branch")).toBeNull();
+      expect(within(row).queryByLabelText(/^Provider,/)).toBeNull();
+    });
+
+    it("shows Restore on hover and on keyboard focus", () => {
+      const row = renderClosed();
+      const restore = screen.getByRole("button", { name: "Restore Row title" });
+      expect(restore).not.toBeVisible();
+      fireEvent.mouseEnter(row);
+      expect(restore).toBeVisible();
+      expect(restore).toHaveTextContent("Restore");
+      fireEvent.mouseLeave(row);
+      expect(restore).not.toBeVisible();
+      act(() => row.focus());
+      expect(restore).toBeVisible();
+    });
+
+    it("keeps Retry and the cleanup failure visible without hover", () => {
+      renderClosed({ cleanup_state: "blocked", cleanup_reason: "Dirty worktree" }, "projects");
+      expect(screen.getByRole("button", { name: "Retry cleanup for Row title" })).toBeVisible();
+      expect(screen.getByText("Cleanup blocked")).toBeVisible();
+    });
+
+    it("keeps a closed title's parenthetical ending whole", () => {
+      useSidebarUiStore.setState({ scope: "completed" });
+      const thread = createMockThread({ id: "t1", workspace_id: "ws-1", title: "Fix login (continued)", last_activity_at: new Date().toISOString(), user_completed_at: CLOSED_AT });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [thread], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      expect(screen.getByTestId("thread-title-ending")).toHaveTextContent(/^\(continued\)$/);
+    });
   });
 
   it("shows the top-ranked PR's icon and +2 for three PRs", () => {

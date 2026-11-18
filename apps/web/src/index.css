@@ -152,6 +152,11 @@
   /* Off the lamp's hue, as in dark, so the Don't ask key and Low quota beside an amber Send never read as more Sends. */
   --warning: oklch(46% 0.100 92);
   --info: var(--blue-700);
+  /* Status label text sits on the hover and selected row fills too, so light mode needs a darker
+     ink than the shared roles to keep 4.5:1 there; icons keep the shared roles. */
+  --status-label-attention: var(--amber-800);
+  --status-label-success: oklch(48% 0.120 145);
+  --status-label-error: oklch(49% 0.140 25);
   --pr-merged: var(--violet-700);
   --selection: color-mix(in oklch, var(--blue-500) 18%, transparent);
   --scrollbar-thumb: color-mix(in oklch, var(--ink) 18%, transparent);
@@ -175,9 +180,11 @@
   --diff-remove-strong: oklch(0.55 0.17 25);
   /* Collapsed-context bands need a step off --background; light --panel matches it. */
   --diff-band: var(--neutral-100);
+  --provider-mark-opacity: 0.85;
 }
 
 .dark {
+  --provider-mark-opacity: 0.7;
   /* --page is darker than --background so floating panels appear lifted off the chrome. */
   --page: var(--neutral-950);
   --background: var(--neutral-900);
@@ -207,6 +214,9 @@
   /* Brass, off the lamp's hue, so the key icon and Low quota beside an amber Send never read as more Sends. */
   --warning: oklch(82% 0.110 92);
   --info: var(--blue-400);
+  --status-label-attention: var(--primary);
+  --status-label-success: var(--success);
+  --status-label-error: var(--error);
   --pr-merged: var(--violet-400);
   --selection: color-mix(in oklch, var(--blue-500) 30%, transparent);
   --scrollbar-thumb: color-mix(in oklch, var(--ink) 22%, transparent);
@@ -313,6 +323,9 @@
   --color-error: var(--error);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-status-label-attention: var(--status-label-attention);
+  --color-status-label-success: var(--status-label-success);
+  --color-status-label-error: var(--status-label-error);
   --color-pr-merged: var(--pr-merged);
   --radius-sm: 0.6rem;
   --radius-md: 0.8rem;
@@ -646,6 +659,18 @@
 
 .dark .github-favicon-mark {
   filter: invert(1);
+}
+
+.project-badge {
+  background: oklch(62% 0.13 var(--project-hue) / 0.44);
+  box-shadow: inset 0 0 0 1px oklch(62% 0.13 var(--project-hue) / 0.7);
+  color: oklch(32% 0.09 var(--project-hue));
+}
+
+.dark .project-badge {
+  background: oklch(62% 0.13 var(--project-hue) / 0.28);
+  box-shadow: none;
+  color: oklch(84% 0.07 var(--project-hue));
 }
 
 /* Radix Collapsible slide-open / slide-closed using the content's intrinsic

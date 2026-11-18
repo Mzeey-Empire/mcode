@@ -169,6 +169,7 @@ describe("SidebarList completion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
     await act(() => vi.advanceTimersByTimeAsync(3000));
 
+    expect(screen.getByTestId("completion-undo-line")).toHaveTextContent(/^Closed\s*Title target\s*Undo$/);
     fireEvent.click(within(screen.getByTestId("completion-undo-line")).getByRole("button", { name: "Title target" }));
 
     expect(useSidebarUiStore.getState().scope).toBe("completed");

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearAttachmentTransportWsUrlCache, setAttachmentTransportWsUrl } from "@/lib/attachment-url";
-import { ProjectIcon, projectMonogram } from "../ProjectIcon";
+import { ProjectIcon, projectHue, projectInitials, projectMonogram } from "../ProjectIcon";
 import { useProjectIconStore } from "../projectIconStore";
 
 const favicon = {
@@ -45,6 +45,37 @@ describe("ProjectIcon", () => {
     const { container } = render(<ProjectIcon workspaceId="ws 1" name="élan" size={40} />);
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByTestId("project-monogram").textContent).toBe("É");
+  });
+});
+
+describe("tinted project badge", () => {
+  it("shows two letters when the project has no image", () => {
+    render(<ProjectIcon workspaceId="ws 1" name="orderwise-sync" size={16} tone="tinted" />);
+    expect(screen.getByTestId("project-monogram").textContent).toBe("OS");
+  });
+
+  it("shows the project's image over the letters", () => {
+    useProjectIconStore.getState().applyIcon(favicon);
+    const { container } = render(<ProjectIcon workspaceId="ws 1" name="mcode" size={16} tone="tinted" />);
+    expect(container.querySelector("img")).not.toBeNull();
+    expect(screen.queryByTestId("project-monogram")).toBeNull();
+  });
+
+  it("keeps one hue per project id", () => {
+    expect(projectHue("ws-1")).toBe(projectHue("ws-1"));
+    expect(projectHue("ws-1")).not.toBe(projectHue("ws-2"));
+  });
+});
+
+describe("projectInitials", () => {
+  it.each([
+    ["mcode", "Mc"],
+    ["orderwise-sync", "OS"],
+    ["vault tools", "VT"],
+    ["x", "X"],
+    ["", "?"],
+  ])("reads %j as %j", (name, expected) => {
+    expect(projectInitials(name)).toBe(expected);
   });
 });
 

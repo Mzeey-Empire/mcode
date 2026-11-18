@@ -92,7 +92,7 @@ function ThreadSearchResult({
       className="group min-h-9 gap-2 rounded-md py-1.5 pl-2 pr-3"
       data-testid={`thread-search-result-${thread.id}`}
     >
-      <ThreadStatusLane mark={look.mark} />
+      <ThreadStatusLane look={look} />
       <span
         className={cn(
           "min-w-0 flex-1 text-fade text-sm font-medium text-ink",

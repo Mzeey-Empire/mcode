@@ -31,7 +31,7 @@ import type { SidebarRowContext } from "./sidebar-row-context";
 import { ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
 import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
-import { freezeOrder, useSidebarUiStore } from "./sidebar-ui-store";
+import { freezeOrder, selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 import { PreviewScrollGuard } from "./preview-scroll-guard";
 import { ThreadPreviewHandleContext, ThreadPreviewTooltip, type ThreadPreviewPayload } from "./SidebarThreadPreview";
@@ -45,14 +45,16 @@ import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 const PROVISIONAL_HEIGHT: Record<Exclude<SidebarItem["kind"], "thread">, number> = {
   project: 32, draft: 32, "show-more": 32, "older-bar": 32, empty: 0, "end-spacer": 12,
 };
-const PROVISIONAL_THREAD_HEIGHT: Record<Extract<SidebarItem, { kind: "thread" }>["layout"], number> = { grouped: 64, flat: 84 };
+const PROVISIONAL_THREAD_HEIGHT: Record<Extract<SidebarItem, { kind: "thread" }>["layout"], number> = { grouped: 64, flat: 78 };
+const CLOSED_THREAD_HEIGHT = 32;
 
 // One 20px text-label line inside py-1, the "No closed threads" line rendered below.
 const EMPTY_CLOSED_HEIGHT = 28;
 
-function provisionalHeight(item: SidebarItem): number {
+function provisionalHeight(item: SidebarItem, closedScope: boolean): number {
   if (item.kind === "empty" && item.scope === "completed") return EMPTY_CLOSED_HEIGHT;
-  return item.kind === "thread" ? PROVISIONAL_THREAD_HEIGHT[item.layout] : PROVISIONAL_HEIGHT[item.kind];
+  if (item.kind !== "thread") return PROVISIONAL_HEIGHT[item.kind];
+  return closedScope ? CLOSED_THREAD_HEIGHT : PROVISIONAL_THREAD_HEIGHT[item.layout];
 }
 
 // Clamping to the list scroller keeps the overlay from floating over the scope bar and header.
@@ -235,8 +237,8 @@ const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: Sid
   }
 });
 
-function toVirtualRows(items: readonly SidebarItem[]): VirtualRow[] {
-  return items.map((item) => ({ id: item.key, height: provisionalHeight(item) }));
+function toVirtualRows(items: readonly SidebarItem[], closedScope: boolean): VirtualRow[] {
+  return items.map((item) => ({ id: item.key, height: provisionalHeight(item, closedScope) }));
 }
 
 /**
@@ -413,7 +415,8 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
   const [previewHandle] = useState(() => createTooltipHandle<ThreadPreviewPayload>());
   const drag = useProjectDrag(controllerRef);
   const rowCtx = useDragSafeContext(ctx, drag.isClickSuppressed);
-  const rows = useMemo(() => toVirtualRows(items), [items]);
+  const closedScope = useSidebarUiStore(selectClosedScope);
+  const rows = useMemo(() => toVirtualRows(items, closedScope), [items, closedScope]);
   const itemsByKey = useMemo(() => new Map<string, SidebarItem>(items.map((item) => [item.key, item])), [items]);
   const sortableIds = useMemo(() => items.flatMap((item) => (item.kind === "project" && item.section === "recent" ? [item.workspaceId] : [])), [items]);
   const entrance = useEntranceKeys(items);

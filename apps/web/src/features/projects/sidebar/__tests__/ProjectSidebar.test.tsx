@@ -199,6 +199,7 @@ import { threadAttentionStore } from "@/features/thread-attention/thread-attenti
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { FakeVirtualViewport } from "./fake-virtual-viewport";
+import { statusGlyph } from "@/features/thread-attention/__tests__/status-glyph";
 
 const publishedRowIdHistory = FakeVirtualViewport.published;
 
@@ -335,6 +336,7 @@ describe("ProjectSidebar thread interactions", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     localStorage.clear();
+    useSidebarUiStore.setState({ view: "projects" });
   });
 
   it("starts a new thread from the project row without expanding it", () => {
@@ -426,7 +428,7 @@ describe("ProjectSidebar thread interactions", () => {
     );
   });
 
-  it("switches to completed threads and reopens one by keyboard", async () => {
+  it("switches to completed threads and restores one by keyboard", async () => {
     const reopenThread = vi.fn().mockResolvedValue(undefined);
     setupStoreMocks({
       thread: makeThread({
@@ -442,7 +444,7 @@ describe("ProjectSidebar thread interactions", () => {
     expect(completedScope).toHaveFocus();
     fireEvent.click(completedScope);
 
-    const action = screen.getByRole("button", { name: "Reopen My Thread" });
+    const action = screen.getByRole("button", { name: "Restore My Thread" });
     action.focus();
     expect(action).toHaveFocus();
     fireEvent.click(action);
@@ -461,17 +463,17 @@ describe("ProjectSidebar thread interactions", () => {
 
     const firstRender = render(<ProjectSidebar />);
     expect(screen.getByRole("button", { name: /^Provider, Claude Active work/i })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /^Provider, Claude Completed work/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Completed work/i })).toBeNull();
     expect(screen.getByRole("group", { name: "Test Project project, 1 thread" })).toBeVisible();
     expect(screen.getByTestId("project-thread-count-ws-1")).toHaveTextContent("1");
 
     selectCompletedScope();
     expect(screen.queryByRole("button", { name: /^Provider, Claude Active work/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /^Provider, Claude Completed work/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Completed work/i })).toBeVisible();
 
     firstRender.unmount();
     render(<ProjectSidebar />);
-    expect(screen.getByRole("button", { name: /^Provider, Claude Completed work/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Completed work/i })).toBeVisible();
   });
 
   it("applies the scope to every project at once", () => {
@@ -489,7 +491,7 @@ describe("ProjectSidebar thread interactions", () => {
     expect(screen.getByRole("button", { name: /^Provider, Claude Second active/i })).toBeVisible();
     selectCompletedScope();
 
-    expect(screen.getByRole("button", { name: /^Provider, Claude First completed/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^First completed/i })).toBeVisible();
     expect(screen.queryByRole("button", { name: /^Provider, Claude Second active/i })).toBeNull();
     expect(screen.queryByTestId("project-row-ws-2")).toBeNull();
   });
@@ -592,7 +594,7 @@ describe("ProjectSidebar thread interactions", () => {
     expect(screen.getAllByTestId("provider-icon-stack")).toHaveLength(1);
   });
 
-  it("offers Reopen on a completed row and shows its hover details", async () => {
+  it("offers Restore on a completed row and shows its hover details", async () => {
     vi.useRealTimers();
     setupStoreMocks({
       thread: makeThread({
@@ -608,8 +610,8 @@ describe("ProjectSidebar thread interactions", () => {
     render(<ProjectSidebar />);
     selectCompletedScope();
 
-    expect(screen.getByRole("button", { name: "Reopen Completed work" })).toBeInTheDocument();
-    screen.getByRole("button", { name: /^Provider, Claude Completed work/i }).focus();
+    expect(screen.getByRole("button", { name: "Restore Completed work" })).toBeInTheDocument();
+    screen.getByRole("button", { name: /^Completed work/i }).focus();
     const preview = await screen.findByTestId("thread-preview-thread-1");
     expect(preview).toHaveTextContent("Closed");
     const exactDeadline = new Intl.DateTimeFormat(undefined, {
@@ -632,7 +634,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
     selectCompletedScope();
-    screen.getByRole("button", { name: /^Provider, Claude Kept work/i }).focus();
+    screen.getByRole("button", { name: /^Kept work/i }).focus();
 
     expect(await screen.findByTestId("thread-preview-thread-1")).toHaveTextContent(
       "Automatic deletion disabled",
@@ -654,7 +656,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
     selectCompletedScope();
-    screen.getByRole("button", { name: /^Provider, Claude Dirty work/i }).focus();
+    screen.getByRole("button", { name: /^Dirty work/i }).focus();
 
     const preview = await screen.findByTestId("thread-preview-thread-1");
     expect(preview).toHaveTextContent(
@@ -664,7 +666,7 @@ describe("ProjectSidebar thread interactions", () => {
     vi.useFakeTimers();
   });
 
-  it("shows retry cleanup and reopen controls for a blocked completed thread", async () => {
+  it("shows retry cleanup and restore controls for a blocked completed thread", async () => {
     vi.useRealTimers();
     const retryThreadCleanup = vi.fn().mockResolvedValue(undefined);
     const reopenThread = vi.fn().mockResolvedValue(undefined);
@@ -685,13 +687,13 @@ describe("ProjectSidebar thread interactions", () => {
     expect(
       screen.getByRole("button", { name: "Retry cleanup for Blocked work" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reopen Blocked work" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore Blocked work" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry cleanup for Blocked work" }));
     await Promise.resolve();
     expect(retryThreadCleanup).toHaveBeenCalledWith("thread-1");
 
-    fireEvent.click(screen.getByRole("button", { name: "Reopen Blocked work" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restore Blocked work" }));
     await Promise.resolve();
     expect(reopenThread).toHaveBeenCalledWith("thread-1");
     vi.useFakeTimers();
@@ -841,18 +843,22 @@ describe("ProjectSidebar thread interactions", () => {
     expect(screen.queryByText("No projects yet")).not.toBeInTheDocument();
   });
 
-  it("leads the row with the provider and title, and ends the title line with the status", () => {
+  it("reads project, title, then branch with the provider last in the Threads view", () => {
+    useSidebarUiStore.setState({ view: "threads" });
     setupStoreMocks();
 
     render(<ProjectSidebar />);
 
-    const row = screen.getByRole("button", { name: /^Provider, Claude My Thread/i });
-    const status = within(row).getByTestId("thread-status");
+    const row = screen.getByRole("button", { name: /^Test Project / });
+    const projectLine = within(row).getByTestId("thread-line-project");
     const title = within(row).getByTestId("thread-title");
+    const branchLine = within(row).getByTestId("thread-line-branch");
 
-    expect(title.previousElementSibling).toBe(screen.getByLabelText("Provider, Claude"));
-    expect(title.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(status).toBeEmptyDOMElement();
+    expect(projectLine).toHaveTextContent("Test Project");
+    expect(within(projectLine).getByTestId("thread-status")).toBeInTheDocument();
+    expect(projectLine.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(title.compareDocumentPosition(branchLine) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(branchLine).getByLabelText("Provider, Claude")).toBeInTheDocument();
   });
 
   it("offers Explorer and rename actions from the project menu", () => {
@@ -1369,7 +1375,7 @@ describe("ProjectSidebar action-required indicator", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(screen.getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
     expect(screen.getByText("Approval required")).toBeInTheDocument();
   });
 
@@ -1384,11 +1390,11 @@ describe("ProjectSidebar action-required indicator", () => {
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(screen.getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
     expect(screen.queryByRole("img", { name: "Running" })).toBeNull();
   });
 
-  it("marks a running row with its spinner and blocks completion", () => {
+  it("marks a running row with its spinner and offers no Close", () => {
     threadStoreOverrides.runningThreadIds = new Set(["thread-pending"]);
     threadStoreOverrides.runtimeByThread = {
       "thread-pending": { runtimePhase: "running", turnExecutionId: "turn-1" },
@@ -1396,15 +1402,15 @@ describe("ProjectSidebar action-required indicator", () => {
     render(<ProjectSidebar />);
 
     expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeInTheDocument();
-    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
-    expect(screen.getByRole("button", { name: "Close My Thread" })).toBeDisabled();
+    expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" }))).toBe("spinner");
+    expect(screen.queryByRole("button", { name: "Close My Thread" })).toBeNull();
   });
 
-  it("blocks completion while a permission is waiting", () => {
+  it("offers no Close while a permission is waiting", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("button", { name: "Close My Thread" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Close My Thread" })).toBeNull();
   });
 
   it("shows a running setup as running", async () => {
@@ -1414,7 +1420,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
     render(<ProjectSidebar />);
 
-    expect(await screen.findByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
+    expect(statusGlyph(await screen.findByRole("img", { name: "Running" }))).toBe("spinner");
   });
 
   it("shows Setup failed for a startup stopped on setup, loaded when the sidebar connects", async () => {
@@ -1424,7 +1430,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
     render(<ProjectSidebar />);
 
-    expect(await screen.findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(await screen.findByRole("img", { name: "Setup failed" }))).toBe("circle-alert");
     expect(screen.queryByRole("img", { name: "Running" })).not.toBeInTheDocument();
   });
 
@@ -1433,18 +1439,18 @@ describe("ProjectSidebar action-required indicator", () => {
     installWorkspaceMock();
     render(<ProjectSidebar />);
 
-    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" })).toHaveAttribute("data-status-mark", "running");
+    expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" }))).toBe("spinner");
   });
 
   it.each([
-    ["completed", "Finished", "success"],
-    ["errored", "Failed", "error"],
-    ["interrupted", "Interrupted", "attention"],
-  ] as const)("marks an unseen %s turn as %s", (outcome, label, markState) => {
+    ["completed", "Finished", "circle-check"],
+    ["errored", "Failed", "circle-alert"],
+    ["interrupted", "Interrupted", "circle-pause"],
+  ] as const)("marks an unseen %s turn as %s", (outcome, label, icon) => {
     applyAttention(attention("thread-pending", endedTurn(outcome)));
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("img", { name: label })).toHaveAttribute("data-status-mark", markState);
+    expect(statusGlyph(screen.getByRole("img", { name: label }))).toBe(icon);
     expect(screen.getByText(label)).toBeVisible();
     expect(screen.queryByText("Errored")).not.toBeInTheDocument();
   });
@@ -1511,7 +1517,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
       const ownerRow = screen.getByRole("button", { name: /^Provider, Claude Thread A/ });
       const targetRow = screen.getByRole("button", { name: /^Provider, Claude Thread B/ });
-      expect(within(ownerRow).getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+      expect(statusGlyph(within(ownerRow).getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
       expect(within(targetRow).getByTestId("thread-status")).toBeEmptyDOMElement();
     } finally {
       stopPushListeners();
@@ -1527,7 +1533,7 @@ describe("ProjectSidebar action-required indicator", () => {
     applyAttention(attention("thread-pending", waitingOn("approval")));
     render(<ProjectSidebar />);
 
-    expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Approval required" })).toHaveAttribute("data-status-mark", "attention");
+    expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Approval required" }))).toBe("shield-alert");
     expect(screen.getByTestId("thread-pr-indicator-thread-pending")).toHaveAccessibleName("PR #42, open");
   });
 
@@ -1551,7 +1557,7 @@ describe("ProjectSidebar action-required indicator", () => {
 
       applyAttention(attention("thread-wait", waitingOn("questions")));
 
-      expect(within(projectRow).getByRole("img", { name: "Answers required" })).toHaveAttribute("data-status-mark", "attention");
+      expect(statusGlyph(within(projectRow).getByRole("img", { name: "Answers required" }))).toBe("message-circle-question-mark");
       expect(projectRow.querySelectorAll("[data-status-mark]")).toHaveLength(1);
     });
 
@@ -1577,7 +1583,7 @@ describe("ProjectSidebar action-required indicator", () => {
       installWorkspaceMock();
       render(<ProjectSidebar />);
 
-      expect(await within(screen.getByTestId("project-row-ws-1")).findByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+      expect(statusGlyph(await within(screen.getByTestId("project-row-ws-1")).findByRole("img", { name: "Setup failed" }))).toBe("circle-alert");
     });
 
     it("keeps a setup that settles after its project collapses current", async () => {
@@ -1591,7 +1597,7 @@ describe("ProjectSidebar action-required indicator", () => {
       fireEvent.click(screen.getByRole("button", { name: "Toggle threads for Test" }));
       act(() => useThreadStartupStore.getState().apply(setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)));
 
-      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" })).toHaveAttribute("data-status-mark", "attention");
+      expect(statusGlyph(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setup failed" }))).toBe("circle-alert");
     });
 
     it("leaves the mark to the rows once expanded", () => {
