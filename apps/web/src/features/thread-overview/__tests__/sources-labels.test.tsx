@@ -38,6 +38,40 @@ describe("overview source labels", () => {
       .toEqual(["example.com/docs#install", "example.com/docs#usage"]);
   });
 
+  it("keeps the parent path when same-path sources differ only by query", () => {
+    expect(sourceLabels(sources(
+      "https://example.com/react/setup?v=1",
+      "https://example.com/react/setup?v=2",
+      "https://example.com/vue/setup?v=1",
+      "https://example.com/vue/setup?v=2",
+    ))).toEqual([
+      "example.com/react/setup?v=1",
+      "example.com/react/setup?v=2",
+      "example.com/vue/setup?v=1",
+      "example.com/vue/setup?v=2",
+    ]);
+  });
+
+  it("shortens a long detail in the middle so its differing end stays visible", () => {
+    expect(sourceLabels(sources(
+      "https://example.com/docs/thread-overview-source-labels-before",
+      "https://example.com/docs/thread-overview-source-labels-after",
+    ))).toEqual([
+      "example.com/…/thread-o…rce-labels-before",
+      "example.com/…/thread-o…urce-labels-after",
+    ]);
+  });
+
+  it("keeps the full detail when shortening would make two labels alike", () => {
+    expect(sourceLabels(sources(
+      "https://example.com/docs/release-one-notes-for-the-overview-card",
+      "https://example.com/docs/release-two-notes-for-the-overview-card",
+    ))).toEqual([
+      "example.com/…/release-one-notes-for-the-overview-card",
+      "example.com/…/release-two-notes-for-the-overview-card",
+    ]);
+  });
+
   it("keeps the bare host for a shared-host source at the site root", () => {
     expect(sourceLabels(sources("https://example.com/", "https://example.com/blog")))
       .toEqual(["example.com", "example.com/blog"]);

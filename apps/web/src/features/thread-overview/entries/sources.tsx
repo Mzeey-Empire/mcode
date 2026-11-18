@@ -33,40 +33,69 @@ function pathSuffix(segments: readonly string[], count: number): string {
   return count < segments.length ? `…/${kept}` : kept;
 }
 
-/** The shortest path suffix no other same-host URL shares, or null when every suffix is shared. */
-function distinguishingPath(url: URL, others: readonly URL[]): string | null {
-  const segments = pathSegments(url);
-  for (let count = 1; count <= Math.max(segments.length, 1); count += 1) {
-    const suffix = pathSuffix(segments, count);
-    if (others.every((other) => pathSuffix(pathSegments(other), count) !== suffix)) return suffix;
-  }
-  return null;
+function samePath(left: URL, right: URL): boolean {
+  return pathSegments(left).join("/") === pathSegments(right).join("/");
 }
 
-/** For URLs with the same path, the query, the fragment, or both: whichever first tells them apart. */
+/**
+ * The shortest path suffix no source on a different path shares. Sources on the same path are left
+ * to {@link distinguishingTail}, so a query twin never forces the path back to its last segment.
+ */
+function distinguishingPath(url: URL, others: readonly URL[]): string {
+  const segments = pathSegments(url);
+  const otherPaths = others.filter((other) => !samePath(other, url));
+  for (let count = 1; count < segments.length; count += 1) {
+    const suffix = pathSuffix(segments, count);
+    if (otherPaths.every((other) => pathSuffix(pathSegments(other), count) !== suffix)) return suffix;
+  }
+  return pathSuffix(segments, segments.length);
+}
+
+/** For sources on the same path, the query, the fragment, or both: whichever first tells them apart. */
 function distinguishingTail(url: URL, others: readonly URL[]): string {
-  const samePath = others.filter((other) => other.pathname === url.pathname);
-  const last = pathSuffix(pathSegments(url), 1);
+  const twins = others.filter((other) => samePath(other, url));
+  if (twins.length === 0) return "";
   for (const tail of [url.search, url.hash, `${url.search}${url.hash}`]) {
-    if (samePath.every((other) => tail !== other.search && tail !== other.hash && tail !== `${other.search}${other.hash}`)) {
-      return `${last}${tail}`;
+    if (twins.every((other) => tail !== other.search && tail !== other.hash && tail !== `${other.search}${other.hash}`)) {
+      return tail;
     }
   }
-  return `${last}${url.search}${url.hash}`;
+  return `${url.search}${url.hash}`;
+}
+
+/** Longest detail a chip shows whole, about what fits beside a faded host at the card's width. */
+const MAX_DETAIL_LENGTH = 28;
+const DETAIL_HEAD_LENGTH = 10;
+
+/**
+ * Shortens a long detail in the middle. The head keeps the segment that tells paths apart and the
+ * end keeps the query and the end of a slug, which a right-edge fade would hide.
+ */
+function shortenDetail(detail: string): string {
+  if (detail.length <= MAX_DETAIL_LENGTH) return detail;
+  const tailLength = MAX_DETAIL_LENGTH - DETAIL_HEAD_LENGTH - 1;
+  return `${detail.slice(0, DETAIL_HEAD_LENGTH)}…${detail.slice(-tailLength)}`;
 }
 
 /**
  * Names each source by its host. When another source shares the host, it adds the shortest path
- * suffix that tells them apart, then the query or fragment when the paths are equal, so two links on
- * one site stay distinguishable without hovering.
+ * suffix that tells them apart, then the query or fragment for sources on the same path, so two
+ * links on one site stay distinguishable without hovering. A long detail is shortened in the middle
+ * unless that would make two same-host labels read alike.
  */
 export function sourceLabelParts(sources: readonly ThreadSource[]): SourceLabel[] {
   const urls = sources.map((source) => new URL(source.url));
-  return urls.map((url, index) => {
+  const full = urls.map((url, index) => {
     const host = sourceHost(url);
     const others = urls.filter((other, otherIndex) => otherIndex !== index && sourceHost(other) === host);
     if (others.length === 0) return { host, detail: "" };
-    return { host, detail: distinguishingPath(url, others) ?? distinguishingTail(url, others) };
+    return { host, detail: `${distinguishingPath(url, others)}${distinguishingTail(url, others)}` };
+  });
+  const short = full.map(({ host, detail }) => ({ host, detail: shortenDetail(detail) }));
+  return short.map((label, index) => {
+    const clashes = short.some((other, otherIndex) =>
+      otherIndex !== index && other.host === label.host && other.detail === label.detail);
+    return clashes ? full[index] : label;
   });
 }
 
@@ -105,21 +134,22 @@ function ThreadOverviewSources({ sources, onOpen }: ThreadOverviewSourcesProps) 
                   aria-label={source.url}
                   data-testid="thread-overview-source"
                   onClick={(event) => onOpen(event, source.url)}
-                  className="h-6 max-w-48 gap-1.5 rounded-md px-1.5 text-caption text-muted hover:bg-hover/50 hover:text-ink"
+                  className="h-6 max-w-full gap-1.5 rounded-md px-1.5 text-caption text-muted hover:bg-hover/50 hover:text-ink"
                 >
                   <SiteFavicon
                     src={source.faviconUrl}
                     fallback={<Globe className="size-3.5 text-muted" />}
                   />
-                  {/* The host shrinks and fades first: the detail is what tells same-host chips apart. */}
+                  {/* The detail tells same-host chips apart and is shortened to fit, so the host's far larger
+                      shrink factor makes it give up its width first; the detail fades only when it kept its full text. */}
                   <span className="flex min-w-0">
-                    <span data-testid="thread-overview-source-host" className="text-fade min-w-0 shrink">
+                    <span data-testid="thread-overview-source-host" className="text-fade min-w-0 shrink-[999]">
                       {labels[index].host}
                     </span>
                     {labels[index].detail ? (
                       <span
                         data-testid="thread-overview-source-detail"
-                        className="text-fade min-w-0 max-w-28 shrink-0"
+                        className="text-fade min-w-0"
                       >
                         /{labels[index].detail}
                       </span>
