@@ -1041,7 +1041,9 @@ describe("canonical SQLite writer", () => {
     await writer.close();
     writer = new CanonicalAgentWriterClient(dbPath);
     expect(await writer.commit("lost-three-times", batch)).toMatchObject({ outcome: "committed" });
-  });
+    // Waits on four writer-worker starts in a row, each 0.2 to 1.6 s, which overran 5 s on loaded CI
+    // runners. The six other worker-heavy tests in this file carry the same limit.
+  }, 30_000);
 
   it("rejects reused operation IDs with changed phase or native cursor", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);
