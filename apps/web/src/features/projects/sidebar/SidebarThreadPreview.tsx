@@ -1,5 +1,6 @@
 import { createContext, useCallback, useDeferredValue, useEffect, useRef } from "react";
-import { Archive, GitBranch } from "lucide-react";
+import { Archive, Laptop } from "lucide-react";
+import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
 import { rankPullRequests, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { openGitHubUrl } from "@/features/preview/navigation/open-url-in-preview";
@@ -113,9 +114,9 @@ function SidebarThreadPreview({ workspaceName, thread }: { workspaceName: string
   const ranked = isPrable(thread) ? rankPullRequests(thread.pull_requests) : [];
   return (
     <div data-testid={`thread-preview-${thread.id}`} className="-mx-2 flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto px-2 text-ink">
-      <div className="min-w-0 shrink-0 text-xs font-semibold leading-5 [overflow-wrap:anywhere]">{thread.title}</div>
+      <div className="min-w-0 shrink-0 text-label font-semibold [overflow-wrap:anywhere]">{thread.title}</div>
       <div className="grid shrink-0 gap-1.5 text-xs text-muted">
-        <PreviewFact label={`Project, ${workspaceName}`} icon={<ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} />}>
+        <PreviewFact label={`Project, ${workspaceName}`} icon={<ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} tone="tinted" />}>
           {workspaceName}
         </PreviewFact>
         <ThreadPreviewBranch thread={thread} />
@@ -139,7 +140,8 @@ function PreviewFact({ label, icon, mono, children }: { label: string; icon: Rea
 function ThreadPreviewBranch({ thread }: { thread: WorkspaceThread }) {
   const checkoutLabel = resolveThreadCheckoutLabel(thread);
   return (
-    <PreviewFact label={`Branch, ${checkoutLabel}`} mono icon={<GitBranch size={14} aria-hidden className="opacity-75" />}>
+    // The same checkout glyph the row leads its branch line with, so card and row read alike.
+    <PreviewFact label={`Branch, ${checkoutLabel}`} mono icon={thread.mode === "worktree" ? <WorktreeModeIcon size={12} aria-hidden /> : <Laptop size={12} aria-hidden />}>
       {checkoutLabel}
     </PreviewFact>
   );
