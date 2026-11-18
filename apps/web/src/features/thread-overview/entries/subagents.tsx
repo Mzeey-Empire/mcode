@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils";
 import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
 import { subagentOverviewCounts } from "@/features/subagents/subagent-status";
 import { type Thread } from "@/transport";
-import { OVERVIEW_ROW_CLASS, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { Layers } from "lucide-react";
 
 type SubagentsSummary = readonly [active: number, done: number, ...providers: string[]];
 
@@ -26,7 +27,9 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
     useShallow((state) => subagentsSummary(state.rosters.get(thread.id))),
   );
   useEffect(() => { void useSubagentRosterStore.getState().ensure(thread.id); }, [thread.id]);
-  const copy = active > 0 ? `${active} active · ${done} done` : `${done} done`;
+  const copy = [active > 0 ? `${active} active` : null, done > 0 ? `${done} done` : null]
+    .filter((part) => part !== null)
+    .join(" · ");
   return (<ThreadOverviewWhen when={active + done > 0}>
     <Button
       variant="ghost"
@@ -35,10 +38,14 @@ function SubagentsEntry({ thread }: { thread: Thread }) {
       data-testid="thread-overview-subagents"
       onClick={() => openSubagentsPanel()}
       aria-label={`Subagents, ${active} active, ${done} done`}
-      className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-start gap-2")}
+      className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between gap-2")}
     >
+      <OverviewRowIcon>
+        <Layers />
+      </OverviewRowIcon>
+      <span className="text-fade min-w-0 grow font-medium text-ink">Subagents</span>
       <ProviderDiscStack providers={providers} />
-      <span className="shrink-0 tabular-nums text-muted">{copy}</span>
+      <span className="shrink-0 text-caption tabular-nums text-muted">{copy}</span>
     </Button>
   </ThreadOverviewWhen>);
 }

@@ -1,0 +1,143 @@
+import { describe, expect, it } from "vitest";
+import { sourceLabels } from "../entries/sources";
+
+function sources(...urls: string[]) {
+  return urls.map((url) => ({ url, faviconUrl: null }));
+}
+
+describe("overview source labels", () => {
+  it("names a source by its host without a leading www", () => {
+    expect(sourceLabels(sources("https://www.example.com/docs/intro", "https://vitest.dev/api")))
+      .toEqual(["example.com", "vitest.dev"]);
+  });
+
+  it("adds the shortest path suffix that tells same-host sources apart", () => {
+    expect(sourceLabels(sources(
+      "https://github.com/openai/codex",
+      "https://www.github.com/anthropics/claude-code/issues",
+      "https://react.dev/learn",
+    ))).toEqual(["github.com/…/codex", "github.com/…/issues", "react.dev"]);
+  });
+
+  it("keeps sources under one shared parent path apart", () => {
+    expect(sourceLabels(sources("https://github.com/openai/codex", "https://github.com/openai/gpt")))
+      .toEqual(["github.com/…/codex", "github.com/…/gpt"]);
+    expect(sourceLabels(sources("https://example.com/docs/install", "https://example.com/docs/configure")))
+      .toEqual(["example.com/…/install", "example.com/…/configure"]);
+  });
+
+  it("walks back up the path when the last segments match", () => {
+    expect(sourceLabels(sources("https://example.com/a/setup", "https://example.com/b/setup")))
+      .toEqual(["example.com/a/setup", "example.com/b/setup"]);
+  });
+
+  it("falls back to the query, then the fragment, when the paths are equal", () => {
+    expect(sourceLabels(sources("https://example.com/docs?tab=api", "https://example.com/docs?tab=cli")))
+      .toEqual(["example.com/docs?tab=api", "example.com/docs?tab=cli"]);
+    expect(sourceLabels(sources("https://example.com/docs#install", "https://example.com/docs#usage")))
+      .toEqual(["example.com/docs#install", "example.com/docs#usage"]);
+  });
+
+  it("keeps the parent path when same-path sources differ only by query", () => {
+    expect(sourceLabels(sources(
+      "https://example.com/react/setup?v=1",
+      "https://example.com/react/setup?v=2",
+      "https://example.com/vue/setup?v=1",
+      "https://example.com/vue/setup?v=2",
+    ))).toEqual([
+      "example.com/react/setup?v=1",
+      "example.com/react/setup?v=2",
+      "example.com/vue/setup?v=1",
+      "example.com/vue/setup?v=2",
+    ]);
+  });
+
+  it("shortens a long detail in the middle so its differing end stays visible", () => {
+    expect(sourceLabels(sources(
+      "https://example.com/docs/thread-overview-source-labels-before",
+      "https://example.com/docs/thread-overview-source-labels-after",
+    ))).toEqual([
+      "example.com/…/thread-o…rce-labels-before",
+      "example.com/…/thread-o…urce-labels-after",
+    ]);
+  });
+
+  it("keeps the full detail when shortening would make two labels alike", () => {
+    expect(sourceLabels(sources(
+      "https://example.com/docs/release-one-notes-for-the-overview-card",
+      "https://example.com/docs/release-two-notes-for-the-overview-card",
+    ))).toEqual([
+      "example.com/…/release-one-notes-for-the-overview-card",
+      "example.com/…/release-two-notes-for-the-overview-card",
+    ]);
+  });
+
+  it("drops the shared start when two long labels first differ deep in the middle", () => {
+    const labels = sourceLabels(sources(
+      "https://example.com/docs/a-very-long-shared-introduction-one-and-shared-closing-words",
+      "https://example.com/docs/a-very-long-shared-introduction-two-and-shared-closing-words",
+    ));
+    expect(labels).toEqual([
+      "example.com/…roduction-one-and-shared-closing-words",
+      "example.com/…roduction-two-and-shared-closing-words",
+    ]);
+  });
+
+  it("shows each of three alike labels from where it differs from its closest peer", () => {
+    const labels = sourceLabels(sources(
+      "https://example.com/docs/shared-introduction-one-then-a-long-shared-middle-piece-one-and-shared-closing-words",
+      "https://example.com/docs/shared-introduction-two-then-a-long-shared-middle-piece-one-and-shared-closing-words",
+      "https://example.com/docs/shared-introduction-two-then-a-long-shared-middle-piece-two-and-shared-closing-words",
+    ));
+    expect(labels).toEqual([
+      "example.com/…roduction-one-then-a-long-shared-middle-piece-one-and-shared-closing-words",
+      "example.com/…dle-piece-one-and-shared-closing-words",
+      "example.com/…dle-piece-two-and-shared-closing-words",
+    ]);
+  });
+
+  it("numbers labels whose shortened text still matches, so the difference never hides in the fade", () => {
+    const a = "a".repeat(1000);
+    const z = "z".repeat(30);
+    const labels = sourceLabels(sources(
+      `https://example.com/docs/${a}1${z}`,
+      `https://example.com/docs/${a}2${a}1${z}`,
+      `https://example.com/docs/${a}2${a}2${z}`,
+    ));
+    expect(labels[0]).toMatch(/ \(1\)$/);
+    expect(labels[1]).toBe(labels[0].replace(/ \(1\)$/, " (2)"));
+    expect(labels[2]).not.toMatch(/\(\d\)$/);
+  });
+
+  it("numbers labels that differ only past what a chip can show", () => {
+    const a = "a".repeat(1000);
+    const z = "z".repeat(1000);
+    const labels = sourceLabels(sources(
+      `https://example.com/docs/${a}1${z}A`,
+      `https://example.com/docs/${a}2${z}A`,
+      `https://example.com/docs/${a}1${z}B`,
+      `https://example.com/docs/${a}2${z}B`,
+    ));
+    const numbers = labels.map((label) => label.match(/ \((\d)\)$/)?.[1]);
+    expect(numbers).toEqual(["1", "1", "2", "2"]);
+  });
+
+  it("keeps the readable end for links that differ only by www or a trailing slash, numbered", () => {
+    expect(sourceLabels(sources(
+      "https://www.example.com/docs/getting-started",
+      "https://example.com/docs/getting-started",
+      "https://example.com/docs/getting-started/",
+      "https://example.com/docs/install",
+    ))).toEqual([
+      "example.com/…/getting-started (1)",
+      "example.com/…/getting-started (2)",
+      "example.com/…/getting-started (3)",
+      "example.com/…/install",
+    ]);
+  });
+
+  it("keeps the bare host for a shared-host source at the site root", () => {
+    expect(sourceLabels(sources("https://example.com/", "https://example.com/blog")))
+      .toEqual(["example.com", "example.com/blog"]);
+  });
+});

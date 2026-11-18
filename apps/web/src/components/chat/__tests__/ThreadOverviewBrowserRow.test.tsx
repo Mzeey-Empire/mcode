@@ -192,6 +192,8 @@ describe("overview Browser row", () => {
 
     await waitFor(() => expect(row()).toHaveAttribute("data-state", "server-stopped"));
     expect(row()).toHaveTextContent("web isn't running");
+    // Long server names stay in the shrinking lead text; the button's visible label is only Start.
+    expect(screen.getByRole("button", { name: "Start web" })).toHaveTextContent(/^Start$/);
     await userEvent.click(screen.getByRole("button", { name: "Start web" }));
 
     expect(transport.restartWorkspaceAction).toHaveBeenCalledWith(THREAD.id, "web");

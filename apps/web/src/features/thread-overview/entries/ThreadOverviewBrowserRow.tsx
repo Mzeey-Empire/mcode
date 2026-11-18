@@ -57,9 +57,14 @@ function PageGlyph({ state }: { state: BrowserRowState }) {
     return <MousePointer2 className="size-3.5 shrink-0 text-muted" aria-hidden />;
   }
   if (state.kind === "server-stopped") {
-    return <span className="size-2 shrink-0 rounded-full bg-error" aria-hidden />;
+    // The lane starts its glyph at the left edge; a 16px box centres the dot where an icon's centre sits.
+    return (
+      <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
+        <span className="size-2 rounded-full bg-error" />
+      </span>
+    );
   }
-  return <SiteFavicon src={state.page.faviconUrl} fallback={<Globe size={14} className="text-muted" />} />;
+  return <SiteFavicon src={state.page.faviconUrl} fallback={<Globe className="text-muted" />} />;
 }
 
 function RowText({ state }: { state: BrowserRowState }) {
@@ -67,9 +72,10 @@ function RowText({ state }: { state: BrowserRowState }) {
   if (state.kind === "open") {
     return (
       <>
-        <span className="min-w-0 text-fade font-medium">{page.title}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-xs tabular-nums text-muted">
-          {page.host}
+        <span className="min-w-0 shrink-[2] text-fade font-medium">{page.title}</span>
+        {/* The title gives way first: the host says which site the Browser is on, so it fades last. */}
+        <span className="ml-auto flex min-w-0 items-center gap-2 font-mono text-caption tabular-nums text-muted">
+          <span className="min-w-0 text-fade">{page.host}</span>
           {state.otherPages > 0 ? <span data-testid="thread-overview-browser-more">+{state.otherPages}</span> : null}
         </span>
       </>
@@ -81,7 +87,7 @@ function RowText({ state }: { state: BrowserRowState }) {
     : `${state.tile.name} isn't running`;
   return (
     <>
-      <span className="shrink-0 font-medium">{lead}</span>
+      <span className="min-w-0 text-fade font-medium">{lead}</span>
       {state.kind === "server-stopped" ? null : (
         <span className="min-w-0 text-fade text-muted">{page.title}</span>
       )}
@@ -89,14 +95,21 @@ function RowText({ state }: { state: BrowserRowState }) {
   );
 }
 
-function RowAction({ children, onPress, loading = false }: { children: ReactNode; onPress: () => void; loading?: boolean }) {
+function RowAction({ children, onPress, loading = false, label }: {
+  children: ReactNode;
+  onPress: () => void;
+  loading?: boolean;
+  /** The accessible name when the visible text leaves out what the action applies to. */
+  label?: string;
+}) {
   return (
     <Button
       type="button"
+      aria-label={label}
       variant="subtle"
       shape="round"
       size="compact"
-      className="h-6 shrink-0 px-2.5 text-xs"
+      className="h-6 shrink-0 px-2.5 text-caption"
       loading={loading}
       onClick={onPress}
     >
@@ -179,9 +192,15 @@ function BrowserRowAction({
       void usePreviewTabsStore.getState().activatePage(thread.workspace_id, thread.id, tabId);
       void start(tile);
     };
+    const starting = isRequesting(tile.actionId);
+    // Action names run to 256 characters, so the button says only Start; the row's lead text names the server.
     return (
-      <RowAction loading={isRequesting(tile.actionId)} onPress={startOnThisPage}>
-        {isRequesting(tile.actionId) ? "Starting" : `Start ${tile.name}`}
+      <RowAction
+        loading={starting}
+        onPress={startOnThisPage}
+        label={starting ? `Starting ${tile.name}` : `Start ${tile.name}`}
+      >
+        {starting ? "Starting" : "Start"}
       </RowAction>
     );
   }
