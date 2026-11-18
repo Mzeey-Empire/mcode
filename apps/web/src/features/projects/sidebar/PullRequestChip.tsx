@@ -46,7 +46,7 @@ function chipLabel(ranked: readonly ThreadPullRequest[], primary: ThreadPullRequ
 }
 
 /**
- * The row's PR chip: the top-ranked PR's state icon, then its number, or `+N` with the total when
+ * The row's PR chip: the top-ranked PR's state icon and number, then `+N` for the rest when
  * several are linked. Pointing at it or activating it opens the shared list of every PR.
  */
 export function PullRequestChip({ threadId, ranked }: { threadId: string; ranked: readonly ThreadPullRequest[] }) {
@@ -62,7 +62,8 @@ export function PullRequestChip({ threadId, ranked }: { threadId: string; ranked
     onDoubleClick: stopRowEvent,
     className: CHIP_CLASS,
   };
-  const label = <><StateIcon pr={primary} />{ranked.length > 1 ? `+${ranked.length}` : primary.number}</>;
+  // The top PR leads, then a count of the rest: "+2" beside a number reads as two more, not three.
+  const label = <><StateIcon pr={primary} />{primary.number}{ranked.length > 1 ? <span>+{ranked.length - 1}</span> : null}</>;
   if (!handle) return <span role="img" {...props}>{label}</span>;
   return (
     // Base UI's safe triangle gives up as soon as the pointer moves slower than 0.1px/ms or pauses

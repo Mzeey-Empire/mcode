@@ -349,7 +349,7 @@ describe("SidebarThreadRow", () => {
     });
   });
 
-  it("shows the top-ranked PR's icon and +3 for three PRs", () => {
+  it("shows the top-ranked PR's icon and number, then +2 for the rest of three PRs", () => {
     renderThread({
       pull_requests: [
         createMockThreadPullRequest({ number: 10, state: "merged", url: PR_URL(10) }),
@@ -358,7 +358,7 @@ describe("SidebarThreadRow", () => {
       ],
     });
     const chip = screen.getByRole("button", { name: "3 pull requests" });
-    expect(chip).toHaveTextContent(/^\+3$/);
+    expect(chip).toHaveTextContent(/^11\s*\+2$/);
     expect(chip.querySelector("svg")).toHaveClass("text-success");
   });
 
