@@ -6,9 +6,8 @@ import { cn } from "@/lib/utils";
 import { useThreadStore } from "@/stores/threadStore";
 import { type Thread } from "@/transport";
 import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
-import { CircleDollarSign, Gauge } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
-import { OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 import {
   usageCategoryPercent,
   usageCategoryShortLabel,
@@ -24,14 +23,13 @@ interface ThreadOverviewUsageProps {
 }
 
 /**
- * One read-only Usage line in the row anatomy: icon lane, a muted name, then the value. It has no
- * hover, because nothing in it acts.
+ * One read-only Usage line: a muted name, then its value right beside it. It has no icon, because
+ * the section reads as one block of figures, and no hover, because nothing in it acts.
  */
-function UsageLine({ icon, name, children }: { icon: ReactNode; name: ReactNode; children?: ReactNode }) {
+function UsageLine({ name, children }: { name: ReactNode; children?: ReactNode }) {
   return (
-    <div className="flex h-row-compact items-center gap-2 px-3 text-body-small">
-      <OverviewRowIcon>{icon}</OverviewRowIcon>
-      <span className="min-w-0 flex-1 text-fade text-muted">{name}</span>
+    <div className="col-span-full grid h-row-compact grid-cols-subgrid items-center">
+      <span className="text-fade text-muted">{name}</span>
       {children}
     </div>
   );
@@ -55,10 +53,7 @@ function UsageCategory({ category, stale }: { category: QuotaCategory; stale: bo
     ? `${shortLabel} usage ${rounded} percent. ${resetText}`
     : `${shortLabel} usage ${rounded} percent`;
   return (
-    <UsageLine
-      icon={<Gauge />}
-      name={stale ? `${sentenceCase(shortLabel)} · stale` : sentenceCase(shortLabel)}
-    >
+    <UsageLine name={stale ? `${sentenceCase(shortLabel)} · stale` : sentenceCase(shortLabel)}>
       <div
         role="progressbar"
         aria-label={progressDescription}
@@ -75,11 +70,10 @@ function UsageCategory({ category, stale }: { category: QuotaCategory; stale: bo
           style={{ width: `${percent}%` }}
         />
       </div>
-      {/* A fixed width fits "100%", whose "%" is wider than a digit, so the meters of stacked limits line up. */}
       <span
         data-testid="thread-overview-usage-value"
         data-near-limit={isNearLimit || undefined}
-        className={cn("w-[5ch] shrink-0 text-right tabular-nums", isNearLimit ? "text-warning" : "text-ink")}
+        className={cn("tabular-nums", isNearLimit ? "text-warning" : "text-ink")}
       >
         {rounded}%
       </span>
@@ -94,17 +88,26 @@ function ThreadOverviewUsage({
   usageStatus,
 }: ThreadOverviewUsageProps) {
   return (
-    <section data-testid="thread-overview-usage" aria-label={`Usage, ${summary}`} className="flex flex-col">
+    // The lines share one set of columns sized to their content, so each meter sits just after the
+    // longest name and stacked meters and percents still line up. With no glyph, the left padding
+    // (12px row inset, 20px icon lane, 8px gap) keeps the names on the other rows' label edge.
+    <section
+      data-testid="thread-overview-usage"
+      aria-label={`Usage, ${summary}`}
+      className="grid grid-cols-[minmax(0,max-content)_max-content_max-content] gap-x-3 pl-10 pr-3 text-body-small"
+    >
       {categories.map((category) => (
         <UsageCategory key={category.label} category={category} stale={usageStatus === "stale"} />
       ))}
       {sessionCost ? (
-        <UsageLine icon={<CircleDollarSign />} name="Session cost">
-          <span className="shrink-0 tabular-nums text-ink">{sessionCost}</span>
+        <UsageLine name="Session cost">
+          <span className="col-span-2 tabular-nums text-ink">{sessionCost}</span>
         </UsageLine>
       ) : null}
       {/* With nothing to measure, the summary is a status such as "Usage unavailable" and names itself. */}
-      {categories.length === 0 && !sessionCost ? <UsageLine icon={<Gauge />} name={summary} /> : null}
+      {categories.length === 0 && !sessionCost ? (
+        <p className="col-span-full flex h-row-compact items-center text-fade text-muted">{summary}</p>
+      ) : null}
     </section>
   );
 }
