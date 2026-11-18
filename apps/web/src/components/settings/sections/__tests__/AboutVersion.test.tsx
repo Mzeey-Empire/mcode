@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { mockTransport } from "@/__tests__/mocks/transport";
+import { AGENT_COUNT_DEADLINE_MS } from "@/features/updates/active-agent-count";
 import { releaseNotesUrl } from "@/features/updates/update-button-state";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -24,6 +25,7 @@ const app = {
   getUpdateStatus: vi.fn(() => Promise.resolve<UpdateStatus>({ state: "idle" })),
 };
 const openExternalUrl = vi.fn(() => Promise.resolve());
+const getActiveAgentCount = vi.mocked(mockTransport.getActiveAgentCount);
 
 const READY: UpdateStatus = { state: "downloaded", version: "0.17.0", installWhenIdle: false };
 
@@ -49,6 +51,7 @@ function actionNames(): string[] {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  getActiveAgentCount.mockReset().mockResolvedValue(0);
   useSettingsStore.setState({ settings: getDefaultSettings(), loaded: true, update: vi.fn(async () => {}) });
   useUpdateStore.setState({ version: "0.16.0", stage: "stable", status: { state: "idle" }, pendingVersion: null });
   setRunningAgents(0);
@@ -167,12 +170,59 @@ describe("About version row restart", () => {
     expect(app.installUpdate).not.toHaveBeenCalled();
   });
 
-  // Fails if Restart needs a hold when nothing would be lost.
-  it("restarts on a click with no agents running", () => {
+  // Fails if Restart needs a hold when nothing would be lost, or skips the server re-check.
+  it("restarts on a click when the server counts no agents", async () => {
+    getActiveAgentCount.mockResolvedValue(0);
     setStatuses(READY);
     render(<AboutSection />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(getActiveAgentCount).toHaveBeenCalledTimes(2);
     expect(app.installUpdate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("About version row server agent count", () => {
+  // Fails if the row trusts only this window's threads and offers a plain Restart over agents elsewhere.
+  it("asks for a hold when the server counts agents this window has not loaded", async () => {
+    getActiveAgentCount.mockResolvedValue(2);
+    setStatuses(READY);
+    render(<AboutSection />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    const hold = screen.getByRole("button", { name: "Hold to restart. Ends 2 running agents." });
+    fireEvent.click(hold);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(app.installUpdate).not.toHaveBeenCalled();
+  });
+
+  // Fails if a plain Restart installs on a stale count after agents started elsewhere.
+  it("switches to hold when the click's re-check finds agents", async () => {
+    getActiveAgentCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+    setStatuses(READY);
+    render(<AboutSection />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(app.installUpdate).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Hold to restart. Ends 1 running agent." })).toBeTruthy();
+  });
+
+  // Fails if an unreadable or late count is read as "no agents" and installs.
+  it.each([
+    ["rejects", () => getActiveAgentCount.mockRejectedValueOnce(new Error("socket closed"))],
+    ["misses the deadline", () => getActiveAgentCount.mockReturnValueOnce(new Promise<number>(() => {}))],
+  ])("does not install when the re-check %s", async (_name, failRecheck) => {
+    getActiveAgentCount.mockResolvedValueOnce(0);
+    setStatuses(READY);
+    render(<AboutSection />);
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    failRecheck();
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    await act(() => vi.advanceTimersByTimeAsync(AGENT_COUNT_DEADLINE_MS));
+    expect(app.installUpdate).not.toHaveBeenCalled();
+    expect(hintText()).toBe("v0.17.0 is ready. Agents may be running.");
+    expect(screen.getByRole("status").textContent).toBe("v0.17.0 is ready. Agents may be running.");
   });
 });
 
