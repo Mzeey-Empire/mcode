@@ -51,7 +51,7 @@ function TargetRowContent({ Icon, children, open }: TargetRowContentProps) {
     {open === undefined ? null : (
       <ChevronDown
         aria-hidden
-        className={cn("shrink-0 text-muted transition-transform duration-150", open && "rotate-180")}
+        className={cn("-mr-0.5 shrink-0 text-muted transition-transform duration-150", open && "rotate-180")}
       />
     )}
   </>);
