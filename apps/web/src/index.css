@@ -1133,8 +1133,21 @@ input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2p
 /* Segmented control, "Line": a hairline track, the chosen option tinted like a selected sidebar row.
    The focus ring sits inside the track so it never clips a neighbour. */
 [data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] {
+  height: 3.2rem;
   background: transparent;
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ink) 14%, transparent);
+}
+/* The shared tray gives every option an equal flex-1 share of a track sized to the sum of the labels, so the
+   longest label overflows its share. Here each option, and the tooltip wrapper around a disabled one, sizes to
+   its own label instead. */
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > span,
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"] {
+  flex: none;
+}
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"] { height: 2.8rem; }
+/* The sliding hover fill is square-cornered; under the rounded chosen option its corners showed as an edge. */
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > [data-slot="sliding-highlight"] {
+  border-radius: var(--radius-md);
 }
 /* Hover needs no rule: the control's sliding highlight already paints --hover, the 5% ink tint, under the pointer. */
 [data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"]:active:not([aria-checked="true"]) { background: color-mix(in oklch, var(--ink) 10%, transparent); }
@@ -1155,6 +1168,16 @@ input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2p
   font-weight: 600;
 }
 [data-settings-surface] [data-slot="button"][data-variant="outline"]:hover { background: var(--hover); }
+
+/* Text fields share the Line control's tone and carry no border; focus shows only the keyboard ring. */
+[data-settings-surface] [data-slot="input"] {
+  height: 3.2rem;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: color-mix(in oklch, var(--ink) 7%, transparent);
+}
+[data-settings-surface] [data-slot="input"]:hover { background: color-mix(in oklch, var(--ink) 10%, transparent); }
+[data-settings-surface] [data-slot="input"]::placeholder { color: var(--muted); }
 
 @keyframes blink {
   0%, 50% { opacity: 1; }

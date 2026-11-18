@@ -69,7 +69,7 @@ function TriggerLabel({ selected, text, showIcon }: { readonly selected?: Settin
 }
 
 /**
- * Settings select built on {@link Picker}: a compact outline trigger that opens a searchable,
+ * Settings select built on {@link Picker}: a borderless pill trigger that opens a searchable,
  * client-filtered list of a fixed option set. Search matches every whitespace-separated token
  * against the label, value and group.
  */
@@ -106,11 +106,11 @@ export function SettingsSelectPicker({
         render={
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             size="compact"
             disabled={disabled || loading}
             data-testid={testId}
-            className="min-w-[22rem] max-w-[28rem] justify-between font-normal"
+            className="max-w-[28rem] justify-between gap-1.5 rounded-full pr-2 pl-3 font-normal hover:bg-hover data-popup-open:bg-hover"
           >
             <TriggerLabel
               selected={selected}
