@@ -57,7 +57,12 @@ function PageGlyph({ state }: { state: BrowserRowState }) {
     return <MousePointer2 className="size-3.5 shrink-0 text-muted" aria-hidden />;
   }
   if (state.kind === "server-stopped") {
-    return <span className="size-2 shrink-0 rounded-full bg-error" aria-hidden />;
+    // The lane starts its glyph at the left edge; a 16px box centres the dot where an icon's centre sits.
+    return (
+      <span className="flex size-4 shrink-0 items-center justify-center" aria-hidden>
+        <span className="size-2 rounded-full bg-error" />
+      </span>
+    );
   }
   return <SiteFavicon src={state.page.faviconUrl} fallback={<Globe className="text-muted" />} />;
 }
@@ -90,10 +95,17 @@ function RowText({ state }: { state: BrowserRowState }) {
   );
 }
 
-function RowAction({ children, onPress, loading = false }: { children: ReactNode; onPress: () => void; loading?: boolean }) {
+function RowAction({ children, onPress, loading = false, label }: {
+  children: ReactNode;
+  onPress: () => void;
+  loading?: boolean;
+  /** The accessible name when the visible text leaves out what the action applies to. */
+  label?: string;
+}) {
   return (
     <Button
       type="button"
+      aria-label={label}
       variant="subtle"
       shape="round"
       size="compact"
@@ -180,9 +192,15 @@ function BrowserRowAction({
       void usePreviewTabsStore.getState().activatePage(thread.workspace_id, thread.id, tabId);
       void start(tile);
     };
+    const starting = isRequesting(tile.actionId);
+    // Action names run to 256 characters, so the button says only Start; the row's lead text names the server.
     return (
-      <RowAction loading={isRequesting(tile.actionId)} onPress={startOnThisPage}>
-        {isRequesting(tile.actionId) ? "Starting" : `Start ${tile.name}`}
+      <RowAction
+        loading={starting}
+        onPress={startOnThisPage}
+        label={starting ? `Starting ${tile.name}` : `Start ${tile.name}`}
+      >
+        {starting ? "Starting" : "Start"}
       </RowAction>
     );
   }
