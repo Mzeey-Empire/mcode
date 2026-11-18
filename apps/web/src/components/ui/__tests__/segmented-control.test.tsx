@@ -16,6 +16,22 @@ describe("SegmentedControl", () => {
     expect(fn).toHaveBeenCalledWith("b");
   });
 
+  it("describes an option by its title so the reason reaches keyboard and screen-reader users", () => {
+    const titled = [
+      { value: "a", label: "Option A" },
+      { value: "b", label: "Option B", disabled: true, title: "Needs setup first." },
+    ];
+    render(<SegmentedControl options={titled} value="a" onChange={vi.fn()} />);
+    expect(screen.getByRole("radio", { name: "Option B" })).toHaveAccessibleDescription("Needs setup first.");
+    expect(screen.getByRole("radio", { name: "Option A" })).toHaveAccessibleDescription("");
+  });
+
+  it("does not describe an option whose title only repeats its label", () => {
+    const titled = [{ value: "a", label: "Unified", title: "Unified" }];
+    render(<SegmentedControl options={titled} value="a" onChange={vi.fn()} />);
+    expect(screen.getByRole("radio", { name: "Unified" })).toHaveAccessibleDescription("");
+  });
+
   it("does not call onChange for disabled options", () => {
     const fn = vi.fn();
     render(<SegmentedControl options={opts} value="a" onChange={fn} />);

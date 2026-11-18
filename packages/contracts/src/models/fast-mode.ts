@@ -15,3 +15,6 @@ export const FastModeStatusSchema = lazySchema(() => z.discriminatedUnion("state
 
 /** Actual Fast state for the model running in a thread. */
 export type FastModeStatus = z.infer<ReturnType<typeof FastModeStatusSchema>>;
+
+/** Provider-reported reason Fast cannot run. */
+export type FastModeUnavailableReason = z.infer<ReturnType<typeof FastModeUnavailableReasonSchema>>;

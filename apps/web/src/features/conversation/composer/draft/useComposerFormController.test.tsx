@@ -218,6 +218,19 @@ describe("useComposerFormController new-thread drafts", () => {
     expect(Object.keys(useThreadDraftStore.getState().drafts)).toHaveLength(0);
   });
 
+  it("defaults Fast from the selected provider's own setting", () => {
+    const { settings } = useSettingsStore.getState();
+    useSettingsStore.setState({
+      settings: { ...settings, provider: { ...settings.provider, claude: { ...settings.provider.claude, fastMode: true }, codex: { ...settings.provider.codex, fastMode: false } } },
+    });
+    const { result } = renderHook(() => useComposerFormController({ isNewThread: true }));
+
+    act(() => result.current.updateSelection({ provider: "claude", modelId: "claude-opus-5-5" }));
+    expect(result.current.defaults.fastDefault).toBe(true);
+    act(() => result.current.updateSelection({ provider: "codex", modelId: "gpt-9-deep" }));
+    expect(result.current.defaults.fastDefault).toBe(false);
+  });
+
   it("starts a fresh composer on the model chosen from a new-model announcement, once", async () => {
     useSettingsStore.setState({ loaded: true });
     useComposerDraftStore.getState().setPendingModel({ provider: "codex", modelId: "gpt-6-astra" });

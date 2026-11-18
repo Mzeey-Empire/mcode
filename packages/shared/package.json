@@ -10,6 +10,7 @@
     "./node/host-runtime": "./src/node/host-runtime.ts",
     "./node/shutdown-deadlines": "./src/node/shutdown-deadlines.ts",
     "./model-effort": "./src/model-effort/index.ts",
+    "./fast-mode": "./src/fast-mode/index.ts",
     "./usage": "./src/usage/index.ts",
     "./browser-preview-redact": "./src/browser-preview/redact.ts",
     "./browser-partition": "./src/browser-preview/browser-partition.ts",

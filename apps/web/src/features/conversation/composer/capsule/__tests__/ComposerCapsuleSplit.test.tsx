@@ -1,8 +1,10 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
+import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { GENIE_CLOSE_MS } from "@/components/ui/genie";
 import { registerProviderModels } from "@/lib/model-registry";
@@ -80,7 +82,7 @@ async function renderSplit(overrides: SplitOverrides = {}) {
       threadId={overrides.threadId}
       branchFromMessageId={overrides.branchFromMessageId}
       selection={{ ...selection, ...overrides.selection }}
-      defaults={{ thinking: undefined, globalCodexFast: false }}
+      defaults={{ thinking: undefined, fastDefault: false }}
       reasoningLevels={overrides.reasoningLevels ?? LEVELS}
       permissionLocked={overrides.permissionLocked ?? false}
       approvalReviewSupported={overrides.approvalReviewSupported ?? true}
@@ -362,6 +364,147 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     expect(screen.getByRole("dialog", { name: "Choose model and provider" })).toBeInTheDocument();
   });
 
+  describe("with a provider Fast status", () => {
+    const THREAD_ID = "thread-fast";
+
+    function reportStatus(status: FastModeStatus): void {
+      useThreadStore.getState().handleAgentEvent({ type: "fastModeStatus", threadId: THREAD_ID, status } as AgentEvent);
+    }
+
+    afterEach(() => {
+      useThreadStore.setState((state) => {
+        const records = new Map(state.records);
+        records.delete(THREAD_ID);
+        return { records };
+      });
+    });
+
+    /** Hovers the wrapper a segment hangs its tooltip on, since a disabled button swallows the pointer. */
+    async function hoverTooltip(option: HTMLElement): Promise<Element | null> {
+      const wrapper = option.parentElement as HTMLElement;
+      fireEvent.pointerEnter(wrapper, { pointerType: "mouse" });
+      fireEvent.mouseEnter(wrapper);
+      fireEvent.pointerMove(wrapper, { pointerType: "mouse" });
+      fireEvent.mouseMove(wrapper);
+      act(() => vi.advanceTimersByTime(1000));
+      for (let i = 0; i < 4; i++) frame();
+      return document.querySelector("[data-slot='tooltip-content']");
+    }
+
+    function fastOption(): HTMLElement {
+      return within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Fast" });
+    }
+
+    const CLAUDE_FAST: ProviderModelInfo = { id: "claude-opus-9", name: "Opus 9", supportedReasoningEfforts: LEVELS, supportsFastMode: true };
+    const CLAUDE_SELECTION = { provider: "claude", modelId: CLAUDE_FAST.id } as const;
+
+    /** Registers a Claude model that runs Fast and serves it as the catalog. */
+    function serveClaudeFast(): void {
+      registerProviderModels("claude", [{
+        id: CLAUDE_FAST.id,
+        label: CLAUDE_FAST.name,
+        providerId: "claude",
+        supportedReasoningLevels: LEVELS,
+        supportsFastMode: true,
+      }]);
+      vi.mocked(mockTransport.listProviderModels).mockResolvedValue([CLAUDE_FAST]);
+    }
+
+    afterEach(() => registerProviderModels("claude", []));
+
+    /** Renders the split with its selection held in state, as the composer does, so a pick re-renders the picker. */
+    function renderStatefulSplit(initial: Partial<ComposerAgentSelection>): void {
+      function Harness() {
+        const [current, setCurrent] = useState<ComposerAgentSelection>({ ...selection, ...initial });
+        return (
+          <ComposerCapsuleSplit
+            anchorRef={createRef<HTMLElement>()}
+            threadId={THREAD_ID}
+            selection={current}
+            defaults={{ thinking: undefined, fastDefault: false }}
+            reasoningLevels={LEVELS}
+            permissionLocked={false}
+            approvalReviewSupported
+            isProviderLocked={false}
+            onSelectionChange={(patch) => setCurrent((previous) => ({ ...previous, ...patch }))}
+            onSelectionTouched={vi.fn()}
+          />
+        );
+      }
+      render(<Harness />);
+    }
+
+    it("keeps Standard once the user picks it after a turn that ran Fast, and drops the bolt", async () => {
+      serveClaudeFast();
+      reportStatus({ modelId: CLAUDE_FAST.id, state: "on" });
+      renderStatefulSplit({ ...CLAUDE_SELECTION, fastMode: true });
+      expect(screen.getByTestId("composer-fast-mode-icon")).toBeInTheDocument();
+      await openModelPicker();
+
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }));
+
+      expect(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }))
+        .toHaveAttribute("aria-checked", "true");
+      expect(screen.queryByTestId("composer-fast-mode-icon")).toBeNull();
+    });
+
+    it("keeps Fast choosable while it cools down, explaining why", async () => {
+      serveClaudeFast();
+      reportStatus({ modelId: CLAUDE_FAST.id, state: "cooldown" });
+      renderStatefulSplit({ ...CLAUDE_SELECTION, fastMode: true });
+      await openModelPicker();
+
+      expect(fastOption()).toHaveAttribute("aria-checked", "true");
+      expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast is cooling down.");
+
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }));
+      expect(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }))
+        .toHaveAttribute("aria-checked", "true");
+      expect(fastOption()).not.toBeDisabled();
+      fireEvent.click(fastOption());
+      expect(fastOption()).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("explains an unavailable Fast with the provider's reason", async () => {
+      serveClaudeFast();
+      reportStatus({ modelId: CLAUDE_FAST.id, state: "off", unavailable: "extra_usage" });
+      await renderSplit({ threadId: THREAD_ID, selection: CLAUDE_SELECTION });
+      await openModelPicker();
+
+      expect(fastOption()).toBeDisabled();
+      expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast needs extra usage turned on.");
+    });
+
+    it("keeps a chosen Fast selected but dimmed while it is unavailable, and lets Standard clear it", async () => {
+      serveClaudeFast();
+      reportStatus({ modelId: CLAUDE_FAST.id, state: "off", unavailable: "extra_usage" });
+      renderStatefulSplit({ ...CLAUDE_SELECTION, fastMode: true });
+      expect(screen.queryByTestId("composer-fast-mode-icon")).toBeNull();
+      await openModelPicker();
+
+      expect(fastOption()).toHaveAttribute("aria-checked", "true");
+      expect(fastOption()).toBeDisabled();
+      expect(fastOption()).toHaveAccessibleDescription("Fast needs extra usage turned on.");
+      expect(await hoverTooltip(fastOption())).toHaveTextContent("Fast needs extra usage turned on.");
+
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }));
+      expect(within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name: "Standard" }))
+        .toHaveAttribute("aria-checked", "true");
+      expect(fastOption()).toHaveAttribute("aria-checked", "false");
+    });
+
+    it("drops Fast from the model part's name while Fast cools down", async () => {
+      serveClaudeFast();
+      reportStatus({ modelId: CLAUDE_FAST.id, state: "cooldown" });
+      await renderSplit({ threadId: THREAD_ID, selection: { ...CLAUDE_SELECTION, fastMode: true } });
+
+      const modelPart = screen.getByRole("button", { name: /^Model: / });
+      expect(modelPart).toHaveAccessibleName(/High reasoning/);
+      expect(modelPart).not.toHaveAccessibleName(/Fast/);
+      expect(screen.queryByTestId("composer-fast-mode-icon")).toBeNull();
+    });
+  });
+
   it("offers no speed choice for a model without Fast", async () => {
     await renderSplit();
     await openModelPicker();
@@ -455,7 +598,7 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     render(
       <ComposerModelOptions
         selection={{ ...selection, provider: "claude", modelId: "claude-opus-5-5" }}
-        defaults={{ thinking: undefined, globalCodexFast: false }}
+        defaults={{ thinking: undefined, fastDefault: false }}
         onSelectionChange={vi.fn()}
       />,
     );

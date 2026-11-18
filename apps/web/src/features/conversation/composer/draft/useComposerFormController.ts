@@ -1,3 +1,4 @@
+import { fastModeDefault } from "@mcode/shared/fast-mode";
 import {
   useCallback,
   useEffect,
@@ -136,7 +137,8 @@ export interface ComposerFormController {
   editorRef: RefObject<LexicalEditor | null>;
   defaults: {
     thinking: boolean | undefined;
-    globalCodexFast: boolean;
+    /** The selected provider's global Fast choice. */
+    fastDefault: boolean;
   };
   attachmentBindings: ComposerAttachmentBindings;
   updateDraft(text: string, mentions: readonly MessageMention[]): void;
@@ -268,9 +270,7 @@ export function useComposerFormController({
   const settingsDefaultMode = useSettingsStore((state) => state.settings.agent.defaults.mode);
   const settingsDefaultPermission = useSettingsStore((state) => state.settings.agent.defaults.permission);
   const settingsDefaultThinking = useSettingsStore((state) => state.settings.model.defaults.thinking);
-  const settingsGlobalCodexFast = useSettingsStore(
-    (state) => state.settings.provider.codex.fastMode === true,
-  );
+  const settingsFastDefault = useSettingsStore((state) => fastModeDefault(state.settings, selection.provider));
   const persistedInteractionMode = useThreadRecord(
     threadId,
     (record) => record.settings.interactionMode,
@@ -876,7 +876,7 @@ export function useComposerFormController({
     editorRef,
     defaults: {
       thinking: settingsDefaultThinking,
-      globalCodexFast: settingsGlobalCodexFast,
+      fastDefault: settingsFastDefault,
     },
     attachmentBindings,
     updateDraft,

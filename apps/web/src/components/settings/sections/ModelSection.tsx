@@ -21,6 +21,7 @@ import type { ProviderAvailability } from "@mcode/contracts/providers/availabili
 import { Sparkles } from "lucide-react";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { useToastStore } from "@/stores/toastStore";
+import { fastModeDefault, fastModeSettingProvider, type FastModeSettingProvider } from "@mcode/shared/fast-mode";
 
 
 /** Display labels for provider-declared reasoning effort levels. */
@@ -101,6 +102,9 @@ function isModelStale(
   );
 }
 
+const CODEX_FAST_MODE_HINT =
+  "Sends OpenAI fast service tier on Codex turns when your CLI and account support it (often lower latency; billing follows OpenAI rules).";
+
 function shouldShowThinking(provider: string, modelId: string): boolean {
   return provider === "claude" && supportsThinkingToggle(modelId);
 }
@@ -124,9 +128,8 @@ export function ModelSection() {
   const fallbackId = useSettingsStore((s) => s.settings.model.defaults.fallbackId);
   const reasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
   const thinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
-  const fastMode = useSettingsStore(
-    (s) => s.settings.provider.codex?.fastMode ?? false,
-  );
+  const fastModeProvider = fastModeSettingProvider(provider);
+  const fastMode = useSettingsStore((s) => fastModeDefault(s.settings, provider));
   const utilityProvider = useSettingsStore((s) => s.settings.model.utility.provider);
   const utilityModelId = useSettingsStore((s) => s.settings.model.utility.id);
   const update = useSettingsStore((s) => s.update);
@@ -378,7 +381,7 @@ export function ModelSection() {
       showReasoning={reasoningLevels.length > 0}
       reasoningOptions={reasoningOptions}
       reasoningHint={reasoningHint}
-      showFastMode={provider === "codex"}
+      fastModeProvider={fastModeProvider}
       showThinking={shouldShowThinking(provider, modelId)}
       utilityProvider={utilityProvider}
       utilityModelId={utilityModelId}
@@ -389,7 +392,9 @@ export function ModelSection() {
       onModelChange={handleModelChange}
       onFallbackChange={(value) => void update({ model: { defaults: { fallbackId: value } } })}
       onReasoningChange={(value) => update({ model: { defaults: { reasoning: value as ReasoningLevel } } })}
-      onFastModeChange={(value) => void update({ provider: { codex: { fastMode: value } } })}
+      onFastModeChange={(value) => {
+        if (fastModeProvider) void update({ provider: { [fastModeProvider]: { fastMode: value } } });
+      }}
       onThinkingChange={(value) => update({ model: { defaults: { thinking: value === "on" } } })}
       onUtilityProviderChange={(value) => void update({ model: { utility: { provider: value as SettingsProviderId | "", id: "" } } })}
       onUtilityModelChange={(value) => void update({ model: { utility: { id: value } } })}
@@ -413,7 +418,7 @@ interface ModelSettingsContentProps {
   showReasoning: boolean;
   reasoningOptions: ReasoningOptions;
   reasoningHint: string;
-  showFastMode: boolean;
+  fastModeProvider: FastModeSettingProvider | null;
   showThinking: boolean;
   utilityProvider: string;
   utilityModelId: string;
@@ -446,7 +451,7 @@ function ModelSettingsContent({
   showReasoning,
   reasoningOptions,
   reasoningHint,
-  showFastMode,
+  fastModeProvider,
   showThinking,
   utilityProvider,
   utilityModelId,
@@ -491,7 +496,7 @@ function ModelSettingsContent({
           showReasoning={showReasoning}
           reasoningOptions={reasoningOptions}
           reasoningHint={reasoningHint}
-          showFastMode={showFastMode}
+          fastModeProvider={fastModeProvider}
           showThinking={showThinking}
           onProviderChange={onProviderChange}
           onModelChange={onModelChange}
@@ -531,7 +536,7 @@ type DefaultModelSettingsProps = Pick<
   | "showReasoning"
   | "reasoningOptions"
   | "reasoningHint"
-  | "showFastMode"
+  | "fastModeProvider"
   | "showThinking"
   | "onProviderChange"
   | "onModelChange"
@@ -557,7 +562,7 @@ function DefaultModelSettings({
   showReasoning,
   reasoningOptions,
   reasoningHint,
-  showFastMode,
+  fastModeProvider,
   showThinking,
   onProviderChange,
   onModelChange,
@@ -621,13 +626,13 @@ function DefaultModelSettings({
           <SegmentedControl options={reasoningOptions} value={reasoning} onChange={onReasoningChange} />
         </SettingRow>
       )}
-      {showFastMode && (
+      {fastModeProvider && (
         <SettingRow
           label="Fast mode"
-          configKey="provider.codex.fastMode"
-          hint="Sends OpenAI fast service tier on Codex turns when your CLI and account support it (often lower latency; billing follows OpenAI rules)."
+          configKey={`provider.${fastModeProvider}.fastMode`}
+          hint={fastModeProvider === "codex" ? CODEX_FAST_MODE_HINT : undefined}
         >
-          <Switch checked={fastMode} onCheckedChange={onFastModeChange} />
+          <Switch aria-label="Fast mode" checked={fastMode} onCheckedChange={onFastModeChange} />
         </SettingRow>
       )}
       {showThinking && (

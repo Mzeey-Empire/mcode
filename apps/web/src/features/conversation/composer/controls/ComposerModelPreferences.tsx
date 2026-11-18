@@ -4,13 +4,16 @@ import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { Brain, Network, Zap, type LucideIcon } from "lucide-react";
 import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
 import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import { SegmentedControl, type SegmentedOption } from "@/components/ui/segmented-control";
 import { cn } from "@/lib/utils";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { findProviderModel, supportsThinkingToggle } from "@/lib/model-registry";
 import { TIER_LADDER } from "@mcode/shared/model-effort";
 import { formatReasoningLabel } from "@/lib/format-model-label";
 import { useThreadStore, type ThreadSettings } from "@/stores/threadStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
+import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";
+import { FAST_MODE_COOLING_COPY, fastModeBlockedReason, fastModeView, type FastModeView } from "./fast-mode-view";
 import { resolveComposerCapabilities } from "../composer-capabilities";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import { moveOptionFocus } from "./AccessOptionList";
@@ -18,7 +21,8 @@ import { moveOptionFocus } from "./AccessOptionList";
 /** Defaults that model preferences use when no thread override exists. */
 export interface ComposerModelPreferenceDefaults {
   thinking: boolean | undefined;
-  globalCodexFast: boolean;
+  /** The selected provider's global Fast choice. */
+  fastDefault: boolean;
 }
 
 /** Props for Composer model preference controls. */
@@ -32,9 +36,8 @@ export interface ComposerModelPreferencesProps {
 
 interface ModelPreferenceState {
   hasThinking: boolean;
-  hasFast: boolean;
   thinking: boolean;
-  fastMode: boolean;
+  fast: FastModeView;
 }
 
 interface ModelPreferenceActionProps {
@@ -57,7 +60,7 @@ function getFastMode(
   selection: ComposerAgentSelection,
   defaults: ComposerModelPreferenceDefaults,
 ): boolean {
-  if (selection.fastMode === null) return defaults.globalCodexFast;
+  if (selection.fastMode === null) return defaults.fastDefault;
   return selection.fastMode;
 }
 
@@ -71,19 +74,28 @@ function getThinking(
 function getModelPreferenceState(
   selection: ComposerAgentSelection,
   defaults: ComposerModelPreferenceDefaults,
+  status: FastModeStatus | undefined,
 ): ModelPreferenceState {
   const model = findProviderModel(selection.provider, selection.modelId);
   const hasThinking = supportsClaudeModelOption(selection.provider, selection.modelId, supportsThinkingToggle);
-  const hasFast = model?.supportsFastMode === true;
   const thinking = getThinking(selection, defaults);
-  const fastMode = getFastMode(selection, defaults);
-  return { hasThinking, hasFast, thinking, fastMode };
+  const fast = fastModeView({
+    supported: model?.supportsFastMode === true,
+    chosen: getFastMode(selection, defaults),
+    status,
+    modelId: selection.modelId,
+  });
+  return { hasThinking, thinking, fast };
 }
 
-/** Whether the selected model runs in Fast mode, from the thread's override or the global default. */
-export function isFastModeOn(selection: ComposerAgentSelection, defaults: ComposerModelPreferenceDefaults): boolean {
-  const state = getModelPreferenceState(selection, defaults);
-  return state.hasFast && state.fastMode;
+/** The selected model's Fast view: the user's choice, qualified by the thread's last provider status. */
+export function useFastModeView(
+  threadId: string | undefined,
+  selection: ComposerAgentSelection,
+  defaults: ComposerModelPreferenceDefaults,
+): FastModeView {
+  const status = useThreadRecord(threadId, (record) => record.fastStatus);
+  return getModelPreferenceState(selection, defaults, status).fast;
 }
 
 function persistThreadSetting(
@@ -103,6 +115,14 @@ export function persistReasoningLevel(
   persistThreadSetting(thread, { reasoningLevel }, { skipForks: false });
 }
 
+interface FastOption {
+  readonly on: boolean;
+  readonly blockedReason: string | null;
+  /** A tooltip for a Fast that stays choosable, such as while the provider cools it down. */
+  readonly note: string | null;
+  readonly set: (on: boolean) => void;
+}
+
 interface ModelOptionToggle {
   readonly label: string;
   readonly icon: LucideIcon;
@@ -112,7 +132,7 @@ interface ModelOptionToggle {
 
 /** The selected model's options: Fast as its own speed choice, then the on/off modes the model offers. */
 interface ModelOptions {
-  readonly fast: Omit<ModelOptionToggle, "label" | "icon"> | null;
+  readonly fast: FastOption | null;
   readonly toggles: readonly ModelOptionToggle[];
 }
 
@@ -137,21 +157,27 @@ function modelOptionsOf(state: ModelPreferenceState, actionProps: ModelPreferenc
     });
   }
   return {
-    fast: state.hasFast
-      ? {
-          on: state.fastMode,
-          // Matching the global default stores no override, so the thread keeps following the setting.
-          set: (on) => change({ fastMode: on === actionProps.defaults.globalCodexFast ? null : on }),
-        }
-      : null,
+    fast: state.fast.kind === "absent"
+      ? null
+      : {
+          // The user's choice sets the radio; the status only dims it, so a chosen Fast that cannot run still shows.
+          on: getFastMode(selection, actionProps.defaults),
+          blockedReason: fastModeBlockedReason(state.fast),
+          note: state.fast.kind === "cooling" ? FAST_MODE_COOLING_COPY : null,
+          // Matching the provider's default stores no override, so the thread keeps following the setting.
+          set: (on) => change({ fastMode: on === actionProps.defaults.fastDefault ? null : on }),
+        },
     toggles,
   };
 }
 
-const SPEED_OPTIONS = [
-  { value: "standard", label: "Standard" },
-  { value: "fast", label: "Fast", icon: <Zap aria-hidden className="size-[1.2rem]" /> },
-] as const;
+const FAST_ICON = <Zap aria-hidden className="size-[1.2rem]" />;
+
+function speedOptionsOf({ blockedReason, note }: FastOption): SegmentedOption[] {
+  const fast: SegmentedOption = { value: "fast", label: "Fast", icon: FAST_ICON };
+  if (blockedReason !== null) return [{ value: "standard", label: "Standard" }, { ...fast, disabled: true, title: blockedReason }];
+  return [{ value: "standard", label: "Standard" }, note === null ? fast : { ...fast, title: note }];
+}
 
 /**
  * The selected model's options in a row, persisted to the thread as they change: Standard or Fast as a segmented
@@ -165,7 +191,8 @@ export function ComposerModelOptions({
   defaults,
   onSelectionChange,
 }: ComposerModelPreferencesProps) {
-  const state = getModelPreferenceState(selection, defaults);
+  const status = useThreadRecord(threadId, (record) => record.fastStatus);
+  const state = getModelPreferenceState(selection, defaults, status);
   const { fast, toggles } = modelOptionsOf(state, { threadId, branchFromMessageId, selection, defaults, onSelectionChange });
   if (!fast && toggles.length === 0) return null;
 
@@ -176,7 +203,7 @@ export function ComposerModelOptions({
           variant="pill"
           size="small"
           aria-label="Speed"
-          options={SPEED_OPTIONS}
+          options={speedOptionsOf(fast)}
           value={fast.on ? "fast" : "standard"}
           onChange={(value) => fast.set(value === "fast")}
         />

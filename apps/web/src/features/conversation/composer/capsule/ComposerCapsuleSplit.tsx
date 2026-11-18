@@ -12,7 +12,7 @@ import { formatReasoningLabel, narrowModelLabel } from "@/lib/format-model-label
 import { findProviderModel, listProviderModels } from "@/lib/model-registry";
 import { cn } from "@/lib/utils";
 import { useComposerAccess, type ComposerAccessInput } from "../controls/ComposerAccessControls";
-import { isFastModeOn, persistReasoningLevel, type ComposerModelPreferenceDefaults } from "../controls/ComposerModelPreferences";
+import { persistReasoningLevel, useFastModeView, type ComposerModelPreferenceDefaults } from "../controls/ComposerModelPreferences";
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import { ModelPickerFooter } from "./ModelPickerFooter";
 
@@ -101,7 +101,7 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
   const access = useComposerAccess(props);
   const unsupervised = selection.permissionMode === PERMISSION_MODES.FULL;
   const model = getSelectedModelPresentation(selection.modelId, selection.provider);
-  const fast = isFastModeOn(selection, defaults);
+  const fast = useFastModeView(props.threadId, selection, defaults).kind === "on";
   const preferenceProps = {
     threadId: props.threadId,
     branchFromMessageId: props.branchFromMessageId,

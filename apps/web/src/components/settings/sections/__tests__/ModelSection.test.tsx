@@ -64,7 +64,11 @@ function makeState(provider: string, modelId: string, reasoning = "high") {
         defaults: { provider, id: modelId, reasoning, fallbackId: "" },
         utility: { provider: "", id: "" },
       },
-      provider: { cli: { codex: "", claude: "", copilot: "", cursor: "" } },
+      provider: {
+        cli: { codex: "", claude: "", copilot: "", cursor: "" },
+        claude: { fastMode: false },
+        codex: { fastMode: false },
+      },
     },
     update: vi.fn(),
   };
@@ -214,6 +218,14 @@ describe("ModelSection reasoning options", () => {
     expect(state.update).toHaveBeenCalledWith({
       model: { defaults: { reasoning: "low" } },
     });
+  });
+
+  it("offers Fast mode for Claude and saves it to Claude's setting", () => {
+    const { state } = renderWithModel("claude", "claude-opus-4-7");
+
+    fireEvent.click(screen.getByRole("switch", { name: "Fast mode" }));
+
+    expect(state.update).toHaveBeenCalledWith({ provider: { claude: { fastMode: true } } });
   });
 
 });
