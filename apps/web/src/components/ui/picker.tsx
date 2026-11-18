@@ -146,6 +146,8 @@ export interface PickerProps<T> {
    * A detail pane always fills. Defaults to false.
    */
   readonly fill?: boolean;
+  /** Without a rail or detail pane, caps the list at about nine rows instead of five, for a popover with room. Defaults to false. */
+  readonly tall?: boolean;
   readonly onSelect: (item: T) => void;
 }
 
@@ -295,7 +297,7 @@ export function Picker<T>(props: PickerProps<T>) {
       onNearEnd={loadMore}
       hairlines={hairlines}
       selectedCheck={selectedCheck}
-      fill={props.detail !== undefined ? "pane" : props.fill === true ? "frame" : false}
+      fill={pickerListFill(props)}
       unmatched={props.unmatchedGroup === undefined ? undefined : { label: props.unmatchedGroup, query }}
     />
   ) : null;
@@ -814,12 +816,19 @@ interface PickerListProps<T> {
    * Instead of capping at five rows, fills its grid cell to match the detail pane ("pane"), or the frame's height
    * beside the rail ("frame").
    */
-  readonly fill: "pane" | "frame" | false;
+  readonly fill: "pane" | "frame" | "tall" | false;
   readonly unmatched?: { readonly label: string; readonly query: string };
+}
+
+function pickerListFill(props: { readonly detail?: unknown; readonly fill?: boolean; readonly tall?: boolean }): PickerListProps<unknown>["fill"] {
+  if (props.detail !== undefined) return "pane";
+  if (props.fill === true) return "frame";
+  return props.tall === true ? "tall" : false;
 }
 
 const LIST_FILL_CLASS = {
   capped: "max-h-[17.2rem] pt-2",
+  tall: "max-h-[32rem] pt-2",
   pane: "@container/picker-list snap-y snap-mandatory pr-1",
   // A zero height keeps the rows out of the panel's own height, so the rail sets it and the list grows into it.
   frame: "h-0 min-h-[17.2rem] grow pt-2",

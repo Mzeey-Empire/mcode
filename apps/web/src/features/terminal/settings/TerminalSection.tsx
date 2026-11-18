@@ -477,9 +477,11 @@ interface FontRow {
   readonly mono?: boolean;
 }
 
-function fontRows(fonts: readonly TerminalFontChoice[], query: string): FontRow[] {
+function fontRows(fonts: readonly TerminalFontChoice[], current: string, query: string): FontRow[] {
   const needle = query.trim().toLowerCase();
-  const hits = fonts.filter((font) => font.name.toLowerCase().includes(needle));
+  // The current face may be the bundled font or a typed name the common list lacks; list it so it shows as selected.
+  const listed = fonts.length > 0 && !fonts.some((font) => font.name === current) ? [{ name: current, mono: true }, ...fonts] : fonts;
+  const hits = listed.filter((font) => font.name.toLowerCase().includes(needle));
   if (hits.length === 0) {
     const typed = query.trim().replace(/\s+/g, " ");
     // A font the list does not know can still be used by name.
@@ -509,7 +511,7 @@ function FontFamilyControl() {
     if (!next) setQuery("");
     setOpen(next);
   };
-  const rows = useMemo(() => fontRows(fonts ?? [], query), [fonts, query]);
+  const rows = useMemo(() => fontRows(fonts ?? [], current, query), [fonts, current, query]);
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -537,6 +539,7 @@ function FontFamilyControl() {
           total={null}
           status="ready"
           selectedKey={current}
+          tall
           renderItem={fontPickerRow}
           onSelect={(row) => {
             updatePresentation("fontFamily", fontStackFor(row.family));

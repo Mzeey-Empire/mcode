@@ -136,6 +136,15 @@ describe("TerminalSection", () => {
     expect(screen.getByRole("button", { name: "Terminal font family: Consolas" })).toBeInTheDocument();
   });
 
+  // Fails if the current face drops out of the list when the common list lacks it, such as the bundled default.
+  it("lists the current font as selected even when the common list lacks it", async () => {
+    render(<TerminalSection />);
+
+    await openFontPicker();
+
+    expect(await screen.findByRole("option", { name: "JetBrains Mono Variable" })).toHaveAttribute("aria-selected", "true");
+  });
+
   // Fails if a name the list does not know can no longer be used.
   it("offers a typed name with no match and writes it", async () => {
     applyPreferenceWrites();
