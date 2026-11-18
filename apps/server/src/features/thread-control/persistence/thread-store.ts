@@ -26,6 +26,7 @@ import {
   canonicalAgentTurns,
   cleanupJobs,
   pullRequestReviewLinks,
+  threadStartups,
   threads,
   turnResumeSchedules,
   workspaces,
@@ -1302,17 +1303,23 @@ export class ThreadStore {
   }
 
   /**
-   * Promote delegated children that are still working so deleting their coordinator never loses
-   * running work. Activity is the child's turn state, not user completion, because a hidden
-   * delegated child is never completed by the user.
+   * Detach delegated children with pending or running turns, or with an unfinished startup and no
+   * turn yet, so deleting their coordinator preserves unfinished work. Activity is the child's turn
+   * and startup state, not user completion, because a hidden delegated child is never completed by
+   * the user. Once a turn exists it decides, as in `deriveTaskState`, so a stale startup record
+   * cannot keep a finished child.
    */
   detachActiveDelegatedChildren(coordinatorThreadId: string): string[] {
+    const anyTurn = this.orm.select({ id: canonicalAgentTurns.id }).from(canonicalAgentTurns)
+      .where(eq(canonicalAgentTurns.threadId, threads.id));
     const runningTurn = this.orm.select({ id: canonicalAgentTurns.id }).from(canonicalAgentTurns)
       .where(and(eq(canonicalAgentTurns.threadId, threads.id), inArray(canonicalAgentTurns.status, ["Pending", "Running"])));
+    const unfinishedStartup = this.orm.select({ id: threadStartups.startupId }).from(threadStartups)
+      .where(and(eq(threadStartups.threadId, threads.id), inArray(threadStartups.state, ["pending", "running", "blocked"])));
     return this.orm.update(threads)
       .set({ delegationCoordinatorThreadId: null, updatedAt: new Date().toISOString() })
-      .where(and(eq(threads.delegationCoordinatorThreadId, coordinatorThreadId),
-        isNull(threads.deletedAt), sql`EXISTS ${runningTurn}`))
+      .where(and(eq(threads.delegationCoordinatorThreadId, coordinatorThreadId), isNull(threads.deletedAt),
+        or(sql`EXISTS ${runningTurn}`, and(sql`EXISTS ${unfinishedStartup}`, sql`NOT EXISTS ${anyTurn}`))))
       .returning({ id: threads.id }).all().map((row) => row.id);
   }
 
