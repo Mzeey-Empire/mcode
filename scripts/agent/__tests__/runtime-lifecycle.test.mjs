@@ -721,6 +721,26 @@ NodeTest.test("agentSetup refuses to replace a database while owned runtime PID 
   }
 });
 
+NodeTest.test("agentSetup stops before any setup work when the drive is nearly full", async () => {
+  const repo = makeRepo();
+  const restoreHooks = setAgentSetupTestHooks({
+    readFreeBytes: () => 1024 ** 3,
+    ensureRuntimeDatabase: () => { throw new Error("setup wrote to a nearly full drive"); },
+  });
+  try {
+    await NodeAssertStrict.default.rejects(
+      () => agentSetup(repo),
+      new Error(
+        `agent:setup needs 3 GB free on ${NodePath.parse(repo).root}, and only 1.00 GB is free. `
+          + "Run `bun run agent:worktrees` to list worktrees that can be removed.",
+      ),
+    );
+  } finally {
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("agentSetup rejects linked runtime state before inspecting PID or session records", async (context) => {
   const repo = makeRepo();
   const external = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "runtime-setup-linked-"));
