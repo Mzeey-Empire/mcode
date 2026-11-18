@@ -144,6 +144,7 @@ describe.skipIf(process.platform === "win32")("packaged reliability cleanup of a
     await new Promise((resolvePromise, reject) => {
       let output = "";
       child.once("error", reject);
+      child.once("exit", (code, signal) => reject(new Error(`Group leader exited before its member started (code ${code}, signal ${signal})`)));
       child.stdout.on("data", (chunk) => {
         output += chunk.toString();
         if (output.includes("member-ready")) resolvePromise();
