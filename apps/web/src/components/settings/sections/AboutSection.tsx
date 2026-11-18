@@ -41,6 +41,21 @@ function aboutBridge() {
 }
 
 /**
+ * Revert's half of a release-line change: the running updater keeps its line until told, and with automatic checks
+ * off nothing else would correct it. Revert never asks to confirm, so it never allows a downgrade.
+ */
+async function switchUpdaterBack(releaseLine: UpdateReleaseLine): Promise<string | null> {
+  const bridge = aboutBridge();
+  if (!bridge?.applyReleaseLine) return null;
+  try {
+    await bridge.applyReleaseLine({ releaseLine, allowDowngrade: false });
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : "the updater could not switch release line.";
+  }
+}
+
+/**
  * Release line switch. Owns the downgrade confirmation and the queue of channel switches,
  * so choosing a line from search behaves exactly as on the About page.
  */
@@ -199,7 +214,7 @@ export const ABOUT = settingsPage("about", {
     hint: "Nightly gets prerelease builds.",
     group: UPDATES,
     synonyms: "release channel stable nightly beta prerelease version update",
-    value: settingsValue((s) => s.updates.channel, (channel) => ({ updates: { channel } })),
+    value: settingsValue((s) => s.updates.channel, (channel) => ({ updates: { channel } }), undefined, switchUpdaterBack),
     Control: ReleaseLineControl,
   },
   checkInterval: {

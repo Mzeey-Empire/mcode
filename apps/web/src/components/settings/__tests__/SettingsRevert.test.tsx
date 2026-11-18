@@ -232,6 +232,22 @@ describe("Settings Revert", () => {
     expect(useSettingsStore.getState().settings.appearance.theme).toBe("system");
   });
 
+  it("switches the running updater back when it puts back the release line", async () => {
+    const applyReleaseLine = vi.fn(() => Promise.resolve({ state: "idle" as const }));
+    vi.stubGlobal("desktopBridge", { app: { applyReleaseLine } });
+    render(<SettingsView />);
+    await act(async () => {
+      await useSettingsStore.getState().update({ updates: { channel: "nightly" } });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert 1 change" }));
+    await flush();
+
+    expect(useSettingsStore.getState().settings.updates.channel).toBe("stable");
+    expect(applyReleaseLine.mock.calls.at(-1)).toEqual([{ releaseLine: "stable", allowDowngrade: false }]);
+    vi.unstubAllGlobals();
+  });
+
   it("shows the restored serve URL in its input", async () => {
     openPage("providers");
     render(<SettingsView />);

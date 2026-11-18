@@ -30,6 +30,8 @@ export type RestoreStep =
       readonly patch: SettingsPatch;
       /** Reason the merged result must not be written (last enabled provider, default provider), or null. */
       readonly blockedBy?: (next: Settings) => string | null;
+      /** Work the value needs once the settings write succeeds, such as switching the running updater; returns a failure reason or null. */
+      readonly afterWrite?: () => Promise<string | null>;
     }
   | { readonly sink: "terminalPreferences"; readonly patch: TerminalPreferencesUpdate }
   | { readonly sink: "terminalGlobalDefault"; readonly profileId: TerminalProfileReference }
@@ -58,11 +60,20 @@ export function settingsValue<V>(
   read: (settings: Settings) => V,
   patch: (value: V) => SettingsPatch,
   blockedBy?: (next: Settings) => string | null,
+  afterWrite?: (value: V) => Promise<string | null>,
 ): RevertibleValue {
   return {
     kind: "revertible",
     read: (source) => read(source.settings),
-    restore: (before) => ({ sink: "settings", patch: patch(read(before.settings)), ...(blockedBy && { blockedBy }) }),
+    restore: (before) => {
+      const value = read(before.settings);
+      return {
+        sink: "settings",
+        patch: patch(value),
+        ...(blockedBy && { blockedBy }),
+        ...(afterWrite && { afterWrite: () => afterWrite(value) }),
+      };
+    },
   };
 }
 

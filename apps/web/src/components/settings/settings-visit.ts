@@ -39,9 +39,16 @@ export interface RevertFailure {
   readonly reason: string;
 }
 
+/** One write Revert sends, and each setting's `afterWrite` to run once it succeeds. */
+export interface RevertBatch {
+  readonly step: RestoreStep;
+  readonly ids: readonly SettingId[];
+  readonly afterWrites?: readonly { readonly id: SettingId; readonly run: () => Promise<string | null> }[];
+}
+
 /** Writes Revert sends: at most one per sink, in sink order. */
 export interface RevertPlan {
-  readonly batches: readonly { readonly step: RestoreStep; readonly ids: readonly SettingId[] }[];
+  readonly batches: readonly RevertBatch[];
   readonly blocked: readonly RevertFailure[];
 }
 
@@ -161,7 +168,11 @@ function planSettings(steps: readonly PlannedStep[], current: Settings, blocked:
     const refusal = pending
       .map((planned) => ({ planned, reason: planned.step.sink === "settings" ? planned.step.blockedBy?.(next.data) ?? null : null }))
       .find(({ reason }) => reason !== null);
-    if (refusal?.reason == null) return ids.length === 0 ? [] : [{ step: { sink: "settings", patch: patch.data }, ids }];
+    if (refusal?.reason == null) {
+      if (ids.length === 0) return [];
+      const afterWrites = pending.flatMap(({ id, step }) => (step.sink === "settings" && step.afterWrite ? [{ id, run: step.afterWrite }] : []));
+      return [{ step: { sink: "settings", patch: patch.data }, ids, ...(afterWrites.length > 0 && { afterWrites }) }];
+    }
     blocked.push(...failuresFor([refusal.planned.id], refusal.reason));
     pending = pending.filter((planned) => planned !== refusal.planned);
   }
@@ -332,8 +343,18 @@ async function runBatches(
     failures.push(...blocked);
     for (const batch of batches) {
       const reason = await runStep(batch.step);
-      if (reason === null) done.push(...batch.ids);
-      else failures.push(...failuresFor(batch.ids, reason));
+      if (reason !== null) {
+        failures.push(...failuresFor(batch.ids, reason));
+        continue;
+      }
+      const failed = new Set<SettingId>();
+      for (const after of batch.afterWrites ?? []) {
+        const afterReason = await after.run();
+        if (afterReason === null) continue;
+        failed.add(after.id);
+        failures.push(...failuresFor([after.id], afterReason));
+      }
+      done.push(...batch.ids.filter((id) => !failed.has(id)));
     }
   }
   return { done, failures };
