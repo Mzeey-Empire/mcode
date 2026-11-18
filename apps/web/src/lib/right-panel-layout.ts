@@ -1,7 +1,7 @@
 import { useDiffStore, type RightPanelTool } from "@/stores/diffStore";
 import { useUiStore } from "@/stores/uiStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { getContentRowWidth, preferredSplitPanelWidth, rightPanelPostureForPanel } from "@/lib/composer-layout";
+import { getContentRowWidth, preferredSplitPanelWidth, rightPanelPosture } from "@/lib/composer-layout";
 
 /**
  * On auto-owned opens, size the panel to ~half the current content row. A width
@@ -19,21 +19,17 @@ function applyHalfWidthIfUntouched(workspaceId: string, threadId?: string | null
 }
 
 /** Whether the panel's row is too narrow to show the conversation beside it, docked or floating. */
-function panelNeedsFullSurface(workspaceId: string, threadId?: string | null): boolean {
-  const panel = useDiffStore.getState().getRightPanel(workspaceId, threadId);
-  return rightPanelPostureForPanel(getContentRowWidth(), panel) === "full-surface";
+function panelNeedsFullSurface(): boolean {
+  return rightPanelPosture(getContentRowWidth()) === "full-surface";
 }
 
 /**
  * After opening the right panel, maximize it when the content row is too narrow
  * to show the conversation beside it. A panel that only cannot dock floats over
- * the conversation instead (see {@link rightPanelPostureForPanel}).
+ * the conversation instead (see {@link rightPanelPosture}).
  */
-export function applyMaximizeIfCramped(
-  workspaceId: string,
-  threadId?: string | null,
-): void {
-  if (!panelNeedsFullSurface(workspaceId, threadId)) return;
+function applyMaximizeIfCramped(): void {
+  if (!panelNeedsFullSurface()) return;
   useUiStore.getState().setRightPanelMaximized(true, "layout");
 }
 
@@ -46,7 +42,7 @@ export function showRightPanelAdaptive(
 ): void {
   useDiffStore.getState().showRightPanel(workspaceId, threadId);
   applyHalfWidthIfUntouched(workspaceId, threadId);
-  applyMaximizeIfCramped(workspaceId, threadId);
+  applyMaximizeIfCramped();
 }
 
 /** Opens the right panel for a workspace/thread and selects `tab`. */
@@ -75,7 +71,7 @@ export function toggleRightPanelAdaptive(
     return;
   }
   applyHalfWidthIfUntouched(workspaceId, threadId);
-  applyMaximizeIfCramped(workspaceId, threadId);
+  applyMaximizeIfCramped();
 }
 
 /**
@@ -91,7 +87,7 @@ export function hideRightPanelAdaptive(workspaceId: string, threadId?: string | 
  * when the row is too narrow for both: the layout guard maximizes again.
  */
 export function showChatAdaptive(workspaceId: string, threadId?: string | null): void {
-  if (!panelNeedsFullSurface(workspaceId, threadId)) {
+  if (!panelNeedsFullSurface()) {
     useUiStore.getState().setRightPanelMaximized(false);
     return;
   }

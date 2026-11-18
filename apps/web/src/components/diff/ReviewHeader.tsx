@@ -238,10 +238,11 @@ function ReviewViewMenu({ selection }: { readonly selection: ReviewViewSelection
         data-testid="review-view-switcher"
         aria-label="Select review view"
         // The same 32px pill as the other tools' row-1 titles, with the subtle button's hover and open fills.
-        className="flex h-8 shrink-0 items-center gap-2 whitespace-nowrap rounded-control bg-selected px-3 text-sm font-medium text-ink hover:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] aria-expanded:bg-control-border"
+        className="flex h-8 min-w-0 items-center gap-2 whitespace-nowrap rounded-control bg-selected px-3 text-sm font-medium text-ink hover:bg-[color-mix(in_oklch,var(--color-selected),var(--color-control-border))] aria-expanded:bg-control-border"
       >
-        <span>{reviewViewById(viewMode).label}</span>
-        <ChevronDown size={14} aria-hidden className="text-muted" />
+        {/* At the panel's minimum width the label fades rather than pushing the picker under Maximize. */}
+        <span className="text-fade">{reviewViewById(viewMode).label}</span>
+        <ChevronDown size={14} aria-hidden className="shrink-0 text-muted" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" sideOffset={4} className="min-w-[150px]">
         {REVIEW_VIEW_GROUPS.map((group, index) => (

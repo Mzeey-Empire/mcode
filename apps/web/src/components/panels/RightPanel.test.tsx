@@ -99,12 +99,10 @@ vi.mock("./ResizableRightPanel", () => ({
     "data-right-panel-root"?: string;
     "data-posture"?: string;
     className?: string;
-    minWidth?: number;
   }) => (
     <div
       data-testid={testId}
       data-posture={props["data-posture"]}
-      data-min-width={props.minWidth}
       className={props.className}
       aria-hidden={props["aria-hidden"]}
       data-right-panel-root={props["data-right-panel-root"]}
@@ -726,36 +724,16 @@ describe("RightPanel", () => {
     toggle.focus();
     expect(panel).toHaveAttribute("data-posture", "docked");
 
-    // Review needs 560px beside the conversation's 520px.
-    act(() => setLayoutMeasurements(1079));
+    // Docking needs the composer's 480px beside the panel's 384px.
+    act(() => setLayoutMeasurements(863));
     expect(panel).toHaveAttribute("data-posture", "floating");
     expect(screen.getByTestId("review-controls")).toBe(reviewBody);
     expect(toggle).toHaveFocus();
 
-    act(() => setLayoutMeasurements(1080));
+    act(() => setLayoutMeasurements(864));
     expect(panel).toHaveAttribute("data-posture", "docked");
     expect(screen.getByTestId("review-controls")).toBe(reviewBody);
     expect(toggle).toHaveFocus();
-  });
-
-  it("keeps a floating panel one width while the user switches between its open tools", () => {
-    useDiffStore.setState({
-      rightPanelFallbackByWorkspace: {
-        "workspace-1": createRightPanelState({ visible: true, width: 384, openTabs: ["tasks", "changes"], activeTab: "tasks" }),
-      },
-    });
-    render(<RightPanel />);
-    act(() => setLayoutMeasurements(896));
-    const panel = screen.getByTestId("right-panel");
-    expect(panel).toHaveAttribute("data-posture", "floating");
-    // Review is the widest open tool, at 560px.
-    expect(panel).toHaveAttribute("data-min-width", "560");
-
-    act(() => useDiffStore.getState().setRightPanelTab("workspace-1", null, "changes"));
-    expect(panel).toHaveAttribute("data-min-width", "560");
-
-    act(() => useDiffStore.getState().setRightPanelTab("workspace-1", null, "tasks"));
-    expect(panel).toHaveAttribute("data-min-width", "560");
   });
 
   it("keeps an idle existing Browser page behind the default panel screen", () => {
