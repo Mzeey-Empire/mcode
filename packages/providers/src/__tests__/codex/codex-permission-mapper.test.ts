@@ -10,7 +10,6 @@ import {
   codexApprovalFileChange,
   mapDecisionToCodexResponse,
   synthesizeCodexApprovalRequest,
-  CODEX_APPROVAL_METHODS,
 } from "../../private/codex/codex-permission-mapper.js";
 
 describe("mapDecisionToCodexResponse", () => {
@@ -178,17 +177,5 @@ describe("synthesizeCodexApprovalRequest", () => {
 
   it("omits an absent native reason", () => {
     expect(synthesizeCodexApprovalRequest({ method: "execCommandApproval", params: { command: "echo hi" } }).reason).toBeUndefined();
-  });
-});
-
-describe("CODEX_APPROVAL_METHODS", () => {
-  it("exposes the five recognised method names", () => {
-    expect(CODEX_APPROVAL_METHODS).toEqual([
-      "item/commandExecution/requestApproval",
-      "item/fileChange/requestApproval",
-      "item/permissions/requestApproval",
-      "applyPatchApproval",
-      "execCommandApproval",
-    ]);
   });
 });

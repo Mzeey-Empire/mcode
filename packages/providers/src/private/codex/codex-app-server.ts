@@ -23,7 +23,7 @@ import { CodexRpcClient, CodexRpcResponseError, CodexTransportError } from "./co
 import { listCodexModels } from "./codex-models.js";
 import { codexIgnoredNotificationReason } from "./codex-notification-policy.js";
 import { parseCodexNotification } from "./codex-notification-validation.js";
-import { mapDecisionToCodexResponse } from "./codex-permission-mapper.js";
+import { CODEX_MCP_ELICITATION_METHOD, codexMcpToolApproval, mapDecisionToCodexResponse } from "./codex-permission-mapper.js";
 import type { CodexQuestionRequest } from "./codex-plan-questions.js";
 import type {
   AdditionalContextEntry,
@@ -330,11 +330,17 @@ export async function routeCodexServerRequest(args: {
   if (method === "item/tool/requestUserInput") {
     return routeCodexQuestionRequest(msg.id, params, args);
   }
+  if (method === CODEX_MCP_ELICITATION_METHOD && !codexMcpToolApproval(params)) {
+    // An approval card cannot collect form or URL input, so the MCP server learns the user never saw it.
+    logger.info("Codex MCP elicitation cancelled; only tool approvals are shown", { id: msg.id });
+    await sendResponse(msg.id, { action: "cancel" });
+    return;
+  }
   const autoApprove = approvalPolicy === "never";
 
   if (autoApprove) {
     logger.info("Codex serverRequest auto-approved", { id: msg.id, method: diagnosticMethod });
-    await sendResponse(msg.id, autoApprovedResponse(method));
+    await sendResponse(msg.id, autoApprovedResponse(method, params));
     return;
   }
 
@@ -366,7 +372,8 @@ export async function routeCodexServerRequest(args: {
   await sendResponse(msg.id, mapDecisionToCodexResponse(method, "deny", params));
 }
 
-function autoApprovedResponse(method: string): unknown {
+function autoApprovedResponse(method: string, params: Record<string, unknown>): unknown {
+  if (method === CODEX_MCP_ELICITATION_METHOD) return mapDecisionToCodexResponse(method, "allow-session", params);
   if (method === "item/permissions/requestApproval") {
     return {
       permissions: { fileSystem: { read: [], write: [] }, network: { enabled: true } },

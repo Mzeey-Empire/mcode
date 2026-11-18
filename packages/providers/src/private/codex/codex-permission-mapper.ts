@@ -45,30 +45,78 @@ function unifiedPatch({ path, kind, diff = "" }: FileChange, change: "added" | "
   return `--- a/${patchPath}\n+++ b/${movePath ?? patchPath}\n${hunks}`;
 }
 
-/** Native Codex methods which ask the host to authorize an operation. */
-export const CODEX_APPROVAL_METHODS = [
-  "item/commandExecution/requestApproval", "item/fileChange/requestApproval",
-  "item/permissions/requestApproval", "applyPatchApproval", "execCommandApproval",
-] as const;
 /** Raw native parameters, interpreted only in this adapter. */
 export type CodexApprovalParams = Record<string, unknown>;
 /** Internal choices used by the native Codex response mapper and session drain. */
 export type CodexApprovalDecision = "allow" | "allow-session" | "deny" | "cancelled";
 
+/** MCP elicitation; Codex also sends its MCP tool-call approvals through it. */
+export const CODEX_MCP_ELICITATION_METHOD = "mcpServer/elicitation/request";
+
+// Codex marks a tool-call approval with these `_meta` keys (codex-rs protocol/src/mcp_approval_meta.rs).
+const McpToolApprovalSchema = z.object({
+  serverName: z.string().min(1),
+  _meta: z.object({
+    codex_approval_kind: z.literal("mcp_tool_call"),
+    tool_name: z.string().min(1),
+    tool_params: z.unknown().optional(),
+    persist: z.union([z.string(), z.array(z.string())]).optional(),
+  }),
+});
+type McpToolApproval = z.infer<typeof McpToolApprovalSchema>;
+
+/** Parse an elicitation that asks to run an MCP tool; other elicitations are forms Mcode cannot show. */
+export function codexMcpToolApproval(params: CodexApprovalParams): McpToolApproval | undefined {
+  const parsed = McpToolApprovalSchema.safeParse(params);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function offersSessionApproval({ _meta: { persist } }: McpToolApproval): boolean {
+  return persist === "session" || (Array.isArray(persist) && persist.includes("session"));
+}
+
+// Codex reads `_meta.persist` on an accepted tool approval; any other reply shape is a rejection.
+function mcpElicitationResponse(decision: CodexApprovalDecision, params: CodexApprovalParams): unknown {
+  if (decision === "cancelled") return { action: "cancel" };
+  const approval = codexMcpToolApproval(params);
+  if (decision === "deny" || !approval) return { action: "decline" };
+  return decision === "allow-session" && offersSessionApproval(approval)
+    ? { action: "accept", _meta: { persist: "session" } }
+    : { action: "accept" };
+}
+
+type CodexResponder = (decision: CodexApprovalDecision, params: CodexApprovalParams) => unknown;
+const V2_REPLIES = { allow: "accept", "allow-session": "acceptForSession", deny: "decline", cancelled: "cancel" } as const;
+const LEGACY_REPLIES = { allow: "approved", "allow-session": "approved_for_session", deny: "denied", cancelled: "abort" } as const;
+const v2Response: CodexResponder = (decision) => ({ decision: V2_REPLIES[decision] });
+const legacyResponse: CodexResponder = (decision) => ({ decision: LEGACY_REPLIES[decision] });
+const permissionsResponse: CodexResponder = (decision, params) => ({
+  permissions: decision === "allow" || decision === "allow-session" ? params.permissions ?? {} : {},
+  scope: decision === "allow-session" ? "session" : "turn",
+});
+const CODEX_RESPONDERS = new Map<string, CodexResponder>([
+  ["item/commandExecution/requestApproval", v2Response],
+  ["item/fileChange/requestApproval", v2Response],
+  ["item/permissions/requestApproval", permissionsResponse],
+  ["applyPatchApproval", legacyResponse],
+  ["execCommandApproval", legacyResponse],
+  [CODEX_MCP_ELICITATION_METHOD, mcpElicitationResponse],
+]);
+
 /** Translate the native protocol variant, including safe denial during teardown. */
 export function mapDecisionToCodexResponse(method: string, decision: CodexApprovalDecision, params: CodexApprovalParams): unknown {
-  if (!CODEX_APPROVAL_METHODS.some((known) => known === method)) {
-    return method.toLowerCase().includes("permissions") ? { permissions: {}, scope: "turn" } : { decision: "decline" };
-  }
-  if (method === "item/permissions/requestApproval") {
-    return { permissions: decision === "allow" || decision === "allow-session" ? params.permissions ?? {} : {}, scope: decision === "allow-session" ? "session" : "turn" };
-  }
-  if (method === "applyPatchApproval" || method === "execCommandApproval") {
-    const replies = { allow: "approved", "allow-session": "approved_for_session", deny: "denied", cancelled: "abort" };
-    return { decision: replies[decision] };
-  }
-  const replies = { allow: "accept", "allow-session": "acceptForSession", deny: "decline", cancelled: "cancel" };
-  return { decision: replies[decision] };
+  const respond = CODEX_RESPONDERS.get(method);
+  if (respond) return respond(decision, params);
+  return method.toLowerCase().includes("permissions") ? { permissions: {}, scope: "turn" } : { decision: "decline" };
+}
+
+function codexApprovalChoices(toolApproval: McpToolApproval | undefined): ApprovalRequestBody["choices"] {
+  const sessionChoice = !toolApproval || offersSessionApproval(toolApproval);
+  return [
+    { id: "allow", intent: "allow_once", label: "Allow once" },
+    ...(sessionChoice ? [{ id: "allow-session", intent: "allow_scoped", label: "Allow for this session" } as const] : []),
+    { id: "deny", intent: "deny", label: "Deny" },
+  ];
 }
 
 /** Adapter state supplies routing; native data supplies only the body. */
@@ -77,6 +125,7 @@ export function synthesizeCodexApprovalRequest(input: {
   origin?: ApprovalRequestBody["origin"];
 }): ApprovalRequestBody {
   const { method, params } = input;
+  const toolApproval = method === CODEX_MCP_ELICITATION_METHOD ? codexMcpToolApproval(params) : undefined;
   return {
     requestedAt: new Date().toISOString(),
     ...(typeof params.itemId === "string" ? { toolCallId: params.itemId } : {}),
@@ -85,14 +134,14 @@ export function synthesizeCodexApprovalRequest(input: {
         params.networkApprovalContext ? `Network: ${JSON.stringify(params.networkApprovalContext)}` : undefined]
         .filter((part) => part !== undefined).join("\n"),
     } : {}),
-    subject: codexSubject(method, params),
-    choices: [
-      { id: "allow", intent: "allow_once", label: "Allow once" },
-      { id: "allow-session", intent: "allow_scoped", label: "Allow for this session" },
-      { id: "deny", intent: "deny", label: "Deny" },
-    ],
+    subject: toolApproval ? mcpToolSubject(toolApproval) : codexSubject(method, params),
+    choices: codexApprovalChoices(toolApproval),
     origin: input.origin ?? { kind: "agent" },
   };
+}
+
+function mcpToolSubject({ serverName, _meta }: McpToolApproval): ApprovalSubject {
+  return { kind: "tool", toolName: `${serverName}/${_meta.tool_name}`, ...(_meta.tool_params === undefined ? {} : { preview: JSON.stringify(_meta.tool_params) }) };
 }
 
 function codexSubject(method: string, params: CodexApprovalParams): ApprovalSubject {
