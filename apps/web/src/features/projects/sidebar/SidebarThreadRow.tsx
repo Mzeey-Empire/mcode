@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { cancelPrefetch, prefetchOnPointerDown, schedulePrefetch } from "@/features/conversation";
 import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
-import { STATUS_MARK_TEXT_CLASS, StatusMark } from "@/components/ui/status-mark";
+import { STATUS_LABEL_TEXT_CLASS, StatusMark } from "@/components/ui/status-mark";
 import { THREAD_STATUS_LOOK, threadRowLook, threadTitleTone, useThreadRowState, type ThreadRowLook, type ThreadStatusLook, type ThreadTitleTone } from "@/features/thread-attention/thread-row-presentation";
 import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
 import { isPrable } from "@/lib/is-prable";
@@ -771,7 +771,7 @@ function ThreadRowLookStatus({ look, iconOnly = false }: { look: ThreadStatusLoo
   return (
     <>
       <StatusMark state={look.state} label={look.label} icon={look.icon} />
-      <ThreadRowCaption aria-hidden className={cn("font-medium", STATUS_MARK_TEXT_CLASS[look.state])}>{look.label}</ThreadRowCaption>
+      <ThreadRowCaption aria-hidden className={cn("font-medium", STATUS_LABEL_TEXT_CLASS[look.state])}>{look.label}</ThreadRowCaption>
     </>
   );
 }

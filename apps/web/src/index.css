@@ -152,6 +152,11 @@
   /* Off the lamp's hue, as in dark, so the Don't ask key and Low quota beside an amber Send never read as more Sends. */
   --warning: oklch(46% 0.100 92);
   --info: var(--blue-700);
+  /* Status label text sits on the hover and selected row fills too, so light mode needs a darker
+     ink than the shared roles to keep 4.5:1 there; icons keep the shared roles. */
+  --status-label-attention: var(--amber-800);
+  --status-label-success: oklch(48% 0.120 145);
+  --status-label-error: oklch(49% 0.140 25);
   --pr-merged: var(--violet-700);
   --selection: color-mix(in oklch, var(--blue-500) 18%, transparent);
   --scrollbar-thumb: color-mix(in oklch, var(--ink) 18%, transparent);
@@ -209,6 +214,9 @@
   /* Brass, off the lamp's hue, so the key icon and Low quota beside an amber Send never read as more Sends. */
   --warning: oklch(82% 0.110 92);
   --info: var(--blue-400);
+  --status-label-attention: var(--primary);
+  --status-label-success: var(--success);
+  --status-label-error: var(--error);
   --pr-merged: var(--violet-400);
   --selection: color-mix(in oklch, var(--blue-500) 30%, transparent);
   --scrollbar-thumb: color-mix(in oklch, var(--ink) 22%, transparent);
@@ -315,6 +323,9 @@
   --color-error: var(--error);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-status-label-attention: var(--status-label-attention);
+  --color-status-label-success: var(--status-label-success);
+  --color-status-label-error: var(--status-label-error);
   --color-pr-merged: var(--pr-merged);
   --radius-sm: 0.6rem;
   --radius-md: 0.8rem;

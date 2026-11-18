@@ -24,6 +24,17 @@ export const STATUS_MARK_TEXT_CLASS: Record<StatusMarkState, string> = {
   info: "text-info",
 };
 
+/**
+ * The text colour of a status label set beside its mark. Light mode darkens attention, success and
+ * error so a small label keeps 4.5:1 on hover and selected row fills; the mark keeps its role colour.
+ */
+export const STATUS_LABEL_TEXT_CLASS: Record<StatusMarkState, string> = {
+  ...STATUS_MARK_TEXT_CLASS,
+  attention: "text-status-label-attention",
+  success: "text-status-label-success",
+  error: "text-status-label-error",
+};
+
 /** Props for {@link StatusMark}. */
 export interface StatusMarkProps {
   state: StatusMarkState;
