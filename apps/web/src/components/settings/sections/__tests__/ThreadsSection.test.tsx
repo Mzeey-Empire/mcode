@@ -127,6 +127,9 @@ describe("ThreadsSection stale default model", () => {
 
     const warning = await screen.findByText(STALE_WARNING);
     expect(screen.getByRole("button", { name: /^Model:/ })).toHaveAccessibleDescription(warning.textContent ?? "");
+    // The toast comes from a passive effect, which can flush after the warning paints on a loaded runner.
+    await vi.waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    await act(async () => {});
     expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Saved model not in catalog"]);
   });
 
