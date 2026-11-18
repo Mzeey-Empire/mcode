@@ -71,10 +71,9 @@ describe("overview registry", () => {
     ]);
   });
 
-  it("gives a new-thread subject only its settings row and target rows", () => {
+  it("gives a new-thread subject only its target rows", () => {
     const newThread: OverviewSubject = { kind: "new-thread", workspaceId: thread.workspace_id };
     expect(getOverviewEntries(newThread).map(({ id, section, order }) => [id, section, order])).toEqual([
-      ["project-actions", "actions", 0],
       ["target.workspace", "lane", 50],
       ["target.branch", "lane", 70],
     ]);

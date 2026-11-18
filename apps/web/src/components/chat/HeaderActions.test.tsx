@@ -432,11 +432,19 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.getByTestId("thread-overview-ci-green")).toBeInTheDocument();
   });
 
-  it("keeps the Overview title free of controls, with Project actions as the card's first row", () => {
+  it("opens Project settings from the gear beside the Overview title", async () => {
+    const user = userEvent.setup();
     renderHeaderActions();
 
-    expect(within(screen.getByTestId("thread-overview-card-header")).queryAllByRole("button")).toHaveLength(0);
+    const header = screen.getByTestId("thread-overview-card-header");
+    expect(within(header).getAllByRole("button").map((button) => button.getAttribute("aria-label")))
+      .toEqual(["Open Project settings"]);
     expect(screen.getAllByRole("button", { name: "Project actions" })).toHaveLength(1);
+
+    await user.click(within(header).getByRole("button", { name: "Open Project settings" }));
+
+    expect(mockShowRightPanel).toHaveBeenCalledWith("ws-1", "thread-1");
+    expect(mockSetRightPanelTab).toHaveBeenCalledWith("ws-1", "thread-1", "environment");
   });
 
   it("opens the Project environment panel from Edit actions through the adaptive route", async () => {

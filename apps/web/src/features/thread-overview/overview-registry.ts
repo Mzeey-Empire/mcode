@@ -38,7 +38,7 @@ export interface OverviewEntry {
 
 /** Body entries. The card groups them by section, then orders each section by `order`. */
 export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
-  { id: "project-actions", section: "actions", order: 0, subjects: ["thread", "new-thread"], Entry: ProjectActionsEntryBlock, State: OverviewProjectActionsState },
+  { id: "project-actions", section: "actions", order: 0, subjects: ["thread"], Entry: ProjectActionsEntryBlock, State: OverviewProjectActionsState },
   { id: "save-recovery", section: "activity", order: 10, subjects: ["thread"], Entry: SaveRecoveryEntryBlock },
   { id: "changes", section: "activity", order: 20, subjects: ["thread"], Entry: ChangesEntryBlock, State: ChangesEntryState },
   { id: "repository", section: "lane", order: 95, subjects: ["thread"], Entry: RepositoryEntryBlock, State: RepositoryEntryState },

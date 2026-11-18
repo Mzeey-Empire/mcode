@@ -1,5 +1,3 @@
-import { createMockThread } from "@mcode/contracts/testing";
-
 import { render, screen } from "@testing-library/react";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
@@ -16,7 +14,8 @@ const cardCss = NodeFS.readFileSync(
   "utf8",
 );
 
-const subject: OverviewSubject = { kind: "thread", thread: createMockThread({ id: "card-thread" }) };
+// A new-thread subject, because a thread's title gear reads the Overview context these layout tests do not mount.
+const subject: OverviewSubject = { kind: "new-thread", workspaceId: "card-workspace" };
 
 function entry(id: string, section: OverviewSectionId, visible: boolean): OverviewEntry {
   return {

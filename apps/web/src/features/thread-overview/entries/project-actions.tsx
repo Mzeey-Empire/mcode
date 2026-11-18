@@ -1,5 +1,5 @@
 import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
-import { Button } from "@/components/ui/button";
+import { Button, IconButton } from "@/components/ui/button";
 import { ActionMenuGlyph } from "@/features/projects/actions/ActionRunMenu";
 import { ThreadActionRunMenu, useThreadActionRunHandlers } from "@/features/projects/actions/ThreadActionRunMenu";
 import { useProjectActions } from "@/features/projects/actions/useProjectActions";
@@ -174,24 +174,26 @@ function openNewThreadProjectSettings(workspaceId: string) {
   useDiffStore.getState().setRightPanelTab(workspaceId, null, "environment");
 }
 
-function NewThreadProjectSettingsRow({ workspaceId }: { readonly workspaceId: string }) {
+function ProjectSettingsButton({ onOpen }: { readonly onOpen: () => void }) {
   return (
-    <Button
-      variant="ghost"
-      size="compact"
-      type="button"
-      onClick={() => openNewThreadProjectSettings(workspaceId)}
-      className={cn(OVERVIEW_ROW_CLASS, "justify-start")}
-    >
-      <OverviewRowIcon><Settings /></OverviewRowIcon>
-      <span className="text-fade font-medium">Project settings</span>
-    </Button>
+    <IconButton aria-label="Open Project settings" onClick={onOpen}>
+      <Settings aria-hidden />
+    </IconButton>
   );
 }
 
-/** The card's first row: the thread's Project Actions, or Project settings for a new thread. */
-export function ProjectActionsEntryBlock({ subject }: { subject: OverviewSubject }) {
+function ThreadProjectSettingsButton() {
+  return <ProjectSettingsButton onOpen={useOverviewContext().openProjectSettings} />;
+}
+
+/** Project settings shortcut beside the Overview title, for a thread or a new thread. */
+export function OverviewProjectSettingsButton({ subject }: { subject: OverviewSubject }) {
   return subject.kind === "thread"
-    ? <ProjectActionsRow thread={subject.thread} />
-    : <NewThreadProjectSettingsRow workspaceId={subject.workspaceId} />;
+    ? <ThreadProjectSettingsButton />
+    : <ProjectSettingsButton onOpen={() => openNewThreadProjectSettings(subject.workspaceId)} />;
+}
+
+/** The card's first row: the thread's Project Actions. A new thread has none to run yet. */
+export function ProjectActionsEntryBlock({ subject }: { subject: OverviewSubject }) {
+  return subject.kind === "thread" ? <ProjectActionsRow thread={subject.thread} /> : null;
 }
