@@ -15,6 +15,9 @@ type DeepPartial<T> = {
   [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K];
 };
 
+/** A partial main-settings write, as `update` takes it. */
+export type SettingsPatch = DeepPartial<Settings>;
+
 const OLD_SETTINGS_KEY = "mcode-settings";
 const MIGRATION_FLAG = "mcode-settings-migrated";
 

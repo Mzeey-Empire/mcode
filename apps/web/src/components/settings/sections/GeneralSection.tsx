@@ -9,6 +9,7 @@ import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { Setting } from "../Setting";
 import { settingsPage } from "../setting-def";
+import { settingsValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
 
@@ -109,21 +110,21 @@ export const GENERAL = settingsPage("general", {
     label: "Theme",
     hint: "Color scheme for the interface.",
     synonyms: "theme dark light mode appearance color colour scheme system",
-    configKey: "appearance.theme",
+    value: settingsValue((s) => s.appearance.theme, (theme) => ({ appearance: { theme } })),
     Control: ThemeControl,
   },
   notifications: {
     label: "Notifications",
     hint: "Notify when a thread finishes, fails or needs you while Mcode is in the background.",
     synonyms: "notifications notify alert toast sound desktop",
-    configKey: "notifications.enabled",
+    value: settingsValue((s) => s.notifications.enabled, (enabled) => ({ notifications: { enabled } })),
     Control: NotificationsControl,
   },
   openIn: {
     label: "Default open-in app",
     hint: "New threads open in this app. Auto picks your highest-priority installed editor and falls back to File Explorer.",
     synonyms: "open in editor vscode cursor ide external app explorer",
-    configKey: "externalApps.defaultEditor",
+    value: settingsValue((s) => s.externalApps.defaultEditor, (defaultEditor) => ({ externalApps: { defaultEditor } })),
     Control: DefaultOpenInAppControl,
   },
 });

@@ -5,8 +5,6 @@ interface SettingRowProps {
   label: string;
   /** Short description shown below the label. */
   hint?: string;
-  /** JSON key path (reserved for future tooltip use). */
-  configKey?: string;
   children: React.ReactNode;
   className?: string;
 }

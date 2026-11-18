@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import type { SettingsSection } from "./settings-sections";
+import type { SettingValue } from "./setting-value";
 
 declare const settingDefBrand: unique symbol;
 
@@ -40,8 +41,8 @@ interface SettingInputBase {
   readonly synonyms?: string;
   /** Phrases describing a symptom this setting fixes, e.g. "threads deleted too soon". */
   readonly problems?: string;
-  /** Store key the control writes, for the later revert layer. `terminal.*` keys are written through the terminal store. */
-  readonly configKey?: string;
+  /** How Revert reads and restores this row. Required, so a new row must choose. */
+  readonly value: SettingValue;
   /** Platform check, pure and cheap: false hides the row everywhere, search included (e.g. no desktop bridge). */
   readonly exists?: () => boolean;
   readonly when?: SettingCondition;

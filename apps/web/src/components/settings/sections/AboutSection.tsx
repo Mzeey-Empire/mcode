@@ -4,6 +4,7 @@ import { useShallow } from "zustand/shallow";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Setting } from "../Setting";
 import { settingsGroup, settingsPage } from "../setting-def";
+import { notRevertible, settingsValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
 import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -190,6 +191,7 @@ export const ABOUT = settingsPage("about", {
     label: "Version",
     group: APP,
     synonyms: "version about update upgrade check now build release installed changelog release notes what's new restart install download",
+    value: notRevertible("An action that shows the build and checks for updates, not a stored value."),
     Row: VersionRow,
   },
   releaseLine: {
@@ -197,7 +199,7 @@ export const ABOUT = settingsPage("about", {
     hint: "Nightly gets prerelease builds.",
     group: UPDATES,
     synonyms: "release channel stable nightly beta prerelease version update",
-    configKey: "updates.channel",
+    value: settingsValue((s) => s.updates.channel, (channel) => ({ updates: { channel } })),
     Control: ReleaseLineControl,
   },
   checkInterval: {
@@ -205,14 +207,14 @@ export const ABOUT = settingsPage("about", {
     hint: "Takes effect on next launch.",
     group: UPDATES,
     synonyms: "update check interval poll frequency",
-    configKey: "updates.checkInterval",
+    value: settingsValue((s) => s.updates.checkInterval, (checkInterval) => ({ updates: { checkInterval } })),
     Control: CheckIntervalControl,
   },
   autoDownload: {
     label: "Auto-download",
     group: UPDATES,
     synonyms: "update download automatic background",
-    configKey: "updates.autoDownload",
+    value: settingsValue((s) => s.updates.autoDownload, (autoDownload) => ({ updates: { autoDownload } })),
     Control: AutoDownloadControl,
   },
   autoInstallOnQuit: {
@@ -220,7 +222,7 @@ export const ABOUT = settingsPage("about", {
     hint: "Installs a downloaded update when you quit Mcode.",
     group: UPDATES,
     synonyms: "update install quit close restart automatic",
-    configKey: "updates.autoInstallOnQuit",
+    value: settingsValue((s) => s.updates.autoInstallOnQuit, (autoInstallOnQuit) => ({ updates: { autoInstallOnQuit } })),
     Control: AutoInstallOnQuitControl,
   },
 });

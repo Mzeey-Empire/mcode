@@ -4,6 +4,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { SEARCH_HIT_CLASS, Setting, SettingRowFrame, useSettingHit } from "../Setting";
 import { settingsGroup, settingsPage, type SettingDef, type SettingId, type SettingInput, type SettingRowProps } from "../setting-def";
+import { providerEnabledValue, settingsValue, type RevertibleValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -297,6 +298,10 @@ function providerCliPathRow(id: CliProvider): ComponentType<SettingRowProps> {
   return ProviderCliPathRow;
 }
 
+function providerCliPathValue(id: CliProvider): RevertibleValue {
+  return settingsValue((s) => s.provider.cli[id], (path) => ({ provider: { cli: { [id]: path } } }));
+}
+
 function providerInputs(): Record<string, SettingInput> {
   const inputs: Record<string, SettingInput> = {};
   for (const entry of PROVIDER_CATALOG) {
@@ -306,7 +311,7 @@ function providerInputs(): Record<string, SettingInput> {
       group,
       label: entry.name,
       synonyms: `${entry.id} ${entry.cliBinary} provider enable disable sign in login auth account turn on off`,
-      configKey: `provider.enabled.${entry.id}`,
+      value: providerEnabledValue(entry.id),
       Row: providerEnabledRow(entry.id),
     };
     if (!hasCliInput(entry.id)) continue;
@@ -315,7 +320,7 @@ function providerInputs(): Record<string, SettingInput> {
       label: `${entry.name} CLI path`,
       synonyms: `cli path binary executable command location not found exe ${entry.id} ${entry.cliBinary}`,
       problems: `${entry.id} not found command not found cli missing`,
-      configKey: `provider.cli.${entry.id}`,
+      value: providerCliPathValue(entry.id),
       Row: providerCliPathRow(entry.id),
     };
   }
@@ -324,14 +329,14 @@ function providerInputs(): Record<string, SettingInput> {
     label: "Server URL",
     hint: "Empty spawns a local server per worktree. A URL attaches to a shared server the app never closes.",
     synonyms: "opencode server url serve host port shared attach http",
-    configKey: "provider.opencode.serveUrl",
+    value: settingsValue((s) => s.provider.opencode.serveUrl, (serveUrl) => ({ provider: { opencode: { serveUrl } } })),
     Row: OpenCodeServeUrlRow,
   };
   inputs.cliUpdates = {
     label: "Check for CLI updates",
     hint: "Asks the npm registry once a day for newer provider CLIs.",
     synonyms: "update cli npm version upgrade provider checks",
-    configKey: "updates.providerCliChecks",
+    value: settingsValue((s) => s.updates.providerCliChecks, (providerCliChecks) => ({ updates: { providerCliChecks } })),
     Control: CliUpdateChecksControl,
   };
   return inputs;

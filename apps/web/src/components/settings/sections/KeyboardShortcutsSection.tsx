@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { SettingsGroup } from "../SettingsGroup";
 import { Setting } from "../Setting";
 import { settingsPage } from "../setting-def";
+import { notRevertible } from "../setting-value";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/stores/uiStore";
 import { getAllCommands } from "@/lib/command-registry";
@@ -62,6 +63,7 @@ export const KEYBOARD = settingsPage("keyboard", {
     label: "Custom keybindings",
     hint: `Override default shortcuts by editing ${KEYBINDINGS_PATH}.`,
     synonyms: "keybindings json keyboard shortcuts hotkeys remap",
+    value: notRevertible("Lives in keybindings.json, edited outside Mcode."),
     Control: CustomKeybindingsControl,
   },
 });

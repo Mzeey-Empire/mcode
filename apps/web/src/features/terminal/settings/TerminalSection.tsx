@@ -20,6 +20,7 @@ import { PathLine, PathTooltipRoot, usePathTooltip } from "@/components/settings
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SEARCH_HIT_CLASS, Setting, SettingRowFrame, useSettingHit } from "@/components/settings/Setting";
 import { settingsGroup, settingsPage, type SettingRowProps } from "@/components/settings/setting-def";
+import { notRevertible, TERMINAL_GLOBAL_DEFAULT, TERMINAL_PROJECT_DEFAULT, terminalPreferenceValue } from "@/components/settings/setting-value";
 import { cn } from "@/lib/utils";
 import { TERMINAL_FONT_SIZES, TERMINAL_LINE_HEIGHTS } from "../terminal-metrics";
 import { detectRenderableFonts, fontStackFor, primaryFontFamily, type TerminalFontChoice } from "./terminal-fonts";
@@ -736,7 +737,7 @@ export const TERMINAL = settingsPage("terminal", {
     group: PROFILES,
     label: "Default profile",
     synonyms: "shell profile powershell pwsh cmd bash wsl git bash default terminal automatic auto global",
-    configKey: "terminal.defaultProfileId",
+    value: TERMINAL_GLOBAL_DEFAULT,
     Row: GlobalProfileRow,
   },
   projectProfile: {
@@ -744,13 +745,14 @@ export const TERMINAL = settingsPage("terminal", {
     label: "Project default profile",
     hint: "Use the inherited default profile, or choose a project override.",
     synonyms: "project workspace shell profile override inherited",
-    configKey: "terminal.workspace.defaultProfileId",
+    value: TERMINAL_PROJECT_DEFAULT,
     Row: ProjectProfileRow,
   },
   certifiedProfiles: {
     group: AVAILABLE_PROFILES,
     label: "Available profiles",
     synonyms: "detected certified shell profiles powershell pwsh cmd bash wsl in use path executable",
+    value: notRevertible("A detected list, not a stored value."),
     Row: DetectedProfilesRow,
   },
   customProfiles: {
@@ -758,48 +760,49 @@ export const TERMINAL = settingsPage("terminal", {
     label: "Custom profiles",
     hint: "Custom profiles remain after a Terminal preference reset.",
     synonyms: "custom profile shell add executable arguments nushell zsh fish detected",
+    value: notRevertible("A list edited through dialogs; recreating a deleted profile gives it a new id."),
     Control: CustomProfilesControl,
   },
   fontFamily: {
     group: FONT_AND_CURSOR,
     label: "Font family",
     synonyms: "font typeface family monospace jetbrains mono cascadia code consolas fira iosevka courier lucida",
-    configKey: "terminal.presentation.fontFamily",
+    value: terminalPreferenceValue((t) => t.presentation.fontFamily, (fontFamily) => ({ presentation: { fontFamily } })),
     Control: FontFamilyControl,
   },
   fontSize: {
     group: FONT_AND_CURSOR,
     label: "Font size",
     synonyms: "font size text small large zoom px pixels",
-    configKey: "terminal.presentation.fontSize",
+    value: terminalPreferenceValue((t) => t.presentation.fontSize, (fontSize) => ({ presentation: { fontSize } })),
     Control: FontSizeControl,
   },
   lineHeight: {
     group: FONT_AND_CURSOR,
     label: "Line height",
     synonyms: "line height spacing leading",
-    configKey: "terminal.presentation.lineHeight",
+    value: terminalPreferenceValue((t) => t.presentation.lineHeight, (lineHeight) => ({ presentation: { lineHeight } })),
     Control: LineHeightControl,
   },
   cursorStyle: {
     group: FONT_AND_CURSOR,
     label: "Cursor style",
     synonyms: "cursor caret block underline bar beam",
-    configKey: "terminal.presentation.cursorStyle",
+    value: terminalPreferenceValue((t) => t.presentation.cursorStyle, (cursorStyle) => ({ presentation: { cursorStyle } })),
     Control: CursorStyleControl,
   },
   cursorBlink: {
     group: FONT_AND_CURSOR,
     label: "Cursor blink",
     synonyms: "cursor blink flash",
-    configKey: "terminal.presentation.cursorBlink",
+    value: terminalPreferenceValue((t) => t.presentation.cursorBlink, (cursorBlink) => ({ presentation: { cursorBlink } })),
     Control: CursorBlinkControl,
   },
   ligatures: {
     group: FONT_AND_CURSOR,
     label: "Ligatures",
     synonyms: "ligatures font arrows",
-    configKey: "terminal.presentation.ligatures",
+    value: terminalPreferenceValue((t) => t.presentation.ligatures, (ligatures) => ({ presentation: { ligatures } })),
     Control: LigaturesControl,
   },
   scrollback: {
@@ -807,7 +810,7 @@ export const TERMINAL = settingsPage("terminal", {
     label: "Scrollback lines",
     hint: "Lines to retain in the buffer.",
     synonyms: "scrollback buffer history lines",
-    configKey: "terminal.behavior.scrollback",
+    value: terminalPreferenceValue((t) => t.behavior.scrollback, (scrollback) => ({ behavior: { scrollback } })),
     Control: ScrollbackControl,
   },
   sessionLimit: {
@@ -815,28 +818,28 @@ export const TERMINAL = settingsPage("terminal", {
     label: "Session limit",
     hint: "Maximum retained Terminal sessions.",
     synonyms: "sessions limit retained terminals max",
-    configKey: "terminal.behavior.sessionLimit",
+    value: terminalPreferenceValue((t) => t.behavior.sessionLimit, (sessionLimit) => ({ behavior: { sessionLimit } })),
     Control: SessionLimitControl,
   },
   confirmOnKill: {
     group: BEHAVIOR,
     label: "Confirm on kill",
     synonyms: "kill close confirm terminate child processes",
-    configKey: "terminal.behavior.confirmOnKill",
+    value: terminalPreferenceValue((t) => t.behavior.confirmOnKill, (confirmOnKill) => ({ behavior: { confirmOnKill } })),
     Control: ConfirmOnKillControl,
   },
   copyOnSelect: {
     group: BEHAVIOR,
     label: "Copy on select",
     synonyms: "copy select clipboard",
-    configKey: "terminal.behavior.copyOnSelect",
+    value: terminalPreferenceValue((t) => t.behavior.copyOnSelect, (copyOnSelect) => ({ behavior: { copyOnSelect } })),
     Control: CopyOnSelectControl,
   },
   confirmMultilinePaste: {
     group: BEHAVIOR,
     label: "Confirm multiline paste",
     synonyms: "paste multiline confirm clipboard",
-    configKey: "terminal.behavior.confirmMultilinePaste",
+    value: terminalPreferenceValue((t) => t.behavior.confirmMultilinePaste, (confirmMultilinePaste) => ({ behavior: { confirmMultilinePaste } })),
     Control: ConfirmMultilinePasteControl,
   },
   screenReader: {
@@ -844,7 +847,7 @@ export const TERMINAL = settingsPage("terminal", {
     label: "Screen reader",
     hint: "Automatic uses the terminal default.",
     synonyms: "screen reader accessibility a11y narrator",
-    configKey: "terminal.accessibility.screenReaderMode",
+    value: terminalPreferenceValue((t) => t.accessibility.screenReaderMode, (screenReaderMode) => ({ accessibility: { screenReaderMode } })),
     Control: ScreenReaderControl,
   },
 });
