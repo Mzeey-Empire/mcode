@@ -83,6 +83,19 @@ describe("overview source labels", () => {
     ]);
   });
 
+  it("shows each of three alike labels from where it differs from its closest peer", () => {
+    const labels = sourceLabels(sources(
+      "https://example.com/docs/shared-introduction-one-then-a-long-shared-middle-piece-one-and-shared-closing-words",
+      "https://example.com/docs/shared-introduction-two-then-a-long-shared-middle-piece-one-and-shared-closing-words",
+      "https://example.com/docs/shared-introduction-two-then-a-long-shared-middle-piece-two-and-shared-closing-words",
+    ));
+    expect(labels).toEqual([
+      "example.com/…roduction-one-then-a-long-shared-middle-piece-one-and-shared-closing-words",
+      "example.com/…dle-piece-one-and-shared-closing-words",
+      "example.com/…dle-piece-two-and-shared-closing-words",
+    ]);
+  });
+
   it("keeps the bare host for a shared-host source at the site root", () => {
     expect(sourceLabels(sources("https://example.com/", "https://example.com/blog")))
       .toEqual(["example.com", "example.com/blog"]);

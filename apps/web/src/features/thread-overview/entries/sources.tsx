@@ -86,10 +86,12 @@ function sharedPrefixLength(left: string, right: string): number {
 /**
  * For details that read alike once shortened: they share the head and the end, so they first
  * differ in the middle, where the full text could fade before the difference shows. The shared
- * start gives way instead, keeping a little of it as context.
+ * start gives way instead, keeping a little of it as context. It gives way up to the closest
+ * peer's difference, not the first one's: with three labels, two can share a start the third
+ * does not, and only the later cut tells those two apart.
  */
 function elideSharedStart(detail: string, peers: readonly string[]): string {
-  const sharedLength = Math.min(...peers.map((peer) => sharedPrefixLength(detail, peer)));
+  const sharedLength = Math.max(...peers.map((peer) => sharedPrefixLength(detail, peer)));
   if (sharedLength <= DETAIL_HEAD_LENGTH) return detail;
   return `…${detail.slice(sharedLength - DETAIL_HEAD_LENGTH)}`;
 }
