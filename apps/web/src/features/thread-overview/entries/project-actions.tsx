@@ -37,10 +37,11 @@ export function primaryProjectAction(
 
 /**
  * 38px wide so the centred chevron ends 11px from the row's edge, where the other rows' chevrons
- * end. It takes its own fill while the row is hovered so the second target reads as separate.
+ * end. It takes its own fill while the row is hovered so the second target reads as separate,
+ * including under the pointer, where the ghost button's own hover fill would match the row's.
  */
 const CHEVRON_SEGMENT_CLASS =
-  "w-[3.8rem] rounded-l-none group-hover/action-row:bg-selected group-focus-within/action-row:bg-selected aria-expanded:bg-selected";
+  "w-[3.8rem] rounded-l-none hover:bg-selected group-hover/action-row:bg-selected group-focus-within/action-row:bg-selected aria-expanded:bg-selected";
 
 /** The row's main part: runs the Action, or shows its terminal when it already runs. */
 function ProjectActionMain({ action, run, capReason, onRun, onOpen }: {
