@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { cn } from "@/lib/utils";
-import { GitBranch } from "lucide-react";
+import { GitBranchPlus } from "lucide-react";
 import {
   OVERVIEW_ROW_CLASS,
   OverviewRowIcon,
@@ -27,9 +27,9 @@ function CreateBranchEntry() {
         onClick={() => branchCreation.setOpen(true)}
       >
         <OverviewRowIcon className="text-primary/80 group-hover:text-primary/80">
-          <GitBranch />
+          <GitBranchPlus />
         </OverviewRowIcon>
-        <span className="font-medium">Create branch</span>
+        <span className="font-medium">Create branch…</span>
       </Button>
     </ThreadOverviewTooltipButton>
   </ThreadOverviewWhen>);

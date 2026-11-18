@@ -56,7 +56,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   // A new thread's rows take the slots of the thread rows they become: where it runs, then the branch.
   { id: "target.workspace", section: "lane", order: 50, subjects: ["new-thread"], Entry: TargetWorkspaceEntryBlock },
   { id: "target.branch", section: "lane", order: 70, subjects: ["new-thread"], Entry: TargetBranchEntryBlock },
-  { id: "create-branch", section: "lane", order: 60, subjects: ["thread"], Entry: CreateBranchEntryBlock },
+  { id: "create-branch", section: "lane", order: 75, subjects: ["thread"], Entry: CreateBranchEntryBlock },
   { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock, State: BranchEntryState },
   { id: "commit", section: "lane", order: 80, subjects: ["thread"], Entry: CommitEntryBlock },
   { id: "terminals", section: "terminals", order: 85, subjects: ["thread"], Entry: OverviewTerminalsSection },

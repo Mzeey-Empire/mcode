@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -83,10 +83,10 @@ describe("ThreadOverview branch create and commit", () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     await user.click(screen.getByTestId("thread-overview-local"));
-    expect(await screen.findByText("detached from release")).toBeInTheDocument();
+    expect(await screen.findByTestId("thread-overview-local-branch")).toHaveTextContent("detached from release");
     expect(screen.queryByLabelText("Copy branch")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("thread-overview-local"));
-    expect(screen.queryByTestId("workspace-menu-branch")).not.toBeInTheDocument();
+    expect(screen.getByTestId("workspace-menu-branch")).toHaveTextContent("detached from release");
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
     expect(screen.getByTestId("workspace-menu-commit")).toBeEnabled();
 
@@ -110,6 +110,37 @@ describe("ThreadOverview branch create and commit", () => {
     });
     expect(mockWorkspaceState.worktreesLoadedForWorkspace).toBeNull();
     expect(screen.queryByTestId("create-pr-dialog")).not.toBeInTheDocument();
+  });
+
+  it("states where a detached worktree's HEAD sits before offering to create a branch", () => {
+    render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+
+    const branchRow = screen.getByTestId("workspace-menu-branch");
+    const createRow = screen.getByTestId("thread-overview-create-branch");
+    expect(branchRow).toHaveTextContent("detached at 3f9a1c2");
+    expect(createRow).toHaveTextContent("Create branch…");
+    expect(branchRow.compareDocumentPosition(createRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("leaves branch creation to the card row when the picker opens on a detached worktree", async () => {
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+
+    const picker = await screen.findByTestId("thread-overview-branch-popover");
+    expect(await within(picker).findByRole("button", { name: "feature/other" })).toBeInTheDocument();
+    expect(within(picker).queryByRole("button", { name: /Create and check out branch/ })).not.toBeInTheDocument();
+  });
+
+  it("lists a detached worktree's checkout under the card's label, not as a HEAD branch", async () => {
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+
+    const picker = await screen.findByTestId("thread-overview-branch-popover");
+    await within(picker).findByRole("button", { name: "feature/other" });
+    expect(within(picker).getByTestId("thread-overview-current-branch")).toHaveTextContent("detached at 3f9a1c2");
+    expect(within(picker).queryByRole("button", { name: "HEAD" })).not.toBeInTheDocument();
   });
 
   it("clears stale PR metadata and caches when creating a named branch", async () => {

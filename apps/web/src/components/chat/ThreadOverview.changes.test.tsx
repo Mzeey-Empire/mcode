@@ -96,8 +96,8 @@ describe("ThreadOverview changes and branches", () => {
     await user.click(screen.getByTestId("workspace-menu-branch"));
     expect(await screen.findByRole("button", { name: "feature/other" })).toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-current-branch")).toHaveTextContent("main");
-    expect(screen.queryByText("Branches unavailable")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Uncommitted:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Couldn't load branches")).not.toBeInTheDocument();
+    expect(screen.queryByText(/uncommitted file/)).not.toBeInTheDocument();
   });
 
   it("lists the checkout's local branches and searches them on the server", async () => {
@@ -126,8 +126,21 @@ describe("ThreadOverview changes and branches", () => {
     render(<ThreadOverview thread={branchlessThread({ checkout_state: "named" })} threadPaneWidth={1400} />);
     await user.click(screen.getByTestId("workspace-menu-branch"));
 
-    expect(await screen.findByText("Branches unavailable")).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn't load branches/)).toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-current-branch")).toHaveTextContent("main");
+  });
+
+  it("lists the branches again when Retry is pressed after listing fails", async () => {
+    vi.mocked(mockTransport.listRefs).mockResolvedValueOnce({
+      ok: false, error: { code: "git_failed", message: "Could not list targets" },
+    });
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={branchlessThread({ checkout_state: "named" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "feature/other" })).toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't load branches/)).not.toBeInTheDocument();
   });
 
   it("uses the state probe's detached comparison when the worktree is clean", async () => {
