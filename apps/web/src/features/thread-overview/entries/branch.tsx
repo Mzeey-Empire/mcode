@@ -1,5 +1,4 @@
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { OverviewSideMenu } from "@/features/thread-overview/overview-side-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -38,6 +37,7 @@ interface BranchMenuData {
   readonly hasListedBranches: boolean;
   readonly rows: readonly OverviewBranchRow[];
   readonly uncommitted: UncommittedFilesState;
+  readonly retry: () => void;
 }
 
 function uncommittedFilesLabel(count: number): string {
@@ -108,7 +108,7 @@ function useThreadOverviewBranchData(thread: Thread, open: boolean, search: stri
   const uncommitted = useUncommittedFiles(thread, open);
   const displayBranch = thread.checkout_state === "branchless" ? "HEAD" : thread.branch;
   const rows = useMemo(() => branchRows(refs.items, displayBranch, query), [refs.items, displayBranch, query]);
-  return { status: refs.status.kind, hasListedBranches: refs.items.length > 0, rows, uncommitted };
+  return { status: refs.status.kind, hasListedBranches: refs.items.length > 0, rows, uncommitted, retry: refs.retry };
 }
 
 /** Returns the current branch's uncommitted-file label. */
@@ -117,15 +117,19 @@ function getCurrentBranchUncommittedLabel(uncommittedFiles: number | null): stri
   return uncommittedFilesLabel(uncommittedFiles);
 }
 
-/** Returns whether this checkout can create and switch to a new branch. */
-function canCreateCheckoutBranch(
-  thread: Thread,
+/**
+ * Why a named checkout cannot create and switch to a new branch yet, or null when it can. A new
+ * branch only helps when there is work to carry: commits ahead of the base or uncommitted files.
+ */
+function createCheckoutBranchBlocker(
   uncommitted: UncommittedFilesState,
   hasCommitsAhead: boolean | null,
-): boolean {
-  if (thread.checkout_state !== "named" || !uncommitted.settled) return false;
-  if (hasCommitsAhead === true) return true;
-  return uncommitted.count !== null && uncommitted.count > 0;
+): string | null {
+  if (!uncommitted.settled) return "Checking for changes…";
+  if (hasCommitsAhead === true) return null;
+  if (uncommitted.count === null) return "Couldn't check for changes";
+  if (uncommitted.count > 0) return null;
+  return "No commits or uncommitted changes to move";
 }
 
 function ThreadOverviewBranchMenu({
@@ -140,25 +144,23 @@ function ThreadOverviewBranchMenu({
 
   const currentBranchUncommittedLabel = getCurrentBranchUncommittedLabel(data.uncommitted.count);
   const shouldConstrainBranchList = data.rows.length > 6;
-  const canCreateNewBranch = canCreateCheckoutBranch(thread, data.uncommitted, hasCommitsAhead);
+  // A detached checkout has no branch to branch from here; the card's own Create branch row owns that.
+  const offersCreateBranch = thread.checkout_state === "named";
 
   return (
     <div
       data-testid="thread-overview-branch-popover"
       className="p-2"
     >
-      <div className="relative">
-        <Search
-          aria-hidden
-          className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
-        />
-        <Input
-          size="compact"
+      {/* Matches the shared Picker's search field: the menu focuses it on open, so a ring would always show; the caret marks focus. */}
+      <div className="flex h-control-compact items-center gap-2 px-3">
+        <Search aria-hidden className="size-4 shrink-0 text-muted" />
+        <input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search branches"
           aria-label="Search branches"
-          className="h-7 pl-9"
+          className="min-w-0 flex-1 bg-transparent text-body-small text-ink outline-none placeholder:text-muted"
         />
       </div>
 
@@ -175,12 +177,14 @@ function ThreadOverviewBranchMenu({
         />
       </ScrollArea>
 
-      <Separator className="my-2" />
-      <ThreadOverviewBranchCreateAction
-        canCreateCheckoutBranch={canCreateNewBranch}
-        onOpenChange={onOpenChange}
-        onCreateBranch={onCreateBranch}
-      />
+      {offersCreateBranch ? (<>
+        <Separator className="my-2" />
+        <ThreadOverviewBranchCreateAction
+          blocker={createCheckoutBranchBlocker(data.uncommitted, hasCommitsAhead)}
+          onOpenChange={onOpenChange}
+          onCreateBranch={onCreateBranch}
+        />
+      </>) : null}
     </div>
   );
 }
@@ -213,7 +217,18 @@ function ThreadOverviewBranchRows({
         />
       )) : null}
       {isEmpty ? <div className="py-2 pl-9 pr-3 text-body-small text-muted">No branches match</div> : null}
-      {data.status === "failed" ? <div className="py-2 pl-9 pr-3 text-body-small text-muted">Couldn't load branches</div> : null}
+      {data.status === "failed" ? (
+        <div className="py-2 pl-9 pr-3 text-body-small text-muted">
+          Couldn't load branches{" "}
+          <button
+            type="button"
+            onClick={data.retry}
+            className="rounded-sm text-caption text-ink underline-offset-2 hover:underline focus-visible:underline"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -258,36 +273,32 @@ function ThreadOverviewBranchRow({
           ) : null}
         </span>
       </span>
-      {isCurrent ? <Check size={14} className="shrink-0 text-muted" /> : null}
+      {isCurrent ? <Check className="shrink-0 text-muted" /> : null}
     </Button>
   );
 }
 
 /** Renders the branch-creation affordance for eligible checkouts. */
 function ThreadOverviewBranchCreateAction({
-  canCreateCheckoutBranch,
+  blocker,
   onOpenChange,
   onCreateBranch,
 }: {
-  canCreateCheckoutBranch: boolean;
+  blocker: string | null;
   onOpenChange: (open: boolean) => void;
   onCreateBranch: () => void;
 }) {
-  const title = canCreateCheckoutBranch
-    ? "Create and check out branch…"
-    : "Detected changes required";
-
   return (
-    <ThreadOverviewTooltipButton content={title} disabled={!canCreateCheckoutBranch}>
+    <ThreadOverviewTooltipButton content={blocker ?? "Create and check out branch…"} disabled={blocker !== null}>
       <Button
         variant="ghost"
         size="compact"
         type="button"
-        disabled={!canCreateCheckoutBranch}
+        disabled={blocker !== null}
         data-testid="thread-overview-create-checkout-branch"
         className={cn(MENU_ROW_CLASS, "justify-start border-0 font-normal disabled:opacity-60")}
         onClick={() => {
-          if (!canCreateCheckoutBranch) return;
+          if (blocker !== null) return;
           onOpenChange(false);
           onCreateBranch();
         }}

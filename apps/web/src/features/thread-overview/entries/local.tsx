@@ -48,10 +48,10 @@ function ThreadOverviewLocalMenu({ pathLabel, worktreePath, branch, branchCopyab
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
           <span className="min-w-0">
-            <span className="block text-xs font-medium text-ink">{pathLabel}</span>
+            <span className="block text-caption font-medium text-ink">{pathLabel}</span>
             <span
               data-testid="thread-overview-local-path"
-              className="block max-w-56 text-fade font-mono text-xs text-muted"
+              className="block max-w-56 text-fade font-mono text-caption text-muted"
             >
               {worktreePath ?? "Unavailable"}
             </span>
@@ -67,16 +67,16 @@ function ThreadOverviewLocalMenu({ pathLabel, worktreePath, branch, branchCopyab
             }}
             className="shrink-0"
           >
-            {copied === "path" ? <Check size={13} /> : <Copy size={13} />}
+            {copied === "path" ? <Check /> : <Copy />}
           </Button>
         </div>
 
         <div className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5">
           <span className="min-w-0">
-            <span className="block text-xs font-medium text-ink">Branch</span>
+            <span className="block text-caption font-medium text-ink">Branch</span>
             <span
               data-testid="thread-overview-local-branch"
-              className="block max-w-56 text-fade font-mono text-xs text-muted"
+              className="block max-w-56 text-fade font-mono text-caption text-muted"
             >
               {branch}
             </span>
@@ -90,7 +90,7 @@ function ThreadOverviewLocalMenu({ pathLabel, worktreePath, branch, branchCopyab
               onClick={() => void copyValue("branch", branch)}
               className="shrink-0"
             >
-              {copied === "branch" ? <Check size={13} /> : <Copy size={13} />}
+              {copied === "branch" ? <Check /> : <Copy />}
             </Button>
           ) : null}
         </div>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -120,6 +120,16 @@ describe("ThreadOverview branch create and commit", () => {
     expect(branchRow).toHaveTextContent("detached at 3f9a1c2");
     expect(createRow).toHaveTextContent("Create branch…");
     expect(branchRow.compareDocumentPosition(createRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("leaves branch creation to the card row when the picker opens on a detached worktree", async () => {
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+    await user.click(screen.getByTestId("workspace-menu-branch"));
+
+    const picker = await screen.findByTestId("thread-overview-branch-popover");
+    expect(await within(picker).findByRole("button", { name: "feature/other" })).toBeInTheDocument();
+    expect(within(picker).queryByRole("button", { name: /Create and check out branch/ })).not.toBeInTheDocument();
   });
 
   it("clears stale PR metadata and caches when creating a named branch", async () => {
