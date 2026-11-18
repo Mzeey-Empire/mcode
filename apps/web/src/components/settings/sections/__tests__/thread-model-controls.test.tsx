@@ -7,7 +7,7 @@ const { mockPmState } = vi.hoisted(() => ({
     models: {} as Record<string, import("@/lib/model-registry").ModelDefinition[]>,
     loading: {} as Record<string, boolean>,
     modes: {} as Record<string, readonly string[] | undefined>,
-    fetchModels: vi.fn(),
+    fetchModels: vi.fn(async () => {}),
     initialize: vi.fn(),
   },
 }));

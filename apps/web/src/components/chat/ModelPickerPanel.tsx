@@ -487,6 +487,8 @@ export interface ModelPickerPanelProps {
   readonly reasoning?: ModelPickerReasoning;
   /** A choice that is not a model, such as Auto, listed first on every tab. Omit for the catalog alone. Keep it stable across renders. */
   readonly lead?: ModelPickerLead;
+  /** Without `reasoning`, lets the list fill the panel's height beside the provider rail instead of five rows. */
+  readonly fill?: boolean;
 }
 
 /** The leading row of {@link ModelPickerPanel}. */
@@ -568,6 +570,7 @@ export function ModelPickerPanel({
   footer,
   reasoning,
   lead,
+  fill,
 }: ModelPickerPanelProps) {
   const presentation = getSelectedModelPresentation(selectedModelId, selectedProviderId);
   const { displayProvider } = presentation;
@@ -702,6 +705,7 @@ export function ModelPickerPanel({
       onSelect={handlePick}
       footer={footer}
       detail={detail}
+      fill={fill}
       hairlines={false}
     />
   );

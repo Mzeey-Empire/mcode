@@ -139,6 +139,11 @@ export interface PickerProps<T> {
   readonly numberedShortcuts?: boolean;
   /** A pane beside the list for the highlighted row. */
   readonly detail?: PickerDetail<T>;
+  /**
+   * Without a detail pane, lets the list fill the height the rail gives the panel instead of capping at five rows.
+   * A detail pane always fills. Defaults to false.
+   */
+  readonly fill?: boolean;
   readonly onSelect: (item: T) => void;
 }
 
@@ -288,7 +293,7 @@ export function Picker<T>(props: PickerProps<T>) {
       onNearEnd={loadMore}
       hairlines={hairlines}
       selectedCheck={selectedCheck}
-      fill={props.detail !== undefined}
+      fill={props.detail !== undefined ? "pane" : props.fill === true ? "frame" : false}
       unmatched={props.unmatchedGroup === undefined ? undefined : { label: props.unmatchedGroup, query }}
     />
   ) : null;
@@ -803,10 +808,20 @@ interface PickerListProps<T> {
   readonly onNearEnd: () => void;
   readonly hairlines: boolean;
   readonly selectedCheck: boolean;
-  /** Fills its grid cell instead of capping at five rows, so it matches the detail pane's height. */
-  readonly fill: boolean;
+  /**
+   * Instead of capping at five rows, fills its grid cell to match the detail pane ("pane"), or the frame's height
+   * beside the rail ("frame").
+   */
+  readonly fill: "pane" | "frame" | false;
   readonly unmatched?: { readonly label: string; readonly query: string };
 }
+
+const LIST_FILL_CLASS = {
+  capped: "max-h-[17.2rem] pt-2",
+  pane: "@container/picker-list snap-y snap-mandatory pr-1",
+  // A zero height keeps the rows out of the panel's own height, so the rail sets it and the list grows into it.
+  frame: "h-0 min-h-[17.2rem] grow pt-2",
+} as const;
 
 function PickerList<T>(props: PickerListProps<T>) {
   const { listId, listKey, rows, shortcutRows, activeIndex, keyboardRow, selectedKey, onHighlight, onPick, onRunAction, onNearEnd, hairlines, selectedCheck, fill, unmatched } = props;
@@ -840,7 +855,7 @@ function PickerList<T>(props: PickerListProps<T>) {
       id={listId}
       role="listbox"
       onScroll={measure}
-      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", fill ? "@container/picker-list snap-y snap-mandatory pr-1" : "max-h-[17.2rem] pt-2")}
+      className={cn("scroll-fade-y relative flex min-h-0 flex-col gap-px", LIST_FILL_CLASS[fill === false ? "capped" : fill])}
     >
       <SlidingHighlight follow="data-active" />
       {unmatched ? <PickerUnmatchedGroup {...unmatched} /> : null}

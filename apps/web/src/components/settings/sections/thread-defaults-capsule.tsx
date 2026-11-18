@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, Hammer, ListChecks, Sparkles, Zap } from "lucide-react";
 import type { AgentDefaultMode, SettingsProviderId } from "@mcode/contracts/models/settings";
 import { fastModeDefault, fastModeSettingProvider } from "@mcode/shared/fast-mode";
@@ -12,9 +12,11 @@ import { useComposerAccess } from "@/features/conversation/composer/controls/Com
 import { ComposerModelOptions } from "@/features/conversation/composer/controls/ComposerModelPreferences";
 import { createDefaultComposerAgentSelection, type ComposerAgentSelection } from "@/features/conversation/composer/draft/composer-selection-state";
 import { formatReasoningLabel } from "@/lib/format-model-label";
-import { findProviderModel, getReasoningLevels, MODEL_PROVIDERS } from "@/lib/model-registry";
+import { findProviderModel, getReasoningLevels, MODEL_PROVIDERS, pickProviderModelsForSettings } from "@/lib/model-registry";
 import { cn } from "@/lib/utils";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useToastStore } from "@/stores/toastStore";
 import { PERMISSION_MODES } from "@/transport";
 import { SEARCH_HIT_CLASS, type SettingHit } from "../Setting";
 import { chooseDefaultModel } from "./thread-model-actions";
@@ -31,6 +33,41 @@ const NO_HIT: SettingHit = { hitId: null, ref: () => {}, attrs: {} };
 
 function providerName(providerId: string): string {
   return MODEL_PROVIDERS.find((provider) => provider.id === providerId)?.name ?? providerId;
+}
+
+/**
+ * True when the loaded catalog lacks the saved default model, so sending may fail. Fetches the default provider's
+ * models, and shows one info toast per stale provider and model.
+ */
+function useStaleDefaultModel(): boolean {
+  const provider = useSettingsStore((s) => s.settings.model.defaults.provider);
+  const modelId = useSettingsStore((s) => s.settings.model.defaults.id);
+  const dynamicModels = useProviderModelsStore((s) => s.models[provider]);
+  const loading = useProviderModelsStore((s) => s.loading[provider] ?? false);
+  const fetchModels = useProviderModelsStore((s) => s.fetchModels);
+  // Until the first fetch settles, the catalog is the static list, which lacks newer models and would warn falsely.
+  const [fetchedProvider, setFetchedProvider] = useState<string | null>(null);
+  useEffect(() => {
+    void fetchModels(provider).then(() => setFetchedProvider(provider));
+  }, [provider, fetchModels]);
+  const catalog = useMemo(
+    () => pickProviderModelsForSettings(MODEL_PROVIDERS.find((p) => p.id === provider)?.models ?? [], dynamicModels),
+    [provider, dynamicModels],
+  );
+  const stale = fetchedProvider === provider && !loading && modelId.trim() !== "" && catalog.length > 0 && !catalog.some((m) => m.id === modelId);
+
+  const toastedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const signature = `${provider}:${modelId}`;
+    if (!stale || toastedRef.current === signature) return;
+    toastedRef.current = signature;
+    useToastStore.getState().show({
+      kind: "info",
+      title: "Saved model not in catalog",
+      meta: `'${modelId}' is missing from the latest ${provider} model list. Pick another model in Settings.`,
+    });
+  }, [stale, provider, modelId]);
+  return stale;
 }
 
 /** The saved defaults as the composer's selection, so the composer's model options can show and change them. */
@@ -69,7 +106,16 @@ function modelPartLabel(provider: string, model: string, level: string | null, f
  * The default model, its reasoning level and Fast as one pill, opening the composer's model picker with its
  * reasoning pane and the model's options, so one click picks a model and its level.
  */
-export function DefaultModelPart({ hit = NO_HIT, coveredIds }: { readonly hit?: SettingHit; readonly coveredIds?: string }) {
+export function DefaultModelPart({
+  hit = NO_HIT,
+  coveredIds,
+  describedBy,
+}: {
+  readonly hit?: SettingHit;
+  readonly coveredIds?: string;
+  /** Id of a note about the model, such as the stale-model warning. */
+  readonly describedBy?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const { selection, fastDefault } = useDefaultsSelection();
@@ -98,6 +144,7 @@ export function DefaultModelPart({ hit = NO_HIT, coveredIds }: { readonly hit?: 
         data-setting-id={coveredIds === undefined ? undefined : "threads.model"}
         data-setting-covers={coveredIds}
         aria-label={label}
+        aria-describedby={describedBy}
         className={cn(PART_CLASS, SEARCH_HIT_CLASS)}
       >
         <ProviderIcon provider={model.iconProviderId} size={14} />
@@ -217,15 +264,22 @@ export interface ThreadDefaultsCapsuleProps {
 
 /** What new threads start with, laid out as the composer's capsule: model, mode, then permission at the end. */
 export function ThreadDefaultsCapsule({ modelHit, modeHit, permissionHit, modelCovers }: ThreadDefaultsCapsuleProps) {
+  const stale = useStaleDefaultModel();
+  const warningId = useId();
   return (
-    <div className="p-3">
+    <div className="flex flex-col gap-2 p-3">
       <div role="group" aria-label="New threads start with" className="flex flex-wrap items-center gap-1 rounded-(--radius-composer) bg-background p-1.5">
-        <DefaultModelPart hit={modelHit} coveredIds={modelCovers} />
+        <DefaultModelPart hit={modelHit} coveredIds={modelCovers} describedBy={stale ? warningId : undefined} />
         <CapsuleDivider />
         <DefaultModeRadios hit={modeHit} drawn />
         <span className="flex-1" />
         <DefaultPermissionPart hit={permissionHit} drawn />
       </div>
+      {stale && (
+        <p id={warningId} className="px-1.5 text-caption text-warning">
+          This model is not in the current catalog. Sending messages may fail until you choose a listed model.
+        </p>
+      )}
     </div>
   );
 }
@@ -294,6 +348,7 @@ export function SmallTaskModelPicker() {
           onQueryChange={setQuery}
           onSelect={(pickedModel, pickedProvider) => choose({ provider: pickedProvider as SettingsProviderId, id: pickedModel })}
           lead={lead}
+          fill
         />
       </PopoverContent>
     </Popover>

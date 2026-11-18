@@ -3,7 +3,9 @@ import { getDefaultSettings, type Settings } from "@mcode/contracts/models/setti
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { registerProviderModels } from "@/lib/model-registry";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useToastStore } from "@/stores/toastStore";
 import type { ProviderModelInfo } from "@/transport/types";
 import { seedProviderAvailability } from "../../__tests__/settings-fixtures";
 import { ThreadsSection } from "../ThreadsSection";
@@ -104,6 +106,37 @@ describe("ThreadsSection new-thread defaults", () => {
     expect(saved().agent.defaults.permission).toBe("full");
     expect(screen.getByRole("button", { name: "Permission: Don't ask" })).toBeInTheDocument();
     expect(screen.getByTestId("settings-unsupervised-icon")).toBeInTheDocument();
+  });
+});
+
+describe("ThreadsSection stale default model", () => {
+  const STALE_WARNING = "This model is not in the current catalog. Sending messages may fail until you choose a listed model.";
+
+  beforeEach(() => {
+    useProviderModelsStore.setState({ models: {}, lastFetched: {}, loading: {} });
+    useToastStore.setState({ toasts: [] });
+  });
+
+  function renderWithDefault(id: string) {
+    seedSettings((s) => ({ ...s, model: { ...s.model, defaults: { ...s.model.defaults, provider: "codex", id } } }));
+    render(<ThreadsSection />);
+  }
+
+  it("warns once when the saved model is missing from the loaded catalog", async () => {
+    renderWithDefault("gpt-retired");
+
+    const warning = await screen.findByText(STALE_WARNING);
+    expect(screen.getByRole("button", { name: /^Model:/ })).toHaveAccessibleDescription(warning.textContent ?? "");
+    expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Saved model not in catalog"]);
+  });
+
+  it("shows no warning for a listed model", async () => {
+    renderWithDefault("gpt-9-deep");
+    await vi.waitFor(() => expect(useProviderModelsStore.getState().models.codex).toHaveLength(CODEX_MODELS.length));
+    await act(async () => {});
+
+    expect(screen.queryByText(STALE_WARNING)).toBeNull();
+    expect(useToastStore.getState().toasts).toEqual([]);
   });
 });
 
