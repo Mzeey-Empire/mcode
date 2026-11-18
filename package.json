@@ -29,6 +29,7 @@
     "lint:deadcode": "knip",
     "typecheck": "turbo run typecheck",
     "check:changed": "bun scripts/agent/check-changed.mjs",
+    "test:files": "bun scripts/agent/test-files.mjs",
     "logs:tail": "bun scripts/logs-tail.mjs",
     "state:paths": "bun scripts/state-paths.mjs",
     "state:reset": "bun scripts/state-reset.mjs",
