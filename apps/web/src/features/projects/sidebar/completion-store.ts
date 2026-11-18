@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import type { Thread } from "@mcode/contracts/models/thread";
 import { getTransport } from "@/transport";
+import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { useRowLifecycleStore } from "./row-lifecycle-store";
 import { HOLD_MS, transitionCompletion, type CompletionEntry, type CompletionEvent } from "./completion-machine";
 
 interface CompletionStoreState {
@@ -112,3 +114,44 @@ export const useCompletionStore = create<CompletionStore>((set, get) => {
     hideUndoLine: () => set({ undoLineThreadId: null }),
   };
 });
+
+/** What the caller knows about a thread, beyond its record, when deciding whether Close may start. */
+export interface CloseFacts {
+  readonly running: boolean;
+  readonly awaitingApproval: boolean;
+  readonly startupPending: boolean;
+  readonly lifecyclePending: boolean;
+  readonly renaming: boolean;
+}
+
+/** Why a Close, Retry or Restore cannot start now, or null when it can. */
+export function lifecycleBlockedReason(thread: Pick<WorkspaceThread, "clientPreparing" | "clientError">, facts: CloseFacts): string | null {
+  if (facts.running) return "Running";
+  if (facts.awaitingApproval) return "Approval required";
+  if (facts.startupPending || thread.clientPreparing) return "Starting";
+  if (thread.clientError) return "Failed to start";
+  if (facts.lifecyclePending) return "Updating";
+  if (facts.renaming) return "Renaming";
+  return null;
+}
+
+/**
+ * Why the thread menu's Close thread cannot start now, or null when it can. It adds the menu's own
+ * refusals to {@link lifecycleBlockedReason}, which the row's Close button reads, so both refuse
+ * the same running, starting and updating threads.
+ */
+export function closeBlockedReason(
+  thread: Pick<WorkspaceThread, "user_completed_at" | "clientPreparing" | "clientError">,
+  facts: CloseFacts & { readonly closing: boolean },
+): string | null {
+  if (thread.user_completed_at !== null) return "Already closed";
+  if (facts.closing) return "Closing";
+  return lifecycleBlockedReason(thread, facts);
+}
+
+/** True while a Close, Retry or Restore must not start. */
+export function lifecycleActionBlocked(threadId: string): boolean {
+  return useRowLifecycleStore.getState().pendingLifecycle.has(threadId)
+    || useCompletionStore.getState().entries.get(threadId)?.phase === "holding"
+    || useWorkspaceStore.getState().pendingStartupByThreadId[threadId] !== undefined;
+}
