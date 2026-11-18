@@ -8,7 +8,7 @@ export function ProvidersSection() {
   return (
     <div className="space-y-8">
       <ProviderSection />
-      <SettingsGroup>
+      <SettingsGroup title="Updates">
         <CliUpdateChecksSetting />
       </SettingsGroup>
     </div>

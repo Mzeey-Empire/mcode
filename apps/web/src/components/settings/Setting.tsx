@@ -56,6 +56,8 @@ const ROW_SPACING: Record<SettingVariant, string> = {
 export interface SettingRowFrameProps {
   readonly def: SettingDef;
   readonly variant: SettingVariant;
+  /** Shorter label where the surrounding row already names the subject, such as "CLI path" under a provider. Omit to show `def.label`. */
+  readonly label?: string;
   /** Live hint that replaces the static one, such as update status. Omit to show `def.hint`. */
   readonly hint?: ReactNode;
   readonly children: ReactNode;
@@ -66,7 +68,7 @@ export interface SettingRowFrameProps {
  * The labelled row layout: label and hint on the left, the control on the right.
  * Stacks the control below the label on narrow viewports. Other matches in search hide the hint.
  */
-export function SettingRowFrame({ def, variant, hint, children, className }: SettingRowFrameProps) {
+export function SettingRowFrame({ def, variant, label = def.label, hint, children, className }: SettingRowFrameProps) {
   const hit = useSettingHit([def]);
   const shownHint = variant === "match" ? undefined : (hint ?? def.hint);
   return (
@@ -77,7 +79,7 @@ export function SettingRowFrame({ def, variant, hint, children, className }: Set
       className={cn(SETTING_ROW_GRID_CLASS, SEARCH_HIT_CLASS, "content-center px-4", ROW_SPACING[variant], className)}
     >
       <div className="min-w-0">
-        <span className="text-body-small font-semibold text-ink">{def.label}</span>
+        <span className="text-body-small font-semibold text-ink">{label}</span>
         {shownHint ? (
           <p className="mt-0.5 max-w-[46rem] text-compact leading-[1.8rem] text-muted">{shownHint}</p>
         ) : null}

@@ -39,8 +39,8 @@ describe("settings pages and their definitions", () => {
       </>,
     );
     await act(async () => {});
-    // Provider configuration sits in closed disclosures; open them so their rows count.
-    for (const trigger of screen.queryAllByRole("button", { name: /^Show .* configuration$/ })) fireEvent.click(trigger);
+    // Provider details start closed; open them so their rows count.
+    for (const trigger of screen.queryAllByRole("button", { name: / settings$/, expanded: false })) fireEvent.click(trigger);
 
     // A control that stands for several settings, such as the Threads model part, lists the others in data-setting-covers.
     const drawn = [
