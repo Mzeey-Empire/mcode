@@ -147,7 +147,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  update: (partial) => trackLocalSettingsWrite(async () => {
+  update: (partial) => trackLocalSettingsWrite({ sink: "settings", patch: partial }, async () => {
     try {
       const transport = getTransport();
       const settings = await transport.updateSettings(partial as PartialSettings);

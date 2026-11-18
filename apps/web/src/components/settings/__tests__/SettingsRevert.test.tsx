@@ -164,6 +164,74 @@ describe("Settings Revert", () => {
     expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
   });
 
+  it("lets another window's change win while a local write to a different setting is in flight", async () => {
+    render(<SettingsView />);
+    await chooseDark();
+    let land: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => new Promise((resolve) => {
+      land = () => resolve(mergeSettings(useSettingsStore.getState().settings, patch));
+    }));
+    let notificationsWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      notificationsWrite = useSettingsStore.getState().update({ notifications: { enabled: false } });
+    });
+    act(() => useSettingsStore.getState()._applyPush(themeOf(useSettingsStore.getState().settings, "light")));
+    await act(async () => {
+      land();
+      await notificationsWrite;
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert 1 change" }));
+    await flush();
+
+    expect(vi.mocked(mockTransport.updateSettings).mock.calls.at(-1)?.[0]).toEqual({ notifications: { enabled: true } });
+    expect(useSettingsStore.getState().settings.appearance.theme).toBe("light");
+  });
+
+  it("claims a setting its own write changed while another local write is in flight", async () => {
+    render(<SettingsView />);
+    let land: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => new Promise((resolve) => {
+      land = () => resolve(mergeSettings(useSettingsStore.getState().settings, patch));
+    }));
+    let notificationsWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      notificationsWrite = useSettingsStore.getState().update({ notifications: { enabled: false } });
+    });
+    await chooseDark();
+
+    expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
+    // The in-flight set is module state; a write left pending would block Revert in later tests.
+    await act(async () => {
+      land();
+      await notificationsWrite;
+    });
+  });
+
+  it("does not overwrite an outside change that lands between two Revert writes", async () => {
+    openPage("terminal");
+    render(<SettingsView />);
+    await flush();
+    await act(async () => {
+      await useTerminalSettingsStore.getState().updatePreferences({ presentation: { fontSize: "xl" } });
+      await useSettingsStore.getState().update({ appearance: { theme: "dark" } });
+    });
+    vi.mocked(mockTransport.terminalPreferencesUpdate).mockClear();
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => {
+      const settings = useSettingsStore.getState().settings;
+      const pushed = { ...settings, terminal: { ...settings.terminal, presentation: { ...settings.terminal.presentation, fontSize: "lg" as const } } };
+      useSettingsStore.getState()._applyPush(pushed);
+      return Promise.resolve(mergeSettings(pushed, patch));
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert 2 changes" }));
+    await flush();
+
+    expect(mockTransport.terminalPreferencesUpdate).not.toHaveBeenCalled();
+    expect(useSettingsStore.getState().settings.terminal.presentation.fontSize).toBe("lg");
+    expect(useSettingsStore.getState().settings.appearance.theme).toBe("system");
+  });
+
   it("shows the restored serve URL in its input", async () => {
     openPage("providers");
     render(<SettingsView />);

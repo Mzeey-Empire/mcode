@@ -3,7 +3,13 @@ import { create } from "zustand";
 import { PartialSettingsSchema, SettingsSchema, type Settings } from "@mcode/contracts/models/settings";
 import { TerminalPreferencesUpdateSchema } from "@mcode/contracts/models/terminal-settings";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { isLocalSettingsWriteInFlight, latestLocalSettingsWriteSeq, subscribeLocalSettingsWrites } from "@/stores/settings-write-origin";
+import {
+  isLocalSettingsWriteInFlight,
+  latestLocalSettingsWriteSeq,
+  localSettingsWriteScopes,
+  subscribeLocalSettingsWrites,
+  type LocalWriteScope,
+} from "@/stores/settings-write-origin";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useTerminalSettingsStore } from "@/features/terminal/settings/terminalSettingsStore";
 import type { SettingDef, SettingId } from "./setting-def";
@@ -32,9 +38,6 @@ export interface RevertFailure {
   readonly label: string;
   readonly reason: string;
 }
-
-/** Who caused a source transition. */
-export type WriteOrigin = "local" | "external" | "revert";
 
 /** Writes Revert sends: at most one per sink, in sink order. */
 export interface RevertPlan {
@@ -72,26 +75,60 @@ function failuresFor(ids: readonly SettingId[], reason: string): RevertFailure[]
   return ids.map((id) => ({ id, label: REVERTIBLE_DEFS[DEF_ORDER.get(id) ?? -1]?.label ?? id, reason }));
 }
 
+function leafPaths(value: unknown, prefix: readonly string[] = []): (readonly string[])[] {
+  if (!isRecord(value)) return [prefix];
+  return Object.entries(value).flatMap(([key, child]) => leafPaths(child, [...prefix, key]));
+}
+
+function isPrefix(a: readonly string[], b: readonly string[]): boolean {
+  return a.length <= b.length && a.every((key, index) => key === b[index]);
+}
+
+function patchesOverlap(a: unknown, b: unknown): boolean {
+  const bPaths = leafPaths(b);
+  return leafPaths(a).some((path) => bPaths.some((other) => isPrefix(path, other) || isPrefix(other, path)));
+}
+
+function addressesDef(scope: LocalWriteScope, step: RestoreStep): boolean {
+  switch (scope.sink) {
+    case "settings":
+      return step.sink === "settings" && patchesOverlap(step.patch, scope.patch);
+    case "terminalPreferences":
+      return step.sink === "terminalPreferences" && patchesOverlap(step.patch, scope.patch);
+    case "terminalGlobalDefault":
+      return step.sink === "terminalGlobalDefault";
+    case "terminalProjectDefault":
+      return step.sink === "terminalProjectDefault" && step.workspaceId === scope.workspaceId;
+  }
+}
+
+/** True when one of `scopes` writes the value `def` reads; its restore step on either side names what it writes. */
+function writtenLocally(def: RevertibleDef, scopes: readonly LocalWriteScope[], prev: RevertSource, next: RevertSource): boolean {
+  const steps = [def.value.restore(prev, prev), def.value.restore(next, next)];
+  return scopes.some((scope) => steps.some((step) => addressesDef(scope, step)));
+}
+
 /**
- * One source transition. Local write in flight: record `prev` as before for each revertible def whose read changed
- * and that has no entry yet. No local write in flight: drop the entry of each def whose read changed, because the value
- * now belongs to whoever wrote it. While reverting: ignore.
+ * One source transition, attributed per setting. A def whose read changed and that an in-flight local write in
+ * `scopes` addresses is this visit's own: record `prev` as before if it has no entry yet. Any other def whose read
+ * changed now belongs to whoever wrote it, so drop its entry.
  */
 export function journalTransition(
   journal: ReadonlyMap<SettingId, JournalEntry>,
   defs: readonly RevertibleDef[],
   prev: RevertSource,
   next: RevertSource,
-  origin: WriteOrigin,
+  scopes: readonly LocalWriteScope[],
 ): ReadonlyMap<SettingId, JournalEntry> {
-  if (origin === "revert") return journal;
+  const changed = defs.filter((def) => !sameValue(def.value.read(prev), def.value.read(next)));
   // A local write claims an untouched row; an outside write releases a claimed one. Anything else keeps the journal.
-  const affected = defs.filter((def) => journal.has(def.id) === (origin === "external")
-    && !sameValue(def.value.read(prev), def.value.read(next)));
+  const affected = changed
+    .map((def) => ({ def, local: writtenLocally(def, scopes, prev, next) }))
+    .filter(({ def, local }) => journal.has(def.id) !== local);
   if (affected.length === 0) return journal;
   const out = new Map(journal);
-  for (const def of affected) {
-    if (origin === "local") out.set(def.id, { def, before: prev });
+  for (const { def, local } of affected) {
+    if (local) out.set(def.id, { def, before: prev });
     else out.delete(def.id);
   }
   return out;
@@ -190,8 +227,8 @@ function onSourceChange(): void {
   if (visit === null || lastSource === null) return;
   const next = readRevertSource();
   if (sameSource(lastSource, next)) return;
-  const origin: WriteOrigin = visit.reverting ? "revert" : isLocalSettingsWriteInFlight(visit.startSeq) ? "local" : "external";
-  const journal = journalTransition(visit.journal, REVERTIBLE_DEFS, lastSource, next, origin);
+  // A revert's own writes are local writes too, so the same per-setting attribution covers it.
+  const journal = journalTransition(visit.journal, REVERTIBLE_DEFS, lastSource, next, localSettingsWriteScopes(visit.startSeq));
   lastSource = next;
   if (journal !== visit.journal) patchVisit(visit.id, { journal, failures: [] });
 }
@@ -272,13 +309,32 @@ async function runStep(step: RestoreStep): Promise<string | null> {
   }
 }
 
-async function runBatches(plan: RevertPlan): Promise<{ readonly done: readonly SettingId[]; readonly failures: readonly RevertFailure[] }> {
+/**
+ * Plans `planned` again from the visit's journal as it is now, so a setting an outside write released while an
+ * earlier batch ran is not written.
+ */
+function replanBatch(visitId: number, planned: RevertPlan["batches"][number]): RevertPlan {
+  const visit = useVisitStore.getState().visit;
+  if (visit?.id !== visitId) return { batches: [], blocked: [] };
+  const current = readRevertSource();
+  const entries = changedEntries(visit.journal, current).filter((entry) => planned.ids.includes(entry.def.id));
+  return planRevert(entries, current);
+}
+
+async function runBatches(
+  visitId: number,
+  plan: RevertPlan,
+): Promise<{ readonly done: readonly SettingId[]; readonly failures: readonly RevertFailure[] }> {
   const failures: RevertFailure[] = [...plan.blocked];
   const done: SettingId[] = [];
-  for (const batch of plan.batches) {
-    const reason = await runStep(batch.step);
-    if (reason === null) done.push(...batch.ids);
-    else failures.push(...failuresFor(batch.ids, reason));
+  for (const planned of plan.batches) {
+    const { batches, blocked } = replanBatch(visitId, planned);
+    failures.push(...blocked);
+    for (const batch of batches) {
+      const reason = await runStep(batch.step);
+      if (reason === null) done.push(...batch.ids);
+      else failures.push(...failuresFor(batch.ids, reason));
+    }
   }
   return { done, failures };
 }
@@ -289,7 +345,7 @@ export async function revertVisit(): Promise<{ readonly failures: readonly Rever
   if (visit === null || visit.reverting || isLocalSettingsWriteInFlight()) return { failures: visit?.failures ?? NO_FAILURES };
   const plan = planRevert(changedEntries(visit.journal, readRevertSource()), readRevertSource());
   patchVisit(visit.id, { reverting: true });
-  const { done, failures } = await runBatches(plan);
+  const { done, failures } = await runBatches(visit.id, plan);
   const latest = useVisitStore.getState().visit;
   if (latest?.id === visit.id) {
     const journal = new Map(latest.journal);
