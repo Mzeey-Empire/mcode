@@ -255,6 +255,30 @@ describe("Cleanup integration", () => {
     expect(cleanupJobRepo.count()).toBe(0);
   });
 
+  it("retention cleanup of a coordinator deletes its finished delegated child instead of listing it", async () => {
+    const ws = (await workspaceRepo.create("retention-test", "/test-repo-5"));
+    const wtPath = NodePath.join(WT_BASE, "coordinator-wt");
+    const coordinator = await threadRepo.create(ws.id, "Coordinator", "worktree", "mcode/coordinator");
+    const child = await threadRepo.create(ws.id, "Council seat", "worktree", "mcode/coordinator", false, "codex", {
+      delegation: { coordinatorThreadId: coordinator.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    await threadRepo.updateWorktreePath(coordinator.id, wtPath);
+    await threadRepo.updateWorktreePath(child.id, wtPath);
+    db.prepare("UPDATE threads SET user_completed_at = ?, scheduled_deletion_at = ? WHERE id = ?")
+      .run("2026-08-12T09:00:00.000Z", "2026-08-12T09:01:00.000Z", coordinator.id);
+
+    await worker.poll();
+
+    expect(threadRepo.findById(coordinator.id)).toBeNull();
+    expect(threadService.list(ws.id).map((thread) => thread.title)).not.toContain("Council seat");
+    expect(threadRepo.findById(child.id)).toBeNull();
+    expect(mockGitWorktrees.removeWorktree).toHaveBeenCalledWith(
+      "/test-repo-5",
+      "coordinator-wt",
+      expect.objectContaining({ worktreePath: wtPath }),
+    );
+  });
+
   it("duplicate delete is idempotent (INSERT OR IGNORE)", async () => {
     const ws = (await workspaceRepo.create("dup-test", "/test-repo-4"));
     const now = new Date().toISOString();
