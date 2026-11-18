@@ -192,21 +192,21 @@
   /* Page and background are both black; panels lift by sitting lighter than the page, and edges where
      two black surfaces meet carry a --border hairline instead of a tone step. */
   --page: oklch(0% 0 0);
-  --background: var(--page);
+  --background: oklch(0% 0 0);
   --ink: var(--neutral-100);
   --panel: oklch(13% 0.003 260);
   --primary: var(--amber-500);
   --primary-hover: var(--amber-600);
   --primary-ink: var(--neutral-900);
-  --button-secondary: var(--selected);
+  --button-secondary: color-mix(in oklch, var(--neutral-100) 12%, transparent);
   /* See-through ink tints, so one value reads on the page, on panels, and in menus. */
-  --hover: color-mix(in oklch, var(--ink) 5%, transparent);
+  --hover: color-mix(in oklch, var(--neutral-100) 5%, transparent);
   --muted: var(--neutral-300);
-  --selected: color-mix(in oklch, var(--ink) 12%, transparent);
+  --selected: color-mix(in oklch, var(--neutral-100) 12%, transparent);
   /* Opaque covers over scrolling or stacked content can't be see-through; mixing in srgb against the
      background matches how the browser composites the tint, so a cover looks the same as the tint at rest. */
-  --hover-solid: color-mix(in srgb, var(--ink) 5%, var(--background));
-  --selected-solid: color-mix(in srgb, var(--ink) 12%, var(--background));
+  --hover-solid: color-mix(in srgb, var(--neutral-100) 5%, oklch(0% 0 0));
+  --selected-solid: color-mix(in srgb, var(--neutral-100) 12%, oklch(0% 0 0));
   --field: var(--neutral-600);
   --destructive: var(--clay-500);
   --destructive-ink: var(--neutral-900);
