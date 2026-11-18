@@ -59,7 +59,8 @@ export interface PanelTabStripProps {
 /**
  * Tool tabs with a pinned add button. Inactive tabs shrink to 9.6rem with a text fade while the active tab keeps
  * its name. Past that, the strip shows only whole tabs around the active one and a labelled "N more" menu lists
- * every tab. See ADR-0026.
+ * every tab. When even the tool name, the active tab, and "N more" crowd the add button, the tool name goes (the
+ * rail's selected entry still names the tool) and a chevron on the active tab opens the menu. See ADR-0026.
  *
  * A `tablist` with manual activation, because switching a tab mounts a terminal, page, or file:
  * arrows and Home/End move focus, Enter or Space selects, and Delete closes the focused tab.
@@ -80,23 +81,33 @@ export function PanelTabStrip({
   const stripRef = useRef<HTMLDivElement>(null);
   const tablistRef = useRef<HTMLDivElement>(null);
   const tabIdPrefix = useId();
-  const capacity = useInactiveTabCapacity(stripRef, tablistRef, items.length, activeId);
-  const shown = useShownTabs(items, activeId, capacity);
+  const fit = useTabStripFit(stripRef, tablistRef, items.length, activeId);
+  const shown = useShownTabs(items, activeId, fit);
   const hiddenCount = items.length - shown.length;
+  const activeShown = shown.some((item) => item.id === activeId);
+  const menuOnActiveTab = fit.kind === "active-only" && activeShown && hiddenCount > 0;
   const closeByKey = useRefocusAfterKeyboardClose(tablistRef, items, onClose);
-  const rovingId = shown.some((item) => item.id === activeId) ? activeId : (shown[0]?.id ?? null);
+  const rovingId = activeShown ? activeId : (shown[0]?.id ?? null);
   // One tooltip root for every tab's close button, so hovering a tab never mounts a popup of its own.
   const [closeTooltip] = useState(() => createTooltipHandle<string>());
+  const overflowMenu = (trigger: OverflowTrigger) => (
+    <PanelTabOverflowMenu
+      items={items}
+      hiddenCount={hiddenCount}
+      activeId={activeId}
+      label={label}
+      trigger={trigger}
+      onSelect={onSelect}
+    />
+  );
   return (
     <div ref={stripRef} data-testid="panel-tab-strip" className="flex min-w-0 flex-1 items-center gap-2">
       {tool ? (
-        <>
+        // The tab list's own name says the same to assistive tech.
+        <span aria-hidden data-panel-tool-heading hidden={fit.kind === "active-only" && !fit.toolName} className="flex shrink-0 items-center gap-2">
           <PanelToolGlyph>{tool.icon}</PanelToolGlyph>
-          {/* The tab list's own name says the same to assistive tech. */}
-          <span aria-hidden data-panel-tool-name className="shrink-0 pr-1 text-sm/5 font-medium text-ink">
-            {tool.name}
-          </span>
-        </>
+          <span className="pr-1 text-sm/5 font-medium text-ink">{tool.name}</span>
+        </span>
       ) : null}
       <div
         ref={tablistRef}
@@ -114,6 +125,7 @@ export function PanelTabStrip({
             active={item.id === activeId}
             focusable={item.id === rovingId}
             closeTooltip={closeTooltip}
+            menu={menuOnActiveTab && item.id === activeId ? overflowMenu("chevron") : undefined}
             onSelect={onSelect}
             onClose={onClose}
             onCloseByKey={closeByKey}
@@ -123,45 +135,62 @@ export function PanelTabStrip({
       <Tooltip handle={closeTooltip}>
         {({ payload }) => (payload ? <TooltipContent side="bottom">{payload}</TooltipContent> : null)}
       </Tooltip>
-      {hiddenCount > 0 ? (
-        <PanelTabOverflowMenu items={items} hiddenCount={hiddenCount} activeId={activeId} label={label} onSelect={onSelect} />
-      ) : null}
+      {hiddenCount > 0 && !menuOnActiveTab ? overflowMenu("labelled") : null}
       <PanelTabAddButton label={addLabel} disabledReason={addDisabledReason} onAdd={onAdd} menu={addMenu} />
     </div>
   );
 }
 
+/** The "N more" button after the tabs, or a chevron inside the active tab when the strip has no room for that. */
+type OverflowTrigger = "labelled" | "chevron";
+
 /**
- * Lists every tab while some do not fit. Its label counts the hidden ones, because a bare chevron beside the add
- * button read as a profile picker, and a new user could not tell the hidden tabs existed.
+ * Lists every tab while some do not fit. The standalone button counts the hidden ones, because a bare chevron beside
+ * the add button read as a profile picker, and a new user could not tell the hidden tabs existed. The chevron form
+ * sits inside the active tab, so it reads as switching that tab.
  */
 function PanelTabOverflowMenu({
   items,
   hiddenCount,
   activeId,
   label,
+  trigger,
   onSelect,
 }: {
   readonly items: readonly PanelTabStripItem[];
   readonly hiddenCount: number;
   readonly activeId: string | null;
   readonly label: string;
+  readonly trigger: OverflowTrigger;
   readonly onSelect: (id: string) => void;
 }) {
+  const name = `All ${label.toLowerCase()}, ${hiddenCount} more`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button
-            variant="subtle"
-            shape="round"
-            aria-label={`All ${label.toLowerCase()}, ${hiddenCount} more`}
-            data-tab-overflow=""
-            className="shrink-0 gap-1 pr-2.5 pl-3 text-body-small font-medium"
-          >
-            {hiddenCount} more
-            <ChevronDown aria-hidden className="size-3.5" />
-          </Button>
+          trigger === "chevron" ? (
+            <IconButton
+              size="inline-sm"
+              aria-label={name}
+              tooltip={`${hiddenCount} more`}
+              // Above the tab's stretched hit area, like the close button.
+              className="relative z-(--layer-sticky) shrink-0"
+            >
+              <ChevronDown aria-hidden className="size-3.5" />
+            </IconButton>
+          ) : (
+            <Button
+              variant="subtle"
+              shape="round"
+              aria-label={name}
+              data-tab-overflow=""
+              className="shrink-0 gap-1 pr-2.5 pl-3 text-body-small font-medium"
+            >
+              {hiddenCount} more
+              <ChevronDown aria-hidden className="size-3.5" />
+            </Button>
+          )
         }
       />
       <DropdownMenuContent align="end" sideOffset={6}>
@@ -227,47 +256,78 @@ const INACTIVE_TAB_MIN_PX = 96;
 /** Room kept for the "N more" button before it has rendered once. */
 const OVERFLOW_TRIGGER_ESTIMATE_PX = 96;
 
-/** The strip's width left for the tab list once the tool name and add button are placed, and the "N more" button's share. */
-function roomForTabs(strip: HTMLElement, tablist: HTMLElement): { readonly room: number; readonly trigger: number } {
-  const gap = Number.parseFloat(getComputedStyle(strip).columnGap) || 0;
-  let room = strip.clientWidth;
-  let trigger = OVERFLOW_TRIGGER_ESTIMATE_PX;
-  for (const child of Array.from(strip.children) as HTMLElement[]) {
-    if (child === tablist || child.offsetWidth === 0) continue;
-    if (child.hasAttribute("data-tab-overflow")) trigger = child.offsetWidth + gap;
-    else room -= child.offsetWidth + gap;
-  }
-  return { room, trigger };
-}
+/**
+ * How the strip spends its width, roomiest first: every tab; the tool name, the active tab, `inactive` whole tabs
+ * around it, and "N more"; or the active tab alone with the menu folded into it, after the tool name while that
+ * fits, its own name fading only if it still does not fit.
+ */
+type TabStripFit =
+  | { readonly kind: "all" }
+  | { readonly kind: "window"; readonly inactive: number }
+  | { readonly kind: "active-only"; readonly toolName: boolean };
+
+const FIT_ALL: TabStripFit = { kind: "all" };
 
 /**
- * How many inactive tabs fit whole beside the active one, or null when every tab fits at its minimum width. Null
- * also covers a strip with no layout yet (jsdom reports 0), which then shows every tab.
+ * Natural widths of the parts that come and go. The tool name and "N more" are hidden in some fits, so their last
+ * shown widths stand in; reading 0 for a hidden part would let the strip flip back to a fit that does not fit.
  */
-function inactiveTabCapacity(strip: HTMLElement, tablist: HTMLElement, itemCount: number): number | null {
-  if (strip.clientWidth === 0) return null;
-  const { room, trigger } = roomForTabs(strip, tablist);
-  const tabGap = Number.parseFloat(getComputedStyle(tablist).columnGap) || 0;
-  const active = tablist.querySelector<HTMLElement>('[data-active="true"]');
-  const activeWidth = active ? active.offsetWidth : 0;
-  const inactiveCount = itemCount - (active ? 1 : 0);
-  const step = INACTIVE_TAB_MIN_PX + tabGap;
-  if (activeWidth + inactiveCount * step <= room) return null;
-  return Math.min(inactiveCount, Math.max(0, Math.floor((room - trigger - activeWidth) / step)));
+interface HiddenPartWidths {
+  heading: number;
+  more: number;
 }
 
-function useInactiveTabCapacity(
+/** The strip's width left for the tool name, the tabs, and "N more" once the add button is placed. */
+function roomBesideAddButton(strip: HTMLElement, tablist: HTMLElement, widths: HiddenPartWidths): number {
+  const gap = Number.parseFloat(getComputedStyle(strip).columnGap) || 0;
+  let room = strip.clientWidth;
+  for (const child of Array.from(strip.children) as HTMLElement[]) {
+    if (child === tablist || child.offsetWidth === 0) continue;
+    if (child.hasAttribute("data-panel-tool-heading")) widths.heading = child.offsetWidth + gap;
+    else if (child.hasAttribute("data-tab-overflow")) widths.more = child.offsetWidth + gap;
+    else room -= child.offsetWidth + gap;
+  }
+  return room;
+}
+
+function measureTabStripFit(
+  strip: HTMLElement,
+  tablist: HTMLElement,
+  itemCount: number,
+  widths: HiddenPartWidths,
+): TabStripFit {
+  // No layout yet (jsdom reports 0): show every tab.
+  if (strip.clientWidth === 0) return FIT_ALL;
+  const room = roomBesideAddButton(strip, tablist, widths) - widths.heading;
+  const active = tablist.querySelector<HTMLElement>('[data-active="true"]');
+  const activeWidth = active ? naturalWidth(active) : 0;
+  const inactiveCount = itemCount - (active ? 1 : 0);
+  const step = INACTIVE_TAB_MIN_PX + (Number.parseFloat(getComputedStyle(tablist).columnGap) || 0);
+  if (activeWidth + inactiveCount * step <= room) return FIT_ALL;
+  const spare = room - widths.more - activeWidth;
+  if (spare < 0) return { kind: "active-only", toolName: activeWidth <= room };
+  return { kind: "window", inactive: Math.min(inactiveCount, Math.floor(spare / step)) };
+}
+
+/** A tab's width with its whole label, even while the label is cut to fit. */
+function naturalWidth(tab: HTMLElement): number {
+  const label = tab.querySelector<HTMLElement>('[role="tab"]');
+  return label ? tab.offsetWidth - label.offsetWidth + label.scrollWidth : tab.offsetWidth;
+}
+
+function useTabStripFit(
   stripRef: React.RefObject<HTMLDivElement | null>,
   tablistRef: React.RefObject<HTMLDivElement | null>,
   itemCount: number,
   activeId: string | null,
-): number | null {
-  const [capacity, setCapacity] = useState<number | null>(null);
+): TabStripFit {
+  const [fit, setFit] = useState<TabStripFit>(FIT_ALL);
+  const widthsRef = useRef<HiddenPartWidths>({ heading: 0, more: OVERFLOW_TRIGGER_ESTIMATE_PX });
   useLayoutEffect(() => {
     const strip = stripRef.current;
     const tablist = tablistRef.current;
     if (!strip || !tablist) return;
-    const update = () => setCapacity(inactiveTabCapacity(strip, tablist, itemCount));
+    const update = () => setFit(measureTabStripFit(strip, tablist, itemCount, widthsRef.current));
     update();
     if (typeof ResizeObserver === "undefined") return;
     // The active tab too: a longer name can leave the tab list's box the same size while it clips more.
@@ -278,7 +338,7 @@ function useInactiveTabCapacity(
     if (active) observer.observe(active);
     return () => observer.disconnect();
   }, [stripRef, tablistRef, itemCount, activeId]);
-  return capacity;
+  return fit;
 }
 
 /** The first shown tab: it holds still while the active tab stays in view, and moves just enough to show it. */
@@ -294,10 +354,11 @@ function tabWindowStart(count: number, activeIndex: number, size: number, previo
 function useShownTabs(
   items: readonly PanelTabStripItem[],
   activeId: string | null,
-  capacity: number | null,
+  fit: TabStripFit,
 ): readonly PanelTabStripItem[] {
   const [start, setStart] = useState(0);
-  if (capacity === null) return items;
+  if (fit.kind === "all") return items;
+  const capacity = fit.kind === "window" ? fit.inactive : 0;
   const activeIndex = items.findIndex((item) => item.id === activeId);
   const size = Math.min(items.length, capacity + (activeIndex >= 0 ? 1 : 0));
   const next = tabWindowStart(items.length, activeIndex, size, start);
@@ -312,6 +373,7 @@ function PanelTab({
   active,
   focusable,
   closeTooltip,
+  menu,
   onSelect,
   onClose,
   onCloseByKey,
@@ -323,6 +385,8 @@ function PanelTab({
   /** The roving tab stop: the active tab, or the first one when none is active. */
   readonly focusable: boolean;
   readonly closeTooltip: TooltipHandle<string>;
+  /** The all-tabs menu, shown after the label when the strip has no room for "N more". */
+  readonly menu?: ReactNode;
   readonly onSelect: (id: string) => void;
   readonly onClose: (id: string) => void;
   readonly onCloseByKey: (id: string) => void;
@@ -336,7 +400,8 @@ function PanelTab({
       className={cn(
         // The active tab keeps its whole name and inactive tabs stop shrinking at 9.6rem, then the strip shows fewer tabs.
         // Shrinking every tab further to fit (r11) left "1 · po" and "2 · po", which three judges could not read.
-        "window-no-drag group/tab relative flex h-8 items-center gap-2 rounded-control pr-3 pl-2.5 text-sm/5 font-medium transition-[color,background-color]",
+        "window-no-drag group/tab relative flex h-8 items-center gap-2 rounded-control pl-2.5 text-sm/5 font-medium transition-[color,background-color]",
+        menu ? "pr-1" : "pr-3",
         active
           ? "max-w-[min(24rem,100%)] shrink-0 bg-selected text-ink"
           : "min-w-[9.6rem] flex-[0_1_max-content] text-muted hover:bg-hover hover:text-ink",
@@ -391,6 +456,7 @@ function PanelTab({
         {item.label}
         {item.status ? <span className="sr-only">, {item.status}</span> : null}
       </button>
+      {menu}
     </div>
   );
 }
