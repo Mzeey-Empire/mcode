@@ -47,7 +47,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { useTerminalStore } from "@/features/terminal";
 import { ProjectSettingsPanel } from "@/features/projects/settings/ProjectSettingsPanel";
-import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-overview-harness";
+import { branchlessThread, resetThreadOverviewState, runningActionRun } from "./__tests__/thread-overview-harness";
 import { ThreadOverview } from "./ThreadOverview";
 
 describe("ThreadOverview actions", () => {
@@ -70,7 +70,8 @@ describe("ThreadOverview actions", () => {
 
     render(<ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} />);
 
-    await user.click(screen.getByRole("button", { name: "Run project action" }));
+    await screen.findByRole("button", { name: "Run Success" });
+    await user.click(screen.getByRole("button", { name: "Project actions" }));
     const action = await screen.findByTestId("project-action-success");
     await user.click(action);
 
@@ -105,7 +106,7 @@ describe("ThreadOverview actions", () => {
     render(<><ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} /><ProjectSettingsPanel workspaceId="ws-1" threadId="thread-1" /></>);
 
     await user.click(await screen.findByRole("button", { name: /Success/, expanded: false }));
-    await user.click(screen.getByRole("button", { name: "Run project action" }));
+    await user.click(screen.getByRole("button", { name: "Project actions" }));
     expect(await screen.findByRole("menuitem", { name: /Success/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
@@ -116,7 +117,7 @@ describe("ThreadOverview actions", () => {
     await waitFor(() => expect(vi.mocked(mockTransport.saveWorkspaceEnvironment)).toHaveBeenCalledOnce());
     await waitFor(() => expect(vi.mocked(mockTransport.readWorkspaceEnvironment)).toHaveBeenCalledTimes(3));
 
-    await user.click(screen.getByRole("button", { name: "Run project action" }));
+    await user.click(screen.getByRole("button", { name: "Project actions" }));
     expect(await screen.findByRole("menuitem", { name: /Renamed Action/ })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /Success/ })).not.toBeInTheDocument();
   });
@@ -137,9 +138,52 @@ describe("ThreadOverview actions", () => {
     });
     render(<ThreadOverview thread={branchlessThread(thread)} threadPaneWidth={1400} />);
 
-    await user.click(screen.getByRole("button", { name: "Run project action" }));
+    await screen.findByRole("button", { name: "Run Success" });
+    await user.click(screen.getByRole("button", { name: "Project actions" }));
     await screen.findByRole("menuitem", { name: /Success/ });
     expect(screen.queryByRole("menuitem", { name: "Run Setup" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open Project settings" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Edit actions" })).toBeInTheDocument();
+  });
+
+  it("runs the most recently run Action from the row's main part", async () => {
+    const user = userEvent.setup();
+    vi.mocked(mockTransport.readWorkspaceEnvironment).mockResolvedValue({
+      document: {
+        version: "0.0.1",
+        actions: [
+          { id: "success", name: "Success", command: { default: "bun run success" } },
+          { id: "dev", name: "Dev server", command: { default: "bun run dev" } },
+        ],
+      },
+      revision: null,
+      status: "present",
+    });
+    vi.mocked(mockTransport.listWorkspaceActionRuns).mockResolvedValue([
+      runningActionRun({ status: "completed", finishedAt: "2026-08-22T12:01:00.000Z", exitCode: 0 }),
+      runningActionRun({
+        actionId: "dev", actionName: "Dev server", runId: "run-2", status: "failed",
+        createdAt: "2026-08-22T13:00:00.000Z", startedAt: "2026-08-22T13:00:00.000Z",
+        finishedAt: "2026-08-22T13:01:00.000Z", exitCode: 1,
+      }),
+    ]);
+    render(<ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} />);
+
+    await user.click(await screen.findByRole("button", { name: "Run Dev server" }));
+
+    await waitFor(() => expect(vi.mocked(mockTransport.startWorkspaceAction)).toHaveBeenCalledWith("thread-1", "dev"));
+  });
+
+  it("opens a running Action's terminal from the row instead of starting it again", async () => {
+    const user = userEvent.setup();
+    vi.mocked(mockTransport.listWorkspaceActionRuns).mockResolvedValue([runningActionRun()]);
+    render(<ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} />);
+
+    await user.click(await screen.findByRole("button", { name: "Open Success" }));
+
+    expect(vi.mocked(mockTransport.startWorkspaceAction)).not.toHaveBeenCalled();
+    await waitFor(() => expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
+      visible: true,
+      activeTabId: "singleton:terminal",
+    }));
   });
 });

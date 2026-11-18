@@ -7,7 +7,7 @@ import { OverviewCard } from "./overview-card";
 import { OverviewEntryStateProviders } from "./overview-entry-state";
 import { useOverviewLayer } from "./overview-layer";
 import type { OverviewPresentationState } from "./overview-presentation";
-import { getOverviewEntries, getOverviewHeaderActions } from "./overview-registry";
+import { getOverviewEntries } from "./overview-registry";
 import type { OverviewSubject } from "./overview-subject";
 import type { ThreadOverviewCiDot } from "./overview-state";
 import { OverviewToggleButton } from "./overview-toggle-button";
@@ -74,18 +74,16 @@ export function OverviewMount({ subject, subjectKey, presentation: { dockable, p
   const anchor = useMemo(() => (layer ? dockedCornerAnchor(layer) : toggleRef), [layer]);
 
   const entries = getOverviewEntries(subject);
-  const headerActions = getOverviewHeaderActions(subject);
   const dockedCard = presentation === "docked" ? (
     <OverviewCard
       subject={subject}
       entries={entries}
-      headerActions={headerActions}
       presentation="docked"
       className="pointer-events-auto absolute top-14 right-4 max-h-[calc(100%_-_7.2rem)]"
     />
   ) : null;
   return (
-    <OverviewEntryStateProviders entries={[...entries, ...headerActions]} subject={subject}>
+    <OverviewEntryStateProviders entries={entries} subject={subject}>
       <OverviewToggleButton
         ref={toggleRef}
         ciDot={ciDot}
@@ -106,7 +104,6 @@ export function OverviewMount({ subject, subjectKey, presentation: { dockable, p
           <OverviewCard
             subject={subject}
             entries={entries}
-            headerActions={headerActions}
             presentation="overlay"
             className="max-h-(--available-height)"
           />

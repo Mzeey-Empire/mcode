@@ -27,34 +27,47 @@ export interface ThreadActionRunMenuProps {
 }
 
 /**
- * {@link ActionRunMenu} wired to a thread: every pick reveals the Terminal tool first, because a
- * terminal can only attach to a visible panel.
+ * A thread's Action handlers: every one reveals the Terminal tool first, because a terminal can
+ * only attach to a visible panel.
  */
-export function ThreadActionRunMenu({ workspaceId, threadId, trigger, projectActions, onEdit }: ThreadActionRunMenuProps) {
+export function useThreadActionRunHandlers({
+  workspaceId,
+  threadId,
+  projectActions,
+  onEdit,
+}: Omit<ThreadActionRunMenuProps, "trigger">) {
   const terminalCount = useTerminalStore((state) => state.terminals[threadId]?.length ?? 0);
+  return {
+    terminalCapReason: terminalCapReason(terminalCount),
+    onRun: (actionId: string) => {
+      openRightPanelTab(workspaceId, threadId, "terminal");
+      projectActions.start(actionId).catch(() => {
+        useToastStore.getState().show({ kind: "failed", title: "Project Action could not start" });
+      });
+    },
+    onOpen: (actionId: string) => {
+      openRightPanelTab(workspaceId, threadId, "terminal");
+      const ptyId = findActionTerminalId(threadId, actionId);
+      if (ptyId) useTerminalStore.getState().setActiveTerminal(threadId, ptyId);
+    },
+    onNewTerminal: () => {
+      openRightPanelTab(workspaceId, threadId, "terminal");
+      createTerminalForScope(threadId);
+    },
+    onEdit: onEdit ?? (() => openRightPanelTab(workspaceId, threadId, "environment")),
+  };
+}
+
+/** {@link ActionRunMenu} wired to a thread through {@link useThreadActionRunHandlers}. */
+export function ThreadActionRunMenu({ trigger, ...props }: ThreadActionRunMenuProps) {
+  const handlers = useThreadActionRunHandlers(props);
   return (
     <ActionRunMenu
       trigger={trigger}
-      actions={projectActions.actions}
-      runsByActionId={projectActions.runsByActionId}
-      loadError={projectActions.loadError}
-      terminalCapReason={terminalCapReason(terminalCount)}
-      onRun={(actionId) => {
-        openRightPanelTab(workspaceId, threadId, "terminal");
-        projectActions.start(actionId).catch(() => {
-          useToastStore.getState().show({ kind: "failed", title: "Project Action could not start" });
-        });
-      }}
-      onOpen={(actionId) => {
-        openRightPanelTab(workspaceId, threadId, "terminal");
-        const ptyId = findActionTerminalId(threadId, actionId);
-        if (ptyId) useTerminalStore.getState().setActiveTerminal(threadId, ptyId);
-      }}
-      onNewTerminal={() => {
-        openRightPanelTab(workspaceId, threadId, "terminal");
-        createTerminalForScope(threadId);
-      }}
-      onEdit={onEdit ?? (() => openRightPanelTab(workspaceId, threadId, "environment"))}
+      actions={props.projectActions.actions}
+      runsByActionId={props.projectActions.runsByActionId}
+      loadError={props.projectActions.loadError}
+      {...handlers}
     />
   );
 }

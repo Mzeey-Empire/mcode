@@ -49,7 +49,6 @@ describe("OverviewCard", () => {
       <OverviewCard
         subject={subject}
         presentation="docked"
-        headerActions={[]}
         entries={[
           entry("lane-row", "lane", true),
           entry("activity-empty", "activity", false),
@@ -72,7 +71,6 @@ describe("OverviewCard", () => {
       <OverviewCard
         subject={subject}
         presentation="overlay"
-        headerActions={[]}
         entries={[entry("lane-empty", "lane", false), entry("usage-row", "usage", true)]}
       />,
     );

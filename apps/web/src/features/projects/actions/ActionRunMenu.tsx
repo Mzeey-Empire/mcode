@@ -106,7 +106,7 @@ function ActionRunMenuItem({
 }
 
 /** The Action's icon, with the running badge at its corner. */
-function ActionMenuGlyph({ action, running }: { readonly action: WorkspaceEnvironmentAction; readonly running: boolean }) {
+export function ActionMenuGlyph({ action, running }: { readonly action: WorkspaceEnvironmentAction; readonly running: boolean }) {
   return (
     <span className="relative inline-flex">
       <ActionIcon iconId={action.icon} command={actionScript(action)} size={16} />
@@ -121,8 +121,11 @@ function ActionMenuGlyph({ action, running }: { readonly action: WorkspaceEnviro
   );
 }
 
-/** "Run" appears only while the row is hovered or highlighted, so a menu of idle actions stays quiet. */
-function RunHint() {
+/**
+ * "Run" appears only while its `group/action` row is hovered or highlighted, so a list of idle
+ * actions stays quiet.
+ */
+export function RunHint() {
   return (
     <span
       aria-hidden

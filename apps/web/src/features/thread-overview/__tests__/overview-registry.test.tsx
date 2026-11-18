@@ -9,12 +9,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { resetThreadRecapRequestStateForTest } from "@/hooks/useThreadRecap";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getOverviewEntries,
-  getOverviewHeaderActions,
-  OVERVIEW_ENTRIES,
-  OVERVIEW_HEADER_ACTIONS,
-} from "../overview-registry";
+import { getOverviewEntries, OVERVIEW_ENTRIES } from "../overview-registry";
 import type { OverviewSubject } from "../overview-subject";
 
 vi.mock("@/transport", async (importOriginal) => ({
@@ -57,6 +52,7 @@ describe("overview registry", () => {
 
   it("orders thread entries globally, retaining section metadata for the later shell", () => {
     expect(getOverviewEntries(subject).map(({ id, section, order }) => [id, section, order])).toEqual([
+      ["project-actions", "actions", 0],
       ["save-recovery", "activity", 10],
       ["changes", "activity", 20],
       ["plan", "activity", 45],
@@ -73,21 +69,18 @@ describe("overview registry", () => {
       ["sources", "activity", 130],
       ["recap", "recap", 140],
     ]);
-    expect(getOverviewHeaderActions(subject).map(({ id }) => id)).toEqual(["project-actions", "settings"]);
   });
 
-  it("gives a new-thread subject only its target rows and the settings action", () => {
+  it("gives a new-thread subject only its settings row and target rows", () => {
     const newThread: OverviewSubject = { kind: "new-thread", workspaceId: thread.workspace_id };
     expect(getOverviewEntries(newThread).map(({ id, section, order }) => [id, section, order])).toEqual([
+      ["project-actions", "actions", 0],
       ["target.workspace", "lane", 50],
       ["target.branch", "lane", 70],
     ]);
-    expect(getOverviewHeaderActions(newThread).map(({ id }) => id)).toEqual(["settings"]);
     const threadOnlyEntries = OVERVIEW_ENTRIES.filter(({ subjects }) => !subjects.includes("new-thread"));
-    const threadOnlyActions = OVERVIEW_HEADER_ACTIONS.filter(({ subjects }) => !subjects.includes("new-thread"));
     const { container } = render(<>
       {threadOnlyEntries.map(({ id, Entry }) => <Entry key={id} subject={newThread} />)}
-      {threadOnlyActions.map(({ id, Action }) => <Action key={id} subject={newThread} />)}
     </>);
     expect(container).toBeEmptyDOMElement();
   });
