@@ -165,6 +165,13 @@ describe("ProviderSection", () => {
     expect(screen.queryByText("Adapter not available yet.")).not.toBeInTheDocument();
   });
 
+  it("lists coming-soon providers after every available provider", () => {
+    render(<ProviderSection />);
+    const comingSoon = screen.getByTestId("provider-row-gemini-comingsoon");
+    const lastAvailable = screen.getByTestId("provider-switch-devin");
+    expect(lastAvailable.compareDocumentPosition(comingSoon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("renders a CLI-not-found state when enabled and status='not_found'", () => {
     render(<ProviderSection />);
     expect(screen.getByTestId("provider-badge-codex-cli-missing")).toBeInTheDocument();

@@ -388,7 +388,7 @@ export function ProviderSection() {
     <div>
       <SettingsGroup>
         {providers.map((p) => {
-          if (p.comingSoon) return <ComingSoonProviderRow key={p.id} row={p} />;
+          if (p.comingSoon) return null;
           const defs = providerDefs(p.id);
           return defs ? (
             <ProviderRow
@@ -401,6 +401,7 @@ export function ProviderSection() {
             />
           ) : null;
         })}
+        {providers.map((p) => (p.comingSoon ? <ComingSoonProviderRow key={p.id} row={p} /> : null))}
       </SettingsGroup>
       <Tooltip handle={pathTooltip}>
         {({ payload }) => (payload ? <TooltipContent side="top" align="start" className="font-mono">{payload}</TooltipContent> : null)}
