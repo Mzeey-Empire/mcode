@@ -154,9 +154,9 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 ## Verifying
 
 - Before you write or keep a test, read [docs/internals/testing/writing-tests.md](docs/internals/testing/writing-tests.md). A test must fail for a real bug; source-text, class-name, mock-echo, and set-then-read tests do not.
-- Check the changed scope with `bun run check:changed`, or `bun run check:changed --since origin/main` for the whole branch. It runs the tests, lint, and typecheck that your changes can affect, including in workspaces that depend on them, and prints failures in full.
-- To rerun test files: `bun run --cwd <workspace> test -- --reporter=dot --silent=passed-only <test-file> [<test-file> ...]`. For files in different workspaces, run one command per workspace.
-- The flags keep output short so failures are not truncated: passing tests print a dot, while failing tests keep their diff, stack trace, and console output. If a failure needs more context, rerun that file without the flags.
+- Before you commit, check the changed scope with `bun run check:changed`, or `bun run check:changed --since origin/main` for the whole branch. It runs the tests, lint, and typecheck that your changes can affect, including in workspaces that depend on them, and prints failures in full.
+- To rerun test files or folders: `bun run test:files <path> [<path> ...]`. Paths are repository-relative and may span workspaces. It refuses an empty list and missing paths, so a failed file-list pipeline cannot run a whole suite. `packages/oxlint-plugin` runs only whole: `bun run test:oxlint-plugin`.
+- Its output is short so failures are not truncated: passing tests print a dot, while failing tests keep their diff, stack trace, and console output. If a failure needs more context, rerun that file with `bun run --cwd <workspace> test -- <test-file>`.
 - Do not use `bun test`: it invokes Bun's native test runner and bypasses the workspace Vitest configuration.
 - To lint files by hand: `bun run lint <file> [<file> ...]`. It runs oxlint with the Mcode rules.
 - To type check a workspace by hand: `bun run --cwd <workspace> typecheck`. It runs `tsc-rs`, a Rust port of the TypeScript 7 checker pinned at the root, so a root `bunx tsc` checks with different rules. TypeScript 7 loads no `@types` package a tsconfig does not list in `types`, so a workspace that uses Node globals lists `"node"` there.
