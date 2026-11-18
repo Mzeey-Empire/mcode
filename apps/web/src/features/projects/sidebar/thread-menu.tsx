@@ -46,18 +46,35 @@ export interface ThreadMenuPoint {
   readonly anchor: Element;
 }
 
-const useThreadMenuStore = create<{ readonly openMenus: number }>(() => ({ openMenus: 0 }));
+const useThreadMenuStore = create<{ readonly openMenus: number; readonly menuThreadIds: readonly string[] }>(() => ({ openMenus: 0, menuThreadIds: [] }));
 
 /**
  * Counts this menu as open while `open` holds. A count rather than a flag, so one menu closing
- * after another opened never reports both closed.
+ * after another opened never reports both closed. A thread menu passes `threadId`, so the row it
+ * acts on can keep its hover look while the pointer is inside the menu.
  */
-export function useHoldThreadMenuOpen(open: boolean): void {
+export function useHoldThreadMenuOpen(open: boolean, threadId?: string): void {
   useEffect(() => {
     if (!open) return;
-    useThreadMenuStore.setState((s) => ({ openMenus: s.openMenus + 1 }));
-    return () => useThreadMenuStore.setState((s) => ({ openMenus: s.openMenus - 1 }));
-  }, [open]);
+    useThreadMenuStore.setState((s) => ({
+      openMenus: s.openMenus + 1,
+      menuThreadIds: threadId === undefined ? s.menuThreadIds : [...s.menuThreadIds, threadId],
+    }));
+    return () => useThreadMenuStore.setState((s) => ({
+      openMenus: s.openMenus - 1,
+      menuThreadIds: threadId === undefined ? s.menuThreadIds : withoutOne(s.menuThreadIds, threadId),
+    }));
+  }, [open, threadId]);
+}
+
+function withoutOne(ids: readonly string[], id: string): readonly string[] {
+  const index = ids.indexOf(id);
+  return index === -1 ? ids : [...ids.slice(0, index), ...ids.slice(index + 1)];
+}
+
+/** Whether a thread menu, right-click or options, is open on this thread. */
+export function useThreadMenuOpenFor(threadId: string): boolean {
+  return useThreadMenuStore((s) => s.menuThreadIds.includes(threadId));
 }
 
 /** Whether any thread menu, right-click or options, is open. */
@@ -83,7 +100,7 @@ export interface ThreadOptionsMenuProps {
 /** A thread's options menu, anchored to its trigger so it follows the row as the list scrolls. */
 export function ThreadOptionsMenu({ target, actions, trigger, leadingItems = NO_ITEMS, align = "end" }: ThreadOptionsMenuProps) {
   const [open, setOpen] = useState(false);
-  useHoldThreadMenuOpen(open);
+  useHoldThreadMenuOpen(open, target.threadId);
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger render={trigger} />
@@ -94,7 +111,7 @@ export function ThreadOptionsMenu({ target, actions, trigger, leadingItems = NO_
 
 /** The right-click thread menu. It renders the same rows as {@link ThreadOptionsMenu}, at the pointer. */
 export function ThreadContextMenu({ target, point, actions, onClose }: { target: ThreadMenuTarget; point: ThreadMenuPoint; actions: ThreadMenuActions; onClose: () => void }) {
-  useHoldThreadMenuOpen(true);
+  useHoldThreadMenuOpen(true, target.threadId);
   useCloseOnAnchorScroll(point.anchor, onClose);
   const anchor = useMemo(() => pointAnchor(point), [point]);
   return (

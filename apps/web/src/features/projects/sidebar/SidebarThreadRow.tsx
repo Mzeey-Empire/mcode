@@ -31,7 +31,7 @@ import { lifecycleActionBlocked, lifecycleBlockedReason, useCompletionStore } fr
 import { selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
 import { ThreadPreviewHandleContext } from "./SidebarThreadPreview";
 import type { CompletionEntry } from "./completion-machine";
-import { ThreadOptionsMenu, type ThreadMenuActions } from "./thread-menu";
+import { ThreadOptionsMenu, useThreadMenuOpenFor, type ThreadMenuActions } from "./thread-menu";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -437,8 +437,8 @@ function ClosedRowCleanupStatus({ presentation, lifecycle }: Pick<ThreadRowVisua
 type ThreadRowVariant = "flat" | "grouped" | "closed";
 
 // Hover and focus restore full ink in CSS, not React state, so the change paints in the next frame.
-const RECEDED_TITLE_CLASS = "text-ink/70 group-hover/row:text-ink group-focus-within/row:text-ink";
-const RECEDED_BADGE_CLASS = "opacity-55 group-hover/row:opacity-100 group-focus-within/row:opacity-100";
+const RECEDED_TITLE_CLASS = "text-ink/70 group-hover/row:text-ink group-focus-within/row:text-ink group-data-menu-open/row:text-ink";
+const RECEDED_BADGE_CLASS = "opacity-55 group-hover/row:opacity-100 group-focus-within/row:opacity-100 group-data-menu-open/row:opacity-100";
 
 const SURFACE_CLASS: Record<ThreadRowVariant, string> = {
   flat: "min-h-[78px] flex-col justify-center p-2",
@@ -475,10 +475,14 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
   onBlur: onTriggerBlur,
   ...triggerProps
 }, ref) {
+  // The pointer leaves the row to reach its menu, so the open menu keeps the row's hover look
+  // and the user can see which thread the menu acts on.
+  const menuOpen = useThreadMenuOpenFor(thread.id);
   return (
     <div
       {...triggerProps}
       ref={ref}
+      data-menu-open={menuOpen ? "" : undefined}
       role="button"
       tabIndex={0}
       onKeyDown={(event) => handleThreadRowKeyDown(event, isEditing, onSelectThread, thread.id)}
@@ -507,7 +511,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
       className={cn(
         "group/row relative flex rounded-lg cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-focus/70",
         SURFACE_CLASS[variant],
-        isActive ? "bg-selected" : "hover:bg-selected/40",
+        isActive ? "bg-selected" : "hover:bg-selected/40 data-menu-open:bg-selected/40",
         triggerClassName,
       )}
       style={surfacePaddingLeft(variant, depth)}

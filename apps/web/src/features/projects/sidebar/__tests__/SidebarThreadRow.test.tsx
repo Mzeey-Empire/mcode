@@ -99,6 +99,22 @@ describe("SidebarThreadRow", () => {
     expect(complete).not.toBeVisible();
   });
 
+  it("keeps the row's hover look while its options menu is open", async () => {
+    const row = renderThread();
+    vi.useRealTimers();
+    fireEvent.mouseEnter(row);
+    fireEvent.click(screen.getByRole("button", { name: "Thread options for Row title" }));
+    await screen.findByRole("menu");
+    fireEvent.mouseLeave(row);
+    expect(row).toHaveAttribute("data-menu-open");
+
+    fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+    await vi.waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    expect(row).not.toHaveAttribute("data-menu-open");
+    // The menu needs real timers to open and close; the shared teardown expects fake ones.
+    vi.useFakeTimers();
+  });
+
   describe("flat Threads row", () => {
     function renderFlat(overrides: Partial<Thread> = {}): HTMLElement {
       useSidebarUiStore.setState({ view: "threads" });
