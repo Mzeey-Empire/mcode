@@ -9,7 +9,7 @@
  * test group.
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import React from "react";
 
 describe('Sidebar "Edit settings.json" button', () => {
@@ -127,5 +127,22 @@ describe('Sidebar "Edit settings.json" button', () => {
 
     expect(screen.queryByText("Ctrl Shift F")).not.toBeInTheDocument();
     expect(screen.queryByText("⌘⇧F")).not.toBeInTheDocument();
+  });
+
+  it("closes Settings from the back row at the foot of the settings sidebar", () => {
+    const onCloseSettings = vi.fn();
+    render(
+      React.createElement(Sidebar, {
+        settingsOpen: true,
+        settingsSection: "general",
+        onSettingsSection: vi.fn(),
+        onOpenSettings: vi.fn(),
+        onCloseSettings,
+      }),
+    );
+
+    fireEvent.click(within(screen.getByTestId("sidebar-footer")).getByRole("button", { name: "Close Settings" }));
+
+    expect(onCloseSettings).toHaveBeenCalledTimes(1);
   });
 });

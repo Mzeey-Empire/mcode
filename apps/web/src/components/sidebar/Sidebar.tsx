@@ -1,7 +1,7 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { ProjectSidebar, useWorkspaceStore } from "@/features/projects";
-import { ArrowLeft, FolderPlus, Search, SquarePen } from "lucide-react";
-import { Button, IconButton } from "@/components/ui/button";
+import { FolderPlus, Search, SquarePen } from "lucide-react";
+import { IconButton } from "@/components/ui/button";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import type { SettingsSection } from "@/components/settings/settings-nav";
 import { useUiStore } from "@/stores/uiStore";
@@ -28,12 +28,6 @@ interface SidebarProps {
   onOpenSettings: () => void;
   /** Called when the user clicks back from settings. */
   onCloseSettings?: () => void;
-}
-
-function SettingsBackRow({ onCloseSettings }: { onCloseSettings: (() => void) | undefined }) {
-  return <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border/40 px-2">
-    <Button variant="ghost" size="icon-compact" onClick={onCloseSettings} aria-label="Back to chat" className="text-muted"><ArrowLeft size={15} /></Button><span className="text-sm font-semibold text-muted">Settings</span>
-  </div>;
 }
 
 function getSettingsNavProps(settingsOpen: boolean | undefined, settingsSection: SettingsSection | undefined, onSettingsSection: ((section: SettingsSection) => void) | undefined): { section: SettingsSection; onSection: (section: SettingsSection) => void } | null {
@@ -94,7 +88,7 @@ function SidebarBody({ settingsOpen, settingsSection, onSettingsSection }: { set
 // Only this frame reads the width, so a seam drag re-renders one div rather than the project tree.
 function SidebarFrame({ settingsOpen, className, children }: { settingsOpen: boolean | undefined; className: string | undefined; children: ReactNode }) {
   const width = useSidebarWidthStore((s) => s.width);
-  return <div data-testid="sidebar" style={{ width }} className={cn("flex h-full flex-col gap-4 bg-page pb-3", settingsOpen ? "max-w-[42vw] md:max-w-none" : "max-w-[55vw] md:max-w-none", className)}>
+  return <div data-testid="sidebar" style={{ width }} className={cn("flex h-full flex-col gap-4 bg-page pb-3", settingsOpen ? "max-w-[42vw] border-r border-border md:max-w-none" : "max-w-[55vw] md:max-w-none", className)}>
     {children}
   </div>;
 }
@@ -111,9 +105,8 @@ export function Sidebar({
   return (
     <SidebarFrame settingsOpen={settingsOpen} className={className}>
       <SidebarHeader />
-      {settingsOpen ? <SettingsBackRow onCloseSettings={onCloseSettings} /> : null}
       <SidebarBody settingsOpen={settingsOpen} settingsSection={settingsSection} onSettingsSection={onSettingsSection} />
-      <SidebarFooter settingsOpen={settingsOpen} onOpenSettings={onOpenSettings} />
+      <SidebarFooter settingsOpen={settingsOpen} onOpenSettings={onOpenSettings} onCloseSettings={onCloseSettings} />
     </SidebarFrame>
   );
 }

@@ -7,6 +7,8 @@ interface CanvasBreadcrumbProps {
   /** Project the canvas belongs to; omitted while no project is chosen. */
   readonly projectName: string | undefined;
   readonly workspaceId: string | undefined;
+  /** Replaces the project icon, for a canvas whose parent crumb is not a project (for example Settings). */
+  readonly icon?: ReactNode;
   /** The current page: a label, or the thread title and its editor. */
   readonly children: ReactNode;
 }
@@ -15,12 +17,12 @@ interface CanvasBreadcrumbProps {
  * The canvas header's "project / page" pill. The page is the last crumb and carries the ink colour;
  * the project before it is muted and fades out when the pill runs out of room.
  */
-export function CanvasBreadcrumb({ projectName, workspaceId, children }: CanvasBreadcrumbProps) {
+export function CanvasBreadcrumb({ projectName, workspaceId, icon, children }: CanvasBreadcrumbProps) {
   return (
     <nav aria-label="Breadcrumb" className="flex h-control-compact min-w-0 items-center gap-2 rounded-2xl bg-selected px-3 text-body-small text-muted">
-      {projectName && workspaceId
+      {icon ?? (projectName && workspaceId
         ? <ProjectIcon workspaceId={workspaceId} name={projectName} size={14} />
-        : <Folder size={14} className="shrink-0" aria-hidden />}
+        : <Folder size={14} className="shrink-0" aria-hidden />)}
       {projectName && (
         <>
           <span className="text-fade">{projectName}</span>

@@ -195,11 +195,9 @@ function AppPrimarySurface(props: Pick<
 >) {
   if (props.settingsOpen) {
     return (
-      <CanvasSurface>
-        <Suspense fallback={null}>
-          <LazySettingsView section={props.settingsSection} />
-        </Suspense>
-      </CanvasSurface>
+      <Suspense fallback={<CanvasSurface>{null}</CanvasSurface>}>
+        <LazySettingsView section={props.settingsSection} />
+      </Suspense>
     );
   }
   if (props.showPullRequests) {
