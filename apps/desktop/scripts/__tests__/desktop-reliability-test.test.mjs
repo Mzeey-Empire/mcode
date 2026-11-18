@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import {
@@ -8,6 +10,7 @@ import {
   isOwnedServerLock,
   resolveOwnedDesktopSpawnOptions,
   runPackagedReliabilityScenario,
+  waitForProcessExit,
 } from "../desktop-packaging/package-validation/desktop-reliability-test.mjs";
 
 function lock(pid, startedAt = `2026-01-01T00:00:0${pid}.000Z`) {
@@ -119,6 +122,51 @@ describe("packaged reliability cleanup", () => {
   it("detaches Desktop only on POSIX so its process group is owned", () => {
     expect(resolveOwnedDesktopSpawnOptions("linux")).toEqual({ detached: true });
     expect(resolveOwnedDesktopSpawnOptions("win32")).toEqual({ detached: false });
+  });
+});
+
+// Windows has no process groups; there the cleanup kills the tree with taskkill.
+describe.skipIf(process.platform === "win32")("packaged reliability cleanup of a real process group", () => {
+  const groups = [];
+  afterEach(() => {
+    for (const pid of groups.splice(0)) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch (error) {
+        if (error?.code !== "ESRCH") throw error;
+      }
+    }
+  });
+
+  async function startOwnedGroup(script) {
+    const child = NodeChildProcess.spawn("sh", ["-c", script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+    groups.push(child.pid);
+    await new Promise((resolvePromise, reject) => {
+      let output = "";
+      child.once("error", reject);
+      child.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+        if (output.includes("member-ready")) resolvePromise();
+      });
+    });
+    return child;
+  }
+
+  it("hard-kills members that outlive a leader which exits on SIGTERM", async () => {
+    // Like the Desktop launcher, the leader exits inside the grace; the member ignores SIGTERM like a slow Electron child.
+    const child = await startOwnedGroup(
+      `sh -c 'trap "" TERM; echo member-ready; exec sleep 30' & trap 'exit 0' TERM; while :; do sleep 0.05; done`,
+    );
+    const runRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-cleanup-test-"));
+    await cleanupOwnedRun(child, NodePath.join(runRoot, "data"), runRoot);
+    expect(() => process.kill(-child.pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+    expect(NodeFS.existsSync(runRoot)).toBe(false);
+  }, 15_000);
+
+  it("names the members still running when a group survives cleanup", async () => {
+    const child = await startOwnedGroup("echo member-ready; exec sleep 30");
+    await expect(waitForProcessExit(child.pid, 200, { useProcessGroup: true }))
+      .rejects.toThrow(new RegExp(`survived cleanup; still running:\\n\\s+${child.pid} \\[\\S+\\] sleep 30`));
   });
 });
 

@@ -3,7 +3,34 @@ import * as NodeAssertStrict from "node:assert/strict";
 import * as NodeTest from "node:test";
 import { killProcessTree } from "../../kill-process-tree.mjs";
 
-NodeTest.test("graceful child exit suppresses delayed hard kill", async () => {
+NodeTest.test("graceful group exit suppresses delayed hard kill", async () => {
+  const originalKill = process.kill;
+  const originalPlatform = process.platform;
+  const signals = [];
+  const child = { pid: 12345, exitCode: null, signalCode: null };
+  process.platform = "linux";
+  process.kill = (pid, signal) => {
+    signals.push([pid, signal]);
+    if (signal === "SIGTERM") child.exitCode = 0;
+    if (signal === 0 && child.exitCode !== null) {
+      const error = new Error("process group empty");
+      error.code = "ESRCH";
+      throw error;
+    }
+    return true;
+  };
+
+  try {
+    await killProcessTree(child, { graceMs: 20, useProcessGroup: true });
+    NodeAssertStrict.default.deepEqual(signals[0], [-12345, "SIGTERM"]);
+    NodeAssertStrict.default.equal(signals.some(([, signal]) => signal === "SIGKILL"), false);
+  } finally {
+    process.kill = originalKill;
+    process.platform = originalPlatform;
+  }
+});
+
+NodeTest.test("leader exit inside the grace still hard-kills surviving group members", async () => {
   const originalKill = process.kill;
   const originalPlatform = process.platform;
   const signals = [];
@@ -17,7 +44,7 @@ NodeTest.test("graceful child exit suppresses delayed hard kill", async () => {
 
   try {
     await killProcessTree(child, { graceMs: 20, useProcessGroup: true });
-    NodeAssertStrict.default.deepEqual(signals, [[-12345, "SIGTERM"]]);
+    NodeAssertStrict.default.deepEqual(signals.at(-1), [-12345, "SIGKILL"]);
   } finally {
     process.kill = originalKill;
     process.platform = originalPlatform;
