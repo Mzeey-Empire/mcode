@@ -12,7 +12,7 @@ import type { ReviewComparisonResult } from "@mcode/contracts/models/review-comp
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { Diff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoadStatus, OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { LoadStatus, OVERVIEW_INLINE_ACTION_CLASS, OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
 type SnapshotDiffStat = { filePath: string; additions: number; deletions: number };
 
@@ -251,6 +251,7 @@ function useChangesState(thread: Thread) {
   }));
   const [loadedChangeSummary, setLoadedChangeSummary] = useState<LoadedChangeSummary | null>(null);
   const [changeSummaryStatus, setChangeSummaryStatus] = useState<LoadStatus>("idle");
+  const [retryCount, setRetryCount] = useState(0);
   const stayedOpenRef = useRef(false);
   const cachedSnapshots = useDiffStore((s) => s.snapshotsByThread[thread.id]);
   const setSnapshots = useDiffStore((s) => s.setSnapshots);
@@ -287,7 +288,9 @@ function useChangesState(thread: Thread) {
   const hasChanges = showChangeSummary || changeSummary.files > 0;
   const isSettledResolvePending = !isRunning && !hasCurrentChangeSummary;
   const isChangeSummaryLoading = open && isSettledResolvePending && !showChangeSummary
-    && hasKnownChanges(hasChanges, loadedChangeSummary, thread.id) && changeSummaryStatus !== "error";
+    // A retry keeps the row on screen even when no changes are known yet, so it does not vanish mid-load.
+    && (hasKnownChanges(hasChanges, loadedChangeSummary, thread.id) || changeSummaryStatus === "loading")
+    && changeSummaryStatus !== "error";
   // The fallback summary has no line totals, so a failed load must say so rather than show nothing.
   const isChangeSummaryFailed = isSettledResolvePending && changeSummaryStatus === "error";
   useEffect(() => {
@@ -332,56 +335,78 @@ function useChangesState(thread: Thread) {
       clearTimeout(timer);
     };
   }, [
-    cachedSnapshotKey, cachedSnapshots, diffRevision, hasCurrentChangeSummary, isRunning, open, setSnapshots,
-    thread.id, thread.workspace_id,
+    cachedSnapshotKey, cachedSnapshots, diffRevision, hasCurrentChangeSummary, isRunning, open, retryCount,
+    setSnapshots, thread.id, thread.workspace_id,
   ]);
-  return { changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary };
+  const retryChangeSummary = useCallback(() => {
+    setChangeSummaryStatus("loading");
+    setRetryCount((count) => count + 1);
+  }, []);
+  return {
+    changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, retryChangeSummary, showChangeSummary,
+  };
 }
 
 /** Preserves the loaded summary and its status while the overview is closed. */
 export const { Provider: ChangesEntryState, useEntryState: useChangesEntryState } = createOverviewEntryState(useChangesState);
 
 function ChangesEntry() {
-  const { changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, showChangeSummary } =
-    useChangesEntryState();
+  const {
+    changeSummary, hasChanges, isChangeSummaryFailed, isChangeSummaryLoading, retryChangeSummary, showChangeSummary,
+  } = useChangesEntryState();
   const openChanges = useCallback(() => {
     executeCommand("changes.toggle");
   }, []);
   return (<ThreadOverviewWhen when={isChangeSummaryLoading || isChangeSummaryFailed || hasChanges}>
-    <Button
-      variant="ghost"
-      size="compact"
-      onClick={openChanges}
-      data-testid="workspace-menu-changes"
-      aria-label={`Changes, ${changedFilesLabel(changeSummary.files)}`}
-      className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between gap-2")}
-    >
-      <OverviewRowIcon>
-        <Diff />
-      </OverviewRowIcon>
-      <span className="text-fade min-w-0 grow text-ink">Changes</span>
-      <ThreadOverviewWhen when={isChangeSummaryLoading}>
-        <span
-          data-testid="thread-overview-change-loading"
-          aria-label="Loading changes"
-          className="animate-thread-overview-loading h-3 w-14 shrink-0 overflow-hidden rounded-sm bg-hover/45"
-        />
-      </ThreadOverviewWhen>
+    <div className="relative">
+      <Button
+        variant="ghost"
+        size="compact"
+        onClick={openChanges}
+        data-testid="workspace-menu-changes"
+        aria-label={`Changes, ${changedFilesLabel(changeSummary.files)}`}
+        className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between gap-2")}
+      >
+        <OverviewRowIcon>
+          <Diff />
+        </OverviewRowIcon>
+        <span className="text-fade min-w-0 grow font-medium text-ink">Changes</span>
+        <ThreadOverviewWhen when={isChangeSummaryLoading}>
+          <span
+            data-testid="thread-overview-change-loading"
+            aria-label="Loading changes"
+            className="animate-thread-overview-loading h-3 w-14 shrink-0 overflow-hidden rounded-sm bg-hover/45"
+          />
+        </ThreadOverviewWhen>
+        <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
+          <span
+            data-testid="thread-overview-change-summary"
+            aria-label={`${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
+            className="shrink-0 text-caption tabular-nums text-muted"
+          >
+            {`+${changeSummary.additions} −${changeSummary.deletions}`}
+          </span>
+        </ThreadOverviewWhen>
+      </Button>
+      {/* Sits over the row rather than inside it: a button cannot nest in the row's button. */}
       <ThreadOverviewWhen when={isChangeSummaryFailed}>
-        <span data-testid="thread-overview-change-failed" className="shrink-0 text-xs text-muted">
-          Unavailable
-        </span>
-      </ThreadOverviewWhen>
-      <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
         <span
-          data-testid="thread-overview-change-summary"
-          aria-label={`${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
-          className="shrink-0 text-xs tabular-nums text-muted"
+          data-testid="thread-overview-change-failed"
+          className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-caption text-muted"
         >
-          {`+${changeSummary.additions} −${changeSummary.deletions}`}
+          {/* Only Retry takes the pointer, so the rest of the text leaves the row's hover intact. */}
+          Couldn't load{" "}
+          <button
+            type="button"
+            data-testid="thread-overview-change-retry"
+            onClick={retryChangeSummary}
+            className={cn("pointer-events-auto", OVERVIEW_INLINE_ACTION_CLASS)}
+          >
+            Retry
+          </button>
         </span>
       </ThreadOverviewWhen>
-    </Button>
+    </div>
   </ThreadOverviewWhen>);
 }
 

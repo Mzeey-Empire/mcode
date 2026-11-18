@@ -117,7 +117,7 @@ function ThreadOverviewRepositoryRow({
               src={repository.faviconUrl}
               frameTestId="thread-overview-repository-favicon-frame"
               imageTestId="thread-overview-repository-favicon"
-              fallback={<GitBranch size={14} className="shrink-0 text-muted" />}
+              fallback={<GitBranch className="shrink-0 text-muted" />}
             />
           </OverviewRowIcon>
           <span className="text-fade font-medium">{label}</span>

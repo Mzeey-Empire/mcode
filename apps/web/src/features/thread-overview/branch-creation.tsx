@@ -105,7 +105,7 @@ function CreateThreadBranchDialogSession({
             <DialogTitle className="text-sm font-medium leading-none">
               {title}
             </DialogTitle>
-            <DialogDescription className="mt-1 max-w-[36ch] text-pretty text-xs leading-5 text-muted">
+            <DialogDescription className="mt-1 max-w-[36ch] text-pretty text-caption leading-5 text-muted">
               {description}
             </DialogDescription>
           </div>
@@ -113,7 +113,7 @@ function CreateThreadBranchDialogSession({
 
         <div className="px-5 py-4">
           <div className="space-y-1.5">
-            <label htmlFor="create-thread-branch" className="text-xs text-muted">
+            <label htmlFor="create-thread-branch" className="text-caption text-muted">
               Branch name
             </label>
             <Input
@@ -142,7 +142,7 @@ function CreateThreadBranchDialogSession({
             <div
               id={errorId}
               role="alert"
-              className="mt-3 break-words rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive"
+              className="mt-3 break-words rounded-md bg-destructive/10 px-3 py-2 text-caption text-destructive"
             >
               {error}
             </div>

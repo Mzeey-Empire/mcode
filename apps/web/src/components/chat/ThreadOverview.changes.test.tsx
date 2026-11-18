@@ -65,14 +65,28 @@ describe("ThreadOverview changes and branches", () => {
     expect(vi.mocked(mockTransport.getReviewState)).not.toHaveBeenCalled();
   });
 
-  it("says the Changes row is unavailable when its comparison fails", async () => {
+  it("says the Changes row could not load when its comparison fails", async () => {
     vi.mocked(mockTransport.getReviewComparison).mockResolvedValue({
       status: "failed", failure: { kind: "git-error", summary: "Git reported an error", detail: "fatal" },
     });
     render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={1400} />);
-    expect(await screen.findByTestId("thread-overview-change-failed")).toHaveTextContent("Unavailable");
+    expect(await screen.findByTestId("thread-overview-change-failed")).toHaveTextContent("Couldn't load");
     expect(screen.queryByTestId("thread-overview-change-loading")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-change-summary")).not.toBeInTheDocument();
+  });
+
+  it("re-runs the comparison when Retry is pressed after a failed load", async () => {
+    vi.mocked(mockTransport.getReviewComparison).mockResolvedValueOnce({
+      status: "failed", failure: { kind: "git-error", summary: "Git reported an error", detail: "fatal" },
+    }).mockResolvedValue({ status: "ready", comparison: {
+      files: [{ path: "notes.md", previousPath: null, changeType: "added", binary: false, additions: 2, deletions: 1, untracked: true }],
+      additions: 2, deletions: 1,
+    } });
+    const user = userEvent.setup();
+    render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={1400} />);
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId("thread-overview-change-summary")).toHaveAttribute("aria-label", "2 additions, 1 deletions");
+    expect(screen.queryByTestId("thread-overview-change-failed")).not.toBeInTheDocument();
   });
 
   it("keeps branch choices when the uncommitted comparison fails", async () => {

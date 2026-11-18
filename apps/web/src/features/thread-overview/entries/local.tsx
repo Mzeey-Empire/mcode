@@ -131,10 +131,9 @@ function LocalEntry({ thread }: { thread: Thread }) {
             <span className="text-fade font-medium">{modeLabel}</span>
           </span>
           <ChevronDown
-            size={13}
             aria-hidden
             className={cn(
-              "shrink-0 text-muted transition-transform duration-150",
+              "-mr-0.5 shrink-0 text-muted transition-transform duration-150",
               localOpen && "rotate-180",
             )}
           />
