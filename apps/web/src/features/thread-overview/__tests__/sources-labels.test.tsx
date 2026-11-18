@@ -109,6 +109,19 @@ describe("overview source labels", () => {
     expect(labels[2]).not.toMatch(/\(\d\)$/);
   });
 
+  it("numbers labels that differ only past what a chip can show", () => {
+    const a = "a".repeat(1000);
+    const z = "z".repeat(1000);
+    const labels = sourceLabels(sources(
+      `https://example.com/docs/${a}1${z}A`,
+      `https://example.com/docs/${a}2${z}A`,
+      `https://example.com/docs/${a}1${z}B`,
+      `https://example.com/docs/${a}2${z}B`,
+    ));
+    const numbers = labels.map((label) => label.match(/ \((\d)\)$/)?.[1]);
+    expect(numbers).toEqual(["1", "1", "2", "2"]);
+  });
+
   it("keeps the readable end for links that differ only by www or a trailing slash, numbered", () => {
     expect(sourceLabels(sources(
       "https://www.example.com/docs/getting-started",

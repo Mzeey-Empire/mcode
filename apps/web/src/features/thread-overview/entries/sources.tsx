@@ -127,12 +127,13 @@ export function sourceLabelParts(sources: readonly ThreadSource[]): SourceLabel[
 }
 
 /**
- * Labels that still read the same, such as a link and its www twin, or repetitive paths whose cuts
- * land on the same words, get " (n)" in source order, as terminal tabs that share a name do. The
- * number sits outside the fade, so the chips read apart however long their text is.
+ * Labels that still read the same where a chip can show them, such as a link and its www twin, or
+ * repetitive paths that differ only past the fade, get " (n)" in source order, as terminal tabs
+ * that share a name do. They are compared on the detail's first {@link MAX_DETAIL_LENGTH}
+ * characters, what a chip shows before it fades, and the number sits outside the fade.
  */
 function numberAlikeLabels(labels: readonly SourceLabel[]): SourceLabel[] {
-  const text = ({ host, detail }: SourceLabel) => `${host}/${detail}`;
+  const text = ({ host, detail }: SourceLabel) => `${host}/${detail.slice(0, MAX_DETAIL_LENGTH)}`;
   const totals = new Map<string, number>();
   for (const label of labels) totals.set(text(label), (totals.get(text(label)) ?? 0) + 1);
   const numbered = new Map<string, number>();
