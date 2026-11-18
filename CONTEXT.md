@@ -101,7 +101,8 @@ The small image that identifies a project in the sidebar, the new-thread
 breadcrumb, and the project chooser. A file the user chose inside the project
 wins. Otherwise Mcode looks for a favicon or logo in common places, such as
 `public/favicon.svg` or the icon an `index.html` links to. With neither, the
-project shows a monogram of its name's first letter. The icon always comes from
+project shows a badge tinted in the project's own colour with the first
+letters of its name, such as "OS" for `orderwise-sync`. The icon always comes from
 the workspace folder, so every worktree of a project shows the same one.
 _Avoid_: "favicon" for the general idea; a favicon is only one source.
 
