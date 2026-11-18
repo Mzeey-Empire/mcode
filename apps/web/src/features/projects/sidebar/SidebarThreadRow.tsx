@@ -724,32 +724,36 @@ const HIDDEN_ACTIONS: CSSProperties = { ...HIDDEN_LAYER, position: "absolute", i
  * The row corner says one thing: actions under the pointer or focus, else the status. Hidden
  * actions take no width, so an idle line fades at the row edge instead of short of an empty gap.
  * A running row offers no Close, so its status stays and only the options button joins it.
+ * When Close shows, the status keeps its icon ahead of the actions so the row keeps its meaning;
+ * a corner that only shows a time gives way entirely. The swap paints in one frame with no
+ * crossfade, because a mid-fade frame would draw "Close" over the status label.
  */
 function ThreadRowTrailingSlot({ status, ...props }: ThreadRowBodyProps & { status: React.ReactNode }) {
   const { isEditing, lifecycle, revealed } = props;
   if (isEditing) return null;
-  const keepStatus = lifecycle.closeHidden;
-  const actions = <ThreadRowActions {...props} />;
+  const swapped = revealed && !lifecycle.closeHidden;
+  const swappedLook = swapped ? statusLook(props.presentation) : null;
   return (
     <div className="relative flex max-w-[55%] shrink-0 items-center gap-1">
-      <div className="grid min-w-0 items-center justify-items-end">
-        <div data-testid="thread-status" style={revealed && !keepStatus ? HIDDEN_LAYER : undefined} className="col-start-1 row-start-1 flex min-w-0 max-w-full items-center gap-1 transition-opacity">
-          {status}
-        </div>
-        {!keepStatus && (
-          <div style={revealed ? undefined : HIDDEN_ACTIONS} className="col-start-1 row-start-1 flex items-center gap-1 transition-opacity">{actions}</div>
-        )}
+      <div data-testid="thread-status" className="flex min-w-0 max-w-full items-center gap-1 empty:hidden">
+        {swapped ? (swappedLook && <ThreadRowLookStatus look={swappedLook} iconOnly />) : status}
       </div>
-      {keepStatus && <div style={revealed ? undefined : HIDDEN_ACTIONS} className="flex items-center transition-opacity">{actions}</div>}
+      <div style={revealed ? undefined : HIDDEN_ACTIONS} className="flex items-center gap-1"><ThreadRowActions {...props} /></div>
     </div>
   );
+}
+
+/** The status look a row shows, or null when it shows a caption or nothing. A failed close reads as a caption. */
+function statusLook(presentation: ThreadRowPresentation): ThreadStatusLook | null {
+  if (presentation.completionFailure !== null) return null;
+  return (presentation.completing ? THREAD_STATUS_LOOK.Closed : presentation.look) ?? null;
 }
 
 function ThreadRowStatus({ thread, presentation, lifecycle, fallback }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "lifecycle"> & { fallback: React.ReactNode }) {
   if (presentation.completionFailure !== null) {
     return <ThreadRowCaption role="status" className="text-error">{presentation.completionFailure}</ThreadRowCaption>;
   }
-  const look = presentation.completing ? THREAD_STATUS_LOOK.Closed : presentation.look;
+  const look = statusLook(presentation);
   if (!look) {
     return hasStandingCaption(presentation, lifecycle)
       ? <ThreadRowStandingCaption thread={thread} presentation={presentation} lifecycle={lifecycle} />
@@ -758,8 +762,12 @@ function ThreadRowStatus({ thread, presentation, lifecycle, fallback }: Pick<Thr
   return <ThreadRowLookStatus look={look} />;
 }
 
-/** Icon then label in the icon's colour; the icon carries the name, so the label is hidden from assistive tech. */
-function ThreadRowLookStatus({ look }: { look: ThreadStatusLook }) {
+/**
+ * Icon then label in the icon's colour; the icon carries the name, so the label is hidden from
+ * assistive tech. `iconOnly` drops the label and keeps the named icon.
+ */
+function ThreadRowLookStatus({ look, iconOnly = false }: { look: ThreadStatusLook; iconOnly?: boolean }) {
+  if (iconOnly) return <StatusMark state={look.state} label={look.label} icon={look.icon} />;
   return (
     <>
       <StatusMark state={look.state} label={look.label} icon={look.icon} />

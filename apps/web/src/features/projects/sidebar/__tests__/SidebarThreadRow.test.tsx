@@ -82,20 +82,22 @@ describe("SidebarThreadRow", () => {
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });
 
-  it("swaps the status label for the row actions on hover", () => {
+  it("keeps the status icon and drops its label while the row actions show", () => {
     act(() => threadAttentionStore.getState().apply(finished("t1")));
     const row = renderThread();
-    const label = within(screen.getByTestId("thread-status")).getByText("Finished");
+    const status = () => screen.getByTestId("thread-status");
     const complete = screen.getByRole("button", { name: "Close Row title" });
-    expect(label).toBeVisible();
+    expect(within(status()).getByText("Finished")).toBeVisible();
     expect(complete).not.toBeVisible();
 
     fireEvent.mouseEnter(row);
-    expect(label).not.toBeVisible();
+    expect(within(status()).queryByText("Finished")).toBeNull();
+    expect(within(status()).getByRole("img", { name: "Finished" })).toBeVisible();
     expect(complete).toBeVisible();
+    expect(status().compareDocumentPosition(complete) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     fireEvent.mouseLeave(row);
-    expect(label).toBeVisible();
+    expect(within(status()).getByText("Finished")).toBeVisible();
     expect(complete).not.toBeVisible();
   });
 
@@ -147,6 +149,13 @@ describe("SidebarThreadRow", () => {
       expect(screen.getByTestId("thread-status")).toHaveTextContent(/^now$/);
     });
 
+    it("hides the time while the row actions show", () => {
+      const row = renderFlat();
+      fireEvent.mouseEnter(row);
+      expect(screen.getByTestId("thread-status")).toHaveTextContent(/^$/);
+      expect(screen.getByRole("button", { name: "Close Row title" })).toBeVisible();
+    });
+
     it("shows an unseen outcome over the time", () => {
       act(() => threadAttentionStore.getState().apply(finished("t1")));
       renderFlat();
@@ -194,7 +203,8 @@ describe("SidebarThreadRow", () => {
       fireEvent.mouseEnter(row);
       expect(close).toBeVisible();
       expect(close).toHaveTextContent("Close");
-      expect(screen.getByTestId("thread-status")).not.toBeVisible();
+      expect(screen.getByTestId("thread-status")).toHaveTextContent(/^$/);
+      expect(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Finished" })).toBeVisible();
       fireEvent.mouseLeave(row);
 
       act(() => row.focus());
