@@ -14,6 +14,9 @@ export const TASKKILL_TIMEOUT_MS = 5_000;
 /** Grace period between the soft and hard POSIX process-group signals. */
 export const PROCESS_GROUP_GRACE_MS = 500;
 
+/** How often a graceful group stop checks whether every member has exited. */
+const GROUP_POLL_MS = 25;
+
 /**
  * Kill a child process and its entire process tree.
  *
@@ -71,10 +74,27 @@ async function terminatePosixProcess(pid, signal, graceMs, useProcessGroup, chil
   signalPosixProcess(pid, signal, useProcessGroup);
   if (graceMs <= 0) return;
 
-  await waitForChildExitOrTimeout(child, graceMs);
-  if (child && isChildExited(child)) return;
-  if (!isProcessAlive(pid, useProcessGroup)) return;
+  if (useProcessGroup) {
+    // The leader can exit inside the grace while other members keep running, so
+    // only an empty group may skip the hard kill.
+    if (await waitForGroupExitOrTimeout(pid, graceMs)) return;
+  } else {
+    await waitForChildExitOrTimeout(child, graceMs);
+    if (child && isChildExited(child)) return;
+    if (!isProcessAlive(pid, false)) return;
+  }
   signalPosixProcess(pid, "SIGKILL", useProcessGroup);
+}
+
+/** Polls the owned process group; resolves true once it has no members, false when the grace ends first. */
+async function waitForGroupExitOrTimeout(pid, graceMs) {
+  const deadline = Date.now() + graceMs;
+  for (;;) {
+    if (!isProcessAlive(pid, true)) return true;
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return false;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(GROUP_POLL_MS, remainingMs)));
+  }
 }
 
 /** Waits for a child to exit, or for the graceful termination window to end. */

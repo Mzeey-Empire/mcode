@@ -379,9 +379,69 @@ export async function waitForProcessExit(pid, timeoutMs, options = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (processExited(target, processKill)) return;
+    if (target < 0 && onlyZombiesRemain(-target, platform)) return;
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(`Owned process tree ${pid} survived cleanup`);
+  throw new Error(`Owned process tree ${pid} survived cleanup${describeSurvivors(target, platform)}`);
+}
+
+/**
+ * A zombie has exited and holds no memory, ports, or files; it stays in its group
+ * only until its parent collects its exit status, which this harness cannot force.
+ * Any live member, or a list that cannot be read, keeps the group counted as running.
+ */
+function onlyZombiesRemain(group, platform) {
+  if (platform === "win32") return false;
+  let members;
+  try {
+    members = listProcesses(platform).filter((entry) => entry.group === group);
+  } catch {
+    return false;
+  }
+  return members.length > 0 && members.every((entry) => entry.state.startsWith("Z"));
+}
+
+/**
+ * Lists the owned group's (or process's) members still running, so a cleanup
+ * failure names what survived. CI keeps no process list after the job ends.
+ */
+function describeSurvivors(target, platform) {
+  if (platform === "win32") return "";
+  try {
+    const rows = listProcesses(platform)
+      .filter((entry) => (target < 0 ? entry.group === -target : entry.pid === target))
+      .map((entry) => `\n    ${entry.pid} [${entry.state}] ${entry.command.slice(0, 300)}`);
+    return rows.length > 0 ? `; still running:${rows.slice(0, 20).join("")}` : "; no member found when listing";
+  } catch (error) {
+    return `; could not list survivors: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+/** Reads every process's ID, group, state, and command; Linux reads /proc so minimal images need no `ps`. */
+function listProcesses(platform) {
+  if (platform !== "linux") {
+    return NodeChildProcess.execFileSync("ps", ["-eo", "pid=,pgid=,stat=,args="], { encoding: "utf8", timeout: 5_000 })
+      .split("\n")
+      .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/))
+      .filter((match) => match !== null)
+      .map(([, pid, group, state, command]) => ({ pid: Number(pid), group: Number(group), state, command }));
+  }
+  return NodeFS.readdirSync("/proc").filter((name) => /^\d+$/.test(name)).flatMap(readProcEntry);
+}
+
+function readProcEntry(pid) {
+  try {
+    const stat = NodeFS.readFileSync(`/proc/${pid}/stat`, "utf8");
+    // The command name sits in parentheses and may contain spaces, so fields are read after the last ")".
+    const [state, , group] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    const commandLine = NodeFS.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");
+    const command = commandLine || `(${stat.slice(stat.indexOf("(") + 1, stat.lastIndexOf(")"))})`;
+    return [{ pid: Number(pid), group: Number(group), state, command }];
+  } catch (error) {
+    // The process exited between listing /proc and reading it.
+    if (error?.code === "ENOENT" || error?.code === "ESRCH") return [];
+    throw error;
+  }
 }
 
 function processExitTarget(pid, useProcessGroup, platform) {

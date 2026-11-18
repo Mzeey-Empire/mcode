@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import {
@@ -8,6 +10,7 @@ import {
   isOwnedServerLock,
   resolveOwnedDesktopSpawnOptions,
   runPackagedReliabilityScenario,
+  waitForProcessExit,
 } from "../desktop-packaging/package-validation/desktop-reliability-test.mjs";
 
 function lock(pid, startedAt = `2026-01-01T00:00:0${pid}.000Z`) {
@@ -119,6 +122,94 @@ describe("packaged reliability cleanup", () => {
   it("detaches Desktop only on POSIX so its process group is owned", () => {
     expect(resolveOwnedDesktopSpawnOptions("linux")).toEqual({ detached: true });
     expect(resolveOwnedDesktopSpawnOptions("win32")).toEqual({ detached: false });
+  });
+});
+
+// Windows has no process groups; there the cleanup kills the tree with taskkill.
+describe.skipIf(process.platform === "win32")("packaged reliability cleanup of a real process group", () => {
+  const groups = [];
+  afterEach(() => {
+    for (const pid of groups.splice(0)) {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch (error) {
+        if (error?.code !== "ESRCH") throw error;
+      }
+    }
+  });
+
+  async function startOwnedGroup(script) {
+    const child = NodeChildProcess.spawn("sh", ["-c", script], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+    groups.push(child.pid);
+    await new Promise((resolvePromise, reject) => {
+      let output = "";
+      child.once("error", reject);
+      child.once("exit", (code, signal) => reject(new Error(`Group leader exited before its member started (code ${code}, signal ${signal})`)));
+      child.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+        if (output.includes("member-ready")) resolvePromise();
+      });
+    });
+    return child;
+  }
+
+  it("hard-kills members that outlive a leader which exits on SIGTERM", async () => {
+    // Like the Desktop launcher, the leader exits inside the grace; the member ignores SIGTERM like a slow Electron child.
+    const child = await startOwnedGroup(
+      `sh -c 'trap "" TERM; echo member-ready; exec sleep 30' & trap 'exit 0' TERM; while :; do sleep 0.05; done`,
+    );
+    const runRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-cleanup-test-"));
+    await cleanupOwnedRun(child, NodePath.join(runRoot, "data"), runRoot);
+    expect(() => process.kill(-child.pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+    expect(NodeFS.existsSync(runRoot)).toBe(false);
+  }, 15_000);
+
+  it("names the members still running when a group survives cleanup", async () => {
+    const child = await startOwnedGroup("echo member-ready; exec sleep 30");
+    await expect(waitForProcessExit(child.pid, 200, { useProcessGroup: true }))
+      .rejects.toThrow(new RegExp(`survived cleanup; still running:\\n\\s+${child.pid} \\[\\S+\\] sleep 30`));
+  });
+
+  const parents = [];
+  afterEach(() => {
+    for (const parent of parents.splice(0)) parent.kill("SIGKILL");
+  });
+
+  /**
+   * Starts a group whose leader has exited but stays a zombie: its parent sleeps
+   * without collecting it, like a launcher or server whose parent is slow to reap.
+   * With `liveMember`, the leader first forks a member that keeps running.
+   */
+  async function startGroupWithZombieLeader({ liveMember }) {
+    const startMember = liveMember ? `my $m = fork; if (!$m) { exec "sleep", "30" } print W "$m\\n";` : `print W "\\n";`;
+    const script = `$| = 1; pipe(R, W); my $p = fork; if (!$p) { close R; setpgrp(0, 0); ${startMember} close W; exit 0 } close W; my $m = <R>; chomp $m; print "$p $m\\n"; sleep 30`;
+    const parent = NodeChildProcess.spawn("perl", ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+    parents.push(parent);
+    const line = await new Promise((resolvePromise, reject) => {
+      let output = "";
+      parent.once("error", reject);
+      parent.once("exit", (code, signal) => reject(new Error(`Zombie parent exited early (code ${code}, signal ${signal})`)));
+      parent.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+        if (output.includes("\n")) resolvePromise(output.split("\n")[0]);
+      });
+    });
+    const [leader, member] = line.trim().split(" ").map(Number);
+    groups.push(leader);
+    // The group must exist, or a missing group would pass the zombie-only test without the fix.
+    expect(() => process.kill(-leader, 0)).not.toThrow();
+    return { leader, member };
+  }
+
+  it("treats a group whose only member is an unreaped zombie as gone", async () => {
+    const { leader } = await startGroupWithZombieLeader({ liveMember: false });
+    await expect(waitForProcessExit(leader, 2_000, { useProcessGroup: true })).resolves.toBeUndefined();
+  });
+
+  it("still fails when a zombie leader's group keeps a live member", async () => {
+    const { leader, member } = await startGroupWithZombieLeader({ liveMember: true });
+    await expect(waitForProcessExit(leader, 300, { useProcessGroup: true }))
+      .rejects.toThrow(new RegExp(`survived cleanup; still running:[\\s\\S]*\\n\\s+${member} \\[S\\S*\\] sleep 30`));
   });
 });
 
