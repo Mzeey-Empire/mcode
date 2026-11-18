@@ -11,8 +11,11 @@ type HoldPhase = "idle" | "holding" | "done";
 export interface HoldToRestartButtonProps {
   /** Accessible name; says what the restart ends. */
   readonly accessibleName: string;
-  /** Runs once when a press is held for {@link HOLD_TO_RESTART_MS}. */
-  readonly onCommit: () => void;
+  /**
+   * Runs when a press is held for {@link HOLD_TO_RESTART_MS}; resolves true when the restart began. Until it settles
+   * the button refuses another hold, and when it resolves false the button can be held again.
+   */
+  readonly onCommit: () => Promise<boolean>;
   readonly className?: string;
 }
 
@@ -32,18 +35,28 @@ const FILL_DONE_CLASS = "[clip-path:inset(0)] transition-none";
 export function HoldToRestartButton({ accessibleName, onCommit, className }: HoldToRestartButtonProps) {
   const [phase, setPhase] = useState<HoldPhase>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mounted = useRef(true);
 
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (timer.current) clearTimeout(timer.current);
+    };
   }, []);
+
+  const commit = async () => {
+    setPhase("done");
+    const started = await onCommit();
+    if (!started && mounted.current) setPhase("idle");
+  };
 
   const start = () => {
     if (timer.current || phase === "done") return;
     setPhase("holding");
     timer.current = setTimeout(() => {
       timer.current = null;
-      setPhase("done");
-      onCommit();
+      void commit();
     }, HOLD_TO_RESTART_MS);
   };
 

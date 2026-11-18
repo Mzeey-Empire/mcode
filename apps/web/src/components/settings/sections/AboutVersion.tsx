@@ -158,7 +158,8 @@ type DesktopAppBridge = NonNullable<Window["desktopBridge"]>["app"];
 interface VersionActions {
   readonly check: () => void;
   readonly download: () => void;
-  readonly restart: () => void;
+  /** Resolves true when the restart began. */
+  readonly restart: () => Promise<boolean>;
   /** Restarts only if the server still counts no agents; otherwise records the count so the row asks for a hold. */
   readonly restartIfIdle: () => void;
   readonly installWhenIdle: () => void;
@@ -186,6 +187,7 @@ function useVersionActions(
       return false;
     });
     if (!started) await readBackStatus();
+    return started;
   };
   const download = readBackOnFailure("downloadUpdate", () => app.downloadUpdate());
   const installWhenIdle = readBackOnFailure("installWhenIdle", () => app.installWhenIdle());
@@ -209,7 +211,7 @@ function useVersionActions(
   return {
     check: () => void check(),
     download: () => void download(),
-    restart: () => void restart(),
+    restart,
     restartIfIdle: () => void restartIfIdle(),
     installWhenIdle: () => void installWhenIdle(),
     cancelWhenIdle: () => void cancelWhenIdle(),

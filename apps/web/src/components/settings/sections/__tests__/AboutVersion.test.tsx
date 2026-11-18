@@ -173,6 +173,24 @@ describe("About version row restart", () => {
     expect(app.installUpdate).toHaveBeenCalledTimes(1);
   });
 
+  it("commits a second held Retry after the first install fails", async () => {
+    const failed: UpdateStatus = { state: "error", message: "Update installation blocked: busy", failedOperation: "install" };
+    app.installUpdate.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    app.getUpdateStatus.mockResolvedValueOnce(failed).mockResolvedValueOnce(failed);
+    setRunningAgents(1);
+    setStatuses(failed);
+    render(<AboutSection />);
+    const hold = screen.getByRole("button", { name: "Hold to restart. Ends 1 running agent." });
+
+    fireEvent.pointerDown(hold, { button: 0 });
+    await act(() => vi.advanceTimersByTimeAsync(HOLD_TO_RESTART_MS));
+    fireEvent.pointerUp(hold);
+    fireEvent.pointerDown(hold, { button: 0 });
+    await act(() => vi.advanceTimersByTimeAsync(HOLD_TO_RESTART_MS));
+
+    expect(app.installUpdate).toHaveBeenCalledTimes(2);
+  });
+
   // Fails if "Install when they finish" does not defer the install.
   it("defers the install until agents finish", () => {
     setRunningAgents(1);
