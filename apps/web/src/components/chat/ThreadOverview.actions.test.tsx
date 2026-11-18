@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -43,6 +43,7 @@ vi.mock("./CreatePrDialog", async () =>
   (await import("./__tests__/thread-overview-mocks")).mockCreatePrDialogModule(),
 );
 
+import { TERMINAL_MAX_PER_SCOPE } from "@mcode/contracts/models/terminal";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { createRightPanelState, useDiffStore } from "@/stores/diffStore";
 import { useTerminalStore } from "@/features/terminal";
@@ -53,6 +54,7 @@ import { ThreadOverview } from "./ThreadOverview";
 describe("ThreadOverview actions", () => {
   beforeEach(() => {
     resetThreadOverviewState();
+    useTerminalStore.setState({ terminals: {} });
   });
 
   it("starting an idle Action reveals the panel and selects its terminal tab", async () => {
@@ -196,5 +198,24 @@ describe("ThreadOverview actions", () => {
     const row = await screen.findByRole("button", { name: "Open Success, approval required" });
     expect(row).toHaveTextContent("Approval required");
     expect(row).not.toHaveTextContent("Run");
+    expect(within(row).getByTestId("action-menu-badge").dataset.badge).toBe("pending");
+  });
+
+  it("at the terminal cap blocks the row's Action but still opens the menu, which says why", async () => {
+    const user = userEvent.setup();
+    const records = Array.from({ length: TERMINAL_MAX_PER_SCOPE }, (_, index) => ({
+      id: `pty-${index}`,
+      threadId: "thread-1",
+      label: `Shell ${index}`,
+    }));
+    useTerminalStore.setState({ terminals: { "thread-1": records } });
+    render(<ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} />);
+
+    expect(await screen.findByRole("button", { name: "Run Success" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Project actions" }));
+
+    expect(await screen.findByRole("menuitem", { name: /Success/ }))
+      .toHaveAccessibleDescription(`${TERMINAL_MAX_PER_SCOPE} terminals are open. Close one to open another.`);
+    expect(vi.mocked(mockTransport.startWorkspaceAction)).not.toHaveBeenCalled();
   });
 });

@@ -52,20 +52,26 @@ function liveStatus(run: WorkspaceEnvironmentActionRun | null): LiveStatus | nul
   return run?.status === "running" || run?.status === "awaiting-approval" ? run.status : null;
 }
 
+const HINT_TONE_CLASS = "shrink-0 text-caption text-muted group-hover/action:text-ink group-focus-visible/action:text-ink";
+
 /**
  * The main part's trailing hint. Unlike the menu's, it shows at rest, so the row reads as an action
  * rather than a picker like the rows below it. A live Action names its state instead, and on hover
- * says the click now opens its terminal.
+ * or focus says the click now opens its terminal. Both labels share one grid cell, so the hint keeps
+ * the wider one's width and the Action's name does not shift as they swap.
  */
 function ProjectActionHint({ status }: { readonly status: LiveStatus | null }) {
-  const hintClass = "flex shrink-0 items-center gap-1 text-caption text-muted group-hover/action:text-ink";
   if (status === null) {
-    return <span aria-hidden className={hintClass}><Play className="size-3" />Run</span>;
+    return <span aria-hidden className={cn(HINT_TONE_CLASS, "flex items-center gap-1")}><Play className="size-3" />Run</span>;
   }
   return (
-    <span aria-hidden className={hintClass}>
-      <span className="group-hover/action:hidden">{LIVE_STATUS_LABEL[status]}</span>
-      <span className="hidden items-center gap-1 group-hover/action:flex"><SquareTerminal className="size-3" />Open</span>
+    <span aria-hidden className={cn(HINT_TONE_CLASS, "grid justify-items-end")}>
+      <span className="col-start-1 row-start-1 group-hover/action:invisible group-focus-visible/action:invisible">
+        {LIVE_STATUS_LABEL[status]}
+      </span>
+      <span className="invisible col-start-1 row-start-1 flex items-center gap-1 group-hover/action:visible group-focus-visible/action:visible">
+        <SquareTerminal className="size-3" />Open
+      </span>
     </span>
   );
 }
@@ -91,7 +97,7 @@ function ProjectActionMain({ action, run, capReason, onRun, onOpen }: {
       className={cn(OVERVIEW_ROW_CLASS, "group/action min-w-0 flex-1 justify-start pr-2 hover:bg-transparent")}
     >
       <OverviewRowIcon>
-        <ActionMenuGlyph action={action} running={status === "running"} />
+        <ActionMenuGlyph action={action} status={status} />
       </OverviewRowIcon>
       <span className="min-w-0 flex-1 text-fade font-medium">{action.name}</span>
       <ProjectActionHint status={status} />

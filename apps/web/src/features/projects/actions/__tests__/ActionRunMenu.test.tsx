@@ -53,6 +53,14 @@ describe("ActionRunMenu", () => {
     expect(props.onRun).not.toHaveBeenCalled();
   });
 
+  it("marks an action waiting for approval with the needs-you ring and opens its terminal", async () => {
+    const { user, props } = await openMenu({ runsByActionId: new Map([["dev", runOf("dev", "awaiting-approval")]]) });
+    expect(screen.getAllByTestId("action-menu-badge").map((badge) => badge.dataset.badge)).toEqual(["pending"]);
+
+    await user.click(screen.getByTestId("project-action-dev"));
+    expect(props.onOpen).toHaveBeenCalledWith("dev");
+  });
+
   it("starts an idle action", async () => {
     const { user, props } = await openMenu();
     await user.click(screen.getByTestId("project-action-test"));
