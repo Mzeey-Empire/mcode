@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useRef, useState } from "react";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import type { ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import { MENU_LIST_CLASS } from "@/components/ui/menu-row";
@@ -117,15 +117,25 @@ function PullRequestMenuItem({ pr, threadId, numberWidth }: { pr: ThreadPullRequ
  */
 export function PullRequestListMenu({ handle }: { handle: PullRequestListHandle }) {
   const [open, setOpen] = useState(false);
+  // A list the pointer opened must not pull focus back to its chip when it closes, or the chip
+  // draws a stray focus ring while the pointer is elsewhere. A keyboard-opened list returns focus.
+  const openedByHover = useRef(false);
   useHoldThreadMenuOpen(open);
   return (
-    <MenuPrimitive.Root handle={handle} modal={false} onOpenChange={setOpen}>
-      {({ payload }) => <PullRequestListPopup payload={payload} />}
+    <MenuPrimitive.Root
+      handle={handle}
+      modal={false}
+      onOpenChange={(next, details) => {
+        if (next) openedByHover.current = details.reason === "trigger-hover";
+        setOpen(next);
+      }}
+    >
+      {({ payload }) => <PullRequestListPopup payload={payload} returnFocus={() => !openedByHover.current} />}
     </MenuPrimitive.Root>
   );
 }
 
-function PullRequestListPopup({ payload }: { payload: PullRequestListPayload | undefined }) {
+function PullRequestListPopup({ payload, returnFocus }: { payload: PullRequestListPayload | undefined; returnFocus: () => boolean }) {
   if (!payload) return null;
   const numberWidth = pullRequestNumberWidth(payload.ranked);
   return (
@@ -134,6 +144,7 @@ function PullRequestListPopup({ payload }: { payload: PullRequestListPayload | u
         {/* A hover open focuses the popup itself, which Chromium can match as :focus-visible after typing;
             its PR lines carry the visible focus, so the surface draws no ring. */}
         <MenuPrimitive.Popup
+          finalFocus={returnFocus}
           className={cn("pointer-events-auto w-80 max-h-[min(var(--available-height),24rem)] overflow-hidden outline-none", MENU_LIST_CLASS, POPOVER_SURFACE_CLASS, POPOVER_FADE_CLASS)}
         >
           {/* The fade masks only this inner scroller, so the surface and its border stay whole. It
