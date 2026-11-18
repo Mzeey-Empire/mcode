@@ -418,7 +418,8 @@ function ClosedThreadRowBody(props: ThreadRowBodyProps) {
         <div className="relative flex shrink-0 items-center gap-1">
           <ClosedRowCleanupStatus presentation={presentation} lifecycle={lifecycle} />
           {presentation.cleanupBlocked && <ThreadCleanupRetry thread={thread} lifecycle={lifecycle} />}
-          <div style={props.revealed ? undefined : HIDDEN_ACTIONS} className="flex items-center gap-1 transition-opacity">
+          {/* No crossfade: a mid-fade frame draws "Restore" over the end of the title. */}
+          <div style={props.revealed ? undefined : HIDDEN_ACTIONS} className="flex items-center gap-1">
             <ThreadLifecycleAction thread={thread} presentation={presentation} lifecycle={lifecycle} />
             <ThreadRowOptions {...props} />
           </div>
