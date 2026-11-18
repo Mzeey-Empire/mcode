@@ -84,7 +84,7 @@ describe("SidebarList thread menu", () => {
   });
 
   it.each([
-    [null, "Use setting"],
+    [null, "App default"],
     [true, "Close when PRs merge"],
     [false, "Keep open"],
   ] as const)("checks the matching auto-close choice for override %s", async (override, checkedName) => {
@@ -97,18 +97,18 @@ describe("SidebarList thread menu", () => {
   });
 
   it.each([
-    [false, "Off"],
-    [true, "On"],
-  ] as const)("shows the resolved global value %s as %s beside Use setting", async (global, label) => {
+    [false, "Stays open"],
+    [true, "Closes on merge"],
+  ] as const)("shows the resolved global value %s as %s beside App default", async (global, label) => {
     setGlobalCompleteOnMerge(global);
     seedThread({ auto_complete_on_merge: null });
     await openSubmenu(user, "Auto-close behavior");
 
-    expect(await screen.findByRole("menuitemradio", { name: /Use setting/ })).toHaveTextContent(label);
+    expect(await screen.findByRole("menuitemradio", { name: /App default/ })).toHaveTextContent(label);
   });
 
   it.each([
-    ["Use setting", true, null],
+    ["App default", true, null],
     ["Close when PRs merge", null, true],
     ["Keep open", null, false],
   ] as const)("saves %s as override %s -> %s", async (choice, from, saved) => {
@@ -140,7 +140,7 @@ describe("SidebarList thread menu", () => {
     await act(async () => {});
 
     expect(useWorkspaceStore.getState().threads[0]?.auto_complete_on_merge).toBeNull();
-    expect(await screen.findByRole("menuitemradio", { name: /Use setting/ })).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByRole("menuitemradio", { name: /App default/ })).toHaveAttribute("aria-checked", "true");
     expect(await screen.findByRole("menuitemradio", { name: /Keep open/ })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("alert")).toHaveTextContent('Unrecognized key: "autoCompleteOnMerge"');
   });

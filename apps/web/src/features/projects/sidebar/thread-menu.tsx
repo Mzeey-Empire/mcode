@@ -195,8 +195,8 @@ function AutoCloseSubmenu({ thread }: { thread: Thread }) {
       <DropdownMenuSubTrigger label="Auto-close behavior" />
       <DropdownMenuSubContent className="min-w-40">
         <DropdownMenuItem
-          label="Use setting"
-          trailing={<span className="text-muted">{globalValue ? "On" : "Off"}</span>}
+          label="App default"
+          trailing={<span className="text-muted">{globalValue ? "Closes on merge" : "Stays open"}</span>}
           checked={current === null}
           closeOnClick={false}
           onClick={() => choose(null)}
