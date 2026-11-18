@@ -10,7 +10,7 @@ import type { SettingsService } from "../../settings/settings-service.js";
 import { subscribeThreadActivity } from "../persistence/thread-activity.js";
 
 /** Facts that can change whether a thread qualifies for automatic completion. */
-export type AutoCompleteDecisionInput = Pick<Thread,
+export type AutoCompleteStateInput = Pick<Thread,
   "deleted_at" | "user_completed_at" | "auto_complete_on_merge" | "auto_complete_paused_at" | "pull_requests"
 > & {
   attention: ThreadAttention | null;
@@ -33,7 +33,7 @@ export type AutoCompleteDecisionInput = Pick<Thread,
 export type AutoCompleteState = "inactive" | "off" | "held" | "waiting-for-merge" | "waiting-for-user" | "ready";
 
 /** Explain the auto-complete state from the current durable facts. */
-export function autoCompleteState(facts: AutoCompleteDecisionInput): AutoCompleteState {
+export function autoCompleteState(facts: AutoCompleteStateInput): AutoCompleteState {
   if (facts.deleted_at !== null || facts.user_completed_at !== null) return "inactive";
   if (!effectiveAutoCompleteOnMerge(facts, facts.completeOnPrMerge)) return "off";
   if (facts.auto_complete_paused_at !== null) return "held";
@@ -71,6 +71,7 @@ export class ThreadAutoCompleteService {
       this.attention.onPublished(hint),
       this.threads.onAutoCompleteOverrideChanged(hint),
       this.funnel.onChanged(hint),
+      // Retry refused completion even when activity leaves the deduplicated attention value unchanged.
       subscribeThreadActivity(hint),
       this.settings.on("change", (next) => {
         const nextEnabled = next.thread.completion.completeOnPrMerge;

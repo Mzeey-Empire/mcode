@@ -2,7 +2,7 @@
 
 The sidebar is derived on the client from a full thread index. The server owns
 four facts the sidebar reads: activity time, linked pull requests, completion,
-and the auto-complete pause. It knows nothing about layout. This page records
+and the auto-complete hold. It knows nothing about layout. This page records
 why each piece sits where it does and the traps a change can fall into.
 
 ## Activity time
@@ -117,7 +117,7 @@ forgetting and re-linking the same PR keeps the hold. Activity,
 the thread's setting, removing links, and title or URL changes do not release it.
 The hold leaves the override intact and is stored as `auto_complete_paused_at`.
 Older builds sharing the database under [ADR 0030](../../adr/0030-shared-database-with-ledger-guard-and-compatibility-floor.md)
-still clear it on activity.
+still clear the hold on activity, writes to the thread's setting, and forgotten links.
 
 - The thread's `auto_complete_on_merge` override wins over the global
   `thread.completion.completeOnPrMerge` setting. Null inherits.
