@@ -664,7 +664,7 @@ function ThreadRowBranch({ thread, stale }: { thread: WorkspaceThread; stale: bo
   return (
     <div
       aria-label={`Branch, ${checkoutLabel}`}
-      className={cn("text-fade min-w-0 flex-1 font-mono", stale && "text-error line-through")}
+      className={cn("text-fade min-w-0 flex-1 font-mono", stale && "text-status-label-error line-through")}
     >
       {checkoutLabel}
     </div>
@@ -706,7 +706,7 @@ function ThreadModeIcon({ thread, stale }: { thread: WorkspaceThread; stale: boo
         <div
           aria-label={`${label} mode`}
           data-testid={isWorktree ? `thread-worktree-indicator-${thread.id}` : undefined}
-          className={cn("flex h-4 w-4 shrink-0 items-center justify-center", stale && "text-error")}
+          className={cn("flex h-4 w-4 shrink-0 items-center justify-center", stale && "text-status-label-error")}
         >
           {isWorktree ? <WorktreeModeIcon size={12} aria-hidden /> : <Laptop size={12} aria-hidden />}
         </div>
