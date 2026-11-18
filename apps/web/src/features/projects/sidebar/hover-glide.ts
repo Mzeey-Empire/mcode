@@ -70,6 +70,7 @@ export class HoverGlide {
   private row: HTMLElement | null = null;
   private box: HighlightBox | null = null;
   private pointer: { x: number; y: number } | null = null;
+  private heldRow: HTMLElement | null = null;
   private readonly detachLayout: () => void;
   private readonly menuObserver: MutationObserver;
 
@@ -132,12 +133,16 @@ export class HoverGlide {
 
   // A menu opening holds the fill on its row; closing returns it to the row under the pointer.
   private readonly onMenuChange = (): void => {
-    const row = this.menuRow() ?? (this.pointer ? hoverRowAt(document.elementFromPoint(this.pointer.x, this.pointer.y)) : null);
+    this.heldRow = this.content.querySelector<HTMLElement>(MENU_OPEN_ROW);
+    const row = this.heldRow ?? (this.pointer ? hoverRowAt(document.elementFromPoint(this.pointer.x, this.pointer.y)) : null);
     if (row !== this.row) this.moveTo(row, this.row && row ? "glide" : "appear");
   };
 
+  // Cached from the observer so pointer moves never query the list. The virtual list can recycle
+  // the held row's element, so a detached one is looked up again.
   private menuRow(): HTMLElement | null {
-    return this.content.querySelector<HTMLElement>(MENU_OPEN_ROW);
+    if (this.heldRow?.isConnected === false) this.heldRow = this.content.querySelector<HTMLElement>(MENU_OPEN_ROW);
+    return this.heldRow;
   }
 
   private moveTo(row: HTMLElement | null, move: HighlightMove): void {
