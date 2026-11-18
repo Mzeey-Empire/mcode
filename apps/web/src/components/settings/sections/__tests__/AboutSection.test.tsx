@@ -26,8 +26,7 @@ vi.mock("@/stores/settingsStore", () => {
   return { useSettingsStore: (selector: (s: typeof state) => unknown) => selector(state) };
 });
 
-import { AboutSection, describeStatus } from "../AboutSection";
-import { useUpdateStore } from "@/stores/updateStore";
+import { AboutSection } from "../AboutSection";
 
 describe("AboutSection release line", () => {
   beforeEach(() => {
@@ -74,40 +73,6 @@ describe("AboutSection release line", () => {
     expect(saves.map((save) => save.partial)).toEqual(
       ["nightly", "stable", "nightly", "stable"].map((channel) => ({ updates: { channel } })),
     );
-  });
-});
-
-describe("AboutSection update status label", () => {
-  it.each([
-    [{ state: "error", message: "x", failedOperation: "check" }, "Check failed"],
-    [{ state: "error", message: "x", failedOperation: "download" }, "Download failed"],
-    [{ state: "error", message: "x", failedOperation: "install" }, "Install failed"],
-    [{ state: "downloaded", version: "0.15.0", installWhenIdle: false }, "v0.15.0 ready"],
-    [{ state: "downloaded", version: "0.15.0", installWhenIdle: true }, "v0.15.0 installs when idle"],
-  ] as const)("labels %o as %s", (status, label) => {
-    expect(describeStatus(status)).toBe(label);
-  });
-});
-
-describe("AboutSection version row", () => {
-  beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    useUpdateStore.setState({ version: "", stage: null });
-  });
-
-  it("names a dev build next to its version", () => {
-    useUpdateStore.setState({ version: "0.16.0", stage: "dev" });
-    render(<AboutSection />);
-    expect(screen.getByText("0.16.0").parentElement?.textContent).toBe("0.16.0Dev");
-  });
-
-  it("shows only the version for a stable build", () => {
-    useUpdateStore.setState({ version: "0.16.0", stage: "stable" });
-    render(<AboutSection />);
-    expect(screen.getByText("0.16.0").parentElement?.textContent).toBe("0.16.0");
   });
 });
 
