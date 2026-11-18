@@ -103,7 +103,7 @@
     "--color-light-info": "var(--color-blue-700)",
     "--color-button-destructive-hover": "var(--color-clay-400)",
     "--color-light-button-destructive-hover": "var(--color-clay-700)",
-    "--color-button-secondary-hover": "var(--color-neutral-500)",
+    "--color-button-secondary-hover": "color-mix(in oklch, var(--color-neutral-100) 18%, transparent)",
     "--color-light-button-secondary-hover": "var(--color-neutral-200)",
     "--color-violet-50": "oklch(98.5% 0.009 293)",
     "--color-violet-100": "oklch(95.5% 0.025 293)",
