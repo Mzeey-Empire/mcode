@@ -11,6 +11,25 @@ import { Globe } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
+function sourceHost(url: URL): string {
+  return url.hostname.replace(/^www\./, "");
+}
+
+/**
+ * Names each source by its host, adding the first path segment when another source shares the
+ * host, so two links on one site stay distinguishable without hovering.
+ */
+export function sourceLabels(sources: readonly ThreadSource[]): string[] {
+  const urls = sources.map((source) => new URL(source.url));
+  const hostCounts = new Map<string, number>();
+  for (const url of urls) hostCounts.set(sourceHost(url), (hostCounts.get(sourceHost(url)) ?? 0) + 1);
+  return urls.map((url) => {
+    const host = sourceHost(url);
+    const segment = url.pathname.split("/").find((part) => part !== "");
+    return (hostCounts.get(host) ?? 0) > 1 && segment ? `${host}/${segment}` : host;
+  });
+}
+
 interface ThreadOverviewSourcesProps {
   sources: ThreadSource[];
   onOpen: (event: React.MouseEvent, url: string) => void;
@@ -18,40 +37,40 @@ interface ThreadOverviewSourcesProps {
 
 /**
  * Renders the deduped external links the assistant produced this thread as a
- * compact favicon grid. Each chip shows its full URL on hover and reuses the
+ * wrapping row of favicon and host chips. Each chip shows its full URL on hover and reuses the
  * standard link-open behavior (Ctrl/Cmd+click opens in the in-app preview,
  * plain click opens the system browser).
  */
 function ThreadOverviewSources({ sources, onOpen }: ThreadOverviewSourcesProps) {
+  const labels = useMemo(() => sourceLabels(sources), [sources]);
   if (sources.length === 0) return null;
 
   return (
-    <div data-testid="thread-overview-sources" className="flex w-full flex-col gap-1.5 px-3 py-1.5">
-      <span className="text-xs font-medium text-muted">
-        Sources
-      </span>
+    <div data-testid="thread-overview-sources" className="flex w-full flex-col px-3 pb-2">
+      <div className="flex h-6 items-center text-caption font-medium text-muted">Sources</div>
       <div className="flex flex-wrap gap-1">
-        {sources.map((source) => (
+        {sources.map((source, index) => (
           <Tooltip key={source.url}>
             <TooltipTrigger
               render={
                 <Button
                   variant="ghost"
-                  size="icon-compact"
+                  size="compact"
                   type="button"
                   aria-label={source.url}
                   data-testid="thread-overview-source"
                   onClick={(event) => onOpen(event, source.url)}
-                  className="size-6 rounded-md hover:bg-hover/50"
+                  className="h-6 max-w-40 gap-1.5 rounded-md px-1.5 text-caption text-muted hover:bg-hover/50 hover:text-ink"
                 >
                   <SiteFavicon
                     src={source.faviconUrl}
-                    fallback={<Globe size={13} className="text-muted" />}
+                    fallback={<Globe className="size-3.5 text-muted" />}
                   />
+                  <span className="text-fade min-w-0">{labels[index]}</span>
                 </Button>
               }
             />
-            <TooltipContent side="top" className="max-w-xs break-all text-xs">
+            <TooltipContent side="top" className="max-w-xs break-all text-caption">
               {source.url}
             </TooltipContent>
           </Tooltip>

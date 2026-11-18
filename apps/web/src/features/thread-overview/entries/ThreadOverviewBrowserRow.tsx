@@ -59,7 +59,7 @@ function PageGlyph({ state }: { state: BrowserRowState }) {
   if (state.kind === "server-stopped") {
     return <span className="size-2 shrink-0 rounded-full bg-error" aria-hidden />;
   }
-  return <SiteFavicon src={state.page.faviconUrl} fallback={<Globe size={14} className="text-muted" />} />;
+  return <SiteFavicon src={state.page.faviconUrl} fallback={<Globe className="text-muted" />} />;
 }
 
 function RowText({ state }: { state: BrowserRowState }) {
@@ -67,9 +67,10 @@ function RowText({ state }: { state: BrowserRowState }) {
   if (state.kind === "open") {
     return (
       <>
-        <span className="min-w-0 text-fade font-medium">{page.title}</span>
-        <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-xs tabular-nums text-muted">
-          {page.host}
+        <span className="min-w-0 shrink-[2] text-fade font-medium">{page.title}</span>
+        {/* The title gives way first: the host says which site the Browser is on, so it fades last. */}
+        <span className="ml-auto flex min-w-0 items-center gap-2 font-mono text-caption tabular-nums text-muted">
+          <span className="min-w-0 text-fade">{page.host}</span>
           {state.otherPages > 0 ? <span data-testid="thread-overview-browser-more">+{state.otherPages}</span> : null}
         </span>
       </>
@@ -81,7 +82,7 @@ function RowText({ state }: { state: BrowserRowState }) {
     : `${state.tile.name} isn't running`;
   return (
     <>
-      <span className="shrink-0 font-medium">{lead}</span>
+      <span className="min-w-0 text-fade font-medium">{lead}</span>
       {state.kind === "server-stopped" ? null : (
         <span className="min-w-0 text-fade text-muted">{page.title}</span>
       )}
@@ -96,7 +97,7 @@ function RowAction({ children, onPress, loading = false }: { children: ReactNode
       variant="subtle"
       shape="round"
       size="compact"
-      className="h-6 shrink-0 px-2.5 text-xs"
+      className="h-6 shrink-0 px-2.5 text-caption"
       loading={loading}
       onClick={onPress}
     >

@@ -80,7 +80,8 @@ describe("ThreadOverview subagents", () => {
 
     const summary = screen.getByTestId("thread-overview-subagents");
     expect(summary).toHaveAccessibleName("Subagents, 1 active, 0 done");
-    expect(summary).toHaveTextContent("1 active · 0 done");
+    expect(summary).toHaveTextContent("Subagents1 active");
+    expect(summary).not.toHaveTextContent("done");
     expect(summary).not.toHaveTextContent("total");
     expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(1);
     expect(screen.queryByTestId("thread-overview-subagents-running")).not.toBeInTheDocument();

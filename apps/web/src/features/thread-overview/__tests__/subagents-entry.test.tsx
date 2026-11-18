@@ -42,10 +42,16 @@ describe("overview Subagents row", () => {
     expect(row).toHaveAccessibleName("Subagents, 2 active, 3 done");
   });
 
-  it("shows only the done count when nothing is active", () => {
+  it("labels the row and shows only the done count when nothing is active", () => {
     seed([entry("a", "claude", "done")]);
     render(<SubagentsEntryBlock subject={{ kind: "thread", thread }} />);
-    expect(screen.getByTestId("thread-overview-subagents").textContent).toBe("1 done");
+    expect(screen.getByTestId("thread-overview-subagents").textContent).toBe("Subagents1 done");
+  });
+
+  it("omits the done count when nothing has finished", () => {
+    seed([entry("a", "claude", "running"), entry("b", "codex", "running")]);
+    render(<SubagentsEntryBlock subject={{ kind: "thread", thread }} />);
+    expect(screen.getByTestId("thread-overview-subagents").textContent).toBe("Subagents2 active");
   });
 
   it("is absent when the roster is empty", () => {
