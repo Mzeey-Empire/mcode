@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import type { OverviewPresentation } from "@/stores/overviewStore";
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { OverviewProjectSettingsButton } from "./entries/project-actions";
 import { OVERVIEW_SECTIONS, type OverviewEntry } from "./overview-registry";
 import type { OverviewSubject } from "./overview-subject";
 import "./overview-card.css";
@@ -52,8 +53,9 @@ export function OverviewCard({ subject, entries, presentation, className, style 
     >
       <div ref={scrollerRef} onScroll={measure} className="min-h-0 overflow-y-auto">
         <div ref={contentRef} className="flex flex-col gap-1 p-4">
-          <div data-testid="thread-overview-card-header" className="flex h-8 shrink-0 items-center">
+          <div data-testid="thread-overview-card-header" className="-mr-2 flex h-8 shrink-0 items-center">
             <span className="min-w-0 flex-1 text-fade text-sm font-medium text-muted">Overview</span>
+            <OverviewProjectSettingsButton subject={subject} />
           </div>
           <div className="flex flex-col gap-1">
             {OVERVIEW_SECTIONS.map((section) => (
