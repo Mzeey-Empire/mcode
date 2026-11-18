@@ -75,6 +75,13 @@ Run each observation or action as a new `mcp__node_repl__js` call against `elect
 
 Prefer accessible Playwright locators and explicit postconditions. Re-inspect after navigation or any action that changes the page structure. Keep console errors and failed requests in persistent arrays when they matter to the test.
 
+The session can hover. Playwright moves the real pointer, so CSS `:hover` styles and Mcode tooltips appear as they do for a user. Tooltips open 400 ms after the pointer arrives, and their popup has no `tooltip` role:
+
+```js
+await electronPage.getByRole("button", { name: "Settings" }).hover();
+await electronPage.locator('[data-slot="tooltip-content"]').waitFor();
+```
+
 Use Playwright for deterministic DOM, keyboard, focus, popup, multi-tab, and timing checks. Use computer use only when visual inspection or native-window behavior cannot be established through Playwright. Computer use supplements the Playwright evidence; it does not replace assertions.
 
 For Browser lifecycle changes, cover the states that can regress:
@@ -114,6 +121,16 @@ Warm each path before timing it. Record multiple samples with `performance.now()
 Measure motion on every frame inside the page. A screen recording holds only the frames that repainted. Run `electronPage.evaluate(appProbes.installFrameProbe, { selector, label })` before the action, then `electronPage.evaluate(appProbes.readFrameProbe, label)`. Each sample holds the frame time, the match count, and the position, size, opacity, and visibility of the first four matches.
 
 Store screenshots, logs, and measurements under `.dev/verification/`. Keep exploratory specifications under `.dev/playwright-scratch/`; do not commit them.
+
+To screenshot, drive the app to the screen, then run the capture script instead of writing one. It connects without a reload, so the app keeps its state, and it creates the output folder:
+
+```powershell
+node .agents/skills/electorn-live-testing/scripts/capture.mjs --out .dev/verification/<name>.png --width 1280 --height 800 --hover 'role=button[name="Settings"]'
+```
+
+`--width` and `--height` resize the real window. `--hover` takes a Playwright selector that matches one element, and the script waits for the tooltip delay and any fade before the capture. From the Node REPL, call `capture(electronPage, parseCaptureArguments([...]))` from the same script.
+
+When the live usage source is down, `--usage-fixture <providerId>` fills the open thread's usage with invented quota readings so the Usage row renders. Wait until the thread has started: a starting thread's Overview has no Usage row, so the fixture changes nothing on screen. The script adds `.usage-fixture` to the file name. A capture taken with it is not live data: say so wherever you show it, including the PR body. From the REPL, call `applyUsageCaptureFixture(electronPage, { providerId })` from `scripts/usage-fixture.mjs` and name the file the same way.
 
 ## Record before and after evidence
 

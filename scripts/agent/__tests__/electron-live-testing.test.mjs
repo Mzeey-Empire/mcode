@@ -4,6 +4,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import { parseCaptureArguments } from "../../../.agents/skills/electorn-live-testing/scripts/capture.mjs";
 import { probeCdpVersion } from "../../../.agents/skills/electorn-live-testing/scripts/start-electron.mjs";
 
 const validCdpVersion = {
@@ -100,4 +101,40 @@ NodeTest.test("rejects a successful installer when Playwright resolves only from
   `);
   NodeAssertStrict.default.equal(rejected.status, 0, rejected.stderr || rejected.error?.message);
   NodeAssertStrict.default.deepEqual(JSON.parse(rejected.stdout), { message: "Playwright was not installed inside the scratch package" });
+});
+
+NodeTest.test("capture resolves its output against the working directory and reads size and hover", () => {
+  const cwd = NodePath.resolve("repo");
+  NodeAssertStrict.deepEqual(
+    parseCaptureArguments(["--out", ".dev/verification/new/shot.png", "--width", "1280", "--height", "800", "--hover", "role=button[name=\"Settings\"]"], cwd),
+    {
+      outPath: NodePath.join(cwd, ".dev", "verification", "new", "shot.png"),
+      size: { width: 1280, height: 800 },
+      hover: "role=button[name=\"Settings\"]",
+      usageFixtureProviderId: null,
+    },
+  );
+});
+
+NodeTest.test("capture names a usage-fixture screenshot so it cannot pass for live usage", () => {
+  const cwd = NodePath.resolve("repo");
+  const marked = parseCaptureArguments(["--out", "shot.png", "--usage-fixture", "claude"], cwd);
+  NodeAssertStrict.equal(marked.outPath, NodePath.join(cwd, "shot.usage-fixture.png"));
+  NodeAssertStrict.equal(marked.usageFixtureProviderId, "claude");
+  const alreadyMarked = parseCaptureArguments(["--out", "shot.usage-fixture.png", "--usage-fixture", "claude"], cwd);
+  NodeAssertStrict.equal(alreadyMarked.outPath, NodePath.join(cwd, "shot.usage-fixture.png"));
+});
+
+NodeTest.test("capture rejects arguments that would take the wrong screenshot", () => {
+  for (const argv of [
+    [],
+    ["--out", "shot.jpg"],
+    ["--out", "shot.png", "--width", "1280"],
+    ["--out", "shot.png", "--width", "1280px", "--height", "800"],
+    ["--out", "shot.png", "--width", "0", "--height", "800"],
+    ["--out", "shot.png", "--hover", " "],
+    ["--out", "shot.png", "--hovr", "x"],
+  ]) {
+    NodeAssertStrict.throws(() => parseCaptureArguments(argv, "repo"), undefined, argv.join(" "));
+  }
 });
