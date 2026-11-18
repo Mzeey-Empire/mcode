@@ -1,6 +1,6 @@
 ---
 name: electorn-live-testing
-description: Keep one Mcode Electron application open and control it across many Playwright commands through the persistent Node REPL or step scripts. Use when inspecting, debugging, benchmarking, or verifying desktop-only behavior, including existing Browser tabs, background tabs, tab switching, popups, provider selection, reloads, restart boundaries, app store state, per-frame motion, and minimizing.
+description: Drive the Mcode Electron desktop app with Playwright and capture what it shows. Use to start the desktop app, screenshot a screen, hover an element, or check a UI change live.
 ---
 
 # Electron Live Testing
