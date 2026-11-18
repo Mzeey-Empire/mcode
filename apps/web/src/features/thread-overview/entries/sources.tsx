@@ -88,10 +88,13 @@ function sharedPrefixLength(left: string, right: string): number {
  * differ in the middle, where the full text could fade before the difference shows. The shared
  * start gives way instead, keeping a little of it as context. It gives way up to the closest
  * peer's difference, not the first one's: with three labels, two can share a start the third
- * does not, and only the later cut tells those two apart.
+ * does not, and only the later cut tells those two apart. A peer with the same detail, such as
+ * the www twin of a link, cannot be told apart by any cut, so it does not count.
  */
 function elideSharedStart(detail: string, peers: readonly string[]): string {
-  const sharedLength = Math.max(...peers.map((peer) => sharedPrefixLength(detail, peer)));
+  const differing = peers.filter((peer) => peer !== detail);
+  if (differing.length === 0) return detail;
+  const sharedLength = Math.max(...differing.map((peer) => sharedPrefixLength(detail, peer)));
   if (sharedLength <= DETAIL_HEAD_LENGTH) return detail;
   return `…${detail.slice(sharedLength - DETAIL_HEAD_LENGTH)}`;
 }

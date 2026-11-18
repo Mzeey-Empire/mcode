@@ -107,6 +107,18 @@ describe("overview source labels", () => {
     expect(new Set(labels).size).toBe(3);
   });
 
+  it("keeps the readable end for links that differ only by www or a trailing slash", () => {
+    expect(sourceLabels(sources(
+      "https://www.example.com/docs/getting-started",
+      "https://example.com/docs/getting-started",
+      "https://example.com/docs/getting-started/",
+    ))).toEqual([
+      "example.com/…/getting-started",
+      "example.com/…/getting-started",
+      "example.com/…/getting-started",
+    ]);
+  });
+
   it("keeps the bare host for a shared-host source at the site root", () => {
     expect(sourceLabels(sources("https://example.com/", "https://example.com/blog")))
       .toEqual(["example.com", "example.com/blog"]);
