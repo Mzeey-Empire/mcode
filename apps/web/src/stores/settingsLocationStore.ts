@@ -17,6 +17,11 @@ export interface SettingsLocationState {
   readonly hit: SettingsHit | null;
   /** Setting whose location link opened the last hit; Back to results returns focus to it. */
   readonly returnTo: SettingId | null;
+  /**
+   * Changes when page navigation moves to another page, which starts a new Settings visit. Opening a search hit does
+   * not change it, so edits made from results stay in the visit when the hit opens its page.
+   */
+  readonly pageVisit: number;
   /** Page link, deep link, history restore: clears query and hit. */
   openPage(page: SettingsSection): void;
   /** Typing: clears hit, keeps page so clearing the field returns to it. */
@@ -54,7 +59,9 @@ export const useSettingsLocation = create<SettingsLocationState>()((set) => ({
   query: "",
   hit: null,
   returnTo: null,
-  openPage: (page) => set({ page, query: "", hit: null, returnTo: null }),
+  pageVisit: 0,
+  openPage: (page) =>
+    set((state) => ({ page, query: "", hit: null, returnTo: null, pageVisit: state.page === page ? state.pageVisit : state.pageVisit + 1 })),
   setQuery: (query) => set({ query, hit: null, returnTo: null }),
   openHit: ({ page, id, from }) => set({ page, hit: { id, nonce: ++hitOpenCount }, returnTo: from }),
   backToResults: () => set({ hit: null }),

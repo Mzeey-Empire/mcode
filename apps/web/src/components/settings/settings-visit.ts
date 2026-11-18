@@ -13,7 +13,6 @@ import {
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useTerminalSettingsStore } from "@/features/terminal/settings/terminalSettingsStore";
 import type { SettingDef, SettingId } from "./setting-def";
-import type { SettingsSection } from "./settings-sections";
 import { SETTINGS_INDEX } from "./settings-nav";
 import { readRevertSource, revertSourceOf, type RestoreStep, type RevertibleValue, type RevertSource } from "./setting-value";
 
@@ -207,7 +206,6 @@ export function planRevert(changed: readonly JournalEntry[], current: RevertSour
 interface Visit {
   /** New per visit, so a revert or write that outlives its visit cannot touch the next one. */
   readonly id: number;
-  readonly page: SettingsSection;
   readonly journal: ReadonlyMap<SettingId, JournalEntry>;
   /** Local writes up to this sequence started before the visit and never count as its changes. */
   readonly startSeq: number;
@@ -244,11 +242,11 @@ function onSourceChange(): void {
   if (journal !== visit.journal) patchVisit(visit.id, { journal, failures: [] });
 }
 
-function startVisit(page: SettingsSection): number {
+function startVisit(): number {
   stopListening?.();
   const id = ++nextVisitId;
   lastSource = readRevertSource();
-  useVisitStore.setState({ visit: { id, page, journal: new Map(), startSeq: latestLocalSettingsWriteSeq(), reverting: false, failures: [] } });
+  useVisitStore.setState({ visit: { id, journal: new Map(), startSeq: latestLocalSettingsWriteSeq(), reverting: false, failures: [] } });
   const unsubscribers = [
     useSettingsStore.subscribe(onSourceChange),
     useWorkspaceStore.subscribe(onSourceChange),
@@ -268,12 +266,12 @@ function endVisit(id: number): void {
   useVisitStore.setState({ visit: null });
 }
 
-/** Starts a visit for `page` and ends it when the page changes or the canvas unmounts. */
-export function useSettingsVisit(page: SettingsSection): void {
+/** Starts a visit and ends it when `pageVisit` changes (page navigation, not an opened search hit) or the canvas unmounts. */
+export function useSettingsVisit(pageVisit: number): void {
   useEffect(() => {
-    const id = startVisit(page);
+    const id = startVisit();
     return () => endVisit(id);
-  }, [page]);
+  }, [pageVisit]);
 }
 
 /** What the header shows for the current visit. */

@@ -21,7 +21,7 @@ export function SettingsView() {
   const ActiveSection = page.component;
   const headingRef = useRef<HTMLHeadingElement>(null);
   const shownSection = useRef(section);
-  useSettingsVisit(section);
+  useSettingsVisit(useSettingsLocation((s) => s.pageVisit));
 
   // Moving focus to the new page's heading makes the next Tab start on that page; skip the first mount so opening Settings keeps focus where it was.
   useEffect(() => {

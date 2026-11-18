@@ -164,6 +164,20 @@ describe("Settings Revert", () => {
     expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
   });
 
+  it("keeps a change made from results when its hit opens another page", async () => {
+    render(<SettingsView />);
+    act(() => useSettingsLocation.getState().setQuery("scrollback"));
+    const slider = await screen.findByRole("slider", { name: "Scrollback lines" });
+    fireEvent.change(slider, { target: { value: "2000" } });
+    fireEvent.mouseUp(slider);
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Go to Scrollback lines in Terminal/ }));
+    await flush();
+
+    expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
+  });
+
   it("lets another window's change win while a local write to a different setting is in flight", async () => {
     render(<SettingsView />);
     await chooseDark();
