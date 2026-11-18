@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import { OVERVIEW_INLINE_ACTION_CLASS } from "@/features/thread-overview/overview-row";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import { useOverviewMessages } from "@/features/thread-overview/use-overview-messages";
 import { useThreadRecap } from "@/hooks/useThreadRecap";
@@ -175,7 +176,7 @@ function ThreadOverviewRecapRow({
             type="button"
             data-testid="thread-overview-recap-retry"
             onClick={onRefresh}
-            className="rounded-sm text-ink underline-offset-2 hover:underline focus-visible:underline"
+            className={OVERVIEW_INLINE_ACTION_CLASS}
           >
             Retry
           </button>
