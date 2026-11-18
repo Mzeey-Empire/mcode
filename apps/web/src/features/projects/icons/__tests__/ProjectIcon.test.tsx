@@ -32,31 +32,31 @@ describe("ProjectIcon", () => {
     expect(image?.style.width).toBe("16px");
   });
 
-  it("falls back to the monogram when the image fails to load", () => {
+  it("falls back to the badge when the image fails to load", () => {
     useProjectIconStore.getState().applyIcon(favicon);
     const { container } = render(<ProjectIcon workspaceId="ws 1" name="mcode" size={16} />);
     fireEvent.error(container.querySelector("img")!);
     expect(container.querySelector("img")).toBeNull();
-    expect(screen.getByTestId("project-monogram").textContent).toBe("Mc");
+    expect(screen.getByTestId("project-badge").textContent).toBe("Mc");
   });
 
   it("shows the initials when the project has no icon", () => {
     useProjectIconStore.getState().applyIcon({ workspaceId: "ws 1", source: "none", chosenMissing: false });
     const { container } = render(<ProjectIcon workspaceId="ws 1" name="élan" size={40} />);
     expect(container.querySelector("img")).toBeNull();
-    expect(screen.getByTestId("project-monogram").textContent).toBe("Él");
+    expect(screen.getByTestId("project-badge").textContent).toBe("Él");
   });
 
   it("shows two letters when the project has no image", () => {
     render(<ProjectIcon workspaceId="ws 1" name="orderwise-sync" size={16} />);
-    expect(screen.getByTestId("project-monogram").textContent).toBe("OS");
+    expect(screen.getByTestId("project-badge").textContent).toBe("OS");
   });
 
   it("shows the project's image over the letters", () => {
     useProjectIconStore.getState().applyIcon(favicon);
     const { container } = render(<ProjectIcon workspaceId="ws 1" name="mcode" size={16} />);
     expect(container.querySelector("img")).not.toBeNull();
-    expect(screen.queryByTestId("project-monogram")).toBeNull();
+    expect(screen.queryByTestId("project-badge")).toBeNull();
   });
 
   it("keeps one hue per project id", () => {

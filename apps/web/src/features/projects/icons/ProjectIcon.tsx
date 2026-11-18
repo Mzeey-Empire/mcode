@@ -53,7 +53,7 @@ export function ProjectIcon({ workspaceId, name, size, className }: ProjectIconP
   // Keyed by src so a new version gets a fresh load attempt after an earlier one failed.
   return src
     ? <ProjectIconImage key={src} src={src} name={name} size={size} style={style} className={className} hue={hue} />
-    : <ProjectMonogram name={name} size={size} style={style} className={className} hue={hue} />;
+    : <ProjectBadge name={name} size={size} style={style} className={className} hue={hue} />;
 }
 
 interface TileProps {
@@ -66,7 +66,7 @@ interface TileProps {
 
 function ProjectIconImage({ src, ...tile }: TileProps & { src: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return <ProjectMonogram {...tile} />;
+  if (failed) return <ProjectBadge {...tile} />;
   return (
     <img
       src={src}
@@ -80,12 +80,12 @@ function ProjectIconImage({ src, ...tile }: TileProps & { src: string }) {
   );
 }
 
-function ProjectMonogram({ name, size, style, className, hue }: TileProps) {
+function ProjectBadge({ name, size, style, className, hue }: TileProps) {
   const tintStyle: React.CSSProperties & { "--project-hue": number } = { ...style, fontSize: Math.round(size / 2), "--project-hue": hue };
   return (
     <span
       aria-hidden
-      data-testid="project-monogram"
+      data-testid="project-badge"
       style={tintStyle}
       className={cn("project-badge inline-flex shrink-0 select-none items-center justify-center font-semibold leading-none", className)}
     >
