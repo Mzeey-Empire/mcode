@@ -35,6 +35,7 @@ import { freezeOrder, selectClosedScope, useSidebarUiStore } from "./sidebar-ui-
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 import { PreviewScrollGuard } from "./preview-scroll-guard";
 import { ThreadPreviewHandleContext, ThreadPreviewTooltip, type ThreadPreviewPayload } from "./SidebarThreadPreview";
+import { createPullRequestListHandle, PullRequestListHandleContext, PullRequestListMenu } from "./PullRequestChip";
 import { createTooltipHandle } from "@/components/ui/tooltip";
 import { SidebarLabelHandleContext, SidebarLabelTooltip } from "./sidebar-label-tooltip";
 import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
@@ -431,6 +432,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
   const { controllerRef, hosts, previewGuard } = useSidebarViewport(containerRef);
   const [previewHandle] = useState(() => createTooltipHandle<ThreadPreviewPayload>());
   const [labelHandle] = useState(() => createTooltipHandle<string>());
+  const [pullRequestHandle] = useState(createPullRequestListHandle);
   const drag = useProjectDrag(controllerRef);
   const rowCtx = useDragSafeContext(ctx, drag.isClickSuppressed);
   const closedScope = useSidebarUiStore(selectClosedScope);
@@ -472,7 +474,9 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
         <SortableContext items={sortableIds} strategy={STATIC_SORT_STRATEGY}>
           <ThreadPreviewHandleContext.Provider value={previewHandle}>
             <SidebarLabelHandleContext.Provider value={labelHandle}>
-              <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
+              <PullRequestListHandleContext.Provider value={pullRequestHandle}>
+                <VirtualRows viewport={controllerRef.current} hosts={hosts} items={itemsByKey} renderItem={renderRow} />
+              </PullRequestListHandleContext.Provider>
             </SidebarLabelHandleContext.Provider>
           </ThreadPreviewHandleContext.Provider>
         </SortableContext>
@@ -482,6 +486,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
       </DndContext>
       <ThreadPreviewTooltip handle={previewHandle} guard={previewGuard} />
       <SidebarLabelTooltip handle={labelHandle} />
+      <PullRequestListMenu handle={pullRequestHandle} />
       {olderBar && controllerRef.current && <OlderBar item={olderBar} viewport={controllerRef.current} onToggle={toggleOlder} />}
       {overlay}
     </div>

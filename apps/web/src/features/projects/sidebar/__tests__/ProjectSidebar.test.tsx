@@ -624,7 +624,7 @@ describe("ProjectSidebar thread interactions", () => {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date("2026-08-15T08:00:00.000Z"));
-    expect(preview).toHaveTextContent(`Deletes ${exactDeadline}`);
+    expect(preview).toHaveTextContent(`· deletes ${exactDeadline}`);
     vi.useFakeTimers();
   });
 
@@ -643,7 +643,7 @@ describe("ProjectSidebar thread interactions", () => {
     screen.getByRole("button", { name: /^Kept work/i }).focus();
 
     expect(await screen.findByTestId("thread-preview-thread-1")).toHaveTextContent(
-      "Automatic deletion disabled",
+      "· automatic deletion disabled",
     );
     vi.useFakeTimers();
   });
@@ -666,9 +666,9 @@ describe("ProjectSidebar thread interactions", () => {
 
     const preview = await screen.findByTestId("thread-preview-thread-1");
     expect(preview).toHaveTextContent(
-      "Cleanup blocked: The worktree has uncommitted changes.",
+      "· cleanup blocked: The worktree has uncommitted changes.",
     );
-    expect(preview).not.toHaveTextContent("Deletes");
+    expect(preview).not.toHaveTextContent("deletes");
     vi.useFakeTimers();
   });
 
@@ -1508,15 +1508,12 @@ describe("ProjectSidebar action-required indicator", () => {
     expectQuietStatus(screen.getByTestId("thread-status"));
   });
 
-  it("shows the row's time on its branch line and the exact time in hover details", async () => {
+  it("shows the row's time on its branch line", () => {
     const updatedAt = new Date(Date.now() - 5 * 60_000).toISOString();
     setupStoreMocks({ thread: makeThread({ id: "thread-updated", title: "Updated Thread", updated_at: updatedAt, last_activity_at: updatedAt }) });
     render(<ProjectSidebar />);
 
-    const row = screen.getByRole("button", { name: /^Updated Thread .*Local mode Branch, main 5m .*Provider, Claude$/i });
-    const exactTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(updatedAt));
-    row.focus();
-    expect(await screen.findByTestId("thread-preview-thread-updated")).toHaveTextContent(`Updated ${exactTime}`);
+    expect(screen.getByRole("button", { name: /^Updated Thread .*Local mode Branch, main 5m .*Provider, Claude$/i })).toBeInTheDocument();
   });
 
   it("marks only the owning sidebar row when a cross-thread send approval arrives", () => {

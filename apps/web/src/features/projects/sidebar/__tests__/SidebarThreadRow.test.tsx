@@ -349,7 +349,7 @@ describe("SidebarThreadRow", () => {
     });
   });
 
-  it("shows the top-ranked PR's icon and +2 for three PRs", () => {
+  it("shows the top-ranked PR's icon and number, then +2 for the rest of three PRs", () => {
     renderThread({
       pull_requests: [
         createMockThreadPullRequest({ number: 10, state: "merged", url: PR_URL(10) }),
@@ -358,8 +358,13 @@ describe("SidebarThreadRow", () => {
       ],
     });
     const chip = screen.getByRole("button", { name: "3 pull requests" });
-    expect(chip).toHaveTextContent(/^\+2$/);
+    expect(chip).toHaveTextContent(/^11\s*\+2$/);
     expect(chip.querySelector("svg")).toHaveClass("text-success");
+  });
+
+  it("shows one PR's number with no count", () => {
+    renderThread({ pull_requests: [createMockThreadPullRequest({ number: 42, state: "open", url: PR_URL(42) })] });
+    expect(screen.getByRole("button", { name: "PR #42, open" })).toHaveTextContent(/^42$/);
   });
 
   it("shows an unresolved PR's number with no state colour", () => {
@@ -369,44 +374,119 @@ describe("SidebarThreadRow", () => {
     expect(chip.querySelector("svg")?.getAttribute("class")).not.toMatch(/text-(success|pr-merged|error|muted)/);
   });
 
-  it("expands the PR list from the chip without selecting the row", () => {
-    const setActiveThread = vi.fn();
-    useWorkspaceStore.setState({ setActiveThread });
-    renderThread({
-      pull_requests: [
-        createMockThreadPullRequest({ number: 10, state: "merged", url: PR_URL(10), title: "Merged change" }),
-        createMockThreadPullRequest({ number: 11, state: "open", url: PR_URL(11), title: "Open change" }),
-      ],
+  describe("PR list", () => {
+    const TWO_PRS = [
+      createMockThreadPullRequest({ number: 10, state: "merged", url: PR_URL(10), title: "Merged change" }),
+      createMockThreadPullRequest({ number: 11, state: "open", url: PR_URL(11), title: "Open change" }),
+    ];
+    const prList = () => screen.queryByRole("menu");
+    const openList = () => {
+      const list = prList();
+      if (!list) throw new Error("PR list is not open");
+      return list;
+    };
+    const hover = async (element: HTMLElement) => {
+      fireEvent.pointerEnter(element, { pointerType: "mouse" });
+      fireEvent.mouseEnter(element, { clientX: 200, clientY: 40 });
+      fireEvent.mouseMove(element, { clientX: 201, clientY: 40 });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+    };
+
+    it("lists every PR as a link when the pointer rests on the chip, without selecting the row", async () => {
+      const setActiveThread = vi.fn();
+      useWorkspaceStore.setState({ setActiveThread });
+      renderThread({ pull_requests: TWO_PRS });
+      expect(prList()).toBeNull();
+
+      await hover(screen.getByRole("button", { name: "2 pull requests" }));
+
+      const items = within(openList()).getAllByRole("menuitem");
+      expect(items.map((item) => item.textContent)).toEqual(["#11Open change", "#10Merged change"]);
+      expect(items.map((item) => item.getAttribute("href"))).toEqual([PR_URL(11), PR_URL(10)]);
+      expect(setActiveThread).not.toHaveBeenCalled();
     });
-    expect(screen.queryByRole("list", { name: "Pull requests" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "2 pull requests" }));
+    it("opens the card of the row the pointer rests on once the list closes", async () => {
+      const now = new Date().toISOString();
+      const first = createMockThread({ id: "t1", workspace_id: "ws-1", title: "First", provider: "claude", mode: "worktree", last_activity_at: now, pull_requests: TWO_PRS });
+      const second = createMockThread({ id: "t2", workspace_id: "ws-1", title: "Second", provider: "claude", mode: "worktree", last_activity_at: now });
+      useWorkspaceStore.setState({ workspaces: [WORKSPACE], threads: [first, second], activeWorkspaceId: "ws-1", activeThreadId: null });
+      render(<Harness />);
+      const chip = screen.getByRole("button", { name: "2 pull requests" });
+      await hover(chip);
+      expect(prList()).not.toBeNull();
 
-    const list = screen.getByRole("list", { name: "Pull requests" });
-    expect(within(list).getAllByRole("button").map((entry) => entry.getAttribute("aria-label"))).toEqual([
-      "Open change, PR #11, open",
-      "Merged change, PR #10, merged",
-    ]);
-    expect(screen.getByRole("button", { name: "2 pull requests" })).toHaveAttribute("aria-expanded", "true");
-    expect(setActiveThread).not.toHaveBeenCalled();
-  });
+      const firstRow = screen.getByRole("button", { name: /^First/ });
+      const secondRow = screen.getByRole("button", { name: /^Second/ });
+      fireEvent.mouseLeave(chip, { clientX: 40, clientY: 60 });
+      fireEvent.mouseLeave(firstRow, { clientX: 40, clientY: 60 });
+      fireEvent.pointerOver(secondRow, { pointerType: "mouse" });
+      fireEvent.mouseEnter(secondRow, { clientX: 40, clientY: 60 });
+      fireEvent.mouseMove(secondRow, { clientX: 41, clientY: 60 });
+      await act(() => vi.advanceTimersByTimeAsync(2000));
 
-  it("opens a PR in the system browser on click and in the in-app browser on Ctrl+click", () => {
-    const setActiveThread = vi.fn();
-    useWorkspaceStore.setState({ setActiveThread });
-    renderThread({ pull_requests: [createMockThreadPullRequest({ number: 42, state: "open", url: PR_URL(42) })] });
-    const chip = screen.getByRole("button", { name: "PR #42, open" });
+      expect(prList()).toBeNull();
+      expect(screen.queryByTestId("thread-preview-t2")).not.toBeNull();
 
-    fireEvent.click(chip);
-    expect(openExternalUrl).toHaveBeenCalledWith(PR_URL(42));
-    expect(resolveNavigation).not.toHaveBeenCalled();
+      fireEvent.mouseLeave(secondRow, { clientX: 40, clientY: 300 });
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(screen.queryByTestId("thread-preview-t2")).toBeNull();
+    });
 
-    openExternalUrl.mockClear();
-    fireEvent.click(chip, { ctrlKey: true });
-    act(() => vi.runOnlyPendingTimers());
-    expect(resolveNavigation).toHaveBeenCalledWith(PR_URL(42), expect.anything());
-    expect(openExternalUrl).not.toHaveBeenCalled();
-    expect(setActiveThread).not.toHaveBeenCalled();
+    it("opens the list from the keyboard and returns focus to the chip on Escape", async () => {
+      renderThread({ pull_requests: TWO_PRS });
+      const chip = screen.getByRole("button", { name: "2 pull requests" });
+      expect(chip).toHaveAttribute("aria-haspopup", "menu");
+      act(() => chip.focus());
+      fireEvent.click(chip);
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(prList()).not.toBeNull();
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(prList()).toBeNull();
+      expect(chip).toHaveFocus();
+    });
+
+    it("reaches the chip from the row with Right Arrow, opens on Enter at the first PR, and returns on Escape", async () => {
+      const row = renderThread({ pull_requests: TWO_PRS });
+      const chip = screen.getByRole("button", { name: "2 pull requests" });
+      act(() => row.focus());
+
+      fireEvent.keyDown(row, { key: "ArrowRight" });
+      expect(chip).toHaveFocus();
+
+      fireEvent.keyDown(chip, { key: "Enter" });
+      fireEvent.click(chip, { detail: 0 });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(within(openList()).getAllByRole("menuitem")[0]).toHaveFocus();
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      expect(prList()).toBeNull();
+      expect(chip).toHaveFocus();
+    });
+
+    it("opens a PR in the system browser on click and in the in-app browser on Ctrl+click", async () => {
+      const setActiveThread = vi.fn();
+      useWorkspaceStore.setState({ setActiveThread });
+      renderThread({ pull_requests: [createMockThreadPullRequest({ number: 42, state: "open", url: PR_URL(42), title: "Only change" })] });
+      const chip = screen.getByRole("button", { name: "PR #42, open" });
+      await hover(chip);
+      const link = within(openList()).getByRole("menuitem", { name: "#42Only change" });
+
+      fireEvent.click(link);
+      expect(openExternalUrl).toHaveBeenCalledWith(PR_URL(42));
+      expect(resolveNavigation).not.toHaveBeenCalled();
+
+      openExternalUrl.mockClear();
+      await hover(chip);
+      fireEvent.click(within(openList()).getByRole("menuitem", { name: "#42Only change" }), { ctrlKey: true });
+      act(() => vi.runOnlyPendingTimers());
+      expect(resolveNavigation).toHaveBeenCalledWith(PR_URL(42), expect.anything());
+      expect(openExternalUrl).not.toHaveBeenCalled();
+      expect(setActiveThread).not.toHaveBeenCalled();
+    });
   });
 
   describe("thread menu", () => {
@@ -713,6 +793,55 @@ describe("SidebarThreadRow", () => {
       useSidebarWidthStore.setState({ width: SIDEBAR_STATUS_WORD_WIDTH - 1 });
       renderThread({ last_activity_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString() });
       expect(within(screen.getByTestId("thread-status")).getByText("5h")).toBeTruthy();
+    });
+  });
+
+  describe("hover card", () => {
+    const openCard = async (row: HTMLElement) => {
+      act(() => row.focus());
+      fireEvent.keyDown(row, { key: "Tab" });
+      await act(() => vi.advanceTimersByTimeAsync(1000));
+      const card = screen.queryByTestId("thread-preview-t1");
+      if (!card) throw new Error("no card");
+      return card;
+    };
+
+    it("names every PR on its own line and shows no status", async () => {
+      const row = renderThread({
+        model: "claude-opus-4-6",
+        pull_requests: [
+          createMockThreadPullRequest({ number: 10, state: "merged", url: PR_URL(10), title: "Merged change" }),
+          createMockThreadPullRequest({ number: 11, state: "open", url: PR_URL(11), title: "Open change" }),
+        ],
+      });
+      act(() => threadAttentionStore.getState().apply(finished("t1")));
+      expect(within(row).getByRole("img", { name: "Finished" })).toBeTruthy();
+      const card = await openCard(row);
+      const lines = within(card).getAllByRole("link");
+      expect(lines.map((line) => line.textContent)).toEqual(["#11Open change", "#10Merged change"]);
+      expect(within(card).getByLabelText(/^Model, /)).toBeTruthy();
+      expect(card).not.toHaveTextContent(/Finished|Running|Updated/);
+    });
+
+    it("is the row's description while it shows", async () => {
+      const row = renderThread();
+      expect(row).not.toHaveAttribute("aria-describedby");
+      const card = await openCard(row);
+      const describedBy = row.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy ?? "")).toContainElement(card);
+    });
+
+    it("puts a closed thread's close and delete dates on one line", async () => {
+      useSidebarUiStore.setState({ scope: "completed" });
+      const card = await openCard(renderThread({ user_completed_at: "2026-10-27T11:00:00.000Z", scheduled_deletion_at: "2026-11-03T11:00:00.000Z" }));
+      expect(within(card).getByLabelText(/^Closed .+ · deletes .+/)).toBeTruthy();
+      expect(card).not.toHaveTextContent(/Deletes/);
+    });
+
+    it("omits the model line when the thread has no model", async () => {
+      const card = await openCard(renderThread({ model: null }));
+      expect(within(card).queryByLabelText(/^Model, /)).toBeNull();
     });
   });
 });
