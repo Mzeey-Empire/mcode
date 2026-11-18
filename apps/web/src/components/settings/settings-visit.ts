@@ -430,9 +430,14 @@ function journalAfterRevert(
   journal: ReadonlyMap<SettingId, JournalEntry>,
   done: readonly SettingId[],
   afterWriteFailed: readonly SettingId[],
+  current: RevertSource,
 ): ReadonlyMap<SettingId, JournalEntry> {
   const out = new Map(journal);
-  for (const id of done) out.delete(id);
+  // A local change made while the Revert ran moved the value off `before` again; that change stays offered.
+  for (const id of done) {
+    const entry = out.get(id);
+    if (entry && sameValue(entry.def.value.read(entry.before), entry.def.value.read(current))) out.delete(id);
+  }
   for (const id of afterWriteFailed) {
     const entry = out.get(id);
     if (entry) out.set(id, { ...entry, afterWriteFailed: true });
@@ -449,7 +454,7 @@ export async function revertVisit(): Promise<{ readonly failures: readonly Rever
   const { done, afterWriteFailed, failures } = await runBatches(visit.id, plan);
   const latest = useVisitStore.getState().visit;
   if (latest?.id === visit.id) {
-    patchVisit(visit.id, { journal: journalAfterRevert(latest.journal, done, afterWriteFailed), reverting: false, failures });
+    patchVisit(visit.id, { journal: journalAfterRevert(latest.journal, done, afterWriteFailed, readRevertSource()), reverting: false, failures });
   }
   return { failures };
 }

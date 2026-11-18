@@ -412,6 +412,29 @@ describe("Settings Revert", () => {
     expect(revertButton()).toBeNull();
   });
 
+  it("keeps a release line picked again while Revert was switching the updater back", async () => {
+    let switched: () => void = () => {};
+    const applyReleaseLine = vi.fn(() => new Promise<{ state: "idle" }>((resolve) => {
+      switched = () => resolve({ state: "idle" });
+    }));
+    vi.stubGlobal("desktopBridge", { app: { applyReleaseLine } });
+    render(<SettingsView />);
+    await act(async () => {
+      await useSettingsStore.getState().update({ updates: { channel: "nightly" } });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert 1 change" }));
+    await flush();
+    expect(applyReleaseLine).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await useSettingsStore.getState().update({ updates: { channel: "nightly" } });
+    });
+    await act(async () => switched());
+
+    expect(useSettingsStore.getState().settings.updates.channel).toBe("nightly");
+    expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
+  });
+
   it("shows the restored serve URL in its input", async () => {
     openPage("providers");
     render(<SettingsView />);
