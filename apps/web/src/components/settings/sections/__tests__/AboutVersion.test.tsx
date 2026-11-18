@@ -121,6 +121,19 @@ describe("About version row What's new", () => {
   });
 });
 
+describe("About version row download", () => {
+  it("shows the status read back when the download call fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    app.downloadUpdate.mockRejectedValueOnce(new Error("ipc closed"));
+    app.getUpdateStatus.mockResolvedValueOnce({ state: "error", message: "net::ERR_NAME_NOT_RESOLVED", failedOperation: "download" });
+    setStatuses({ state: "available", version: "0.17.0" });
+    render(<AboutSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(actionNames()).toEqual(["Retry"]);
+  });
+});
+
 describe("About version row restart", () => {
   // Fails if a plain click restarts while agents run, or a short press restarts.
   it("restarts after a 1200ms hold with agents running, not after 1100ms", () => {

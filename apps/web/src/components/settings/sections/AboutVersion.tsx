@@ -170,15 +170,26 @@ function useVersionActions(
   setChecking: (checking: boolean) => void,
   setServerAgents: (count: number | null) => void,
 ): VersionActions {
+  // The desktop publishes why a call failed; reading the status back shows it even if that push was missed.
+  const readBackStatus = async () => useUpdateStore.getState().setStatus(await app.getUpdateStatus());
+  const readBackOnFailure = (name: string, call: () => Promise<void>) => async () => {
+    try {
+      await call();
+    } catch (error) {
+      console.error(`[updates] ${name} failed`, error);
+      await readBackStatus();
+    }
+  };
   const restart = async () => {
     const started = await app.installUpdate().catch((error: unknown) => {
       console.error("[updates] installUpdate failed", error);
       return false;
     });
-    if (started) return;
-    // The desktop publishes why it refused; reading it back shows Retry even if that push was missed.
-    useUpdateStore.getState().setStatus(await app.getUpdateStatus());
+    if (!started) await readBackStatus();
   };
+  const download = readBackOnFailure("downloadUpdate", () => app.downloadUpdate());
+  const installWhenIdle = readBackOnFailure("installWhenIdle", () => app.installWhenIdle());
+  const cancelWhenIdle = readBackOnFailure("cancelInstallWhenIdle", () => app.cancelInstallWhenIdle());
   // The plain Restart may rest on a stale count; another window can have started agents since.
   const restartIfIdle = async () => {
     const count = await readActiveAgentCount();
@@ -197,11 +208,11 @@ function useVersionActions(
   };
   return {
     check: () => void check(),
-    download: () => void app.downloadUpdate(),
+    download: () => void download(),
     restart: () => void restart(),
     restartIfIdle: () => void restartIfIdle(),
-    installWhenIdle: () => void app.installWhenIdle(),
-    cancelWhenIdle: () => void app.cancelInstallWhenIdle(),
+    installWhenIdle: () => void installWhenIdle(),
+    cancelWhenIdle: () => void cancelWhenIdle(),
   };
 }
 
