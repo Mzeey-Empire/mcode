@@ -204,7 +204,7 @@ describe("deriveSidebarModel", () => {
     expect(["a1", "a2", "b1"].map((id) => threadItem(items, id)?.treeLine)).toEqual(["through", "end", "end"]);
   });
 
-  it("ends the thread line at a selected row kept past the cap and draws none under a collapsed project", () => {
+  it("ends the thread line at a selected row kept past the cap or under a collapsed project", () => {
     const facts = Array.from({ length: PROJECT_ROW_CAP + 2 }, (_, index) => fact(`t${index}`, { activityMs: NOW - (index + 1) * 1000 }));
     const last = facts.at(-1)!.id;
     const capped = deriveSidebarModel(inputs({ facts, selectedThreadId: last })).items;
@@ -212,7 +212,9 @@ describe("deriveSidebarModel", () => {
 
     expect(threadItem(capped, `t${PROJECT_ROW_CAP - 1}`)?.treeLine).toBe("through");
     expect(threadItem(capped, last)?.treeLine).toBe("end");
-    expect(threadItem(collapsed, "t3")?.treeLine).toBe("none");
+    const expanded = deriveSidebarModel(inputs({ facts, selectedThreadId: "t3" })).items;
+    expect(threadItem(collapsed, "t3")?.treeLine).toBe("end");
+    expect(threadItem(collapsed, "t3")?.depth).toBe(threadItem(expanded, "t3")?.depth);
   });
 
   it("draws no thread line in the Threads view", () => {

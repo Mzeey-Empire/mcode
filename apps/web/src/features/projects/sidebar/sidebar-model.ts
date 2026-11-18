@@ -321,7 +321,8 @@ function projectGroup(workspaceId: string, placed: readonly Placed[], ctx: Secti
   const header = projectHeader(workspaceId, ctx.section, collapsed, placed.length);
   if (collapsed) {
     const selected = selectedRow(families, ctx.inputs.selectedThreadId);
-    return selected ? [header, threadItem(selected, ctx.section, "grouped", "none")] : [header];
+    // The kept selected row hangs off its project on the end segment, as it would when expanded.
+    return selected ? [header, threadItem(selected, ctx.section, "grouped", "end")] : [header];
   }
   const drafts = options.drafts ? draftItems(workspaceId, ctx.inputs) : [];
   const rows = options.capped
