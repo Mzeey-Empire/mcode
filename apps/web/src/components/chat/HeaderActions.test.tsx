@@ -579,6 +579,7 @@ describe("HeaderActions - consolidated header", () => {
     expect(coverage).toHaveAttribute("aria-label", expect.stringContaining("Covered through"));
     expect(coverage).toHaveAttribute("aria-label", expect.stringContaining("Latest activity"));
     expect(coverage).toHaveTextContent("Out of date");
+    expect(screen.queryByTestId("thread-overview-recap-refresh")).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-recap")).not.toHaveTextContent(/stale|generate/i);
   });
 
@@ -649,7 +650,7 @@ describe("HeaderActions - consolidated header", () => {
     const fills = bars.map((bar) => bar.firstElementChild);
     expect(values[0]).toHaveTextContent("89% used");
     expect(bars[0]).not.toHaveAttribute("data-near-limit");
-    expect(fills[0]).toHaveClass("bg-muted");
+    expect(fills[0]).toHaveClass("bg-ink");
     expect(values[1]).toHaveTextContent("100% used");
     expect(bars[1]).toHaveAttribute("data-near-limit", "true");
     expect(fills[1]).toHaveClass("bg-warning");

@@ -52,10 +52,12 @@ function UsageCategory({ category }: { category: QuotaCategory }) {
         aria-valuemax={100}
         aria-valuenow={rounded}
         data-near-limit={isNearLimit || undefined}
-        className="h-1 w-full overflow-hidden rounded-[2px] bg-border"
+        // Track and fill are picked for contrast in both themes: the track about 2.1:1 against the panel
+        // so the 100% end reads, and each fill (ink, or warning near the limit) at least 3.2:1 against the track.
+        className="h-1 w-full overflow-hidden rounded-[2px] bg-control-border/70"
       >
         <div
-          className={cn("h-full rounded-[2px]", isNearLimit ? "bg-warning" : "bg-muted")}
+          className={cn("h-full rounded-[2px]", isNearLimit ? "bg-warning" : "bg-ink")}
           style={{ width: `${percent}%` }}
         />
       </div>

@@ -54,14 +54,14 @@ function ThreadOverviewRecapControls({
 
   return (
     <div className="-mr-1.5 flex shrink-0 items-center gap-0.5">
+      {/* "Out of date" already refreshes, so the icon would be a second control for the same action. */}
       {coverageLabel ? (
         <ThreadOverviewRecapCoverage
           coverageLabel={coverageLabel}
           isGenerating={isGenerating}
           onRefresh={onRefresh}
         />
-      ) : null}
-      <Tooltip>
+      ) : <Tooltip>
         <TooltipTrigger
           render={
             <Button
@@ -75,7 +75,6 @@ function ThreadOverviewRecapControls({
               className={cn("group -my-1 shrink-0", isGenerating && "text-muted/45")}
             >
               <RefreshCw
-                size={13}
                 aria-hidden
                 className="transition-transform duration-200 ease-out group-active:rotate-45 motion-reduce:transition-none"
               />
@@ -83,7 +82,7 @@ function ThreadOverviewRecapControls({
           }
         />
         <TooltipContent>{refreshLabel}</TooltipContent>
-      </Tooltip>
+      </Tooltip>}
     </div>
   );
 }
