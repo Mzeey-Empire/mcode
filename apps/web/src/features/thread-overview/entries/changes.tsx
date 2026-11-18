@@ -359,53 +359,53 @@ function ChangesEntry() {
   }, []);
   return (<ThreadOverviewWhen when={isChangeSummaryLoading || isChangeSummaryFailed || hasChanges}>
     <div className="relative">
-    <Button
-      variant="ghost"
-      size="compact"
-      onClick={openChanges}
-      data-testid="workspace-menu-changes"
-      aria-label={`Changes, ${changedFilesLabel(changeSummary.files)}`}
-      className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between gap-2")}
-    >
-      <OverviewRowIcon>
-        <Diff />
-      </OverviewRowIcon>
-      <span className="text-fade min-w-0 grow font-medium text-ink">Changes</span>
-      <ThreadOverviewWhen when={isChangeSummaryLoading}>
+      <Button
+        variant="ghost"
+        size="compact"
+        onClick={openChanges}
+        data-testid="workspace-menu-changes"
+        aria-label={`Changes, ${changedFilesLabel(changeSummary.files)}`}
+        className={cn(OVERVIEW_ROW_CLASS, "cursor-pointer justify-between gap-2")}
+      >
+        <OverviewRowIcon>
+          <Diff />
+        </OverviewRowIcon>
+        <span className="text-fade min-w-0 grow font-medium text-ink">Changes</span>
+        <ThreadOverviewWhen when={isChangeSummaryLoading}>
+          <span
+            data-testid="thread-overview-change-loading"
+            aria-label="Loading changes"
+            className="animate-thread-overview-loading h-3 w-14 shrink-0 overflow-hidden rounded-sm bg-hover/45"
+          />
+        </ThreadOverviewWhen>
+        <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
+          <span
+            data-testid="thread-overview-change-summary"
+            aria-label={`${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
+            className="shrink-0 text-caption tabular-nums text-muted"
+          >
+            {`+${changeSummary.additions} −${changeSummary.deletions}`}
+          </span>
+        </ThreadOverviewWhen>
+      </Button>
+      {/* Sits over the row rather than inside it: a button cannot nest in the row's button. */}
+      <ThreadOverviewWhen when={isChangeSummaryFailed}>
         <span
-          data-testid="thread-overview-change-loading"
-          aria-label="Loading changes"
-          className="animate-thread-overview-loading h-3 w-14 shrink-0 overflow-hidden rounded-sm bg-hover/45"
-        />
-      </ThreadOverviewWhen>
-      <ThreadOverviewWhen when={!isChangeSummaryLoading && !isChangeSummaryFailed && showChangeSummary}>
-        <span
-          data-testid="thread-overview-change-summary"
-          aria-label={`${changeSummary.additions} additions, ${changeSummary.deletions} deletions`}
-          className="shrink-0 text-caption tabular-nums text-muted"
+          data-testid="thread-overview-change-failed"
+          className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-caption text-muted"
         >
-          {`+${changeSummary.additions} −${changeSummary.deletions}`}
+          {/* Only Retry takes the pointer, so the rest of the text leaves the row's hover intact. */}
+          Couldn't load{" "}
+          <button
+            type="button"
+            data-testid="thread-overview-change-retry"
+            onClick={retryChangeSummary}
+            className={cn("pointer-events-auto", OVERVIEW_INLINE_ACTION_CLASS)}
+          >
+            Retry
+          </button>
         </span>
       </ThreadOverviewWhen>
-    </Button>
-    {/* Sits over the row rather than inside it: a button cannot nest in the row's button. */}
-    <ThreadOverviewWhen when={isChangeSummaryFailed}>
-      <span
-        data-testid="thread-overview-change-failed"
-        className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-caption text-muted"
-      >
-        {/* Only Retry takes the pointer, so the rest of the text leaves the row's hover intact. */}
-        Couldn't load{" "}
-        <button
-          type="button"
-          data-testid="thread-overview-change-retry"
-          onClick={retryChangeSummary}
-          className={cn("pointer-events-auto", OVERVIEW_INLINE_ACTION_CLASS)}
-        >
-          Retry
-        </button>
-      </span>
-    </ThreadOverviewWhen>
     </div>
   </ThreadOverviewWhen>);
 }
