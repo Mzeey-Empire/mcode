@@ -113,15 +113,20 @@ export function terminalProjectDefaultValue(): RevertibleValue {
 /** Shared definition for the Terminal page's project default profile row. */
 export const TERMINAL_PROJECT_DEFAULT = terminalProjectDefaultValue();
 
+/** Refuses a result whose default or small-task provider is off. */
+export function defaultProviderBlock(next: Settings): string | null {
+  for (const id of [next.model.defaults.provider, next.model.utility.provider]) {
+    if (id !== "" && !next.provider.enabled[id]) return `${getCatalogEntry(id).name} is a default provider.`;
+  }
+  return null;
+}
+
 function providerEnabledBlock(next: Settings): string | null {
   const adapterBacked = useProviderAvailabilityStore.getState().providers.filter((row) => row.hasAdapter);
   if (adapterBacked.length > 0 && !adapterBacked.some((row) => next.provider.enabled[row.id])) {
     return "at least one provider must stay on.";
   }
-  for (const id of [next.model.defaults.provider, next.model.utility.provider]) {
-    if (id !== "" && !next.provider.enabled[id]) return `${getCatalogEntry(id).name} is a default provider.`;
-  }
-  return null;
+  return defaultProviderBlock(next);
 }
 
 /** Provider enable flag; blockedBy refuses a result with no adapter-backed provider on, or with a default provider off. */

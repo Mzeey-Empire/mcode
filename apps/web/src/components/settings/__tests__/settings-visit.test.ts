@@ -140,6 +140,21 @@ describe("planRevert", () => {
   });
 });
 
+describe("planRevert default model", () => {
+  beforeEach(() => seedProviderAvailability());
+
+  it("refuses to put back a default model whose provider another window turned off", () => {
+    const claude = source({ model: { defaults: { provider: "claude", id: "claude-opus-4-8" } } });
+    const codex = source({ model: { defaults: { provider: "codex", id: "gpt-5" } } }, claude.settings);
+    const journal = journalTransition(EMPTY, DEFS, claude, codex, wrote({ model: { defaults: { provider: "codex", id: "gpt-5" } } }));
+    const claudeOff = source({ provider: { enabled: { claude: false } } }, codex.settings);
+
+    const plan = planRevert(changedEntries(journal, claudeOff), claudeOff);
+    expect(plan.blocked).toEqual([{ id: MODEL.id, label: "Provider and model", reason: "Claude is a default provider." }]);
+    expect(plan.batches).toEqual([]);
+  });
+});
+
 describe("local write tracking", () => {
   it("reports every settings writer as local while its request is in flight", async () => {
     let release: () => void = () => {};

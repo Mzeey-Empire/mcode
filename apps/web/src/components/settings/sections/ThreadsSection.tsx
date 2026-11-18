@@ -4,7 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Setting, useSettingHit } from "../Setting";
 import { settingsGroup, settingsPage } from "../setting-def";
-import { settingsValue } from "../setting-value";
+import { defaultProviderBlock, settingsValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
 import {
@@ -116,7 +116,11 @@ export const THREADS = settingsPage("threads", {
     label: "Provider and model",
     synonyms: "default model provider gpt codex claude cursor copilot opencode devin opus sonnet haiku luna llm ai agent fast speed priority tier",
     // One value: chooseDefaultModel writes provider and model together, so Revert puts them back together.
-    value: settingsValue((s) => ({ provider: s.model.defaults.provider, id: s.model.defaults.id }), (defaults) => ({ model: { defaults } })),
+    value: settingsValue(
+      (s) => ({ provider: s.model.defaults.provider, id: s.model.defaults.id }),
+      (defaults) => ({ model: { defaults } }),
+      defaultProviderBlock,
+    ),
     Control: DefaultModelPart,
   },
   reasoning: {
@@ -166,7 +170,11 @@ export const THREADS = settingsPage("threads", {
     group: SMALL_TASKS,
     label: "Commit messages, PR drafts and thread recaps",
     synonyms: "small tasks utility provider model commit message pr draft recap summary cheap",
-    value: settingsValue((s) => ({ provider: s.model.utility.provider, id: s.model.utility.id }), (utility) => ({ model: { utility } })),
+    value: settingsValue(
+      (s) => ({ provider: s.model.utility.provider, id: s.model.utility.id }),
+      (utility) => ({ model: { utility } }),
+      defaultProviderBlock,
+    ),
     Control: SmallTaskModelPicker,
   },
   closeOnMerge: {
