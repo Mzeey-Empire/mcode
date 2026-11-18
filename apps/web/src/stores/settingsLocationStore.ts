@@ -25,7 +25,7 @@ export interface SettingsLocationState {
   openHit(target: { readonly page: SettingsSection; readonly id: SettingId; readonly from: SettingId }): void;
   /** Back to results: clears the hit only. */
   backToResults(): void;
-  /** Settings closed: forget the search but keep the last page. */
+  /** Settings closed: forget the search and return to General, so an open that names no page lands there. */
   leave(): void;
 }
 
@@ -45,6 +45,9 @@ export function selectCanGoBackToResults(state: Pick<SettingsLocationState, "que
   return state.hit !== null && state.query.trim() !== "";
 }
 
+/** Module-level so the nonce never repeats, even after Back to results clears the hit. */
+let hitOpenCount = 0;
+
 /** Settings location store; replaces the app shell's own page state. */
 export const useSettingsLocation = create<SettingsLocationState>()((set) => ({
   page: "general",
@@ -53,8 +56,7 @@ export const useSettingsLocation = create<SettingsLocationState>()((set) => ({
   returnTo: null,
   openPage: (page) => set({ page, query: "", hit: null, returnTo: null }),
   setQuery: (query) => set({ query, hit: null, returnTo: null }),
-  openHit: ({ page, id, from }) =>
-    set((state) => ({ page, hit: { id, nonce: (state.hit?.nonce ?? 0) + 1 }, returnTo: from })),
+  openHit: ({ page, id, from }) => set({ page, hit: { id, nonce: ++hitOpenCount }, returnTo: from }),
   backToResults: () => set({ hit: null }),
-  leave: () => set({ query: "", hit: null, returnTo: null }),
+  leave: () => set({ page: "general", query: "", hit: null, returnTo: null }),
 }));

@@ -377,7 +377,7 @@ export function App() {
     if (settingsOpen) {
       useUiStore.setState({ sidebarCollapsed: false });
     } else {
-      // Every way out of Settings forgets the search; the last page stays for the next visit.
+      // Every way out of Settings forgets the search and the page, so the next plain open shows General.
       useSettingsLocation.getState().leave();
     }
   }, [settingsOpen]);
