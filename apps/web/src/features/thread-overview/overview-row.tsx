@@ -12,6 +12,13 @@ export const OVERVIEW_ROW_CLASS =
   "group h-row-compact w-full gap-2 px-3 text-left text-body-small transition-[background-color,color] duration-150 ease-out";
 
 /**
+ * An inline recovery action, such as Retry after a failed load. Ink alone sits under 3:1 against the
+ * muted sentence around it, so the underline shows at rest rather than only on hover.
+ */
+export const OVERVIEW_INLINE_ACTION_CLASS =
+  "rounded-sm text-ink underline decoration-muted underline-offset-2 hover:decoration-ink focus-visible:decoration-ink";
+
+/**
  * The leading icon lane of an overview row: a 16px icon at the start of a fixed 20px slot, so
  * glyphs line up with the card title while row text keeps its position.
  */

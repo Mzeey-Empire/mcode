@@ -12,7 +12,7 @@ import type { ReviewComparisonResult } from "@mcode/contracts/models/review-comp
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { Diff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LoadStatus, OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
+import { LoadStatus, OVERVIEW_INLINE_ACTION_CLASS, OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 
 type SnapshotDiffStat = { filePath: string; additions: number; deletions: number };
 
@@ -392,14 +392,15 @@ function ChangesEntry() {
     <ThreadOverviewWhen when={isChangeSummaryFailed}>
       <span
         data-testid="thread-overview-change-failed"
-        className="absolute top-1/2 right-3 -translate-y-1/2 text-caption text-muted"
+        className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-caption text-muted"
       >
+        {/* Only Retry takes the pointer, so the rest of the text leaves the row's hover intact. */}
         Couldn't load{" "}
         <button
           type="button"
           data-testid="thread-overview-change-retry"
           onClick={retryChangeSummary}
-          className="rounded-sm text-ink underline-offset-2 hover:underline focus-visible:underline"
+          className={cn("pointer-events-auto", OVERVIEW_INLINE_ACTION_CLASS)}
         >
           Retry
         </button>
