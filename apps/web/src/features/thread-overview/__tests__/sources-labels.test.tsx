@@ -96,6 +96,17 @@ describe("overview source labels", () => {
     ]);
   });
 
+  it("never gives two different links the same label, even in repetitive text", () => {
+    const a = "a".repeat(30);
+    const z = "z".repeat(30);
+    const labels = sourceLabels(sources(
+      `https://example.com/docs/${a}1${z}`,
+      `https://example.com/docs/${a}2${a}1${z}`,
+      `https://example.com/docs/${a}2${a}2${z}`,
+    ));
+    expect(new Set(labels).size).toBe(3);
+  });
+
   it("keeps the bare host for a shared-host source at the site root", () => {
     expect(sourceLabels(sources("https://example.com/", "https://example.com/blog")))
       .toEqual(["example.com", "example.com/blog"]);

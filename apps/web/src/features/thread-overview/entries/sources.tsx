@@ -111,11 +111,18 @@ export function sourceLabelParts(sources: readonly ThreadSource[]): SourceLabel[
     return { host, detail: `${distinguishingPath(url, others)}${distinguishingTail(url, others)}` };
   });
   const short = full.map(({ host, detail }) => ({ host, detail: shortenDetail(detail) }));
-  return short.map((label, index) => {
+  const elided = short.map((label, index) => {
     const peers = full.filter((_, otherIndex) =>
       otherIndex !== index && short[otherIndex].host === label.host && short[otherIndex].detail === label.detail);
     if (peers.length === 0) return label;
     return { host: label.host, detail: elideSharedStart(full[index].detail, peers.map((peer) => peer.detail)) };
+  });
+  // Each label is cut on its own, so in repetitive text two cuts can still land on the same words.
+  // Those labels keep their full detail, which always differs, even if the fade hides some of it.
+  return elided.map((label, index) => {
+    const clashes = elided.some((other, otherIndex) =>
+      otherIndex !== index && other.host === label.host && other.detail === label.detail && full[otherIndex].detail !== full[index].detail);
+    return clashes ? full[index] : label;
   });
 }
 
