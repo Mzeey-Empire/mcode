@@ -23,6 +23,11 @@ export type RevertibleDef = SettingDef & { readonly value: RevertibleValue };
 export interface JournalEntry {
   readonly def: RevertibleDef;
   readonly before: RevertSource;
+  /**
+   * A Revert wrote the value back but its `afterWrite` failed, so the change stays listed (and retryable) even though
+   * the saved value already equals `before`. A later local change to the setting clears it.
+   */
+  readonly afterWriteFailed?: true;
 }
 
 /** A change the header names. */
@@ -139,22 +144,26 @@ export function journalTransition(
 ): ReadonlyMap<SettingId, JournalEntry> {
   const changed = defs.filter((def) => !sameValue(def.value.read(prev), def.value.read(next)));
   // A local write claims an untouched row; an outside write releases a claimed one. Anything else keeps the journal.
+  // A local change to a row whose switch-back failed also clears that mark.
   const affected = changed
     .map((def) => ({ def, local: writtenLocally(def, scopes, next) }))
-    .filter(({ def, local }) => journal.has(def.id) !== local);
+    .filter(({ def, local }) => journal.has(def.id) !== local || (local && journal.get(def.id)?.afterWriteFailed));
   if (affected.length === 0) return journal;
   const out = new Map(journal);
   for (const { def, local } of affected) {
-    if (local) out.set(def.id, { def, before: prev });
+    if (local) out.set(def.id, { def, before: journal.get(def.id)?.before ?? prev });
     else out.delete(def.id);
   }
   return out;
 }
 
-/** Entries whose read(current) differs from read(before), in page order. Changing a value back by hand removes it. */
+/**
+ * Entries whose read(current) differs from read(before), or whose last switch-back failed, in page order. Changing a
+ * value back by hand removes it.
+ */
 export function changedEntries(journal: ReadonlyMap<SettingId, JournalEntry>, current: RevertSource): readonly JournalEntry[] {
   return [...journal.values()]
-    .filter((entry) => !sameValue(entry.def.value.read(entry.before), entry.def.value.read(current)))
+    .filter((entry) => entry.afterWriteFailed || !sameValue(entry.def.value.read(entry.before), entry.def.value.read(current)))
     .sort((a, b) => (DEF_ORDER.get(a.def.id) ?? 0) - (DEF_ORDER.get(b.def.id) ?? 0));
 }
 
@@ -344,9 +353,10 @@ function replanBatch(visitId: number, planned: RevertPlan["batches"][number]): R
 async function runBatches(
   visitId: number,
   plan: RevertPlan,
-): Promise<{ readonly done: readonly SettingId[]; readonly failures: readonly RevertFailure[] }> {
+): Promise<{ readonly done: readonly SettingId[]; readonly afterWriteFailed: readonly SettingId[]; readonly failures: readonly RevertFailure[] }> {
   const failures: RevertFailure[] = [...plan.blocked];
   const done: SettingId[] = [];
+  const afterWriteFailed: SettingId[] = [];
   for (const planned of plan.batches) {
     const { batches, blocked } = replanBatch(visitId, planned);
     failures.push(...blocked);
@@ -364,9 +374,24 @@ async function runBatches(
         failures.push(...failuresFor([after.id], afterReason));
       }
       done.push(...batch.ids.filter((id) => !failed.has(id)));
+      afterWriteFailed.push(...failed);
     }
   }
-  return { done, failures };
+  return { done, afterWriteFailed, failures };
+}
+
+function journalAfterRevert(
+  journal: ReadonlyMap<SettingId, JournalEntry>,
+  done: readonly SettingId[],
+  afterWriteFailed: readonly SettingId[],
+): ReadonlyMap<SettingId, JournalEntry> {
+  const out = new Map(journal);
+  for (const id of done) out.delete(id);
+  for (const id of afterWriteFailed) {
+    const entry = out.get(id);
+    if (entry) out.set(id, { ...entry, afterWriteFailed: true });
+  }
+  return out;
 }
 
 /** Puts back every change of the current visit. Idempotent: a second call finds nothing to do. */
@@ -375,12 +400,10 @@ export async function revertVisit(): Promise<{ readonly failures: readonly Rever
   if (visit === null || visit.reverting || isLocalSettingsWriteInFlight()) return { failures: visit?.failures ?? NO_FAILURES };
   const plan = planRevert(changedEntries(visit.journal, readRevertSource()), readRevertSource());
   patchVisit(visit.id, { reverting: true });
-  const { done, failures } = await runBatches(visit.id, plan);
+  const { done, afterWriteFailed, failures } = await runBatches(visit.id, plan);
   const latest = useVisitStore.getState().visit;
   if (latest?.id === visit.id) {
-    const journal = new Map(latest.journal);
-    for (const id of done) journal.delete(id);
-    patchVisit(visit.id, { journal, reverting: false, failures });
+    patchVisit(visit.id, { journal: journalAfterRevert(latest.journal, done, afterWriteFailed), reverting: false, failures });
   }
   return { failures };
 }

@@ -325,6 +325,31 @@ describe("Settings Revert", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps Revert offered when the updater could not switch back, and a retry switches it", async () => {
+    const applyReleaseLine = vi.fn(() => Promise.resolve({ state: "idle" as const }))
+      .mockRejectedValueOnce(new Error("Updater is busy."));
+    vi.stubGlobal("desktopBridge", { app: { applyReleaseLine } });
+    render(<SettingsView />);
+    await act(async () => {
+      await useSettingsStore.getState().update({ updates: { channel: "nightly" } });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert 1 change" }));
+    await flush();
+
+    expect(useSettingsStore.getState().settings.updates.channel).toBe("stable");
+    const button = screen.getByRole("button", { name: "Revert 1 change" });
+    expect(await tooltipOf(button)).toBe("Could not put back Release line: Updater is busy. Puts back Release line");
+
+    fireEvent.click(button);
+    await flush();
+
+    expect(applyReleaseLine).toHaveBeenCalledTimes(2);
+    expect(applyReleaseLine.mock.calls.at(-1)).toEqual([{ releaseLine: "stable", allowDowngrade: false }]);
+    expect(revertButton()).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("shows the restored serve URL in its input", async () => {
     openPage("providers");
     render(<SettingsView />);
