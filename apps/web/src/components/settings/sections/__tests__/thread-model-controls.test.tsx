@@ -45,10 +45,6 @@ function ThreadSettingRows() {
   return <>{THREADS.all.map((def) => <Setting key={def.id} def={def} />)}</>;
 }
 
-/**
- * Renders the Threads page with the given default provider and model.
- * Returns the update spy for asserting what a control writes.
- */
 function renderWithModel(provider: string, modelId: string, reasoning = "high") {
   const defaults = getDefaultSettings();
   const update = vi.fn(async () => {});

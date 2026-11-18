@@ -16,7 +16,6 @@ vi.mock("@/transport", async () => ({
   getTransport: () => mockTransport,
 }));
 
-/** A settings store whose update applies the patch, so a control's write shows on screen like the real store. */
 function seedSettings(provider: SettingsProviderId = "claude") {
   const defaults = getDefaultSettings();
   const update = vi.fn(async (patch: Record<string, unknown>) => {

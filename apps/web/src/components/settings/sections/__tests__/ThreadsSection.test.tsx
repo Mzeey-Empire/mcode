@@ -28,7 +28,6 @@ function deepMerge(base: unknown, patch: unknown): unknown {
   return out;
 }
 
-/** A store whose update applies the patch, so a write shows on the page as with the real store. */
 function seedSettings(change: (settings: Settings) => Settings = (settings) => settings) {
   const update = vi.fn(async (patch: Record<string, unknown>) => {
     const current = useSettingsStore.getState().settings;

@@ -15,7 +15,6 @@ vi.mock("@/transport", async () => ({
   getTransport: () => mockTransport,
 }));
 
-/** Stands in for the server: a settings write returns the merged result, as the real RPC does. */
 function serveSettingsWrites() {
   vi.mocked(mockTransport.updateSettings).mockReset().mockImplementation(async (patch) => mergeSettings(useSettingsStore.getState().settings, patch));
 }

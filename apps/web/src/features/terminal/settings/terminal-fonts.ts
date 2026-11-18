@@ -52,7 +52,7 @@ export function detectRenderableFonts(): readonly TerminalFontChoice[] {
   document.body.append(probe);
   try {
     const baselines = PROBE_FALLBACKS.map((fallback) => measureWith(probe, fallback));
-    // Without a layout engine (tests, a hidden renderer) every width is 0 and nothing can be ruled out.
+    // Without layout (jsdom in tests) every width is 0, so nothing can be ruled out.
     if (baselines.every((width) => width === 0)) return COMMON_FONTS;
     return COMMON_FONTS.filter((font) =>
       PROBE_FALLBACKS.some((fallback, index) => measureWith(probe, `"${font.name}", ${fallback}`) !== baselines[index]),
@@ -62,7 +62,6 @@ export function detectRenderableFonts(): readonly TerminalFontChoice[] {
   }
 }
 
-/** Family names in a CSS font-family list, unquoted, in order. */
 function familyNames(stack: string): string[] {
   return stack.split(",").map((part) => part.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
 }

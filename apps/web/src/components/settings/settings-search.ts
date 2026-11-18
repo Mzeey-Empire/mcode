@@ -30,7 +30,6 @@ const LABEL_PHRASE_BONUS = 2;
 
 const stem = (word: string) => (word.length > 4 ? word.replace(/(ing|ed|es|s)$/, "") : word);
 
-/** One normal form for every search: lower case, hyphens and underscores as spaces, single spaces. */
 const normalize = (text: string) => text.toLowerCase().replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
 
 const tokenize = (text: string | undefined) =>

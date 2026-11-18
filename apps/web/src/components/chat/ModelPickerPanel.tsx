@@ -87,7 +87,6 @@ interface LegacyFoldOption {
   readonly group: string | undefined;
 }
 
-/** The host's own first row, such as Auto, listed above every catalog. */
 interface LeadOption {
   readonly kind: "lead";
   readonly label: string;
@@ -499,13 +498,11 @@ export interface ModelPickerLead {
   readonly onSelect: () => void;
 }
 
-/** Lists the lead first while no search runs or the search matches its label. */
 function withLead(results: ModelSearchResults, lead: ModelPickerLead | undefined, searchQuery: string): ModelSearchResults {
   if (!lead || !matchesAllTokens([lead.label], tokenizeSearch(searchQuery))) return results;
   return { ...results, options: [{ kind: "lead", label: lead.label }, ...results.options] };
 }
 
-/** The lead's key while it is the current choice, else the selected model's. */
 function selectedRowKey(lead: ModelPickerLead | undefined, presentation: SelectedModelPresentation): string | undefined {
   if (lead?.selected) return LEAD_KEY;
   return presentation.selectedProviderId ? optionKey(presentation.selectedProviderId, presentation.normalizedModelId) : undefined;

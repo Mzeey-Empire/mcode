@@ -58,7 +58,6 @@ afterEach(() => {
 });
 
 describe("About version row status", () => {
-  // Fails if a state shows the wrong sentence or offers the wrong next step.
   it.each<[string, UpdateStatus[], string, string[]]>([
     ["idle", [{ state: "idle" }], "Up to date.", ["Check now"]],
     ["not available", [{ state: "not-available", version: "0.16.0" }], "Up to date.", ["Check now"]],
@@ -80,21 +79,18 @@ describe("About version row status", () => {
     expect(actionNames()).toEqual(actions);
   });
 
-  // Fails if Check now stays clickable while a check runs, inviting a second check.
   it("marks Check now unavailable while checking", () => {
     setStatuses({ state: "checking" });
     render(<AboutSection />);
     expect(screen.getByRole("button", { name: "Check now" }).getAttribute("aria-disabled")).toBe("true");
   });
 
-  // Fails if turning off automatic checks still claims the app is up to date.
   it("says automatic checks are off when the interval is Off", () => {
     useSettingsStore.setState({ settings: { ...getDefaultSettings(), updates: { ...getDefaultSettings().updates, checkInterval: "never" } } });
     render(<AboutSection />);
     expect(hintText()).toBe("Automatic checks are off.");
   });
 
-  // Fails if a status change is not announced to screen readers.
   it("announces status changes through the status line", () => {
     render(<AboutSection />);
     expect(screen.getByRole("status").textContent).toBe("Up to date");
@@ -104,7 +100,6 @@ describe("About version row status", () => {
 });
 
 describe("About version row What's new", () => {
-  // Fails if the link shows with nothing pending, or opens the notes for the wrong version.
   it("shows only while an update is pending and opens that version's notes", () => {
     render(<AboutSection />);
     expect(screen.queryByRole("button", { name: /What's new/ })).toBeNull();
@@ -128,7 +123,6 @@ describe("About version row download", () => {
 });
 
 describe("About version row restart", () => {
-  // Fails if a plain click restarts while agents run, a short press restarts, or the hold skips the desktop's confirmation.
   it("restarts after a 1200ms hold with agents running, not after 1100ms", () => {
     setRunningAgents(2);
     setStatuses(READY);
@@ -148,7 +142,6 @@ describe("About version row restart", () => {
     expect(hold.textContent).toContain("Restarting");
   });
 
-  // Fails if keyboard users cannot restart, or a held key still commits after focus leaves.
   it("restarts on a held Space and cancels on blur", () => {
     setRunningAgents(1);
     setStatuses(READY);
@@ -206,7 +199,6 @@ describe("About version row restart", () => {
     expect(app.installUpdate).toHaveBeenCalledTimes(2);
   });
 
-  // Fails if "Install when they finish" does not defer the install.
   it("defers the install until agents finish", () => {
     setRunningAgents(1);
     setStatuses(READY);
@@ -216,7 +208,6 @@ describe("About version row restart", () => {
     expect(app.installUpdate).not.toHaveBeenCalled();
   });
 
-  // Fails if a plain Restart claims the confirmation that only a hold may give.
   it("asks the desktop to install without confirming on a plain Restart", async () => {
     setStatuses(READY);
     render(<AboutSection />);
@@ -225,7 +216,6 @@ describe("About version row restart", () => {
     expect(app.installUpdate.mock.calls).toEqual([[undefined]]);
   });
 
-  // Fails if a quick double click sends two installs before the desktop answers the first.
   it("sends one install for a double click", async () => {
     app.installUpdate.mockReturnValueOnce(new Promise<InstallUpdateResult>(() => {}));
     setStatuses(READY);
@@ -239,7 +229,6 @@ describe("About version row restart", () => {
 });
 
 describe("About version row desktop agent check", () => {
-  // Fails if the row trusts only this window's threads after the desktop counts agents elsewhere.
   it("asks for a hold when the desktop refuses because agents are running", async () => {
     app.installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: 2 });
     setStatuses(READY);
@@ -254,7 +243,6 @@ describe("About version row desktop agent check", () => {
     expect(app.installUpdate.mock.calls).toEqual([[undefined], [CONFIRMED]]);
   });
 
-  // Fails if an unknown count is read as "no agents" and offers a plain Restart again.
   it("says agents may be running when the desktop cannot count them", async () => {
     app.installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: null });
     setStatuses(READY);
@@ -266,7 +254,6 @@ describe("About version row desktop agent check", () => {
     expect(screen.getByRole("button", { name: "Hold to restart. Agents may be running." })).toBeTruthy();
   });
 
-  // Fails if Retry after a failed install restarts over agents the desktop finds.
   it("asks for a hold when a retried install finds agents", async () => {
     app.installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: 3 });
     setStatuses({ state: "error", message: "Update installation blocked: busy", failedOperation: "install" });
@@ -277,7 +264,6 @@ describe("About version row desktop agent check", () => {
     expect(screen.getByRole("button", { name: "Hold to restart. Ends 3 running agents." })).toBeTruthy();
   });
 
-  // Fails if a count for one update keeps asking for a hold on the next one.
   it("forgets the desktop's count when a newer update is ready", async () => {
     app.installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: 2 });
     setStatuses(READY);
@@ -290,7 +276,6 @@ describe("About version row desktop agent check", () => {
 });
 
 describe("About version row label", () => {
-  // Fails if a dev build loses its stage label next to the version.
   it("names a dev build next to its version", () => {
     useUpdateStore.setState({ stage: "dev" });
     render(<AboutSection />);

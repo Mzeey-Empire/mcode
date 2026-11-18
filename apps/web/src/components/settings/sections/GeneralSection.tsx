@@ -82,11 +82,6 @@ function NotificationsControl() {
   return <Switch aria-label="Notifications" checked={enabled} onCheckedChange={(v) => update({ notifications: { enabled: v } })} />;
 }
 
-/**
- * Chooses the global default open-in app (`externalApps.defaultEditor`, tier 2
- * of the three-tier resolution). New threads with no per-thread override open
- * in this app; "Auto" clears the setting and falls back to auto-resolution.
- */
 function DefaultOpenInAppControl() {
   const defaultEditor = useSettingsStore((s) => s.settings.externalApps.defaultEditor);
   const update = useSettingsStore((s) => s.update);

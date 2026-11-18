@@ -89,7 +89,6 @@ describe("ProviderSection", () => {
     expect(screen.getByText(`At least one provider must be enabled. ${warning}`)).toBeInTheDocument();
   });
 
-  // Fails if the last-enabled guard is dropped and the switch lets Claude turn off.
   it("blocks disabling the last enabled provider", async () => {
     const user = userEvent.setup();
     const update = vi.fn().mockResolvedValue(undefined);
@@ -102,7 +101,6 @@ describe("ProviderSection", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  // Fails if the missing CLI moves into a hover-only tooltip.
   it.each(["Claude Code is not installed.", "Point the CLI path at claude.exe or the claude binary."])("shows a missing CLI and its guidance without hover: %s", (message) => {
     useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
       ? { ...row, cli: { ...row.cli, status: "not_found", message } }
@@ -122,7 +120,6 @@ describe("ProviderSection", () => {
     expect(screen.queryByTestId("provider-badge-claude-cli-missing")).not.toBeInTheDocument();
   });
 
-  // Fails if the path line drops the file name or loses the full path for hover and screen readers.
   it("shows the CLI file name first and keeps the full path as its accessible name", () => {
     useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
       ? { ...row, cli: { ...row.cli, resolvedPath: "C:\\Users\\me\\bin\\claude.exe" } }
@@ -184,7 +181,6 @@ describe("ProviderSection", () => {
     expect(screen.getByRole("button", { name: "Claude settings" })).toHaveAttribute("aria-expanded", "false");
   });
 
-  // Fails if the row stops opening its details, or if the switch's click bubbles up and opens them.
   it("opens a provider's details from its row but not from its switch", async () => {
     const user = userEvent.setup();
     render(<ProviderSection />);

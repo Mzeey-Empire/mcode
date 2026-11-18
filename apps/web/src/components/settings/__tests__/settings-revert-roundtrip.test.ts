@@ -35,7 +35,6 @@ const ALTERED: SettingsPatch = {
   },
 };
 
-/** Applies a restore step the way its store action lands it. */
 function applyStep(source: RevertSource, step: RestoreStep): RevertSource {
   switch (step.sink) {
     case "settings":

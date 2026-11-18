@@ -15,7 +15,6 @@ vi.mock("@/transport", async () => ({
 const ids = (query: string, index: readonly IndexedSetting[] = SETTINGS_INDEX) =>
   searchSettings(query, index).map((match) => match.entry.def.id);
 
-/** The real index as it is on desktop, where Hardware acceleration exists. */
 const desktopIndex = SETTINGS_INDEX.map((entry) =>
   entry.def.id === "troubleshooting.hardwareAcceleration" ? { ...entry, def: { ...entry.def, exists: () => true } } : entry,
 );

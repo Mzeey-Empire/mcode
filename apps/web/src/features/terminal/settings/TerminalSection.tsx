@@ -208,7 +208,6 @@ function useTerminalProfiles() {
     pending,
     globalDefault,
     automaticProfile,
-    /** The profile a new terminal opens with: the chosen one, or the first detected under Automatic. */
     inUseProfileId: globalDefault === "automatic" ? automaticProfile?.id : globalDefault,
     selectedProfileUnavailable: Boolean(recovery?.unavailableProfileId)
       || terminalProfileUnavailable(globalDefault, certifiedOptions, customProfiles),
@@ -225,7 +224,6 @@ function globalProfileHint(profiles: TerminalProfiles): string | undefined {
   return undefined;
 }
 
-/** Default profile; its hint names the profile Automatic resolves to, so the row draws it. */
 function GlobalProfileRow({ def, variant }: SettingRowProps) {
   const profiles = useTerminalProfiles();
   const setGlobalDefault = useTerminalSettingsStore((state) => state.setGlobalDefault);
@@ -260,7 +258,6 @@ function ProfileRecoveryNotices() {
   );
 }
 
-/** Project default profile; without an open project the row dims and says why. */
 function ProjectProfileRow({ def, variant }: SettingRowProps) {
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   if (!activeWorkspaceId) {
@@ -360,10 +357,6 @@ function detectedProfilesStatus(profiles: TerminalProfiles): string | null {
   return null;
 }
 
-/**
- * One row per detected profile: its name, an "In use" tag on the profile a new terminal opens with,
- * and its executable path. The rows share one path tooltip root.
- */
 function DetectedProfilesRow({ def, variant }: SettingRowProps) {
   const profiles = useTerminalProfiles();
   const hit = useSettingHit([def]);
@@ -397,7 +390,6 @@ function DetectedProfilesRow({ def, variant }: SettingRowProps) {
   );
 }
 
-/** Custom profile list with add, edit and delete; owns the profile dialog so search results can add one too. */
 function CustomProfilesControl() {
   const profiles = useTerminalProfiles();
   const createProfile = useTerminalSettingsStore((state) => state.createProfile);
@@ -470,7 +462,6 @@ function useTerminalPreferences() {
   };
 }
 
-/** A font picker row: a listed font, or the typed name when nothing matches. */
 interface FontRow {
   readonly key: string;
   readonly family: string;
@@ -485,7 +476,6 @@ function fontRows(fonts: readonly TerminalFontChoice[], current: string, query: 
   const hits = listed.filter((font) => font.name.toLowerCase().includes(needle));
   if (hits.length === 0) {
     const typed = query.trim().replace(/\s+/g, " ");
-    // A font the list does not know can still be used by name.
     return typed ? [{ key: `typed:${typed}`, family: typed, label: `Use "${typed}"` }] : [];
   }
   // Monospace faces first: a terminal almost always wants one.
@@ -499,7 +489,6 @@ function fontPickerRow(row: FontRow): PickerRow {
   return { key: row.key, name: row.label, fontFamily: `"${row.family}", var(--font-sans)`, group, groupLabel: group };
 }
 
-/** Font family pill: shows the current face in itself, and opens a searchable list of faces this machine renders. */
 function FontFamilyControl() {
   const { terminal, pending, updatePresentation } = useTerminalPreferences();
   const current = primaryFontFamily(terminal.presentation.fontFamily);
@@ -581,7 +570,6 @@ function LineHeightControl() {
   );
 }
 
-/** A small filled shape of each cursor style, drawn in the segment's text colour. */
 const CURSOR_GLYPHS: Record<TerminalSettings["presentation"]["cursorStyle"], string> = {
   block: "h-3 w-2",
   underline: "mt-2.5 h-0.5 w-2",
@@ -637,7 +625,6 @@ function TerminalSampleHead() {
   );
 }
 
-/** A live terminal sample in the current font, size, line height, ligatures and cursor. Only the page shows it. */
 function TerminalSample() {
   const presentation = useSettingsStore((state) => state.settings.terminal.presentation);
   const style: CSSProperties = {

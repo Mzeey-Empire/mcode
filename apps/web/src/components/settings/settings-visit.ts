@@ -72,8 +72,6 @@ function failuresFor(ids: readonly SettingId[], reason: string): RevertFailure[]
   return ids.map((id) => ({ id, label: REVERTIBLE_DEFS[DEF_ORDER.get(id) ?? -1]?.label ?? id, reason }));
 }
 
-// ---- pure core ----
-
 /**
  * One source transition. Local write in flight: record `prev` as before for each revertible def whose read changed
  * and that has no entry yet. No local write in flight: drop the entry of each def whose read changed, because the value
@@ -157,8 +155,6 @@ export function planRevert(changed: readonly JournalEntry[], current: RevertSour
   ];
   return { batches, blocked };
 }
-
-// ---- visit store ----
 
 interface Visit {
   /** New per visit, so a revert or write that outlives its visit cannot touch the next one. */

@@ -45,7 +45,6 @@ export function useSettingHit(defs: readonly SettingDef[]): SettingHit {
   return { hitId, ref, attrs: hitId === null ? {} : { "data-search-hit": "", tabIndex: -1 } };
 }
 
-// Search rows sit under their location link, so they drop the page row's top padding and minimum height.
 const ROW_SPACING: Record<SettingVariant, string> = {
   page: "min-h-18 py-2.5",
   best: "pt-1.5 pb-3",

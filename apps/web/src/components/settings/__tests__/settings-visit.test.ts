@@ -85,7 +85,6 @@ describe("planRevert", () => {
 
   it("puts back provider, model, reasoning and Fast in one settings write", () => {
     const before = source({ model: { defaults: { provider: "claude", id: "claude-opus-4-8", reasoning: "high" } }, provider: { claude: { fastMode: true } } });
-    // A model pick that normalises reasoning, then a Fast change.
     const picked = source({ model: { defaults: { provider: "codex", id: "gpt-5", reasoning: "medium" } } }, before.settings);
     const current = source({ provider: { codex: { fastMode: true } } }, picked.settings);
     let journal = journalTransition(EMPTY, DEFS, before, picked, "local");

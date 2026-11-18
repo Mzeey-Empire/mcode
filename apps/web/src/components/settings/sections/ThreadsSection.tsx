@@ -195,7 +195,6 @@ export const THREADS = settingsPage("threads", {
   },
 });
 
-/** The model part stands for the model and the applicable settings it shows: reasoning, Fast and Thinking. */
 const MODEL_PART_DEFS = [THREADS.model, THREADS.reasoning, THREADS.fastMode, THREADS.thinking];
 const MODE_DEFS = [THREADS.mode];
 const PERMISSION_DEFS = [THREADS.permission];

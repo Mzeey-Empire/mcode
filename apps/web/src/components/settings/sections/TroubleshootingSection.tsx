@@ -53,7 +53,6 @@ export const TROUBLESHOOTING = settingsPage("troubleshooting", {
     synonyms: "gpu graphics hardware acceleration rendering blank flicker blurry render",
     problems: "window blank flicker screen black terminal flicker terminal blank",
     value: settingsValue((s) => s.graphics.hardwareAcceleration, (hardwareAcceleration) => ({ graphics: { hardwareAcceleration } })),
-    // Only the desktop app can switch the GPU and relaunch, so the browser build hides the row and its search result.
     exists: () => {
       const bridge = hardwareAccelerationBridge();
       return Boolean(bridge?.getHardwareAcceleration && bridge.relaunch);
