@@ -402,14 +402,16 @@ function GroupedThreadRowBody(props: ThreadRowBodyProps) {
 function ThreadRowMetaLine({ thread, presentation, chip, trailing }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { chip: React.ReactNode; trailing?: React.ReactNode }) {
   return (
     // A scaffold row dims its content but never its status, so the dim skips the trailing slot.
+    // The PR chip sits before the status so every row's status and actions end at the provider mark.
     <div data-testid="thread-line-branch" className="mt-0.5 flex h-4 min-w-0 items-center gap-1 text-caption text-muted">
       <div className={cn("flex min-w-0 flex-1 items-center gap-1", presentation.scaffoldDim)}>
         <ThreadModeIcon thread={thread} stale={presentation.isStaleWorktree} />
         <ThreadRowBranch thread={thread} stale={presentation.isStaleWorktree} />
       </div>
+      {/* The chip renders nothing on a row with no PR; empty:hidden then drops its gap. */}
+      <div className={cn("flex shrink-0 items-center pl-1 empty:hidden", presentation.scaffoldDim)}>{chip}</div>
       {trailing}
-      <div className={cn("flex shrink-0 items-center gap-2 pl-1", presentation.scaffoldDim)}>
-        {chip}
+      <div className={cn("flex shrink-0 items-center pl-1", presentation.scaffoldDim)}>
         <ThreadRowProviderSlot provider={presentation.provider} providersUsed={thread.providers_used} className="opacity-(--provider-mark-opacity)" />
       </div>
     </div>

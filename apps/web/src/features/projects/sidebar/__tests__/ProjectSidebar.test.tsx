@@ -1734,6 +1734,18 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
     expect(row).toContainElement(indicator);
   });
 
+  it("puts the PR chip before the status so the status ends at the provider mark", () => {
+    renderWithThread(
+      makeThread({ mode: "worktree", status: "active", pull_requests: [createMockThreadPullRequest({ number: 42, state: "open" })] }),
+    );
+    const branchLine = screen.getByTestId("thread-line-branch");
+    const chip = within(branchLine).getByTestId("thread-pr-indicator-thread-1");
+    const status = within(branchLine).getByTestId("thread-status");
+    const provider = within(branchLine).getByLabelText(/^Provider, /);
+    expect(chip.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(status.compareDocumentPosition(provider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("renders a merged PR with the violet merge icon, and never words the CI state", () => {
     renderWithThread(
       makeThread({ mode: "worktree", pull_requests: [createMockThreadPullRequest({ number: 42, state: "merged" })] }),
