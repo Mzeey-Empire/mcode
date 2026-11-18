@@ -33,7 +33,7 @@ reopen, so rows sorted by it would jump whenever metadata changed.
 The web holds every thread in `workspaceStore`. `thread.listAll` loads them on
 startup and reconnect. The `thread.created`, `thread.activity`,
 `thread.lifecycleChanged` and `thread.pullRequests` pushes keep them current.
-The Completed count, the flat Threads view and Older each need every thread,
+The flat Threads view, the Open and Closed scopes and Older each need every thread,
 so do not reintroduce per-project or capped loading.
 
 A new thread fact the sidebar reads needs a push. Without one the sidebar shows
@@ -123,7 +123,7 @@ thread by hand. Unknown attention also blocks it.
 
 [`deriveSidebarModel`](../../../apps/web/src/features/projects/sidebar/sidebar-model.ts)
 is pure. It maps the thread index, pending completions, UI state, settings and
-`now` to the rows. Row caps, Older and the Completed count all come from it.
+`now` to the rows. Row caps, Older and the Open and Closed scopes all come from it.
 Components render its items and never filter or sort.
 
 - Older is computed on the client from `thread.olderAfterDays`. A thread

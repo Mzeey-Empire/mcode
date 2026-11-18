@@ -21,7 +21,7 @@ interface SidebarUiState {
 
 interface SidebarUiActions {
   setScope(scope: SidebarScope): void;
-  toggleView(): void;
+  setView(view: SidebarView): void;
   toggleOlder(): void;
   /** Opens Older without the rise, for revealing a thread selected from outside the sidebar. */
   openOlder(): void;
@@ -77,7 +77,8 @@ function mergePersisted(persisted: unknown, current: SidebarUiState & SidebarUiA
 }
 
 /**
- * Sidebar scope, view and section state. The view, open projects and Show more choices persist across app sessions.
+ * Sidebar scope, view and section state. The view, open projects and Show more choices persist across app sessions;
+ * the scope lives only in memory, so it survives remounts but each app session starts on Open.
  */
 export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
   persist(
@@ -90,7 +91,7 @@ export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
       showMore: readLegacyFlags(LEGACY_SHOW_MORE_KEY),
       frozen: null,
       setScope: (scope) => set({ scope }),
-      toggleView: () => set((state) => ({ view: state.view === "projects" ? "threads" : "projects" })),
+      setView: (view) => set({ view }),
       toggleOlder: () => set((state) => ({ olderOpen: !state.olderOpen })),
       openOlder: () => set({ olderOpen: true }),
       toggleProject: (workspaceId, section) =>
@@ -113,13 +114,6 @@ export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
     },
   ),
 );
-
-/**
- * Returns Active when no threads are completed, otherwise the requested scope.
- */
-export function effectiveSidebarScope(scope: SidebarScope, completedCount: number): SidebarScope {
-  return completedCount === 0 ? "active" : scope;
-}
 
 /**
  * Snapshots the clock and every thread's sort key, so rows hold still under the pointer. New

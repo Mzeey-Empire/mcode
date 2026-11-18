@@ -80,9 +80,8 @@ export type SidebarItem =
 
 /** The derived sidebar. */
 export interface SidebarModel {
-  /** Effective scope: Active when nothing is completed, so the hidden bar never strands the user. */
+  /** The scope the user chose; it stays chosen when it lists nothing. */
   readonly scope: SidebarScope;
-  readonly scopeBar: { readonly visible: boolean; readonly completedCount: number };
   readonly items: readonly SidebarItem[];
   /** Null when no thread is Older (the bar exists only then) or the scope is Completed. */
   readonly olderBar: { readonly count: number; readonly open: boolean } | null;
@@ -377,17 +376,15 @@ function nextBoundary(parts: Partitioned, inputs: SidebarInputs): number | null 
 
 /**
  * Derives sidebar rows, effective scope and aging boundaries without side effects.
- * Pending completions stay Active; an empty Completed scope falls back to Active.
+ * Pending completions stay Active; an empty Completed scope stays chosen and lists one empty line.
  */
 export function deriveSidebarModel(inputs: SidebarInputs): SidebarModel {
   const parts = partition(inputs);
-  const completedCount = parts.completed.length;
-  const scope: SidebarScope = completedCount === 0 ? "active" : inputs.ui.scope;
+  const scope: SidebarScope = inputs.ui.scope;
   const active = scope === "active";
   const body = active ? activeItems(parts, inputs) : completedItems(parts, inputs);
   return {
     scope,
-    scopeBar: { visible: completedCount > 0, completedCount },
     items: [...body, { kind: "end-spacer", key: "end-spacer" }],
     olderBar: active && parts.older.length > 0 ? { count: parts.older.length, open: inputs.ui.olderOpen } : null,
     olderIds: new Set(active ? parts.older.map((entry) => entry.fact.id) : []),

@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { ProjectSidebar, useWorkspaceStore } from "@/features/projects";
-import { ArrowLeft, Search, SquarePen } from "lucide-react";
+import { ArrowLeft, FolderPlus, Search, SquarePen } from "lucide-react";
 import { Button, IconButton } from "@/components/ui/button";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import type { SettingsSection } from "@/components/settings/settings-nav";
@@ -9,6 +9,9 @@ import { SidebarHeader } from "@/components/shell/SidebarHeader";
 import { cn } from "@/lib/utils";
 import { ReactPerformanceProfiler } from "@/performance/ReactPerformanceProfiler";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
+import { ShortcutCombo } from "@/components/ui/shortcut-keys";
+import { getKeybindingForCommand, keybindingKeycaps, subscribeKeybindings, type Keybinding } from "@/lib/keybinding-manager";
+import { isMac } from "@/lib/platform";
 import { SidebarFooter } from "./SidebarFooter";
 import { useSidebarWidthStore } from "./sidebarWidthStore";
 
@@ -37,16 +40,43 @@ function getSettingsNavProps(settingsOpen: boolean | undefined, settingsSection:
   return settingsOpen && settingsSection && onSettingsSection ? { section: settingsSection, onSection: onSettingsSection } : null;
 }
 
+function useCommandBinding(commandId: string): Keybinding | undefined {
+  return useSyncExternalStore(subscribeKeybindings, () => getKeybindingForCommand(commandId));
+}
+
+const ARIA_MODIFIER: Record<string, string> = { mod: isMac ? "Meta" : "Control", ctrl: "Control", shift: "Shift", alt: "Alt" };
+
+function ariaShortcut(binding: Keybinding | undefined): string | undefined {
+  if (!binding) return undefined;
+  const parts = binding.key.split("+");
+  const key = parts.pop() ?? "";
+  return [...parts.map((part) => ARIA_MODIFIER[part.toLowerCase()] ?? part), key.length === 1 ? key.toUpperCase() : key].join("+");
+}
+
+function ActionTooltip({ name, binding }: { readonly name: string; readonly binding: Keybinding | undefined }) {
+  const keys = binding ? keybindingKeycaps(binding.key, isMac) : undefined;
+  return <>{name}{keys ? <span className="ml-1 flex shrink-0"><ShortcutCombo keys={keys} /></span> : null}</>;
+}
+
+const TOP_ACTION_CLASS = "size-7 text-muted hover:text-ink";
+
 function SidebarGoZone() {
   const setPrimarySurface = useUiStore((s) => s.setPrimarySurface);
-  return <div className="flex shrink-0 items-center gap-2 px-1.5">
+  const addProjectBinding = useCommandBinding("workspace.new");
+  const newThreadBinding = useCommandBinding("thread.new");
+  return <div className="flex shrink-0 items-center gap-1 px-1.5">
     <button type="button" className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-control bg-panel px-2 text-left text-body-small text-muted transition-colors duration-(--duration-fast) hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus" onClick={() => useCommandPaletteStore.getState().open({ intent: "threadSearch" })}>
       <Search size={16} aria-hidden className="shrink-0" />
       <span>Search</span>
     </button>
-    <IconButton data-testid="sidebar-new-thread" aria-label="New thread" onClick={() => { setPrimarySurface("chat"); useWorkspaceStore.getState().beginNewThread(); }}>
-      <SquarePen aria-hidden />
-    </IconButton>
+    <div className="flex shrink-0 gap-0.5">
+      <IconButton aria-label="Add project" aria-keyshortcuts={ariaShortcut(addProjectBinding)} tooltip={<ActionTooltip name="Add project" binding={addProjectBinding} />} className={TOP_ACTION_CLASS} onClick={() => useCommandPaletteStore.getState().open({ intent: "addProject" })}>
+        <FolderPlus aria-hidden />
+      </IconButton>
+      <IconButton data-testid="sidebar-new-thread" aria-label="New thread" aria-keyshortcuts={ariaShortcut(newThreadBinding)} tooltip={<ActionTooltip name="New thread" binding={newThreadBinding} />} className={TOP_ACTION_CLASS} onClick={() => { setPrimarySurface("chat"); useWorkspaceStore.getState().beginNewThread(); }}>
+        <SquarePen aria-hidden />
+      </IconButton>
+    </div>
   </div>;
 }
 

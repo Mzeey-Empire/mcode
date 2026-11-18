@@ -1,7 +1,11 @@
-import { useCallback, useEffect } from "react";
-import { List, ListTree, Plus } from "lucide-react";
-import { IconButton } from "@/components/ui/button";
-import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
+import { useEffect } from "react";
+import { ChevronDown } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useWorkspaceStartupRecovery } from "@/features/thread-startup/state/thread-startup-store";
 import { ProjectDropWell } from "../ProjectDropWell";
 import { useProjectTreeMenus } from "../ProjectTree";
@@ -10,25 +14,38 @@ import { CompletionUndoLine } from "./CompletionUndoLine";
 import { ScopeBar } from "./ScopeBar";
 import { SidebarList } from "./SidebarList";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
-import { useSidebarUiStore } from "./sidebar-ui-store";
+import { useSidebarUiStore, type SidebarScope, type SidebarView } from "./sidebar-ui-store";
 import { useSidebarModel } from "./use-sidebar-model";
 import { useSidebarMotion } from "./sidebar-motion";
 
-function SidebarProjectsHeader() {
-  // The palette's folder-browse view works across Electron and standalone web without the desktop bridge.
-  const openFolder = useCallback(() => useCommandPaletteStore.getState().open({ intent: "addProject" }), []);
+const VIEW_LABEL: Record<SidebarView, string> = { threads: "Threads", projects: "Projects" };
+const VIEWS: readonly SidebarView[] = ["threads", "projects"];
+
+function ViewMenu() {
   const view = useSidebarUiStore((s) => s.view);
-  const toggleView = useSidebarUiStore((s) => s.toggleView);
-  const ViewIcon = view === "projects" ? List : ListTree;
+  const setView = useSidebarUiStore((s) => s.setView);
   return (
-    <div className="flex h-8 shrink-0 items-center gap-1 pl-2">
-      <span className="min-w-0 flex-1 text-label text-muted">{view === "projects" ? "Projects" : "Threads"}</span>
-      <IconButton aria-label={view === "projects" ? "Show as one list" : "Group by project"} onClick={toggleView}>
-        <ViewIcon aria-hidden />
-      </IconButton>
-      <IconButton aria-label="Add project" onClick={openFolder}>
-        <Plus aria-hidden />
-      </IconButton>
+    <DropdownMenu>
+      <DropdownMenuTrigger className="mr-auto flex h-8 min-w-0 items-center gap-1 rounded-control px-2 text-body-small font-medium text-ink transition-colors duration-(--duration-fast) hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus data-popup-open:bg-hover">
+        {VIEW_LABEL[view]}
+        <ChevronDown aria-hidden className="size-3.5 shrink-0 text-muted" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        {VIEWS.map((option) => (
+          <DropdownMenuItem key={option} label={VIEW_LABEL[option]} checked={view === option} onClick={() => setView(option)} />
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SidebarListHeader({ scope, showScope }: { readonly scope: SidebarScope; readonly showScope: boolean }) {
+  return (
+    <div className="@container shrink-0">
+      <div className="flex flex-wrap items-center gap-2 pt-3 pb-1">
+        <ViewMenu />
+        {showScope ? <ScopeBar scope={scope} className="basis-full @min-[220px]:shrink-0 @min-[220px]:basis-auto" /> : null}
+      </div>
     </div>
   );
 }
@@ -45,7 +62,7 @@ function useWorkspaceLoading(): void {
 }
 
 /**
- * The Projects sidebar: header, scope bar, and the one virtual list of derived items, plus the
+ * The Projects sidebar: view and scope header, and the one virtual list of derived items, plus the
  * menus and dialogs its rows open.
  */
 export function ProjectSidebar() {
@@ -58,8 +75,7 @@ export function ProjectSidebar() {
   useWorkspaceLoading();
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
-      <SidebarProjectsHeader />
-      <ScopeBar visible={model.scopeBar.visible} completedCount={shown.completedCount} scope={model.scope} />
+      <SidebarListHeader scope={model.scope} showScope={hasProjects} />
       <CompletionUndoLine onOpen={ctx.onSelectThread} flying={shown.flying} />
       <SidebarList
         items={shown.items}

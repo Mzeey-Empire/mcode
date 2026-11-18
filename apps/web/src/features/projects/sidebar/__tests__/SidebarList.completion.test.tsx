@@ -52,11 +52,6 @@ function closingRow(): Element | null {
   return document.querySelector("[data-thread-id='target']")?.closest(".sidebar-row-closing") ?? null;
 }
 
-function completedCount(): string | null {
-  const bar = screen.queryByTestId("sidebar-scope-bar");
-  return bar ? within(bar).getByRole("radio", { name: /Closed/ }).textContent : null;
-}
-
 function renderSidebar(): void {
   render(<ProjectSidebar />);
 }
@@ -121,18 +116,18 @@ describe("SidebarList completion", () => {
     expect(within(targetRow()).getByText("Title target")).not.toHaveClass("sidebar-strike");
   });
 
-  it("moves the row out of Active and raises the count when the hold ends", async () => {
+  it("moves the row out of Active into Closed when the hold ends", async () => {
     vi.mocked(mockTransport.completeThread).mockReturnValue(replyAfter(3000, { ok: true, thread: COMPLETED_TARGET }));
     renderSidebar();
     fireEvent.click(screen.getByRole("button", { name: "Close Title target" }));
-    expect(completedCount()).toBeNull();
 
     await act(() => vi.advanceTimersByTimeAsync(3000));
     expect(closingRow()).not.toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(CLOSE_MS));
 
     expect(renderedThreadIds()).toEqual(["newer", "older"]);
-    expect(completedCount()).toContain("1");
+    fireEvent.click(screen.getByRole("radio", { name: "Closed" }));
+    expect(renderedThreadIds()).toEqual(["target"]);
   });
 
   it("returns a refused row with the reason and Retry", async () => {

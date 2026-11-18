@@ -77,6 +77,12 @@ function Harness() {
   );
 }
 
+function chooseView(name: "Threads" | "Projects"): void {
+  fireEvent.click(screen.getByRole("button", { name: name === "Threads" ? "Projects" : "Threads" }));
+  act(() => vi.runOnlyPendingTimers());
+  fireEvent.click(screen.getByRole("menuitemradio", { name }));
+}
+
 function renderedThreadIds(): string[] {
   return [...document.querySelectorAll<HTMLElement>("[data-testid='thread-item']")].map((row) => row.dataset.threadId ?? "");
 }
@@ -209,7 +215,7 @@ describe("SidebarList Threads view", () => {
     expect(renderedThreadIds()).toEqual(["a-new", "a-old", "b-new", "b-old"]);
     const flipsBefore = FakeVirtualViewport.flips.length;
 
-    fireEvent.click(screen.getByRole("button", { name: "Show as one list" }));
+    chooseView("Threads");
 
     expect(renderedThreadIds()).toEqual(["b-new", "a-new", "a-old", "b-old"]);
     expect(screen.queryByTestId("project-row-ws-1")).toBeNull();
@@ -219,7 +225,7 @@ describe("SidebarList Threads view", () => {
 
   it("keeps the Threads view across a remount from persisted state", async () => {
     const first = render(<ProjectSidebar />);
-    fireEvent.click(screen.getByRole("button", { name: "Show as one list" }));
+    chooseView("Threads");
     first.unmount();
     const stored = localStorage.getItem("mcode-sidebar-ui");
 
@@ -229,7 +235,7 @@ describe("SidebarList Threads view", () => {
     await act(() => useSidebarUiStore.persist.rehydrate());
     render(<ProjectSidebar />);
 
-    expect(screen.getByRole("button", { name: "Group by project" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Threads" })).toBeVisible();
     expect(renderedThreadIds()).toEqual(["b-new", "a-new", "a-old", "b-old"]);
   });
 });

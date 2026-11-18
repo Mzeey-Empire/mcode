@@ -19,7 +19,7 @@ const IS_DESKTOP = typeof window !== "undefined" && !!window.desktopBridge;
 export function SidebarFooter({ settingsOpen, onOpenSettings }: SidebarFooterProps) {
   if (settingsOpen) return <SettingsFileFooter />;
   return (
-    <footer data-testid="sidebar-footer" className="flex shrink-0 items-center justify-between gap-1 px-3">
+    <footer data-testid="sidebar-footer" className="flex shrink-0 items-center justify-between gap-1 px-1.5">
       <div className="flex items-center gap-1">
         <IconButton aria-label="Settings" onClick={onOpenSettings}>
           <Settings aria-hidden />
