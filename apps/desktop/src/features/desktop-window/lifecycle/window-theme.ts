@@ -5,8 +5,8 @@ import { ThemeSchema, type Theme } from "@mcode/contracts/models/settings";
 /** Renderer-to-main channel carrying the user's theme preference. */
 export const WINDOW_THEME_CHANNEL = "window:theme";
 
-/** Dark theme `--background` (`--neutral-900`, oklch(16% 0.005 260)) as sRGB hex. */
-export const DARK_WINDOW_BACKGROUND = "#0c0d0f";
+/** Dark theme `--background` (oklch(0% 0 0), pure black) as sRGB hex. */
+export const DARK_WINDOW_BACKGROUND = "#000000";
 /** Light theme `--background` (`--neutral-50`, oklch(99% 0.005 260)) as sRGB hex. */
 export const LIGHT_WINDOW_BACKGROUND = "#fafcff";
 
