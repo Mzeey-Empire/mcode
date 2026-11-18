@@ -45,16 +45,19 @@ export function ThreadOverviewWhen({ when, children }: { when: boolean; children
 export function ThreadOverviewTooltipButton({
   content,
   disabled = false,
+  className,
   children,
 }: {
   content: string;
   disabled?: boolean;
+  /** Sizes the wrapper a disabled button sits in, so it can keep the button's place in a flex row. */
+  className?: string;
   children: ReactElement;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        render={disabled ? <span className="inline-flex">{children}</span> : children}
+        render={disabled ? <span className={cn("inline-flex", className)}>{children}</span> : children}
       />
       <TooltipContent>{content}</TooltipContent>
     </Tooltip>

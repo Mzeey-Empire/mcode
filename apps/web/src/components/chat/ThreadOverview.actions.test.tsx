@@ -178,12 +178,23 @@ describe("ThreadOverview actions", () => {
     vi.mocked(mockTransport.listWorkspaceActionRuns).mockResolvedValue([runningActionRun()]);
     render(<ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} />);
 
-    await user.click(await screen.findByRole("button", { name: "Open Success" }));
+    const row = await screen.findByRole("button", { name: "Open Success, running" });
+    expect(row).toHaveTextContent("Running");
+    await user.click(row);
 
     expect(vi.mocked(mockTransport.startWorkspaceAction)).not.toHaveBeenCalled();
     await waitFor(() => expect(useDiffStore.getState().getRightPanel("ws-1", "thread-1")).toMatchObject({
       visible: true,
       activeTabId: "singleton:terminal",
     }));
+  });
+
+  it("says on the row when its Action waits for approval", async () => {
+    vi.mocked(mockTransport.listWorkspaceActionRuns).mockResolvedValue([runningActionRun({ status: "awaiting-approval" })]);
+    render(<ThreadOverview thread={branchlessThread({ mode: "direct" })} threadPaneWidth={1400} />);
+
+    const row = await screen.findByRole("button", { name: "Open Success, approval required" });
+    expect(row).toHaveTextContent("Approval required");
+    expect(row).not.toHaveTextContent("Run");
   });
 });

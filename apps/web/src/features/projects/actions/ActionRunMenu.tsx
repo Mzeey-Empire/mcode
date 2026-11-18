@@ -121,11 +121,8 @@ export function ActionMenuGlyph({ action, running }: { readonly action: Workspac
   );
 }
 
-/**
- * "Run" appears only while its `group/action` row is hovered or highlighted, so a list of idle
- * actions stays quiet.
- */
-export function RunHint() {
+/** "Run" appears only while the row is hovered or highlighted, so a menu of idle actions stays quiet. */
+function RunHint() {
   return (
     <span
       aria-hidden

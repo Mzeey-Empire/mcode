@@ -1,6 +1,6 @@
 import type { WorkspaceEnvironmentAction, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
 import { Button } from "@/components/ui/button";
-import { ActionMenuGlyph, RunHint } from "@/features/projects/actions/ActionRunMenu";
+import { ActionMenuGlyph } from "@/features/projects/actions/ActionRunMenu";
 import { ThreadActionRunMenu, useThreadActionRunHandlers } from "@/features/projects/actions/ThreadActionRunMenu";
 import { useProjectActions } from "@/features/projects/actions/useProjectActions";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
 import { newThreadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import { type Thread } from "@/transport";
-import { ChevronDown, Play, Settings } from "lucide-react";
+import { ChevronDown, Play, Settings, SquareTerminal } from "lucide-react";
 
 function useThreadProjectActions(thread: Thread) {
   return useProjectActions(thread.workspace_id, thread.id);
@@ -43,6 +43,33 @@ export function primaryProjectAction(
 const CHEVRON_SEGMENT_CLASS =
   "w-[3.8rem] rounded-l-none hover:bg-selected group-hover/action-row:bg-selected group-focus-within/action-row:bg-selected aria-expanded:bg-selected";
 
+/** What a live Action's row says at rest; its click opens the Action's terminal. */
+const LIVE_STATUS_LABEL = { running: "Running", "awaiting-approval": "Approval required" } as const;
+
+type LiveStatus = keyof typeof LIVE_STATUS_LABEL;
+
+function liveStatus(run: WorkspaceEnvironmentActionRun | null): LiveStatus | null {
+  return run?.status === "running" || run?.status === "awaiting-approval" ? run.status : null;
+}
+
+/**
+ * The main part's trailing hint. Unlike the menu's, it shows at rest, so the row reads as an action
+ * rather than a picker like the rows below it. A live Action names its state instead, and on hover
+ * says the click now opens its terminal.
+ */
+function ProjectActionHint({ status }: { readonly status: LiveStatus | null }) {
+  const hintClass = "flex shrink-0 items-center gap-1 text-caption text-muted group-hover/action:text-ink";
+  if (status === null) {
+    return <span aria-hidden className={hintClass}><Play className="size-3" />Run</span>;
+  }
+  return (
+    <span aria-hidden className={hintClass}>
+      <span className="group-hover/action:hidden">{LIVE_STATUS_LABEL[status]}</span>
+      <span className="hidden items-center gap-1 group-hover/action:flex"><SquareTerminal className="size-3" />Open</span>
+    </span>
+  );
+}
+
 /** The row's main part: runs the Action, or shows its terminal when it already runs. */
 function ProjectActionMain({ action, run, capReason, onRun, onOpen }: {
   readonly action: WorkspaceEnvironmentAction;
@@ -51,26 +78,28 @@ function ProjectActionMain({ action, run, capReason, onRun, onOpen }: {
   readonly onRun: (actionId: string) => void;
   readonly onOpen: (actionId: string) => void;
 }) {
-  const live = run?.status === "running" || run?.status === "awaiting-approval";
-  const blocked = !live && capReason !== null;
+  const status = liveStatus(run);
+  const blocked = status === null && capReason !== null;
   const button = (
     <Button
       variant="ghost"
       size="compact"
       type="button"
-      aria-label={live ? `Open ${action.name}` : `Run ${action.name}`}
+      aria-label={status ? `Open ${action.name}, ${LIVE_STATUS_LABEL[status].toLowerCase()}` : `Run ${action.name}`}
       disabled={blocked}
-      onClick={() => (live ? onOpen(action.id) : onRun(action.id))}
+      onClick={() => (status ? onOpen(action.id) : onRun(action.id))}
       className={cn(OVERVIEW_ROW_CLASS, "group/action min-w-0 flex-1 justify-start pr-2 hover:bg-transparent")}
     >
       <OverviewRowIcon>
-        <ActionMenuGlyph action={action} running={run?.status === "running"} />
+        <ActionMenuGlyph action={action} running={status === "running"} />
       </OverviewRowIcon>
       <span className="min-w-0 flex-1 text-fade font-medium">{action.name}</span>
-      {live ? null : <RunHint />}
+      <ProjectActionHint status={status} />
     </Button>
   );
-  return blocked ? <ThreadOverviewTooltipButton content={capReason} disabled>{button}</ThreadOverviewTooltipButton> : button;
+  if (!blocked) return button;
+  // The tooltip's wrapper stands in for the button in the row, so it takes the button's share of the width.
+  return <ThreadOverviewTooltipButton content={capReason} disabled className="min-w-0 flex-1">{button}</ThreadOverviewTooltipButton>;
 }
 
 /**
