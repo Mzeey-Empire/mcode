@@ -196,7 +196,7 @@ function AutoCloseSubmenu({ thread }: { thread: Thread }) {
       <DropdownMenuSubContent className="min-w-40">
         <DropdownMenuItem
           label="App default"
-          trailing={<span className="text-muted">{globalValue ? "Closes on merge" : "Stays open"}</span>}
+          trailing={<span className="text-muted">{AUTO_CLOSE_CHOICES.find((choice) => choice.value === globalValue)?.label}</span>}
           checked={current === null}
           closeOnClick={false}
           onClick={() => choose(null)}

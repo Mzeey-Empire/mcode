@@ -97,8 +97,8 @@ describe("SidebarList thread menu", () => {
   });
 
   it.each([
-    [false, "Stays open"],
-    [true, "Closes on merge"],
+    [false, "Keep open"],
+    [true, "Close when PRs merge"],
   ] as const)("shows the resolved global value %s as %s beside App default", async (global, label) => {
     setGlobalCompleteOnMerge(global);
     seedThread({ auto_complete_on_merge: null });
@@ -115,7 +115,7 @@ describe("SidebarList thread menu", () => {
     seedThread({ auto_complete_on_merge: from });
     await openSubmenu(user, "Auto-close behavior");
 
-    await user.click(await screen.findByRole("menuitemradio", { name: new RegExp(choice) }));
+    await user.click(await screen.findByRole("menuitemradio", { name: new RegExp(`^${choice}`) }));
 
     expect(mockTransport.updateThreadSettings).toHaveBeenCalledWith("t1", { autoCompleteOnMerge: saved });
     expect(useWorkspaceStore.getState().threads[0]?.auto_complete_on_merge).toBe(saved);
