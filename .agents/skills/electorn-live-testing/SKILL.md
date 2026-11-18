@@ -1,6 +1,6 @@
 ---
 name: electorn-live-testing
-description: Keep one Mcode Electron application open and control it across many Playwright commands through the persistent Node REPL or step scripts. Use when inspecting, debugging, benchmarking, or verifying desktop-only behavior, including existing Browser tabs, background tabs, tab switching, popups, provider selection, reloads, restart boundaries, app store state, per-frame motion, and minimizing.
+description: Drive the Mcode Electron desktop app with Playwright and capture what it shows. Use to start the desktop app, screenshot a screen, hover an element, or check a UI change live.
 ---
 
 # Electron Live Testing
@@ -75,6 +75,13 @@ Run each observation or action as a new `mcp__node_repl__js` call against `elect
 
 Prefer accessible Playwright locators and explicit postconditions. Re-inspect after navigation or any action that changes the page structure. Keep console errors and failed requests in persistent arrays when they matter to the test.
 
+The session can hover. Playwright moves the real pointer, so CSS `:hover` styles and Mcode tooltips appear as they do for a user. Tooltips open 400 ms after the pointer arrives, and their popup has no `tooltip` role:
+
+```js
+await electronPage.getByRole("button", { name: "Settings" }).hover();
+await electronPage.locator('[data-slot="tooltip-content"]').waitFor();
+```
+
 Use Playwright for deterministic DOM, keyboard, focus, popup, multi-tab, and timing checks. Use computer use only when visual inspection or native-window behavior cannot be established through Playwright. Computer use supplements the Playwright evidence; it does not replace assertions.
 
 For Browser lifecycle changes, cover the states that can regress:
@@ -114,6 +121,16 @@ Warm each path before timing it. Record multiple samples with `performance.now()
 Measure motion on every frame inside the page. A screen recording holds only the frames that repainted. Run `electronPage.evaluate(appProbes.installFrameProbe, { selector, label })` before the action, then `electronPage.evaluate(appProbes.readFrameProbe, label)`. Each sample holds the frame time, the match count, and the position, size, opacity, and visibility of the first four matches.
 
 Store screenshots, logs, and measurements under `.dev/verification/`. Keep exploratory specifications under `.dev/playwright-scratch/`; do not commit them.
+
+To screenshot, drive the app to the screen, then run the capture script instead of writing one. It connects without a reload, so the app keeps its state, and it creates the output folder. Connect once with a reload as shown in the session section above before the first capture, or the app may still be signed out:
+
+```powershell
+node .agents/skills/electorn-live-testing/scripts/capture.mjs --out .dev/verification/<name>.png --width 1280 --height 800 --hover 'role=button[name="Settings"]'
+```
+
+`--width` and `--height` resize the real window. `--hover` takes a Playwright selector that matches one element, and the script waits for the tooltip delay and any fade before the capture. From the Node REPL, call `capture(electronPage, parseCaptureArguments([...]))` from the same script.
+
+When the live usage source is down, `--usage-fixture <providerId>` fills the open thread's usage with invented quota readings so the Usage row renders. Wait until the thread has started: a starting thread's Overview has no Usage row, so the fixture changes nothing on screen. The script adds `.usage-fixture` to the file name and restores the previous usage after the capture, including on failure. A capture taken with it is not live data: say so wherever you show it, including the PR body. From the REPL, pass `"--usage-fixture", "<providerId>"` to `parseCaptureArguments` and call `capture`, which applies and restores the fixture for you. Every capture first restores any fixture left in the app, so do not apply one yourself before calling `capture`.
 
 ## Record before and after evidence
 

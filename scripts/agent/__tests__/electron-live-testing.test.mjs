@@ -2,9 +2,12 @@ import * as NodeTest from "node:test";
 import * as NodeAssertStrict from "node:assert/strict";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import { parseCaptureArguments } from "../../../.agents/skills/electorn-live-testing/scripts/capture.mjs";
 import { probeCdpVersion } from "../../../.agents/skills/electorn-live-testing/scripts/start-electron.mjs";
+import * as usageFixture from "../../../.agents/skills/electorn-live-testing/scripts/usage-fixture.mjs";
 
 const validCdpVersion = {
   Browser: "Electron/37.3.1",
@@ -100,4 +103,134 @@ NodeTest.test("rejects a successful installer when Playwright resolves only from
   `);
   NodeAssertStrict.default.equal(rejected.status, 0, rejected.stderr || rejected.error?.message);
   NodeAssertStrict.default.deepEqual(JSON.parse(rejected.stdout), { message: "Playwright was not installed inside the scratch package" });
+});
+
+NodeTest.test("capture resolves its output against the working directory and reads size and hover", () => {
+  const cwd = NodePath.resolve("repo");
+  NodeAssertStrict.deepEqual(
+    parseCaptureArguments(["--out", ".dev/verification/new/shot.png", "--width", "1280", "--height", "800", "--hover", "role=button[name=\"Settings\"]"], cwd),
+    {
+      outPath: NodePath.join(cwd, ".dev", "verification", "new", "shot.png"),
+      size: { width: 1280, height: 800 },
+      hover: "role=button[name=\"Settings\"]",
+      usageFixtureProviderId: null,
+    },
+  );
+});
+
+NodeTest.test("capture names a usage-fixture screenshot so it cannot pass for live usage", () => {
+  const cwd = NodePath.resolve("repo");
+  const marked = parseCaptureArguments(["--out", "shot.png", "--usage-fixture", "claude"], cwd);
+  NodeAssertStrict.equal(marked.outPath, NodePath.join(cwd, "shot.usage-fixture.png"));
+  NodeAssertStrict.equal(marked.usageFixtureProviderId, "claude");
+  const alreadyMarked = parseCaptureArguments(["--out", "shot.usage-fixture.png", "--usage-fixture", "claude"], cwd);
+  NodeAssertStrict.equal(alreadyMarked.outPath, NodePath.join(cwd, "shot.usage-fixture.png"));
+});
+
+NodeTest.test("capture rejects arguments that would take the wrong screenshot", () => {
+  for (const argv of [
+    [],
+    ["--out", "shot.jpg"],
+    ["--out", "shot.png", "--width", "1280"],
+    ["--out", "shot.png", "--width", "1280px", "--height", "800"],
+    ["--out", "shot.png", "--width", "0", "--height", "800"],
+    ["--out", "shot.png", "--hover", " "],
+    ["--out", "shot.png", "--hovr", "x"],
+  ]) {
+    NodeAssertStrict.throws(() => parseCaptureArguments(argv, "repo"), undefined, argv.join(" "));
+  }
+});
+
+async function usageFixtureStore(t, previous) {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-usage-fixture-"));
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+  globalThis.window = {};
+  t.after(() => {
+    if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    else delete globalThis.window;
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  });
+  const modulePath = NodePath.join(root, "thread-store.mjs");
+  NodeFS.writeFileSync(modulePath, `
+    let state = { currentThreadId: "thread-1", records: new Map() };
+    export const useThreadStore = {
+      getState() { return state; },
+      setState(partial) { state = { ...state, ...partial }; },
+    };
+  `);
+  const threadStoreUrl = NodeURL.pathToFileURL(modulePath).href;
+  const { useThreadStore } = await import(threadStoreUrl);
+  useThreadStore.setState({ records: new Map([["thread-1", {
+    usageByProvider: previous === undefined ? {} : { claude: previous },
+  }]]) });
+  return {
+    args: { threadStoreUrl, providerId: "claude", diagnostic: "Capture fixture, not live usage." },
+    store: useThreadStore,
+    usage: () => useThreadStore.getState().records.get("thread-1").usageByProvider,
+  };
+}
+
+async function applyFixture(fixture) {
+  await usageFixture.writeUsageFixture(fixture.args);
+  NodeAssertStrict.deepEqual(fixture.usage().claude.quotaCategories.map(({ used }) => used), [34, 51]);
+}
+
+function replaceFixtureUsage(fixture, usage) {
+  const records = new Map(fixture.store.getState().records);
+  const record = records.get("thread-1");
+  records.set("thread-1", { ...record, usageByProvider: { ...record.usageByProvider, claude: usage } });
+  fixture.store.setState({ records });
+}
+
+NodeTest.test("usage fixture restores the original live usage object", async (t) => {
+  const previous = { quotaCategories: [{ used: 12 }], usageStatus: "ready" };
+  const fixture = await usageFixtureStore(t, previous);
+  await applyFixture(fixture);
+  NodeAssertStrict.deepEqual(await usageFixture.undoUsageFixture(), { restored: true });
+  NodeAssertStrict.equal(fixture.usage().claude, previous);
+  NodeAssertStrict.equal(Object.hasOwn(window, "__liveTestingUsageFixture"), false);
+});
+
+NodeTest.test("usage fixture removes a provider key that was previously absent", async (t) => {
+  const fixture = await usageFixtureStore(t);
+  await applyFixture(fixture);
+  NodeAssertStrict.deepEqual(await usageFixture.undoUsageFixture(), { restored: true });
+  NodeAssertStrict.equal(Object.hasOwn(fixture.usage(), "claude"), false);
+});
+
+NodeTest.test("usage fixture restores after a stale refresh copies its categories", async (t) => {
+  const previous = { quotaCategories: [{ used: 12 }], usageStatus: "ready" };
+  const fixture = await usageFixtureStore(t, previous);
+  await applyFixture(fixture);
+  replaceFixtureUsage(fixture, { ...fixture.usage().claude, usageStatus: "stale", diagnostic: "Refresh failed" });
+  NodeAssertStrict.deepEqual(await usageFixture.undoUsageFixture(), { restored: true });
+  NodeAssertStrict.equal(fixture.usage().claude, previous);
+});
+
+NodeTest.test("usage fixture preserves a live refresh with different categories", async (t) => {
+  const fixture = await usageFixtureStore(t);
+  await applyFixture(fixture);
+  const live = { quotaCategories: [{ used: 7 }], usageStatus: "ready" };
+  replaceFixtureUsage(fixture, live);
+  NodeAssertStrict.deepEqual(await usageFixture.undoUsageFixture(), { restored: false });
+  NodeAssertStrict.equal(fixture.usage().claude, live);
+  NodeAssertStrict.equal(Object.hasOwn(window, "__liveTestingUsageFixture"), false);
+});
+
+NodeTest.test("usage fixture restore without an applied fixture leaves state unchanged", async (t) => {
+  const fixture = await usageFixtureStore(t);
+  const state = fixture.store.getState();
+  NodeAssertStrict.deepEqual(await usageFixture.undoUsageFixture(), { restored: false });
+  NodeAssertStrict.equal(fixture.store.getState(), state);
+});
+
+NodeTest.test("usage fixture rejects a second application until restored", async (t) => {
+  const previous = { quotaCategories: [{ used: 12 }], usageStatus: "ready" };
+  const fixture = await usageFixtureStore(t, previous);
+  await applyFixture(fixture);
+  await NodeAssertStrict.rejects(() => usageFixture.writeUsageFixture(fixture.args));
+  await usageFixture.undoUsageFixture();
+  await applyFixture(fixture);
+  await usageFixture.undoUsageFixture();
+  NodeAssertStrict.equal(fixture.usage().claude, previous);
 });
