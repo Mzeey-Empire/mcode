@@ -24,6 +24,20 @@ export function gitWasKilled(error: unknown): boolean {
   return readFailure(error).killed === true;
 }
 
+/**
+ * The line of a failed push's output that says why it failed. Git wraps the reason in `To <remote>`,
+ * hint, and summary lines, so prefer a remote hook's message, then the rejected ref, then git's own error.
+ */
+export function gitPushFailureReason(output: string): string {
+  const lines = output.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  const remote = lines.find((line) => line.startsWith("remote:") && line.length > "remote:".length);
+  if (remote) return remote.slice("remote:".length).trim();
+  return lines.find((line) => line.startsWith("! ["))
+    ?? lines.find((line) => /^(fatal|error):/.test(line))
+    ?? lines[0]
+    ?? "Push failed";
+}
+
 /** Everything git printed before it failed, stdout first, for classification and display. */
 export function gitFailureOutput(error: unknown): string {
   const { stdout, stderr } = readFailure(error);
