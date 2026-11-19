@@ -668,7 +668,7 @@ export function Composer({
               approvalReviewSupported: agentControls.approvalReviewSupported,
             },
             activeGoal,
-            isProviderLocked: surfaceState.isProviderLocked,
+            providerScope: surfaceState.providerScope,
             modelId,
             contextEntry,
             hasLowQuota,

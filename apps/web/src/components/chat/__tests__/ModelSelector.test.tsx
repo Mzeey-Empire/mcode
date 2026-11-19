@@ -166,10 +166,10 @@ describe("ModelSelector", () => {
     expect(screen.getByText("Nothing matches “shared”")).toBeInTheDocument();
   });
 
-  it("keeps a search to the thread's provider when the provider is locked", async () => {
+  it("keeps a search to the thread's provider when the scope is the selected provider only", async () => {
     setProviders({ claude: true, codex: true });
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} providerLocked />);
+      onSelect={vi.fn()} providerScope={{ kind: "selected-only" }} />);
     await openPicker();
 
     await userEvent.type(screen.getByRole("combobox", { name: "Search models" }), "5.6 sol");
@@ -210,15 +210,84 @@ describe("ModelSelector", () => {
     expect(screen.getByRole("radio", { name: "Claude" })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("lists only the thread's provider, with no tabs, when the provider is locked", async () => {
+  it("lists only the thread's provider, with no tabs, when the scope is the selected provider only", async () => {
     setProviders({ claude: true, codex: true });
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} providerLocked />);
+      onSelect={vi.fn()} providerScope={{ kind: "selected-only" }} />);
     await openPicker();
 
     expect(screen.queryAllByRole("radio")).toHaveLength(0);
     expect(screen.getByRole("option", { selected: true })).toBeInTheDocument();
     expect(optionNames().filter((name) => name.startsWith("GPT"))).toEqual([]);
+  });
+
+  it("offers a started thread only the providers it can switch to", async () => {
+    setProviders({ claude: true, codex: true, cursor: true, opencode: true });
+    useProviderAvailabilityStore.setState((state) => ({
+      providers: state.providers.map((provider) => provider.id === "opencode" ? { ...provider, hasAdapter: false } : provider),
+    }));
+    render(<ModelSelector selectedModelId="gpt-9-zeta" selectedProviderId="codex"
+      onSelect={vi.fn()} providerScope={{ kind: "switchable", threadProviderId: "codex" }} />);
+    const dialog = await openPicker();
+
+    const tabs = within(dialog).getAllByRole("radio").map((tab) => tab.getAttribute("aria-label") ?? tab.textContent);
+    expect(tabs).toEqual(expect.arrayContaining(["Codex", "Claude", "Cursor"]));
+    expect(tabs).not.toContain("OpenCode");
+    expect(tabs).not.toContain("Gemini");
+  });
+
+  it("drops another provider's models when a turn starts while its tab is open", async () => {
+    setProviders({ claude: true, codex: true });
+    listProviderModels.mockImplementation(async (providerId) => providerId === "claude"
+      ? [{ id: "claude-only-model", name: "Claude Only" }]
+      : [{ id: "gpt-9-zeta", name: "GPT-9 Zeta" }]);
+    const { rerender } = render(<ModelSelector selectedModelId="gpt-9-zeta" selectedProviderId="codex"
+      onSelect={vi.fn()} providerScope={{ kind: "switchable", threadProviderId: "codex" }} />);
+    await openPicker();
+    await userEvent.click(screen.getByRole("radio", { name: "Claude" }));
+    expect(await screen.findByRole("option", { name: /Claude Only/ })).toBeInTheDocument();
+
+    rerender(<ModelSelector selectedModelId="gpt-9-zeta" selectedProviderId="codex"
+      onSelect={vi.fn()} providerScope={{ kind: "selected-only", threadProviderId: "codex" }} />);
+
+    expect(await screen.findByRole("option", { name: /GPT-9 Zeta/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Claude Only/ })).toBeNull();
+  });
+
+  it("opens a started thread on its own provider when the selected provider cannot take a switch", async () => {
+    setProviders({ claude: false, codex: true });
+    listProviderModels.mockImplementation(async (providerId) => providerId === "claude"
+      ? [{ id: "claude-only-model", name: "Claude Only" }]
+      : [{ id: "gpt-9-zeta", name: "GPT-9 Zeta" }]);
+    render(<ModelSelector selectedModelId="claude-only-model" selectedProviderId="claude"
+      onSelect={vi.fn()} providerScope={{ kind: "switchable", threadProviderId: "codex" }} />);
+    await openPicker();
+
+    expect(await screen.findByRole("option", { name: /GPT-9 Zeta/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Claude Only/ })).toBeNull();
+  });
+
+  it("drops a provider's models when it becomes unusable while its tab is open", async () => {
+    setProviders({ claude: true, codex: true });
+    listProviderModels.mockImplementation(async (providerId) => providerId === "claude"
+      ? [{ id: "claude-only-model", name: "Claude Only" }]
+      : [{ id: "gpt-9-zeta", name: "GPT-9 Zeta" }]);
+    render(<ModelSelector selectedModelId="gpt-9-zeta" selectedProviderId="codex"
+      onSelect={vi.fn()} providerScope={{ kind: "switchable", threadProviderId: "codex" }} />);
+    await openPicker();
+    await userEvent.click(screen.getByRole("radio", { name: "Claude" }));
+    expect(await screen.findByRole("option", { name: /Claude Only/ })).toBeInTheDocument();
+
+    act(() => {
+      useProviderAvailabilityStore.setState((state) => ({
+        providers: state.providers.map((provider) => provider.id === "claude"
+          ? { ...provider, cli: { status: "not_found", resolvedPath: null, configuredPath: "" } }
+          : provider),
+      }) as never);
+    });
+
+    expect(await screen.findByRole("option", { name: /GPT-9 Zeta/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Claude Only/ })).toBeNull();
   });
 
   it("marks the selected row and stars a model without choosing it", async () => {

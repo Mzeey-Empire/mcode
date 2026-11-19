@@ -6,6 +6,7 @@ import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";
 import { mockTransport } from "@/__tests__/mocks/transport";
+import type { PickerProviderScope } from "@/components/chat/ModelPickerPanel";
 import { GENIE_CLOSE_MS } from "@/components/ui/genie";
 import { registerProviderModels } from "@/lib/model-registry";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
@@ -67,7 +68,7 @@ function part(name: RegExp): HTMLElement {
 interface SplitOverrides {
   readonly selection?: Partial<ComposerAgentSelection>;
   readonly reasoningLevels?: ReasoningLevel[];
-  readonly isProviderLocked?: boolean;
+  readonly providerScope?: PickerProviderScope;
   readonly permissionLocked?: boolean;
   readonly approvalReviewSupported?: boolean;
   readonly threadId?: string;
@@ -86,7 +87,7 @@ async function renderSplit(overrides: SplitOverrides = {}) {
       reasoningLevels={overrides.reasoningLevels ?? LEVELS}
       permissionLocked={overrides.permissionLocked ?? false}
       approvalReviewSupported={overrides.approvalReviewSupported ?? true}
-      isProviderLocked={overrides.isProviderLocked ?? false}
+      providerScope={overrides.providerScope ?? { kind: "all" }}
       onSelectionChange={onSelectionChange}
       onSelectionTouched={vi.fn()}
     />,
@@ -281,7 +282,7 @@ describe("ComposerCapsuleSplit", () => {
   });
 
   it("opens the model picker while the agent runs", async () => {
-    await renderSplit({ isProviderLocked: true });
+    await renderSplit({ providerScope: { kind: "selected-only" } });
 
     expect(await openModelPicker()).toBeInTheDocument();
   });
@@ -338,7 +339,7 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
 
   it("sets and persists the selected model's level in one click while the agent runs, and closes", async () => {
     const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
-    const onSelectionChange = await renderSplit({ threadId: "thread-1", isProviderLocked: true });
+    const onSelectionChange = await renderSplit({ threadId: "thread-1", providerScope: { kind: "selected-only" } });
     await openModelPicker();
 
     expect(within(pane("GPT-9 Deep")).getByRole("option", { name: "High" })).toHaveAttribute("aria-selected", "true");
@@ -348,6 +349,17 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     expect(setThreadSettings).toHaveBeenCalledWith("thread-1", { reasoningLevel: "low" });
     for (let i = 0; i < 16; i++) frame(GENIE_CLOSE_MS);
     expect(realPopup()).toBeNull();
+  });
+
+  it("keeps a reasoning pick off the thread while a switch to another provider starts", async () => {
+    const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
+    const onSelectionChange = await renderSplit({ threadId: "thread-1", providerScope: { kind: "selected-only", threadProviderId: "claude" } });
+    await openModelPicker();
+
+    fireEvent.click(within(pane("GPT-9 Deep")).getByRole("option", { name: "Low" }));
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-deep", provider: "codex", reasoning: "low" });
+    expect(setThreadSettings).not.toHaveBeenCalled();
   });
 
   it("sets Fast from the footer in place, keeping the picker open", async () => {
@@ -425,7 +437,7 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
             reasoningLevels={LEVELS}
             permissionLocked={false}
             approvalReviewSupported
-            isProviderLocked={false}
+            providerScope={{ kind: "all" }}
             onSelectionChange={(patch) => setCurrent((previous) => ({ ...previous, ...patch }))}
             onSelectionTouched={vi.fn()}
           />
@@ -709,4 +721,85 @@ describe("ComposerCapsuleSplit access", () => {
     await openModelPicker();
     expect(screen.getByRole("button", { name: "Access: Bypass" })).toBeInTheDocument();
   });
+});
+
+describe("ComposerCapsuleSplit provider switch", () => {
+  const CLAUDE_MODEL: ProviderModelInfo = { id: "claude-haiku-9", name: "Haiku 9", supportedReasoningEfforts: LEVELS };
+  const CLAUDE_THREAD = { threadId: "thread-1", providerScope: { kind: "switchable", threadProviderId: "claude" } } as const;
+  const NOTICE = "This thread runs on Claude. Picking a Codex model hands it off to Codex.";
+
+  beforeEach(() => {
+    registerProviderModels("claude", [{ id: CLAUDE_MODEL.id, label: CLAUDE_MODEL.name, providerId: "claude", supportedReasoningLevels: LEVELS }]);
+    vi.mocked(mockTransport.listProviderModels).mockImplementation(async (providerId) =>
+      providerId === "claude" ? [CLAUDE_MODEL] : CODEX_MODELS);
+  });
+
+  afterEach(() => registerProviderModels("claude", []));
+
+  function activeOption(): HTMLElement {
+    const active = screen.getAllByRole("option").find((option) => option.hasAttribute("data-active"));
+    if (!active) throw new Error("expected a highlighted option");
+    return active;
+  }
+
+  async function openCodexTab(): Promise<void> {
+    await openModelPicker();
+    fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+    await act(async () => {});
+  }
+
+  it("offers another provider's models on an idle started thread, and a pick there hands off without persisting the level", async () => {
+    const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
+    const onSelectionChange = await renderSplit({ ...CLAUDE_THREAD, selection: { provider: "claude", modelId: CLAUDE_MODEL.id } });
+    await openCodexTab();
+
+    expect(screen.getByText(NOTICE)).toBeInTheDocument();
+    expect(within(activeOption()).getByText("Switch")).toBeInTheDocument();
+    expect(activeOption()).toHaveAccessibleDescription(/switches to Codex/i);
+    fireEvent.click(within(pane("GPT-9 Deep")).getByRole("option", { name: "Low" }));
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-deep", provider: "codex", reasoning: "low" });
+    expect(setThreadSettings).not.toHaveBeenCalled();
+  });
+
+  it("picks a row on another provider's tab as the selection, provider included", async () => {
+    const onSelectionChange = await renderSplit({ ...CLAUDE_THREAD, selection: { provider: "claude", modelId: CLAUDE_MODEL.id } });
+    await openCodexTab();
+
+    fireEvent.click(screen.getByRole("option", { name: "GPT-9 Plain" }));
+
+    expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({ modelId: "gpt-9-plain", provider: "codex" }));
+  });
+
+  it("keeps the thread's own tab as today: no notice, no Switch, and the level persists", async () => {
+    const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
+    const onSelectionChange = await renderSplit({ ...CLAUDE_THREAD, selection: { provider: "claude", modelId: CLAUDE_MODEL.id } });
+    await openModelPicker();
+
+    expect(screen.getByRole("radio", { name: "Claude" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByText(/hands it off/)).toBeNull();
+    expect(screen.queryByText("Switch")).toBeNull();
+    fireEvent.click(within(pane("Haiku 9")).getByRole("option", { name: "Low" }));
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ modelId: CLAUDE_MODEL.id, provider: "claude", reasoning: "low" });
+    expect(setThreadSettings).toHaveBeenCalledWith("thread-1", { reasoningLevel: "low" });
+  });
+
+  it("offers only the selected model's provider while a turn runs", async () => {
+    await renderSplit({ threadId: "thread-1", providerScope: { kind: "selected-only" }, selection: { provider: "claude", modelId: CLAUDE_MODEL.id } });
+    await openModelPicker();
+
+    expect(screen.queryByRole("radio", { name: "Codex" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Favourites" })).toBeNull();
+  });
+
+  it("says on the model part that a send hands the thread off while the selection is on another provider", async () => {
+    await renderSplit({ ...CLAUDE_THREAD });
+
+    expect(part(/^Model: /)).toHaveAccessibleName("Model: GPT-9 Deep, High reasoning, hands off from Claude on send");
+  });
+
+  function pane(name: string): HTMLElement {
+    return screen.getByRole("listbox", { name: `Reasoning for ${name}` });
+  }
 });

@@ -20,8 +20,8 @@ vi.mock("@/transport", async () => ({
 
 // The picker itself is ModelSelector's concern; the row owns only what a choice does.
 vi.mock("@/components/chat/ModelSelector", () => ({
-  ModelSelector: ({ trigger, onSelect, providerLocked }: { trigger: ReactElement; onSelect: (model: string, provider: string) => void; providerLocked: boolean }) => (
-    <div data-testid="model-selector" data-provider-locked={String(providerLocked)}>
+  ModelSelector: ({ trigger, onSelect, providerScope }: { trigger: ReactElement; onSelect: (model: string, provider: string) => void; providerScope?: { kind: string } }) => (
+    <div data-testid="model-selector" data-provider-scope={providerScope?.kind}>
       {trigger}
       <button type="button" onClick={() => onSelect("gpt-5.5", "codex")}>Pick gpt-5.5</button>
     </div>
@@ -126,7 +126,7 @@ describe("UsageLimitRow", () => {
     const user = userEvent.setup();
     render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
 
-    expect(screen.getByTestId("model-selector")).toHaveAttribute("data-provider-locked", "true");
+    expect(screen.getByTestId("model-selector")).toHaveAttribute("data-provider-scope", "selected-only");
     await user.click(screen.getByRole("button", { name: "Pick gpt-5.5" }));
 
     expect(mockTransport.resumeInterruptedTurn).toHaveBeenCalledWith({ threadId: THREAD, turnId: TURN, model: "gpt-5.5" });

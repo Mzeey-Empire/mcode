@@ -103,7 +103,7 @@ interface ComposerContentSurfaceProps {
       readonly approvalReviewSupported: ComposerCapsuleSplitProps["approvalReviewSupported"];
     };
     readonly activeGoal: ComposerAttachedCapabilitiesProps["activeGoal"];
-    readonly isProviderLocked: boolean;
+    readonly providerScope: ComposerCapsuleSplitProps["providerScope"];
     readonly modelId: ComposerCapsuleSplitProps["selection"]["modelId"];
     readonly contextEntry?: {
       readonly lastTokensIn?: number;
@@ -653,7 +653,7 @@ function ComposerCapsuleRight({ model, actions, rightRef }: Pick<ComposerCapsule
         reasoningLevels={model.agentControls.reasoningLevels}
         permissionLocked={model.agentControls.permissionLocked}
         approvalReviewSupported={model.agentControls.approvalReviewSupported}
-        isProviderLocked={model.isProviderLocked}
+        providerScope={model.providerScope}
         onSelectionChange={actions.onSelectionChange}
         onSelectionTouched={actions.onSelectionTouched}
       >

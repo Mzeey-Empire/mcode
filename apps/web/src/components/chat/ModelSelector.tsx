@@ -5,7 +5,7 @@ import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverMotion, type PopoverRootActions } from "@/components/ui/popover";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { cn } from "@/lib/utils";
-import { getSelectedModelPresentation, ModelPickerPanel, type SelectedModelPresentation } from "./ModelPickerPanel";
+import { getSelectedModelPresentation, ModelPickerPanel, type PickerProviderScope, type SelectedModelPresentation } from "./ModelPickerPanel";
 
 interface ModelSelectorProps {
   selectedModelId: string;
@@ -18,8 +18,8 @@ interface ModelSelectorProps {
   selectedProviderId?: string;
   /** Called with both the model ID and the provider it was selected from. */
   onSelect: (modelId: string, providerId: string) => void;
-  /** Provider locked: can switch models within the same provider but not change provider (thread started) */
-  providerLocked?: boolean;
+  /** Which providers the picker offers. Defaults to every provider. */
+  providerScope?: PickerProviderScope;
   /** Muted summary after the model name, such as the reasoning level. */
   detail?: ReactNode;
   /** Settings for the selected model, shown under the catalog. */
@@ -60,7 +60,7 @@ export function ModelSelector({
   selectedModelId,
   selectedProviderId,
   onSelect,
-  providerLocked,
+  providerScope,
   detail,
   settings,
   trigger: customTrigger,
@@ -102,7 +102,7 @@ export function ModelSelector({
         <ModelPickerPanel
           selectedModelId={selectedModelId}
           selectedProviderId={selectedProviderId}
-          providerLocked={providerLocked}
+          providerScope={providerScope}
           query={query}
           onQueryChange={setQuery}
           onSelect={(modelId, providerId) => {

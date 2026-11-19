@@ -2,14 +2,14 @@ import { Zap } from "lucide-react";
 import { useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { PERMISSION_MODES } from "@/transport";
-import { getSelectedModelPresentation, ModelPickerPanel, type SelectedModelPresentation } from "@/components/chat/ModelPickerPanel";
+import { getSelectedModelPresentation, ModelPickerPanel, type PickerProviderScope, type SelectedModelPresentation } from "@/components/chat/ModelPickerPanel";
 import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverMotion, type PopoverRootActions } from "@/components/ui/popover";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatReasoningLabel, narrowModelLabel } from "@/lib/format-model-label";
-import { findProviderModel, listProviderModels } from "@/lib/model-registry";
+import { MODEL_PROVIDERS, findProviderModel, listProviderModels } from "@/lib/model-registry";
 import { cn } from "@/lib/utils";
 import { useComposerAccess, type ComposerAccessInput } from "../controls/ComposerAccessControls";
 import { persistReasoningLevel, useFastModeView, type ComposerModelPreferenceDefaults } from "../controls/ComposerModelPreferences";
@@ -22,8 +22,8 @@ export interface ComposerCapsuleSplitProps extends ComposerAccessInput {
   readonly anchorRef: RefObject<HTMLElement | null>;
   readonly defaults: ComposerModelPreferenceDefaults;
   readonly reasoningLevels: ReasoningLevel[];
-  /** Started thread: model changes stay within its provider. */
-  readonly isProviderLocked: boolean;
+  /** Which providers the model picker offers and whether a pick on another provider hands the thread off. */
+  readonly providerScope: PickerProviderScope;
   /** Controls that share the pill after the model part, outside its hover fill: the context label and Send. */
   readonly children?: ReactNode;
 }
@@ -53,12 +53,14 @@ interface ModelPartFacts {
   readonly fast: boolean;
   /** The access label while the agent runs without approval prompts, which the part flags. */
   readonly unsupervised: string | null;
+  readonly handoffFrom: string | null;
 }
 
 /** Names the model part with everything it shows: the model, its reasoning level, Fast, and access while it is unsupervised. */
-function modelPartLabelOf(model: SelectedModelPresentation, { level, fast, unsupervised }: ModelPartFacts): string {
+function modelPartLabelOf(model: SelectedModelPresentation, { level, fast, unsupervised, handoffFrom }: ModelPartFacts): string {
   const levelText = level ? `, ${formatReasoningLabel(level)} reasoning` : "";
-  return `Model: ${model.shortLabel}${levelText}${fast ? ", Fast" : ""}${unsupervised ? `, ${unsupervised}` : ""}`;
+  const handoffText = handoffFrom ? `, hands off from ${handoffFrom} on send` : "";
+  return `Model: ${model.shortLabel}${levelText}${fast ? ", Fast" : ""}${unsupervised ? `, ${unsupervised}` : ""}${handoffText}`;
 }
 
 /**
@@ -79,6 +81,16 @@ function modelPickPatch(
   return patch;
 }
 
+function handoffSourceName(scope: PickerProviderScope, selectedProviderId: string): string | null {
+  if (scope.kind !== "switchable" || scope.threadProviderId === selectedProviderId) return null;
+  return MODEL_PROVIDERS.find((provider) => provider.id === scope.threadProviderId)?.name ?? scope.threadProviderId;
+}
+
+function crossesProvider(scope: PickerProviderScope, providerId: string): boolean {
+  if (scope.kind === "all" || scope.threadProviderId === undefined) return false;
+  return scope.threadProviderId !== providerId;
+}
+
 /** The rule between the pill's parts. It paints under the hover fill, so the fill slides over it. */
 export function CapsuleDivider() {
   return <span aria-hidden className="h-3.5 w-px shrink-0 bg-border" />;
@@ -89,7 +101,7 @@ export function CapsuleDivider() {
  * selected model's options and the turn's access, which change in place. Picking a model or a level closes the picker.
  */
 export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
-  const { anchorRef, selection, defaults, reasoningLevels, isProviderLocked, onSelectionChange } = props;
+  const { anchorRef, selection, defaults, reasoningLevels, providerScope, onSelectionChange } = props;
   const [open, setOpen] = useState(false);
   // The search and the provider tab start over on each open.
   const [query, setQuery] = useState("");
@@ -115,12 +127,18 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
     current: selection.reasoning,
     onChoose: (modelId: string, provider: string, reasoning: ReasoningLevel) => {
       onSelectionChange({ modelId, provider, reasoning });
-      persistReasoningLevel(preferenceProps, reasoning);
+      const stagesHandoff = crossesProvider(providerScope, provider);
+      if (!stagesHandoff) persistReasoningLevel(preferenceProps, reasoning);
       close();
     },
   };
   const level = reasoningLevels.includes(selection.reasoning) ? selection.reasoning : null;
-  const modelLabel = modelPartLabelOf(model, { level, fast, unsupervised: unsupervised ? access.selected.label : null });
+  const modelLabel = modelPartLabelOf(model, {
+    level,
+    fast,
+    unsupervised: unsupervised ? access.selected.label : null,
+    handoffFrom: handoffSourceName(providerScope, selection.provider),
+  });
   const AccessIcon = access.selected.icon;
 
   return (
@@ -179,7 +197,7 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
             <ModelPickerPanel
               selectedModelId={selection.modelId}
               selectedProviderId={selection.provider}
-              providerLocked={isProviderLocked}
+              providerScope={providerScope}
               query={query}
               onQueryChange={setQuery}
               tab={tab}
