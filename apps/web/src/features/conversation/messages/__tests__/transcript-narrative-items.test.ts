@@ -503,6 +503,15 @@ describe("html visual placement", () => {
     expect(projected.map((item) => item.key)).not.toContain("visual-2");
   });
 
+  it("drops a running turn's visual slot once the streaming reply places it, without a saved placement", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2)],
+      currentTurn: { threadId: "thread", executionId: "execution", responseKey: "live-answer" },
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: "See:\n\n![Chart](visual:visual-2)", toolCalls: [liveTool],
+    });
+    expect(projected.map((item) => item.key)).not.toContain("visual-2");
+  });
+
   function visual(sequence: number, visualPlacement?: "auto" | "inline"): Message {
     return createMockMessage({
       id: `visual-${sequence}`, thread_id: "thread", role: "system", content: "Chart", sequence,
