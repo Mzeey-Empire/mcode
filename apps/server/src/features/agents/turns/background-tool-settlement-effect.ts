@@ -2,10 +2,8 @@ import { inject, injectable } from "tsyringe";
 import type { ProviderBackgroundToolSettlement } from "@mcode/providers";
 import { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
+import { ORPHANED_BACKGROUND_TOOL_OUTPUT } from "@mcode/shared/planned-restart";
 import { TURN_FEATURE_EFFECTS, type TurnFeatureEffects } from "./turn-feature-effects.js";
-
-/** The summary a background call gets when the provider that ran it did not survive a restart. */
-export const ORPHANED_BACKGROUND_TOOL_OUTPUT = "Stopped when Mcode restarted.";
 
 /** A held background call stopped because its provider did not survive startup. */
 export type StoppedBackgroundCall = ReturnType<CanonicalAgentBoundary["listHeldBackgroundToolCalls"]>[number];

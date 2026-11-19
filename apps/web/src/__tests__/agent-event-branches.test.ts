@@ -209,6 +209,16 @@ describe("handleAgentEvent branches", () => {
     expect(useToastStore.getState().toasts).toEqual([]);
   });
 
+  it("replaces a live planned-restart success with its later failure at the server sequence", () => {
+    const systemNotice = { kind: "diagnostic", presentation: "timeline", noticeKey: "planned-restart:turn-1" } as const;
+    const event = { type: "system", threadId: "thread-1", subtype: "planned-restart.notice", systemNotice } as const;
+    useThreadStore.getState().handleAgentEvent({ ...event, message: "Woke after Mcode restarted", messageId: "8f0b6d1e-5d36-4f60-9f0e-0b6c9a1d0a01", sequence: 3 });
+    useThreadStore.getState().handleAgentEvent({ ...event, message: "Could not wake after Mcode restarted", messageId: "8f0b6d1e-5d36-4f60-9f0e-0b6c9a1d0a02", sequence: 7 });
+
+    expect(getTestActiveMessages().map(({ content, sequence }) => ({ content, sequence })))
+      .toEqual([{ content: "Could not wake after Mcode restarted", sequence: 7 }]);
+  });
+
   it("retains current-session configuration notices for the Composer and clears a replaced session", () => {
     const event = { type: "system", threadId: "thread-1", subtype: "provider.notice.configuration", message: "Fix <config>", messageId: "config-1", systemNotice: { kind: "configuration", presentation: "timeline", scope: "session", sessionId: "session-1", noticeKey: "config-key", configPath: "C:/config.toml", configRange: { startLine: 2, startColumn: 3, endLine: 2, endColumn: 9 } } } as const;
     useThreadStore.getState().handleAgentEvent(event);

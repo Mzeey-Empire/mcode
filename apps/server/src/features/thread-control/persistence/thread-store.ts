@@ -17,6 +17,7 @@ import { PlanPhaseSchema, type PlanPhase } from "@mcode/contracts/models/thread"
 import { ReasoningLevelSchema } from "@mcode/contracts/models/settings";
 import { ScheduledTurnResumeSchema } from "@mcode/contracts/models/turn-recovery";
 import { type AcknowledgeSeenResult } from "@mcode/contracts/models/thread-attention";
+import { restartFailureNoticeSql } from "../attention/restart-failure-notice-sql.js";
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { DevinMode, ThreadMode, ThreadStatus, InteractionMode, OrchestrationMode, PermissionMode } from "@mcode/contracts/models/enums";
 import type { Thread, RecentThread } from "@mcode/contracts/models/thread";
@@ -659,6 +660,8 @@ export class ThreadStore {
         sql`(
           SELECT sequence FROM messages WHERE thread_id = ${id} AND outcome IS NOT NULL AND ${transcriptMessageVisibility}
           UNION ALL SELECT last_turn_sequence FROM threads WHERE id = ${id}
+          UNION ALL SELECT m.sequence FROM messages m JOIN threads t ON t.id = m.thread_id
+            WHERE m.thread_id = ${id} AND m.sequence > COALESCE(t.last_turn_sequence, -1) AND ${sql.raw(restartFailureNoticeSql("m"))}
         )`,
       ).get()?.sequence;
       if (newest == null || throughSequence > newest) {

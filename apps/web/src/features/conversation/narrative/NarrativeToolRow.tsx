@@ -68,21 +68,21 @@ export function NarrativeToolRow({ icon: Icon, label, children, disclosure }: Na
 type TooltipState = "unmounted" | "open" | "closed";
 
 /**
- * A file path or command after the row label. It fades out at the row edge,
- * and hovering reveals `fullText` in a tooltip that mounts on first hover so
- * long transcripts do not pay for one tooltip per row.
+ * A file path, command, or short prose description after the row label. It
+ * fades out at the row edge, and hovering reveals `fullText` in a tooltip that
+ * mounts on first hover so long transcripts do not pay for one tooltip per row.
  */
 export function NarrativeToolRowDetail({ kind, children, fullText }: {
-  kind: "file" | "command";
+  kind: "file" | "command" | "prose";
   children: string;
   fullText?: string;
 }) {
   const tooltipId = useId();
   const [tooltipState, setTooltipState] = useState<TooltipState>("unmounted");
-  const tone = kind === "command" ? "text-code text-ink" : "text-xs text-muted";
+  const tone = kind === "command" ? "font-mono text-code text-ink" : kind === "file" ? "font-mono text-xs text-muted" : "text-xs text-muted";
   const trigger = (
     <span
-      className={`min-w-0 text-fade whitespace-nowrap font-mono ${tone}`}
+      className={`min-w-0 text-fade whitespace-nowrap ${tone}`}
       onPointerEnter={() => setTooltipState("open")}
       onPointerLeave={() => setTooltipState("closed")}
     >

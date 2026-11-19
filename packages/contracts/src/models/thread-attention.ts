@@ -15,6 +15,12 @@ export const SeenMarkSchema = lazySchema(() => z.object({
 /** The thread's advance-only acknowledgement marker. */
 export type SeenMark = z.infer<ReturnType<typeof SeenMarkSchema>>;
 
+/** Where a planned-restart failure notice sits in the transcript and when it was written. */
+export const RestartFailureSchema = lazySchema(() => z.object({
+  sequence: z.number().int().nonnegative(),
+  at: z.string(),
+}).strict());
+
 /** Provider-neutral facts for thread attention and review. */
 export const ThreadAttentionSchema = lazySchema(() => z.object({
   threadId: z.string().min(1).max(256),
@@ -30,6 +36,11 @@ export const ThreadAttentionSchema = lazySchema(() => z.object({
   hasUnfinishedDelegatedTasks: z.boolean(),
   /** True while a subagent this thread started in the background still runs after its parent turn ended. */
   hasRunningBackgroundSubagents: z.boolean(),
+  /**
+   * The thread's newest planned-restart failure notice, when it is newer than the last settled turn and that turn
+   * did not error. Derived on each read and never stored, so a failure that left no turn still alerts.
+   */
+  restartFailure: RestartFailureSchema().nullable(),
 }).strict());
 /** Durable attention facts plus the current live wait, if any. */
 export type ThreadAttention = z.infer<ReturnType<typeof ThreadAttentionSchema>>;
@@ -44,10 +55,16 @@ export function threadHasRunningDescendants(attention: ThreadAttention): boolean
   return attention.hasUnfinishedDelegatedTasks || attention.hasRunningBackgroundSubagents;
 }
 
+/** Whether a planned-restart failure is newer than what the user has seen. */
+export function hasUnseenRestartFailure(attention: ThreadAttention): boolean {
+  return attention.restartFailure !== null && !isTurnSeen(attention.restartFailure.sequence, attention.seen.sequence);
+}
+
 /** Whether attention prevents a thread from becoming quiet or completing automatically. */
 export function threadAttentionNeedsUser(attention: ThreadAttention | null | undefined): boolean {
   if (!attention) return false;
   if (attention.waiting || threadHasRunningDescendants(attention)) return true;
+  if (hasUnseenRestartFailure(attention)) return true;
   const turn = attention.lastTurn;
   return turn !== null && turn.outcome !== "cancelled" && !isTurnSeen(turn.sequence, attention.seen.sequence);
 }

@@ -142,6 +142,7 @@ export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
 import { endedWithoutCompleting, getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 import { createFramePacer } from "./frame-pacer";
+import { isPlannedRestartNotice } from "@mcode/shared/planned-restart";
 
 function activeCanonicalExecutionId(turn: AgentTurn | undefined): string | undefined {
   if (!turn || (turn.status !== "Pending" && turn.status !== "Running")) return undefined;
@@ -1755,6 +1756,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     messageId: string = crypto.randomUUID(),
     systemNotice?: Message["systemNotice"],
     visual?: Message["visual"],
+    sequence: number = messageSequenceFor(threadId),
   ): Message => ({
     id: messageId,
     thread_id: threadId,
@@ -1765,7 +1767,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     cost_usd: null,
     tokens_used: null,
     timestamp: new Date().toISOString(),
-    sequence: messageSequenceFor(threadId),
+    sequence,
     attachments: null,
     systemNotice,
     visual,
@@ -1860,6 +1862,15 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return true;
   };
 
+  /** The server replaces a planned-restart notice under its key and moves it later, so the old row must go. */
+  const dropReplacedRestartNotice = (threadId: string, next: Message): void => {
+    if (!isPlannedRestartNotice(next)) return;
+    const noticeKey = next.systemNotice?.noticeKey;
+    patchRec(threadId, (record) => ({
+      messages: record.messages.filter((message) => message.systemNotice?.noticeKey !== noticeKey),
+    }));
+  };
+
   const handleSystemEvent = (event: Extract<AgentEvent, { type: "system" }>): void => {
     if (event.subtype === "provider.session.started") {
       evictCachedRecord(event.threadId);
@@ -1868,13 +1879,14 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }
     const notice = systemNoticeFor(event.subtype, event.message);
     if (!notice) return;
-    const next = createSystemMessage(event.threadId, notice, event.messageId, event.systemNotice, event.visual);
+    const next = createSystemMessage(event.threadId, notice, event.messageId, event.systemNotice, event.visual, event.sequence);
     if (!event.visual) rememberCurrentSessionNotice(event.threadId, next);
     if (event.systemNotice?.scope === "session") {
       return;
     }
     if (replaceRerouteNotice(event, notice)) return;
     if (isDuplicateSystemNotice(event, notice)) return;
+    dropReplacedRestartNotice(event.threadId, next);
     appendMessageToThread(event.threadId, next);
   };
 

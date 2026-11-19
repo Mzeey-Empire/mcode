@@ -415,6 +415,21 @@ describe("planned restart runtime", () => {
     expect(notice?.systemNotice?.kind).toBe("diagnostic");
   }, 30_000);
 
+  it("publishes each written notice with its saved identity so an open thread shows it live", async () => {
+    await open("publish");
+    const [threadId] = await restartWith(1);
+    const canonical = container.resolve(CanonicalAgentBoundary);
+    const progress = container.resolve(WorkerOwnedTurnRuntime).progress!;
+    canonical.bindAcceptedSynthesizedPublications((thread, events) => progress.acceptSynthesizedPublications(thread, events));
+    const publish = vi.spyOn(canonical, "recordSynthesizedPublications");
+    await nextStart().continueAtStartup(async () => { throw new Error("provider unavailable"); });
+    const saved = container.resolve(MessageRepo).listByThread(threadId!, 100).messages.find((message) => message.content.startsWith("Could not"));
+    expect(publish).toHaveBeenCalledWith(threadId, [expect.objectContaining({
+      type: "system", messageId: saved?.id, sequence: saved?.sequence, message: "Could not resume after Mcode restarted",
+    })]);
+    expect(publish.mock.results.every((result) => result.type === "return")).toBe(true);
+  }, 30_000);
+
   it("limits starts to four and carries queued work through another shutdown", async () => {
     await open("queue");
     const threads = await restartWith(5);

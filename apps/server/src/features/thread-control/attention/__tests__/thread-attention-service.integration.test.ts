@@ -19,6 +19,7 @@ import { MessageStore } from "../../../agents/conversation/persistence/message-s
 import { invalidateAttentionOnSettledTurns, invalidateAttentionOnSubagentChange, ThreadAttentionService } from "../thread-attention-service.js";
 import { notifyCommittedCanonicalEvents, subscribeCommittedCanonicalEvents } from "../../../agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../approval-waiting-source.js";
+import { plannedRestartNoticeText } from "@mcode/shared/planned-restart";
 
 const BEFORE = "2026-10-10T10:00:00.000Z";
 const ENDED = "2026-10-10T10:01:00.000Z";
@@ -385,5 +386,82 @@ describe("thread attention through real SQLite and the serialized writer", () =>
       .toEqual({ status: "interrupted", last_turn_outcome: outcome, last_turn_sequence: 2 });
     expect(t.database.query("SELECT sequence, outcome FROM messages WHERE thread_id = ? AND outcome IS NOT NULL").all(t.a.id))
       .toEqual([{ sequence: 2, outcome }]);
+  });
+});
+
+describe("planned restart failure attention", () => {
+  function notice(t: Awaited<ReturnType<typeof fixture>>, sequence: number, content: string, noticeKey = "planned-restart:turn-1") {
+    t.database.query("INSERT INTO messages (id, thread_id, role, content, sequence, timestamp, system_notice) VALUES (?, ?, 'system', ?, ?, ?, ?)")
+      .run(`notice-${sequence}`, t.a.id, content, sequence, ENDED, JSON.stringify({ kind: "diagnostic", presentation: "timeline", noticeKey }));
+  }
+
+  it("alerts for a failure that left no turn and clears once the thread is seen", async () => {
+    const t = await fixture();
+    t.settle(2);
+    t.markBefore();
+    await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
+    notice(t, 3, plannedRestartNoticeText("wake", "failed"));
+
+    expect(t.service.get(t.a.id)?.restartFailure).toEqual({ sequence: 3, at: ENDED });
+    expect(t.service.listInteresting().map(({ threadId }) => threadId)).toEqual([t.a.id]);
+    await t.service.acknowledgeSeen(t.a.id, 3);
+    expect(t.service.listInteresting()).toEqual([]);
+  });
+
+  it("does not alert for a success, another feature's notice, or a failure older than the last turn", async () => {
+    const t = await fixture();
+    notice(t, 1, plannedRestartNoticeText("wake", "failed"));
+    t.settle(2);
+    t.markBefore();
+    await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
+    notice(t, 3, plannedRestartNoticeText("wake", "started"));
+    notice(t, 4, plannedRestartNoticeText("wake", "failed"), "other-feature:turn-1");
+    expect(t.service.get(t.a.id)?.restartFailure).toBeNull();
+    expect(t.service.listInteresting()).toEqual([]);
+  });
+
+  it("ignores a failure older than the last turn for both alerting and acknowledgement", async () => {
+    const t = await fixture();
+    notice(t, 1, plannedRestartNoticeText("wake", "failed"));
+    t.settle(2);
+    await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
+    notice(t, 3, plannedRestartNoticeText("wake", "started"));
+    expect(t.service.get(t.a.id)?.restartFailure).toBeNull();
+    await expect(t.service.acknowledgeSeen(t.a.id, 3)).rejects.toMatchObject({ code: "sequence_ahead" });
+  });
+
+  it("moves a late failure that replaces the success after the attempt's turn, so it still alerts", async () => {
+    const t = await fixture();
+    const messages = new MessageStore(t.database);
+    const noticeKey = "planned-restart:turn-1";
+    t.settle(2);
+    messages.replaceKeyedSystemNotice(t.a.id, plannedRestartNoticeText("wake", "started"), { kind: "diagnostic", presentation: "timeline", noticeKey });
+    t.settle(5);
+    await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
+    await t.service.acknowledgeSeen(t.a.id, 5);
+    messages.replaceKeyedSystemNotice(t.a.id, plannedRestartNoticeText("wake", "failed"), { kind: "diagnostic", presentation: "timeline", noticeKey });
+
+    expect(t.service.get(t.a.id)?.restartFailure?.sequence).toBeGreaterThan(5);
+    expect(t.database.query("SELECT count(*) AS count FROM messages WHERE json_extract(system_notice, '$.noticeKey') = ?").get(noticeKey))
+      .toEqual({ count: 1 });
+  });
+
+  it("does not raise a failure again once the errored attempt turn has been seen", async () => {
+    const t = await fixture();
+    t.settle(2, "errored");
+    await t.threads.recordTurnOutcome(t.a.id, "errored", ENDED);
+    notice(t, 3, plannedRestartNoticeText("resume", "failed"));
+    await t.service.acknowledgeSeen(t.a.id, 2);
+    expect(t.service.get(t.a.id)?.restartFailure).toBeNull();
+  });
+
+  it("leaves a failure that ended as an unseen errored turn to that turn's alert", async () => {
+    const t = await fixture();
+    t.settle(2, "errored");
+    await t.threads.recordTurnOutcome(t.a.id, "errored", ENDED);
+    notice(t, 3, plannedRestartNoticeText("resume", "failed"));
+    const attention = t.service.get(t.a.id);
+    expect(attention?.restartFailure).toBeNull();
+    expect(attention?.lastTurn?.outcome).toBe("errored");
   });
 });

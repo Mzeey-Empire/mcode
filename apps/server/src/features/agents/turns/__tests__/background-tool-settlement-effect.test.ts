@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
-import { BackgroundToolSettlementEffect, ORPHANED_BACKGROUND_TOOL_OUTPUT, type StoppedBackgroundCall } from "../background-tool-settlement-effect.js";
+import { ORPHANED_BACKGROUND_TOOL_OUTPUT } from "@mcode/shared/planned-restart";
+import { BackgroundToolSettlementEffect, type StoppedBackgroundCall } from "../background-tool-settlement-effect.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000124";
 

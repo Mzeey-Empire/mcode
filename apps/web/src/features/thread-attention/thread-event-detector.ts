@@ -1,4 +1,4 @@
-import type { ThreadAttention, ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import { hasUnseenRestartFailure, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { isWindowFocused } from "@/lib/window-focus";
@@ -15,13 +15,15 @@ import type { NeedsYouLabel, ThreadRowState } from "./thread-row-state";
 interface ThreadFacts {
   turn: number | null;
   waiting: string | null;
+  /** Sequence of the newest planned-restart failure that left no failed turn. */
+  restart: number | null;
 }
 
 /** A row state worth a toast, tied to the server fact that produced it. */
 interface ThreadEvent {
   kind: "finished" | "failed" | "needs-you";
   label: string;
-  source: "turn" | "waiting";
+  source: "turn" | "waiting" | "restart";
   key: string;
   at: string;
   /** Files the turn changed; null when unknown or for a wait. */
@@ -47,11 +49,26 @@ const WAITING_LABEL: Record<ThreadWaitingKind, NeedsYouLabel> = {
 
 function factsOf(attention: ThreadAttention | undefined): ThreadFacts {
   const waiting = attention?.waiting;
-  return { turn: attention?.lastTurn?.sequence ?? null, waiting: waiting ? `${waiting.kind}@${waiting.since}` : null };
+  return {
+    turn: attention?.lastTurn?.sequence ?? null,
+    waiting: waiting ? `${waiting.kind}@${waiting.since}` : null,
+    restart: attention?.restartFailure?.sequence ?? null,
+  };
+}
+
+/** A continuation that failed before it could start a turn alerts the same way a failed turn does. */
+function restartFailureEvent(state: ThreadRowState, attention: ThreadAttention | undefined): ThreadEvent | null {
+  const restart = attention?.restartFailure;
+  if (state.kind !== "failed" || !restart || !hasUnseenRestartFailure(attention)) return null;
+  return { kind: "failed", label: "Failed", source: "restart", key: `restart:${restart.sequence}`, at: restart.at, changedFileCount: null };
 }
 
 /** Finished, failed and live waits toast. An interrupted turn or a setup gate stays on its row only. */
 function eventOf(state: ThreadRowState, attention: ThreadAttention | undefined): ThreadEvent | null {
+  return restartFailureEvent(state, attention) ?? turnOrWaitingEvent(state, attention);
+}
+
+function turnOrWaitingEvent(state: ThreadRowState, attention: ThreadAttention | undefined): ThreadEvent | null {
   const turn = attention?.lastTurn;
   const waiting = attention?.waiting;
   if ((state.kind === "finished" || state.kind === "failed") && turn) {
@@ -72,10 +89,9 @@ function eventOf(state: ThreadRowState, attention: ThreadAttention | undefined):
   return null;
 }
 
-function isNews(event: ThreadEvent, facts: ThreadFacts, accounted: ThreadFacts | undefined): boolean {
-  return event.source === "turn"
-    ? (facts.turn ?? -1) > (accounted?.turn ?? -1)
-    : facts.waiting !== accounted?.waiting;
+function isTurnOrWaitingNews(event: ThreadEvent, facts: ThreadFacts, accounted: ThreadFacts | undefined): boolean {
+  if (event.source === "turn") return (facts.turn ?? -1) > (accounted?.turn ?? -1);
+  return facts.waiting !== accounted?.waiting;
 }
 
 function clockTime(iso: string): string {
@@ -137,6 +153,7 @@ interface Sighting {
   event: ThreadEvent | null;
   facts: ThreadFacts;
   onScreen: boolean;
+  unseenRestart: boolean;
 }
 
 function sight(threadId: string): Sighting {
@@ -146,23 +163,28 @@ function sight(threadId: string): Sighting {
   const state = readThreadRowState(threadId, thread?.clientPreparing === true, thread?.clientError != null);
   // A deleted thread keeps its attention facts but has nothing left to open.
   const event = thread ? eventOf(state, attention) : null;
-  return { thread, state, event, facts: factsOf(attention), onScreen: onScreenThreadId === threadId };
+  return {
+    thread, state, event, facts: factsOf(attention), onScreen: onScreenThreadId === threadId,
+    unseenRestart: hasUnseenRestartFailure(attention),
+  };
 }
 
 function sameFacts(left: ThreadFacts | undefined, right: ThreadFacts): boolean {
-  return left?.turn === right.turn && left.waiting === right.waiting;
+  return left?.turn === right.turn && left.waiting === right.waiting && left.restart === right.restart;
 }
 
 /**
  * Toasts a thread's new outcome or wait while the user is elsewhere, and takes the
  * toast back once the row stops showing it. A fact counts as news only once: facts
  * from a snapshot hydration, or that arrive while the thread is on screen, are
- * accounted for without a toast. A running thread defers accounting, so a turn that
+ * accounted for without a toast, except an unseen restart failure, which toasts once. A running thread defers accounting, so a turn that
  * ends before the client sees its run stop still toasts when it does.
  */
 export function startThreadEventDetector(): () => void {
   const accounted = new Map<string, ThreadFacts>();
   const shown = new Map<string, string>();
+  // Restart failures toasted in this client session, by thread and failure sequence.
+  const announcedRestarts = new Set<string>();
   // Threads a store change outside attention can still move: unaccounted facts or a live toast.
   const watched = new Set<string>();
   // A missing row means deleted only once it has loaded; before that its facts wait like a running turn.
@@ -177,25 +199,52 @@ export function startThreadEventDetector(): () => void {
     if (shown.has(threadId) && (onScreen || shown.get(threadId) !== event?.key)) withdraw(threadId);
   };
 
-  const announceNews = (threadId: string, { thread, event, facts, onScreen }: Sighting): void => {
-    if (!event || onScreen || !isNews(event, facts, accounted.get(threadId))) return;
+  const announce = (threadId: string, thread: WorkspaceThread | undefined, event: ThreadEvent): void => {
     showToast(threadId, thread, event);
     notifyDesktop(notificationOf(threadId, thread, event));
     shown.set(threadId, event.key);
+    if (event.source === "restart") announcedRestarts.add(`${threadId}:${event.key}`);
   };
 
-  const account = (threadId: string, { thread, state, facts, onScreen }: Sighting, snapshot: boolean): void => {
-    if (thread) loaded.add(threadId);
-    const settled = loaded.has(threadId) && state.kind !== "running";
-    if (onScreen || snapshot || settled) accounted.set(threadId, facts);
-    if (shown.has(threadId) || !sameFacts(accounted.get(threadId), facts)) watched.add(threadId);
+  const isNews = (threadId: string, event: ThreadEvent, facts: ThreadFacts): boolean => {
+    if (event.source === "restart") return !announcedRestarts.has(`${threadId}:${event.key}`);
+    return isTurnOrWaitingNews(event, facts, accounted.get(threadId));
+  };
+
+  // Restart failures happen during startup, usually before this client hydrates, so a snapshot still announces
+  // an unseen one once; turn and wait facts in a snapshot stay accounted for without a toast.
+  const announceNews = (threadId: string, { thread, event, facts, onScreen }: Sighting, snapshot: boolean): void => {
+    if (!event || onScreen || (snapshot && event.source !== "restart")) return;
+    if (isNews(threadId, event, facts)) announce(threadId, thread, event);
+  };
+
+  // Any row state (unloaded, running, waiting) can hold back a restart failure's toast, so its accounting ignores
+  // the row: it stays pending until it toasts, the user sees it, or its thread is deleted.
+  const restartSettled = (threadId: string, { thread, facts, unseenRestart }: Sighting): boolean =>
+    !unseenRestart || announcedRestarts.has(`${threadId}:restart:${facts.restart}`) || (loaded.has(threadId) && !thread);
+
+  const turnSettled = (threadId: string, { state, onScreen }: Sighting, snapshot: boolean): boolean =>
+    onScreen || snapshot || (loaded.has(threadId) && state.kind !== "running");
+
+  const factsToAccount = (threadId: string, sighting: Sighting, snapshot: boolean): ThreadFacts => {
+    const { facts } = sighting;
+    const previous = accounted.get(threadId) ?? { turn: null, waiting: null, restart: null };
+    const turnFacts = turnSettled(threadId, sighting, snapshot) ? facts : previous;
+    const restart = restartSettled(threadId, sighting) ? facts.restart : previous.restart;
+    return { turn: turnFacts.turn, waiting: turnFacts.waiting, restart };
+  };
+
+  const account = (threadId: string, sighting: Sighting, snapshot: boolean): void => {
+    if (sighting.thread) loaded.add(threadId);
+    accounted.set(threadId, factsToAccount(threadId, sighting, snapshot));
+    if (shown.has(threadId) || !sameFacts(accounted.get(threadId), sighting.facts)) watched.add(threadId);
     else watched.delete(threadId);
   };
 
   const evaluate = (threadId: string, snapshot: boolean): void => {
     const sighting = sight(threadId);
     retractStale(threadId, sighting);
-    if (!snapshot) announceNews(threadId, sighting);
+    announceNews(threadId, sighting, snapshot);
     account(threadId, sighting, snapshot);
   };
 
