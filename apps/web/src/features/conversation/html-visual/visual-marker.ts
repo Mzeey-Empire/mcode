@@ -2,6 +2,7 @@
 const VISUAL_MARKER_SCHEME = "visual:";
 
 const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/;
 const INLINE_CODE_SPAN = /(`+)[\s\S]*?\1/g;
 
 /** Returns the visual message id a markdown image source names, or undefined for any other source. */
@@ -27,7 +28,8 @@ function withoutCode(content: string): string {
   let fence: string | undefined;
   for (const line of content.split("\n")) {
     if (fence) {
-      if (line.trim().startsWith(fence) && line.trim().replaceAll(fence[0] ?? "", "") === "") fence = undefined;
+      const close = FENCE_CLOSE.exec(line)?.[1];
+      if (close?.startsWith(fence) && close[0] === fence[0]) fence = undefined;
       continue;
     }
     const open = FENCE_OPEN.exec(line)?.[1];
