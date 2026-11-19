@@ -68,6 +68,14 @@ describe("git.push", { timeout: 30_000 }, () => {
 
     expect(git(origin, "rev-parse", "refs/heads/main")).toBe(originHead);
     expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(localHead);
+    // Review compares a branch against its upstream, so Push must not move it off origin/main.
+    expect(git(worktree, "rev-parse", "--abbrev-ref", `${branch}@{upstream}`)).toBe("origin/main");
+  });
+
+  it("tracks the pushed branch when the branch had no upstream", async () => {
+    await push();
+
+    expect(git(cwd, "rev-parse", "--abbrev-ref", "main@{upstream}")).toBe("origin/main");
   });
 
   it("shows both lines of a remote hook's message without the command line or local paths", async () => {

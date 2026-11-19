@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -74,5 +74,17 @@ describe("Review state against the published branch", { timeout: 30_000 }, () =>
     git("push", "origin", "feat");
     commit("second feature commit");
     expect(await service.readReviewState("fixture", cwd)).toMatchObject({ published: { ahead: 1 } });
+  });
+
+  it("still reads an unpublished branch when git tracing adds output", async () => {
+    git("push", "origin", "main");
+    git("checkout", "--track", "-b", "feat", "origin/main");
+    commit("feature commit");
+    vi.stubEnv("GIT_TRACE", "1");
+    try {
+      expect(await service.readReviewState("fixture", cwd)).toMatchObject({ published: null });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

@@ -44,7 +44,7 @@ export class GitPushService {
   constructor(
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
     @inject(GitRepositoryService)
-    private readonly gitRepository: Pick<GitRepositoryService, "push" | "getCurrentBranchAt">,
+    private readonly gitRepository: Pick<GitRepositoryService, "getCurrentBranchAt">,
     @inject(PullRequestReviewGitService)
     private readonly pullRequestReviews: Pick<PullRequestReviewGitService, "pushPullRequestReviewBranch">,
     @inject(ReviewWorktreeService)
@@ -71,7 +71,11 @@ export class GitPushService {
           target.expectedHeadRepositoryUrl,
         );
       } else {
-        await this.gitRepository.push(request.workspacePath, request.branch);
+        await this.pushStandard(request.workspacePath, `refs/heads/${request.branch}`, {
+          kind: "standard",
+          remote: "origin",
+          branch: request.branch,
+        });
       }
     } catch (error) {
       throw toPushFailure(error);
@@ -116,19 +120,25 @@ export class GitPushService {
       this.scheduleBumps(request.workspaceId, destination.localBranch);
       return;
     }
-    await this.pushStandardCommit(request.repoPath, request.sha, destination);
+    await this.pushStandard(request.repoPath, request.sha, destination);
     this.scheduleBumps(request.workspaceId, destination.branch);
   }
 
-  private async pushStandardCommit(
+  /**
+   * Push `source` to the destination branch and keep an upstream that still resolves. A worktree
+   * branch started from origin/main tracks it, and Review compares against the upstream, so moving
+   * tracking to the pushed branch would empty the branch's default Review comparison. An upstream
+   * whose tracking ref is gone counts as missing and is replaced.
+   */
+  private async pushStandard(
     repoPath: string,
-    sha: string,
+    source: string,
     destination: Extract<CommitPushDestination, { kind: "standard" }>,
   ): Promise<void> {
     if (!REMOTE_NAME.test(destination.remote)) throw new Error("Invalid push remote.");
     validateBranchName(destination.branch);
     await this.gitExecutor.exec(
-      ["-C", repoPath, "push", destination.remote, `${sha}:refs/heads/${destination.branch}`],
+      ["-C", repoPath, "push", destination.remote, `${source}:refs/heads/${destination.branch}`],
       { timeout: PUSH_TIMEOUT_MS },
     );
     await this.setUpstreamIfMissing(repoPath, destination.remote, destination.branch);
