@@ -147,6 +147,16 @@ describe("ClaudeEventMapper native dispatch", () => {
     expect(evidence.slice(1).map((source) => source.parent)).toEqual([{ kind: "root" }, { kind: "root" }]);
   });
 
+  it("reports nothing for a background subagent's run once its launching turn has ended", async () => {
+    const { mapper, events, callbacks } = createMapper();
+    await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "AGENT_1", name: "Agent", input: { run_in_background: true } }] } });
+    const launched = events.length;
+    vi.mocked(callbacks.liveExecutionId).mockReturnValue(undefined);
+    mapper.reportSubagentRun("AGENT_1", { model: "claude-sonnet-5-5", reasoningEffort: "high" });
+
+    expect(events).toHaveLength(launched);
+  });
+
   it("reports an Agent's subagent_type as subagentType from assistant blocks and standalone tool_use messages", async () => {
     const { mapper, events } = createMapper();
     await mapper.map({ type: "assistant", parent_tool_use_id: null, message: { content: [{ type: "tool_use", id: "AGENT_1", name: "Agent", input: { subagent_type: "general-purpose" } }] } });

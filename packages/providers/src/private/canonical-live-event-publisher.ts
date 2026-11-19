@@ -49,6 +49,12 @@ export interface NativeLiveEventEvidence {
  */
 export class CanonicalLiveEventPublisher {
   private readonly queues = new Map<string, ProviderExecutionQueue>();
+  /**
+   * Every ended execution and attempt, kept for the publisher's lifetime. A pending approval keeps the routing it
+   * was requested under across any number of later turns, so no window is safe to forget. One short key per
+   * ended turn stays small next to the turn's own events.
+   */
+  private readonly endedExecutions = new Set<string>();
   private admissionStopped = false;
   private shutdownTask: Promise<void> | undefined;
   private lateEventReported = false;
@@ -106,13 +112,7 @@ export class CanonicalLiveEventPublisher {
     sourceIdentities: readonly ProviderIdentity[],
     native?: NativeLiveEventEvidence | string,
   ): void {
-    if (this.admissionStopped) {
-      if (!this.lateEventReported) {
-        this.lateEventReported = true;
-        logger.warn("Provider canonical event rejected after shutdown", { executionId: routing.executionId });
-      }
-      return;
-    }
+    if (this.rejectsLateEvent(routing, runtimeEvent)) return;
     const queue = this.queueFor(routing);
     this.discardUnanchoredPlan(queue, routing, runtimeEvent);
     if (!this.admit(queue, routing, runtimeEvent, sourceIdentities, native)) return;
@@ -124,6 +124,7 @@ export class CanonicalLiveEventPublisher {
     const draft = this.createDraft(routing, runtimeEvent, sourceIdentities, sourceSequence, typeof native === "string" ? undefined : native);
     const bytes = this.byteBudget === "unbounded" ? 0 : Buffer.byteLength(JSON.stringify(draft));
     if (!this.admitBytes(queue, routing, bytes, runtimeEvent)) return;
+    if (endsExecution(runtimeEvent)) this.endedExecutions.add(this.queueKey(routing));
     queue.nextSourceSequence += 1;
     queue.pendingBytes += bytes;
     this.pendingByThread.set(routing.threadId, (this.pendingByThread.get(routing.threadId) ?? 0) + 1);
@@ -153,6 +154,22 @@ export class CanonicalLiveEventPublisher {
         queue.pendingBytes -= bytes;
         this.settleCapacity(routing.threadId);
       });
+  }
+
+  private rejectsLateEvent(routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent): boolean {
+    if (this.admissionStopped) {
+      if (!this.lateEventReported) {
+        this.lateEventReported = true;
+        logger.warn("Provider canonical event rejected after shutdown", { executionId: routing.executionId });
+      }
+      return true;
+    }
+    if (!this.endedExecutions.has(this.queueKey(routing))) return false;
+    // The server accepts nothing after Ended, and a rejected event would break the turn's release,
+    // so a late callback (a background subagent's hook or approval) must not reach it.
+    logger.warn("Provider canonical event dropped after its execution ended", {
+      executionId: routing.executionId, eventType: runtimeEvent.event.type });
+    return true;
   }
 
   private discardUnanchoredPlan(queue: ProviderExecutionQueue, routing: CanonicalLiveEventRouting, runtimeEvent: ProviderRuntimeEvent): void {
@@ -317,6 +334,16 @@ function nativeDraftSuffix(native: NativeLiveEventEvidence | undefined): string 
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/**
+ * Matches the server reducer, which closes an execution at any parent Ended except a lost
+ * provider stream; that one leaves the turn open for its real ending.
+ */
+function endsExecution(runtimeEvent: ProviderRuntimeEvent): boolean {
+  const event = runtimeEvent.event;
+  return isParentTerminal(runtimeEvent) && event.type === AgentEventType.Ended
+    && !(event.outcome === undefined && event.reason === "provider_lost");
 }
 
 function isParentTerminal(runtimeEvent: ProviderRuntimeEvent): boolean {

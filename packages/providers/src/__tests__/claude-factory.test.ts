@@ -854,13 +854,15 @@ describe("Claude public factory core and capabilities", () => {
   });
 
   it("routes pooled PostCompact hooks to the consumed follow-up execution", async () => {
-    const transport = installTransport();
+    installTransport(async (turn, options) => {
+      if (turn === 2) await options.hooks?.PostCompact?.[0]?.hooks[0]?.({ hook_event_name: "PostCompact", compact_summary: "fixture summary", session_id: "NATIVE_PARENT", transcript_path: "fixture", cwd: process.cwd(), trigger: "auto" }, undefined, { signal: new AbortController().signal });
+      return [result(`RESULT_${turn}`)];
+    });
     const { provider, events, drafts } = fixture();
     await provider.sendTurn(request());
     await completed(events, 1);
     await provider.sendTurn(request({ turnId: "turn-2", turnExecutionId: execution2 }));
     await completed(events, 2);
-    await transport.optionsSeen[0]?.hooks?.PostCompact?.[0]?.hooks[0]?.({ hook_event_name: "PostCompact", compact_summary: "fixture summary", session_id: "NATIVE_PARENT", transcript_path: "fixture", cwd: process.cwd(), trigger: "auto" }, undefined, { signal: new AbortController().signal });
     await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.CompactSummary)).toHaveLength(1));
     expect(drafts.find((draft) => draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent" && draft.payload.item.payload.runtimeEvent.event.type === AgentEventType.CompactSummary)?.routing.executionId).toBe(execution2);
   });
