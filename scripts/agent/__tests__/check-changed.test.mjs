@@ -20,19 +20,126 @@ function labels(plan) {
   return plan.jobs.map((job) => job.label);
 }
 
-NodeTest.test("a shared package change checks every workspace that depends on it, and no other", () => {
-  const plan = planChecks({ files: ["packages/shared/src/id.ts"], workspaces: WORKSPACES, since: null, exists: everyFileExists });
+function planWithFiles(files, contents) {
+  return planChecks({
+    files,
+    workspaces: WORKSPACES,
+    since: null,
+    exists: everyFileExists,
+    listFiles: (dir) => Object.keys(contents).filter((file) => file.startsWith(`${dir}/`)),
+    readFile: (file) => contents[file],
+  });
+}
+
+function selectedTests(plan) {
+  return plan.jobs
+    .filter((job) => job.label.startsWith("test "))
+    .flatMap((job) => job.args.slice(3).filter((arg) => !arg.startsWith("-")));
+}
+
+NodeTest.test("a shared package change runs tests in its workspace and typechecks its dependents", () => {
+  const plan = planWithFiles(["packages/shared/src/id.ts"], {
+    "packages/shared/src/id.test.ts": "",
+    "packages/contracts/src/id.test.ts": "import { id } from '@mcode/shared/id';",
+    "apps/web/src/id.test.ts": "",
+  });
 
   NodeAssertStrict.deepEqual(labels(plan), [
-    "test packages/shared",
-    "test packages/contracts",
-    "test apps/web",
+    "test packages/shared (1 file)",
     "typecheck packages/shared",
     "typecheck packages/contracts",
     "typecheck apps/web",
     "lint 1 file",
   ]);
+  NodeAssertStrict.deepEqual(selectedTests(plan), ["src/id.test.ts"]);
   NodeAssertStrict.deepEqual(plan.notes, []);
+});
+
+NodeTest.test("a changed test runs itself when it still exists", () => {
+  const plan = planChecks({
+    files: ["apps/web/src/live.test.tsx", "apps/web/src/deleted.test.ts"],
+    workspaces: WORKSPACES,
+    exists: (file) => file !== "apps/web/src/deleted.test.ts",
+  });
+
+  NodeAssertStrict.deepEqual(selectedTests(plan), ["src/live.test.tsx"]);
+});
+
+NodeTest.test("a changed source runs its named tests in other folders", () => {
+  const plan = planWithFiles(["apps/web/src/stores/threadStore.ts"], {
+    "apps/web/src/__tests__/threadStore.test.ts": "",
+    "apps/web/src/features/threadStore-reasoning.test.ts": "",
+    "apps/web/src/features/threadStoreMore.test.ts": "",
+  });
+
+  NodeAssertStrict.deepEqual(selectedTests(plan), [
+    "src/__tests__/threadStore.test.ts",
+    "src/features/threadStore-reasoning.test.ts",
+  ]);
+});
+
+NodeTest.test("a changed source runs tests that import, re-export, or mock it as well as named tests", () => {
+  const plan = planWithFiles(["apps/web/src/stores/threadStore.ts"], {
+    "apps/web/src/__tests__/comment.test.ts": "// import '../stores/threadStore';",
+    "apps/web/src/__tests__/dynamic.test.ts": "await import('../stores/threadStore');",
+    "apps/web/src/__tests__/mock.test.ts": "vi.mock(\"@/stores/threadStore.ts\", () => ({}));",
+    "apps/web/src/__tests__/reexport.test.ts": "export { threadStore } from '../stores/threadStore.js';",
+    "apps/web/src/__tests__/static.test.ts": "import {\n  threadStore,\n} from '../stores/threadStore';",
+    "apps/web/src/__tests__/threadStore.test.ts": "",
+  });
+
+  NodeAssertStrict.deepEqual(selectedTests(plan), [
+    "src/__tests__/dynamic.test.ts",
+    "src/__tests__/mock.test.ts",
+    "src/__tests__/reexport.test.ts",
+    "src/__tests__/static.test.ts",
+    "src/__tests__/threadStore.test.ts",
+  ]);
+});
+
+NodeTest.test("an import of a different module with the same file name does not select the test", () => {
+  const plan = planWithFiles(["apps/web/src/features/narrative/types.ts"], {
+    "apps/web/src/__tests__/narrative.test.ts": "import type { Segment } from '@/features/narrative/types';",
+    "apps/web/src/__tests__/transport.test.ts": "import type { Call } from '../transport/types';",
+    "apps/web/src/features/narrative/__tests__/local.test.ts": "import type { Segment } from '../types.js';",
+    "apps/web/src/__tests__/folder.test.ts": "import { Segment } from '@/features/narrative';",
+  });
+
+  NodeAssertStrict.deepEqual(selectedTests(plan), [
+    "src/__tests__/narrative.test.ts",
+    "src/features/narrative/__tests__/local.test.ts",
+  ]);
+});
+
+NodeTest.test("a changed index module is reached through its folder", () => {
+  const plan = planWithFiles(["apps/web/src/features/narrative/index.ts"], {
+    "apps/web/src/__tests__/folder.test.ts": "import { Segment } from '@/features/narrative';",
+    "apps/web/src/__tests__/other.test.ts": "import { Row } from '@/features/other';",
+  });
+
+  NodeAssertStrict.deepEqual(selectedTests(plan), ["src/__tests__/folder.test.ts"]);
+});
+
+NodeTest.test("a source without direct tests runs only the named tests of its immediate importers", () => {
+  const plan = planWithFiles(["apps/web/src/internal/projection.ts"], {
+    "apps/web/src/stores/threadStore.ts": "import { project } from '../internal/projection';",
+    "apps/web/src/features/consumer.ts": "import { threadStore } from '../stores/threadStore';",
+    "apps/web/src/__tests__/threadStore-reasoning.test.ts": "",
+    "apps/web/src/__tests__/consumer.test.ts": "",
+    "apps/web/src/__tests__/view.test.ts": "import { threadStore } from '../stores/threadStore';",
+  });
+
+  NodeAssertStrict.deepEqual(selectedTests(plan), ["src/__tests__/threadStore-reasoning.test.ts"]);
+  NodeAssertStrict.deepEqual(plan.notes, []);
+});
+
+NodeTest.test("a source without related tests reports the gap and starts no test job", () => {
+  const plan = planWithFiles(["apps/web/src/internal/uncovered.ts"], {
+    "apps/web/src/__tests__/unrelated.test.ts": "",
+  });
+
+  NodeAssertStrict.deepEqual(labels(plan), ["typecheck apps/web", "lint 1 file"]);
+  NodeAssertStrict.deepEqual(plan.notes, ["no direct tests for apps/web/src/internal/uncovered.ts"]);
 });
 
 NodeTest.test("a deleted file still selects its workspace but never reaches the linter, and docs are not linted", () => {
@@ -41,9 +148,11 @@ NodeTest.test("a deleted file still selects its workspace but never reaches the 
     workspaces: WORKSPACES,
     since: null,
     exists: (file) => file !== "apps/server/src/gone.ts",
+    listFiles: () => [],
   });
 
-  NodeAssertStrict.deepEqual(labels(plan), ["test apps/server", "typecheck apps/server"]);
+  NodeAssertStrict.deepEqual(labels(plan), ["typecheck apps/server"]);
+  NodeAssertStrict.deepEqual(plan.notes, ["no direct tests for apps/server/src/gone.ts"]);
 });
 
 NodeTest.test("a shared config change says the scoped run cannot vouch for it", () => {
@@ -51,15 +160,45 @@ NodeTest.test("a shared config change says the scoped run cannot vouch for it", 
 
   NodeAssertStrict.deepEqual(plan.jobs, []);
   NodeAssertStrict.match(plan.notes[0], /tsconfig\.base\.json/);
+  NodeAssertStrict.match(plan.notes[0], /bun run check:changed --full/);
 });
 
-NodeTest.test("--since hands its ref to Vitest, and other arguments are refused", () => {
-  NodeAssertStrict.deepEqual(parseCheckArgs(["--since", "origin/main"]), { since: "origin/main" });
-  NodeAssertStrict.throws(() => parseCheckArgs(["--since"]));
-  NodeAssertStrict.throws(() => parseCheckArgs(["apps/web"]));
+NodeTest.test("--full restores Vitest changed jobs for touched and dependent workspaces in either flag order", () => {
+  for (const [argv, changed] of [
+    [["--full"], "--changed"],
+    [["--full", "--since", "origin/main"], "--changed=origin/main"],
+    [["--since", "origin/main", "--full"], "--changed=origin/main"],
+  ]) {
+    const plan = planChecks({
+      files: ["packages/shared/src/id.ts"],
+      workspaces: WORKSPACES,
+      exists: everyFileExists,
+      ...parseCheckArgs(argv),
+    });
 
-  const plan = planChecks({ files: ["apps/server/src/a.ts"], workspaces: WORKSPACES, since: "origin/main", exists: everyFileExists });
-  NodeAssertStrict.ok(plan.jobs[0].args.includes("--changed=origin/main"));
+    const jobs = plan.jobs.filter((job) => job.label.startsWith("test "));
+    NodeAssertStrict.deepEqual(jobs.map((job) => job.cwd), ["packages/shared", "packages/contracts", "apps/web"]);
+    for (const job of jobs) {
+      NodeAssertStrict.deepEqual(job.args, [
+        "run", "test", "--", changed, "--passWithNoTests", "--reporter=dot", "--silent=passed-only",
+      ]);
+    }
+  }
+});
+
+NodeTest.test("--since alone keeps direct selection and invalid arguments are refused", () => {
+  const options = parseCheckArgs(["--since", "origin/main"]);
+  NodeAssertStrict.deepEqual(options, { since: "origin/main", full: false });
+  NodeAssertStrict.throws(() => parseCheckArgs(["--since"]));
+  NodeAssertStrict.throws(() => parseCheckArgs(["--full", "apps/web"]));
+
+  const plan = planChecks({
+    files: ["apps/server/src/a.test.ts"],
+    workspaces: WORKSPACES,
+    exists: everyFileExists,
+    ...options,
+  });
+  NodeAssertStrict.deepEqual(selectedTests(plan), ["src/a.test.ts"]);
 });
 
 NodeTest.test("an agent script change runs its own test file, and a changed test runs itself", () => {
@@ -85,8 +224,7 @@ NodeTest.test("a test summary line says when no test imports the change", () => 
   );
 });
 
-// Each git call spawns a process. check:changed runs this beside a workspace's whole Vitest suite, and under that
-// load the dozen calls here outlast Bun's 5 second default.
+// Each git call spawns a process. On a shared machine the dozen calls here can outlast Bun's 5 second default.
 NodeTest.test("change detection reads staged, unstaged, untracked, and with --since the branch's commits", { timeout: 60_000 }, () => {
   const repo = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "check-changed-"));
   const git = (...args) => NodeChildProcess.execFileSync("git", args, { cwd: repo, encoding: "utf8" });
