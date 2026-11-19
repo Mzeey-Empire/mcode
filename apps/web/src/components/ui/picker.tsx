@@ -36,6 +36,8 @@ export interface PickerRow {
   readonly icon?: ReactNode;
   /** Draws the name in the mono face, for branch names, ids and paths. */
   readonly mono?: boolean;
+  /** Draws the name in this CSS font family, such as a font picker previewing each face. */
+  readonly fontFamily?: string;
   /** A short mono label in a fixed-width lane before the name, such as a commit's short sha, so names align. */
   readonly prefix?: string;
   /** Short muted detail on the right, such as a group or a source. */
@@ -144,6 +146,8 @@ export interface PickerProps<T> {
    * A detail pane always fills. Defaults to false.
    */
   readonly fill?: boolean;
+  /** Without a rail or detail pane, caps the list at about nine rows instead of five, for a popover with room. Defaults to false. */
+  readonly tall?: boolean;
   readonly onSelect: (item: T) => void;
 }
 
@@ -293,7 +297,7 @@ export function Picker<T>(props: PickerProps<T>) {
       onNearEnd={loadMore}
       hairlines={hairlines}
       selectedCheck={selectedCheck}
-      fill={props.detail !== undefined ? "pane" : props.fill === true ? "frame" : false}
+      fill={pickerListFill(props)}
       unmatched={props.unmatchedGroup === undefined ? undefined : { label: props.unmatchedGroup, query }}
     />
   ) : null;
@@ -812,12 +816,19 @@ interface PickerListProps<T> {
    * Instead of capping at five rows, fills its grid cell to match the detail pane ("pane"), or the frame's height
    * beside the rail ("frame").
    */
-  readonly fill: "pane" | "frame" | false;
+  readonly fill: "pane" | "frame" | "tall" | false;
   readonly unmatched?: { readonly label: string; readonly query: string };
+}
+
+function pickerListFill(props: { readonly detail?: unknown; readonly fill?: boolean; readonly tall?: boolean }): PickerListProps<unknown>["fill"] {
+  if (props.detail !== undefined) return "pane";
+  if (props.fill === true) return "frame";
+  return props.tall === true ? "tall" : false;
 }
 
 const LIST_FILL_CLASS = {
   capped: "max-h-[17.2rem] pt-2",
+  tall: "max-h-[32rem] pt-2",
   pane: "@container/picker-list snap-y snap-mandatory pr-1",
   // A zero height keeps the rows out of the panel's own height, so the rail sets it and the list grows into it.
   frame: "h-0 min-h-[17.2rem] grow pt-2",
@@ -1011,7 +1022,7 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
         <span className="w-[5.6rem] shrink-0 font-mono text-caption text-muted">{row.prefix}</span>
       ) : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className={cn("text-fade", row.mono && "font-mono text-caption")}>{row.name}</span>
+        <span className={cn("text-fade", row.mono && "font-mono text-caption")} style={{ fontFamily: row.fontFamily }}>{row.name}</span>
         {row.description != null ? (
           <span className="flex min-w-0 items-center gap-1.5 text-caption text-muted">{row.description}</span>
         ) : null}

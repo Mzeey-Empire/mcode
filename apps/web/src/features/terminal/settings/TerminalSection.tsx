@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { ChevronDown, Plus, SquareTerminal } from "lucide-react";
 import type { TerminalCustomProfile, TerminalProfileReference } from "@mcode/contracts/models/terminal";
 import type { TerminalPreferencesUpdate, TerminalSettings } from "@mcode/contracts/models/terminal-settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { PICKER_PANEL_CLASS, Picker, type PickerRow } from "@/components/ui/picker";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -13,10 +15,14 @@ import { useTerminalSettingsStore } from "./terminalSettingsStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { RangeControl } from "@/components/settings/RangeControl";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
+import { SettingsSelectPicker, type SettingsPickOption } from "@/components/settings/SettingsSelectPicker";
+import { PathLine, PathTooltipRoot, usePathTooltip } from "@/components/settings/PathLine";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SEARCH_HIT_CLASS, Setting, SettingRowFrame, useSettingHit } from "@/components/settings/Setting";
-import { settingsGroup, settingsPage, type SettingDef, type SettingRowProps } from "@/components/settings/setting-def";
+import { settingsGroup, settingsPage, type SettingRowProps } from "@/components/settings/setting-def";
 import { cn } from "@/lib/utils";
+import { TERMINAL_FONT_SIZES, TERMINAL_LINE_HEIGHTS } from "../terminal-metrics";
+import { detectRenderableFonts, fontStackFor, primaryFontFamily, type TerminalFontChoice } from "./terminal-fonts";
 
 const INHERIT_PROFILE = "__terminal_inherit__";
 
@@ -113,7 +119,9 @@ function ProfileDialog({ open, profile, pending, onOpenChange, onSubmit }: Profi
   );
 }
 
-function ProfileSelect({
+type ProfileOption = { readonly id: TerminalProfileReference; readonly name: string };
+
+function ProfilePicker({
   value,
   certified,
   custom,
@@ -122,46 +130,36 @@ function ProfileSelect({
   allowInherit = false,
 }: {
   value: string;
-  certified: readonly { id: TerminalProfileReference; name: string }[];
+  certified: readonly ProfileOption[];
   custom: readonly TerminalCustomProfile[];
   disabled?: boolean;
   onChange: (value: string) => void;
   allowInherit?: boolean;
 }) {
-  const selectedLabel = terminalProfileLabel(value, certified, custom);
-  const unavailable = terminalProfileUnavailable(value, certified, custom);
-
+  const options: SettingsPickOption[] = [
+    ...(allowInherit ? [{ value: INHERIT_PROFILE, label: "Use inherited global profile" }] : []),
+    { value: "automatic", label: "Automatic" },
+    ...certified.map((profile) => ({ value: profile.id, label: profile.name })),
+    ...custom.map((profile) => ({ value: profile.id, label: profile.name })),
+    ...(terminalProfileUnavailable(value, certified, custom)
+      ? [{ value, label: `Unavailable: ${profileName(value as TerminalProfileReference)}` }]
+      : []),
+  ];
   return (
-    <Select value={value} onValueChange={(next) => { if (next) onChange(next); }} disabled={disabled}>
-      <SelectTrigger aria-label={allowInherit ? "Workspace Terminal profile" : "Default Terminal profile"} className="w-full min-w-52 sm:w-64">
-        <SelectValue>{selectedLabel}</SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        {allowInherit ? <SelectItem value={INHERIT_PROFILE}>Use inherited global profile</SelectItem> : null}
-        <SelectItem value="automatic">Automatic</SelectItem>
-        {certified.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.name}</SelectItem>)}
-        {custom.map((profile) => <SelectItem key={profile.id} value={profile.id}>{profile.name}</SelectItem>)}
-        {unavailable ? <SelectItem value={value}>{`Unavailable: ${profileName(value as TerminalProfileReference)}`}</SelectItem> : null}
-      </SelectContent>
-    </Select>
+    <SettingsSelectPicker
+      aria-label={allowInherit ? "Workspace Terminal profile" : "Default Terminal profile"}
+      value={value}
+      options={options}
+      searchPlaceholder="Search profiles"
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
-}
-
-function terminalProfileLabel(
-  value: string,
-  certified: readonly { id: TerminalProfileReference; name: string }[],
-  custom: readonly TerminalCustomProfile[],
-): string {
-  if (value === INHERIT_PROFILE) return "Use inherited global profile";
-  if (value === "automatic") return "Automatic";
-  return certified.find((profile) => profile.id === value)?.name
-    ?? custom.find((profile) => profile.id === value)?.name
-    ?? `Unavailable: ${profileName(value as TerminalProfileReference)}`;
 }
 
 function terminalProfileUnavailable(
   value: string,
-  certified: readonly { id: TerminalProfileReference; name: string }[],
+  certified: readonly ProfileOption[],
   custom: readonly TerminalCustomProfile[],
 ): boolean {
   if (value === INHERIT_PROFILE || value === "automatic") return false;
@@ -177,7 +175,7 @@ function PreferencesStatus({ pending, error }: { pending: boolean; error: string
 
 /**
  * Terminal profile lists for one control. Loads them once per mount of the first control
- * that needs them: the page shows four profile rows, so later rows skip while a load is in flight.
+ * that needs them: the page shows several profile rows, so later rows skip while a load is in flight.
  */
 function useTerminalProfiles() {
   const terminal = useSettingsStore((state) => state.settings.terminal);
@@ -198,6 +196,7 @@ function useTerminalProfiles() {
     [certifiedProfiles],
   );
   const globalDefault = recovery?.unavailableProfileId ?? terminal.defaultProfileId;
+  const automaticProfile = certifiedProfiles[0];
   return {
     certifiedProfiles,
     certifiedOptions,
@@ -207,7 +206,9 @@ function useTerminalProfiles() {
     profilesLoading,
     pending,
     globalDefault,
-    automaticProfile: certifiedProfiles[0],
+    automaticProfile,
+    /** The profile a new terminal opens with: the chosen one, or the first detected under Automatic. */
+    inUseProfileId: globalDefault === "automatic" ? automaticProfile?.id : globalDefault,
     selectedProfileUnavailable: Boolean(recovery?.unavailableProfileId)
       || terminalProfileUnavailable(globalDefault, certifiedOptions, customProfiles),
   };
@@ -223,13 +224,13 @@ function globalProfileHint(profiles: TerminalProfiles): string | undefined {
   return undefined;
 }
 
-/** Global default profile; its hint names the profile Automatic resolves to, so the row draws it. */
+/** Default profile; its hint names the profile Automatic resolves to, so the row draws it. */
 function GlobalProfileRow({ def, variant }: SettingRowProps) {
   const profiles = useTerminalProfiles();
   const setGlobalDefault = useTerminalSettingsStore((state) => state.setGlobalDefault);
   return (
     <SettingRowFrame def={def} variant={variant} hint={globalProfileHint(profiles)}>
-      <ProfileSelect
+      <ProfilePicker
         value={profiles.globalDefault}
         certified={profiles.certifiedOptions}
         custom={profiles.customProfiles}
@@ -258,19 +259,11 @@ function ProfileRecoveryNotices() {
   );
 }
 
-const NO_PROJECT_NOTICE = "Open a project to set a project default.";
-
-function NoProjectNotice({ def }: { readonly def: SettingDef }) {
-  const hit = useSettingHit([def]);
-  return <p ref={hit.ref} {...hit.attrs} data-setting-id={def.id} className={cn(SEARCH_HIT_CLASS, "px-4 py-2.5 text-caption text-muted")}>{NO_PROJECT_NOTICE}</p>;
-}
-
-/** Project default profile; without an open project the page shows a notice in its place. */
+/** Project default profile; without an open project the row dims and says why. */
 function ProjectProfileRow({ def, variant }: SettingRowProps) {
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   if (!activeWorkspaceId) {
-    if (variant === "page") return <NoProjectNotice def={def} />;
-    return <SettingRowFrame def={def} variant={variant}><p className="text-caption text-muted">{NO_PROJECT_NOTICE}</p></SettingRowFrame>;
+    return <SettingRowFrame def={def} variant={variant} hint="Open a project to set one." className="opacity-55">{null}</SettingRowFrame>;
   }
   return <ProjectProfileFrame def={def} variant={variant} workspaceId={activeWorkspaceId} />;
 }
@@ -298,7 +291,7 @@ function ProjectProfileFrame({ def, variant, workspaceId }: SettingRowProps & { 
   return (
     <SettingRowFrame def={def} variant={variant}>
       <div className="flex flex-wrap items-center gap-2">
-        <ProfileSelect
+        <ProfilePicker
           value={workspaceOverride?.defaultProfileId ?? INHERIT_PROFILE}
           certified={profiles.certifiedOptions}
           custom={profiles.customProfiles}
@@ -316,22 +309,29 @@ function ProjectProfileFrame({ def, variant, workspaceId }: SettingRowProps & { 
   );
 }
 
+function InUseTag() {
+  return <Badge variant="secondary" size="compact">In use</Badge>;
+}
+
 function CustomProfileRow({
   profile,
+  inUse,
   pending,
   onEdit,
   onDelete,
 }: {
   readonly profile: TerminalCustomProfile;
+  readonly inUse: boolean;
   readonly pending: boolean;
   readonly onEdit: (profile: TerminalCustomProfile) => void;
   readonly onDelete: (profileId: string) => void;
 }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 px-3 py-2 text-xs">
-      <span className="min-w-0 text-fade">
+      <span className="flex min-w-0 items-center gap-2 text-fade">
         {profile.name}
-        <span className="ml-2 text-muted">{profile.executable}</span>
+        {inUse ? <InUseTag /> : null}
+        <span className="text-muted">{profile.executable}</span>
       </span>
       <span className="flex shrink-0 gap-1">
         <Button variant="ghost" size="compact" disabled={pending} onClick={() => onEdit(profile)}>Edit</Button>
@@ -353,21 +353,45 @@ function ProfileDeleteReferences() {
   );
 }
 
-function CertifiedProfilesControl() {
+function detectedProfilesStatus(profiles: TerminalProfiles): string | null {
+  if (profiles.profilesLoading && !profiles.profilesLoaded) return "Loading profiles…";
+  if (!profiles.profilesLoading && profiles.certifiedProfiles.length === 0) return "No profiles detected.";
+  return null;
+}
+
+/**
+ * One row per detected profile: its name, an "In use" tag on the profile a new terminal opens with,
+ * and its executable path. The rows share one path tooltip root.
+ */
+function DetectedProfilesRow({ def, variant }: SettingRowProps) {
   const profiles = useTerminalProfiles();
+  const hit = useSettingHit([def]);
+  const pathTooltip = usePathTooltip();
+  const statusText = detectedProfilesStatus(profiles);
+  const status = statusText ? <p className="text-caption text-muted">{statusText}</p> : null;
+  const rows = profiles.certifiedProfiles.map((profile) => (
+    <div key={profile.id} className="flex min-h-14 min-w-0 flex-col justify-center gap-0.5 px-4 py-2.5">
+      <div className="flex items-center gap-2 text-body-small font-medium text-ink">
+        {profile.name}
+        {profile.id === profiles.inUseProfileId ? <InUseTag /> : null}
+      </div>
+      <PathLine path={profile.executable} tooltip={pathTooltip} />
+    </div>
+  ));
+  if (variant !== "page") {
+    return (
+      <SettingRowFrame def={def} variant={variant}>
+        {status}
+        <div className="grid min-w-52 gap-1 sm:min-w-64">{rows}</div>
+        <PathTooltipRoot handle={pathTooltip} />
+      </SettingRowFrame>
+    );
+  }
   return (
-    <div className="grid min-w-52 gap-2 sm:min-w-64">
-      {profiles.profilesLoading && !profiles.profilesLoaded ? <p className="text-xs text-muted">Loading profiles…</p> : null}
-      {!profiles.profilesLoading && profiles.certifiedProfiles.length === 0 ? <p className="text-xs text-muted">No certified profiles detected.</p> : null}
-      {profiles.certifiedProfiles.map((profile) => (
-        <div key={profile.id} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border/50 px-3 py-2 text-xs">
-          <span className="min-w-0 text-fade">
-            {profile.name}
-            <span className="ml-2 text-muted">{profile.executable}</span>
-          </span>
-          <Badge variant="secondary" size="compact">Detected</Badge>
-        </div>
-      ))}
+    <div ref={hit.ref} {...hit.attrs} data-setting-id={def.id} className={cn(SEARCH_HIT_CLASS, "divide-y divide-border")}>
+      {status ? <div className="px-4 py-2.5">{status}</div> : null}
+      {rows}
+      <PathTooltipRoot handle={pathTooltip} />
     </div>
   );
 }
@@ -387,11 +411,12 @@ function CustomProfilesControl() {
   };
 
   return (
-    <div className="grid min-w-52 gap-2 sm:min-w-64">
+    <div className="grid justify-items-end gap-2">
       {profiles.customProfiles.map((profile) => (
         <CustomProfileRow
           key={profile.id}
           profile={profile}
+          inUse={profile.id === profiles.inUseProfileId}
           pending={profiles.pending}
           onEdit={openDialog}
           onDelete={(profileId) => { void deleteProfile(profileId); }}
@@ -412,7 +437,8 @@ function CustomProfilesControl() {
         disabled={profiles.pending || profiles.customProfiles.length >= 32}
         onClick={() => openDialog(null)}
       >
-        Add custom profile
+        <Plus aria-hidden className="size-3.5" />
+        Add profile
       </Button>
       <ProfileDialog
         open={dialogOpen}
@@ -443,52 +469,85 @@ function useTerminalPreferences() {
   };
 }
 
-function handleFontFamilyKey(
-  event: React.KeyboardEvent<HTMLInputElement>,
-  resetFontFamilyDraft: () => void,
-): void {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    event.currentTarget.blur();
-  }
-  if (event.key === "Escape") {
-    event.preventDefault();
-    resetFontFamilyDraft();
-  }
+/** A font picker row: a listed font, or the typed name when nothing matches. */
+interface FontRow {
+  readonly key: string;
+  readonly family: string;
+  readonly label: string;
+  readonly mono?: boolean;
 }
 
-function FontFamilyControl() {
-  const { terminal, updatePresentation } = useTerminalPreferences();
-  const saved = terminal.presentation.fontFamily;
-  const [draft, setDraft] = useState(saved);
-  const [draftBase, setDraftBase] = useState(saved);
-  // A persisted preference update must replace the unsaved draft.
-  if (draftBase !== saved) {
-    setDraftBase(saved);
-    setDraft(saved);
+function fontRows(fonts: readonly TerminalFontChoice[], current: string, query: string): FontRow[] {
+  const needle = query.trim().toLowerCase();
+  // The current face may be the bundled font or a typed name the common list lacks; list it so it shows as selected.
+  const listed = fonts.length > 0 && !fonts.some((font) => font.name === current) ? [{ name: current, mono: true }, ...fonts] : fonts;
+  const hits = listed.filter((font) => font.name.toLowerCase().includes(needle));
+  if (hits.length === 0) {
+    const typed = query.trim().replace(/\s+/g, " ");
+    // A font the list does not know can still be used by name.
+    return typed ? [{ key: `typed:${typed}`, family: typed, label: `Use "${typed}"` }] : [];
   }
-  const commit = () => {
-    const value = draft.trim();
-    if (!value) {
-      setDraft(saved);
-      return;
-    }
-    if (value !== saved) {
-      updatePresentation("fontFamily", value);
-    } else if (draft !== value) {
-      setDraft(value);
-    }
+  // Monospace faces first: a terminal almost always wants one.
+  return [...hits.filter((font) => font.mono), ...hits.filter((font) => !font.mono)]
+    .map((font) => ({ key: font.name, family: font.name, label: font.name, mono: font.mono }));
+}
+
+function fontPickerRow(row: FontRow): PickerRow {
+  if (row.mono === undefined) return { key: row.key, name: row.label };
+  const group = row.mono ? "Monospace" : "All fonts";
+  return { key: row.key, name: row.label, fontFamily: `"${row.family}", var(--font-sans)`, group, groupLabel: group };
+}
+
+/** Font family pill: shows the current face in itself, and opens a searchable list of faces this machine renders. */
+function FontFamilyControl() {
+  const { terminal, pending, updatePresentation } = useTerminalPreferences();
+  const current = primaryFontFamily(terminal.presentation.fontFamily);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  // Measuring every face forces layout, so it runs once, when the list first opens.
+  const [fonts, setFonts] = useState<readonly TerminalFontChoice[] | null>(null);
+  const handleOpenChange = (next: boolean) => {
+    if (next && fonts === null) setFonts(detectRenderableFonts());
+    if (!next) setQuery("");
+    setOpen(next);
   };
+  const rows = useMemo(() => fontRows(fonts ?? [], current, query), [fonts, current, query]);
+
   return (
-    <Input
-      aria-label="Terminal font family"
-      value={draft}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => handleFontFamilyKey(event, () => setDraft(saved))}
-      maxLength={128}
-      className="w-full sm:w-64"
-    />
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="compact"
+            disabled={pending}
+            aria-label={`Terminal font family: ${current}`}
+            className="max-w-[28rem] justify-between gap-1.5 rounded-full pr-2 pl-3 font-normal hover:bg-hover data-popup-open:bg-hover"
+          >
+            <span className="min-w-0 flex-1 text-fade text-left" style={{ fontFamily: `"${current}", var(--font-mono)` }}>{current}</span>
+            <ChevronDown aria-hidden className="size-4 shrink-0 text-muted" />
+          </Button>
+        }
+      />
+      <PopoverContent align="end" side="bottom" sideOffset={4} className={PICKER_PANEL_CLASS}>
+        <Picker
+          query={query}
+          onQueryChange={setQuery}
+          searchPlaceholder="Search fonts"
+          items={rows}
+          total={null}
+          status="ready"
+          selectedKey={current}
+          tall
+          renderItem={fontPickerRow}
+          onSelect={(row) => {
+            updatePresentation("fontFamily", fontStackFor(row.family));
+            handleOpenChange(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -496,11 +555,16 @@ function FontSizeControl() {
   const { terminal, pending, updatePresentation } = useTerminalPreferences();
   const presentation = terminal.presentation;
   return (
-    <SegmentedControl
-      options={(["xs", "sm", "md", "lg", "xl"] as const).map((value) => ({ value, label: value.toUpperCase(), disabled: pending }))}
-      value={presentation.fontSize}
-      onChange={(value) => updatePresentation("fontSize", value as typeof presentation.fontSize)}
-    />
+    <span className="flex items-center gap-2">
+      <SegmentedControl
+        aria-label="Font size"
+        className="font-mono"
+        options={(["xs", "sm", "md", "lg", "xl"] as const).map((value) => ({ value, label: String(TERMINAL_FONT_SIZES[value]), disabled: pending }))}
+        value={presentation.fontSize}
+        onChange={(value) => updatePresentation("fontSize", value as typeof presentation.fontSize)}
+      />
+      <span className="text-caption text-muted">px</span>
+    </span>
   );
 }
 
@@ -516,12 +580,24 @@ function LineHeightControl() {
   );
 }
 
+/** A small filled shape of each cursor style, drawn in the segment's text colour. */
+const CURSOR_GLYPHS: Record<TerminalSettings["presentation"]["cursorStyle"], string> = {
+  block: "h-3 w-2",
+  underline: "mt-2.5 h-0.5 w-2",
+  bar: "h-3 w-0.5",
+};
+
 function CursorStyleControl() {
   const { terminal, pending, updatePresentation } = useTerminalPreferences();
   const presentation = terminal.presentation;
   return (
     <SegmentedControl
-      options={(["block", "underline", "bar"] as const).map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1), disabled: pending }))}
+      options={(["block", "underline", "bar"] as const).map((value) => ({
+        value,
+        label: value[0].toUpperCase() + value.slice(1),
+        icon: <span aria-hidden className={cn("inline-block bg-current", CURSOR_GLYPHS[value])} />,
+        disabled: pending,
+      }))}
       value={presentation.cursorStyle}
       onChange={(value) => updatePresentation("cursorStyle", value as typeof presentation.cursorStyle)}
     />
@@ -536,6 +612,64 @@ function CursorBlinkControl() {
 function LigaturesControl() {
   const { terminal, pending, updatePresentation } = useTerminalPreferences();
   return <Switch aria-label="Terminal ligatures" checked={terminal.presentation.ligatures} disabled={pending} onCheckedChange={(value) => updatePresentation("ligatures", value)} />;
+}
+
+const SAMPLE_CURSOR: Record<TerminalSettings["presentation"]["cursorStyle"], string> = {
+  block: "h-[1.15em] w-[0.6em] align-text-bottom",
+  underline: "h-[0.12em] w-[0.6em] align-baseline",
+  bar: "h-[1.15em] w-[0.12em] align-text-bottom",
+};
+
+/** Fixed, so a larger font or line height clips inside the sample instead of pushing the rows below. */
+const SAMPLE_HEIGHT = "19.2rem";
+
+function TerminalSampleHead() {
+  const profiles = useTerminalProfiles();
+  const inUse = profiles.certifiedProfiles.find((profile) => profile.id === profiles.inUseProfileId)
+    ?? profiles.customProfiles.find((profile) => profile.id === profiles.inUseProfileId);
+  return (
+    <div className="flex h-9 items-center gap-2 pr-1 pl-4 text-caption text-muted">
+      <SquareTerminal aria-hidden className="size-3.5" />
+      <span className="font-medium text-ink">{inUse?.name ?? "Terminal"}</span>
+      {profiles.globalDefault === "automatic" ? <span>· Auto</span> : null}
+    </div>
+  );
+}
+
+/** A live terminal sample in the current font, size, line height, ligatures and cursor. Only the page shows it. */
+function TerminalSample() {
+  const presentation = useSettingsStore((state) => state.settings.terminal.presentation);
+  const style: CSSProperties = {
+    height: SAMPLE_HEIGHT,
+    fontFamily: presentation.fontFamily,
+    fontSize: `${TERMINAL_FONT_SIZES[presentation.fontSize]}px`,
+    lineHeight: TERMINAL_LINE_HEIGHTS[presentation.lineHeight],
+    fontVariantLigatures: presentation.ligatures ? "normal" : "none",
+  };
+  const prompt = <span className="text-muted">PS C:\dev\mcode&gt;</span>;
+  return (
+    <div className="mx-2 mt-1 mb-2 rounded-md bg-page">
+      <TerminalSampleHead />
+      <div role="img" aria-label="Terminal preview" style={style} className="overflow-hidden px-4 pt-0.5 pb-3.5 text-ink [&>div]:break-all [&>div]:whitespace-pre-wrap">
+        <div>{prompt} git log --oneline -2</div>
+        <div><span className="text-warning">fc7b2ff2c</span> feat: discover Claude models from Claude Code</div>
+        <div><span className="text-warning">e662c02e8</span> fix(claude): launch the user-installed Claude Code CLI</div>
+        <div>{prompt} echo "-&gt; =&gt; != &gt;="</div>
+        <div>-&gt; =&gt; != &gt;=</div>
+        <div>
+          {prompt}{" "}
+          <span
+            aria-hidden
+            className={cn(
+              "inline-block bg-ink",
+              SAMPLE_CURSOR[presentation.cursorStyle],
+              presentation.cursorBlink && "animate-[blink_1.06s_steps(1)_infinite] motion-reduce:animate-none",
+            )}
+          />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ScrollbackControl() {
@@ -590,8 +724,9 @@ function ScreenReaderControl() {
   );
 }
 
-const PROFILES = settingsGroup("Profiles and defaults", "Defaults apply to new terminals.");
-const PRESENTATION = settingsGroup("Presentation");
+const PROFILES = settingsGroup("Profiles", "Defaults apply to new terminals.");
+const AVAILABLE_PROFILES = settingsGroup("Available profiles");
+const FONT_AND_CURSOR = settingsGroup("Font and cursor");
 const BEHAVIOR = settingsGroup("Behavior");
 const ACCESSIBILITY = settingsGroup("Accessibility");
 
@@ -599,71 +734,69 @@ const ACCESSIBILITY = settingsGroup("Accessibility");
 export const TERMINAL = settingsPage("terminal", {
   globalProfile: {
     group: PROFILES,
-    label: "Global default profile",
-    synonyms: "shell profile powershell pwsh cmd bash wsl git bash default terminal automatic",
+    label: "Default profile",
+    synonyms: "shell profile powershell pwsh cmd bash wsl git bash default terminal automatic auto global",
     configKey: "terminal.defaultProfileId",
     Row: GlobalProfileRow,
   },
   projectProfile: {
     group: PROFILES,
     label: "Project default profile",
-    hint: "Use the inherited global profile, or choose a project override.",
+    hint: "Use the inherited default profile, or choose a project override.",
     synonyms: "project workspace shell profile override inherited",
     configKey: "terminal.workspace.defaultProfileId",
     Row: ProjectProfileRow,
   },
   certifiedProfiles: {
-    group: PROFILES,
-    label: "Certified profiles",
-    hint: "Detected profiles are read-only.",
-    synonyms: "detected shell profiles powershell pwsh cmd bash wsl",
-    Control: CertifiedProfilesControl,
+    group: AVAILABLE_PROFILES,
+    label: "Available profiles",
+    synonyms: "detected certified shell profiles powershell pwsh cmd bash wsl in use path executable",
+    Row: DetectedProfilesRow,
   },
   customProfiles: {
-    group: PROFILES,
+    group: AVAILABLE_PROFILES,
     label: "Custom profiles",
     hint: "Custom profiles remain after a Terminal preference reset.",
-    synonyms: "custom profile shell add executable arguments nushell zsh fish",
+    synonyms: "custom profile shell add executable arguments nushell zsh fish detected",
     Control: CustomProfilesControl,
   },
   fontFamily: {
-    group: PRESENTATION,
+    group: FONT_AND_CURSOR,
     label: "Font family",
-    hint: "Changes apply to new and open terminals.",
     synonyms: "font typeface family monospace jetbrains mono cascadia code consolas fira iosevka courier lucida",
     configKey: "terminal.presentation.fontFamily",
     Control: FontFamilyControl,
   },
   fontSize: {
-    group: PRESENTATION,
+    group: FONT_AND_CURSOR,
     label: "Font size",
     synonyms: "font size text small large zoom px pixels",
     configKey: "terminal.presentation.fontSize",
     Control: FontSizeControl,
   },
   lineHeight: {
-    group: PRESENTATION,
+    group: FONT_AND_CURSOR,
     label: "Line height",
     synonyms: "line height spacing leading",
     configKey: "terminal.presentation.lineHeight",
     Control: LineHeightControl,
   },
   cursorStyle: {
-    group: PRESENTATION,
+    group: FONT_AND_CURSOR,
     label: "Cursor style",
     synonyms: "cursor caret block underline bar beam",
     configKey: "terminal.presentation.cursorStyle",
     Control: CursorStyleControl,
   },
   cursorBlink: {
-    group: PRESENTATION,
+    group: FONT_AND_CURSOR,
     label: "Cursor blink",
     synonyms: "cursor blink flash",
     configKey: "terminal.presentation.cursorBlink",
     Control: CursorBlinkControl,
   },
   ligatures: {
-    group: PRESENTATION,
+    group: FONT_AND_CURSOR,
     label: "Ligatures",
     synonyms: "ligatures font arrows",
     configKey: "terminal.presentation.ligatures",
@@ -743,7 +876,7 @@ function ResetTerminalPreferencesButton() {
   );
 }
 
-/** Complete global, workspace, presentation, behavior, and accessibility Terminal settings. */
+/** Terminal settings: profiles, a live font and cursor sample with its rows, behavior and accessibility. */
 export function TerminalSection() {
   const busy = useTerminalSettingsStore((state) => state.pending || state.profilesLoading || state.workspaceLoading);
   return (
@@ -753,11 +886,14 @@ export function TerminalSection() {
         <Setting def={TERMINAL.globalProfile} />
         <ProfileRecoveryNotices />
         <Setting def={TERMINAL.projectProfile} />
+      </SettingsGroup>
+      <SettingsGroup group={AVAILABLE_PROFILES}>
         <Setting def={TERMINAL.certifiedProfiles} />
         <Setting def={TERMINAL.customProfiles} />
         <ProfileDeleteReferences />
       </SettingsGroup>
-      <SettingsGroup group={PRESENTATION}>
+      <SettingsGroup group={FONT_AND_CURSOR}>
+        <TerminalSample />
         <Setting def={TERMINAL.fontFamily} />
         <Setting def={TERMINAL.fontSize} />
         <Setting def={TERMINAL.lineHeight} />

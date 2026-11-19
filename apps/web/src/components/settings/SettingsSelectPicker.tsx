@@ -32,6 +32,8 @@ interface SettingsSelectPickerProps {
   readonly loading?: boolean;
   readonly align?: "start" | "center" | "end";
   readonly "data-testid"?: string;
+  /** Names the trigger when its text is only the value, such as a profile picker in a search result. */
+  readonly "aria-label"?: string;
 }
 
 /** A tag that repeats on every row says nothing, so groups show only when there are at least two. */
@@ -83,6 +85,7 @@ export function SettingsSelectPicker({
   loading,
   align = "end",
   "data-testid": testId,
+  "aria-label": ariaLabel,
 }: SettingsSelectPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -110,6 +113,7 @@ export function SettingsSelectPicker({
             size="compact"
             disabled={disabled || loading}
             data-testid={testId}
+            aria-label={ariaLabel}
             className="max-w-[28rem] justify-between gap-1.5 rounded-full pr-2 pl-3 font-normal hover:bg-hover data-popup-open:bg-hover"
           >
             <TriggerLabel
