@@ -646,6 +646,8 @@ interface DiffState {
   readonly reviewFilesVisibleByScope: Record<string, boolean>;
   /** Diff scope whose Commit sheet is open. One sheet at a time, so no per-scope cleanup; a closed or unmatched scope shows none. */
   commitSheetScopeId: string | null;
+  /** Whether the open Commit sheet leads with Commit and push, because it was opened for that step. */
+  commitSheetPush: boolean;
   /** View mode within the Changes tab (the single rendered view). */
   viewMode: DiffViewMode;
   /**
@@ -797,8 +799,8 @@ interface DiffState {
   getReviewFilesVisible: (scopeId: string) => boolean;
   /** Persist an explicit Files visibility choice for a Review scope. */
   setReviewFilesVisible: (scopeId: string, visible: boolean) => void;
-  /** Open the Commit sheet for a diff scope, or close it with null. */
-  setCommitSheetScopeId: (scopeId: string | null) => void;
+  /** Open the Commit sheet for a diff scope, or close it with null. `push` leads the sheet with Commit and push; it resets on every call. */
+  setCommitSheetScopeId: (scopeId: string | null, options?: { push?: boolean }) => void;
   setViewMode: (mode: DiffViewMode) => void;
   /**
    * Resolve the Review view a thread should show: the user's sticky pick when
@@ -875,6 +877,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   rightPanelFallbackByWorkspace: {},
   reviewFilesVisibleByScope: readStoredFlags(REVIEW_FILES_VISIBILITY_STORAGE_KEY),
   commitSheetScopeId: null,
+  commitSheetPush: false,
   viewMode: "turn",
   reviewViewByThread: {},
   reviewViewManuallySelectedByThread: {},
@@ -1050,7 +1053,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       return { reviewFilesVisibleByScope };
     }),
 
-  setCommitSheetScopeId: (scopeId) => set({ commitSheetScopeId: scopeId }),
+  setCommitSheetScopeId: (scopeId, options) => set({ commitSheetScopeId: scopeId, commitSheetPush: options?.push ?? false }),
 
   setViewMode: (mode) =>
     set({ viewMode: mode, selectedCommitSha: null, reviewFileJumpRequest: null }),
