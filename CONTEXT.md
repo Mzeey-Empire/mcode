@@ -839,7 +839,7 @@ _Avoid_: Failed, which states that the write did not happen
 ### Overview
 The card that recaps the active thread's working context (its changes, current
 branch, and pull-request state) and hosts the git actions for that thread
-(Commit…, Create PR), modelled on Codex's "Environment" panel. Its rows
+in its **git row**, modelled on Codex's "Environment" panel. Its rows
 group into four sections: lane, activity, terminals, and summary. Code symbol:
 `ThreadOverview`.
 
@@ -849,6 +849,15 @@ wide enough and the right panel is closed. Otherwise the header button opens it
 as an overlay at the same corner, which closes on Escape or an outside press.
 Closing a docked card with the header button is remembered per thread for the
 session.
+
+**Git row.** One split row in the lane that leads with the thread's next git
+step: **Create branch…** on a branchless worktree, **Commit…** while the
+checkout has uncommitted changes, then **Create PR…** once commits are ahead of
+the base. Its chevron menu holds the other step that fits now, such as
+**Commit and push…**. Once the thread has a pull request, the Open PR row
+replaces it, and a Direct-mode thread has none. While the pointer, focus, or
+its menu is on the row, the row keeps its step, so an agent's edits cannot swap
+the action under a click.
 
 **Thread-scoped.** The Overview lives in the chat header, which renders only
 when a thread is active. With no thread open there is no Overview; the
@@ -1043,8 +1052,9 @@ never one of those.
 ### Commit sheet
 The sheet over the Review tab where the user picks uncommitted files, edits a
 generated message, and commits, optionally pushing. A floating Commit button
-opens it while the checkout is dirty, and the overview's **Commit…** row opens
-Review with it. It always lists every uncommitted file, whatever view Review
+opens it while the checkout is dirty, and the overview's git row opens Review
+with it: **Commit…** leads the sheet with Commit, and **Commit and push…** leads
+it with Commit and push. It always lists every uncommitted file, whatever view Review
 shows. Tracked files start checked and untracked files start unchecked. One
 commit request keeps its `requestId` until the server answers, so a dropped
 connection resends it instead of committing twice. A rejection or a hook
