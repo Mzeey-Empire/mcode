@@ -88,6 +88,29 @@ describe("visual message", () => {
   });
 });
 
+describe("visual marker in a reply", () => {
+  const published = createMockMessage({ id: "visual-1", thread_id: "thread-1", role: "system", content: "Visual: Latency by provider", visual: { ...visual, placement: "inline" } });
+  beforeEach(() => resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [published] }]]) }));
+  afterEach(() => resetThreadStoreForTests());
+
+  function renderReply(markerId: string) {
+    const reply = createMockMessage({ id: "answer", thread_id: "thread-1", role: "assistant", content: `Before\n\n![Latency](visual:${markerId})\n\nAfter` });
+    return render(<MessageBubble message={reply} />);
+  }
+
+  it("shows the thread's visual where the reply places its marker", async () => {
+    const { container } = renderReply("visual-1");
+    expect((await screen.findByTitle("Latency by provider")).tagName).toBe("IFRAME");
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("shows the marker's title as text when the thread has no such visual", async () => {
+    const { container } = renderReply("missing");
+    expect(await screen.findByText("Latency")).toBeTruthy();
+    expect(container.querySelector("img, iframe")).toBeNull();
+  });
+});
+
 describe("buildHtmlVisualDocument", () => {
   const theme = { colorScheme: "light" as const, tokens: { "--ink": "</script><script>alert(1)</script>" } };
 

@@ -50,6 +50,11 @@ function isVisualMessage(message: Message): boolean {
   return message.role === "system" && Boolean(message.visual);
 }
 
+/** An inline visual the answer places through its marker; one the answer forgot falls back above the answer. */
+function isPlacedInAnswer(visual: Message, answer: Message): boolean {
+  return visual.visual?.placement === "inline" && answer.content.includes(`visual:${visual.id}`);
+}
+
 /** Maps a notice message to its row model, keeping its identity stable across renders. */
 export function turnNoticeFromMessage(message: Message): TurnNotice {
   const cached = turnNoticeCache.get(message);
@@ -80,7 +85,7 @@ export function placeTurnNotices(messages: readonly Message[], owner: LiveNotice
     }
     if (message.role === "system") continue;
     if (message.role === "assistant" && message.id === owner.responseId) moveToLiveTurn(draft, pending);
-    else if (message.role === "assistant") moveToSettledTurn(draft, pending, message.id);
+    else if (message.role === "assistant") moveToSettledTurn(draft, pending, message);
     pending = { notices: [], visuals: [] };
   }
   if (owner.ownsTrailing) moveToLiveTurn(draft, pending);
@@ -89,13 +94,15 @@ export function placeTurnNotices(messages: readonly Message[], owner: LiveNotice
 
 function moveToLiveTurn(draft: PlacementDraft, pending: PendingTurnMessages): void {
   draft.live.push(...pending.notices.map(turnNoticeFromMessage));
-  draft.liveVisuals.push(...pending.visuals);
+  // An inline visual shows only where the streamed reply places it, so the live turn gives it no slot.
+  draft.liveVisuals.push(...pending.visuals.filter((visual) => visual.visual?.placement !== "inline"));
   for (const message of [...pending.notices, ...pending.visuals]) draft.moved.add(message.id);
 }
 
-function moveToSettledTurn(draft: PlacementDraft, pending: PendingTurnMessages, responseId: string): void {
-  if (pending.notices.length > 0) draft.byResponseId[responseId] = pending.notices;
-  if (pending.visuals.length > 0) draft.visualsByResponseId[responseId] = pending.visuals;
+function moveToSettledTurn(draft: PlacementDraft, pending: PendingTurnMessages, answer: Message): void {
+  if (pending.notices.length > 0) draft.byResponseId[answer.id] = pending.notices;
+  const visuals = pending.visuals.filter((visual) => !isPlacedInAnswer(visual, answer));
+  if (visuals.length > 0) draft.visualsByResponseId[answer.id] = visuals;
   for (const message of [...pending.notices, ...pending.visuals]) draft.moved.add(message.id);
 }
 

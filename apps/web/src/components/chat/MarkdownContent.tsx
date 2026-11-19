@@ -1,6 +1,6 @@
 import { isHiddenPlanFenceLanguage } from "@/lib/plan-fences";
 import { memo, useMemo, useState, lazy, Suspense } from "react";
-import { defaultUrlTransform, type Components } from "react-markdown";
+import { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { Globe } from "lucide-react";
@@ -19,13 +19,18 @@ import {
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { EntityToken, type EntityKind } from "./EntityToken";
 import { MarkdownTreeCache } from "./markdown-tree-cache";
+import { InlineVisualMarker, visualMarkerMessageId } from "@/features/conversation/html-visual/InlineVisualMarker";
 
-/** Pass through workspace preview URLs; otherwise use react-markdown's default sanitizer. */
-function markdownUrlTransform(value: string): string {
+/**
+ * Pass through workspace preview URLs and visual marker image sources; otherwise use react-markdown's default sanitizer.
+ * The `img` renderer resolves a marker to its visual and never hands it to a real image.
+ */
+const markdownUrlTransform: UrlTransform = (value, key) => {
   const trimmed = value.trim();
   if (isPreviewableUrl(trimmed)) return trimmed;
+  if (key === "src" && visualMarkerMessageId(trimmed)) return trimmed;
   return defaultUrlTransform(value);
-}
+};
 
 /** Props for {@link MarkdownContent}. */
 interface MarkdownContentProps {
@@ -521,6 +526,7 @@ function makeComponents(
   variant: "assistant" | "user",
   workspacePath: string | null,
   threadId: string | null,
+  ownerThreadId: string | null,
   chatHighlighting: boolean,
   componentOverrides?: Partial<Components>,
 ) {
@@ -541,8 +547,18 @@ function makeComponents(
 
   return {
     ...makeStaticComponents(variant, workspacePath),
+    ...(variant === "assistant" && { img: makeImageRenderer(ownerThreadId) }),
     ...componentOverrides,
     code: codeRenderer,
+  };
+}
+
+/** Swaps a reply's `visual:` marker for the visual it names; other images render as before. */
+function makeImageRenderer(threadId: string | null) {
+  return ({ src, alt, node: _node, ...rest }: React.ComponentProps<"img"> & { node?: unknown }) => {
+    const messageId = typeof src === "string" ? visualMarkerMessageId(src) : undefined;
+    if (messageId) return <InlineVisualMarker threadId={threadId} messageId={messageId} alt={alt ?? ""} />;
+    return <img src={src} alt={alt} {...rest} />;
   };
 }
 
@@ -565,9 +581,11 @@ export const MarkdownContent = memo(function MarkdownContent({
     ? (threadId === undefined ? activeThreadId : threadId)
     : threadId ?? null;
 
+  // Streamed replies render without a thread id; they belong to the active thread, where their visuals live.
+  const ownerThreadId = threadId ?? activeThreadId;
   const components = useMemo(
-    () => makeComponents(isStreaming, variant, workspacePath, highlightThreadId, chatHighlighting, componentOverrides),
-    [isStreaming, variant, workspacePath, highlightThreadId, chatHighlighting, componentOverrides],
+    () => makeComponents(isStreaming, variant, workspacePath, highlightThreadId, ownerThreadId, chatHighlighting, componentOverrides),
+    [isStreaming, variant, workspacePath, highlightThreadId, ownerThreadId, chatHighlighting, componentOverrides],
   );
 
   const remarkPlugins = variant === "user" ? USER_REMARK_PLUGINS : ASSISTANT_REMARK_PLUGINS;

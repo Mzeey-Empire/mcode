@@ -33,6 +33,12 @@ describe("HtmlVisualSchema", () => {
     expect(HtmlVisualSchema().safeParse({ ...visual, maxHeight: 300.5 }).success).toBe(false);
   });
 
+  it("accepts an inline placement and still parses a saved visual without one", () => {
+    expect(HtmlVisualSchema().parse({ ...visual, placement: "inline" }).placement).toBe("inline");
+    expect(HtmlVisualSchema().parse(visual).placement).toBeUndefined();
+    expect(HtmlVisualSchema().safeParse({ ...visual, placement: "sidebar" }).success).toBe(false);
+  });
+
   it("rejects unknown fields", () => {
     expect(HtmlVisualSchema().safeParse({ ...visual, sandbox: "allow-same-origin" }).success).toBe(false);
   });
