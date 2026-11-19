@@ -4,6 +4,8 @@ export { StartupStepsTrail, type StartupStepsTrailProps } from "./StartupStepsTr
 export { editStartupSetupScript, openStartupSetupTerminal } from "./useStartupActions";
 /** Composer starting state and the Retry for a startup whose agent failed. */
 export { useStartingThread, useStartupAgentRetry } from "./useStartupActions";
+/** Marks a failed startup seen once its trail is on screen. */
+export { useAcknowledgeStartupFailure } from "./useStartupActions";
 /** The Paper 04f decision a stopped startup asks for. */
 export { startupDecision, type StartupDecision } from "./startup-step-copy";
 /** Edit message for a startup that never produced a working thread. */

@@ -1430,14 +1430,14 @@ describe("ProjectSidebar action-required indicator", () => {
     expect(screen.queryByRole("button", { name: "Close My Thread" })).toBeNull();
   });
 
-  it("shows a running setup as running", async () => {
+  it("shows a running setup as Setting up", async () => {
     currentThread = makeThread({ id: "thread-pending", mode: "worktree", worktree_managed: true });
     startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "running")] });
     installWorkspaceMock();
 
     render(<ProjectSidebar />);
 
-    expect(statusGlyph(await screen.findByRole("img", { name: "Running" }))).toBe("spinner");
+    expect(statusGlyph(await screen.findByRole("img", { name: "Setting up" }))).toBe("spinner");
   });
 
   it("shows Setup failed for a startup stopped on setup, loaded when the sidebar connects", async () => {
@@ -1451,12 +1451,12 @@ describe("ProjectSidebar action-required indicator", () => {
     expect(screen.queryByRole("img", { name: "Running" })).not.toBeInTheDocument();
   });
 
-  it("shows a row whose first turn is still starting as running", () => {
+  it("shows a row whose first turn is still starting as Setting up", () => {
     currentPendingStartup = { "thread-pending": true };
     installWorkspaceMock();
     render(<ProjectSidebar />);
 
-    expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Running" }))).toBe("spinner");
+    expect(statusGlyph(within(screen.getByTestId("thread-status")).getByRole("img", { name: "Setting up" }))).toBe("spinner");
   });
 
   it.each([
@@ -1613,7 +1613,7 @@ describe("ProjectSidebar action-required indicator", () => {
       installWorkspaceMock();
       render(<ProjectSidebar />);
 
-      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Running" })).toBeVisible();
+      expect(within(screen.getByTestId("project-row-ws-1")).getByRole("img", { name: "Setting up" })).toBeVisible();
     });
 
     it("rolls up a startup stopped on setup in a collapsed project", async () => {
@@ -1631,7 +1631,7 @@ describe("ProjectSidebar action-required indicator", () => {
       startupTransport.listThreadStartups.mockResolvedValue({ records: [setupStartup("thread-pending", "running")] });
       installWorkspaceMock();
       render(<ProjectSidebar />);
-      expect(await within(screen.getByTestId("thread-status")).findByRole("img", { name: "Running" })).toBeVisible();
+      expect(await within(screen.getByTestId("thread-status")).findByRole("img", { name: "Setting up" })).toBeVisible();
 
       fireEvent.click(screen.getByRole("button", { name: "Toggle threads for Test" }));
       act(() => useThreadStartupStore.getState().apply(setupStartup("thread-pending", "failed", SETUP_FAILED_BLOCK)));

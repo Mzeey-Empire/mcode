@@ -1,5 +1,7 @@
 import { hasUnseenRestartFailure, isTurnSeen, threadHasRunningDescendants, type ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
+import type { ThreadStartupPhase } from "@mcode/contracts/thread-startup";
+import type { StartupActivity, ThreadActivity } from "./thread-activity";
 
 /** Third-line label for a thread that is blocked on the user. */
 export type NeedsYouLabel =
@@ -7,60 +9,64 @@ export type NeedsYouLabel =
   | "Answers required"
   | "Plan ready"
   | "Interrupted"
-  | "Setup failed";
+  | "Setup failed"
+  | "Fetch failed";
 
 /** The single state a sidebar or palette thread row shows. */
 export type ThreadRowState =
   | { kind: "needs-you"; label: NeedsYouLabel }
+  | { kind: "setting-up"; phase: ThreadStartupPhase | null }
   | { kind: "running" }
   | { kind: "failed" }
   | { kind: "finished" }
   | { kind: "quiet" };
 
-/** Automatic worktree setup as seen by a thread row; null when setup is not gating the thread. */
-export type ThreadRowSetup = "running" | "awaiting-approval" | "failed" | null;
-
 /** Everything a row needs to pick its state. */
 export interface ThreadRowFacts {
+  activity: ThreadActivity;
   attention: ThreadAttention | undefined;
-  running: boolean;
-  setup: ThreadRowSetup;
   /** The thread is open in a visible, focused window, so its outcome is already in view. */
   onScreen: boolean;
-  /** Optimistic creation failed; the placeholder keeps its pending startup until the user retries or dismisses it. */
-  createFailed: boolean;
 }
 
 const needsYou = (label: NeedsYouLabel): ThreadRowState => ({ kind: "needs-you", label });
 
 /**
- * Picks the row state. A failed create outranks everything because the server
- * never created the thread, so nothing on it can run or wait. A blocking question outranks a running turn because
- * the turn cannot progress without the user; a plan only matters once the turn
- * that wrote it stops. Settled outcomes show only until the user sees them.
- * Delegated tasks or background subagents still running after the thread's own turn keep it running,
- * below anything that needs the user and above an unseen settled outcome.
+ * Picks the row state. A blocking question outranks a running startup or turn because
+ * neither can progress without the user; a plan only matters once the turn that wrote it stops.
+ * A failed startup shows until a window records that the user saw it. Settled turn outcomes
+ * show only until the user sees them. Delegated tasks or background subagents still running
+ * after the thread's own turn keep it running, below anything that needs the user and above
+ * an unseen settled outcome.
  */
 export function deriveThreadRowState(facts: ThreadRowFacts): ThreadRowState {
-  if (facts.createFailed) return { kind: "failed" };
   const live = liveRowState(facts);
   if (live) return live;
-  const settled = settledRowState(facts);
+  const settled: ThreadRowState = facts.activity.startup.kind === "failed" ? { kind: "failed" } : settledRowState(facts);
   if (facts.attention && threadHasRunningDescendants(facts.attention) && settled.kind !== "needs-you") return { kind: "running" };
   return settled;
 }
 
-/** A pending startup still counts as running, but a failed setup holds it until the user decides. */
-function setupFailureHolds(setup: ThreadRowSetup, waiting: string | undefined): boolean {
-  return setup === "failed" && waiting !== "plan";
+function awaitsApproval(waiting: string | undefined, startup: StartupActivity): boolean {
+  return waiting === "approval" || (startup.kind === "needs-you" && startup.decision === "setup-approval");
 }
 
-function liveRowState({ attention, running, setup }: ThreadRowFacts): ThreadRowState | null {
+function startupNeedsYou(startup: StartupActivity, waiting: string | undefined): ThreadRowState | null {
+  if (startup.kind !== "needs-you" || startup.decision === "setup-approval") return null;
+  // A plan the agent already wrote outranks a setup it no longer depends on.
+  if (waiting === "plan") return null;
+  return needsYou(startup.decision === "fetch-failed" ? "Fetch failed" : "Setup failed");
+}
+
+function liveRowState({ attention, activity }: ThreadRowFacts): ThreadRowState | null {
   const waiting = attention?.waiting?.kind;
-  if (waiting === "approval" || setup === "awaiting-approval") return needsYou("Approval required");
+  const { startup } = activity;
+  if (awaitsApproval(waiting, startup)) return needsYou("Approval required");
   if (waiting === "questions") return needsYou("Answers required");
-  if (setupFailureHolds(setup, waiting)) return needsYou("Setup failed");
-  if (running || setup === "running") return { kind: "running" };
+  const startupHold = startupNeedsYou(startup, waiting);
+  if (startupHold) return startupHold;
+  if (startup.kind === "setting-up") return { kind: "setting-up", phase: startup.phase };
+  if (activity.turnRunning) return { kind: "running" };
   if (waiting === "plan") return needsYou("Plan ready");
   return null;
 }
@@ -82,7 +88,8 @@ function settledRowState({ attention, onScreen }: ThreadRowFacts): ThreadRowStat
 }
 
 const ROLLUP_RANK: Record<ThreadRowState["kind"], number> = {
-  "needs-you": 4,
+  "needs-you": 5,
+  "setting-up": 4,
   running: 3,
   failed: 2,
   finished: 1,

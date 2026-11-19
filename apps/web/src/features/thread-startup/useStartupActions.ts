@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentModelState } from "@mcode/contracts/compat/agent-model";
 import type { ThreadStartup, ThreadStartupAction, ThreadStartupResolveInput } from "@mcode/contracts/thread-startup";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
@@ -11,6 +11,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { type StartupCancelRequest, useThreadStartupStore } from "./state/thread-startup-store";
 import { startupDecision, startupSetupView, type StartupSetupView } from "./startup-step-copy";
 
@@ -265,4 +266,27 @@ export function openStartupSetupTerminal(workspaceId: string, threadId: string, 
 export function editStartupSetupScript(workspaceId: string, threadId: string): void {
   showRightPanelAdaptive(workspaceId, threadId);
   useDiffStore.getState().setRightPanelTab(workspaceId, threadId, "environment");
+}
+
+function unseenFailure(startup: ThreadStartup | undefined): startup is ThreadStartup {
+  return (startup?.state === "failed" || startup?.state === "interrupted") && startup.failureSeenAt === null;
+}
+
+/**
+ * Records that the user saw a failed or interrupted startup once its trail is on screen in a
+ * visible, focused window, so every window's row stops showing it. The server push that follows
+ * sets `failureSeenAt`; one call per startup revision is enough.
+ */
+export function useAcknowledgeStartupFailure(threadId: string, startup: ThreadStartup | undefined): void {
+  const onScreen = threadAttentionStore((state) => state.onScreenThreadId === threadId);
+  const target = onScreen && unseenFailure(startup) ? `${startup.startupId}:${startup.revision}` : null;
+  const sent = useRef<string | null>(null);
+  useEffect(() => {
+    if (!target || !startup || sent.current === target) return;
+    sent.current = target;
+    getTransport().acknowledgeStartupFailure(startup.startupId, startup.revision).catch(() => {
+      // The row keeps showing Failed, which is true; the next revision or visit asks again.
+      if (sent.current === target) sent.current = null;
+    });
+  }, [target, startup]);
 }

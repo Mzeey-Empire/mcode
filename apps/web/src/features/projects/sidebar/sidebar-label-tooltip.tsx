@@ -62,10 +62,10 @@ export function DraftTag({ iconOnly = false }: { iconOnly?: boolean }) {
   return iconOnly ? <SidebarLabelTrigger label="Draft">{tag}</SidebarLabelTrigger> : tag;
 }
 
-/** A status shown as its icon alone: the icon keeps its accessible name, and the shared tooltip shows the label. */
+/** A status shown as its icon alone: the icon keeps its accessible name, and the shared tooltip shows the label and any detail. */
 export function IconOnlyStatus({ look }: { look: ThreadStatusLook }) {
   return (
-    <SidebarLabelTrigger label={look.label}>
+    <SidebarLabelTrigger label={look.detail ? `${look.label} · ${look.detail}` : look.label}>
       <span className="inline-flex"><StatusMark state={look.state} label={look.label} icon={look.icon} /></span>
     </SidebarLabelTrigger>
   );

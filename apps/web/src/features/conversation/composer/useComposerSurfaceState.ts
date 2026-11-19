@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import { startupHolds, useThreadActivity, type ThreadActivity } from "@/features/thread-attention/thread-activity";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
@@ -63,12 +64,11 @@ function useCatalogScope(input: ComposerSurfaceStateInput) {
 
 function getComposerLocks(
   input: ComposerSurfaceStateInput,
-  startupPending: boolean,
+  activity: ThreadActivity,
 ) {
   return {
-    startingThread: Boolean(
-      input.activeThread?.clientPreparing || input.activeThread?.clientError || startupPending,
-    ),
+    // A failed create has no startup to hold it, but the composer still waits on Retry or Dismiss.
+    startingThread: startupHolds(activity) || Boolean(input.activeThread?.clientError),
     providerScope: pickerProviderScopeOf({
       started: Boolean(input.threadId && !input.isNewThread && !input.branchFromMessageId),
       threadProviderId: input.activeThread?.provider,
@@ -102,9 +102,11 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   const catalogScope = useCatalogScope(input);
   // Startup state lives outside the thread row so list refreshes cannot drop
   // the composer lock between thread creation and the agent's first event.
-  const startupPending = useWorkspaceStore((state) =>
-    input.threadId ? state.pendingStartupByThreadId[input.threadId] !== undefined : false);
-  const composerLocks = getComposerLocks(input, startupPending);
+  const activity = useThreadActivity(input.threadId ?? "", {
+    preparing: input.activeThread?.clientPreparing === true,
+    createFailed: input.activeThread?.clientError != null,
+  });
+  const composerLocks = getComposerLocks(input, activity);
 
   return {
     annotationScopeId,

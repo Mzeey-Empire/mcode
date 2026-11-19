@@ -4,7 +4,7 @@ import { useThreadStartupStore } from "@/features/thread-startup/state/thread-st
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { getExecutingThreadIds, useThreadStore } from "@/stores/threadStore";
 import { threadAttentionStore } from "./thread-attention-store";
-import { threadRowSetup, threadStartupRecord } from "./thread-row-presentation";
+import { deriveThreadActivity, threadStartupRecord } from "./thread-activity";
 import { deriveThreadRowState, rollUpThreadRowStates, type ThreadRowState } from "./thread-row-state";
 
 /** The fields of a sidebar thread the roll-up reads beyond the shared stores. */
@@ -22,11 +22,17 @@ export function useRolledUpThreadRowState(threads: readonly RollUpThread[]): Thr
   })));
   const running = new Set(executing);
   return rollUpThreadRowStates(threads.map((thread) => deriveThreadRowState({
+    activity: deriveThreadActivity({
+      record: threadStartupRecord(startups, thread.id),
+      local: {
+        preparing: thread.clientPreparing === true,
+        pendingStartup: pendingStartup[thread.id] !== undefined,
+        createFailed: thread.clientError != null,
+      },
+      turnRunning: running.has(thread.id),
+    }),
     attention: attention[thread.id],
-    running: running.has(thread.id) || pendingStartup[thread.id] !== undefined || thread.clientPreparing === true,
-    setup: threadRowSetup(threadStartupRecord(startups, thread.id)),
     onScreen: onScreenThreadId === thread.id,
-    createFailed: thread.clientError != null,
   })));
 }
 

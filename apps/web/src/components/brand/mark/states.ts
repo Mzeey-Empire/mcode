@@ -71,6 +71,7 @@ export const STATE_BODY: Record<McodeMarkState, (c: Circuit) => string> = {
   quiet: (c) => unlit(c, true),
   running: (c) =>
     unlit(c, false) + lit(c) + chipEdge(c) + flow(c, liveOf(c), (t) => (t.side * 0.7 + t.pin * 0.35) % 2.4),
+  "setting-up": (c) => STATE_BODY.running(c),
   "needs-you": (c) => unlit(c, false) + lit(c) + `<g class="call">${chipEdge(c, AMBER_HIGHLIGHT)}</g>`,
   finished: (c) => unlit(c, false) + fill(c) + lit(c) + chipEdge(c),
   failed: (c) => unlit(c, false) + stubs(c) + lit(c) + `<g class="die">${chipEdge(c)}</g>`,
