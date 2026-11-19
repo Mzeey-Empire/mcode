@@ -1,7 +1,7 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import type { HtmlVisual } from "@mcode/contracts/models/html-visual";
 import { act, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/features/conversation/messages/MessageBubble";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
@@ -90,6 +90,8 @@ describe("visual message", () => {
 
 describe("visual marker in a reply", () => {
   const published = createMockMessage({ id: "visual-1", thread_id: "thread-1", role: "system", content: "Visual: Latency by provider", visual });
+  // Keep the lazy renderer's cold load outside the find* wait, which a loaded runner can outlast.
+  beforeAll(() => import("@/components/chat/MarkdownContent"));
   beforeEach(() => resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [published] }]]) }));
   afterEach(() => resetThreadStoreForTests());
 
