@@ -3,7 +3,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { HtmlVisualFrame } from "./HtmlVisualFrame";
 
 /** Image source scheme an agent's reply uses to place a published visual: `![Title](visual:<message id>)`. */
-export const VISUAL_MARKER_SCHEME = "visual:";
+const VISUAL_MARKER_SCHEME = "visual:";
 
 /** Returns the visual message id a markdown image source names, or undefined for any other source. */
 export function visualMarkerMessageId(src: string | undefined): string | undefined {

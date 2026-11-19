@@ -31,7 +31,7 @@ export const HTML_VISUAL_THEME_TOKENS = [
 /** Where a visual shows: above the reply ("auto"), or at the marker the agent puts in its reply ("inline"). */
 export const HtmlVisualPlacementSchema = lazySchema(() => z.enum(["auto", "inline"]));
 
-/** Where a visual shows: above the reply ("auto"), or at the marker the agent puts in its reply ("inline"). */
+/** Parsed {@link HtmlVisualPlacementSchema}. */
 export type HtmlVisualPlacement = z.infer<ReturnType<typeof HtmlVisualPlacementSchema>>;
 
 // Stays strict and unchanged: older builds sharing the database parse saved visuals with this schema.
