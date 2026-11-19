@@ -20,7 +20,6 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
 });
 
-/** Ids the page should draw: every setting that exists here and applies to the current choices. */
 function ApplicableIds({ settings, onIds }: { settings: readonly SettingDef[]; onIds: (ids: string[]) => void }) {
   // The list is fixed for the page, so each condition hook runs in the same order on every render.
   const applies = settings.map((def) => def.when?.useApplies() ?? true);
@@ -39,7 +38,6 @@ describe("settings pages and their definitions", () => {
       </>,
     );
     await act(async () => {});
-    // Provider details start closed; open them so their rows count.
     for (const trigger of screen.queryAllByRole("button", { name: / settings$/, expanded: false })) fireEvent.click(trigger);
 
     // A control that stands for several settings, such as the Threads model part, lists the others in data-setting-covers.

@@ -54,7 +54,6 @@ export function SettingsSearchResults({ query }: { readonly query: string }) {
   const matches = useMemo(() => searchSettings(query, SETTINGS_INDEX), [query]);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
-  // Back to results lands on the link that opened the hit when it is still listed; otherwise on the heading.
   useEffect(() => {
     const returnTo = useSettingsLocation.getState().returnTo;
     if (returnTo === null) return;

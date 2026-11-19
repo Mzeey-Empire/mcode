@@ -8,7 +8,6 @@ import { fastModeDefault, fastModeSettingProvider } from "@mcode/shared/fast-mod
 import { SettingRowFrame } from "../Setting";
 import type { SettingRowProps } from "../setting-def";
 
-/** Display labels for provider-declared reasoning effort levels. */
 const REASONING_LEVEL_LABELS: Record<string, string> = {
   none: "None",
   minimal: "Minimal",
@@ -20,7 +19,6 @@ const REASONING_LEVEL_LABELS: Record<string, string> = {
   ultra: "Ultra",
 };
 
-/** Hint shown under Fast mode when the default provider is Codex. */
 const CODEX_FAST_MODE_HINT =
   "Sends OpenAI fast service tier on Codex turns when your CLI and account support it (often lower latency; billing follows OpenAI rules).";
 

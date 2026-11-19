@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { useShallow } from "zustand/shallow";
 import { useSettingsLocation } from "@/stores/settingsLocationStore";
 import type { SettingCondition, SettingDef, SettingId, SettingVariant } from "./setting-def";
 
@@ -20,32 +21,35 @@ export interface SettingHit {
   readonly attrs: { readonly "data-search-hit"?: ""; readonly tabIndex?: -1 };
 }
 
+type RowHit = { readonly id: SettingId; readonly nonce: number } | { readonly id: null; readonly nonce: null };
+
+const NO_ROW_HIT: RowHit = { id: null, nonce: null };
+
 /**
  * Marks, scrolls to and focuses the element when the open hit is one of `defs`.
  * Runs when the element mounts with the hit or becomes the hit, so rows that mount late
  * (provider availability, a disclosure opening) still get scrolled to. Once per hit open: value re-renders do not scroll again.
  */
 export function useSettingHit(defs: readonly SettingDef[]): SettingHit {
-  // A string selector re-renders only the rows that gain or lose the hit.
-  const hitKey = useSettingsLocation((state) =>
-    state.hit && defs.some((def) => def.id === state.hit?.id) ? `${state.hit.nonce}:${state.hit.id}` : null,
-  );
+  // A shallow-compared selector re-renders only the rows that gain or lose the hit.
+  const { id: hitId, nonce } = useSettingsLocation(useShallow((state): RowHit => {
+    const hit = state.hit;
+    return hit !== null && defs.some((def) => def.id === hit.id) ? { id: hit.id, nonce: hit.nonce } : NO_ROW_HIT;
+  }));
   const element = useRef<HTMLElement | null>(null);
   const ref = useCallback((node: HTMLElement | null) => {
     element.current = node;
   }, []);
 
   useEffect(() => {
-    if (hitKey === null || !element.current) return;
+    if (hitId === null || !element.current) return;
     element.current.focus({ preventScroll: true });
     element.current.scrollIntoView({ block: "center" });
-  }, [hitKey]);
+  }, [hitId, nonce]);
 
-  const hitId = hitKey === null ? null : (hitKey.slice(hitKey.indexOf(":") + 1) as SettingId);
   return { hitId, ref, attrs: hitId === null ? {} : { "data-search-hit": "", tabIndex: -1 } };
 }
 
-// Search rows sit under their location link, so they drop the page row's top padding and minimum height.
 const ROW_SPACING: Record<SettingVariant, string> = {
   page: "min-h-18 py-2.5",
   best: "pt-1.5 pb-3",

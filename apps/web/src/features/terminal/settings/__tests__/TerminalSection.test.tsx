@@ -37,7 +37,6 @@ function setDefaultProfile(id: TerminalProfileReference) {
   useSettingsStore.setState({ settings: { ...settings, terminal: { ...settings.terminal, defaultProfileId: id } } });
 }
 
-/** Stands in for the server: a preference write lands in the settings store, as the real terminal store does. */
 function applyPreferenceWrites() {
   useTerminalSettingsStore.setState({
     updatePreferences: vi.fn(async (input: TerminalPreferencesUpdate) => {
@@ -122,7 +121,6 @@ describe("TerminalSection", () => {
     expect(setWorkspaceDefault).toHaveBeenCalledWith(workspaceId, "automatic");
   });
 
-  // Fails if picking a font stops writing a quoted family with the fallback list behind it, or the sample stops following it.
   it("writes a picked font in the stored format and the sample draws in it", async () => {
     applyPreferenceWrites();
     render(<TerminalSection />);
@@ -136,7 +134,6 @@ describe("TerminalSection", () => {
     expect(screen.getByRole("button", { name: "Terminal font family: Consolas" })).toBeInTheDocument();
   });
 
-  // Fails if the current face drops out of the list when the common list lacks it, such as the bundled default.
   it("lists the current font as selected even when the common list lacks it", async () => {
     render(<TerminalSection />);
 
@@ -145,7 +142,6 @@ describe("TerminalSection", () => {
     expect(await screen.findByRole("option", { name: "JetBrains Mono Variable" })).toHaveAttribute("aria-selected", "true");
   });
 
-  // Fails if a name the list does not know can no longer be used.
   it("offers a typed name with no match and writes it", async () => {
     applyPreferenceWrites();
     render(<TerminalSection />);
@@ -157,7 +153,6 @@ describe("TerminalSection", () => {
     expect(useSettingsStore.getState().settings.terminal.presentation.fontFamily).toMatch(/^"My Odd Font", .*monospace$/);
   });
 
-  // Fails if the size labels stop matching the terminal's pixel sizes, or the sample loses its fixed height and pushes the rows below.
   it("changes font size in the sample and the store while the sample keeps its height", async () => {
     applyPreferenceWrites();
     render(<TerminalSection />);
@@ -172,7 +167,6 @@ describe("TerminalSection", () => {
     expect(heightBefore).not.toBe("");
   });
 
-  // Fails if "In use" stops following the default profile, or Automatic stops resolving to the first detected profile.
   it("tags the profile a new terminal opens with", () => {
     useTerminalSettingsStore.setState({ certifiedProfiles: [detected("pwsh", "PowerShell"), detected("cmd", "Command Prompt")] });
     const { rerender } = render(<TerminalSection />);
@@ -185,7 +179,6 @@ describe("TerminalSection", () => {
     expect(profileRowOf("Command Prompt")).toHaveTextContent("In use");
   });
 
-  // Fails if the path line drops the file name or hides the full path from name and tooltip.
   it("shows a profile's file name and names its full path", () => {
     useTerminalSettingsStore.setState({ certifiedProfiles: [detected("pwsh", "PowerShell")] });
     render(<TerminalSection />);

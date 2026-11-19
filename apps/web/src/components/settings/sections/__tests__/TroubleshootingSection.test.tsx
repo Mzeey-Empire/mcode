@@ -10,7 +10,6 @@ const { saves, persisted } = vi.hoisted(() => ({
   },
 }));
 
-// Saves stay pending until the test resolves them, and never change `settings`, like the real server round trip.
 vi.mock("@/stores/settingsStore", () => {
   const state = {
     get settings() {

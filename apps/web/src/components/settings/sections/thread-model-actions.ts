@@ -8,7 +8,6 @@ function catalogModel(providerId: string, modelId: string): ModelDefinition | un
     ?? findProviderModel(providerId, modelId);
 }
 
-/** Keeps the saved level when the model offers it, else moves to the model's default level. */
 function supportedReasoning(providerId: string, modelId: string, reasoning: ReasoningLevel): ReasoningLevel {
   const model = catalogModel(providerId, modelId);
   const declared = model?.supportedReasoningLevels;

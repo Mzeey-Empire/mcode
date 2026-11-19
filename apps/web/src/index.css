@@ -212,7 +212,6 @@
   --destructive-ink: var(--neutral-900);
   --button-secondary-hover: color-mix(in oklch, var(--neutral-100) 18%, transparent);
   --button-destructive-hover: var(--clay-400);
-  /* A step above the panel: visible on black without drawing dividers as firmly as a selected fill. */
   --border: oklch(19% 0.003 260);
   --tree: oklch(34% 0.005 260);
   --control-border: var(--neutral-400);
@@ -1057,8 +1056,6 @@ diffs-container:has([data-jump-highlight="true"]) {
   }
 }
 
-/* Settings range slider: the composer effort slider's anatomy (SteppedSlider) without stop dots. A pill track,
-   an amber tint that ends at the knob's far edge, and an amber knob inset 3px. --range-fraction is the value as 0 to 1. */
 input[type="range"].settings-range {
   -webkit-appearance: none;
   appearance: none;
@@ -1158,7 +1155,6 @@ input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2p
 }
 [data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"]:focus-visible { outline-offset: -2px; }
 
-/* Outline buttons: a faint ink fill inside the same hairline family as the Line segmented control. */
 [data-settings-surface] [data-slot="button"][data-variant="outline"] {
   height: 3rem;
   padding-inline: 1rem;
@@ -1169,7 +1165,6 @@ input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2p
 }
 [data-settings-surface] [data-slot="button"][data-variant="outline"]:hover { background: var(--hover); }
 
-/* Text fields share the Line control's tone and carry no border; focus shows only the keyboard ring. */
 [data-settings-surface] [data-slot="input"] {
   height: 3.2rem;
   border: 0;

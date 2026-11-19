@@ -21,7 +21,6 @@ import { PERMISSION_MODES } from "@/transport";
 import { SEARCH_HIT_CLASS, type SettingHit } from "../Setting";
 import { chooseDefaultModel } from "./thread-model-actions";
 
-// The composer's capsule part, with the Settings hover fill.
 const PART_CLASS =
   "inline-flex h-8 min-w-0 items-center gap-1.5 rounded-full px-2.5 text-compact text-ink hover:bg-hover aria-expanded:bg-hover focus-visible:outline-2 focus-visible:outline-focus";
 
@@ -70,7 +69,6 @@ function useStaleDefaultModel(): boolean {
   return stale;
 }
 
-/** The saved defaults as the composer's selection, so the composer's model options can show and change them. */
 function useDefaultsSelection(): { selection: ComposerAgentSelection; fastDefault: boolean } {
   const defaults = useSettingsStore((s) => s.settings.model.defaults);
   const agent = useSettingsStore((s) => s.settings.agent.defaults);
@@ -89,7 +87,6 @@ function useDefaultsSelection(): { selection: ComposerAgentSelection; fastDefaul
   };
 }
 
-/** Writes what the composer's model options change: Thinking, and Fast to the default provider's own setting. */
 function writeModelOptions(patch: Partial<ComposerAgentSelection>): void {
   const { settings, update } = useSettingsStore.getState();
   if (patch.thinking != null) void update({ model: { defaults: { thinking: patch.thinking } } });
@@ -97,7 +94,6 @@ function writeModelOptions(patch: Partial<ComposerAgentSelection>): void {
   if (patch.fastMode != null && fastProvider) void update({ provider: { [fastProvider]: { fastMode: patch.fastMode } } });
 }
 
-/** Names the model part with everything it shows, as the composer's model part does. */
 function modelPartLabel(provider: string, model: string, level: string | null, fast: boolean): string {
   return `Model: ${provider} ${model}${level ? `, ${formatReasoningLabel(level)}` : ""}${fast ? ", Fast" : ""}`;
 }
@@ -248,7 +244,6 @@ export function DefaultPermissionPart({ hit = NO_HIT, drawn = false }: { readonl
   );
 }
 
-/** The capsule's rule between parts, as the composer's. */
 function CapsuleDivider() {
   return <span aria-hidden className="mx-0.5 h-3.5 w-px shrink-0 bg-border" />;
 }
@@ -284,7 +279,6 @@ export function ThreadDefaultsCapsule({ modelHit, modeHit, permissionHit, modelC
   );
 }
 
-/** The small-task model's trigger text: Auto, or the chosen model with its provider's icon. */
 function SmallTaskLabel({ provider, modelId }: { readonly provider: string; readonly modelId: string }): ReactNode {
   if (!modelId) {
     return (

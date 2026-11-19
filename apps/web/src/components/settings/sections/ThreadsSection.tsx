@@ -4,6 +4,7 @@ import { Switch } from "@/components/ui/switch";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { Setting, useSettingHit } from "../Setting";
 import { settingsGroup, settingsPage } from "../setting-def";
+import { defaultProviderBlock, settingsValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
 import {
@@ -114,14 +115,19 @@ export const THREADS = settingsPage("threads", {
     group: NEW_THREADS,
     label: "Provider and model",
     synonyms: "default model provider gpt codex claude cursor copilot opencode devin opus sonnet haiku luna llm ai agent fast speed priority tier",
-    configKey: "model.defaults.id",
+    // One value: chooseDefaultModel writes provider and model together, so Revert puts them back together.
+    value: settingsValue(
+      (s) => ({ provider: s.model.defaults.provider, id: s.model.defaults.id }),
+      (defaults) => ({ model: { defaults } }),
+      defaultProviderBlock,
+    ),
     Control: DefaultModelPart,
   },
   reasoning: {
     group: NEW_THREADS,
     label: "Reasoning effort",
     synonyms: "thinking effort reasoning depth high low",
-    configKey: "model.defaults.reasoning",
+    value: settingsValue((s) => s.model.defaults.reasoning, (reasoning) => ({ model: { defaults: { reasoning } } })),
     when: { useApplies: useReasoningApplies, reason: NO_REASONING, anchor: "threads.model" },
     Row: ReasoningRow,
   },
@@ -129,14 +135,14 @@ export const THREADS = settingsPage("threads", {
     group: NEW_THREADS,
     label: "Mode",
     synonyms: "plan build interaction mode",
-    configKey: "agent.defaults.mode",
+    value: settingsValue((s) => s.agent.defaults.mode, (mode) => ({ agent: { defaults: { mode } } })),
     Control: DefaultModeRadios,
   },
   permission: {
     group: NEW_THREADS,
     label: "Permission",
     synonyms: "access approval approve ask full supervised yolo permissions dont ask prompts",
-    configKey: "agent.defaults.permission",
+    value: settingsValue((s) => s.agent.defaults.permission, (permission) => ({ agent: { defaults: { permission } } })),
     Control: DefaultPermissionPart,
   },
   fastMode: {
@@ -144,6 +150,11 @@ export const THREADS = settingsPage("threads", {
     label: "Fast mode",
     synonyms: "fast speed priority service tier latency",
     when: { useApplies: useFastModeApplies, reason: "Only for providers that offer a fast tier. Choose one as the default provider.", anchor: "threads.model" },
+    // Stored per-provider flags, not the default provider's view of them: a provider change must not look like a Fast change.
+    value: settingsValue(
+      (s) => ({ claude: s.provider.claude.fastMode, codex: s.provider.codex.fastMode }),
+      (fast) => ({ provider: { claude: { fastMode: fast.claude }, codex: { fastMode: fast.codex } } }),
+    ),
     Row: FastModeRow,
   },
   thinking: {
@@ -151,7 +162,7 @@ export const THREADS = settingsPage("threads", {
     label: "Thinking",
     hint: "Enable extended thinking for Haiku 4.5. Effort-tier models ignore this and use the reasoning level instead.",
     synonyms: "extended thinking haiku",
-    configKey: "model.defaults.thinking",
+    value: settingsValue((s) => s.model.defaults.thinking, (thinking) => ({ model: { defaults: { thinking } } })),
     when: { useApplies: useThinkingApplies, reason: "Only for Claude models with a thinking toggle, such as Haiku 4.5.", anchor: "threads.model" },
     Control: ThinkingControl,
   },
@@ -159,7 +170,11 @@ export const THREADS = settingsPage("threads", {
     group: SMALL_TASKS,
     label: "Commit messages, PR drafts and thread recaps",
     synonyms: "small tasks utility provider model commit message pr draft recap summary cheap",
-    configKey: "model.utility.id",
+    value: settingsValue(
+      (s) => ({ provider: s.model.utility.provider, id: s.model.utility.id }),
+      (utility) => ({ model: { utility } }),
+      defaultProviderBlock,
+    ),
     Control: SmallTaskModelPicker,
   },
   closeOnMerge: {
@@ -167,14 +182,14 @@ export const THREADS = settingsPage("threads", {
     label: "Close threads when their PRs merge",
     hint: "Each thread can override this from its menu.",
     synonyms: "close merged pull request pr auto close archive",
-    configKey: "thread.completion.completeOnPrMerge",
+    value: settingsValue((s) => s.thread.completion.completeOnPrMerge, (completeOnPrMerge) => ({ thread: { completion: { completeOnPrMerge } } })),
     Control: CloseOnMergeControl,
   },
   olderAfter: {
     group: CLEANUP,
     label: "Threads move to Older after",
     synonyms: "older stale sidebar age inactive",
-    configKey: "thread.olderAfterDays",
+    value: settingsValue((s) => s.thread.olderAfterDays, (olderAfterDays) => ({ thread: { olderAfterDays } })),
     Control: OlderAfterControl,
   },
   retention: {
@@ -183,12 +198,11 @@ export const THREADS = settingsPage("threads", {
     hint: "Changes apply to existing closed threads. A shorter period gives newly overdue threads 24 hours before cleanup.",
     synonyms: "retention delete deleted cleanup purge remove disappear lost gone keep history closed threads soon early never",
     problems: "threads deleted too soon threads disappear lost closed threads",
-    configKey: "thread.completion.retentionDays",
+    value: settingsValue((s) => s.thread.completion.retentionDays, (retentionDays) => ({ thread: { completion: { retentionDays } } })),
     Control: RetentionControl,
   },
 });
 
-/** The model part stands for the model and the applicable settings it shows: reasoning, Fast and Thinking. */
 const MODEL_PART_DEFS = [THREADS.model, THREADS.reasoning, THREADS.fastMode, THREADS.thinking];
 const MODE_DEFS = [THREADS.mode];
 const PERMISSION_DEFS = [THREADS.permission];

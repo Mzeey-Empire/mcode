@@ -2,19 +2,22 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { Setting } from "../Setting";
 import { settingsPage } from "../setting-def";
+import { notRevertible } from "../setting-value";
+
+const FIXTURE_VALUE = notRevertible("Test fixture.");
 
 function Value() {
   return <span>control</span>;
 }
 
 const FIXTURE = settingsPage("general", {
-  plain: { label: "Plain", hint: "Plain hint.", Control: Value },
-  absent: { label: "Absent", exists: () => false, Control: Value },
+  plain: { label: "Plain", hint: "Plain hint.", value: FIXTURE_VALUE, Control: Value },
+  absent: { label: "Absent", exists: () => false, value: FIXTURE_VALUE, Control: Value },
   offNow: {
     label: "Off now",
     hint: "Off hint.",
     when: { useApplies: () => false, reason: "Only for other choices.", anchor: "general.plain" },
-    Control: Value,
+    value: FIXTURE_VALUE, Control: Value,
   },
 });
 

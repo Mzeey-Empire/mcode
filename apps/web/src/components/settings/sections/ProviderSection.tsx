@@ -4,6 +4,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { SEARCH_HIT_CLASS, Setting, SettingRowFrame, useSettingHit } from "../Setting";
 import { settingsGroup, settingsPage, type SettingDef, type SettingId, type SettingInput, type SettingRowProps } from "../setting-def";
+import { providerEnabledValue, settingsValue, type RevertibleValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -19,11 +20,9 @@ import { type ProviderAvailability } from "@mcode/contracts/providers/availabili
 import { type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { ConfirmDisableDialog } from "./ConfirmDisableDialog";
 
-/** Provider IDs that expose a CLI path input field, read from the settings schema so a new CLI key needs no list edit. */
 type CliProvider = keyof ReturnType<typeof getDefaultSettings>["provider"]["cli"];
 const CLI_PROVIDERS = new Set<string>(Object.keys(getDefaultSettings().provider.cli));
 
-/** Narrows a ProviderId to those that have an editable CLI path setting. */
 function hasCliInput(id: ProviderId): id is CliProvider {
   return CLI_PROVIDERS.has(id);
 }
@@ -42,17 +41,13 @@ function useProviderToggle(): {
   const utilityProvider = useSettingsStore((s) => s.settings.model.utility.provider);
   const update = useSettingsStore((s) => s.update);
   const [pendingDisable, setPendingDisable] = useState<ProviderId | null>(null);
-  // Count how many adapter-backed providers are currently enabled, so we can
-  // prevent the user from disabling the last one.
   const enabledCount = providers.filter((p) => p.enabled && p.hasAdapter).length;
 
   async function flip(id: ProviderId, next: boolean) {
     if (!next) {
-      // Block turning off the last enabled adapter-backed provider.
       const isLastEnabled = enabledCount === 1 && providers.find((p) => p.id === id)?.enabled;
       if (isLastEnabled) return;
 
-      // Warn before disabling a provider that is currently set as the default.
       if (defaultProvider === id || utilityProvider === id) {
         setPendingDisable(id);
         return;
@@ -106,7 +101,6 @@ function CliPathInput({ id }: { id: CliProvider }) {
   return <Input id={`provider-cli-path-${id}`} data-testid={`provider-cli-path-${id}`} aria-label={`${labelFor(id)} CLI path`} value={cliPath ?? ""} onChange={(event) => void update({ provider: { cli: { [id]: event.target.value } } })} placeholder={id} className="h-7 w-56 text-xs" />;
 }
 
-/** Parse a serve URL draft through the settings contract; null when it would be rejected. */
 function parseServeUrlDraft(draft: string): string | null {
   const parsed = PartialSettingsSchema().safeParse({ provider: { opencode: { serveUrl: draft } } });
   return parsed.success ? (parsed.data.provider?.opencode?.serveUrl ?? "") : null;
@@ -121,6 +115,14 @@ function OpenCodeServeUrlRow({ def, variant }: SettingRowProps) {
   const update = useSettingsStore((s) => s.update);
   const [draft, setDraft] = useState(saved);
   const [invalid, setInvalid] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [shownSaved, setShownSaved] = useState(saved);
+  // A write from elsewhere, such as Revert, must reach the input; a draft being typed wins until blur.
+  if (saved !== shownSaved && !editing) {
+    setShownSaved(saved);
+    setDraft(saved);
+    setInvalid(false);
+  }
 
   const commit = () => {
     const normalized = parseServeUrlDraft(draft);
@@ -149,7 +151,11 @@ function OpenCodeServeUrlRow({ def, variant }: SettingRowProps) {
         setDraft(event.target.value);
         setInvalid(false);
       }}
-      onBlur={commit}
+      onFocus={() => setEditing(true)}
+      onBlur={() => {
+        setEditing(false);
+        commit();
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter") event.currentTarget.blur();
       }}
@@ -166,21 +172,15 @@ export interface ProviderSettingDefs {
   readonly serveUrl?: SettingDef;
 }
 
-/** The path the provider runs: resolved when known, else configured, else the bare binary name found on PATH. */
 function cliPathFor(row: ProviderAvailability): string {
   return row.cli.resolvedPath ?? (row.cli.configuredPath || getCatalogEntry(row.id).cliBinary);
 }
 
 interface ProviderRowProps {
-  /** Availability and configuration snapshot for this provider. */
   row: ProviderAvailability;
-  /** This provider's setting definitions. */
   defs: ProviderSettingDefs;
-  /** True when this is the only enabled adapter-backed provider. */
   isLastEnabled: boolean;
-  /** Called when the user flips the enable toggle. */
   onToggle: (next: boolean) => void | Promise<void>;
-  /** The page's one shared tooltip for full CLI paths. */
   pathTooltip: TooltipHandle<string>;
 }
 
@@ -228,7 +228,6 @@ function hasProviderDetails(id: ProviderId, defs: ProviderSettingDefs): boolean 
   return (defs.cliPath !== undefined && hasCliInput(id)) || defs.serveUrl !== undefined;
 }
 
-/** The provider's own settings, opened in place under its row. */
 function ProviderDetails({ id, defs, detailsId }: { id: ProviderId; defs: ProviderSettingDefs; detailsId: string }) {
   return <div id={detailsId} className="pl-9 bg-hover/40">
     {defs.cliPath && hasCliInput(id) && <SettingRowFrame def={defs.cliPath} variant="page" label="CLI path"><CliPathInput id={id} /></SettingRowFrame>}
@@ -236,7 +235,6 @@ function ProviderDetails({ id, defs, detailsId }: { id: ProviderId; defs: Provid
   </div>;
 }
 
-/** Name and Beta tag over the CLI path, or over the hint in its place when one applies so it shows without hover. */
 function ProviderSummary({ row, hint, pathTooltip }: { row: ProviderAvailability; hint: string; pathTooltip: TooltipHandle<string> }) {
   return <div className="flex min-w-0 flex-1 flex-col gap-0.5">
     <div className="flex items-center gap-2 text-body-small font-medium whitespace-nowrap text-ink">{labelFor(row.id)}{row.beta && <BetaTag id={row.id} />}</div>
@@ -266,7 +264,6 @@ function DetailsToggle({ id, isOpen, detailsId, onToggle }: { id: ProviderId; is
   </Button>;
 }
 
-/** Search result for a provider's enable switch: the same switch, guard and confirmation as the page row. */
 function providerEnabledRow(id: ProviderId): ComponentType<SettingRowProps> {
   function ProviderEnabledRow({ def, variant }: SettingRowProps) {
     const row = useAvailability(id);
@@ -289,12 +286,15 @@ function providerEnabledRow(id: ProviderId): ComponentType<SettingRowProps> {
   return ProviderEnabledRow;
 }
 
-/** Search result for a provider's CLI path: the same input as inside the page's details. */
 function providerCliPathRow(id: CliProvider): ComponentType<SettingRowProps> {
   function ProviderCliPathRow({ def, variant }: SettingRowProps) {
     return <SettingRowFrame def={def} variant={variant}><CliPathInput id={id} /></SettingRowFrame>;
   }
   return ProviderCliPathRow;
+}
+
+function providerCliPathValue(id: CliProvider): RevertibleValue {
+  return settingsValue((s) => s.provider.cli[id], (path) => ({ provider: { cli: { [id]: path } } }));
 }
 
 function providerInputs(): Record<string, SettingInput> {
@@ -306,7 +306,7 @@ function providerInputs(): Record<string, SettingInput> {
       group,
       label: entry.name,
       synonyms: `${entry.id} ${entry.cliBinary} provider enable disable sign in login auth account turn on off`,
-      configKey: `provider.enabled.${entry.id}`,
+      value: providerEnabledValue(entry.id),
       Row: providerEnabledRow(entry.id),
     };
     if (!hasCliInput(entry.id)) continue;
@@ -315,7 +315,7 @@ function providerInputs(): Record<string, SettingInput> {
       label: `${entry.name} CLI path`,
       synonyms: `cli path binary executable command location not found exe ${entry.id} ${entry.cliBinary}`,
       problems: `${entry.id} not found command not found cli missing`,
-      configKey: `provider.cli.${entry.id}`,
+      value: providerCliPathValue(entry.id),
       Row: providerCliPathRow(entry.id),
     };
   }
@@ -324,14 +324,14 @@ function providerInputs(): Record<string, SettingInput> {
     label: "Server URL",
     hint: "Empty spawns a local server per worktree. A URL attaches to a shared server the app never closes.",
     synonyms: "opencode server url serve host port shared attach http",
-    configKey: "provider.opencode.serveUrl",
+    value: settingsValue((s) => s.provider.opencode.serveUrl, (serveUrl) => ({ provider: { opencode: { serveUrl } } })),
     Row: OpenCodeServeUrlRow,
   };
   inputs.cliUpdates = {
     label: "Check for CLI updates",
     hint: "Asks the npm registry once a day for newer provider CLIs.",
     synonyms: "update cli npm version upgrade provider checks",
-    configKey: "updates.providerCliChecks",
+    value: settingsValue((s) => s.updates.providerCliChecks, (providerCliChecks) => ({ updates: { providerCliChecks } })),
     Control: CliUpdateChecksControl,
   };
   return inputs;
@@ -397,7 +397,6 @@ export function ProviderSection() {
   );
 }
 
-/** A provider that is not available yet: dimmed, with no switch and no details. */
 function ComingSoonProviderRow({ row }: { row: ProviderAvailability }) {
   return (
     <div aria-disabled="true" data-testid={`provider-row-${row.id}-comingsoon`} className="flex min-h-15 items-center gap-4 py-2.5 pr-3 pl-4 opacity-55">
@@ -410,12 +409,10 @@ function ComingSoonProviderRow({ row }: { row: ProviderAvailability }) {
   );
 }
 
-/** Returns the human-readable display name for a provider ID. */
 function labelFor(id: ProviderId): string {
   return getCatalogEntry(id).name;
 }
 
-/** Returns the hint text shown in place of the CLI path: every message that applies, most important first. */
 function hintFor(row: ProviderAvailability, isLastEnabled: boolean): string {
   return [
     isLastEnabled ? "At least one provider must be enabled." : undefined,

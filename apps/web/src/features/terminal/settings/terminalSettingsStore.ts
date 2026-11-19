@@ -4,6 +4,7 @@ import type { TerminalPreferencesUpdate, TerminalProfileRecovery } from "@mcode/
 import { getTransport } from "@/transport";
 import type { TerminalProfileList } from "@/transport/types";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { trackLocalSettingsWrite } from "@/stores/settings-write-origin";
 
 /** Workspace override state exposed to the Terminal settings section. */
 export interface TerminalWorkspaceOverride {
@@ -101,7 +102,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     }
   },
 
-  setGlobalDefault: async (profileId) => {
+  setGlobalDefault: (profileId) => trackLocalSettingsWrite({ sink: "terminalGlobalDefault", profileId }, async () => {
     set({ pending: true, error: null });
     try {
       await getTransport().terminalProfileSetDefault(profileId);
@@ -113,9 +114,9 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     } finally {
       set({ pending: false });
     }
-  },
+  }, (ok) => ok),
 
-  setWorkspaceDefault: async (workspaceId, profileId) => {
+  setWorkspaceDefault: (workspaceId, profileId) => trackLocalSettingsWrite({ sink: "terminalProjectDefault", workspaceId, profileId }, async () => {
     set({ pending: true, error: null });
     try {
       const result = await getTransport().terminalWorkspacePreferencesUpdate(workspaceId, profileId);
@@ -127,9 +128,9 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     } finally {
       set({ pending: false });
     }
-  },
+  }, (ok) => ok),
 
-  resetWorkspaceDefault: async (workspaceId) => {
+  resetWorkspaceDefault: (workspaceId) => trackLocalSettingsWrite({ sink: "terminalProjectDefault", workspaceId, profileId: null }, async () => {
     set({ pending: true, error: null });
     try {
       await getTransport().terminalWorkspacePreferencesReset(workspaceId);
@@ -141,7 +142,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     } finally {
       set({ pending: false });
     }
-  },
+  }, (ok) => ok),
 
   createProfile: async (input) => {
     set({ pending: true, error: null, deleteReferences: null });
@@ -187,7 +188,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     }
   },
 
-  updatePreferences: async (input) => {
+  updatePreferences: (input) => trackLocalSettingsWrite({ sink: "terminalPreferences", patch: input }, async () => {
     set({ pending: true, error: null });
     try {
       const result = await getTransport().terminalPreferencesUpdate(input);
@@ -199,7 +200,7 @@ export const useTerminalSettingsStore = create<TerminalSettingsState>((set, get)
     } finally {
       set({ pending: false });
     }
-  },
+  }, (ok) => ok),
 
   resetPreferences: async (workspaceId) => {
     set({ pending: true, error: null });

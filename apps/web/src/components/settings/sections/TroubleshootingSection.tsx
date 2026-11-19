@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Setting } from "../Setting";
 import { settingsPage } from "../setting-def";
+import { settingsValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
 
 function hardwareAccelerationBridge() {
@@ -43,7 +44,7 @@ export const TROUBLESHOOTING = settingsPage("troubleshooting", {
     label: "Troubleshooting logs",
     hint: "Keeps a 7-day record of what your agents did, so you can find out why a thread got stuck. It stays on this computer and leaves out your messages and code.",
     synonyms: "logs log diagnostics debug record stuck trace recording",
-    configKey: "diagnostics.recording",
+    value: settingsValue((s) => s.diagnostics.recording, (recording) => ({ diagnostics: { recording } })),
     Control: DiagnosticsRecordingControl,
   },
   hardwareAcceleration: {
@@ -51,8 +52,7 @@ export const TROUBLESHOOTING = settingsPage("troubleshooting", {
     hint: "Applies after Mcode restarts.",
     synonyms: "gpu graphics hardware acceleration rendering blank flicker blurry render",
     problems: "window blank flicker screen black terminal flicker terminal blank",
-    configKey: "graphics.hardwareAcceleration",
-    // Only the desktop app can switch the GPU and relaunch, so the browser build hides the row and its search result.
+    value: settingsValue((s) => s.graphics.hardwareAcceleration, (hardwareAcceleration) => ({ graphics: { hardwareAcceleration } })),
     exists: () => {
       const bridge = hardwareAccelerationBridge();
       return Boolean(bridge?.getHardwareAcceleration && bridge.relaunch);

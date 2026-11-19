@@ -3,6 +3,9 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { SETTINGS_INDEX } from "../settings-nav";
 import { searchSettings, settingLocation, type IndexedSetting } from "../settings-search";
 import { settingsGroup, settingsPage } from "../setting-def";
+import { notRevertible } from "../setting-value";
+
+const FIXTURE_VALUE = notRevertible("Test fixture.");
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -12,7 +15,6 @@ vi.mock("@/transport", async () => ({
 const ids = (query: string, index: readonly IndexedSetting[] = SETTINGS_INDEX) =>
   searchSettings(query, index).map((match) => match.entry.def.id);
 
-/** The real index as it is on desktop, where Hardware acceleration exists. */
 const desktopIndex = SETTINGS_INDEX.map((entry) =>
   entry.def.id === "troubleshooting.hardwareAcceleration" ? { ...entry, def: { ...entry.def, exists: () => true } } : entry,
 );
@@ -63,9 +65,9 @@ describe("searchSettings over the real settings", () => {
 
 describe("searchSettings scoring", () => {
   const fixture = settingsPage("general", {
-    fontSize: { label: "Font size", hint: "Size of text", group: settingsGroup("Font and cursor"), Control: () => null },
-    fontColour: { label: "Colour", synonyms: "font tint", Control: () => null },
-    other: { label: "Other", hint: "Mentions font", Control: () => null },
+    fontSize: { label: "Font size", hint: "Size of text", group: settingsGroup("Font and cursor"), value: FIXTURE_VALUE, Control: () => null },
+    fontColour: { label: "Colour", synonyms: "font tint", value: FIXTURE_VALUE, Control: () => null },
+    other: { label: "Other", hint: "Mentions font", value: FIXTURE_VALUE, Control: () => null },
   });
   const index = fixture.all.map((def) => ({ def, pageLabel: "General" }));
 
@@ -85,7 +87,7 @@ describe("searchSettings scoring", () => {
   });
 
   it("keeps index order for equal scores", () => {
-    const tied = settingsPage("general", { a: { label: "Alpha x", Control: () => null }, b: { label: "Beta x", Control: () => null } });
+    const tied = settingsPage("general", { a: { label: "Alpha x", value: FIXTURE_VALUE, Control: () => null }, b: { label: "Beta x", value: FIXTURE_VALUE, Control: () => null } });
     expect(searchSettings("x", tied.all.map((def) => ({ def, pageLabel: "General" }))).map((m) => m.entry.def.id)).toEqual([
       "general.a",
       "general.b",
