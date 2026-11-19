@@ -9,7 +9,7 @@ import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { GitComparisonService } from "../git-comparison-service.js";
 import { RealGitExecutor } from "../execution/real-git-executor.js";
 
-describe("Review state against the Git upstream", { timeout: 30_000 }, () => {
+describe("Review state against the published branch", { timeout: 30_000 }, () => {
   let owned: OwnedTestDatabase;
   let repo: WorkspaceRepo;
   let directory: string;
@@ -45,23 +45,34 @@ describe("Review state against the Git upstream", { timeout: 30_000 }, () => {
   });
   afterEach(() => { NodeFS.rmSync(directory, { recursive: true, force: true }); });
 
-  it("reports null on a branch without an upstream", async () => {
-    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ upstream: null });
+  it("reports null on an unpublished branch", async () => {
+    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ published: null });
   });
 
-  it("reports zero commits ahead of the upstream just pushed", async () => {
+  it("reports zero commits ahead of the branch just pushed", async () => {
     git("push", "-u", "origin", "main");
     git("config", "status.aheadBehind", "false");
-    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ upstream: { ahead: 0 } });
+    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ published: { ahead: 0 } });
   });
 
   it("counts two local commits on a tracking branch and reports null after detaching", async () => {
     git("push", "-u", "origin", "main");
     commit("first local commit");
     commit("second local commit");
-    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ upstream: { ahead: 2 } });
+    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ published: { ahead: 2 } });
 
     git("checkout", "--detach");
-    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ upstream: null });
+    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ published: null });
+  });
+
+  it("counts against the same branch on origin when the upstream is origin/main", async () => {
+    git("push", "origin", "main");
+    git("checkout", "--track", "-b", "feat", "origin/main");
+    commit("first feature commit");
+    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ published: null });
+
+    git("push", "origin", "feat");
+    commit("second feature commit");
+    expect(await service.readReviewState("fixture", cwd)).toMatchObject({ published: { ahead: 1 } });
   });
 });

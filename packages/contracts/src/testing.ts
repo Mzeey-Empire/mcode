@@ -29,7 +29,7 @@ export function createMockThreadStartup(overrides: Partial<ThreadStartup> = {}):
   };
 }
 
-/** Build Review state for a clean Git checkout with no upstream or comparison base. */
+/** Build Review state for a clean Git checkout with no published branch or comparison base. */
 export function createMockGitReviewState(
   overrides?: Partial<Extract<ReviewState, { isGitRepo: true }>>,
 ): Extract<ReviewState, { isGitRepo: true }> {
@@ -39,7 +39,7 @@ export function createMockGitReviewState(
     branch: "main",
     uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
     commitsAhead: null,
-    upstream: null,
+    published: null,
     branchDefault: { unavailable: "no-base" },
     ...overrides,
   };
