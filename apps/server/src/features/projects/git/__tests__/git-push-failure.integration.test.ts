@@ -10,7 +10,7 @@ import { GitPushService } from "../git-push-service.js";
 import { GitRepositoryService } from "../git-repository-service.js";
 import { RealGitExecutor } from "../execution/real-git-executor.js";
 
-describe("A failed git.push reports git's reason", { timeout: 30_000 }, () => {
+describe("git.push", { timeout: 30_000 }, () => {
   let owned: OwnedTestDatabase;
   let directory: string;
   let cwd: string;
@@ -55,17 +55,34 @@ describe("A failed git.push reports git's reason", { timeout: 30_000 }, () => {
   });
   afterEach(() => { NodeFS.rmSync(directory, { recursive: true, force: true }); });
 
-  it("shows a remote hook's message without the command line or local paths", async () => {
+  it("pushes to the configured fork without updating origin or changing the upstream", async () => {
+    git(cwd, "push", "origin", "main");
+    const originHead = git(origin, "rev-parse", "refs/heads/main");
+    const fork = NodePath.join(directory, "fork.git");
+    git(directory, "init", "--bare", fork);
+    git(cwd, "remote", "add", "fork", fork);
+    git(cwd, "push", "-u", "fork", "main");
+    git(cwd, "commit", "--allow-empty", "-m", "push to fork");
+    const localHead = git(cwd, "rev-parse", "HEAD");
+
+    await push();
+
+    expect(git(fork, "rev-parse", "refs/heads/main")).toBe(localHead);
+    expect(git(origin, "rev-parse", "refs/heads/main")).toBe(originHead);
+    expect(git(cwd, "config", "branch.main.remote")).toBe("fork");
+  });
+
+  it("shows both lines of a remote hook's message without the command line or local paths", async () => {
     NodeFS.writeFileSync(
       NodePath.join(origin, "hooks", "pre-receive"),
-      "#!/bin/sh\necho 'branch is frozen for release review' >&2\nexit 1\n",
+      "#!/bin/sh\necho 'Running release checks' >&2\necho 'branch is frozen for release review' >&2\nexit 1\n",
       { mode: 0o755 },
     );
 
-    const failure = await push().then(() => null, (error: unknown) => error);
-
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).toBe("branch is frozen for release review");
+    await expect(push()).rejects.toHaveProperty(
+      "message",
+      "Running release checks\nbranch is frozen for release review",
+    );
   });
 
   it("names the rejected ref when the remote has moved on", async () => {
