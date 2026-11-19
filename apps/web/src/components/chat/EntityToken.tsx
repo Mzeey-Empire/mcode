@@ -131,11 +131,14 @@ export function EntityToken({
       ? label.replace(/^@+/, "")
       : label;
 
+  // An inline-flex box takes its baseline from its first item, here the icon's bottom edge, which put the label off
+  // the prose baseline by a different amount at each font size. Only the label joins baseline alignment, so the
+  // token's baseline is the label's and it sits on the line's baseline.
   return (
     <span
       data-entity-token={kind}
       className={cn(
-        "mx-px inline-flex max-w-full items-center gap-1 align-[-0.2em] font-sans text-[length:inherit] font-medium leading-none",
+        "mx-px inline-flex max-w-full items-center gap-1 align-baseline font-sans text-[length:inherit] font-medium leading-none",
         ENTITY_TEXT_CLASS[kind],
         className,
       )}
@@ -149,7 +152,7 @@ export function EntityToken({
         commandName={isCommandInvocation ? displayLabel : undefined}
         className="flex size-3.5 translate-y-[0.07em] items-center justify-center text-current"
       />
-      <span className="min-w-0 text-fade">{displayLabel}</span>
+      <span className="min-w-0 self-baseline text-fade">{displayLabel}</span>
     </span>
   );
 }
