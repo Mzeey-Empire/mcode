@@ -24,7 +24,7 @@ const DESCRIPTION = [
 
 /** Providers whose shell launches expose native background command ids. */
 export function providerReportsBackgroundCommands(providerId: string): boolean {
-  return providerId === "claude";
+  return providerId === "claude" || providerId === "codex";
 }
 
 /** Offer wait marks scoped to the authenticated provider session's thread. */
@@ -42,7 +42,7 @@ export function createBackgroundToolkit(
       outputSchema: listedSchema(outputSchema, "output"),
       call: (args, { threadId }, { signal }) => toToolResult(async () => {
         const { taskIds, waiting } = await parseInput("background_wait", inputSchema, args);
-        // Claude can use the tool in the same turn as the launch, before its record has drained to SQLite.
+        // The agent can call this before its shell launch has drained to SQLite.
         await waitForSaved(threadId);
         signal.throwIfAborted();
         const { matched } = commands.resolve(threadId, taskIds);

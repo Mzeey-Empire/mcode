@@ -21,6 +21,7 @@ import { logger } from "@mcode/shared";
 import { buildMcodeInstructionSections, NO_MCODE_TOOLKITS, type McodeInstructionSection } from "@mcode/thread-orchestration";
 import {
   providerBrowserPermissionCapability,
+  type ProviderBackgroundToolSettlement,
   type ProviderBrowserCredentialMetadata,
   type ProviderBrowserLeaseGrant,
   type ProviderBrowserLeaseHandle,
@@ -93,6 +94,7 @@ const CODEX_MCP_STARTUP_TIMEOUT_MS = 10_000;
 /** Child-only env var carrying the `mcode` bearer token, so the token never appears in argv or config. */
 const CODEX_MCODE_TOKEN_ENV = "MCODE_MCP_TOKEN";
 const STOP_SETTLE_TIMEOUT_MS = 10_000;
+const BACKGROUND_STOP_SETTLE_TIMEOUT_MS = 1_000;
 /** Bound on a follow-up send's wait for a user-stop drain before it respawns instead. */
 const STOP_DRAIN_REUSE_TIMEOUT_MS = 3_000;
 const USAGE_WARMUP_RETRY_MS = 60_000;
@@ -103,6 +105,7 @@ const CODEX_APPROVAL_POLICY_BY_SANDBOX: Record<SandboxMode, AskForApproval> = {
   "danger-full-access": "never",
 };
 const CODEX_MIN_VERSION = "0.135.0";
+const CODEX_BACKGROUND_TERMINALS_MIN_VERSION = "0.140.0";
 /** S07-00 captured native plan items and question responses on this CLI version. */
 const CODEX_NATIVE_PLAN_MIN_VERSION = "0.161.0";
 /** First CLI whose app-server answers `turn/steer` with `expectedTurnId`; older ones declare `turn-steer` unsupported. */
@@ -154,7 +157,7 @@ const CODEX_DESCRIPTOR_WITH_STEER = codexDescriptor("supported");
 const CODEX_DESCRIPTOR_WITHOUT_STEER = codexDescriptor("unsupported");
 
 const TURN_SCOPED_EVENT_TYPES = new Set<AgentEvent["type"]>([
-  "turnStarted", "message", "generatedAttachment", "toolUse", "toolResult",
+  "turnStarted", "message", "generatedAttachment", "toolUse", "toolResult", "toolBackgrounded",
   "turnComplete", "error", "ended", "compacting", "compactSummary",
   "modelFallback", "textDelta", "toolInputDelta", "toolProgress", "contextEstimate",
   "assistantMessageBoundary",
@@ -307,6 +310,7 @@ interface CodexSessionState {
   nextChildGeneration: number;
   /** Child threads already queried for authoritative model metadata this session. */
   childMetadataFetches: Set<string>;
+  backgroundCommands?: Map<string, CodexBackgroundCommand>;
   /** Child events awaiting an authoritative parent/child execution mapping. */
   pendingChildEvents: PendingChildEvent[];
   /** Native child event identities already emitted from this session. */
@@ -320,6 +324,21 @@ interface CodexSessionState {
   workspaceId: string;
   /** Browser permission class fixed to the provider process at spawn. */
   browserPermissionCapability: "observe" | "interact" | "privileged";
+}
+
+type CodexBackgroundResult = Pick<ProviderBackgroundToolSettlement, "status" | "output">;
+
+interface CodexBackgroundCommand {
+  nativeTurnId: string;
+  taskId: string;
+  launch: CodexCanonicalEventRouting;
+  launchEnded: boolean;
+  result?: CodexBackgroundResult;
+  stopRequest?: Promise<boolean>;
+  terminateConfirmed?: true;
+  settlement: Promise<void>;
+  resolveSettlement: () => void;
+  delivering?: true;
 }
 
 /** One pending codex approval bridged into the Phase 1 permission flow. */
@@ -1503,7 +1522,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const mcodeInstructions = this.codexSpawnInstructions(context);
 
     const server = this.createCodexAppServer(context, mcodeInstructions);
-    const mapper = this.createCodexEventMapper(threadId, context.sessionId);
+    const mapper = this.createCodexEventMapper(threadId, context.sessionId, context.cliPath);
     this.activeCodexServers.set(context.sessionId, server);
     // The pause belongs to the thread, so a server replacing one paused mid-backlog starts paused.
     if (this.canonicalEventPublisher.isStreamPaused(threadId)) server.pauseOutput();
@@ -1653,7 +1672,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     return overrides;
   }
 
-  private createCodexEventMapper(threadId: string, sessionId: string): CodexEventMapper {
+  private createCodexEventMapper(threadId: string, sessionId: string, cliPath: string): CodexEventMapper {
+    const version = currentCodexVersion(cliPath);
+    const supportsBackgroundCommands = version !== null && meetsMinVersion(version, CODEX_BACKGROUND_TERMINALS_MIN_VERSION);
     const mapper = new CodexEventMapper(threadId, undefined, (event) => {
       const state = this.runtime.get(sessionId);
       const nativeTurnId = event.nativeTurnId;
@@ -1664,7 +1685,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         toolCallId: event.toolCallId,
         toolName: event.toolName, toolInput: event.toolInput,
       } satisfies ProviderFileMutationStart);
-    });
+    }, supportsBackgroundCommands);
     mapper.setOutputTruncationMode(this.outputTruncationMode);
     this.emitSessionRuntimeEvent(threadId, mapper.sessionStartedEvent());
     return mapper;
@@ -1712,6 +1733,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const mainNotification = isMainThreadNotification(server, rawNotification.params);
     const nativeThreadId = nativeThreadIdFromParams(rawNotification.params);
     const nativeTurnId = nativeTurnIdFromParams(rawNotification.params);
+    if (this.completeCodexBackgroundCommand(entry, notification)) return;
     // Reject old main-turn events before they can reset the shared mapper for a new dispatch.
     if (mainNotification && !this.isCurrentCodexMainTurn(entry, nativeTurnId)) return;
     this.updateApprovalFileChanges(context.sessionId, rawNotification, mainNotification);
@@ -2141,7 +2163,76 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     eventExecutionId: string | undefined;
     startupEventExecutionId: string | undefined;
   }): void {
-    for (const event of args.mappedEvents) this.deliverCodexNotificationEvent(args, event);
+    for (const event of args.mappedEvents) {
+      if (args.entry && args.nativeTurnId && args.mainNotification && event.event.type === AgentEventType.ToolBackgrounded) {
+        this.holdCodexBackgroundCommand(args.entry, args.nativeTurnId, args.eventExecutionId, event.event);
+      }
+      this.deliverCodexNotificationEvent(args, event);
+    }
+  }
+
+  private holdCodexBackgroundCommand(
+    state: CodexSessionState,
+    nativeTurnId: string,
+    executionId: string | undefined,
+    event: Extract<AgentEvent, { type: "toolBackgrounded" }>,
+  ): void {
+    const owner = this.canonicalRoutingForExecution(state.threadId, executionId);
+    if (!event.taskId || owner?.kind !== "active" || owner.routing.executionId !== executionId) return;
+    let resolveSettlement!: () => void;
+    const settlement = new Promise<void>((resolve) => { resolveSettlement = resolve; });
+    (state.backgroundCommands ??= new Map()).set(event.toolCallId, {
+      taskId: event.taskId, nativeTurnId, launch: owner.routing, launchEnded: false, settlement, resolveSettlement,
+    });
+  }
+
+  private completeCodexBackgroundCommand(state: CodexSessionState | undefined, notification: CodexNotification): boolean {
+    const held = this.findCodexBackgroundCompletion(state, notification);
+    if (!held) return false;
+    const { item, turnId, command } = held;
+    if (command.nativeTurnId === turnId && (!item.processId || command.taskId === item.processId)) {
+      const failed = item.status === "failed" || (item.exitCode != null && item.exitCode !== 0);
+      this.settleCodexBackgroundCommand(held.state, held.toolCallId, command, {
+        status: command.terminateConfirmed ? "cancelled" : failed ? "failed" : "completed", output: item.aggregatedOutput ?? "",
+      });
+    }
+    return true;
+  }
+
+  private findCodexBackgroundCompletion(state: CodexSessionState | undefined, notification: CodexNotification) {
+    if (!state?.backgroundCommands || notification.unrecognized || notification.method !== "item/completed") return undefined;
+    const { item, threadId, turnId } = notification.params;
+    if (threadId !== state.server.threadId || item?.type !== "commandExecution" || !item.id) return undefined;
+    const command = state.backgroundCommands.get(item.id);
+    return command ? { state, command, item, turnId, toolCallId: item.id } : undefined;
+  }
+
+  private settleCodexBackgroundCommand(
+    state: CodexSessionState, toolCallId: string, command: CodexBackgroundCommand, result: CodexBackgroundResult,
+  ): Promise<void> | undefined {
+    command.result ??= result;
+    if (!command.launchEnded) return undefined;
+    if (!command.delivering) {
+      command.delivering = true;
+      void this.deliverCodexBackgroundSettlement(command, toolCallId, command.result).finally(() => {
+        state.backgroundCommands?.delete(toolCallId);
+        command.resolveSettlement();
+      });
+    }
+    return command.settlement;
+  }
+
+  private async deliverCodexBackgroundSettlement(
+    command: CodexBackgroundCommand, toolCallId: string, result: CodexBackgroundResult,
+  ): Promise<void> {
+    const { threadId, executionId } = command.launch;
+    try {
+      await this.waitForCanonicalTurnEvents(command.launch);
+      await this.host.turns.settleBackgroundTool({ providerId: this.id, threadId, executionId, toolCallId, ...result });
+    } catch (error) {
+      logger.error("Codex background command settlement failed", { executionId, toolCallId,
+        error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   private deliverCodexNotificationEvent(
@@ -2510,6 +2601,15 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       await state.server.kill({ interruptActiveTurn: !isAbandonedTurn(state, executionForDrain(state)) });
     } finally {
       this.endTurnAfterOutput(state, turnInFlight);
+      const stopped: string[] = [];
+      await Promise.all([...(state.backgroundCommands ?? [])].map(([toolCallId, command]) => {
+        if (!command.result && !command.terminateConfirmed) stopped.push(toolCallId);
+        command.launchEnded = true;
+        return this.settleCodexBackgroundCommand(state, toolCallId, command, {
+          status: "cancelled", output: "Stopped because the Codex session ended.",
+        });
+      }));
+      if (stopped.length > 0) this.host.turns.recordStoppedBackgroundCommands?.(state.threadId, stopped);
     }
   }
 
@@ -2873,6 +2973,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
         turnExecutionId,
         ...(completion.endedOutcome ? { outcome: completion.endedOutcome } : {}),
       } satisfies AgentEvent, turnExecutionId);
+      for (const [toolCallId, command] of run.entry.backgroundCommands ?? []) {
+        if (command.launch.executionId !== turnExecutionId) continue;
+        command.launchEnded = true;
+        if (command.result) this.settleCodexBackgroundCommand(run.entry, toolCallId, command, command.result);
+      }
     }
   }
 
@@ -3023,6 +3128,55 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (entry.routing) this.canonicalEventPublisher.publish(entry.routing, providerRuntimeEvent({ ...approvalReceipt({ requestId, threadId: entry.threadId, body: entry.body }, outcome), turnExecutionId: entry.routing.executionId }));
     else logger.warn("Codex approval decided outside a routed turn; no timeline receipt", { requestId, threadId: entry.threadId });
     this.emit("approval_resolved", { requestId, threadId: entry.threadId, outcome });
+  }
+
+  /** Stops a held command owned by this live Codex session. */
+  async stopBackgroundTask(sessionId: string, taskId: string): ReturnType<NonNullable<IAgentProvider["stopBackgroundTask"]>> {
+    const state = this.runtime.get(sessionId);
+    if (!state?.backgroundCommands) return "not-running";
+    const entry = [...state.backgroundCommands].find(([, candidate]) => candidate.taskId === taskId);
+    if (!entry) return "not-running";
+    const [toolCallId, command] = entry;
+    const request = this.requestCodexBackgroundStop(state, command);
+    const stopRequest = command.stopRequest;
+    const stopped = await request;
+    if (await this.waitForBackgroundSettlement(command)) return stopped ? "stopped" : "not-running";
+    if (!stopped) {
+      // A negative reply can race the native result. Leave the call with the provider and let Stop retry.
+      if (command.stopRequest === stopRequest) command.stopRequest = undefined;
+      return "settling";
+    }
+    this.settleCodexBackgroundCommand(state, toolCallId, command, {
+      status: "cancelled", output: "Stopped by request.",
+    });
+    return "stopped";
+  }
+
+  private async waitForBackgroundSettlement(command: CodexBackgroundCommand): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        command.settlement.then(() => true),
+        new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), BACKGROUND_STOP_SETTLE_TIMEOUT_MS); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async requestCodexBackgroundStop(state: CodexSessionState, command: CodexBackgroundCommand): Promise<boolean> {
+    if (!command.stopRequest && (command.result || !state.server.isAlive)) return false;
+    const stop = command.stopRequest ??= Promise.resolve().then(() =>
+      state.server.terminateBackgroundTerminal(command.taskId, () => { command.terminateConfirmed = true; }));
+    try {
+      return await stop;
+    } catch (error) {
+      if (state.server.isAlive && this.runtime.get(state.sessionId) === state) {
+        if (command.stopRequest === stop) command.stopRequest = undefined;
+        throw error;
+      }
+      return false;
+    }
   }
 
   /**

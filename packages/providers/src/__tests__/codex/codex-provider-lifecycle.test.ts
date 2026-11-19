@@ -7,7 +7,7 @@ import { type NativePlanQuestionBatch } from "@mcode/contracts/models/plan-quest
 import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { CodexProvider, stubEnvService } from "./codex-provider-test-fixture.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
-import type { ProviderEventSinkPort } from "../../host-ports.js";
+import type { ProviderBackgroundToolSettlement, ProviderEventSinkPort } from "../../host-ports.js";
 import { checkCodexVersion, clearVersionCache } from "../../private/codex/codex-version.js";
 
 const { spawn, cli } = vi.hoisted(() => ({ spawn: vi.fn(), cli: { version: "0.150.0" } }));
@@ -21,7 +21,7 @@ vi.mock("which", () => ({ default: async () => "/usr/bin/codex" }));
 interface RpcRequest {
   id?: number;
   method: string;
-  params?: { turnId?: string; expectedTurnId?: string };
+  params?: { turnId?: string; expectedTurnId?: string; threadId?: string; processId?: string };
 }
 
 class NativeProcess extends NodeEvents.EventEmitter {
@@ -40,6 +40,7 @@ class NativeProcess extends NodeEvents.EventEmitter {
   /** When true, `turn/start` waits for {@link answerHeldTurnStart} or {@link failHeldTurnStart}. */
   holdTurnStart = false;
   initializeReply: ((request: RpcRequest) => void) | undefined;
+  terminateReply: ((request: RpcRequest) => void) | undefined;
   private heldTurnStart: RpcRequest | undefined;
   private buffer = "";
   private turnCount = 0;
@@ -62,6 +63,12 @@ class NativeProcess extends NodeEvents.EventEmitter {
     } }) + "\n");
   }
 
+  commandItem(method: "started" | "completed", item: Record<string, unknown>, turnId = "native-turn-1"): void {
+    this.stdout.write(JSON.stringify({ method: `item/${method}`, params: {
+      threadId: "native-thread", turnId, item: { type: "commandExecution", ...item },
+    } }) + "\n");
+  }
+
   answerHeldTurnStart(): void {
     const held = this.takeHeldTurnStart();
     this.stdout.write(JSON.stringify({ id: held.id, result: this.resultFor(held) }) + "\n");
@@ -81,7 +88,12 @@ class NativeProcess extends NodeEvents.EventEmitter {
 
   private respond(request: RpcRequest): void {
     this.requests.push(request);
-    if (request.id === undefined || this.answerAsScripted(request)) return;
+    if (request.id === undefined) return;
+    if (request.method === "thread/backgroundTerminals/terminate" && this.terminateReply) {
+      this.terminateReply(request);
+      return;
+    }
+    if (this.answerAsScripted(request)) return;
     this.stdout.write(JSON.stringify({ id: request.id, result: this.resultFor(request) }) + "\n");
     if (request.method === "turn/interrupt" && request.params?.turnId) this.complete(request.params.turnId, "interrupted");
   }
@@ -157,6 +169,7 @@ function createProvider(eventSink?: ProviderEventSinkPort) {
   const getSettings = vi.fn(async () => settings);
   const child = new NativeProcess();
   const catalogShutdown = vi.fn(async () => {});
+  const settlements: ProviderBackgroundToolSettlement[] = [];
   spawn.mockImplementation(() => {
     setImmediate(() => child.emit("spawn"));
     return child;
@@ -168,7 +181,7 @@ function createProvider(eventSink?: ProviderEventSinkPort) {
       listModels: async () => [], currentSkills: () => [], currentPrompts: () => [],
       refreshCustomPrompts: async () => ({ prompts: [] }), shutdown: catalogShutdown,
     },
-    undefined, undefined, eventSink,
+    undefined, undefined, eventSink, async (settlement) => { settlements.push(settlement); },
   );
   const events: ProviderRuntimeEvent[] = [];
   provider.observeCanonicalEvents((event: ProviderRuntimeEvent) => events.push(event));
@@ -180,7 +193,16 @@ function createProvider(eventSink?: ProviderEventSinkPort) {
       type: AgentEventType.Ended, threadId: request.threadId, turnExecutionId: executionId, outcome: "completed",
     } }));
   };
-  return { provider, child, settings, getSettings, starts, complete, events, catalogShutdown };
+  return { provider, child, settings, getSettings, starts, complete, events, catalogShutdown, settlements };
+}
+
+const backgroundBuild = { id: "build", processId: "101", command: "  bun run build  ", status: "inProgress" };
+const backgroundSettlement = { providerId: "codex", threadId: request.threadId, executionId: request.turnExecutionId, toolCallId: "build" };
+
+async function startBackgroundBuild(f: ReturnType<typeof createProvider>) {
+  await f.provider.sendTurn(request);
+  await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+  f.child.commandItem("started", backgroundBuild);
 }
 
 async function pendingQuestion(f: ReturnType<typeof createProvider>, settled: () => Promise<void>) {
@@ -1155,6 +1177,217 @@ describe("Codex provider lifecycle through native transport", () => {
       await provider.shutdown();
     }
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("carries the task id as soon as it arrives and backgrounds only commands still running at turn end", async () => {
+    const f = createProvider();
+    try {
+      await f.provider.sendTurn(request);
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(1));
+      f.child.commandItem("started", { ...backgroundBuild, processId: null });
+      f.child.commandItem("started", backgroundBuild);
+      f.child.commandItem("started", { id: "lint", processId: "102", command: "bun run lint", status: "inProgress" });
+      f.child.commandItem("completed", { id: "lint", processId: "102", command: "bun run lint", status: "completed", exitCode: 0 });
+      await f.provider.flushCanonicalEvents();
+      expect(turnEventsOf(f.events).filter((event) => event.type === "toolUse")).toContainEqual(expect.objectContaining({
+        toolCallId: "build", backgroundTaskId: "101",
+      }));
+      expect(turnEventsOf(f.events).filter((event) => event.type === "toolBackgrounded")).toEqual([]);
+      await f.complete(1, request.turnExecutionId);
+      expect(turnEventsOf(f.events).filter((event) => ["toolResult", "toolBackgrounded", "turnComplete"].includes(event.type)))
+        .toMatchObject([
+          { type: "toolResult", toolCallId: "lint", isError: false },
+          { type: "toolBackgrounded", toolCallId: "build", kind: "command", taskId: "101", label: "bun run build" },
+          { type: "turnComplete" },
+        ]);
+      expect(f.child.requests.filter(({ method }) => method === "thread/backgroundTerminals/list")).toEqual([]);
+    } finally {
+      await f.provider.shutdown();
+    }
+  });
+
+  it.each([
+    ["completed", 0, "completed"],
+    ["completed", 7, "failed"],
+    ["failed", null, "failed"],
+  ])("settles a command with native status %s and exit code %s against its original turn", async (status, exitCode, expected) => {
+    const f = createProvider();
+    try {
+      await startBackgroundBuild(f);
+      await f.complete(1, request.turnExecutionId);
+      await f.provider.sendTurn({ ...request, turnId: "turn-2", turnExecutionId: STEER_ID });
+      await vi.waitFor(() => expect(f.starts()).toHaveLength(2));
+      const completed = { ...backgroundBuild, status, exitCode, aggregatedOutput: "Build output" };
+      f.child.commandItem("completed", completed, "native-turn-2");
+      f.child.commandItem("completed", completed);
+      f.child.commandItem("completed", completed);
+      await f.complete(2, STEER_ID);
+      expect(f.settlements).toEqual([{ ...backgroundSettlement, output: "Build output", status: expected }]);
+      expect(f.child.requests.filter(({ method }) => method === "thread/backgroundTerminals/list")).toEqual([]);
+    } finally {
+      await f.provider.shutdown();
+    }
+  });
+
+  it.each(["session discard", "process exit"])("cancels held commands on %s", async (ending) => {
+    const f = createProvider();
+    try {
+      await startBackgroundBuild(f);
+      await f.complete(1, request.turnExecutionId);
+      if (ending === "session discard") await f.provider.discardSession(request.sessionId);
+      else f.child.emit("exit", 1, null);
+      await vi.waitFor(() => expect(f.settlements).toEqual([
+        expect.objectContaining({ ...backgroundSettlement, status: "cancelled" }),
+      ]));
+    } finally {
+      await f.provider.shutdown();
+    }
+  });
+
+  it.each([
+    { terminated: true, completionFirst: true, status: "failed" },
+    { terminated: false, completionFirst: true, status: "failed" },
+    { terminated: true, completionFirst: false, status: "cancelled" },
+  ])("settles $status when terminate answers $terminated and completion first is $completionFirst", async ({ terminated, completionFirst, status }) => {
+    const f = createProvider();
+    try {
+      await startBackgroundBuild(f);
+      await f.complete(1, request.turnExecutionId);
+      f.child.terminateReply = (rpc) => {
+        const completion = JSON.stringify({ method: "item/completed", params: {
+          threadId: "native-thread", turnId: "native-turn-1",
+          item: { type: "commandExecution", ...backgroundBuild, status: "failed", exitCode: 1, aggregatedOutput: "Build exited" },
+        } });
+        const reply = JSON.stringify({ id: rpc.id, result: { terminated } });
+        f.child.stdout.write(completionFirst ? `${completion}\n${reply}\n` : `${reply}\n${completion}\n`);
+      };
+      await expect(f.provider.stopBackgroundTask?.(request.sessionId, "unknown")).resolves.toBe("not-running");
+      await expect(f.provider.stopBackgroundTask?.(request.sessionId, "101")).resolves.toBe(terminated ? "stopped" : "not-running");
+      await vi.waitFor(() => expect(f.settlements).toEqual([
+        { ...backgroundSettlement, status, output: "Build exited" },
+      ]));
+      expect(f.child.requests.filter(({ method }) => method === "thread/backgroundTerminals/terminate").map(({ params }) => params))
+        .toEqual([{ threadId: "native-thread", processId: "101" }]);
+    } finally {
+      await f.provider.shutdown();
+    }
+  });
+
+  it("waits for settlement on both Stops when completion arrives during terminate", async () => {
+    const f = createProvider();
+    try {
+      await startBackgroundBuild(f);
+      await f.complete(1, request.turnExecutionId);
+      const terminate = Promise.withResolvers<RpcRequest>();
+      f.child.terminateReply = terminate.resolve;
+      const first = f.provider.stopBackgroundTask?.(request.sessionId, "101");
+      const rpc = await terminate.promise;
+      f.child.commandItem("completed", { ...backgroundBuild, status: "completed", exitCode: 0, aggregatedOutput: "Build passed" });
+      await f.provider.flushCanonicalEvents();
+      const second = f.provider.stopBackgroundTask?.(request.sessionId, "101").then((result) =>
+        ({ result, settlements: [...f.settlements] }));
+      f.child.stdout.write(JSON.stringify({ id: rpc.id, result: { terminated: false } }) + "\n");
+
+      await expect(first).resolves.toBe("not-running");
+      await expect(second).resolves.toEqual({ result: "not-running",
+        settlements: [{ ...backgroundSettlement, status: "completed", output: "Build passed" }] });
+      expect(f.child.requests.filter(({ method }) => method === "thread/backgroundTerminals/terminate")).toHaveLength(1);
+    } finally {
+      await f.provider.shutdown();
+    }
+  });
+
+  it("holds the Stop response after terminate finds an exited command until its late result arrives", async () => {
+    const f = createProvider();
+    try {
+      await startBackgroundBuild(f);
+      await f.complete(1, request.turnExecutionId);
+      const terminate = Promise.withResolvers<RpcRequest>();
+      f.child.terminateReply = terminate.resolve;
+      const stop = f.provider.stopBackgroundTask?.(request.sessionId, "101").then((result) =>
+        ({ result, settlements: [...f.settlements] }));
+      const rpc = await terminate.promise;
+      f.child.stdout.write(JSON.stringify({ id: rpc.id, result: { terminated: false } }) + "\n");
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      f.child.commandItem("completed", { ...backgroundBuild, status: "failed", exitCode: 7, aggregatedOutput: "Build failed" });
+
+      await expect(stop).resolves.toEqual({ result: "not-running",
+        settlements: [{ ...backgroundSettlement, status: "failed", output: "Build failed" }] });
+    } finally {
+      await f.provider.shutdown();
+    }
+  });
+
+  it.each(["active launch", "missing completion", "unconfirmed termination"])("bounds Stop with %s", async (scenario) => {
+    const f = createProvider();
+    const active = scenario === "active launch";
+    const terminated = scenario !== "unconfirmed termination";
+    let startReplyPending = active;
+    f.child.holdTurnStart = active;
+    try {
+      await startBackgroundBuild(f);
+      f.child.complete("native-turn-1");
+      await vi.waitFor(() => expect(turnEventsOf(f.events)).toContainEqual(expect.objectContaining({
+        type: AgentEventType.ToolBackgrounded, toolCallId: "build",
+      })));
+      expect(turnEnds(f.events)).toHaveLength(active ? 0 : 1);
+      f.child.terminateReply = (rpc) => {
+        f.child.stdout.write(JSON.stringify({ id: rpc.id, result: { terminated } }) + "\n");
+      };
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      let result: string | undefined;
+      const stop = f.provider.stopBackgroundTask?.(request.sessionId, "101").then((value) => { result = value; });
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(result).toBe(terminated ? "stopped" : "settling");
+      await stop;
+      expect(f.settlements.map(({ status }) => status)).toEqual(active || !terminated ? [] : ["cancelled"]);
+      if (active) {
+        f.child.answerHeldTurnStart();
+        startReplyPending = false;
+        await settleIo();
+        expect(f.settlements.map(({ status }) => status)).toEqual(["cancelled"]);
+      }
+      if (!terminated) {
+        const retry = f.provider.stopBackgroundTask?.(request.sessionId, "101");
+        await settleIo();
+        expect(f.child.requests.filter(({ method }) => method === "thread/backgroundTerminals/terminate")).toHaveLength(2);
+        f.child.commandItem("completed", { ...backgroundBuild, status: "completed", exitCode: 0, aggregatedOutput: "Build passed" });
+        await expect(retry).resolves.toBe("not-running");
+        expect(f.settlements).toEqual([{ ...backgroundSettlement, status: "completed", output: "Build passed" }]);
+      }
+    } finally {
+      vi.useRealTimers();
+      if (startReplyPending) f.child.answerHeldTurnStart();
+      await f.provider.shutdown();
+    }
+  });
+
+  it("keeps command output and exit status when optional item fields have unexpected types", async () => {
+    const f = createProvider();
+    try {
+      await startBackgroundBuild(f);
+      await f.complete(1, request.turnExecutionId);
+      f.child.commandItem("completed", { ...backgroundBuild, processId: 101, status: { code: "unknown" },
+        exitCode: 7, aggregatedOutput: "Build failed" });
+      await f.provider.flushCanonicalEvents();
+      expect(f.settlements).toEqual([{ ...backgroundSettlement, status: "failed", output: "Build failed" }]);
+    } finally {
+      await f.provider.shutdown();
+    }
+  });
+
+  it("does not background commands or send terminal RPCs on a CLI below 0.140.0", async () => {
+    cli.version = "0.135.0";
+    const f = createProvider();
+    try {
+      await startBackgroundBuild(f);
+      await f.complete(1, request.turnExecutionId);
+      await expect(f.provider.stopBackgroundTask?.(request.sessionId, "101")).resolves.toBe("not-running");
+      expect(turnEventsOf(f.events).filter((event) => event.type === "toolBackgrounded")).toEqual([]);
+      expect(f.child.requests.filter(({ method }) => method.startsWith("thread/backgroundTerminals/"))).toEqual([]);
+    } finally {
+      await f.provider.shutdown();
+    }
   });
 
   it("cancels a reused turn during settings preparation without poisoning the next turn", async () => {

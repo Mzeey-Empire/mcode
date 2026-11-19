@@ -48,7 +48,9 @@ export class BackgroundToolSettlementEffect {
     const launch = commands.runningLaunch(threadId, toolCallId);
     if (!launch) return "not-running";
     if (stopTask && launch.taskId !== null) {
-      if (await stopTask(`mcode-${threadId}`, launch.taskId) === "stopped") return "stopped";
+      const outcome = await stopTask(`mcode-${threadId}`, launch.taskId);
+      if (outcome === "stopped") return "stopped";
+      if (outcome === "settling") throw new Error("The command's final state is not confirmed yet. Try Stop again in a moment.");
     }
 
     // A notification can be accepted already while its running row is still visible in SQLite.

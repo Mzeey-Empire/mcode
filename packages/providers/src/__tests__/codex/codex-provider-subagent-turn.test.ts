@@ -7,7 +7,8 @@ vi.mock("@mcode/shared", () => ({
   logger: { warn: loggerWarnMock, info: vi.fn(), debug: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("../../private/codex/codex-version.js", () => ({
+vi.mock("../../private/codex/codex-version.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../private/codex/codex-version.js")>(),
   checkCodexVersion: () => ({ ok: true, version: "0.40.0" }),
 }));
 

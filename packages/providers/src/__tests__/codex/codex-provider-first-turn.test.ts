@@ -16,7 +16,8 @@ const { checkCodexVersionMock, meetsMinVersionMock } = vi.hoisted(() => ({
   meetsMinVersionMock: vi.fn(() => true),
 }));
 
-vi.mock("../../private/codex/codex-version.js", () => ({
+vi.mock("../../private/codex/codex-version.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../private/codex/codex-version.js")>(),
   checkCodexVersion: checkCodexVersionMock,
 }));
 

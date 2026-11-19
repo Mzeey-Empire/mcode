@@ -199,6 +199,7 @@ export class CodexProvider extends PackageCodexProvider {
       close?: (sessionId: string) => Promise<void>;
     },
     eventSink?: ProviderEventSinkPort,
+    settleBackgroundTool: ProviderHostPorts["turns"]["settleBackgroundTool"] = async () => {},
   ) {
     const observers = new Set<(event: ProviderRuntimeEvent) => void>();
     const delegatedSettingsService = { get: () => settings.get() };
@@ -221,6 +222,7 @@ export class CodexProvider extends PackageCodexProvider {
         close: (sessionId) => mcode?.close?.(sessionId) ?? Promise.resolve(),
       },
       grants: { consume: () => false },
+      turns: { open: async () => ({ kind: "declined", reason: "busy" }), settleBackgroundTool },
       events: {
         submit: async (batch) => {
           const receipt = eventSink ? await eventSink.submit(batch) : {

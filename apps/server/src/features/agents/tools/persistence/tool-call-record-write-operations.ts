@@ -12,6 +12,7 @@ export const createToolCallRecordInputSchema = z.object({
   inputSummary: z.string(), outputSummary: z.string(), outputTruncated: z.boolean().optional(),
   outputTotalBytes: z.number().int().nonnegative().optional(), outputArtifactPath: z.string().optional(), exitCode: z.number().int().optional(),
   status: ToolCallStatusSchema, phase: ToolCallPhaseSchema.optional(), background: z.boolean().optional(), startedAt: z.string().optional(), completedAt: z.string().optional(),
+  backgroundTaskId: z.string().min(1).max(256).optional(),
   sortOrder: z.number().int(), parentToolCallId: z.string().optional(),
 }).strict();
 
