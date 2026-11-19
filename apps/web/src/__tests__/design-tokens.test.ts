@@ -125,8 +125,6 @@ const DEVIATIONS: Readonly<Record<Theme, Readonly<Record<string, string>>>> = {
   },
   dark: {
     "--warning": "oklch(82% 0.110 92)",
-    // Softer than Paper's neutral-500 for the same reason as the light hairline.
-    "--border": "oklch(25% 0.005 260)",
   },
 };
 

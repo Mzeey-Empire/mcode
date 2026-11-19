@@ -25,7 +25,7 @@ export function BashRenderer({ toolCall, isActive }: ToolRendererProps) {
       isActive={isActive}
     >
       <div className="space-y-1.5">
-        <pre className="rounded bg-page px-2.5 py-1.5 text-xs leading-relaxed text-muted font-mono overflow-x-auto">
+        <pre className="rounded bg-page px-2.5 dark:bg-hover py-1.5 text-xs leading-relaxed text-muted font-mono overflow-x-auto">
           <span className="select-none text-muted">$ </span>{command}
         </pre>
 

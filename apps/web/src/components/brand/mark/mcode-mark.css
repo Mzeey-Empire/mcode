@@ -180,7 +180,7 @@
   font-family: var(--font-sans, "Public Sans Variable", "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif);
 }
 :root.dark .mcode-preloader {
-  background: var(--background, oklch(16% 0.005 260));
+  background: var(--background, oklch(0% 0 0));
   color: var(--muted, oklch(65% 0.005 260));
 }
 .mcode-preloader-mark {

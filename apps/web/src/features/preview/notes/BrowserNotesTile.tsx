@@ -206,7 +206,7 @@ export function BrowserNotesTile({ scopeId, workspaceId, threadId, onRemoveAll }
             type="button"
             aria-label={`Remove ${label}`}
             onClick={onRemoveAll}
-            className="pointer-events-none absolute right-1 top-1 flex size-8 items-center justify-center rounded-full bg-selected text-ink opacity-0 transition-opacity duration-150 focus-visible:pointer-events-auto focus-visible:opacity-100 group-focus-within/tile:pointer-events-auto group-focus-within/tile:opacity-100 group-hover/tile:pointer-events-auto group-hover/tile:opacity-100 motion-reduce:transition-none"
+            className="pointer-events-none absolute right-1 top-1 flex size-8 items-center justify-center rounded-full bg-selected-solid text-ink opacity-0 transition-opacity duration-150 focus-visible:pointer-events-auto focus-visible:opacity-100 group-focus-within/tile:pointer-events-auto group-focus-within/tile:opacity-100 group-hover/tile:pointer-events-auto group-hover/tile:opacity-100 motion-reduce:transition-none"
           >
             <X size={16} aria-hidden />
           </button>

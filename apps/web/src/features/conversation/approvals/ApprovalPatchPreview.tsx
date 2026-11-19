@@ -149,7 +149,7 @@ export function ApprovalPatchPreview({ files }: { readonly files: readonly Appro
             type="button"
             variant="ghost"
             size="compact"
-            className={cn("h-6 px-2 text-xs text-muted hover:text-ink", preview ? "absolute right-0 bottom-0 bg-hover" : "ml-auto flex")}
+            className={cn("h-6 px-2 text-xs text-muted hover:text-ink", preview ? "absolute right-0 bottom-0 bg-hover-solid" : "ml-auto flex")}
             onClick={() => setOpen(true)}
           >
             Open diff

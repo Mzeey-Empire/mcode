@@ -83,7 +83,7 @@ function cellTone(cell: PullRequestDiffCell): string {
     return "bg-[var(--diff-remove-bg)] text-[var(--diff-remove-text)]";
   }
   if (cell.type === "empty") return "bg-hover/[0.04] text-muted";
-  if (cell.type === "metadata") return "bg-page/75 text-muted";
+  if (cell.type === "metadata") return "bg-page/75 text-muted dark:bg-hover";
   return "text-ink/75 hover:bg-hover/[0.08]";
 }
 
@@ -307,7 +307,7 @@ const DiffCell = memo(function DiffCell({
       <span
         aria-hidden
         data-testid="pull-request-diff-gutter"
-        className="inline-grid w-10 shrink-0 select-none grid-cols-[0.75rem_1fr] items-center bg-page/35 pr-1.5 tabular-nums text-muted/70"
+        className="inline-grid w-10 shrink-0 select-none grid-cols-[0.75rem_1fr] items-center bg-page/35 pr-1.5 dark:bg-hover tabular-nums text-muted/70"
       >
         <span className="text-center text-current">{change.marker}</span>
         <span className="text-right">{cell.lineNumber ?? ""}</span>

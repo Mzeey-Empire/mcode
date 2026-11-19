@@ -217,9 +217,9 @@ describe("Desktop Window feature entry point", () => {
 
   it.each([
     ["light", true, "#fafcff"],
-    ["dark", false, "#0c0d0f"],
+    ["dark", false, "#000000"],
     ["system", false, "#fafcff"],
-    ["system", true, "#0c0d0f"],
+    ["system", true, "#000000"],
   ])("opens the window for a %s preference (system dark: %s)", (theme, systemDark, background) => {
     desktopWindowFeatureTest.reset();
     desktopWindowFeatureTest.nativeTheme.shouldUseDarkColors = systemDark;
@@ -237,7 +237,7 @@ describe("Desktop Window feature entry point", () => {
     desktopWindowFeatureTest.nativeTheme.shouldUseDarkColors = false;
     if (contents !== undefined) NodeFS.writeFileSync(themeHintPath, contents);
     const window = createDesktopWindowFeature(dependencies()).createWindow();
-    expect(window.options.backgroundColor).toBe("#0c0d0f");
+    expect(window.options.backgroundColor).toBe("#000000");
   });
 
   it("repaints and persists a theme reported by the main window only", async () => {

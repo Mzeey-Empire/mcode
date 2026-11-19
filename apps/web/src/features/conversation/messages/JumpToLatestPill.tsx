@@ -15,7 +15,7 @@ export function JumpToLatestPill({ onJumpToLatest }: JumpToLatestPillProps) {
     <button
       type="button"
       onClick={onJumpToLatest}
-      className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-selected pr-3 pl-2.5 text-xs font-medium text-ink shadow-floating focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus"
+      className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-border bg-selected-solid pr-3 pl-2.5 text-xs font-medium text-ink shadow-floating focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-solid focus-visible:outline-focus"
     >
       <ArrowDown size={14} aria-hidden />
       Jump to latest

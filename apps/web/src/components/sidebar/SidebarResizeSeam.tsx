@@ -80,7 +80,7 @@ export function SidebarResizeSeam() {
     >
       <span
         aria-hidden
-        className="pointer-events-none w-px bg-border/45 transition-colors group-hover:w-0.5 group-hover:bg-focus group-focus-visible:w-0.5 group-focus-visible:bg-focus"
+        className="pointer-events-none w-px bg-border/45 transition-colors group-hover:w-0.5 group-hover:bg-focus group-focus-visible:w-0.5 group-focus-visible:bg-focus dark:bg-border dark:group-hover:bg-focus dark:group-focus-visible:bg-focus"
       />
     </div>
   );
