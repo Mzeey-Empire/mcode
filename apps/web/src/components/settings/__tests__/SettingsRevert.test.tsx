@@ -306,6 +306,60 @@ describe("Settings Revert", () => {
     expect(vi.mocked(mockTransport.updateSettings).mock.calls.at(-1)?.[0]).toEqual({ appearance: { theme: "system" } });
   });
 
+  it("keeps a change a later write of the same value explains when the earlier pending write fails", async () => {
+    render(<SettingsView />);
+    let fail: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      fail = () => reject(new Error("offline"));
+    }));
+    let lightWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      lightWrite = useSettingsStore.getState().update({ appearance: { theme: "light" } });
+    });
+    act(() => useSettingsStore.getState()._applyPush(themeOf(useSettingsStore.getState().settings, "light")));
+    await act(async () => {
+      await useSettingsStore.getState().update({ appearance: { theme: "system" } });
+      await useSettingsStore.getState().update({ appearance: { theme: "light" } });
+    });
+    await act(async () => {
+      fail();
+      await lightWrite;
+    });
+
+    expect(useSettingsStore.getState().settings.appearance.theme).toBe("light");
+    fireEvent.click(screen.getByRole("button", { name: "Revert 1 change" }));
+    await flush();
+    expect(vi.mocked(mockTransport.updateSettings).mock.calls.at(-1)?.[0]).toEqual({ appearance: { theme: "system" } });
+  });
+
+  it("keeps a change two pending writes of the same value explain when only the later one fails", async () => {
+    render(<SettingsView />);
+    let land: () => void = () => {};
+    let fail: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings)
+      .mockImplementationOnce((patch) => new Promise((resolve) => {
+        land = () => resolve(mergeSettings(useSettingsStore.getState().settings, patch));
+      }))
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => {
+        fail = () => reject(new Error("offline"));
+      }));
+    let writes: Promise<unknown>[] = [];
+    act(() => {
+      writes = [
+        useSettingsStore.getState().update({ appearance: { theme: "light" } }),
+        useSettingsStore.getState().update({ appearance: { theme: "light" } }),
+      ];
+    });
+    act(() => useSettingsStore.getState()._applyPush(themeOf(useSettingsStore.getState().settings, "light")));
+    await act(async () => {
+      fail();
+      land();
+      await Promise.all(writes);
+    });
+
+    expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
+  });
+
   it("claims its own write when the push for it arrives before the write's response", async () => {
     render(<SettingsView />);
     vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => {

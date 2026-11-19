@@ -124,33 +124,37 @@ function sendsProfile(scope: LocalWriteScope, step: RestoreStep): boolean {
 /** The one changed field of a terminal default, which is the profile it points at. */
 const PROFILE_FIELD = "profile";
 
+function indexesWhere(scopes: readonly LocalWriteScope[], sends: (scope: LocalWriteScope) => boolean): number[] {
+  return scopes.flatMap((scope, index) => (sends(scope) ? [index] : []));
+}
+
 /**
- * For each field of `def` that changed from `prev` to `next`, the index into `scopes` of an in-flight write that sends
- * it, or null when some changed field is not sent, with its new value, by any of them. `restore(x, x)` names what
+ * For each field of `def` that changed from `prev` to `next`, the indexes into `scopes` of every in-flight write that
+ * sends it, or null when some changed field is not sent, with its new value, by any of them. `restore(x, x)` names what
  * writing a value sends, so the fields that differ between the two steps are what changed. Matching each changed field
  * and its value, not the whole value, keeps a pending write to one field of a grouped row (both Fast flags) from
  * claiming an outside change to another; the window's own push can arrive before its RPC response, so arrival path
- * alone cannot tell them apart.
+ * alone cannot tell them apart. Several writes can send the same value, and any one of them landing explains it.
  */
 function explainingWrites(
   def: RevertibleDef,
   scopes: readonly LocalWriteScope[],
   prev: RevertSource,
   next: RevertSource,
-): ReadonlyMap<string, number> | null {
+): ReadonlyMap<string, readonly number[]> | null {
   const before = def.value.restore(prev, prev);
   const after = def.value.restore(next, next);
   if (after.sink !== "settings" && after.sink !== "terminalPreferences") {
-    const index = scopes.findIndex((scope) => sendsProfile(scope, after));
-    return index === -1 ? null : new Map([[PROFILE_FIELD, index]]);
+    const indexes = indexesWhere(scopes, (scope) => sendsProfile(scope, after));
+    return indexes.length === 0 ? null : new Map([[PROFILE_FIELD, indexes]]);
   }
   const paths = before.sink === after.sink ? changedPaths(before.patch, after.patch) : leafPaths(after.patch);
   if (paths.length === 0) return null;
-  const byField = new Map<string, number>();
+  const byField = new Map<string, readonly number[]>();
   for (const path of paths) {
-    const index = scopes.findIndex((scope) => scope.sink === after.sink && patchSendsPath(scope.patch, path, after.patch));
-    if (index === -1) return null;
-    byField.set(path.join("\0"), index);
+    const indexes = indexesWhere(scopes, (scope) => scope.sink === after.sink && patchSendsPath(scope.patch, path, after.patch));
+    if (indexes.length === 0) return null;
+    byField.set(path.join("\0"), indexes);
   }
   return byField;
 }
@@ -264,8 +268,8 @@ const useVisitStore = create<{ readonly visit: Visit | null }>(() => ({ visit: n
 let nextVisitId = 0;
 let lastSource: RevertSource | null = null;
 let stopListening: (() => void) | null = null;
-/** For each claimed setting, per changed field, the sequence of the local write that field relied on to land. */
-let reliedOn = new Map<SettingId, ReadonlyMap<string, number>>();
+/** For each claimed setting, per changed field, the sequences of the local writes any one of which landing explains it. */
+let reliedOn = new Map<SettingId, ReadonlyMap<string, readonly number[]>>();
 
 function sameSource(a: RevertSource, b: RevertSource): boolean {
   return a.settings === b.settings
@@ -303,16 +307,21 @@ function recordReliance(journal: ReadonlyMap<SettingId, JournalEntry>, prev: Rev
     // Replace per field: a later local write to a field ends that field's reliance on an earlier write, while a grouped
     // row (both Fast flags) keeps relying on a pending write to the field the latest write did not touch.
     const fields = new Map(reliedOn.get(def.id));
-    for (const [field, index] of explaining) fields.set(field, writes[index]?.seq ?? 0);
+    for (const [field, indexes] of explaining) fields.set(field, indexes.map((index) => writes[index]?.seq ?? 0));
     reliedOn.set(def.id, fields);
   }
 }
 
-/** A failed write landed nothing, so a setting claimed on the assumption it would was changed by someone else. */
+/** A failed write landed nothing, so a field only it could explain was changed by someone else: release its setting. */
 function onWriteFailed(seq: number): void {
   const visit = useVisitStore.getState().visit;
   if (visit === null) return;
-  const released = [...reliedOn].filter(([, fields]) => [...fields.values()].includes(seq)).map(([id]) => id);
+  const released: SettingId[] = [];
+  for (const [id, fields] of reliedOn) {
+    const remaining = new Map([...fields].map(([field, seqs]) => [field, seqs.filter((other) => other !== seq)] as const));
+    if ([...remaining.values()].some((seqs) => seqs.length === 0)) released.push(id);
+    else reliedOn.set(id, remaining);
+  }
   if (released.length === 0) return;
   const journal = new Map(visit.journal);
   for (const id of released) {
