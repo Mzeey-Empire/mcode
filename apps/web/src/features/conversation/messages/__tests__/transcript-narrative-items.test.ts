@@ -1,6 +1,7 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { CONTEXT_COMPACTED_NOTICE, type Message } from "@mcode/contracts/models/message";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts/models/plan-questions";
 import type { ToolCall } from "@/transport/types";
 import type { ToolCallTransition } from "../useToolCallTransitions";
 import { expandTranscriptNarrative, expandTranscriptToolGroups } from "../transcript-narrative-items";
@@ -337,6 +338,91 @@ describe("context compaction notice", () => {
 
   function transcriptLabel(row: { type: string; item?: { type: string }; message?: Message }): string {
     return row.type === "message" && row.message ? row.message.content : rowLabel(row);
+  }
+});
+
+describe("html visual placement", () => {
+  const records = { answer: { approvals: [], hooks: [], thoughts: [], tools: [{
+    id: "tool", message_id: "answer", parent_tool_call_id: null, tool_name: "Bash", input_summary: "pwd",
+    output_summary: "done", status: "completed" as const, started_at: new Date(1200).toISOString(),
+    completed_at: new Date(1300).toISOString(), sort_order: 0,
+  }] } };
+  const liveTool: ToolCall = { id: "tool", toolName: "Bash", toolInput: { command: "pwd" }, output: "done", isError: false, isComplete: true, startedAt: 1200 };
+
+  it("shows a settled turn's visual between its work fold and its answer", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "Done", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
+  it("keeps two visuals of one turn in the order they were published", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), visual(3), turnMessage("answer", "assistant", "Done", 4)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "visual-3", "answer", "turn-meta-line:answer"]);
+  });
+
+  it("shows a running turn's visual below its live rows and above its streaming reply", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2)],
+      currentTurn: { threadId: "thread", executionId: "execution", responseKey: "live-answer" },
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: "Here it is", toolCalls: [liveTool],
+    });
+    const keys = projected.map((item) => item.key);
+    expect(keys.slice(0, 4)).toEqual(["prompt", "narrative-flow", "visual-2", "live-answer"]);
+  });
+
+  it("keeps a running turn's visual above its answer once the answer is saved mid-turn", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "Here it is", 3)],
+      currentTurn: { threadId: "thread", executionId: "execution", messageId: "answer", responseKey: "live-answer" },
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: "Here it is", toolCalls: [liveTool],
+    });
+    const keys = projected.map((item) => item.key);
+    expect(keys.slice(0, 4)).toEqual(["prompt", "narrative-flow", "visual-2", "live-answer"]);
+  });
+
+  it("keeps the same visual item when the running turn's reply streams on", () => {
+    const project = createTranscriptItemProjector();
+    const input: TranscriptProjectionInput = {
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2)],
+      currentTurn: { threadId: "thread", executionId: "execution", responseKey: "live-answer" },
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: "Here", toolCalls: [liveTool],
+    };
+    const before = project(input).find((item) => item.key === "visual-2");
+    const after = project({ ...input, streamingText: "Here it is" }).find((item) => item.key === "visual-2");
+    expect(before).toBeDefined();
+    expect(after).toBe(before);
+  });
+
+  it("keeps a visual published after the last answer on its own row when no turn runs", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), turnMessage("answer", "assistant", "Done", 2), visual(3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [],
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "answer", "visual-3"]);
+  });
+
+  it("shows the visual of a turn started by a hidden plan answer above that turn's reply", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("plan-answer", "user", `${PLAN_ANSWER_MESSAGE_PREFIX} yes`, 1), visual(2), turnMessage("answer", "assistant", "Done", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
+  function visual(sequence: number): Message {
+    return createMockMessage({
+      id: `visual-${sequence}`, thread_id: "thread", role: "system", content: "Chart", sequence,
+      timestamp: new Date(1000 + sequence).toISOString(), visual: { title: "Chart", html: "<p>chart</p>", maxHeight: 720 },
+    });
+  }
+
+  function turnMessage(id: string, role: Message["role"], content: string, sequence: number): Message {
+    return createMockMessage({ id, thread_id: "thread", role, content, sequence, timestamp: new Date(1000 + sequence).toISOString() });
   }
 });
 

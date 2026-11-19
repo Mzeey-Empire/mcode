@@ -1,7 +1,7 @@
 import { CONTEXT_COMPACTED_NOTICE, type Message } from "@mcode/contracts/models/message";
 import type { TurnNotice } from "../narrative/types";
 
-/** Where each context-compaction notice renders: among a turn's rows, or as its own message row. */
+/** Where each context-compaction notice and HTML visual renders: within a turn, or as its own message row. */
 export interface TurnNoticePlacement {
   /** Messages that still render as their own rows. */
   messages: readonly Message[];
@@ -9,6 +9,10 @@ export interface TurnNoticePlacement {
   byResponseId: Readonly<Record<string, readonly Message[]>>;
   /** Notices of the live turn, shown among its live rows. */
   live: readonly TurnNotice[];
+  /** Visual messages keyed by the answer of the settled turn that published them, in publication order. */
+  visualsByResponseId: Readonly<Record<string, readonly Message[]>>;
+  /** Visual messages of the live turn, shown below its live rows. */
+  liveVisuals: readonly Message[];
 }
 
 /** The live turn that takes notices into its rows. */
@@ -19,18 +23,31 @@ export interface LiveNoticeOwner {
   ownsTrailing: boolean;
 }
 
+interface PendingTurnMessages {
+  notices: Message[];
+  visuals: Message[];
+}
+
 interface PlacementDraft {
   byResponseId: Record<string, readonly Message[]>;
   live: TurnNotice[];
+  visualsByResponseId: Record<string, readonly Message[]>;
+  liveVisuals: Message[];
   moved: Set<string>;
 }
 
 const NO_NOTICES_BY_RESPONSE: Readonly<Record<string, readonly Message[]>> = {};
 const NO_LIVE_NOTICES: readonly TurnNotice[] = [];
+const NO_VISUALS_BY_RESPONSE: Readonly<Record<string, readonly Message[]>> = {};
+const NO_LIVE_VISUALS: readonly Message[] = [];
 const turnNoticeCache = new WeakMap<Message, TurnNotice>();
 
 function isContextCompactedNotice(message: Message): boolean {
   return message.role === "system" && message.content === CONTEXT_COMPACTED_NOTICE && !message.systemNotice;
+}
+
+function isVisualMessage(message: Message): boolean {
+  return message.role === "system" && Boolean(message.visual);
 }
 
 /** Maps a notice message to its row model, keeping its identity stable across renders. */
@@ -44,44 +61,54 @@ export function turnNoticeFromMessage(message: Message): TurnNotice {
 }
 
 /**
- * A compaction's message takes the next message sequence when it ends, so mid-turn it sorts above all of
- * the turn's work. Each notice joins the turn it happened in: the next answer, unless a prompt comes first.
- * A notice with no turn to join keeps its own row.
+ * A compaction's message takes the next message sequence when it ends, and a visual's when it is published,
+ * so mid-turn both sort above all of the turn's work. Each joins the turn it happened in: the next answer,
+ * unless a prompt comes first. Notices go among the turn's rows; visuals go just above its answer, so they
+ * read as part of the reply. One with no turn to join keeps its own row.
  */
 export function placeTurnNotices(messages: readonly Message[], owner: LiveNoticeOwner): TurnNoticePlacement {
-  const draft: PlacementDraft = { byResponseId: {}, live: [], moved: new Set() };
-  let pending: Message[] = [];
+  const draft: PlacementDraft = { byResponseId: {}, live: [], visualsByResponseId: {}, liveVisuals: [], moved: new Set() };
+  let pending: PendingTurnMessages = { notices: [], visuals: [] };
   for (const message of messages) {
     if (isContextCompactedNotice(message)) {
-      pending.push(message);
+      pending.notices.push(message);
+      continue;
+    }
+    if (isVisualMessage(message)) {
+      pending.visuals.push(message);
       continue;
     }
     if (message.role === "system") continue;
     if (message.role === "assistant" && message.id === owner.responseId) moveToLiveTurn(draft, pending);
     else if (message.role === "assistant") moveToSettledTurn(draft, pending, message.id);
-    pending = [];
+    pending = { notices: [], visuals: [] };
   }
   if (owner.ownsTrailing) moveToLiveTurn(draft, pending);
   return placementFrom(messages, draft);
 }
 
-function moveToLiveTurn(draft: PlacementDraft, notices: readonly Message[]): void {
-  draft.live.push(...notices.map(turnNoticeFromMessage));
-  for (const notice of notices) draft.moved.add(notice.id);
+function moveToLiveTurn(draft: PlacementDraft, pending: PendingTurnMessages): void {
+  draft.live.push(...pending.notices.map(turnNoticeFromMessage));
+  draft.liveVisuals.push(...pending.visuals);
+  for (const message of [...pending.notices, ...pending.visuals]) draft.moved.add(message.id);
 }
 
-function moveToSettledTurn(draft: PlacementDraft, notices: readonly Message[], responseId: string): void {
-  if (notices.length === 0) return;
-  draft.byResponseId[responseId] = notices;
-  for (const notice of notices) draft.moved.add(notice.id);
+function moveToSettledTurn(draft: PlacementDraft, pending: PendingTurnMessages, responseId: string): void {
+  if (pending.notices.length > 0) draft.byResponseId[responseId] = pending.notices;
+  if (pending.visuals.length > 0) draft.visualsByResponseId[responseId] = pending.visuals;
+  for (const message of [...pending.notices, ...pending.visuals]) draft.moved.add(message.id);
 }
 
 function placementFrom(messages: readonly Message[], draft: PlacementDraft): TurnNoticePlacement {
-  if (draft.moved.size === 0) return { messages, byResponseId: NO_NOTICES_BY_RESPONSE, live: NO_LIVE_NOTICES };
+  if (draft.moved.size === 0) {
+    return { messages, byResponseId: NO_NOTICES_BY_RESPONSE, live: NO_LIVE_NOTICES, visualsByResponseId: NO_VISUALS_BY_RESPONSE, liveVisuals: NO_LIVE_VISUALS };
+  }
   return {
     messages: messages.filter((message) => !draft.moved.has(message.id)),
-    byResponseId: draft.byResponseId,
+    byResponseId: Object.keys(draft.byResponseId).length > 0 ? draft.byResponseId : NO_NOTICES_BY_RESPONSE,
     live: draft.live.length > 0 ? draft.live : NO_LIVE_NOTICES,
+    visualsByResponseId: Object.keys(draft.visualsByResponseId).length > 0 ? draft.visualsByResponseId : NO_VISUALS_BY_RESPONSE,
+    liveVisuals: draft.liveVisuals.length > 0 ? draft.liveVisuals : NO_LIVE_VISUALS,
   };
 }
 
