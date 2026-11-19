@@ -58,7 +58,6 @@ import type { ProviderStatus } from "@mcode/contracts/providers/provider-status"
 import type { GoalLookupResult } from "@mcode/contracts/models/goal";
 import { TERMINAL_DATA_TAG, decodeTerminalDataFrame } from "@mcode/contracts/ws/terminal-legacy-binary";
 import { stagedSnapshotIds } from "@/lib/staged-snapshot-ids";
-import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { ApprovalRequest } from "@mcode/contracts/models/approval";
 import type { BuildStage } from "@mcode/contracts/build-stage";
@@ -1124,10 +1123,6 @@ export function createWsTransport(
 
     // Agent
     sendMessage: async (input: SendMessageInput) => {
-      const state = useSettingsStore.getState();
-      const guardrails = state.loaded
-        ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
-        : {};
       const { replyToMessageId, quotedText, ...command } = input;
       const stagedDraftImageIds = stagedSnapshotIds(input.previewAnnotations);
       try {
@@ -1136,7 +1131,6 @@ export function createWsTransport(
           ...(stagedDraftImageIds.length > 0 && { stagedDraftImageIds }),
           ...(replyToMessageId && { replyToMessageId }),
           ...(quotedText && { quotedText }),
-          ...guardrails,
         }, { timeoutMs: SEND_MESSAGE_TIMEOUT_MS });
       } catch (error) {
         if (!input.messageId || error instanceof RpcError) throw error;
@@ -1174,17 +1168,9 @@ export function createWsTransport(
     retryThreadStartupAgent: (startupId) =>
       rpc<ThreadStartup>("thread.startup.retryAgent", { startupId }),
     createAndSendMessage: (input: CreateAndSendInput) => {
-      const state = useSettingsStore.getState();
-      const guardrails = state.loaded
-        ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
-        : {};
-      const params = {
-        ...input,
-        ...guardrails,
-      };
       return input.startupId
-        ? createAndSendWithReconnect(params)
-        : rpc<CreateAndSendResult>("agent.createAndSend", params);
+        ? createAndSendWithReconnect(input)
+        : rpc<CreateAndSendResult>("agent.createAndSend", input);
     },
     stopAgent: (threadId) => rpc<import("@mcode/contracts/models/turn-runtime").AgentStopResult>("agent.stop", { threadId }),
     retrySave: async (threadId) => WS_METHODS()["agent.retrySave"].result.parse(await rpc<unknown>("agent.retrySave", { threadId })),

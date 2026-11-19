@@ -341,7 +341,6 @@ export class CursorProvider
 
 
   private prepareTurnContext(req: TurnRequest<"cursor">): CursorTurnContext {
-    void req.fallbackModel;
     void req.reasoningLevel;
     const resume = req.resumeFrom !== undefined;
     if (req.resumeFrom !== undefined) {

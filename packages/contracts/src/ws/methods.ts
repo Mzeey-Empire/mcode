@@ -343,10 +343,6 @@ export const SendMessageSchema = lazySchema(() => z.object({
     interactionMode: InteractionModeSchema.optional(),
     /** Provider-agnostic proactive delegation mode for this turn. */
     orchestrationMode: OrchestrationModeSchema.optional(),
-    /** USD budget cap for this session. 0 or absent disables. */
-    maxBudgetUsd: z.number().nonnegative().finite().optional(),
-    /** Maximum agent turns. 0 or absent disables. */
-    maxTurns: z.number().int().nonnegative().optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
     /**
@@ -409,10 +405,6 @@ const createAndSendFields = lazySchema(() =>
     /** When "plan", the server wraps the message with the plan-mode question prompt. */
     interactionMode: InteractionModeSchema.optional(),
     orchestrationMode: OrchestrationModeSchema.optional(),
-    /** USD budget cap for this session. 0 or absent disables. */
-    maxBudgetUsd: z.number().nonnegative().finite().optional(),
-    /** Maximum agent turns. 0 or absent disables. */
-    maxTurns: z.number().int().nonnegative().optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
     /**

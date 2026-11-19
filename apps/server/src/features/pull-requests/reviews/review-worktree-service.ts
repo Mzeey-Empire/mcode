@@ -622,8 +622,6 @@ export class ReviewWorktreeService {
       reasoningLevel: settings.model.defaults.reasoning,
       provider,
       interactionMode,
-      maxBudgetUsd: settings.agent.guardrails.maxBudgetUsd || undefined,
-      maxTurns: settings.agent.guardrails.maxTurns || undefined,
       thinking: settings.model.defaults.thinking,
       providerWireOverride: context,
       displayContent: intent,

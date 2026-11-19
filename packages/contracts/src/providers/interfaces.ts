@@ -113,8 +113,6 @@ export interface TurnRequest<P extends ProviderId = ProviderId> {
   /** Working directory: the thread's effective worktree or workspace path. */
   cwd: string;
   model: string;
-  /** Fallback model if the primary is unavailable. Undefined disables fallback. */
-  fallbackModel?: string;
   permissionMode: PermissionMode;
   /** Resolved once for this dispatch attempt before provider delivery begins. */
   approvalReviewMode: ApprovalReviewMode;
@@ -125,10 +123,6 @@ export interface TurnRequest<P extends ProviderId = ProviderId> {
   /** Requests provider-native proactive delegation without changing reasoning effort. */
   orchestrationMode?: OrchestrationMode;
   reasoningLevel?: ReasoningLevel;
-  /** USD budget cap for this Turn. Undefined or 0 disables. */
-  maxBudgetUsd?: number;
-  /** Max agent turns for this Turn. Undefined or 0 disables. */
-  maxTurns?: number;
   /**
    * SDK session id to resume from. When defined the Provider resumes that
    * session; when undefined it starts fresh. Replaces the previous

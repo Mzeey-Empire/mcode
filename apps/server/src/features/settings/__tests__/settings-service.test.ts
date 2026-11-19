@@ -56,14 +56,36 @@ describe("SettingsService agent runtime defaults", () => {
     }
   });
 
-  it("uses Codex Luna without a fallback when settings are missing in the agent runtime", () => {
+  it("loads legacy agent limits and saves every other setting without the removed keys", () => {
+    const retained = getDefaultSettings();
+    retained.appearance.theme = "dark";
+    retained.agent.defaults.mode = "plan";
+    retained.agent.defaults.permission = "supervised";
+    retained.model.defaults.id = "custom-model";
+    vi.mocked(NodeFS.readFileSync).mockReturnValue(JSON.stringify({
+      ...retained,
+      agent: { ...retained.agent, maxConcurrent: 7, guardrails: { maxBudgetUsd: 12, maxTurns: 8 } },
+      model: { ...retained.model, defaults: { ...retained.model.defaults, fallbackId: "old-fallback" } },
+    }));
+
+    const service = new SettingsService();
+    expect(service.get()).toEqual(retained);
+    service.update({});
+    const writes = vi.mocked(NodeFS.writeFileSync).mock.calls;
+    expect(writes.length).toBeGreaterThan(0);
+    for (const [, document] of writes) {
+      expect(JSON.parse(String(document))).toEqual(retained);
+    }
+    service.dispose();
+  });
+
+  it("uses Codex Luna when settings are missing in the agent runtime", () => {
     process.env.MCODE_AGENT_RUNTIME = "1";
 
     const settings = new SettingsService().get();
 
     expect(settings.model.defaults.provider).toBe("codex");
     expect(settings.model.defaults.id).toBe("gpt-5.6-luna");
-    expect(settings.model.defaults.fallbackId).toBe("");
   });
 
   it("uses the normal Claude defaults when settings are missing outside the agent runtime", () => {
@@ -74,7 +96,6 @@ describe("SettingsService agent runtime defaults", () => {
 
     expect(settings.model.defaults.provider).toBe("claude");
     expect(settings.model.defaults.id).toBe("claude-opus-4-8");
-    expect(settings.model.defaults.fallbackId).toBe("claude-sonnet-4-6");
     expect(settings.model.defaults.reasoning).toBe(defaults.model.defaults.reasoning);
   });
 
@@ -83,14 +104,12 @@ describe("SettingsService agent runtime defaults", () => {
     const existingSettings = getDefaultSettings();
     existingSettings.model.defaults.provider = "claude";
     existingSettings.model.defaults.id = "claude-opus-4-8";
-    existingSettings.model.defaults.fallbackId = "claude-sonnet-4-6";
     vi.mocked(NodeFS.readFileSync).mockReturnValue(JSON.stringify(existingSettings));
 
     const settings = new SettingsService().get();
 
     expect(settings.model.defaults.provider).toBe("claude");
     expect(settings.model.defaults.id).toBe("claude-opus-4-8");
-    expect(settings.model.defaults.fallbackId).toBe("claude-sonnet-4-6");
   });
 });
 

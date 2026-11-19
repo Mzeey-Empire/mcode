@@ -32,9 +32,8 @@ function legacyTheme(value: unknown): Settings["appearance"]["theme"] | undefine
 function legacyTopLevelPatch(state: Record<string, unknown>): DeepPartial<Settings> {
   const theme = legacyTheme(state.theme);
   const appearance = theme ? { theme } : undefined;
-  const agent = typeof state.maxConcurrentAgents === "number" ? { maxConcurrent: state.maxConcurrentAgents } : undefined;
   const notifications = typeof state.notificationsEnabled === "boolean" ? { enabled: state.notificationsEnabled } : undefined;
-  return { ...(appearance ? { appearance } : {}), ...(agent ? { agent } : {}), ...(notifications ? { notifications } : {}) };
+  return { ...(appearance ? { appearance } : {}), ...(notifications ? { notifications } : {}) };
 }
 
 function legacySettingsPatch(value: unknown): DeepPartial<Settings> {

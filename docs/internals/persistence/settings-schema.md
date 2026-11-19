@@ -28,7 +28,6 @@ If a category has multiple settings that share a common qualifier, group them un
 // Good: "mode" and "permission" both qualify as "defaults"
 {
   "agent": {
-    "maxConcurrent": 5,
     "defaults": {
       "mode": "build",
       "permission": "full"
@@ -39,7 +38,6 @@ If a category has multiple settings that share a common qualifier, group them un
 // Bad: flat siblings with repeated prefix
 {
   "agent": {
-    "maxConcurrent": 5,
     "defaultMode": "build",
     "defaultPermission": "full"
   }
@@ -88,11 +86,11 @@ All property names use camelCase, matching the TypeScript codebase convention.
 
 ```jsonc
 // Good
-{ "agent": { "maxConcurrent": 5 } }
+{ "terminal": { "defaultProfileId": "automatic" } }
 
 // Bad
-{ "agent": { "max_concurrent": 5 } }
-{ "agent": { "max-concurrent": 5 } }
+{ "terminal": { "default_profile_id": "automatic" } }
+{ "terminal": { "default-profile-id": "automatic" } }
 ```
 
 ## Decision Checklist
@@ -116,14 +114,9 @@ When adding a new setting, ask these questions in order:
     "theme": "system"                  // "system" | "dark" | "light"
   },
   "agent": {
-    "maxConcurrent": 5,
     "defaults": {
       "mode": "build",                 // "plan" | "build" | "agent"
       "permission": "full"             // "full" | "supervised"
-    },
-    "guardrails": {
-      "maxBudgetUsd": 0,               // 0 disables, USD cap per session (Claude only)
-      "maxTurns": 0                    // 0 disables, turn limit per session (Claude only)
     }
   },
   "model": {
@@ -131,7 +124,6 @@ When adding a new setting, ask these questions in order:
       "provider": "claude",            // "claude" | "codex" | "gemini" | "copilot"
       "id": "claude-sonnet-4-6",
       "reasoning": "high",             // "low" | "medium" | "high"
-      "fallbackId": "claude-sonnet-4-6", // "" disables fallback
       "contextWindow": null             // number or null; overrides API/SDK value
     }
   },

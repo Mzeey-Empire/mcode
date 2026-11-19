@@ -157,8 +157,7 @@ async function createAgentServiceHarness(automaticSetup?:
     } as never,
     {
       get: vi.fn(() => ({
-        model: { defaults: { fallbackId: undefined } },
-        agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+        model: { defaults: {} },
         provider: { claude: { fastMode: false }, codex: { fastMode: false } },
       })),
     } as never,

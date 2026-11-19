@@ -125,7 +125,6 @@ function shouldShowThinking(provider: string, modelId: string): boolean {
 export function ModelSection() {
   const provider = useSettingsStore((s) => s.settings.model.defaults.provider);
   const modelId = useSettingsStore((s) => s.settings.model.defaults.id);
-  const fallbackId = useSettingsStore((s) => s.settings.model.defaults.fallbackId);
   const reasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
   const thinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
   const fastModeProvider = fastModeSettingProvider(provider);
@@ -219,19 +218,6 @@ export function ModelSection() {
     return mergedCatalogModels;
   }, [mergedCatalogModels, modelId, provider]);
 
-  const modelsForFallbackPicker = useMemo(() => {
-    const ids = new Set(mergedCatalogModels.map((m) => m.id));
-    if (fallbackId.trim() && !ids.has(fallbackId)) {
-      const orphan: ModelDefinition = {
-        id: fallbackId,
-        label: `${fallbackId} (unlisted)`,
-        providerId: provider,
-        group: "Saved selection",
-      };
-      return [orphan, ...mergedCatalogModels];
-    }
-    return mergedCatalogModels;
-  }, [mergedCatalogModels, fallbackId, provider]);
 
   const staleDefaultToastSigRef = useRef<string | null>(null);
   useEffect(() => {
@@ -249,7 +235,6 @@ export function ModelSection() {
   }, [modelsLoading, mergedCatalogModels, modelId, provider]);
 
   const defaultModelStale = isModelStale(modelId, modelsLoading, mergedCatalogModels);
-  const fallbackModelStale = isModelStale(fallbackId, modelsLoading, mergedCatalogModels);
 
   const modelOptions = useMemo(
     () =>
@@ -261,17 +246,6 @@ export function ModelSection() {
     [modelsForDefaultPicker],
   );
 
-  const fallbackOptions = useMemo(
-    () => [
-      { value: "", label: "Off", group: undefined },
-      ...modelsForFallbackPicker.map((m) => ({
-        value: m.id,
-        label: m.multiplier != null && m.multiplier !== 1 ? `${m.label} (${m.multiplier}x)` : m.label,
-        group: m.group,
-      })),
-    ],
-    [modelsForFallbackPicker],
-  );
 
   const mergedUtilityCatalogModels = useMemo(
     () =>
@@ -334,7 +308,7 @@ export function ModelSection() {
         model: {
           defaults: {
             provider: v as SettingsProviderId,
-            ...(firstModel && { id: firstModel.id, fallbackId: "" }),
+            ...(firstModel && { id: firstModel.id }),
             reasoning: newReasoning as ReasoningLevel,
           },
         },
@@ -368,16 +342,13 @@ export function ModelSection() {
     <ModelSettingsContent
       provider={provider}
       modelId={modelId}
-      fallbackId={fallbackId}
       reasoning={reasoning}
       thinking={thinking}
       fastMode={fastMode}
       providerOptions={providerOptions}
       modelOptions={modelOptions}
-      fallbackOptions={fallbackOptions}
       modelsLoading={modelsLoading}
       defaultModelStale={defaultModelStale}
-      fallbackModelStale={fallbackModelStale}
       showReasoning={reasoningLevels.length > 0}
       reasoningOptions={reasoningOptions}
       reasoningHint={reasoningHint}
@@ -390,7 +361,6 @@ export function ModelSection() {
       utilityModelsLoading={utilityModelsLoading}
       onProviderChange={handleProviderChange}
       onModelChange={handleModelChange}
-      onFallbackChange={(value) => void update({ model: { defaults: { fallbackId: value } } })}
       onReasoningChange={(value) => update({ model: { defaults: { reasoning: value as ReasoningLevel } } })}
       onFastModeChange={(value) => {
         if (fastModeProvider) void update({ provider: { [fastModeProvider]: { fastMode: value } } });
@@ -405,16 +375,13 @@ export function ModelSection() {
 interface ModelSettingsContentProps {
   provider: string;
   modelId: string;
-  fallbackId: string;
   reasoning: string;
   thinking: boolean;
   fastMode: boolean;
   providerOptions: ProviderOptions;
   modelOptions: ModelPickerOptions;
-  fallbackOptions: ModelPickerOptions;
   modelsLoading: boolean;
   defaultModelStale: boolean;
-  fallbackModelStale: boolean;
   showReasoning: boolean;
   reasoningOptions: ReasoningOptions;
   reasoningHint: string;
@@ -427,7 +394,6 @@ interface ModelSettingsContentProps {
   utilityModelsLoading: boolean;
   onProviderChange: (value: string) => void;
   onModelChange: (value: string) => void;
-  onFallbackChange: (value: string) => void;
   onReasoningChange: (value: string) => void;
   onFastModeChange: (value: boolean) => void;
   onThinkingChange: (value: string) => void;
@@ -438,16 +404,13 @@ interface ModelSettingsContentProps {
 function ModelSettingsContent({
   provider,
   modelId,
-  fallbackId,
   reasoning,
   thinking,
   fastMode,
   providerOptions,
   modelOptions,
-  fallbackOptions,
   modelsLoading,
   defaultModelStale,
-  fallbackModelStale,
   showReasoning,
   reasoningOptions,
   reasoningHint,
@@ -460,7 +423,6 @@ function ModelSettingsContent({
   utilityModelsLoading,
   onProviderChange,
   onModelChange,
-  onFallbackChange,
   onReasoningChange,
   onFastModeChange,
   onThinkingChange,
@@ -483,16 +445,13 @@ function ModelSettingsContent({
         <DefaultModelSettings
           provider={provider}
           modelId={modelId}
-          fallbackId={fallbackId}
           reasoning={reasoning}
           thinking={thinking}
           fastMode={fastMode}
           providerOptions={providerOptions}
           modelOptions={modelOptions}
-          fallbackOptions={fallbackOptions}
           modelsLoading={modelsLoading}
           defaultModelStale={defaultModelStale}
-          fallbackModelStale={fallbackModelStale}
           showReasoning={showReasoning}
           reasoningOptions={reasoningOptions}
           reasoningHint={reasoningHint}
@@ -500,7 +459,6 @@ function ModelSettingsContent({
           showThinking={showThinking}
           onProviderChange={onProviderChange}
           onModelChange={onModelChange}
-          onFallbackChange={onFallbackChange}
           onReasoningChange={onReasoningChange}
           onFastModeChange={onFastModeChange}
           onThinkingChange={onThinkingChange}
@@ -523,16 +481,13 @@ type DefaultModelSettingsProps = Pick<
   ModelSettingsContentProps,
   | "provider"
   | "modelId"
-  | "fallbackId"
   | "reasoning"
   | "thinking"
   | "fastMode"
   | "providerOptions"
   | "modelOptions"
-  | "fallbackOptions"
   | "modelsLoading"
   | "defaultModelStale"
-  | "fallbackModelStale"
   | "showReasoning"
   | "reasoningOptions"
   | "reasoningHint"
@@ -540,7 +495,6 @@ type DefaultModelSettingsProps = Pick<
   | "showThinking"
   | "onProviderChange"
   | "onModelChange"
-  | "onFallbackChange"
   | "onReasoningChange"
   | "onFastModeChange"
   | "onThinkingChange"
@@ -549,16 +503,13 @@ type DefaultModelSettingsProps = Pick<
 function DefaultModelSettings({
   provider,
   modelId,
-  fallbackId,
   reasoning,
   thinking,
   fastMode,
   providerOptions,
   modelOptions,
-  fallbackOptions,
   modelsLoading,
   defaultModelStale,
-  fallbackModelStale,
   showReasoning,
   reasoningOptions,
   reasoningHint,
@@ -566,7 +517,6 @@ function DefaultModelSettings({
   showThinking,
   onProviderChange,
   onModelChange,
-  onFallbackChange,
   onReasoningChange,
   onFastModeChange,
   onThinkingChange,
@@ -595,28 +545,6 @@ function DefaultModelSettings({
           {defaultModelStale && (
             <p className="max-w-xs text-right text-xs text-warning">
               This model is not in the current catalog. Sending messages may fail until you choose a listed model.
-            </p>
-          )}
-        </div>
-      </SettingRow>
-      <SettingRow
-        label="Fallback model"
-        configKey="model.defaults.fallbackId"
-        hint="Used when the primary model is unavailable. Off disables fallback."
-      >
-        <div className="flex flex-col items-end gap-2">
-          <SettingsSelectPicker
-            value={fallbackId}
-            onChange={onFallbackChange}
-            options={fallbackOptions}
-            emptyTriggerLabel="Off"
-            searchPlaceholder="Search models"
-            loading={modelsLoading}
-            data-testid="settings-fallback-model-trigger"
-          />
-          {fallbackModelStale && (
-            <p className="max-w-xs text-right text-xs text-warning">
-              This fallback model is not in the current catalog. Consider turning fallback off or picking a listed model.
             </p>
           )}
         </div>

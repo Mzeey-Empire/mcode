@@ -100,8 +100,6 @@ interface BranchedInitialTurnParams {
   parentThreadId: string | undefined;
   forkedFromMessageId?: string;
   title: string;
-  maxBudgetUsd?: number;
-  maxTurns?: number;
   thinking?: boolean;
   fastMode?: boolean;
   devinMode?: DevinMode;
@@ -278,8 +276,6 @@ export class ThreadCreationCoordinator {
       interactionMode,
       parentThreadId,
       forkedFromMessageId,
-      maxBudgetUsd,
-      maxTurns,
 
       thinking,
       fastMode,
@@ -295,7 +291,7 @@ export class ThreadCreationCoordinator {
       workspaceId, content, model, permissionMode, approvalReviewMode, mode, branch: initialBranch(command), startFromOrigin, pullRequestNumber, worktreeBranchMode,
       existingWorktreePath, existingWorktreeBaseBranch, attachments, reasoningLevel,
       provider, interactionMode, parentThreadId, forkedFromMessageId,
-      title: command.title ?? titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns,
+      title: command.title ?? titleFrom(displayContent ?? content),
       thinking, fastMode, devinMode, displayContent, mentions,
       previewAnnotations, selectedTextComments, goalObjective, orchestrationMode,
     };
@@ -473,8 +469,6 @@ export class ThreadCreationCoordinator {
       provider: params.provider,
       reasoningLevel: params.reasoningLevel,
       interactionMode: params.interactionMode,
-      maxBudgetUsd: params.maxBudgetUsd,
-      maxTurns: params.maxTurns,
       thinking: params.thinking,
       displayContent: params.displayContent,
       mentions: params.mentions,
@@ -514,8 +508,6 @@ export class ThreadCreationCoordinator {
         provider: params.provider,
         reasoningLevel: params.reasoningLevel,
         interactionMode: params.interactionMode,
-        maxBudgetUsd: params.maxBudgetUsd,
-        maxTurns: params.maxTurns,
         thinking: params.thinking,
         displayContent: params.displayContent,
         mentions: params.mentions,
@@ -782,8 +774,6 @@ export class ThreadCreationCoordinator {
         reasoningLevel: params.reasoningLevel,
         provider: params.provider,
         interactionMode: params.interactionMode,
-        maxBudgetUsd: params.maxBudgetUsd,
-        maxTurns: params.maxTurns,
         thinking: provisioned.thinking,
         fastMode: provisioned.fastMode,
         devinMode: provisioned.devinMode,

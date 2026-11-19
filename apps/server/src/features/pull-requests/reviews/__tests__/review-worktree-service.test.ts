@@ -195,7 +195,6 @@ describe("ReviewWorktreeService", () => {
         },
         agent: {
           defaults: { mode: "build", permission: "full" },
-          guardrails: { maxBudgetUsd: 0, maxTurns: 0 },
         },
       }),
     } as unknown as SettingsService;

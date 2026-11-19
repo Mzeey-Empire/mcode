@@ -91,8 +91,7 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     } as unknown as MemoryPressureService;
     const settingsServiceStub = {
       get: vi.fn(async () => ({
-        model: { defaults: { fallbackId: undefined } },
-        agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+        model: { defaults: {} },
         provider: { claude: { fastMode: false }, codex: { fastMode: false } },
       })),
     } as unknown as SettingsService;

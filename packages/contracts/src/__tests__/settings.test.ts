@@ -8,6 +8,16 @@ import {
 } from "../models/settings.js";
 
 describe("SettingsSchema", () => {
+  it("loads legacy agent limits without rejecting the remaining settings", () => {
+    const parsed = SettingsSchema().parse({
+      agent: { maxConcurrent: 7, guardrails: { maxBudgetUsd: 12, maxTurns: 8 }, defaults: { mode: "plan", permission: "supervised" } },
+      model: { defaults: { fallbackId: "old-fallback", id: "custom-model" } },
+    });
+    expect(parsed.agent).toEqual({ defaults: { mode: "plan", permission: "supervised" } });
+    expect(parsed.model.defaults.id).toBe("custom-model");
+    expect(parsed.model.defaults).not.toHaveProperty("fallbackId");
+  });
+
   describe("model.defaults.reasoning", () => {
     it("normalizes legacy orchestration-shaped values to max", () => {
       expect(SettingsSchema().parse({
@@ -56,38 +66,6 @@ describe("SettingsSchema", () => {
 
     it("includes server.memory.heapMb in getDefaultSettings", () => {
       expect(getDefaultSettings().server.memory.heapMb).toBe(SERVER_HEAP_DEFAULT_MB);
-    });
-  });
-
-  describe("model.defaults.fallbackId", () => {
-    it("defaults to claude-sonnet-4-6 when parsing an empty object", () => {
-      const result = SettingsSchema().parse({});
-      expect(result.model.defaults.fallbackId).toBe("claude-sonnet-4-6");
-    });
-
-    it("accepts a custom fallbackId", () => {
-      const result = SettingsSchema().parse({
-        model: { defaults: { fallbackId: "claude-haiku-4-5-20251001" } },
-      });
-      expect(result.model.defaults.fallbackId).toBe("claude-haiku-4-5-20251001");
-    });
-
-    it("accepts empty string to disable fallback", () => {
-      const result = SettingsSchema().parse({
-        model: { defaults: { fallbackId: "" } },
-      });
-      expect(result.model.defaults.fallbackId).toBe("");
-    });
-
-    it("includes fallbackId in getDefaultSettings()", () => {
-      expect(getDefaultSettings().model.defaults.fallbackId).toBe("claude-sonnet-4-6");
-    });
-
-    it("trims whitespace so a space-only value becomes empty string", () => {
-      const result = SettingsSchema().parse({
-        model: { defaults: { fallbackId: "   " } },
-      });
-      expect(result.model.defaults.fallbackId).toBe("");
     });
   });
 

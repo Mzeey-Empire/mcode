@@ -207,7 +207,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "high", fallbackId: "", thinking: false },
+          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "high", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -220,7 +220,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "codex", id: "nonexistent-model", reasoning: "high", fallbackId: "", thinking: false },
+          defaults: { provider: "codex", id: "nonexistent-model", reasoning: "high", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -233,7 +233,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "cursor", id: "cursor-dynamic-model-xyz", reasoning: "high", fallbackId: "", thinking: false },
+          defaults: { provider: "cursor", id: "cursor-dynamic-model-xyz", reasoning: "high", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -246,7 +246,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-sonnet-4-6", reasoning: "low", fallbackId: "", thinking: false },
+          defaults: { provider: "claude", id: "claude-sonnet-4-6", reasoning: "low", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -259,7 +259,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "max", fallbackId: "", thinking: false },
+          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "max", thinking: false },
           utility: { provider: "", id: "" },
         },
       },
@@ -375,7 +375,6 @@ describe("Codex model catalog", () => {
             provider: "codex",
             id: "gpt-5.2-codex",
             reasoning: "medium",
-            fallbackId: "",
             thinking: false,
           },
           utility: { provider: "", id: "" },
