@@ -97,6 +97,29 @@ NodeTest.test("a changed source runs tests that import, re-export, or mock it as
   ]);
 });
 
+NodeTest.test("an import of a different module with the same file name does not select the test", () => {
+  const plan = planWithFiles(["apps/web/src/features/narrative/types.ts"], {
+    "apps/web/src/__tests__/narrative.test.ts": "import type { Segment } from '@/features/narrative/types';",
+    "apps/web/src/__tests__/transport.test.ts": "import type { Call } from '../transport/types';",
+    "apps/web/src/features/narrative/__tests__/local.test.ts": "import type { Segment } from '../types.js';",
+    "apps/web/src/__tests__/folder.test.ts": "import { Segment } from '@/features/narrative';",
+  });
+
+  NodeAssertStrict.deepEqual(selectedTests(plan), [
+    "src/__tests__/narrative.test.ts",
+    "src/features/narrative/__tests__/local.test.ts",
+  ]);
+});
+
+NodeTest.test("a changed index module is reached through its folder", () => {
+  const plan = planWithFiles(["apps/web/src/features/narrative/index.ts"], {
+    "apps/web/src/__tests__/folder.test.ts": "import { Segment } from '@/features/narrative';",
+    "apps/web/src/__tests__/other.test.ts": "import { Row } from '@/features/other';",
+  });
+
+  NodeAssertStrict.deepEqual(selectedTests(plan), ["src/__tests__/folder.test.ts"]);
+});
+
 NodeTest.test("a source without direct tests runs only the named tests of its immediate importers", () => {
   const plan = planWithFiles(["apps/web/src/internal/projection.ts"], {
     "apps/web/src/stores/threadStore.ts": "import { project } from '../internal/projection';",

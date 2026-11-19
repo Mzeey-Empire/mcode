@@ -140,15 +140,39 @@ function namedTests(tests, sourceStem) {
   });
 }
 
-function filesByImport(files, stems, readFile) {
+function withoutExtension(path) {
+  return path.replace(/\.(?:[cm]?[jt]sx?)$/, "");
+}
+
+/**
+ * The repository-relative module path a specifier names, without extension, or null when it points outside the
+ * workspace. Resolving the path instead of comparing basenames keeps a change to one `types.ts` from selecting every
+ * test that imports some other `types` module. `@/` mirrors the `@/*` -> `./src/*` alias in apps/web/tsconfig.json.
+ */
+function resolveSpecifier(importer, specifier, dir) {
+  if (specifier.startsWith("./") || specifier.startsWith("../")) {
+    return withoutExtension(NodePath.posix.join(NodePath.posix.dirname(importer), specifier));
+  }
+  if (specifier.startsWith("@/")) return withoutExtension(`${dir}/src/${specifier.slice(2)}`);
+  return null;
+}
+
+/** Maps each source to the files that import it; a source named `index` is also reached through its folder. */
+function filesByImport(files, sources, dir, readFile) {
+  const sourceByModule = new Map();
+  for (const source of sources) {
+    const module = withoutExtension(source);
+    sourceByModule.set(module, source);
+    if (NodePath.posix.basename(module) === "index") sourceByModule.set(NodePath.posix.dirname(module), source);
+  }
   const matches = new Map();
   for (const file of files) {
     for (const [, , specifier] of readFile(file).matchAll(IMPORT_SPECIFIER)) {
       if (!specifier) continue;
-      const importedStem = stem(specifier);
-      if (!stems.has(importedStem)) continue;
-      if (!matches.has(importedStem)) matches.set(importedStem, new Set());
-      matches.get(importedStem).add(file);
+      const source = sourceByModule.get(resolveSpecifier(file, specifier, dir));
+      if (!source) continue;
+      if (!matches.has(source)) matches.set(source, new Set());
+      matches.get(source).add(file);
     }
   }
   return matches;
@@ -161,21 +185,18 @@ function selectDirectTests({ files, dir, exists, listFiles, readFile, notes }) {
 
   const index = listFiles(dir).filter((file) => LINTABLE_FILE.test(file) && exists(file));
   const tests = index.filter((file) => TEST_FILE.test(file));
-  const testImports = filesByImport(tests, new Set(sources.map(stem)), readFile);
+  const testImports = filesByImport(tests, sources, dir, readFile);
   const unmatched = [];
   for (const source of sources) {
-    const sourceStem = stem(source);
-    const directTests = [...namedTests(tests, sourceStem), ...(testImports.get(sourceStem) ?? [])];
+    const directTests = [...namedTests(tests, stem(source)), ...(testImports.get(source) ?? [])];
     if (directTests.length === 0) unmatched.push(source);
     selected.push(...directTests);
   }
 
   if (unmatched.length > 0) {
-    const importers = filesByImport(
-      index.filter((file) => !TEST_FILE.test(file)), new Set(unmatched.map(stem)), readFile,
-    );
+    const importers = filesByImport(index.filter((file) => !TEST_FILE.test(file)), unmatched, dir, readFile);
     for (const source of unmatched) {
-      const indirectTests = [...(importers.get(stem(source)) ?? [])]
+      const indirectTests = [...(importers.get(source) ?? [])]
         .flatMap((importer) => namedTests(tests, stem(importer)));
       if (indirectTests.length === 0) notes.push(`no direct tests for ${source}`);
       selected.push(...indirectTests);
