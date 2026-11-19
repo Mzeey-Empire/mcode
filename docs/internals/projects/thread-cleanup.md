@@ -10,9 +10,9 @@ How Mcode deletes finished threads and their worktrees, and how failures recover
    threads to `cleanup_state = 'queued'` and inserts a `kind = 'retention'` row
    into `cleanup_jobs` in one transaction.
 3. Each job runs under a mutation reservation plus the per-repo git lock:
-   provider teardown first (5s session wait, `claude.exe` descendant kill, 1.5s
-   Windows handle settle), then `SandboxWorktreeCleanupPolicy.decide()`, then
-   `GitWorktreeService.removeWorktree`.
+   provider teardown first (5s wait while the session stops and kills its own
+   process tree, then a 1.5s Windows handle settle), then
+   `SandboxWorktreeCleanupPolicy.decide()`, then `GitWorktreeService.removeWorktree`.
 4. Success hard-deletes thread rows and the job, broadcasts `thread.deleted`,
    and hard-deletes the workspace when its last job finishes.
 

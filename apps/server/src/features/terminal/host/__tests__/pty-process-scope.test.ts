@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../../runtime/process/containment/process-kill.js", () => ({
   gracefulKillProcessTree: mocks.gracefulKillProcessTree,
   killProcessTree: mocks.killProcessTree,
-  listDirectChildren: vi.fn(),
 }));
 
 vi.mock("../../../../runtime/process/containment/windows-process-scope.js", () => ({

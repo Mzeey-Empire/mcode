@@ -17,7 +17,6 @@ import { CleanupWorker } from "../../../thread-control/cleanup/cleanup-worker.js
 import { HandoffStorage } from "../../../handoff/index.js";
 import type { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import type { ClaudeProviderBoundary as ClaudeProvider } from "@mcode/providers";
-import { killDescendantsByName } from "../../../../runtime/process/containment/process-kill.js";
 import type { GitExecutor } from "../../git/execution/index.js";
 
 let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
@@ -42,9 +41,6 @@ vi.mock("fs", async (importOriginal) => {
     existsSync: vi.fn((path: NodeFS.PathLike) => isCleanupFixturePath(path) || actual.existsSync(path)),
   };
 });
-vi.mock("../../../../runtime/process/containment/process-kill.js", () => ({
-  killDescendantsByName: vi.fn().mockResolvedValue(undefined),
-}));
 
 function setCleanupPathExists(exists: boolean): void {
   vi.mocked(NodeFS.existsSync).mockImplementation((path) => (
@@ -394,7 +390,6 @@ describe("CleanupWorker - attachment cleanup and workspace finalization", () => 
 
   beforeEach(() => {
     setCleanupPathExists(true);
-    vi.mocked(killDescendantsByName).mockClear();
 
     db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
     cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -612,7 +607,6 @@ describe("CleanupWorker - shared branch protection", () => {
 
   beforeEach(() => {
     setCleanupPathExists(true);
-    vi.mocked(killDescendantsByName).mockClear();
 
     db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
     cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -876,7 +870,6 @@ describe("CleanupWorker - missing directory handling", () => {
 
   beforeEach(() => {
     setCleanupPathExists(true);
-    vi.mocked(killDescendantsByName).mockClear();
 
     db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
     cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -962,7 +955,6 @@ describe("CleanupWorker - idempotent retry", () => {
 
   beforeEach(() => {
     setCleanupPathExists(true);
-    vi.mocked(killDescendantsByName).mockClear();
 
     db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
     cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
