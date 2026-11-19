@@ -22,12 +22,15 @@ export function taskNoticeStatus(state: TaskState): DelegatedTaskNoticeStatus | 
   return null;
 }
 
+/** Durable notice prefix for failures before a delegated turn exists. */
+export const STARTUP_FAILURE_NOTICE_PREFIX = "failed:startup:";
+
 /** Derive a stable notice identity, suppressing interrupted attempts scheduled to resume. */
 export function taskNoticeKey(taskId: string, state: TaskState, attemptId: string | null,
   requestIds: readonly string[], resumeScheduled = false): string | null {
   if (state.status === "finished") {
     if (state.outcome === "interrupted" && resumeScheduled) return null;
-    return attemptId ? `finished:${state.outcome}:${attemptId}` : `failed:startup:${taskId}`;
+    return attemptId ? `finished:${state.outcome}:${attemptId}` : `${STARTUP_FAILURE_NOTICE_PREFIX}${taskId}`;
   }
   if (state.status !== "waiting" || state.reason === "approval") return null;
   if (state.reason === "setup_blocked") return `setup_blocked:${taskId}`;

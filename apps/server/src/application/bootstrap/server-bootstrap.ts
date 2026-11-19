@@ -124,7 +124,9 @@ import { WorkspaceTerminalPreferencesService } from "../../features/terminal/pre
 import { TerminalDiagnosticsService } from "../../features/terminal/diagnostics/terminal-diagnostics-service.js";
 import { MessageRepo } from "../../features/agents/conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
-import { invalidateAttentionOnSettledTurns, invalidateAttentionOnSubagentChange, notifyTasksOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
+import { invalidateAttentionOnSettledTurns, notifyTasksOnSettledTurns, ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
+import { threadDescendantsSource } from "../../features/thread-control/attention/thread-descendants.js";
+import { ThreadControlApprovalRepo } from "../../features/thread-control/authority/persistence/thread-control-approval-repo.js";
 import { ThreadAutoCompleteService } from "../../features/thread-control/lifecycle/thread-auto-complete.js";
 import { subscribeCommittedCanonicalEvents } from "../../features/agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../../features/thread-control/attention/approval-waiting-source.js";
@@ -381,6 +383,13 @@ const delegatedTaskService = container.resolve(DelegatedTaskService);
 const threadLaunchService = container.resolve(ThreadLaunchService);
 const threadStartupService = container.resolve(ThreadStartupService);
 const stopObservingDelegatedRosters = subagentRosterService.bindDelegatedTasks(delegatedTaskService);
+subagentRosterService.bindPendingInput(approvalService, container.resolve(ThreadControlApprovalRepo));
+const stopObservingBackgroundRosters = subagentRosterService.observeWorkload(agentWorkload);
+const descendantInputChanged = (threadId: string) => {
+  delegatedTaskService.childChanged(threadId);
+  subagentRosterService.inputChanged(threadId);
+};
+threadControlService.bindApprovalTargetChanged(descendantInputChanged);
 const stopObservingDelegatedStartups = threadStartupService.subscribe((startup) => delegatedTaskService.taskChanged(startup.startupId));
 const stopObservingDelegatedTurns = notifyTasksOnSettledTurns(delegatedTaskService, subscribeCommittedCanonicalEvents);
 const threadStartupFetchDecisions = container.resolve(ThreadStartupFetchDecisions);
@@ -572,16 +581,14 @@ container.resolve(TurnRuntimeController).bindFileEvidence(fileEvidenceLedger);
 bindTurnFileEvidenceLedger(fileEvidenceLedger);
 const threadAttentionService = new ThreadAttentionService(db, databaseWriter,
   [approvalWaitingSource(approvalService), planWaitingSource(db, "questions"), planWaitingSource(db, "plan")],
-  delegatedTaskService,
-  agentWorkload,
+  threadDescendantsSource(subagentRosterService, agentWorkload),
   (attention) => broadcast("thread.attention", attention));
 threadRepo.attention = threadAttentionService;
 workerOwnedTurnRuntime.bindPlanPhaseChanged((threadId) => threadRepo.publishPlanPhase(threadId));
 turnSnapshotRepo.attention = threadAttentionService;
 snapshotRefPins.attention = threadAttentionService;
 invalidateAttentionOnSettledTurns(threadAttentionService, subscribeCommittedCanonicalEvents);
-const stopObservingDelegatedAttention = delegatedTaskService.onRosterChanged((coordinatorThreadId) => threadAttentionService.invalidate(coordinatorThreadId));
-const stopObservingSubagentAttention = invalidateAttentionOnSubagentChange(threadAttentionService, agentWorkload);
+const stopObservingSubagentAttention = subagentRosterService.onChanged((parentId) => threadAttentionService.invalidate(parentId));
 const planService = createPlanService(databaseWriter, workerOwnedTurnRuntime, planRepo, planTurnService, {
   threads: threadRepo, providers: providerRegistry, commands: container.resolve(AGENT_TURN_COMMAND_PORT),
   startups: threadStartupService, messages: messageRepo, threadService,
@@ -1167,14 +1174,14 @@ async function bootstrapServer(): Promise<void> {
         broadcast("approval.requested", request);
         threadAttentionService.invalidate(request.threadId);
         nudgeCoordinatorForThread(request.threadId);
-        delegatedTaskService.childChanged(request.threadId);
+        descendantInputChanged(request.threadId);
         portPush.send("approval.requested", request);
       },
       publishApprovalResolved: (payload) => {
         broadcast("approval.resolved", payload);
         threadAttentionService.invalidate(payload.threadId);
         nudgeCoordinatorForThread(payload.threadId);
-        delegatedTaskService.childChanged(payload.threadId);
+        descendantInputChanged(payload.threadId);
         portPush.send("approval.resolved", payload);
       },
     }, threadControlService);
@@ -1361,7 +1368,7 @@ async function shutdown(): Promise<void> {
       stopObservingDelegatedRosters();
       stopObservingDelegatedStartups();
       stopObservingDelegatedTurns();
-      stopObservingDelegatedAttention();
+      stopObservingBackgroundRosters();
       stopObservingSubagentAttention();
       shutdownCoordinator.setPhase("close application database writer");
       fileEvidenceLedger.close();

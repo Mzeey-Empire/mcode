@@ -102,16 +102,17 @@ export class TurnRecoveryService {
     launchTelemetry.mark("terminal checkpoint reopening");
     await this.parentAssistantTextCheckpoints.retireTerminalCheckpoints();
     launchTelemetry.mark("terminal checkpoint retirement");
-    await this.canonicalSink.interruptSavedFamilyChildren(UNPROVED_EXECUTION_REASON);
+    await this.canonicalSink.interruptSavedFamilyChildren(UNPROVED_EXECUTION_REASON, "running");
     launchTelemetry.mark("family child interruption");
     const checkpoints = this.canonicalSink.listUnfinishedCheckpoints();
-    if (checkpoints.length === 0) return { interrupted: [] };
     const incident = { id: NodeCrypto.randomUUID(), createdAt: new Date().toISOString() };
     const interrupted: string[] = [];
     for (const checkpoint of checkpoints) {
       interrupted.push(await this.interruptUnfinishedCheckpoint(checkpoint, incident));
       launchTelemetry.mark("checkpoint interrupted");
     }
+    // Parent recovery records unresolved deliveries as unavailable before this sweep closes the remaining children.
+    await this.canonicalSink.interruptSavedFamilyChildren(UNPROVED_EXECUTION_REASON, "turnless");
     return { interrupted };
   }
 

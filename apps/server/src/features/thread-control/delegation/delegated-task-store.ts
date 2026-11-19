@@ -9,7 +9,7 @@ import { CanonicalAgentEventEnvelopeSchema } from "@mcode/contracts/compat/agent
 import { AgentEventSchema } from "@mcode/contracts/events/agent-event";
 import { isDelegateTaskToolName } from "@mcode/contracts/models/subagent-roster";
 import { canonicalAgentEvents, canonicalAgentItems, canonicalAgentTurns, delegatedTasks, threadStartups, threadControlApprovals } from "../../../runtime/persistence/sqlite/schema.js";
-import { noticeCovered } from "./task-notice.js";
+import { noticeCovered, STARTUP_FAILURE_NOTICE_PREFIX } from "./task-notice.js";
 
 /** A claim records the delivered key observed before one wake reserved it. */
 export const NoticeClaimSchema = z.object({ wakeId: z.string().uuid(), key: z.string(), basis: z.string().nullable() });
@@ -113,6 +113,8 @@ export class DelegatedTaskStore {
             THEN ${canonicalAgentTurns.status} NOT IN ('Completed', 'Errored', 'Cancelled', 'Interrupted')
           WHEN ${threadStartups.startupId} IS NOT NULL
             THEN ${threadStartups.state} NOT IN ('failed', 'interrupted', 'cancelled')
+              OR (${threadStartups.state} = 'interrupted' AND ${threadStartups.phase} = 'setup'
+                AND ${delegatedTasks.noticeDelivered} IS NOT (${STARTUP_FAILURE_NOTICE_PREFIX} || ${delegatedTasks.taskId}))
           ELSE ${threadControlApprovals.status} IS NULL
             OR ${threadControlApprovals.status} NOT IN ('rejected', 'expired', 'cancelled')
         END OR ${resumingClause})`,

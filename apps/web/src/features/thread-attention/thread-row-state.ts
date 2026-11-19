@@ -1,4 +1,4 @@
-import { hasUnseenRestartFailure, isTurnSeen, threadHasRunningDescendants, type ThreadAttention } from "@mcode/contracts/models/thread-attention";
+import { hasUnseenRestartFailure, isTurnSeen, type ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { ThreadStartupPhase } from "@mcode/contracts/thread-startup";
 import type { StartupActivity, ThreadActivity } from "./thread-activity";
@@ -43,7 +43,7 @@ export function deriveThreadRowState(facts: ThreadRowFacts): ThreadRowState {
   const live = liveRowState(facts);
   if (live) return live;
   const settled: ThreadRowState = facts.activity.startup.kind === "failed" ? { kind: "failed" } : settledRowState(facts);
-  if (facts.attention && threadHasRunningDescendants(facts.attention) && settled.kind !== "needs-you") return { kind: "running" };
+  if (facts.attention && facts.attention.descendants !== "none" && settled.kind !== "needs-you") return { kind: "running" };
   return settled;
 }
 

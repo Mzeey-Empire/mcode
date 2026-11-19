@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { SubagentRosterSchema, compareRosterEntries, isDelegateTaskToolName, type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest, type SubagentRosterRequest } from "@mcode/contracts/models/subagent-roster";
+import { SubagentRosterSchema, compareRosterEntries, isDelegateTaskToolName, isLiveSubagentStatus, type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest, type SubagentRosterRequest, type SubagentStatus } from "@mcode/contracts/models/subagent-roster";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { SUBAGENT_REPORTING, isChildTurnCancellable, type IAgentProvider, type IProviderRegistry, type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { type CanonicalSubagentStopRequest, type CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
@@ -15,16 +15,21 @@ import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { and, eq, inArray, ne, or } from "drizzle-orm";
-import { messages, threads, toolCallRecords } from "../../../runtime/persistence/sqlite/schema.js";
+import { canonicalAgentThreads, messages, threads, toolCallRecords } from "../../../runtime/persistence/sqlite/schema.js";
 import { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { narrativeRosterEntry, narrativeSubagentDetail, rootAgent, subagentStatusFrom, subagentTitle, type RosterToolCall } from "./subagent-roster-projection.js";
-import type { CanonicalChildRow } from "../canonical/canonical-child-roster.js";
+import { observesChildActivity, type CanonicalChildActivity, type CanonicalChildRow } from "../canonical/canonical-child-roster.js";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
 import type { DelegatedTaskService } from "../../thread-control/delegation/delegated-task-service.js";
+import type { ThreadControlApprovalRepo } from "../../thread-control/authority/persistence/thread-control-approval-repo.js";
+import type { ApprovalService } from "../approvals/approval-service.js";
+import type { AgentWorkload } from "../workload/agent-workload.js";
 
 type AcceptedSubagentProgress = Pick<import("../canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
-  "loadSubagentRoster" | "loadSubagentStopTarget" | "loadActiveSubagentStopTargets" | "finishSubagentTurn" | "interruptSubagentTurns" | "onSubagentRosterChange">;
+  "loadSubagentRoster" | "loadLiveSubagentChildren" | "liveSubagentParentIds" | "subagentOwningParent"
+  | "loadSubagentStopTarget" | "loadActiveSubagentStopTargets" | "finishSubagentTurn" | "interruptSubagentTurns" | "onSubagentRosterChange">;
+type DelegatedRoster = Pick<DelegatedTaskService, "rosterEntries" | "liveRosterStatuses" | "stopForUser" | "coordinatorsWithUnfinishedTasks">;
 type DelegatedStopTarget = { tasks: Pick<DelegatedTaskService, "stopForUser">; entry: SubagentRosterEntry };
 
 /** Owns server-authoritative sub-agent rosters and independent cancellation. */
@@ -34,10 +39,13 @@ export class SubagentRosterService {
   private readonly revisions = new Map<string, number>();
   private readonly canonicalRevisions = new Map<string, number>();
   private readonly pendingPushes = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly listeners = new Set<(parentId: string) => void>();
   private readonly stoppedCalls = new Map<string, Set<string>>();
   private readonly activeStops = new Map<string, Promise<CanonicalSubagentStopResult>>();
   private acceptedProgress: AcceptedSubagentProgress | undefined;
-  private delegatedTasks: Pick<DelegatedTaskService, "rosterEntries" | "stopForUser"> | undefined;
+  private delegatedTasks: DelegatedRoster | undefined;
+  private approvalService: Pick<ApprovalService, "listPendingApprovals"> | undefined;
+  private controlApprovals: Pick<ThreadControlApprovalRepo, "listPendingByThread"> | undefined;
 
   constructor(
     @inject(SUBAGENT_LIFECYCLE_DURABILITY)
@@ -49,7 +57,7 @@ export class SubagentRosterService {
   ) {}
 
   /** Compose cross-provider tasks without a dependency cycle through AgentService. */
-  bindDelegatedTasks(tasks: Pick<DelegatedTaskService, "rosterEntries" | "stopForUser" | "onRosterChanged">): () => void {
+  bindDelegatedTasks(tasks: DelegatedRoster & Pick<DelegatedTaskService, "onRosterChanged">): () => void {
     this.delegatedTasks = tasks;
     return tasks.onRosterChanged((threadId) => this.changed(threadId));
   }
@@ -57,7 +65,60 @@ export class SubagentRosterService {
   /** Resolve controls through retained family identities before their saved rows exist. */
   bindAcceptedProgress(progress: AcceptedSubagentProgress): void {
     this.acceptedProgress = progress;
-    progress.onSubagentRosterChange((threadId, revision) => this.canonicalChanged(threadId, revision));
+    progress.onSubagentRosterChange((threadId, revision, activityChanged) => this.canonicalChanged(threadId, revision, activityChanged));
+  }
+
+  /** Read both provider requests and thread-control waits for canonical children. */
+  bindPendingInput(approvalService: Pick<ApprovalService, "listPendingApprovals">,
+    controlApprovals: Pick<ThreadControlApprovalRepo, "listPendingByThread">): void {
+    this.approvalService = approvalService;
+    this.controlApprovals = controlApprovals;
+  }
+
+  /** Refresh the same parent roster when the workload's background calls change. */
+  observeWorkload(workload: Pick<AgentWorkload, "onSubagentChange">): () => void {
+    return workload.onSubagentChange((parentId) => this.changed(parentId));
+  }
+
+  /** Observe a debounced change at the same time as the roster broadcast. */
+  onChanged(listener: (parentId: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  /** Refresh the owning roster when a canonical child's approval or question changes. */
+  inputChanged(threadId: string): void {
+    const parentId = this.canonicalParent(threadId);
+    if (parentId) this.changed(parentId);
+  }
+
+  private canonicalParent(threadId: string): string | null {
+    if (this.acceptedProgress) return this.acceptedProgress.subagentOwningParent(threadId);
+    const row = drizzle(this.db).select({
+      owner: canonicalAgentThreads.owningParentThreadId, parent: canonicalAgentThreads.parentThreadId,
+    }).from(canonicalAgentThreads).where(eq(canonicalAgentThreads.id, threadId)).get();
+    return row?.owner ?? row?.parent ?? null;
+  }
+
+  /** Read the live statuses of the parent's canonical children and delegated tasks. */
+  loadLiveStatuses(parentId: string): SubagentStatus[] {
+    const children = this.acceptedProgress?.loadLiveSubagentChildren(parentId)
+      ?? this.durability.loadLiveSubagentChildren(parentId);
+    // Foreground Agent calls belong to their turn, and the workload already tracks background calls.
+    return [
+      ...children.map((child) => this.canonicalStatus(child)).filter(isLiveSubagentStatus),
+      ...this.delegatedTasks?.liveRosterStatuses(parentId) ?? [],
+    ];
+  }
+
+  /** Include every parent with live canonical or delegated work, and the workload's background parents. */
+  liveParentCandidates(backgroundParents: Iterable<string> = []): ReadonlySet<string> {
+    return new Set([
+      ...this.durability.liveSubagentParentIds(),
+      ...this.acceptedProgress?.liveSubagentParentIds() ?? [],
+      ...this.delegatedTasks?.coordinatorsWithUnfinishedTasks() ?? [],
+      ...backgroundParents,
+    ]);
   }
 
   /** Project one authoritative roster without mutating revisions or persisted state. */
@@ -124,8 +185,15 @@ export class SubagentRosterService {
   observeCommittedEvents(subscribe = subscribeCommittedCanonicalEvents): () => void {
     return subscribe((events) => {
       for (const threadId of threadsWhere(events, touchesNarrativeRoster)) this.changed(threadId);
+      for (const threadId of threadsWhere(events, observesChildActivity)) this.changed(threadId);
+      for (const event of events) {
+        if (event.payload.type === "child-thread.recorded") {
+          this.changed(event.payload.childThread.owningParentThreadId ?? event.payload.parentThreadId);
+        }
+      }
       for (const threadId of threadsWhere(events, endsTurn)) this.turnFinished(threadId);
       for (const threadId of threadsWhere(events, (event) => endsTurn(event) || event.payload.type === "turn.started")) {
+        this.inputChanged(threadId);
         const owner = drizzle(this.db).select({ id: threads.delegationCoordinatorThreadId }).from(threads)
           .where(eq(threads.id, threadId)).get()?.id;
         if (owner) this.changed(owner);
@@ -150,8 +218,8 @@ export class SubagentRosterService {
     if (stopped.size === 0) this.stoppedCalls.delete(threadId);
   }
 
-  private canonicalChanged(threadId: string, revision: number): void {
-    if ((this.canonicalRevisions.get(threadId) ?? 0) === revision) return;
+  private canonicalChanged(threadId: string, revision: number, activityChanged: boolean): void {
+    if (!activityChanged && (this.canonicalRevisions.get(threadId) ?? 0) === revision) return;
     this.canonicalRevisions.set(threadId, revision);
     this.changed(threadId);
   }
@@ -162,6 +230,7 @@ export class SubagentRosterService {
     const timer = setTimeout(() => {
       this.pendingPushes.delete(threadId);
       broadcast("subagents.changed", { threadId, epoch: this.epoch, revision: this.revisions.get(threadId) ?? 0 });
+      for (const listener of this.listeners) listener(threadId);
     }, 250);
     timer.unref();
     this.pendingPushes.set(threadId, timer);
@@ -187,15 +256,28 @@ export class SubagentRosterService {
 
   private canonicalEntry(parentId: string, row: CanonicalChildRow, narrative: SubagentRosterEntry | undefined,
     id: string, sourceToolCallId: string | null, children: readonly CanonicalChildRow[]): SubagentRosterEntry {
-    const awaitingFirstTurn = row.latestTurnStatus === null && row.endedAt === null && row.activityState === "Idle";
-    const status = awaitingFirstTurn ? "setting-up" : subagentStatusFrom(row.latestTurnStatus ?? row.activityState);
+    const status = this.canonicalStatus(row);
     return {
       ...canonicalEntryMetadata(row, narrative),
       id, provider: row.provider, status, tier: "transcript",
-      canStop: (status === "running" || status === "setting-up") && this.withStopAvailability(parentId, row).canStop,
+      canStop: isLiveSubagentStatus(status) && this.withStopAvailability(parentId, row).canStop,
       sourceToolCallId, childThreadId: row.id, sourceMessageId: narrative?.sourceMessageId ?? null,
       parentEntryId: canonicalParentEntryId(row, children),
     };
+  }
+
+  private canonicalStatus(row: CanonicalChildActivity): SubagentStatus {
+    const awaitingFirstTurn = row.latestTurnStatus === null && row.endedAt === null && row.activityState === "Idle";
+    const status = awaitingFirstTurn ? "setting-up" : subagentStatusFrom(row.latestTurnStatus ?? row.activityState);
+    if (!isLiveSubagentStatus(status) || row.endedAt !== null) return status;
+    return this.hasPendingInput(row.id) ? "needs-you" : status;
+  }
+
+  private hasPendingInput(threadId: string): boolean {
+    const pending = this.approvalService?.listPendingApprovals(threadId) ?? [];
+    if (pending.length > 0) return true;
+    const control = this.controlApprovals?.listPendingByThread(threadId) ?? [];
+    return control.length > 0;
   }
 
   /** Stop one owned sub-agent turn without stopping its provider session. */

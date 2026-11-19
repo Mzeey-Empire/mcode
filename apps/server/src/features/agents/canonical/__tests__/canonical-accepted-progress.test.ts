@@ -50,6 +50,7 @@ import { ParentAssistantTextCheckpointStore } from "../../turns/parent-assistant
 import { AgentWorkloadService } from "../../workload/agent-workload.js";
 import { createMockThread, createMockThreadPullRequest } from "@mcode/contracts/testing";
 import { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
+import { threadDescendantsSource } from "../../../thread-control/attention/thread-descendants.js";
 import { autoCompleteState } from "../../../thread-control/lifecycle/thread-auto-complete.js";
 import { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import { WorkspaceService } from "../../../projects/lifecycle/workspace-service.js";
@@ -2140,8 +2141,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       const workload = await releaseWithUnsavedLaunch("subagent");
       const changes: string[] = [];
       onTestFinished(workload.onSubagentChange((threadId) => changes.push(threadId)));
-      const attention = new ThreadAttentionService(db, databaseWriter, [], { coordinatorsWithUnfinishedTasks: () => new Set() },
-        workload, () => {});
+      const attention = new ThreadAttentionService(db, databaseWriter, [],
+        threadDescendantsSource({ loadLiveStatuses: () => [], liveParentCandidates: (parents) => new Set(parents) }, workload), () => {});
       const decision = () => autoCompleteState({ ...createMockThread({ pull_requests: [createMockThreadPullRequest({ state: "merged" })] }),
         attention: attention.get(execution.threadId), completeOnPrMerge: true });
 
@@ -2446,10 +2447,37 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
     await expect.poll(() => progress.depth().pending).toBe(0);
     const boundary = new CanonicalAgentStore(db, () => {});
-    expect(boundary.interruptSavedFamilyChildren("Server restarted")).toEqual([childId]);
+    expect(boundary.interruptSavedFamilyChildren("Server restarted", "running")).toEqual([childId]);
     expect(boundary.loadSubagentStopTarget({ owningParentThreadId: execution.threadId, childThreadId: childId })?.latestTurn?.status).toBe("Interrupted");
     expect(db.prepare("SELECT status FROM canonical_agent_turns WHERE id = ?").get(execution.turnId)).toEqual({ status: "Completed" });
-    expect(boundary.interruptSavedFamilyChildren("Server restarted")).toEqual([]);
+    expect(boundary.interruptSavedFamilyChildren("Server restarted", "running")).toEqual([]);
+  });
+
+  it("stops a saved turnless child at boot and keeps a new turnless child live", async () => {
+    await send(1, start("codex"));
+    const spawn = (ordinal: number, id: string) => send(ordinal, { kind: "event", phase: "running", nativeCursor: null,
+      events: [familyDraft(ordinal - 1, "toolUse", { toolCallId: id, toolName: "Agent", toolInput: {} },
+        { collaboration: { kind: "spawnAgent", receiverThreadIds: [`native-${id}`], prompt: "Child" } })] });
+    await spawn(2, "before-boot");
+    await progress.waitForSaved(execution.threadId);
+    const boundary = new CanonicalAgentStore(db, () => {});
+    const query = { owningParentThreadId: execution.threadId, limit: 100 };
+    const child = boundary.loadSubagentRoster(query).active[0];
+    if (!child) throw new Error("Expected the saved child");
+    expect(boundary.loadLiveSubagentChildren(execution.threadId)).toMatchObject([{ id: child.id, latestTurnStatus: null }]);
+
+    expect(boundary.interruptSavedFamilyChildren("Server restarted", "turnless")).toEqual([child.id]);
+    expect(boundary.loadLiveSubagentChildren(execution.threadId)).toEqual([]);
+    expect(boundary.liveSubagentParentIds()).toEqual([]);
+    expect(boundary.loadSubagentRoster(query).done).toMatchObject([{ id: child.id, activityState: "Closed", latestTurnStatus: null }]);
+    expect(boundary.interruptSavedFamilyChildren("Server restarted", "turnless")).toEqual([]);
+
+    await spawn(3, "after-boot");
+    await progress.waitForSaved(execution.threadId);
+    const newChild = boundary.loadSubagentRoster(query).active[0];
+    if (!newChild) throw new Error("Expected the new saved child");
+    expect(newChild.id).not.toBe(child.id);
+    expect(boundary.loadLiveSubagentChildren(execution.threadId)).toMatchObject([{ id: newChild.id, latestTurnStatus: null }]);
   });
 
   it.each(["codex", "devin"])("accepts %s text, tools and terminal while storage is held, retaining them after worker release", async (providerId) => {

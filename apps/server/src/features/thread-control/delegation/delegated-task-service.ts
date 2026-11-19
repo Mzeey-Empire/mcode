@@ -20,7 +20,7 @@ import type { DelegatedTaskRepo } from "./delegated-task-repo.js";
 import type { DelegatedTask, DelegatedTaskPlan } from "./delegated-task-store.js";
 import { deriveTaskState } from "./task-state.js";
 import {
-  taskNoticeKey, taskNoticeStatus, noticeCovered, renderTaskNotices, selectEntriesWithinBudget, type TaskNoticeEntry,
+  STARTUP_FAILURE_NOTICE_PREFIX, taskNoticeKey, taskNoticeStatus, noticeCovered, renderTaskNotices, selectEntriesWithinBudget, type TaskNoticeEntry,
 } from "./task-notice.js";
 import type { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
 import type { PlannedRestart } from "../../agents/recovery/planned-restart/index.js";
@@ -83,12 +83,22 @@ export class DelegatedTaskService {
   /** Derive Coordinators with working or waiting delegated tasks from current lifecycle facts. */
   coordinatorsWithUnfinishedTasks(coordinatorThreadId?: string): ReadonlySet<string> {
     const coordinators = new Set<string>();
-    const resuming = this.deps.plannedRestart.pendingResumeTurnIds();
-    for (const task of this.deps.tasks.listUnfinishedCandidates(coordinatorThreadId, resuming)) {
+    for (const task of this.unfinishedCandidates(coordinatorThreadId)) {
       const { state } = this.snapshot(task);
       if (state.status !== "finished") coordinators.add(task.coordinatorThreadId);
     }
     return coordinators;
+  }
+
+  /** Read live roster statuses without loading source calls or finished receipts. */
+  liveRosterStatuses(coordinatorThreadId: string): SubagentStatus[] {
+    return this.unfinishedCandidates(coordinatorThreadId)
+      .map((task) => rosterStatus(this.snapshot(task).state))
+      .filter(isLiveSubagentStatus);
+  }
+
+  private unfinishedCandidates(coordinatorThreadId?: string): DelegatedTask[] {
+    return this.deps.tasks.listUnfinishedCandidates(coordinatorThreadId, this.deps.plannedRestart.pendingResumeTurnIds());
   }
 
   /** Refresh the owning Coordinator's roster after a child's approval is published or resolved. */
@@ -474,6 +484,7 @@ export class DelegatedTaskService {
     const ending = turn?.ending;
     const state = deriveTaskState({
       turn, startup, approval: this.deps.approvals.status(task.taskId), launching: this.launching.has(task.taskId),
+      startupFailureReported: task.noticeDelivered === `${STARTUP_FAILURE_NOTICE_PREFIX}${task.taskId}`,
       summary: turn?.status === "Completed" ? this.deps.canonical.loadTerminalProjection(turn.id).message?.content : undefined,
       error: ending?.outcome === "errored" ? ending.failure.message : undefined,
       needsInput: this.needsInput(threadId),

@@ -51,7 +51,8 @@ import { MessageStore } from "../../agents/conversation/persistence/message-stor
 import { CanonicalAgentStore } from "../../agents/canonical/canonical-agent-store.js";
 import { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
 import { notifyCommittedCanonicalEvents, subscribeCommittedCanonicalEvents } from "../../agents/canonical/committed-canonical-events.js";
-import { notifyTasksOnSettledTurns } from "../attention/thread-attention-service.js";
+import { notifyTasksOnSettledTurns, ThreadAttentionService } from "../attention/thread-attention-service.js";
+import { threadDescendantsSource } from "../attention/thread-descendants.js";
 import { MessageRepo } from "../../agents/conversation/persistence/message-repo.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { HandoffStorage } from "../../handoff/index.js";
@@ -930,6 +931,40 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect(loadEntry()).toEqual({ revision: before.revision + 2, status: "running" });
   });
 
+  it.each(["completed", "errored"] as const)("shows a waiting, running, then %s task in Coordinator attention", async (outcome) => {
+    const f = await harness();
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    const turn = f.canonical.loadTurn(task.taskId);
+    if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted child");
+    const db = f.runtime.database;
+    db.query(`WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM history WHERE n < 300)
+      INSERT INTO delegated_tasks (task_id, coordinator_thread_id, client_request_id, input_fingerprint, plan_json, created_at)
+      SELECT printf('00000000-0000-4000-8000-%012d', n), coordinator_thread_id, 'finished-' || n, input_fingerprint, plan_json, created_at - n
+      FROM delegated_tasks JOIN history WHERE task_id = ?`).run(task.taskId);
+    db.query(`INSERT INTO thread_control_approvals (id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, status)
+      SELECT task_id, coordinator_thread_id, ?, '', '{}', '{}', task_id, 'rejected'
+      FROM delegated_tasks WHERE coordinator_thread_id = ? AND client_request_id LIKE 'finished-%'`).run(f.coordinator.workspace_id, f.coordinator.id);
+    const source = threadDescendantsSource(f.roster, { backgroundSubagentThreadIds: () => new Set() });
+    const attention = new ThreadAttentionService(f.runtime.reader, f.runtime.writer, [], source, () => {});
+    f.pendingApprovals.push({ requestId: "ask", threadId: task.threadId, body: {
+      requestedAt: new Date().toISOString(), origin: { kind: "agent" },
+      subject: { kind: "question", questions: [{ header: "Choose", question: "Which?", options: [], multiple: false, custom: true }] },
+      choices: [{ id: "answer", intent: "provider", label: "Answer" }],
+    } });
+    expect(f.roster.liveParentCandidates()).toEqual(new Set([f.coordinator.id]));
+    expect(attention.get(f.coordinator.id)?.descendants).toBe("needs-you");
+    expect(attention.listInteresting().map(({ threadId, descendants }) => [threadId, descendants])).toEqual([[f.coordinator.id, "needs-you"]]);
+    f.pendingApprovals.pop();
+    expect(f.roster.loadLiveStatuses(f.coordinator.id)).toEqual(["running"]);
+    expect(attention.get(f.coordinator.id)?.descendants).toBe("running");
+    await f.canonicalStore.finishParentTurnBatched({
+      threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId, providerId: "codex",
+      providerIdentities: [], outcome, error: outcome === "errored" ? "Task failed" : undefined,
+      projectTurn: () => ({ message: null, narrative: [] }),
+    });
+    expect(attention.get(f.coordinator.id)?.descendants).toBe("none");
+  });
+
   it("backfills finished tasks while leaving in-flight tasks eligible after migration", async () => {
     const f = await harness();
     const finished = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
@@ -1109,6 +1144,50 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect(await f.service.delegate(f.source, { ...f.input, permissionMode: "full" })).toMatchObject({ status: "rejected", error: { code: "forbidden" } });
     expect(f.tasks.findByRequest(f.coordinator.id, f.input.clientRequestId)).toBeNull();
     expect(requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" })).effectivePermissionMode).toBe("supervised");
+  });
+
+  it.each(["interrupted", "failed"])("reports a delegated %s setup in the parent roster", async (state) => {
+    const f = await harness("full", true);
+    const task = requireTask(await f.service.delegate(f.source, f.input));
+    await vi.waitFor(() => expect(f.environment.getAutomaticSetup({ threadId: task.threadId ?? "" }).attempt?.state).toBe("running"));
+    if (state === "interrupted") await f.startups.interruptNonterminalOnStartup();
+    else await f.startups.fail(task.taskId, { code: "SETUP_FAILED", message: "Setup failed", retryable: false });
+    expect(f.startups.get(task.taskId)).toMatchObject({ state, phase: "setup" });
+
+    const status = requireTask(await f.service.status(f.source, { taskId: task.taskId }));
+    expect(status.state).toEqual(state === "interrupted"
+      ? { status: "waiting", reason: "setup_blocked" }
+      : { status: "finished", outcome: "failed", error: "Setup failed" });
+    expect(f.roster.loadLiveStatuses(f.coordinator.id)).toEqual(state === "interrupted" ? ["needs-you"] : []);
+    expect(f.roster.liveParentCandidates()).toEqual(state === "interrupted" ? new Set([f.coordinator.id]) : new Set());
+  });
+
+  it.each([true, false])("recovers an interrupted setup with an old failure notice delivered: %s", async (delivered) => {
+    const f = await harness("full", true);
+    const w = await wakeHarness(f);
+    const task = requireTask(await f.service.delegate(f.source, f.input));
+    await vi.waitFor(() => expect(f.environment.getAutomaticSetup({ threadId: task.threadId ?? "" }).attempt?.state).toBe("running"));
+    await f.startups.interruptNonterminalOnStartup();
+    if (delivered) {
+      const startup = f.startups.get(task.taskId);
+      if (!startup) throw new Error("Expected interrupted startup");
+      await f.startups.acknowledgeFailure(task.taskId, startup.revision);
+      await f.tasks.acknowledge(task.taskId, `failed:startup:${task.taskId}`);
+    }
+
+    await w.wake.recoverAtStartup();
+    await w.tick();
+    await w.wake.recoverAtStartup();
+    await w.tick();
+
+    expect({
+      sends: w.state.sends,
+      notices: w.messages().map((row) => SystemNoticeMetadataSchema().parse(JSON.parse(row.system_notice)).delegatedTasks?.[0]?.status),
+      live: f.roster.loadLiveStatuses(f.coordinator.id),
+      candidates: [...f.roster.liveParentCandidates()],
+    }).toEqual(delivered
+      ? { sends: 0, notices: [], live: [], candidates: [] }
+      : { sends: 1, notices: ["setup_blocked"], live: ["needs-you"], candidates: [f.coordinator.id] });
   });
 
   it("cancels setup through threadStop and keeps a task waiting on stop approval stoppable", async () => {

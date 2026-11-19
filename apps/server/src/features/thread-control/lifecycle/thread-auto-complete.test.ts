@@ -59,8 +59,8 @@ describe("autoCompleteState", () => {
     [{ user_completed_at: AT }, "inactive"],
     [{ deleted_at: AT }, "inactive"],
     [{ attention: null }, "waiting-for-user"],
-    [{ attention: { ...quietAttention(), hasUnfinishedDelegatedTasks: true } }, "waiting-for-user"],
-    [{ attention: { ...quietAttention(), hasRunningBackgroundSubagents: true } }, "waiting-for-user"],
+    [{ attention: { ...quietAttention(), descendants: "running" } }, "waiting-for-user"],
+    [{ attention: { ...quietAttention(), descendants: "needs-you" } }, "waiting-for-user"],
   ] satisfies Array<[Partial<AutoCompleteStateInput>, string]>)("honours lifecycle and preference gates: %j", (input, expected) => {
     expect(autoCompleteState(decisionInput(input))).toBe(expected);
   });
@@ -79,7 +79,7 @@ async function fixture() {
   const workspace = await new WorkspaceRepo(runtime.reader, runtime.writer).create("Auto-complete", "/fixture");
   const thread = await threads.create(workspace.id, "Feature", "direct", "main");
   const attention = new ThreadAttentionService(runtime.reader, runtime.writer, [],
-    { coordinatorsWithUnfinishedTasks: () => new Set() }, { backgroundSubagentThreadIds: () => new Set<string>() }, () => {});
+    { descendants: () => "none", candidates: () => new Set() }, () => {});
   const funnel = new PullRequestLinkFunnel(runtime.writer, () => {}, () => {});
   const reservations = new ThreadControlMutationReservationService();
   let settings = getDefaultSettings();

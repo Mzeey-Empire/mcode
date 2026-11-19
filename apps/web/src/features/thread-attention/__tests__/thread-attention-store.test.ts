@@ -210,18 +210,11 @@ describe("on-screen thread acknowledgements", () => {
     expect(warning.mock.calls.map(([message]) => message)).toEqual(["[thread-attention] acknowledgement failed"]);
   });
 
-  it("clears a delegating thread that a reconnect snapshot omits", () => {
-    threadAttentionStore.getState().apply({ ...attention, hasUnfinishedDelegatedTasks: true });
+  it.each(["running", "needs-you"] as const)("clears descendants in state %s when a reconnect snapshot omits the thread", (descendants) => {
+    threadAttentionStore.getState().apply({ ...attention, descendants });
     const observed = threadAttentionStore.getState().byThreadId;
     threadAttentionStore.getState().hydrate([], observed);
-    expect(threadAttentionStore.getState().byThreadId.a?.hasUnfinishedDelegatedTasks).toBe(false);
-  });
-
-  it("clears a background subagent that a reconnect snapshot omits", () => {
-    threadAttentionStore.getState().apply({ ...attention, hasRunningBackgroundSubagents: true });
-    const observed = threadAttentionStore.getState().byThreadId;
-    threadAttentionStore.getState().hydrate([], observed);
-    expect(threadAttentionStore.getState().byThreadId.a?.hasRunningBackgroundSubagents).toBe(false);
+    expect(threadAttentionStore.getState().byThreadId.a?.descendants).toBe("none");
   });
 
   it("keeps a newer push over an in-flight reconnect snapshot and never regresses an optimistic mark", () => {

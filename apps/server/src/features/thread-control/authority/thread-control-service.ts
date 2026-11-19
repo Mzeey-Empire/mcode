@@ -82,6 +82,7 @@ export class ThreadControlService {
   private capacityTail: Promise<void> = Promise.resolve();
   private readonly externalReservations = new Map<string, number>();
   private readonly mutationReservations: ThreadControlMutationReservationService;
+  private approvalTargetChanged?: (threadId: string) => void;
 
   constructor(
     // Delayed because ApprovalService needs the provider registry, whose host ports resolve thread control.
@@ -1033,6 +1034,11 @@ export class ThreadControlService {
       ...(approval.operation === "thread_send" ? { message: approval.message } : {}) };
   }
 
+  /** Observe thread-control waits read against the target when its approval card belongs to a different source. */
+  bindApprovalTargetChanged(listener: (threadId: string) => void): void {
+    this.approvalTargetChanged = listener;
+  }
+
   /** Publish an already committed approval on its authenticated source thread. */
   publishThreadApproval(approvalId: string): void {
     const approval = this.approvals.listPending().find((item) => item.approvalId === approvalId);
@@ -1043,6 +1049,7 @@ export class ThreadControlService {
     this.approvalService.publish({ requestId, threadId, body }, {
       id: providerId, resolveApproval: (id, response) => this.respondToApproval(id, response),
     });
+    if (threadId !== approval.threadId) this.approvalTargetChanged?.(approval.threadId);
   }
 
   /** Cancel an unclaimed task approval without creating its child. */
@@ -1054,12 +1061,14 @@ export class ThreadControlService {
   }
 
   private publishApprovalResolution(pending: PendingThreadControlApproval, decision: ThreadApprovalDecision): void {
+    const threadId = pending.sourceThreadId ?? pending.threadId;
     this.approvalService.resolved({
-      requestId: pending.approvalId, threadId: pending.sourceThreadId ?? pending.threadId,
+      requestId: pending.approvalId, threadId,
       outcome: decision === "cancelled" ? { status: "cancelled", reason: "session_stopped" }
         : decision === "deny" ? { status: "denied", choiceLabel: "Deny" }
         : { status: "allowed", intent: "allow_once", choiceLabel: "Allow" },
     });
+    if (threadId !== pending.threadId) this.approvalTargetChanged?.(pending.threadId);
   }
 
   private async createOne(
