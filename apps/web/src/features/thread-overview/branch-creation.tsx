@@ -199,12 +199,3 @@ export function useThreadOverviewBranchCreation(threadId: string) {
 
   return { ...current, setOpen, complete };
 }
-
-/**
- * Returns whether a branchless worktree can enter the Create PR naming step.
- */
-export function canStartBranchlessCreatePr(
-  thread: Pick<Thread, "mode" | "checkout_state">,
-): boolean {
-  return thread.mode === "worktree" && thread.checkout_state === "branchless";
-}

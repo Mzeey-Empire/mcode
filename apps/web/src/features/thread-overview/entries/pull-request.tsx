@@ -9,13 +9,11 @@ import { registerCommand } from "@/lib/command-registry";
 import { cn } from "@/lib/utils";
 import { type Thread } from "@/transport";
 import type { ChecksStatus } from "@mcode/contracts/github";
-import { ChevronDown, GitCommitHorizontal, GitPullRequest, Plus } from "lucide-react";
+import { ChevronDown, GitPullRequest, Plus } from "lucide-react";
 import { useEffect, useState, type CSSProperties, type MouseEvent } from "react";
 import {
-  OVERVIEW_ROW_CLASS,
   OverviewRowIcon,
   ThreadOverviewTooltipButton,
-  ThreadOverviewWhen,
 } from "@/features/thread-overview/overview-row";
 
 type CiSegmentName = "failing" | "running" | "passing" | "cancelled";
@@ -47,19 +45,10 @@ function getClosedPrRowStatus(pr: NonNullable<ThreadOverviewPr>): { label: strin
   return { label: pr.state, tone: "neutral" };
 }
 
-/** Returns the Overview status before the thread has a pull request. */
-function getUnopenedPrRowStatus(hasCommitsAhead: boolean | null): { label: string; tone: PrRowTone } {
-  if (hasCommitsAhead === true) return { label: "Ready", tone: "neutral" };
-  if (hasCommitsAhead === false) return { label: "No commits ahead", tone: "muted" };
-  return { label: "Checking", tone: "muted" };
-}
-
 function getPrRowStatus(
-  pr: ThreadOverviewPr,
-  hasCommitsAhead: boolean | null,
+  pr: NonNullable<ThreadOverviewPr>,
   checks: ChecksStatus | null,
 ): { label: string | null; tone: PrRowTone } {
-  if (!pr) return getUnopenedPrRowStatus(hasCommitsAhead);
   if (pr.state.toLowerCase() === "open") return getOpenPrRowStatus(checks);
   return getClosedPrRowStatus(pr);
 }
@@ -125,87 +114,24 @@ function ThreadOverviewCiStatusCircle({ checks }: { checks: ChecksStatus }) {
 }
 
 interface ThreadOverviewPrRowProps {
-  pr: ThreadOverviewPr;
-  hasCommitsAhead: boolean | null;
+  pr: NonNullable<ThreadOverviewPr>;
   checks: ChecksStatus | null;
   openPrDetail: { title: string } | null;
   threadId: string;
-  onCommit: () => void;
   onCreatePr: () => void;
   onOpenPr: (url: string, event?: MouseEvent) => void;
 }
 
-function ThreadOverviewPrActionRow({
-  hasCommitsAhead,
-  onCommit,
-  onCreatePr,
-}: Pick<ThreadOverviewPrRowProps, "hasCommitsAhead" | "onCommit" | "onCreatePr">) {
-  if (hasCommitsAhead === false) {
-    return (
-      <div data-testid="thread-overview-pr">
-        <ThreadOverviewTooltipButton content="Review and commit the changes">
-          <Button
-            variant="ghost"
-            size="compact"
-            type="button"
-            data-testid="workspace-menu-commit"
-            className={cn(
-              OVERVIEW_ROW_CLASS,
-              "cursor-pointer justify-start text-ink",
-            )}
-            onClick={onCommit}
-          >
-            <OverviewRowIcon>
-              <GitCommitHorizontal />
-            </OverviewRowIcon>
-            <span className="font-medium">Commit…</span>
-          </Button>
-        </ThreadOverviewTooltipButton>
-      </div>
-    );
-  }
-
-  return (
-    <div data-testid="thread-overview-pr">
-      <ThreadOverviewTooltipButton
-        content={hasCommitsAhead ? "Create pull request" : "Waiting for commits ahead of base branch"}
-        disabled={!hasCommitsAhead}
-      >
-        <Button
-          variant="ghost"
-          size="compact"
-          type="button"
-          data-testid="workspace-menu-create-pr"
-          className={cn(
-            OVERVIEW_ROW_CLASS,
-            "cursor-pointer justify-start text-ink disabled:cursor-not-allowed disabled:opacity-50",
-          )}
-          onClick={onCreatePr}
-          disabled={!hasCommitsAhead}
-        >
-          <OverviewRowIcon>
-            <GitPullRequest />
-          </OverviewRowIcon>
-          <span className="font-medium">Create PR</span>
-        </Button>
-      </ThreadOverviewTooltipButton>
-    </div>
-  );
-}
-
-function ThreadOverviewPrActiveRow({
+function ThreadOverviewPrRow({
   pr,
-  hasCommitsAhead,
   checks,
   openPrDetail,
   threadId,
   onCreatePr,
   onOpenPr,
-}: Required<Pick<ThreadOverviewPrRowProps, "pr" | "hasCommitsAhead" | "checks" | "openPrDetail" | "threadId" | "onCreatePr" | "onOpenPr">> & {
-  pr: NonNullable<ThreadOverviewPrRowProps["pr"]>;
-}) {
+}: ThreadOverviewPrRowProps) {
   const [checksOpen, setChecksOpen] = useState(false);
-  const status = getPrRowStatus(pr, hasCommitsAhead, checks);
+  const status = getPrRowStatus(pr, checks);
   const detailText = getPrRowDetail(pr, openPrDetail);
   const hasChecksData =
     pr.state.toLowerCase() === "open" &&
@@ -303,56 +229,20 @@ function ThreadOverviewPrActiveRow({
   );
 }
 
-function ThreadOverviewPrRow({
-  pr,
-  hasCommitsAhead,
-  checks,
-  openPrDetail,
-  threadId,
-  onCommit,
-  onCreatePr,
-  onOpenPr,
-}: ThreadOverviewPrRowProps) {
-  if (!pr) {
-    return (
-      <ThreadOverviewPrActionRow
-        hasCommitsAhead={hasCommitsAhead}
-        onCommit={onCommit}
-        onCreatePr={onCreatePr}
-      />
-    );
-  }
-
+function PullRequestEntry({ thread }: { thread: Thread }) {
+  const { prable, effectivePr, checks, openPrDetail, handleOpenPr, setCreatePrOpen } = useOverviewContext();
+  // Before a PR exists, the git row offers Create PR.
+  if (!prable || !effectivePr) return null;
   return (
-    <ThreadOverviewPrActiveRow
-      pr={pr}
-      hasCommitsAhead={hasCommitsAhead}
+    <ThreadOverviewPrRow
+      pr={effectivePr}
       checks={checks}
       openPrDetail={openPrDetail}
-      threadId={threadId}
-      onCreatePr={onCreatePr}
-      onOpenPr={onOpenPr}
+      threadId={thread.id}
+      onCreatePr={() => setCreatePrOpen(true)}
+      onOpenPr={handleOpenPr}
     />
   );
-}
-
-function PullRequestEntry({ thread }: { thread: Thread }) {
-  const { prable: canShowPrActions, effectivePr, hasCommitsAhead, checks, openPrDetail, handleCommit, handleOpenPr, setCreatePrOpen } = useOverviewContext();
-
-  return (<ThreadOverviewWhen when={canShowPrActions}>
-    <>
-      <ThreadOverviewPrRow
-        pr={effectivePr}
-        hasCommitsAhead={hasCommitsAhead}
-        checks={checks}
-        openPrDetail={openPrDetail}
-        threadId={thread.id}
-        onCommit={handleCommit}
-        onCreatePr={() => setCreatePrOpen(true)}
-        onOpenPr={handleOpenPr}
-      />
-    </>
-  </ThreadOverviewWhen>);
 }
 
 /** PullRequest block in the thread overview, preserving its existing row position. */
