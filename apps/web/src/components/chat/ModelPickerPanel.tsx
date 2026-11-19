@@ -153,32 +153,39 @@ function getDefaultProviderId(
 export type PickerProviderScope =
   /** New thread, draft, or settings: every provider, and a pick selects directly. */
   | { readonly kind: "all" }
-  /** A turn runs: only the selected model's provider. */
-  | { readonly kind: "selected-only" }
+  /** A turn runs: only the selected model's provider. A started thread names its provider, which a switch may not have reached yet. */
+  | { readonly kind: "selected-only"; readonly threadProviderId?: string }
   /** Started and idle: every provider, and a pick on another provider hands the thread off on the next send. */
   | { readonly kind: "switchable"; readonly threadProviderId: string };
 
 const ALL_PROVIDERS: PickerProviderScope = { kind: "all" };
 
-/** The provider the picker is held to, or undefined when it offers every provider. */
 function lockedProviderOf(scope: PickerProviderScope, displayProvider: ModelProvider | undefined): ModelProvider | undefined {
   return scope.kind === "selected-only" ? displayProvider : undefined;
 }
 
-/** The thread's provider when a pick on another provider hands the thread off, otherwise undefined. */
 function handoffSourceOf(scope: PickerProviderScope): string | undefined {
   return scope.kind === "switchable" ? scope.threadProviderId : undefined;
 }
 
-/** Says, on another provider's tab, that a pick there hands the thread off. */
 function handoffNotice(handoffFrom: string | undefined, activeTab: ModelPickerTab): string | undefined {
   if (!handoffFrom || activeTab === FAVORITES_TAB || activeTab === handoffFrom) return undefined;
   return `This thread runs on ${providerName(handoffFrom)}. Picking a ${providerName(activeTab)} model hands it off to ${providerName(activeTab)}.`;
 }
 
-function getProvidersForLeftRail(lockedProvider: ModelProvider | undefined): readonly ModelProvider[] {
+function getProvidersForLeftRail(
+  lockedProvider: ModelProvider | undefined,
+  handoffFrom: string | undefined,
+  canUseProvider: (providerId: string) => boolean,
+): readonly ModelProvider[] {
   if (lockedProvider) {
     return MODEL_PROVIDERS.filter((provider) => provider.id === lockedProvider.id);
+  }
+  if (handoffFrom) {
+    // A started thread can only switch to a provider that can run it now; others are hidden rather than shown disabled.
+    return MODEL_PROVIDERS.filter(
+      (provider) => provider.id === handoffFrom || (!provider.comingSoon && canUseProvider(provider.id)),
+    );
   }
   return MODEL_PROVIDERS;
 }
@@ -200,13 +207,10 @@ function isProviderUsable(
 function getVisibleFavorites(
   favorites: readonly ModelFavoriteEntry[],
   canUseProvider: (providerId: string) => boolean,
-  lockedProvider: ModelProvider | undefined,
+  railProviders: readonly ModelProvider[],
 ): ModelFavoriteEntry[] {
-  return favorites.filter((favorite) => {
-    const providerIsHidden = !canUseProvider(favorite.providerId);
-    const outsideLockedProvider = lockedProvider !== undefined && favorite.providerId !== lockedProvider.id;
-    return !providerIsHidden && !outsideLockedProvider;
-  });
+  return favorites.filter((favorite) =>
+    canUseProvider(favorite.providerId) && railProviders.some((provider) => provider.id === favorite.providerId));
 }
 
 function filterModelsBySearchQuery(
@@ -597,7 +601,9 @@ export function ModelPickerPanel({
   const defaultTab = lockedProvider
     ? lockedProvider.id
     : getDefaultProviderId(selectedProviderId, displayProvider);
-  const [activeTab, setActiveTab] = usePickerTab(defaultTab, tab, onTabChange);
+  const [pickerTab, setActiveTab] = usePickerTab(defaultTab, tab, onTabChange);
+  // The scope can narrow while the picker is open, when a turn starts, so a locked rail overrides the remembered tab.
+  const activeTab = lockedProvider ? lockedProvider.id : pickerTab;
   const [legacyFold, setLegacyFold] = useState<LegacyFoldState>("auto");
 
   const favorites = useModelFavoritesStore((store) => store.entries);
@@ -613,14 +619,18 @@ export function ModelPickerPanel({
     (providerId: string) => getProviderDisabled(providerId, availabilityList),
     [availabilityList],
   );
+  const railProviders = useMemo(
+    () => getProvidersForLeftRail(lockedProvider, handoffFrom, canUseProvider),
+    [lockedProvider, handoffFrom, canUseProvider],
+  );
   const tabs = getPickerTabs(
-    getProvidersForLeftRail(lockedProvider),
+    railProviders,
     lockedProvider !== undefined,
     isProviderDisabled,
   );
   const favoritesVisible = useMemo(
-    () => getVisibleFavorites(favorites, canUseProvider, lockedProvider),
-    [favorites, canUseProvider, lockedProvider],
+    () => getVisibleFavorites(favorites, canUseProvider, railProviders),
+    [favorites, canUseProvider, railProviders],
   );
   const starredKeys = useMemo(
     () => new Set(favorites.map((favorite) => optionKey(favorite.providerId, favorite.modelId))),
@@ -629,8 +639,8 @@ export function ModelPickerPanel({
 
   const searching = tokenizeSearch(query).length > 0;
   const searchedProviders = useMemo(
-    () => (searching ? getProvidersForLeftRail(lockedProvider).filter((provider) => !provider.comingSoon && canUseProvider(provider.id)) : []),
-    [searching, lockedProvider, canUseProvider],
+    () => (searching ? railProviders.filter((provider) => !provider.comingSoon && canUseProvider(provider.id)) : []),
+    [searching, railProviders, canUseProvider],
   );
 
   const selectedModelInTab = presentation.selectedProviderId === activeTab ? presentation.normalizedModelId : undefined;

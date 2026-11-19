@@ -351,6 +351,17 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
     expect(realPopup()).toBeNull();
   });
 
+  it("keeps a reasoning pick off the thread while a switch to another provider starts", async () => {
+    const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
+    const onSelectionChange = await renderSplit({ threadId: "thread-1", providerScope: { kind: "selected-only", threadProviderId: "claude" } });
+    await openModelPicker();
+
+    fireEvent.click(within(pane("GPT-9 Deep")).getByRole("option", { name: "Low" }));
+
+    expect(onSelectionChange).toHaveBeenCalledWith({ modelId: "gpt-9-deep", provider: "codex", reasoning: "low" });
+    expect(setThreadSettings).not.toHaveBeenCalled();
+  });
+
   it("sets Fast from the footer in place, keeping the picker open", async () => {
     serveModels([{ id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: LEVELS, supportsFastMode: true }]);
     const onSelectionChange = await renderSplit();

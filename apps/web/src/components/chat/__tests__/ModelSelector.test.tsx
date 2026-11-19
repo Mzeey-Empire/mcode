@@ -221,6 +221,39 @@ describe("ModelSelector", () => {
     expect(optionNames().filter((name) => name.startsWith("GPT"))).toEqual([]);
   });
 
+  it("offers a started thread only the providers it can switch to", async () => {
+    setProviders({ claude: true, codex: true, cursor: true, opencode: true });
+    useProviderAvailabilityStore.setState((state) => ({
+      providers: state.providers.map((provider) => provider.id === "opencode" ? { ...provider, hasAdapter: false } : provider),
+    }));
+    render(<ModelSelector selectedModelId="gpt-9-zeta" selectedProviderId="codex"
+      onSelect={vi.fn()} providerScope={{ kind: "switchable", threadProviderId: "codex" }} />);
+    const dialog = await openPicker();
+
+    const tabs = within(dialog).getAllByRole("radio").map((tab) => tab.getAttribute("aria-label") ?? tab.textContent);
+    expect(tabs).toEqual(expect.arrayContaining(["Codex", "Claude", "Cursor"]));
+    expect(tabs).not.toContain("OpenCode");
+    expect(tabs).not.toContain("Gemini");
+  });
+
+  it("drops another provider's models when a turn starts while its tab is open", async () => {
+    setProviders({ claude: true, codex: true });
+    listProviderModels.mockImplementation(async (providerId) => providerId === "claude"
+      ? [{ id: "claude-only-model", name: "Claude Only" }]
+      : [{ id: "gpt-9-zeta", name: "GPT-9 Zeta" }]);
+    const { rerender } = render(<ModelSelector selectedModelId="gpt-9-zeta" selectedProviderId="codex"
+      onSelect={vi.fn()} providerScope={{ kind: "switchable", threadProviderId: "codex" }} />);
+    await openPicker();
+    await userEvent.click(screen.getByRole("radio", { name: "Claude" }));
+    expect(await screen.findByRole("option", { name: /Claude Only/ })).toBeInTheDocument();
+
+    rerender(<ModelSelector selectedModelId="gpt-9-zeta" selectedProviderId="codex"
+      onSelect={vi.fn()} providerScope={{ kind: "selected-only", threadProviderId: "codex" }} />);
+
+    expect(await screen.findByRole("option", { name: /GPT-9 Zeta/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Claude Only/ })).toBeNull();
+  });
+
   it("marks the selected row and stars a model without choosing it", async () => {
     const onSelect = vi.fn();
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"

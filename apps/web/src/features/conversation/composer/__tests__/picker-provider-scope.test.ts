@@ -16,6 +16,7 @@ describe("pickerProviderScopeOf", () => {
   });
 
   it("holds a started thread to its provider while a turn runs", () => {
-    expect(pickerProviderScopeOf({ started: true, threadProviderId: "claude", isAgentRunning: true })).toEqual({ kind: "selected-only" });
+    expect(pickerProviderScopeOf({ started: true, threadProviderId: "claude", isAgentRunning: true }))
+      .toEqual({ kind: "selected-only", threadProviderId: "claude" });
   });
 });

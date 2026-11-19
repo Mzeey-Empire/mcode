@@ -11,6 +11,6 @@ export interface PickerProviderScopeInput {
 /** Derives the composer model picker's provider scope from the thread's state. */
 export function pickerProviderScopeOf({ started, threadProviderId, isAgentRunning }: PickerProviderScopeInput): PickerProviderScope {
   if (!started || !threadProviderId) return { kind: "all" };
-  if (isAgentRunning) return { kind: "selected-only" };
+  if (isAgentRunning) return { kind: "selected-only", threadProviderId };
   return { kind: "switchable", threadProviderId };
 }
