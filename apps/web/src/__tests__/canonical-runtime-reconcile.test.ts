@@ -1,5 +1,6 @@
-import { createMockMessage } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
+import { createMockMessage, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createElement } from "react";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { createAgentModelState, reduceAgentEventBatch, type AgentItem, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { type Message } from "@mcode/contracts/models/message";
@@ -8,6 +9,10 @@ import { isThreadExecuting, sendQueuedMessage, useThreadStore } from "@/stores/t
 import { useQueueStore } from "@/stores/queueStore";
 import { useToastStore } from "@/stores/toastStore";
 import { sendComposerThreadMessage } from "@/features/conversation/composer/submission/composer-thread-message";
+import { Composer } from "@/features/conversation/composer/Composer";
+import { useRevertTurnDisabledReason } from "@/features/conversation/turn-revert/TurnRevertBarConfirm";
+import { render, renderHook, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createDefaultComposerAgentSelection } from "@/features/conversation/composer/draft/composer-selection-state";
 import { getThreadRuntimePhase, isThreadStopPending } from "@/stores/thread-lifecycle";
 import {
@@ -16,6 +21,8 @@ import {
   readThreadField,
 } from "@/stores/thread-store-test-utils";
 import { clearRecordCache } from "@/features/conversation/hydration/record-cache";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
@@ -1018,5 +1025,31 @@ describe("canonical runtime reconciliation", () => {
       ...(acknowledged ? { "unsaved-message": "unsaved-message" } : {}) });
     expect(readThreadField(THREAD_ID, (record) => record.runtimePhase)).toBe(acknowledged ? "completed" : "interrupted");
     expect(readThreadField(THREAD_ID, (record) => record.canonicalAgent.lostProgress)).toBe(true);
+  });
+
+  it("sends, not queues, a message after the canonical turn end overtakes the running set", async () => {
+    const workspace = createMockWorkspace({ id: "workspace-1" });
+    const thread = createMockThread({ id: THREAD_ID, workspace_id: workspace.id, provider: "codex" });
+    useWorkspaceStore.setState({ workspaces: [workspace], activeWorkspaceId: workspace.id, threads: [thread], activeThreadId: THREAD_ID });
+    useQueueStore.setState({ queues: {}, inFlightQueuedMessages: {}, editingThreadId: null });
+    seedRuntime("running", EXECUTION_ID, true);
+    useThreadStore.getState().handleCanonicalAgentEvents(THREAD_ID, turnEvents(EXECUTION_ID, "completed"));
+    useThreadStore.setState({ runningThreadIds: new Set([THREAD_ID]) });
+    const send = vi.mocked(mockTransport.sendMessage).mockResolvedValueOnce(undefined);
+
+    expect(isThreadExecuting(THREAD_ID)).toBe(false);
+    const { result } = renderHook(() => useRevertTurnDisabledReason(THREAD_ID,
+      { snapshot: undefined, listLoaded: false, allReverted: false }));
+    expect(result.current).toBeNull();
+
+    useComposerDraftStore.getState().setPendingPrefill("follow-up");
+    render(createElement(Composer, { threadId: THREAD_ID, workspaceId: workspace.id }));
+    const button = screen.getByRole("button", { name: "Send message" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await userEvent.setup().click(button);
+    await waitFor(() => expect({
+      sent: send.mock.calls.map(([input]) => [input.threadId, input.content]),
+      queued: useQueueStore.getState().queues[THREAD_ID]?.map(({ content }) => content) ?? [],
+    }).toEqual({ sent: [[THREAD_ID, "follow-up"]], queued: [] }));
   });
 });
