@@ -356,9 +356,13 @@ are never promoted, tagged final, or matched against the answer:
    real one, so main-thread boundaries wait for `message_delta`, the next
    tool call (preamble), or the result (final). Classifying the null early
    showed tool-free answers as a thought next to the streaming answer.
-2. **`TextDelta.isFinalResponse`** (stream hint) — best-effort flag set on
-   `content_block_delta` when all tools have resolved and at least one tool
-   fired this turn. May be absent on tool-free turns; boundary event wins.
+2. **`TextDelta.isFinalResponse`** (stream hint) — Claude never sets it.
+   Its text streams before the `stop_reason` that classifies it, and the old
+   guess ("final once every tool has resolved") marked every narration after
+   the first tool round as the answer, so the live timeline dropped it. Unset
+   text streams as narration; the client shows the open segment as the answer
+   until the boundary retracts or closes it. Cursor and Devin, which lack a
+   per-message stop reason, still set this guess.
 3. **Client segment routing** — `threadStore` retracts or closes the open
    thought segment on `session.assistantMessageBoundary`. Final response text
    renders as a provisional assistant message. Open-slot deltas use

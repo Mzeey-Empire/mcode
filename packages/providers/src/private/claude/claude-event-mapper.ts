@@ -88,7 +88,6 @@ export interface ClaudeMappedSession {
   permissionMode?: string;
   model: string;
   pendingToolUses: Set<string>;
-  hasFiredToolThisTurn: boolean;
   poisoned?: boolean;
 }
 
@@ -566,7 +565,6 @@ export class ClaudeEventMapper {
     const session = this.callbacks.getSession();
     if (!session) return;
     session.pendingToolUses.add(id);
-    session.hasFiredToolThisTurn = true;
   }
 
   private async result(message: Message): Promise<ClaudeMapOutcome> {
@@ -971,18 +969,13 @@ export class ClaudeEventMapper {
         partialJson: delta.partial_json,
       });
   }
+  /**
+   * Leaves `isFinalResponse` unset: whether this text is narration or the answer is known only
+   * from the message's `stop_reason`, which arrives after the text. Guessing "final" once a tool
+   * had run hid every later narration from the live timeline; the boundary classifies it instead.
+   */
   private emitTextDelta(delta: string): void {
-    const session = this.callbacks.getSession();
-    const isFinalResponse =
-      session !== undefined &&
-      session.pendingToolUses.size === 0 &&
-      session.hasFiredToolThisTurn;
-    this.emit({
-      type: AgentEventType.TextDelta,
-      threadId: this.threadId,
-      delta,
-      ...(isFinalResponse ? { isFinalResponse: true } : {}),
-    });
+    this.emit({ type: AgentEventType.TextDelta, threadId: this.threadId, delta });
   }
   private toolProgress(message: Message): ClaudeMapOutcome {
     const toolCallId = stringValue(message.tool_use_id);

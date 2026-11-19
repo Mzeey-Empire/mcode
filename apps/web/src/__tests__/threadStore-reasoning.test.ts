@@ -130,6 +130,30 @@ describe("threadStore reasoning segments", () => {
     expect(segmentShape(threadId)).toEqual([]);
   });
 
+  // Claude streams text unflagged and classifies it with the boundary that follows.
+  it("keeps unflagged narration between reasoning rows and retracts the final answer at its boundary", () => {
+    const queue = setupRaf();
+    const threadId = "thread-reasoning-claude-shape";
+    emit(reasoning(threadId, "Finding the menu.", { reasoningItemId: "m1:thinking:0" }));
+    emit(reasoning(threadId, "", { reasoningItemId: "m1:thinking:0", done: true }));
+    emit(toolUse(threadId, "t1"));
+    emit(reasoning(threadId, "Checking the shared list.", { reasoningItemId: "m2:thinking:0" }));
+    emit(reasoning(threadId, "", { reasoningItemId: "m2:thinking:0", done: true }));
+    emit({ type: "textDelta", threadId, delta: "There's a shared component." });
+    flush(queue);
+    emit({ type: "assistantMessageBoundary", threadId, isFinalResponse: false });
+    emit(toolUse(threadId, "t2"));
+    emit({ type: "textDelta", threadId, delta: "Done." });
+    flush(queue);
+    emit({ type: "assistantMessageBoundary", threadId, isFinalResponse: true });
+
+    expect(segmentShape(threadId)).toEqual([
+      { text: "Finding the menu.", kind: "reasoning", open: false },
+      { text: "Checking the shared list.", kind: "reasoning", open: false },
+      { text: "There's a shared component.", kind: "narration", open: false },
+    ]);
+  });
+
   it("closes open reasoning when final answer text starts", () => {
     const queue = setupRaf();
     const threadId = "thread-reasoning-final";

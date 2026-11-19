@@ -38,7 +38,7 @@ function createMapper(captureSdkSessionId = vi.fn(() => true)) {
 describe("ClaudeEventMapper native dispatch", () => {
   it("reports unchanged Fast status once in each execution", async () => {
     const { mapper, events, callbacks } = createMapper();
-    vi.mocked(callbacks.getSession).mockReturnValue({ model: "opus", pendingToolUses: new Set(), hasFiredToolThisTurn: false });
+    vi.mocked(callbacks.getSession).mockReturnValue({ model: "opus", pendingToolUses: new Set() });
     const init = { type: "system", subtype: "init", fast_mode_state: "on" };
     await mapper.map(init);
     await mapper.map(init);
@@ -52,7 +52,7 @@ describe("ClaudeEventMapper native dispatch", () => {
   });
   it("deduplicates init Fast status and reports cooldown from results", async () => {
     const { mapper, events, callbacks } = createMapper();
-    vi.mocked(callbacks.getSession).mockReturnValue({ model: "opus", pendingToolUses: new Set(), hasFiredToolThisTurn: false });
+    vi.mocked(callbacks.getSession).mockReturnValue({ model: "opus", pendingToolUses: new Set() });
     const init = { type: "system", subtype: "init", fast_mode_state: "on" };
     await mapper.map(init);
     await mapper.map(init);
@@ -267,6 +267,41 @@ describe("ClaudeEventMapper tool results", () => {
   });
 });
 
+describe("ClaudeEventMapper text classification", () => {
+  const textDelta = (text: string) => ({ type: "stream_event", event: {
+    type: "content_block_delta", index: 0, delta: { type: "text_delta", text } } });
+  const textMessage = (text: string) => ({ type: "assistant", message: {
+    content: [{ type: "text", text }], stop_reason: null } });
+  const toolCall = (id: string) => ({ type: "assistant", message: {
+    content: [{ type: "tool_use", id, name: "Read", input: {} }], stop_reason: null } });
+  const toolResult = (id: string) => ({ type: "user", message: {
+    content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] } });
+
+  // Regression: text after a finished tool round was streamed as final, so the live timeline
+  // never showed it as narration between tool rows.
+  it("leaves text after a tool round for the stop reason to classify", async () => {
+    const { mapper, events, callbacks } = createMapper();
+    vi.mocked(callbacks.getSession).mockReturnValue({ model: "opus", pendingToolUses: new Set() });
+    await mapper.map(toolCall("READ_1"));
+    await mapper.map(toolResult("READ_1"));
+    await mapper.map(textDelta("There's a shared component."));
+    await mapper.map(textMessage("There's a shared component."));
+    await mapper.map(toolCall("READ_2"));
+    await mapper.map(toolResult("READ_2"));
+    await mapper.map(textDelta("Done."));
+    await mapper.map(textMessage("Done."));
+    await mapper.map({ type: "stream_event", event: { type: "message_delta", delta: { stop_reason: "end_turn" } } });
+
+    expect(events.filter((event) => event.type === AgentEventType.TextDelta
+      || event.type === AgentEventType.AssistantMessageBoundary)).toEqual([
+      { type: AgentEventType.TextDelta, threadId: "test", delta: "There's a shared component." },
+      { type: AgentEventType.AssistantMessageBoundary, threadId: "test", isFinalResponse: false },
+      { type: AgentEventType.TextDelta, threadId: "test", delta: "Done." },
+      { type: AgentEventType.AssistantMessageBoundary, threadId: "test", isFinalResponse: true },
+    ]);
+  });
+});
+
 describe("ClaudeEventMapper user interrupts", () => {
   async function eventsAfterResult(content: string, isError: boolean): Promise<AgentEvent[]> {
     const { events, mapper } = createMapper();
@@ -341,7 +376,7 @@ describe("ClaudeEventMapper background tools", () => {
   async function launched(ids: readonly string[]) {
     const harness = createMapper();
     const pendingToolUses = new Set<string>();
-    vi.mocked(harness.callbacks.getSession).mockReturnValue({ model: "sonnet", pendingToolUses, hasFiredToolThisTurn: false });
+    vi.mocked(harness.callbacks.getSession).mockReturnValue({ model: "sonnet", pendingToolUses });
     for (const id of ids) {
       await harness.mapper.map({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Agent", input: {} }] } });
       await harness.mapper.map(launch(id));

@@ -51,7 +51,6 @@ function makeProvider(lease: BrowserAutomationSessionLease) {
     permissionMode: "default",
     orchestrationMode: "standard",
     pendingToolUses: new Set<string>(),
-    hasFiredToolThisTurn: false,
     workspaceId: "workspace-1",
     browserPermissionCapability: "interact" as const,
   } as unknown as Parameters<ClaudeProvider["close"]>[0];

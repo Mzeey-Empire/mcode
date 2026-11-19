@@ -50,7 +50,6 @@ function nativeSessionEntry(pushMessage: ReturnType<typeof vi.fn>, pendingToolUs
     permissionMode: "default",
     pendingToolUses,
     backgroundTools: new Map<string, HeldBackgroundCall>(),
-    hasFiredToolThisTurn: false,
   };
 }
 
