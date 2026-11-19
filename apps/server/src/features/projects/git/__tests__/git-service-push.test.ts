@@ -89,9 +89,6 @@ describe("GitPushService", () => {
   function createPushService(options: { upstream?: boolean; review?: boolean; pushError?: Error } = {}) {
     const mock = createMockGitExecutor();
     mock.execFn.mockImplementation(async (args) => {
-      if (args[2] === "config" && args[3] === "--get") {
-        throw Object.assign(new Error("no upstream configured"), { code: 1 });
-      }
       if (args[2] === "push" && options.pushError) throw options.pushError;
       if (args.includes("--symbolic-full-name") && !options.upstream) {
         throw Object.assign(new Error("no upstream configured"), { code: 128 });

@@ -92,10 +92,10 @@ export const ReviewStateSchema = lazySchema(() => z.discriminatedUnion("isGitRep
     }),
     commitsAhead: z.object({ count: z.number().int().nonnegative(), base: z.string() }).nullable(),
     /**
-     * Counts commits on HEAD that are absent from the branch's upstream.
-     * Null when HEAD is detached, the branch has no upstream, or the configured upstream ref no longer exists.
+     * Counts commits on HEAD absent from origin/<branch>, the ref Push and Create PR publish to.
+     * Null when HEAD is detached or origin/<branch> does not exist.
      */
-    upstream: z.object({ ahead: z.number().int().nonnegative() }).nullable(),
+    published: z.object({ ahead: z.number().int().nonnegative() }).nullable(),
     branchDefault: z.union([
       z.object({ compare: z.string(), base: z.string() }),
       z.object({ unavailable: z.enum(["unborn", "no-base"]) }),

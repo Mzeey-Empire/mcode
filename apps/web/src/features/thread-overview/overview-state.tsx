@@ -51,10 +51,10 @@ function hasUncommittedChanges(state: ReviewState | null): boolean | null {
   return staged + unstaged + untracked > 0;
 }
 
-/** A branch with no upstream counts its commits ahead of base as unpushed. */
+/** A branch with no published ref counts its commits ahead of base as unpushed. */
 function hasUnpushedCommits(state: ReviewState | null): boolean | null {
   if (!state?.isGitRepo) return null;
-  if (state.upstream) return state.upstream.ahead > 0;
+  if (state.published) return state.published.ahead > 0;
   // The server sends null when it cannot count against base; that is unknown, not zero.
   if (state.commitsAhead === null) return null;
   return state.commitsAhead.count > 0;
@@ -135,7 +135,7 @@ export function useOverviewState(
   const { gitPush, pushBranch, clearFinishedPush, refresh } = useGitPush(thread);
   const openings = useOpenings(open);
   // Only a named-branch worktree's git row reads uncommitted changes, and each probe spawns several
-  // git processes. A landed push or a reopened card re-probes, since a push from elsewhere moves only the upstream ref.
+  // git processes. A landed push or a reopened card re-probes, since a push from elsewhere can move just the published ref.
   const { state: reviewState } = useReviewState(prable ? thread.workspace_id : null, thread.id, refresh + openings);
   const gitRow = useMemo(() => planGitRow({
     mode: thread.mode,

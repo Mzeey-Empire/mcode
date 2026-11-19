@@ -54,7 +54,7 @@ export class GitPushService {
     @inject("ThreadRepo") private readonly threadRepo: Pick<ThreadRepo, "findById">,
   ) {}
 
-  /** Push the checked-out branch to its upstream or a linked Review task's persisted target. */
+  /** Push the checked-out branch to its own name on origin or a linked Review task's persisted target. */
   async pushCheckedOutBranch(request: CheckedOutBranchPush): Promise<void> {
     const resolution = request.threadId
       ? this.reviewWorktrees.resolvePushTarget(request.threadId)
@@ -71,7 +71,7 @@ export class GitPushService {
           target.expectedHeadRepositoryUrl,
         );
       } else {
-        await this.pushStandardBranch(request.workspacePath, request.branch);
+        await this.gitRepository.push(request.workspacePath, request.branch);
       }
     } catch (error) {
       throw toPushFailure(error);
@@ -156,40 +156,6 @@ export class GitPushService {
       return true;
     } catch (error) {
       if (gitExitCode(error) !== null) return false;
-      throw error;
-    }
-  }
-
-  private async pushStandardBranch(workspacePath: string, branch: string): Promise<void> {
-    const upstream = await this.readPushUpstream(workspacePath, branch);
-    if (!upstream) {
-      await this.gitRepository.push(workspacePath, branch);
-      return;
-    }
-    await this.gitExecutor.exec(
-      ["-C", workspacePath, "push", "--", upstream.remote, `refs/heads/${branch}:${upstream.merge}`],
-      { timeout: PUSH_TIMEOUT_MS },
-    );
-  }
-
-  private async readPushUpstream(repoPath: string, branch: string): Promise<{ remote: string; merge: string } | null> {
-    validateBranchName(branch);
-    const [remote, merge] = await Promise.all([
-      this.readGitConfig(repoPath, `branch.${branch}.remote`),
-      this.readGitConfig(repoPath, `branch.${branch}.merge`),
-    ]);
-    if (remote && remote !== "." && REMOTE_NAME.test(remote) && merge?.startsWith("refs/heads/")) {
-      return { remote, merge };
-    }
-    return null;
-  }
-
-  private async readGitConfig(repoPath: string, key: string): Promise<string | null> {
-    try {
-      const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "config", "--get", key]);
-      return stdout.trim();
-    } catch (error) {
-      if (gitExitCode(error) === 1) return null;
       throw error;
     }
   }

@@ -55,21 +55,19 @@ describe("git.push", { timeout: 30_000 }, () => {
   });
   afterEach(() => { NodeFS.rmSync(directory, { recursive: true, force: true }); });
 
-  it("pushes to the configured fork without updating origin or changing the upstream", async () => {
+  it("publishes a worktree branch under its own name when it tracks origin/main", async () => {
     git(cwd, "push", "origin", "main");
     const originHead = git(origin, "rev-parse", "refs/heads/main");
-    const fork = NodePath.join(directory, "fork.git");
-    git(directory, "init", "--bare", fork);
-    git(cwd, "remote", "add", "fork", fork);
-    git(cwd, "push", "-u", "fork", "main");
-    git(cwd, "commit", "--allow-empty", "-m", "push to fork");
-    const localHead = git(cwd, "rev-parse", "HEAD");
+    const branch = "feat";
+    const worktree = NodePath.join(directory, "worktree");
+    git(cwd, "worktree", "add", "--track", "-b", branch, worktree, "origin/main");
+    git(worktree, "commit", "--allow-empty", "-m", "feature commit");
+    const localHead = git(worktree, "rev-parse", "HEAD");
 
-    await push();
+    await service.pushCheckedOutBranch({ workspaceId: "fixture", workspacePath: worktree, branch });
 
-    expect(git(fork, "rev-parse", "refs/heads/main")).toBe(localHead);
     expect(git(origin, "rev-parse", "refs/heads/main")).toBe(originHead);
-    expect(git(cwd, "config", "branch.main.remote")).toBe("fork");
+    expect(git(origin, "rev-parse", `refs/heads/${branch}`)).toBe(localHead);
   });
 
   it("shows both lines of a remote hook's message without the command line or local paths", async () => {
