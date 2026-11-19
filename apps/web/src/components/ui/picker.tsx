@@ -1057,24 +1057,19 @@ function PickerOptionContent({ row, digit, active, selected, selectedCheck, onRu
   );
 }
 
-/** The keycap, or the row's hint in its place while the row is highlighted or hovered. */
 function PickerOptionTrailing({ hint, digit, active }: { readonly hint: PickerRowHint | undefined; readonly digit: number | undefined; readonly active: boolean }) {
-  // Only the highlighted or hovered row shows its hint, so a list of hinted rows never reads as a column of labels.
   const keycap = digit === undefined || (hint && active) ? null : (
     // A narrow list keeps the name whole and drops the keycap; the chord still works. On a filled row the keycap
     // takes ink, since muted over the key's tint and the row's fill drops below AA.
     <span
       aria-hidden
-      className={cn(
-        "shrink-0 text-muted group-data-active/option:text-ink group-data-selected/option:text-ink @max-[240px]/picker-list:hidden",
-        hint && "group-hover/option:hidden",
-      )}
+      className="shrink-0 text-muted group-data-active/option:text-ink group-data-selected/option:text-ink @max-[240px]/picker-list:hidden"
     >
       <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
     </span>
   );
-  const label = hint ? (
-    <span aria-hidden className={cn("shrink-0 text-caption text-ink", !active && "hidden group-hover/option:inline")}>
+  const label = hint && active ? (
+    <span aria-hidden className="shrink-0 text-caption text-ink">
       {hint.label}
     </span>
   ) : null;
