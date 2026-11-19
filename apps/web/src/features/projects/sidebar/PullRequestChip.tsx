@@ -42,9 +42,9 @@ function openPullRequest(pr: ThreadPullRequest, threadId: string, event: React.M
   if (pr.url) openGitHubUrl(pr.url, threadId, event);
 }
 
-// A press on a lone-PR chip opens the PR, but Base UI's hover rest timer started on the way in
-// survives the press and would open the list after the PR. The list refuses hover opens from a
-// pressed chip until the pointer leaves it.
+// Activating a lone-PR chip opens the PR, but Base UI's hover rest timer started on the way in
+// survives the activation and would open the list after the PR. The list refuses hover opens from
+// an activated chip until the pointer next enters or leaves it.
 const pressedLoneChips = new WeakSet<Element>();
 
 function chipLabel(ranked: readonly ThreadPullRequest[], primary: ThreadPullRequest): string {
@@ -53,8 +53,9 @@ function chipLabel(ranked: readonly ThreadPullRequest[], primary: ThreadPullRequ
 
 /**
  * The row's PR chip: the top-ranked PR's state icon and number, then `+N` for the rest when
- * several are linked. Pointing at it opens the shared list of every PR. Activating it opens that
- * list only when several PRs are linked; a lone PR with a URL opens directly.
+ * several are linked. Pointing at it opens the shared list of every PR. Activating it opens a lone
+ * PR directly (or does nothing when that PR has no link) and opens the list only when several PRs
+ * are linked.
  */
 export function PullRequestChip({ threadId, ranked }: { threadId: string; ranked: readonly ThreadPullRequest[] }) {
   const handle = useContext(PullRequestListHandleContext);
@@ -72,7 +73,7 @@ export function PullRequestChip({ threadId, ranked }: { threadId: string; ranked
   // The top PR leads, then a count of the rest: "+2" beside a number reads as two more, not three.
   const label = <><StateIcon pr={primary} />{primary.number}{ranked.length > 1 ? <span>+{ranked.length - 1}</span> : null}</>;
   if (!handle) return <span role="img" {...props}>{label}</span>;
-  const lonePullRequest = ranked.length === 1 && primary.url ? primary : null;
+  const isLone = ranked.length === 1;
   return (
     // Base UI's safe triangle gives up as soon as the pointer moves slower than 0.1px/ms or pauses
     // 40ms short of the list, even inside the cone, and a steep path to a tall list does both. The
@@ -86,16 +87,15 @@ export function PullRequestChip({ threadId, ranked }: { threadId: string; ranked
       closeDelay={PULL_REQUEST_LIST_CLOSE_DELAY_MS}
       {...props}
       // Base UI opens the list on mousedown, before the click, so a lone PR skips its handler on both.
-      {...(lonePullRequest && {
-        onMouseDown: (event: BaseUIEvent<React.MouseEvent>) => {
-          event.preventBaseUIHandler();
-          pressedLoneChips.add(event.currentTarget);
-        },
+      {...(isLone && {
+        onMouseDown: (event: BaseUIEvent<React.MouseEvent>) => event.preventBaseUIHandler(),
+        onMouseEnter: (event: React.MouseEvent) => pressedLoneChips.delete(event.currentTarget),
         onMouseLeave: (event: React.MouseEvent) => pressedLoneChips.delete(event.currentTarget),
         onClick: (event: BaseUIEvent<React.MouseEvent>) => {
           event.preventBaseUIHandler();
+          pressedLoneChips.add(event.currentTarget);
           handle.close();
-          openPullRequest(lonePullRequest, threadId, event);
+          openPullRequest(primary, threadId, event);
         },
       })}
     >

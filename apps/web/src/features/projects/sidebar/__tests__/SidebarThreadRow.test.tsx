@@ -560,11 +560,43 @@ describe("SidebarThreadRow", () => {
         expect(prList()).toBeNull();
       });
 
-      it("shows the list on click when the PR has no link to open", async () => {
+      it("keeps the list shut after a keyboard activation while the pointer rests on the chip", async () => {
+        renderThread({ pull_requests: ONE_PR });
+        const chip = screen.getByRole("button", { name: "PR #42, open" });
+        fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+        fireEvent.mouseEnter(chip, { clientX: 200, clientY: 40 });
+        fireEvent.mouseMove(chip, { clientX: 201, clientY: 40 });
+
+        act(() => chip.focus());
+        fireEvent.keyDown(chip, { key: "Enter" });
+        fireEvent.click(chip, { detail: 0 });
+        await act(() => vi.advanceTimersByTimeAsync(1000));
+
+        expect(openExternalUrl).toHaveBeenCalledWith(PR_URL(42));
+        expect(prList()).toBeNull();
+      });
+
+      it("still lists the PR on a later hover after a keyboard activation made with the pointer elsewhere", async () => {
+        renderThread({ pull_requests: ONE_PR });
+        const chip = screen.getByRole("button", { name: "PR #42, open" });
+        act(() => chip.focus());
+        fireEvent.keyDown(chip, { key: "Enter" });
+        fireEvent.click(chip, { detail: 0 });
+        await act(() => vi.advanceTimersByTimeAsync(500));
+
+        await hover(chip);
+        expect(prList()).not.toBeNull();
+      });
+
+      it("opens nothing on click when the PR has no link, and still lists it on hover", async () => {
         renderThread({ pull_requests: [createMockThreadPullRequest({ number: 7, state: "unresolved", url: null })] });
+        const chip = screen.getByRole("button", { name: "PR #7, unresolved" });
 
-        await press(screen.getByRole("button", { name: "PR #7, unresolved" }));
+        await press(chip);
+        expect(prList()).toBeNull();
+        expect(openExternalUrl).not.toHaveBeenCalled();
 
+        await hover(chip);
         expect(prList()).not.toBeNull();
       });
     });
