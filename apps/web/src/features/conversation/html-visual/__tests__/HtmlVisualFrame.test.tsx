@@ -67,6 +67,22 @@ describe("HtmlVisualFrame", () => {
     expect(frame.style.height).toBe("80px");
   });
 
+  it("starts a remounted frame at the height its visual last measured", () => {
+    const measured: HtmlVisual = { ...visual };
+    const first = render(<HtmlVisualFrame visual={measured} />);
+    const firstFrame = screen.getByTitle<HTMLIFrameElement>("Latency by provider");
+    if (!firstFrame.contentWindow) throw new Error("frame has no window");
+    postFrom(firstFrame.contentWindow, { type: "mcode:visual-height", height: 312 });
+    first.unmount();
+
+    const remounted = render(<HtmlVisualFrame visual={measured} />);
+    expect(screen.getByTitle<HTMLIFrameElement>("Latency by provider").style.height).toBe("312px");
+    remounted.unmount();
+
+    render(<HtmlVisualFrame visual={{ ...measured }} />);
+    expect(screen.getByTitle<HTMLIFrameElement>("Latency by provider").style.height).toBe("80px");
+  });
+
   it("ignores height messages from anything but its own page", () => {
     const { frame, contentWindow } = renderFrame();
     postFrom(window, { type: "mcode:visual-height", height: 400 });
