@@ -8,7 +8,7 @@ import { CiWatcherService } from "../../pull-requests/status/ci-watcher.js";
 import { ReviewWorktreeService } from "../../pull-requests/reviews/review-worktree-service.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { CommitPushDestination } from "./commits/commit-request.js";
-import { gitExitCode } from "./execution/git-failure.js";
+import { gitExitCode, gitFailureOutput, gitPushFailureReason } from "./execution/git-failure.js";
 import type { GitExecutor } from "./execution/types.js";
 import { GitRepositoryService } from "./git-repository-service.js";
 import { PullRequestReviewGitService } from "./pull-request-review-git-service.js";
@@ -60,17 +60,21 @@ export class GitPushService {
       ? this.reviewWorktrees.resolvePushTarget(request.threadId)
       : { kind: "standard" as const };
     if (resolution.kind === "invalid_review") throw invalidReviewLink();
-    if (resolution.kind === "review") {
-      const target = this.matchReviewTarget(resolution.target, request.workspaceId, request.branch);
-      await this.assertReviewCheckout(target);
-      await this.pullRequestReviews.pushPullRequestReviewBranch(
-        target.worktreePath,
-        target.pushRemote,
-        target.pushRef,
-        target.expectedHeadRepositoryUrl,
-      );
-    } else {
-      await this.gitRepository.push(request.workspacePath, request.branch);
+    try {
+      if (resolution.kind === "review") {
+        const target = this.matchReviewTarget(resolution.target, request.workspaceId, request.branch);
+        await this.assertReviewCheckout(target);
+        await this.pullRequestReviews.pushPullRequestReviewBranch(
+          target.worktreePath,
+          target.pushRemote,
+          target.pushRef,
+          target.expectedHeadRepositoryUrl,
+        );
+      } else {
+        await this.gitRepository.push(request.workspacePath, request.branch);
+      }
+    } catch (error) {
+      throw toPushFailure(error);
     }
     this.scheduleBumps(request.workspaceId, request.branch);
   }
@@ -182,4 +186,15 @@ export class GitPushService {
 
 function invalidReviewLink(): Error {
   return new Error("The Review task link changed. Reload the task before pushing.");
+}
+
+/**
+ * A git failure's message starts with the full command line, local paths included, which the
+ * client would show as the reason. Errors git did not raise already read as reasons and pass through.
+ */
+function toPushFailure(error: unknown): unknown {
+  if (gitExitCode(error) === null) return error;
+  const output = gitFailureOutput(error);
+  logger.warn("Push failed", { detail: output });
+  return new Error(gitPushFailureReason(output), { cause: error });
 }
