@@ -2969,44 +2969,22 @@ export class ClaudeProvider
   }
 
   /**
-   * Stop a session and wait for the underlying subprocess to exit.
-   * Resolves when the stream loop emits _streamDone or when the timeout
-   * elapses — whichever comes first. Safe to call if the session does not
-   * exist (resolves immediately). The once-listener is always cleaned up,
-   * even on timeout, to prevent EventEmitter listener accumulation.
+   * Stop the session, retrying any failed retirement, and wait until the stop
+   * settles or the timeout elapses. Log stop failures without rejecting.
    */
   async waitForSessionExit(sessionId: string, timeoutMs = 5000): Promise<void> {
-    // Register the listener BEFORE checking sessions so we never miss an
-    // event that fires between the check and the once() call.
     await new Promise<void>((resolve) => {
-      let settled = false;
+      const timer = setTimeout(resolve, timeoutMs);
+      timer.unref();
 
-      const done = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        this.removeListener(`_streamDone:${sessionId}`, done);
-        resolve();
-      };
-
-      const timer = setTimeout(done, timeoutMs);
-      this.once(`_streamDone:${sessionId}`, done);
-
-      const entry = this.runtime.get(sessionId);
-      if (!entry) {
-        // No active session — resolve immediately without waiting.
-        done();
-        return;
-      }
-
-      // Stop through the runtime. The interrupt
-      // closes the prompt queue, ending the SDK iterator, so the stream loop's
-      // finally emits `_streamDone`, which resolves the wait above.
       void this.runtime.stop(sessionId).catch((err: unknown) => {
         logger.warn("Claude waitForSessionExit stop failed", {
           sessionId,
           error: String(err),
         });
+      }).finally(() => {
+        clearTimeout(timer);
+        resolve();
       });
     });
   }
