@@ -42,7 +42,11 @@ describe("settings pages and their definitions", () => {
     // Provider configuration sits in closed disclosures; open them so their rows count.
     for (const trigger of screen.queryAllByRole("button", { name: /^Show .* configuration$/ })) fireEvent.click(trigger);
 
-    const drawn = [...container.querySelectorAll("[data-setting-id]")].map((element) => element.getAttribute("data-setting-id"));
+    // A control that stands for several settings, such as the Threads model part, lists the others in data-setting-covers.
+    const drawn = [
+      ...[...container.querySelectorAll("[data-setting-id]")].map((element) => element.getAttribute("data-setting-id")),
+      ...[...container.querySelectorAll("[data-setting-covers]")].flatMap((element) => (element.getAttribute("data-setting-covers") ?? "").split(" ").filter(Boolean)),
+    ];
     expect(new Set(drawn).size).toBe(drawn.length);
     expect([...drawn].sort()).toEqual([...expected].sort());
   });

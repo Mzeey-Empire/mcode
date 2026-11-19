@@ -1,91 +1,195 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { getDefaultSettings, type Settings } from "@mcode/contracts/models/settings";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mockTransport } from "@/__tests__/mocks/transport";
+import { registerProviderModels } from "@/lib/model-registry";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useToastStore } from "@/stores/toastStore";
+import type { ProviderModelInfo } from "@/transport/types";
+import { seedProviderAvailability } from "../../__tests__/settings-fixtures";
 import { ThreadsSection } from "../ThreadsSection";
 
-describe("ThreadsSection", () => {
-  const update = vi.fn().mockResolvedValue(undefined);
+// The real transport module imports the models store, so spreading it would load the store bound to the real transport.
+vi.mock("@/transport", async () => ({
+  ...(await vi.importActual<typeof import("@/transport/types")>("@/transport/types")),
+  getTransport: () => mockTransport,
+}));
+
+const CODEX_MODELS: ProviderModelInfo[] = [
+  { id: "gpt-9-deep", name: "GPT-9 Deep", supportedReasoningEfforts: ["low", "medium", "high"] },
+  { id: "gpt-9-wide", name: "GPT-9 Wide", supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] },
+];
+
+function deepMerge(base: unknown, patch: unknown): unknown {
+  if (typeof base !== "object" || base === null || typeof patch !== "object" || patch === null || Array.isArray(patch)) return patch;
+  const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
+  for (const [key, value] of Object.entries(patch)) out[key] = deepMerge(out[key], value);
+  return out;
+}
+
+/** A store whose update applies the patch, so a write shows on the page as with the real store. */
+function seedSettings(change: (settings: Settings) => Settings = (settings) => settings) {
+  const update = vi.fn(async (patch: Record<string, unknown>) => {
+    const current = useSettingsStore.getState().settings;
+    useSettingsStore.setState({ settings: deepMerge(current, patch) as Settings });
+    return undefined as string | undefined;
+  });
+  useSettingsStore.setState({ settings: change(getDefaultSettings()), loaded: true, update });
+  return update;
+}
+
+function saved(): Settings {
+  return useSettingsStore.getState().settings;
+}
+
+async function openModelPicker(): Promise<HTMLElement> {
+  fireEvent.click(screen.getByRole("button", { name: /^Model:/ }));
+  return screen.findByRole("dialog", { name: "Choose model and provider" });
+}
+
+beforeEach(() => {
+  // jsdom lays nothing out; the picker's list renders only the rows that fit its measured height.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(100, 100, 200, 240));
+  seedProviderAvailability();
+  registerProviderModels("codex", CODEX_MODELS.map((model) => ({
+    id: model.id,
+    label: model.name,
+    providerId: "codex",
+    supportedReasoningLevels: model.supportedReasoningEfforts,
+  })));
+  vi.mocked(mockTransport.listProviderModels).mockResolvedValue(CODEX_MODELS);
+  vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+});
+
+describe("ThreadsSection new-thread defaults", () => {
+  it("writes the provider and model together when a model comes from another provider, keeping a level it offers", async () => {
+    const update = seedSettings((s) => ({ ...s, model: { ...s.model, defaults: { ...s.model.defaults, provider: "claude", reasoning: "high" } } }));
+    render(<ThreadsSection />);
+    const picker = await openModelPicker();
+    fireEvent.click(within(picker).getByRole("radio", { name: "Codex" }));
+    fireEvent.click(await within(picker).findByRole("option", { name: "GPT-9 Wide" }));
+    await act(async () => {});
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(saved().model.defaults).toMatchObject({ provider: "codex", id: "gpt-9-wide", reasoning: "high" });
+  });
+
+  it("writes a level picked in the reasoning pane and names it on the model part", async () => {
+    seedSettings((s) => ({ ...s, model: { ...s.model, defaults: { ...s.model.defaults, provider: "codex", id: "gpt-9-deep", reasoning: "high" } } }));
+    render(<ThreadsSection />);
+    const picker = await openModelPicker();
+    const pane = await within(picker).findByRole("listbox", { name: "Reasoning for GPT-9 Deep" });
+    fireEvent.click(within(pane).getByRole("option", { name: "Low" }));
+    await act(async () => {});
+
+    expect(saved().model.defaults.reasoning).toBe("low");
+    expect(screen.getByRole("button", { name: /^Model:/ })).toHaveAccessibleName("Model: Codex GPT-9 Deep, Low");
+  });
+
+  it.each([["Plan", "plan"], ["Build", "build"]] as const)("writes %s as the default mode", (label, mode) => {
+    seedSettings((s) => ({ ...s, agent: { ...s.agent, defaults: { ...s.agent.defaults, mode: mode === "plan" ? "build" : "plan" } } }));
+    render(<ThreadsSection />);
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Mode" })).getByRole("radio", { name: label }));
+    expect(saved().agent.defaults.mode).toBe(mode);
+  });
+
+  it("writes the permission, and marks the unsupervised choice with the warning icon", async () => {
+    seedSettings((s) => ({ ...s, agent: { ...s.agent, defaults: { ...s.agent.defaults, permission: "supervised" } } }));
+    render(<ThreadsSection />);
+    expect(screen.queryByTestId("settings-unsupervised-icon")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Permission: Ask me" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Don't ask/ }));
+    await act(async () => {});
+
+    expect(saved().agent.defaults.permission).toBe("full");
+    expect(screen.getByRole("button", { name: "Permission: Don't ask" })).toBeInTheDocument();
+    expect(screen.getByTestId("settings-unsupervised-icon")).toBeInTheDocument();
+  });
+});
+
+describe("ThreadsSection stale default model", () => {
+  const STALE_WARNING = "This model is not in the current catalog. Sending messages may fail until you choose a listed model.";
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    useSettingsStore.setState({
-      settings: getDefaultSettings(),
-      loaded: true,
-      update,
-    });
+    useProviderModelsStore.setState({ models: {}, lastFetched: {}, loading: {} });
+    useToastStore.setState({ toasts: [] });
   });
 
-  it("shows the default and saves a whole-day retention value", () => {
+  function renderWithDefault(id: string) {
+    seedSettings((s) => ({ ...s, model: { ...s.model, defaults: { ...s.model.defaults, provider: "codex", id } } }));
     render(<ThreadsSection />);
-    const input = screen.getByRole("spinbutton", {
-      name: "Closed thread retention days",
-    });
+  }
 
-    expect(input).toHaveValue(3);
-    fireEvent.change(input, { target: { value: "30" } });
-    fireEvent.blur(input);
+  it("warns once when the saved model is missing from the loaded catalog", async () => {
+    renderWithDefault("gpt-retired");
 
-    expect(update).toHaveBeenCalledWith({
-      thread: { completion: { retentionDays: 30 } },
-    });
+    const warning = await screen.findByText(STALE_WARNING);
+    expect(screen.getByRole("button", { name: /^Model:/ })).toHaveAccessibleDescription(warning.textContent ?? "");
+    // The toast comes from a passive effect, which can flush after the warning paints on a loaded runner.
+    await vi.waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1));
+    await act(async () => {});
+    expect(useToastStore.getState().toasts.map((toast) => toast.title)).toEqual(["Saved model not in catalog"]);
   });
 
-  it.each(["0", "-1", "1.5", "366"])("rejects invalid draft %s", (draft) => {
+  it("shows no warning for a listed model", async () => {
+    renderWithDefault("gpt-9-deep");
+    await vi.waitFor(() => expect(useProviderModelsStore.getState().models.codex).toHaveLength(CODEX_MODELS.length));
+    await act(async () => {});
+
+    expect(screen.queryByText(STALE_WARNING)).toBeNull();
+    expect(useToastStore.getState().toasts).toEqual([]);
+  });
+});
+
+describe("ThreadsSection small-task model", () => {
+  it("saves Auto as the automatic choice and a model as its provider and id", async () => {
+    seedSettings((s) => ({ ...s, model: { ...s.model, utility: { provider: "claude", id: "claude-haiku-4-5" } } }));
     render(<ThreadsSection />);
-    const input = screen.getByRole("spinbutton", {
-      name: "Closed thread retention days",
-    });
 
-    fireEvent.change(input, { target: { value: draft } });
-    fireEvent.blur(input);
+    fireEvent.click(screen.getByRole("button", { name: /^Model for small tasks:/ }));
+    let picker = await screen.findByRole("dialog", { name: "Choose the model for small tasks" });
+    fireEvent.click(within(picker).getByRole("option", { name: "Auto" }));
+    await act(async () => {});
+    expect(saved().model.utility).toEqual({ provider: "", id: "" });
 
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Enter a whole number from 1 to 365.",
-    );
-    expect(update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Model for small tasks: Auto" }));
+    picker = await screen.findByRole("dialog", { name: "Choose the model for small tasks" });
+    fireEvent.click(within(picker).getByRole("radio", { name: "Codex" }));
+    fireEvent.click(await within(picker).findByRole("option", { name: "GPT-9 Deep" }));
+    await act(async () => {});
+    expect(saved().model.utility).toEqual({ provider: "codex", id: "gpt-9-deep" });
+  });
+});
+
+describe("ThreadsSection cleanup", () => {
+  it("keeps a saved retention period outside the presets selected through opening and closing the picker", async () => {
+    seedSettings((s) => ({ ...s, thread: { ...s.thread, completion: { ...s.thread.completion, retentionDays: 45 } } }));
+    render(<ThreadsSection />);
+    const trigger = screen.getByTestId("settings-retention-trigger");
+    expect(trigger).toHaveTextContent("45 days");
+
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("option", { name: "45 days" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    await act(async () => {});
+
+    expect(trigger).toHaveTextContent("45 days");
+    expect(saved().thread.completion.retentionDays).toBe(45);
   });
 
-  it("selects Never", () => {
+  it("saves Never as no automatic deletion", async () => {
+    seedSettings();
     render(<ThreadsSection />);
-
-    fireEvent.click(
-      screen.getByRole("switch", {
-        name: "Never delete closed threads automatically",
-      }),
-    );
-
-    expect(update).toHaveBeenCalledWith({
-      thread: { completion: { retentionDays: null } },
-    });
-  });
-
-  it("shows persisted Never state without an unsafe-worktree control", () => {
-    const settings = getDefaultSettings();
-    useSettingsStore.setState({
-      settings: {
-        ...settings,
-        thread: {
-          ...settings.thread,
-          completion: { ...settings.thread.completion, retentionDays: null },
-        },
-      },
-    });
-
-    render(<ThreadsSection />);
-
-    expect(
-      screen.getByRole("switch", {
-        name: "Never delete closed threads automatically",
-      }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole("spinbutton", { name: "Closed thread retention days" }),
-    ).toBeDisabled();
-    expect(screen.queryByText("Unsafe worktree cleanup")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("settings-retention-trigger"));
+    fireEvent.click(await screen.findByRole("option", { name: "Never" }));
+    await act(async () => {});
+    expect(saved().thread.completion.retentionDays).toBeNull();
   });
 
   it("shows a failed merge setting write beside the switch", async () => {
+    const update = seedSettings();
     update.mockResolvedValueOnce("Settings file is read-only");
     render(<ThreadsSection />);
     const control = screen.getByRole("switch", { name: "Close threads when their PRs merge" });

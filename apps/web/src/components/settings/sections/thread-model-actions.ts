@@ -1,66 +1,39 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
-import { MODEL_PROVIDERS, normalizeReasoningLevel, type ModelDefinition } from "@/lib/model-registry";
-import type { ReasoningLevel, SettingsProviderId } from "@mcode/contracts/models/settings";
+import { findProviderModel, normalizeReasoningLevel, type ModelDefinition } from "@/lib/model-registry";
+import { ProviderIdSchema, type ReasoningLevel } from "@mcode/contracts/models/settings";
 
-/**
- * Sets the default provider for new threads. Resets the default model to the new
- * provider's first model and normalises the reasoning level to one that model supports,
- * in one settings write. The Threads page and search results both call this.
- */
-export async function chooseDefaultProvider(providerId: string): Promise<void> {
-  const reasoning = useSettingsStore.getState().settings.model.defaults.reasoning;
-  await useProviderModelsStore.getState().fetchModels(providerId);
-  const newProvider = MODEL_PROVIDERS.find((p) => p.id === providerId);
-  const dynamicFirst = useProviderModelsStore.getState().models[providerId]?.[0];
-  const firstModel = dynamicFirst ?? newProvider?.models[0];
-  let newReasoning: string = reasoning;
-  if (firstModel) {
-    const declared = firstModel.supportedReasoningLevels;
-    if (declared) {
-      newReasoning = (declared as readonly string[]).includes(reasoning)
-        ? reasoning
-        : (firstModel.defaultReasoningLevel ?? "medium");
-    } else {
-      newReasoning = normalizeReasoningLevel(providerId, firstModel.id, reasoning);
-    }
-  }
-  await useSettingsStore.getState().update({
-    model: {
-      defaults: {
-        provider: providerId as SettingsProviderId,
-        ...(firstModel && { id: firstModel.id }),
-        reasoning: newReasoning as ReasoningLevel,
-      },
-    },
-  });
+function catalogModel(providerId: string, modelId: string): ModelDefinition | undefined {
+  return useProviderModelsStore.getState().models[providerId]?.find((model) => model.id === modelId)
+    ?? findProviderModel(providerId, modelId);
+}
+
+/** Keeps the saved level when the model offers it, else moves to the model's default level. */
+function supportedReasoning(providerId: string, modelId: string, reasoning: ReasoningLevel): ReasoningLevel {
+  const model = catalogModel(providerId, modelId);
+  const declared = model?.supportedReasoningLevels;
+  if (!declared) return normalizeReasoningLevel(providerId, modelId, reasoning);
+  if (declared.includes(reasoning)) return reasoning;
+  return model?.defaultReasoningLevel ?? "medium";
 }
 
 /**
- * Sets the default model for new threads, moving the reasoning level to the model's
- * default when the saved level is not one the model supports.
- *
- * @param modelId - Chosen model id.
- * @param selected - The chosen model's catalog entry, when it is listed.
+ * Sets the default provider and model for new threads in one settings write. The reasoning level is `level` when
+ * given, else the saved level when the model offers it, else the model's default. The Threads page and search
+ * results both call this, so a model from another provider never leaves the provider and model out of step.
  */
-export async function chooseDefaultModel(modelId: string, selected: ModelDefinition | undefined): Promise<void> {
+export async function chooseDefaultModel(providerId: string, modelId: string, level?: ReasoningLevel): Promise<void> {
   const { settings, update } = useSettingsStore.getState();
   const { provider, reasoning } = settings.model.defaults;
-  const declared = selected?.supportedReasoningLevels;
-  let newReasoning: string = reasoning;
-  if (declared) {
-    // If the stored level isn't valid for this model, use its default
-    if (!(declared as readonly string[]).includes(reasoning)) {
-      newReasoning = selected?.defaultReasoningLevel ?? "medium";
-    }
-  } else {
-    newReasoning = normalizeReasoningLevel(provider, modelId, reasoning);
-  }
+  // The model picker hands back a catalog provider id as a plain string; parse it before it reaches the settings.
+  const nextProvider = ProviderIdSchema.parse(providerId);
+  const nextReasoning = level ?? supportedReasoning(providerId, modelId, reasoning);
   await update({
     model: {
       defaults: {
+        ...(nextProvider !== provider && { provider: nextProvider }),
         id: modelId,
-        ...(newReasoning !== reasoning && { reasoning: newReasoning as ReasoningLevel }),
+        ...(nextReasoning !== reasoning && { reasoning: nextReasoning }),
       },
     },
   });
