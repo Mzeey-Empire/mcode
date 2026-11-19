@@ -164,14 +164,6 @@ interface ClaudeSessionState {
    * launched them.
    */
   backgroundTools: Map<string, HeldBackgroundCall>;
-  /**
-   * True once the first tool call for this sendMessage query has been registered.
-   * Distinguishes pre-tool preamble text (pendingToolUses=0, no tool fired yet)
-   * from post-tool assistant text. Intentionally survives SDK `result` events
-   * because the Claude SDK can emit `result` between internal rounds while the
-   * same user turn continues.
-   */
-  hasFiredToolThisTurn: boolean;
   /** Non-secret browser lease lifecycle metadata for this main session. */
   browserLease?: Pick<
     BrowserAutomationSessionLeaseGrant,
@@ -1883,7 +1875,6 @@ export class ClaudeProvider
       orchestrationMode: staged.orchestrationMode,
       pendingToolUses: new Set<string>(),
       backgroundTools: new Map<string, HeldBackgroundCall>(),
-      hasFiredToolThisTurn: false,
       workspaceId: browser.scope?.workspaceId ?? "unknown-workspace",
       browserPermissionCapability:
         browser.scope?.permissionCapability ?? "interact",

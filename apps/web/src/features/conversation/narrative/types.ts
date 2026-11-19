@@ -36,6 +36,8 @@ export interface ThoughtSegment {
   endedAt?: number;
   /** True when the provider explicitly classified this segment as non-final narration. */
   isExplicitNonFinal?: boolean;
+  /** True once an assistant-message boundary ended this row as narration, so later text never reopens it. */
+  closedByBoundary?: boolean;
   /** Narration is visible prose; reasoning is the model's collapsed thinking. Absent means narration. */
   kind?: ThoughtSegmentKind;
 }

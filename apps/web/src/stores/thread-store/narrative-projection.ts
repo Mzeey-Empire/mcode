@@ -12,8 +12,12 @@ function looksLikeContinuation(previousText: string, nextText: string): boolean 
   return !previousEndsSentence || nextStartsLowercaseOrPunctuation;
 }
 
+/**
+ * Reopens a row only when its close was a guess. A row a boundary classified as narration is
+ * finished: reopening it let the next answer merge in, and the answer's boundary then deleted both.
+ */
 function shouldReopenThought(last: ThoughtSegment | undefined, text: string): boolean {
-  if (!last || last.endedAt === undefined || isReasoningSegment(last)) return false;
+  if (!last || last.endedAt === undefined || isReasoningSegment(last) || last.closedByBoundary) return false;
   return last.text.length < 40 || looksLikeContinuation(last.text, text);
 }
 
@@ -149,7 +153,7 @@ export function projectAssistantMessageBoundary(
   if (event.isFinalResponse) return segments.filter((_, candidateIndex) => candidateIndex !== index);
   return segments.map((candidate, candidateIndex) => candidateIndex === index
     ? { ...candidate, text: "content" in event && event.content !== undefined ? event.content : candidate.text,
-      endedAt: candidate.endedAt ?? Date.now() } : candidate);
+      endedAt: candidate.endedAt ?? Date.now(), closedByBoundary: true } : candidate);
 }
 
 /** Updates tool progress without notifying state subscribers when no call changed. */
