@@ -354,6 +354,8 @@ export class WorkspaceEnvironmentAutomaticStore {
     const next: ThreadStartup = {
       ...startup, revision: startup.revision + 1, updatedAt: now,
       state: blocked ? "blocked" : "running",
+      // A retried setup leaves the interrupted state, so a later failure must read as unseen again.
+      failureSeenAt: null,
       block: blocked ? {
         code: input.state === "failed" ? "SETUP_FAILED" : "SETUP_APPROVAL_REQUIRED",
         message: input.state === "failed" ? "Project Setup failed" : "Project Setup requires approval",

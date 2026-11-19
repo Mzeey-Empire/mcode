@@ -66,7 +66,7 @@ export class ThreadStartupService {
     return this.startupRepo.findById(startupId);
   }
 
-  /** List authoritative lifecycle snapshots for a workspace. */
+  /** List recent startups and older startups needed to recover workspace rows. */
   list(workspaceId: string): ThreadStartup[] {
     return this.startupRepo.listByWorkspace(workspaceId);
   }
@@ -124,6 +124,13 @@ export class ThreadStartupService {
   /** Fail the active phase with its durable error. */
   fail(...[startupId, error, detail]: Parameters<ThreadStartupStateStore["fail"]>): Promise<ThreadStartup> {
     return this.commit(threadStartupStateWriteOperations.fail, [[startupId, error, detail], this.timestamp()]);
+  }
+
+  /** Persist and publish acknowledgement of the startup failure the user saw. */
+  async acknowledgeFailure(startupId: string, revision: number): Promise<ThreadStartup | null> {
+    const committed = await this.writer.execute(threadStartupStateWriteOperations.acknowledgeFailure, [[startupId, revision], this.timestamp()]);
+    if (committed.changed && committed.startup) this.publish(committed.startup);
+    return committed.startup;
   }
 
   /** Run a failed agent phase again before its saved first message is resent. */

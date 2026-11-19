@@ -4,8 +4,28 @@ import type { Thread } from "./models/thread.js";
 import type { Message } from "./models/message.js";
 import type { ThreadPullRequest } from "./models/thread-pull-request.js";
 import type { ThreadAttention } from "./models/thread-attention.js";
+import type { ThreadStartup } from "./thread-startup.js";
 
 const DEFAULT_TIMESTAMP = "2026-01-01T00:00:00.000Z";
+
+/** Build a pending direct startup with valid defaults for contract consumers' tests. */
+export function createMockThreadStartup(overrides: Partial<ThreadStartup> = {}): ThreadStartup {
+  return {
+    startupId: crypto.randomUUID(),
+    workspaceId: "workspace-1",
+    kind: "direct",
+    state: "pending",
+    phase: "thread",
+    steps: [{ phase: "thread", state: "pending" }, { phase: "agent", state: "pending" }],
+    transcript: [],
+    cancellation: "none",
+    revision: 1,
+    failureSeenAt: null,
+    createdAt: DEFAULT_TIMESTAMP,
+    updatedAt: DEFAULT_TIMESTAMP,
+    ...overrides,
+  };
+}
 
 /** Build a linked PR with valid defaults for contract consumers' tests. */
 export function createMockThreadPullRequest(overrides: Partial<ThreadPullRequest> = {}): ThreadPullRequest {

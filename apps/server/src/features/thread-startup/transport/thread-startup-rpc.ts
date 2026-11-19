@@ -1,4 +1,4 @@
-import type { ThreadStartupCancelInput, ThreadStartupGetInput, ThreadStartupListInput, ThreadStartupResolveInput, ThreadStartupRetryAgentInput } from "@mcode/contracts/thread-startup";
+import type { ThreadStartupAcknowledgeFailureInput, ThreadStartupCancelInput, ThreadStartupGetInput, ThreadStartupListInput, ThreadStartupResolveInput, ThreadStartupRetryAgentInput } from "@mcode/contracts/thread-startup";
 import type { WsMethodName } from "@mcode/contracts/ws/methods";
 import type { AgentService } from "../../agents/orchestration/agent-service.js";
 import type { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
@@ -11,7 +11,8 @@ type ThreadStartupRpcMethod =
   | "thread.startup.list"
   | "thread.startup.resolve"
   | "thread.startup.cancel"
-  | "thread.startup.retryAgent";
+  | "thread.startup.retryAgent"
+  | "thread.startup.acknowledgeFailure";
 
 type ThreadStartupParamsByMethod = {
   "thread.startup.get": ThreadStartupGetInput;
@@ -19,12 +20,13 @@ type ThreadStartupParamsByMethod = {
   "thread.startup.resolve": ThreadStartupResolveInput;
   "thread.startup.cancel": ThreadStartupCancelInput;
   "thread.startup.retryAgent": ThreadStartupRetryAgentInput;
+  "thread.startup.acknowledgeFailure": ThreadStartupAcknowledgeFailureInput;
 };
 
 /** Dependencies required to route thread startup lifecycle RPC calls. */
 export interface ThreadStartupRouterDeps {
   threadStartupFetchDecisions: ThreadStartupFetchDecisions;
-  threadStartupService: Pick<ThreadStartupService, "get" | "list" | "cancel" | "markCancelled">;
+  threadStartupService: Pick<ThreadStartupService, "get" | "list" | "cancel" | "markCancelled" | "acknowledgeFailure">;
   workspaceEnvironmentService: Pick<WorkspaceEnvironmentService, "retryAutomaticAgentStart" | "stopAutomaticSetup">;
   agentService: Pick<AgentService, "stopSession">;
 }
@@ -43,6 +45,7 @@ const threadStartupHandlers: ThreadStartupHandlerMap = {
     deps.threadStartupService.get(params.startupId), params.action,
   ),
   "thread.startup.cancel": (deps, params) => cancelThreadStartup(deps, params.startupId),
+  "thread.startup.acknowledgeFailure": (deps, params) => deps.threadStartupService.acknowledgeFailure(params.startupId, params.revision),
   "thread.startup.retryAgent": async (deps, params) => {
     const startup = deps.threadStartupService.get(params.startupId);
     if (!startup?.threadId) throw new Error("This startup has no thread to retry");

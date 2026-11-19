@@ -25,6 +25,7 @@ const T0 = "2026-09-02T12:00:00.000Z";
 
 const fetchBlocked: ThreadStartup = {
   startupId,
+  failureSeenAt: null,
   workspaceId: "workspace-1",
   kind: "managed-worktree",
   state: "blocked",

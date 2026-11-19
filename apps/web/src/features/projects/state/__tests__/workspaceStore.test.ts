@@ -315,7 +315,7 @@ describe("workspaceStore new-thread panel transition", () => {
     vi.mocked(mockTransport.getThreadStartup).mockResolvedValueOnce({
       startupId: placeholderId, workspaceId: "ws-1", kind: "direct", state: "cancelled", phase: "thread",
       steps: [{ phase: "thread", state: "cancelled" }, { phase: "agent", state: "pending" }],
-      transcript: [], cancellation: "requested", revision: 1,
+      transcript: [], cancellation: "requested", revision: 1, failureSeenAt: null,
       createdAt: "2026-09-02T12:00:00.000Z", updatedAt: "2026-09-02T12:00:00.000Z",
     });
     await expect(useWorkspaceStore.getState().retryPreparingThread(placeholderId)).rejects.toThrow("Creation cancelled");

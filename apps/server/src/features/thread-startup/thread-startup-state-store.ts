@@ -64,6 +64,7 @@ export class ThreadStartupStateStore {
       transcript: [],
       cancellation: "none",
       revision: 1,
+      failureSeenAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -121,8 +122,7 @@ export class ThreadStartupStateStore {
 
     if (startup.state === "pending") {
       if (targetIndex !== 0) throw new Error("Startup must begin with its first phase");
-      return this.persistNext({
-        ...startup,
+      return this.persistNext(startup, {
         state: "running",
         phase,
         steps: startup.steps.map((step, index) => index === 0
@@ -133,12 +133,11 @@ export class ThreadStartupStateStore {
     const activeIndex = startup.steps.findIndex((step) => step.state === "running");
     if (targetIndex === activeIndex) {
       if (!detail) return startup;
-      return this.persistNext({ ...startup, steps: startup.steps.map((step, index) =>
+      return this.persistNext(startup, { steps: startup.steps.map((step, index) =>
         index === activeIndex ? { ...step, detail } : step) });
     }
     if (targetIndex !== activeIndex + 1) throw new Error("Startup phases must advance in order");
-    return this.persistNext({
-      ...startup,
+    return this.persistNext(startup, {
       phase,
       steps: startup.steps.map((step, index) => {
         if (index === activeIndex) return { ...step, state: "completed", endedAt: timestamp };
@@ -152,14 +151,14 @@ export class ThreadStartupStateStore {
   bindThread(startupId: string, threadId: string): ThreadStartup {
     const startup = this.require(startupId);
     if (isTerminal(startup) || startup.threadId === threadId) return startup;
-    return this.persistNext({ ...startup, threadId });
+    return this.persistNext(startup, { threadId });
   }
 
   /** Remove a binding after the owning creation flow confirms that its child was deleted. */
   clearThreadBinding(startupId: string): ThreadStartup {
     const startup = this.require(startupId);
     if (!startup.threadId) return startup;
-    return this.persistNext({ ...startup, threadId: undefined });
+    return this.persistNext(startup, { threadId: undefined });
   }
 
   /** Append one bounded output entry and retain only the newest bounded transcript. */
@@ -174,8 +173,8 @@ export class ThreadStartupStateStore {
     const entries = contents.map((content) => ThreadStartupTranscriptEntrySchema().parse({
       phase: startup.phase, content, createdAt: this.now().toISOString(),
     }));
-    return this.persistNext({
-      ...startup, transcript: retainTranscript([...startup.transcript, ...entries]),
+    return this.persistNext(startup, {
+      transcript: retainTranscript([...startup.transcript, ...entries]),
     });
   }
 
@@ -187,8 +186,7 @@ export class ThreadStartupStateStore {
     // outside this lifecycle, for example when the user continues without Setup.
     if (startup.state === "interrupted") {
       if (startup.cancellation === "requested") return this.markCancelled(startupId);
-      return this.persistNext({
-        ...startup,
+      return this.persistNext(startup, {
         state: "completed",
         phase: startup.steps.at(-1)!.phase,
         block: undefined,
@@ -202,8 +200,7 @@ export class ThreadStartupStateStore {
     if (isTerminal(startup)) return startup;
     const activeIndex = this.activeIndex(startup);
     if (activeIndex !== startup.steps.length - 1) throw new Error("Startup cannot complete before its final phase");
-    return this.persistNext({
-      ...startup,
+    return this.persistNext(startup, {
       state: "completed",
       steps: startup.steps.map((step, index) => index === activeIndex
         ? { ...step, state: "completed", endedAt: timestamp }
@@ -216,8 +213,7 @@ export class ThreadStartupStateStore {
     const startup = this.require(startupId);
     if (isTerminal(startup) || startup.state === "blocked") return startup;
     const activeIndex = this.activeIndex(startup);
-    return this.persistNext({
-      ...startup,
+    return this.persistNext(startup, {
       state: "blocked",
       phase: startup.steps[activeIndex].phase,
       steps: startup.steps.map((step, index) => index === activeIndex
@@ -234,8 +230,7 @@ export class ThreadStartupStateStore {
     // the user can still retry or bypass the phase that never finished.
     if (startup.state !== "blocked" && startup.state !== "interrupted") return startup;
     const activeIndex = this.currentIndex(startup);
-    return this.persistNext({
-      ...startup,
+    return this.persistNext(startup, {
       state: "running",
       steps: startup.steps.map((step, index) => index === activeIndex
         ? { ...step, state: "running", startedAt: this.now().toISOString(), endedAt: undefined,
@@ -256,8 +251,7 @@ export class ThreadStartupStateStore {
     const next = startup.steps[activeIndex + 1];
     if (!next) throw new Error("Startup cannot skip its final phase");
     const timestamp = this.now().toISOString();
-    return this.persistNext({
-      ...startup,
+    return this.persistNext(startup, {
       state: "running",
       phase: next.phase,
       steps: startup.steps.map((step, index) => {
@@ -274,8 +268,7 @@ export class ThreadStartupStateStore {
     const startup = this.require(startupId);
     if (isTerminal(startup)) return startup;
     const activeIndex = this.currentIndex(startup);
-    return this.persistNext({
-      ...startup,
+    return this.persistNext(startup, {
       state: "failed",
       phase: startup.steps[activeIndex].phase,
       steps: startup.steps.map((step, index) => index === activeIndex
@@ -286,14 +279,23 @@ export class ThreadStartupStateStore {
     });
   }
 
+  /** Record the first time the user sees a failed or interrupted startup. */
+  acknowledgeFailure(startupId: string, revision: number): ThreadStartup | null {
+    const startup = this.startupRepo.findById(startupId);
+    if (!startup || startup.revision !== revision || startup.failureSeenAt !== null
+      || (startup.state !== "failed" && startup.state !== "interrupted")) {
+      return startup;
+    }
+    return this.persistNext(startup, { failureSeenAt: this.now().toISOString() });
+  }
+
   /** Run a failed agent phase again; only a failure before the first turn was admitted has anything to resend. */
   retryAgent(startupId: string): ThreadStartup {
     const startup = this.require(startupId);
     if (startup.state !== "failed" || startup.phase !== "agent" || startup.cancellation === "requested") return startup;
     const activeIndex = this.currentIndex(startup);
     const { error: _error, ...cleared } = startup;
-    return this.persistNext({
-      ...cleared,
+    return this.persistNext(cleared, {
       state: "running",
       steps: startup.steps.map((step, index) => {
         if (index !== activeIndex) return step;
@@ -307,7 +309,7 @@ export class ThreadStartupStateStore {
   cancel(startupId: string): ThreadStartup {
     const startup = this.require(startupId);
     if (isTerminal(startup) || startup.cancellation === "requested") return startup;
-    return this.persistNext({ ...startup, cancellation: "requested" });
+    return this.persistNext(startup, { cancellation: "requested" });
   }
 
   /** Mark a startup cancelled only after its owning integration stops its own work. */
@@ -316,8 +318,7 @@ export class ThreadStartupStateStore {
     // An interrupted record may still carry a cancellation request; honour it.
     if (isTerminal(startup) && startup.state !== "interrupted") return startup;
     const activeIndex = this.currentIndex(startup);
-    return this.persistNext({
-      ...startup,
+    return this.persistNext(startup, {
       state: "cancelled",
       phase: startup.steps[activeIndex].phase,
       steps: startup.steps.map((step, index) => index === activeIndex
@@ -351,8 +352,7 @@ export class ThreadStartupStateStore {
 
   private interrupt(startup: ThreadStartup): ThreadStartup {
     const activeIndex = this.currentIndex(startup);
-    return this.persistNext({
-      ...startup,
+    return this.persistNext(startup, {
       state: "interrupted",
       phase: startup.steps[activeIndex].phase,
       steps: startup.steps.map((step, index) => index === activeIndex
@@ -379,9 +379,11 @@ export class ThreadStartupStateStore {
     return startup.steps.findIndex((step) => step.phase === startup.phase);
   }
 
-  private persistNext(startup: ThreadStartup): ThreadStartup {
+  private persistNext(startup: ThreadStartup, changes: Partial<ThreadStartup>): ThreadStartup {
+    const next = { ...startup, ...changes };
     const persisted = ThreadStartupSchema().parse({
-      ...startup,
+      ...next,
+      failureSeenAt: next.state === startup.state ? next.failureSeenAt : null,
       revision: startup.revision + 1,
       updatedAt: this.now().toISOString(),
     });

@@ -585,6 +585,7 @@ describe("Workspace Behavior", () => {
 
     useThreadStartupStore.getState().apply({
       startupId: pending!.startupId,
+      failureSeenAt: null,
       workspaceId: ws.id,
       kind: "direct",
       state: "completed",
@@ -618,6 +619,7 @@ describe("Workspace Behavior", () => {
       async (params: { startupId: string }) => {
         useThreadStartupStore.getState().apply({
           startupId: params.startupId,
+          failureSeenAt: null,
           workspaceId: ws.id,
           kind: "direct",
           state: "completed",
@@ -659,6 +661,7 @@ describe("Workspace Behavior", () => {
 
       useThreadStartupStore.getState().apply({
         startupId: pending!.startupId,
+        failureSeenAt: null,
         workspaceId: ws.id,
         kind: "direct",
         state: terminalState,
@@ -695,6 +698,7 @@ describe("Workspace Behavior", () => {
 
     useThreadStartupStore.getState().apply({
       startupId: pending!.startupId,
+      failureSeenAt: null,
       workspaceId: ws.id,
       kind: "direct",
       state: "completed",
@@ -728,6 +732,7 @@ describe("Workspace Behavior", () => {
 
     const record = {
       startupId: "11111111-2222-4333-8444-555566667777",
+      failureSeenAt: null,
       workspaceId: ws.id,
       kind: "direct" as const,
       state: "cancelled" as const,
@@ -778,6 +783,7 @@ describe("Workspace Behavior", () => {
 
     useThreadStartupStore.getState().apply({
       startupId: pending!.startupId,
+      failureSeenAt: null,
       workspaceId: ws.id,
       kind: "direct",
       state: "cancelled",
@@ -808,6 +814,7 @@ describe("Workspace Behavior", () => {
       async (params: { startupId: string }) => {
         useThreadStartupStore.getState().apply({
           startupId: params.startupId,
+          failureSeenAt: null,
           workspaceId: ws.id,
           kind: "direct",
           state: "cancelled",
@@ -855,6 +862,7 @@ describe("Workspace Behavior", () => {
 
     useThreadStartupStore.getState().apply({
       startupId: pending!.startupId,
+      failureSeenAt: null,
       workspaceId: ws.id,
       kind: "direct",
       state: "cancelled",
@@ -1584,6 +1592,7 @@ describe("Workspace Behavior", () => {
       const recovery = useWorkspaceStore.getState().recoverPreparingThreads();
       const startup: ThreadStartup = {
         startupId: placeholderId,
+        failureSeenAt: null,
         workspaceId: ws.id,
         kind: "direct",
         state: "running",
@@ -1680,6 +1689,7 @@ describe("Workspace Behavior", () => {
       const placeholderId = useWorkspaceStore.getState().activeThreadId!;
       const unbound = {
         startupId: placeholderId,
+        failureSeenAt: null,
         workspaceId: ws.id,
         kind: "direct" as const,
         state: "running" as const,

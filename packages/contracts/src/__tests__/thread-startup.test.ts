@@ -8,7 +8,9 @@ import {
   ThreadStartupErrorSchema,
   ThreadStartupBlockSchema,
   ThreadStartupResolveInputSchema,
+  ThreadStartupListResultSchema,
 } from "../thread-startup.js";
+import { createMockThreadStartup } from "../testing.js";
 
 const startupId = "00000000-0000-4000-8000-000000000001";
 
@@ -33,25 +35,26 @@ describe("ThreadStartupResolveInputSchema", () => {
 });
 
 function directStartup() {
-  return {
-    startupId,
-    workspaceId: "workspace-1",
-    kind: "direct" as const,
-    state: "pending" as const,
-    phase: "thread" as const,
-    steps: [
-      { phase: "thread" as const, state: "pending" as const },
-      { phase: "agent" as const, state: "pending" as const },
-    ],
-    transcript: [],
-    cancellation: "none" as const,
-    revision: 1,
-    createdAt: "2026-09-02T10:00:00.000Z",
-    updatedAt: "2026-09-02T10:00:00.000Z",
-  };
+  return createMockThreadStartup({ startupId });
 }
 
 describe("ThreadStartupSchema", () => {
+  it("retains a failure seen timestamp and rejects a malformed timestamp", () => {
+    const failed = createMockThreadStartup({
+      state: "failed",
+      steps: [{ phase: "thread", state: "failed" }, { phase: "agent", state: "pending" }],
+      error: { code: "CREATE_FAILED", message: "Thread creation failed", retryable: true },
+    });
+    const failureSeenAt = "2026-09-02T10:00:00.000Z";
+    expect(ThreadStartupSchema().parse({ ...failed, failureSeenAt })).toEqual({ ...failed, failureSeenAt });
+    expect(ThreadStartupSchema().safeParse({ ...failed, failureSeenAt: "yesterday" }).success).toBe(false);
+  });
+
+  it("accepts a recovery result with more than 100 startups", () => {
+    const records = Array.from({ length: 103 }, () => createMockThreadStartup());
+    expect(ThreadStartupListResultSchema().parse({ records })).toEqual({ records });
+  });
+
   it.each([
     ["direct", ["thread", "agent"]],
     ["direct", ["thread", "fetch", "agent"]],
