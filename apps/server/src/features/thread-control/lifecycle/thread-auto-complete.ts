@@ -10,22 +10,37 @@ import type { SettingsService } from "../../settings/settings-service.js";
 import { subscribeThreadActivity } from "../persistence/thread-activity.js";
 
 /** Facts that can change whether a thread qualifies for automatic completion. */
-export type AutoCompleteDecisionInput = Pick<Thread,
+export type AutoCompleteStateInput = Pick<Thread,
   "deleted_at" | "user_completed_at" | "auto_complete_on_merge" | "auto_complete_paused_at" | "pull_requests"
 > & {
   attention: ThreadAttention | null;
   completeOnPrMerge: boolean;
 };
 
-/** Explain whether the current durable facts permit automatic completion. */
-export function autoCompleteDecision(facts: AutoCompleteDecisionInput):
-  "complete" | "inactive" | "disabled" | "paused" | "pull-requests" | "needs-user" {
+/**
+ * inactive: the thread is deleted or already closed.
+ * off: automatic completion is disabled by the effective setting.
+ * held: reopening holds automatic completion.
+ * waiting-for-merge: the PR list is empty or has an unmerged PR.
+ * waiting-for-user: attention is unknown or something needs the user.
+ * ready: the thread can complete automatically.
+ *
+ * Held enters on reopen, by hand or by sending a message to a closed thread.
+ * Its hold snapshot remembers the PRs linked when it began, or when first observed for an older build's hold.
+ * It leaves only when a PR outside that set is linked
+ * or a remembered PR changes state. Forgetting and re-linking the same PR keeps the hold.
+ * Held is stored as auto_complete_paused_at, whose name stays because older builds share the database.
+ */
+export type AutoCompleteState = "inactive" | "off" | "held" | "waiting-for-merge" | "waiting-for-user" | "ready";
+
+/** Explain the auto-complete state from the current durable facts. */
+export function autoCompleteState(facts: AutoCompleteStateInput): AutoCompleteState {
   if (facts.deleted_at !== null || facts.user_completed_at !== null) return "inactive";
-  if (!effectiveAutoCompleteOnMerge(facts, facts.completeOnPrMerge)) return "disabled";
-  if (facts.auto_complete_paused_at !== null) return "paused";
-  if (!pullRequestsSettledMerged(facts.pull_requests)) return "pull-requests";
-  if (!facts.attention || threadAttentionNeedsUser(facts.attention)) return "needs-user";
-  return "complete";
+  if (!effectiveAutoCompleteOnMerge(facts, facts.completeOnPrMerge)) return "off";
+  if (facts.auto_complete_paused_at !== null) return "held";
+  if (!pullRequestsSettledMerged(facts.pull_requests)) return "waiting-for-merge";
+  if (!facts.attention || threadAttentionNeedsUser(facts.attention)) return "waiting-for-user";
+  return "ready";
 }
 
 /** Level-triggered completion from committed thread facts, with one flight per thread. */
@@ -57,6 +72,7 @@ export class ThreadAutoCompleteService {
       this.attention.onPublished(hint),
       this.threads.onAutoCompleteOverrideChanged(hint),
       this.funnel.onChanged(hint),
+      // Retry refused completion even when activity leaves the deduplicated attention value unchanged.
       subscribeThreadActivity(hint),
       this.settings.on("change", (next) => {
         const nextEnabled = next.thread.completion.completeOnPrMerge;
@@ -72,12 +88,12 @@ export class ThreadAutoCompleteService {
     if (this.inFlight.has(threadId)) return;
     const thread = this.threads.findById(threadId);
     if (!thread) return;
-    const decision = autoCompleteDecision({
+    const state = autoCompleteState({
       ...thread,
       attention: this.attention.get(threadId),
       completeOnPrMerge: this.settings.get().thread.completion.completeOnPrMerge,
     });
-    if (decision !== "complete") return;
+    if (state !== "ready") return;
     this.inFlight.add(threadId);
     try {
       await this.completion.complete(threadId, 0, "auto");

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockThread, createMockThreadPullRequest } from "@mcode/contracts/testing";
 import { getDefaultSettings, type Settings } from "@mcode/contracts/models/settings";
 import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
+import type { ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import { ThreadRepo } from "../persistence/thread-repo.js";
 import { ThreadAttentionService } from "../attention/thread-attention-service.js";
 import { ThreadControlMutationReservationService } from "../authority/thread-control-mutation-reservation-service.js";
@@ -12,7 +13,7 @@ import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { PullRequestLinkFunnel } from "../../pull-requests/links/pull-request-link-funnel.js";
 import { CanonicalParentTurnWrite } from "../../agents/canonical/canonical-parent-turn-write.js";
 import { ThreadCompletionService } from "./thread-completion-service.js";
-import { autoCompleteDecision, ThreadAutoCompleteService, type AutoCompleteDecisionInput } from "./thread-auto-complete.js";
+import { autoCompleteState, ThreadAutoCompleteService, type AutoCompleteStateInput } from "./thread-auto-complete.js";
 import { broadcast } from "../../../application/transport/push.js";
 
 vi.mock("../../../application/transport/push.js", () => ({ broadcast: vi.fn() }));
@@ -25,43 +26,43 @@ function quietAttention(): ThreadAttention {
     seen: { sequence: null, at: null }, hasUnfinishedDelegatedTasks: false };
 }
 
-function decisionInput(overrides: Partial<AutoCompleteDecisionInput> = {}): AutoCompleteDecisionInput {
+function decisionInput(overrides: Partial<AutoCompleteStateInput> = {}): AutoCompleteStateInput {
   return { ...createMockThread({ pull_requests: [MERGED] }), attention: quietAttention(), completeOnPrMerge: true, ...overrides };
 }
 
-describe("autoCompleteDecision", () => {
+describe("autoCompleteState", () => {
   it.each([
-    [[], "pull-requests"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "merged" })], "complete"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "closed" })], "pull-requests"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "open" })], "pull-requests"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "draft" })], "pull-requests"],
-    [[MERGED, createMockThreadPullRequest({ number: 43, state: "unresolved" })], "pull-requests"],
-  ] satisfies Array<[AutoCompleteDecisionInput["pull_requests"], string]>)("requires every PR to be merged: %j", (pull_requests, expected) => {
-    expect(autoCompleteDecision(decisionInput({ pull_requests }))).toBe(expected);
+    [[], "waiting-for-merge"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "merged" })], "ready"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "closed" })], "waiting-for-merge"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "open" })], "waiting-for-merge"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "draft" })], "waiting-for-merge"],
+    [[MERGED, createMockThreadPullRequest({ number: 43, state: "unresolved" })], "waiting-for-merge"],
+  ] satisfies Array<[AutoCompleteStateInput["pull_requests"], string]>)("requires every PR to be merged: %j", (pull_requests, expected) => {
+    expect(autoCompleteState(decisionInput({ pull_requests }))).toBe(expected);
   });
 
   it.each(["completed", "errored", "interrupted"] as const)("waits for an unseen %s result, then allows its seen result", (outcome) => {
     const attention: ThreadAttention = { ...quietAttention(), lastTurn: { outcome, endedAt: AT, sequence: 2, changedFileCount: null } };
-    expect(autoCompleteDecision(decisionInput({ attention }))).toBe("needs-user");
-    expect(autoCompleteDecision(decisionInput({ attention: { ...attention, seen: { sequence: 2, at: AT } } }))).toBe("complete");
+    expect(autoCompleteState(decisionInput({ attention }))).toBe("waiting-for-user");
+    expect(autoCompleteState(decisionInput({ attention: { ...attention, seen: { sequence: 2, at: AT } } }))).toBe("ready");
   });
 
   it.each(["approval", "questions", "plan"] as const)("blocks a live %s", (kind) => {
-    expect(autoCompleteDecision(decisionInput({ attention: { ...quietAttention(), waiting: { kind, since: AT } } }))).toBe("needs-user");
+    expect(autoCompleteState(decisionInput({ attention: { ...quietAttention(), waiting: { kind, since: AT } } }))).toBe("waiting-for-user");
   });
 
   it.each([
-    [{ auto_complete_on_merge: false }, "disabled"],
-    [{ auto_complete_on_merge: true, completeOnPrMerge: false }, "complete"],
-    [{ auto_complete_on_merge: null, completeOnPrMerge: false }, "disabled"],
-    [{ auto_complete_paused_at: AT }, "paused"],
+    [{ auto_complete_on_merge: false }, "off"],
+    [{ auto_complete_on_merge: true, completeOnPrMerge: false }, "ready"],
+    [{ auto_complete_on_merge: null, completeOnPrMerge: false }, "off"],
+    [{ auto_complete_paused_at: AT }, "held"],
     [{ user_completed_at: AT }, "inactive"],
     [{ deleted_at: AT }, "inactive"],
-    [{ attention: null }, "needs-user"],
-    [{ attention: { ...quietAttention(), hasUnfinishedDelegatedTasks: true } }, "needs-user"],
-  ] satisfies Array<[Partial<AutoCompleteDecisionInput>, string]>)("honours lifecycle and preference gates: %j", (input, expected) => {
-    expect(autoCompleteDecision(decisionInput(input))).toBe(expected);
+    [{ attention: null }, "waiting-for-user"],
+    [{ attention: { ...quietAttention(), hasUnfinishedDelegatedTasks: true } }, "waiting-for-user"],
+  ] satisfies Array<[Partial<AutoCompleteStateInput>, string]>)("honours lifecycle and preference gates: %j", (input, expected) => {
+    expect(autoCompleteState(decisionInput(input))).toBe(expected);
   });
 });
 
@@ -162,21 +163,19 @@ describe("ThreadAutoCompleteService", () => {
     expect(f.complete.mock.calls).toEqual([[f.thread.id, 0, "auto"], [f.thread.id, 0, "auto"]]);
   });
 
-  it("keeps a reopened thread paused with its override intact until a new turn settles", async () => {
+  it("keeps a reopened thread held with its override intact after a new turn settles", async () => {
     const f = await fixture();
     await f.threads.updateSettings(f.thread.id, { auto_complete_on_merge: true });
     await f.funnel.observe(f.thread.id, [MERGED]);
     await f.service.evaluate(f.thread.id);
     await f.completion.reopen(f.thread.id);
-    await f.service.evaluate(f.thread.id);
-    expect(f.current()).toMatchObject({ user_completed_at: null, auto_complete_paused_at: AT, auto_complete_on_merge: true });
     f.service.start();
     await f.threads.recordTurnOutcome(f.thread.id, "cancelled", "2030-01-01T10:01:00.000Z");
-    await f.expectCompleted();
-    expect(f.current().auto_complete_paused_at).toBeNull();
+    await f.service.evaluate(f.thread.id);
+    expect(f.current()).toMatchObject({ user_completed_at: null, auto_complete_paused_at: AT, auto_complete_on_merge: true });
   });
 
-  it("pauses implicit reopen during canonical turn admission", async () => {
+  it("holds automatic completion after implicit reopen during canonical turn admission", async () => {
     const f = await fixture();
     await f.funnel.observe(f.thread.id, [MERGED]);
     await f.service.evaluate(f.thread.id);
@@ -188,45 +187,143 @@ describe("ThreadAutoCompleteService", () => {
     });
     await f.service.evaluate(f.thread.id);
     expect(f.current().user_completed_at).toBeNull();
-    expect(autoCompleteDecision({ ...f.current(), attention: f.attention.get(f.thread.id), completeOnPrMerge: true })).toBe("paused");
+    expect(autoCompleteState({ ...f.current(), attention: f.attention.get(f.thread.id), completeOnPrMerge: true })).toBe("held");
   });
 
-  it("keeps the reopen pause for repeated snapshots and metadata, clearing it for new PR state without activity", async () => {
+  const holdEvents: HoldEvent[] = [
+    { event: "turn activity", released: false, apply: (f) => f.threads.advanceActivity(f.thread.id, "2030-01-01T10:01:00.000Z") },
+    { event: "settled turn", released: false, apply: (f) => f.threads.recordTurnOutcome(f.thread.id, "cancelled", "2030-01-01T10:01:00.000Z") },
+    { event: "setting enabled", released: false, apply: (f) => f.threads.updateSettings(f.thread.id, { auto_complete_on_merge: true }) },
+    { event: "setting disabled", released: false, apply: (f) => f.threads.updateSettings(f.thread.id, { auto_complete_on_merge: false }) },
+    { event: "repeated snapshot", released: false, apply: (f) => f.funnel.observe(f.thread.id, [MERGED]) },
+    { event: "title change", released: false, apply: (f) => f.funnel.observe(f.thread.id, [{ ...MERGED, title: "Renamed" }]) },
+    {
+      event: "null hold snapshot with a title-only change",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = NULL WHERE id = ?").run(f.thread.id);
+        await f.funnel.observe(f.thread.id, [{ ...MERGED, title: "Renamed" }]);
+      },
+    },
+    {
+      event: "null hold snapshot with a new merged PR",
+      released: true,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = NULL WHERE id = ?").run(f.thread.id);
+        await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]);
+      },
+    },
+    {
+      event: "null hold snapshot with a branch round trip",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = NULL WHERE id = ?").run(f.thread.id);
+        await f.funnel.forgetBranch(f.thread.id);
+        await f.funnel.observe(f.thread.id, [MERGED]);
+      },
+    },
+    {
+      event: "unreadable hold snapshot with a branch round trip",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = '{not json' WHERE id = ?").run(f.thread.id);
+        await f.funnel.forgetBranch(f.thread.id);
+        await f.funnel.observe(f.thread.id, [MERGED]);
+      },
+    },
+    {
+      event: "unreadable hold snapshot with a title-only change",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_hold_pull_requests = '{not json' WHERE id = ?").run(f.thread.id);
+        await f.funnel.observe(f.thread.id, [{ ...MERGED, title: "Renamed" }]);
+      },
+    },
+    {
+      event: "stale hold snapshot after an older build reopens with a different merged PR",
+      released: false,
+      apply: async (f) => {
+        f.database.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(f.thread.id);
+        await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]);
+        f.database.query("UPDATE threads SET auto_complete_paused_at = ? WHERE id = ?")
+          .run("2030-01-01T10:02:00.000Z", f.thread.id);
+        await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged", title: "Renamed" })]);
+      },
+    },
+    { event: "URL-only change", released: false, apply: (f) => f.funnel.observe(f.thread.id, [{ ...MERGED, url: "https://github.com/example/repo/pull/42" }]) },
+    {
+      event: "branch round trip: links forgotten, then the same merged PR re-linked",
+      released: false,
+      apply: async (f) => {
+        await f.funnel.forgetBranch(f.thread.id);
+        await f.funnel.observe(f.thread.id, [MERGED]);
+      },
+    },
+    {
+      event: "links forgotten, then a different merged PR linked",
+      released: true,
+      apply: async (f) => {
+        await f.funnel.forgetBranch(f.thread.id);
+        await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]);
+      },
+    },
+    { event: "links forgotten", released: false, apply: (f) => f.funnel.forgetBranch(f.thread.id) },
+    { event: "new merged PR", released: true, apply: (f) => f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]) },
+    {
+      event: "linked PR state change",
+      released: true,
+      linkWhileClosed: [createMockThreadPullRequest({ number: 44, state: "open" })],
+      apply: (f) => f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 44, state: "merged" })]),
+    },
+  ];
+
+  it.each(holdEvents)("pins the hold transition for $event", async ({ released, linkWhileClosed, apply }) => {
     const f = await fixture();
     await f.funnel.observe(f.thread.id, [MERGED]);
     await f.service.evaluate(f.thread.id);
+    if (linkWhileClosed) await f.funnel.observe(f.thread.id, linkWhileClosed);
     await f.completion.reopen(f.thread.id);
-    const activity = f.current().last_activity_at;
+    await apply(f);
     f.service.start();
-    await f.funnel.observe(f.thread.id, [MERGED]);
-    await f.funnel.observe(f.thread.id, [{ ...MERGED, title: "Renamed" }]);
-    expect(f.current()).toMatchObject({ user_completed_at: null, auto_complete_paused_at: AT });
-    await f.funnel.observe(f.thread.id, [createMockThreadPullRequest({ number: 43, state: "merged" })]);
-    await f.expectCompleted();
-    expect(f.current().last_activity_at).toBe(activity);
-    expect(f.current().auto_complete_paused_at).toBeNull();
+    if (released) {
+      await f.expectCompleted();
+      expect(f.current().auto_complete_paused_at).toBeNull();
+      expect(f.database.query("SELECT auto_complete_hold_pull_requests FROM threads WHERE id = ?").get(f.thread.id))
+        .toEqual({ auto_complete_hold_pull_requests: null });
+    } else {
+      await f.service.evaluate(f.thread.id);
+      expect(f.current().auto_complete_paused_at).not.toBeNull();
+      expect(f.current().user_completed_at).toBeNull();
+    }
   });
 });
 
-type Trigger = "startup" | "pull-requests" | "attention" | "override" | "activity" | "settings";
+type HoldFixture = Awaited<ReturnType<typeof fixture>>;
+interface HoldEvent {
+  event: string;
+  released: boolean;
+  linkWhileClosed?: ThreadPullRequest[];
+  apply: (f: HoldFixture) => unknown;
+}
+type Trigger = "startup" | "pull-requests" | "attention" | "override" | "settings";
 const inputTriggers = {
   deleted_at: ["startup"],
   user_completed_at: ["startup"],
   auto_complete_on_merge: ["override"],
-  auto_complete_paused_at: ["activity", "pull-requests", "override"],
+  auto_complete_paused_at: ["pull-requests"],
   pull_requests: ["startup", "pull-requests"],
   attention: ["attention"],
   completeOnPrMerge: ["settings"],
-} satisfies Record<keyof AutoCompleteDecisionInput, Trigger[]>;
+} satisfies Record<keyof AutoCompleteStateInput, Trigger[]>;
 
-async function prepareTrigger(f: Awaited<ReturnType<typeof fixture>>, trigger: Trigger): Promise<void> {
+async function prepareTrigger(f: HoldFixture, trigger: Trigger): Promise<void> {
   if (trigger !== "pull-requests") await f.funnel.observe(f.thread.id, [MERGED]);
   if (trigger === "override" || trigger === "settings") f.setGlobal(false);
   if (trigger === "attention") {
     f.database.query("UPDATE threads SET last_turn_outcome = 'completed', last_turn_ended_at = ?, last_turn_sequence = 2 WHERE id = ?").run(AT, f.thread.id);
     f.database.query("INSERT INTO messages (id, thread_id, role, content, sequence, outcome) VALUES ('answer', ?, 'assistant', 'Answer', 2, 'completed')").run(f.thread.id);
   }
-  if (trigger === "activity" || trigger === "override") await f.threads.reopen(f.thread.id, AT);
+  if (trigger === "pull-requests") await f.threads.reopen(f.thread.id, AT);
 }
 
 it.each([...new Set(Object.values(inputTriggers).flat())])("wires decision inputs through the real %s trigger", async (trigger) => {
@@ -236,7 +333,6 @@ it.each([...new Set(Object.values(inputTriggers).flat())])("wires decision input
   if (trigger === "pull-requests") await f.funnel.observe(f.thread.id, [MERGED]);
   if (trigger === "attention") await f.attention.acknowledgeSeen(f.thread.id, 2);
   if (trigger === "override") await f.threads.updateSettings(f.thread.id, { auto_complete_on_merge: true });
-  if (trigger === "activity") await f.threads.advanceActivity(f.thread.id, "2030-01-01T10:01:00.000Z");
   if (trigger === "settings") f.setGlobal(true);
   await f.expectCompleted();
   expect(f.complete.mock.calls).toEqual([[f.thread.id, 0, "auto"]]);

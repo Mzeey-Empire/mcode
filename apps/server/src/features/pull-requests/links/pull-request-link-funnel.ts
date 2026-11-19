@@ -1,11 +1,19 @@
 import type { Database } from "bun:sqlite";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { rankPullRequests, ThreadPullRequestSchema, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
+import { z } from "zod";
+import { logger } from "@mcode/shared";
+import { rankPullRequests, ThreadPullRequestSchema, ThreadPullRequestStateSchema, type ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import type { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { databaseWriteHandler } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { threadPullRequests, threads } from "../../../runtime/persistence/sqlite/schema.js";
 import { threadPullRequestWriteOperations } from "./thread-pull-request-write-operations.js";
+
+const holdSnapshotSchema = z.object({
+  heldAt: z.string(),
+  pullRequests: z.array(z.object({ number: z.number().int().positive(), state: ThreadPullRequestStateSchema })),
+});
+type HoldSnapshot = z.infer<typeof holdSnapshotSchema>;
 
 function mergeObservations(current: ThreadPullRequest[], observations: readonly ThreadPullRequest[]): ThreadPullRequest[] {
   const byNumber = new Map(current.map((pr) => [pr.number, pr]));
@@ -36,14 +44,42 @@ function mirrorPrimaryIntoLegacyColumnsForOlderBuilds(db: Database, threadId: st
     .where(eq(threads.id, threadId)).run();
 }
 
-function clearPauseOnStateChange(db: Database, threadId: string, current: ThreadPullRequest[], next: ThreadPullRequest[]): void {
-  const previousStates = new Map(current.map((pr) => [pr.number, pr.state]));
-  const changed = current.length !== next.length || next.some((pr) => previousStates.get(pr.number) !== pr.state);
-  if (!changed) return;
-  db.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(threadId);
+// A damaged snapshot must not block PR updates or branch checkout, so it is re-baselined like a missing one.
+function parseStoredJson(threadId: string, text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    logger.warn("Discarding unreadable auto-complete hold snapshot", { threadId, error: error.message });
+    return null;
+  }
 }
 
-function readLinks(db: Database, threadId: string): ThreadPullRequest[] {
+function resolveHoldSnapshot(db: Database, threadId: string, current: ThreadPullRequest[]): HoldSnapshot | null {
+  const thread = drizzle(db).select({ heldAt: threads.autoCompletePausedAt, holdSnapshot: threads.autoCompleteHoldPullRequests })
+    .from(threads).where(eq(threads.id, threadId)).get();
+  if (!thread || thread.heldAt === null) return null;
+  if (thread.holdSnapshot !== null) {
+    const stored = holdSnapshotSchema.safeParse(parseStoredJson(threadId, thread.holdSnapshot));
+    if (stored.success && stored.data.heldAt === thread.heldAt) return stored.data;
+  }
+  // Older builds set holds without a matching snapshot, so adopt the links before this write.
+  const holdSnapshot = { heldAt: thread.heldAt, pullRequests: current.map(({ number, state }) => ({ number, state })) };
+  drizzle(db).update(threads).set({ autoCompleteHoldPullRequests: JSON.stringify(holdSnapshot) })
+    .where(eq(threads.id, threadId)).run();
+  return holdSnapshot;
+}
+
+function releaseHoldOnPullRequestChange(db: Database, threadId: string, holdSnapshot: HoldSnapshot | null, next: ThreadPullRequest[]): void {
+  if (!holdSnapshot) return;
+  const previousStates = new Map(holdSnapshot.pullRequests.map((pr) => [pr.number, pr.state]));
+  const changed = next.some((pr) => !previousStates.has(pr.number) || previousStates.get(pr.number) !== pr.state);
+  if (!changed) return;
+  db.query("UPDATE threads SET auto_complete_paused_at = NULL, auto_complete_hold_pull_requests = NULL WHERE id = ?").run(threadId);
+}
+
+/** Read linked PRs with the legacy fallback used by both observation and hold capture. */
+export function readLinks(db: Database, threadId: string): ThreadPullRequest[] {
   const orm = drizzle(db);
   const thread = orm.select({ number: threads.prNumber }).from(threads).where(eq(threads.id, threadId)).get();
   if (!thread) throw new Error(`Thread ${threadId} not found`);
@@ -58,19 +94,21 @@ function readLinks(db: Database, threadId: string): ThreadPullRequest[] {
 export function observeThreadPullRequests(db: Database, threadId: string, observations: readonly ThreadPullRequest[]): ThreadPullRequest[] | null {
   return db.transaction(() => {
     const current = readLinks(db, threadId);
+    const holdSnapshot = resolveHoldSnapshot(db, threadId, current);
     const next = mergeObservations(current, observations);
     if (JSON.stringify(rankPullRequests(current)) === JSON.stringify(next)) return null;
     writeLinks(db, threadId, next);
-    clearPauseOnStateChange(db, threadId, current, next);
+    releaseHoldOnPullRequestChange(db, threadId, holdSnapshot, next);
     return next;
   })();
 }
 
 /** Clear PR links inside a checkout transaction on the writable owner. */
 export function forgetThreadPullRequests(db: Database, threadId: string): ThreadPullRequest[] | null {
-  if (readLinks(db, threadId).length === 0) return null;
+  const current = readLinks(db, threadId);
+  resolveHoldSnapshot(db, threadId, current);
+  if (current.length === 0) return null;
   writeLinks(db, threadId, []);
-  db.query("UPDATE threads SET auto_complete_paused_at = NULL WHERE id = ?").run(threadId);
   return [];
 }
 

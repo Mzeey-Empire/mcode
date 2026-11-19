@@ -120,6 +120,7 @@ export const threads = sqliteTable(
     userCompletedAt: text("user_completed_at"),
     autoCompleteOnMerge: integer("auto_complete_on_merge"),
     autoCompletePausedAt: text("auto_complete_paused_at"),
+    autoCompleteHoldPullRequests: text("auto_complete_hold_pull_requests"),
     scheduledDeletionAt: text("scheduled_deletion_at"),
     cleanupState: text("cleanup_state"),
     cleanupReason: text("cleanup_reason"),

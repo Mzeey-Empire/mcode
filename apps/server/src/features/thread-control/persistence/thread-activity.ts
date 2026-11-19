@@ -18,7 +18,7 @@ export function advanceThreadActivity(db: Database, threadId: string, at: string
     "SELECT last_activity_at FROM threads WHERE id = ?",
   ).get(threadId));
   if (!before) return false;
-  const result = db.query(`UPDATE threads SET last_activity_at = ?, auto_complete_paused_at = NULL
+  const result = db.query(`UPDATE threads SET last_activity_at = ?
     WHERE id = ? AND (last_activity_at IS NULL OR julianday(last_activity_at) < julianday(?))`)
     .run(at, threadId, at);
   if (result.changes === 0) return false;

@@ -2,7 +2,7 @@
 
 The sidebar is derived on the client from a full thread index. The server owns
 four facts the sidebar reads: activity time, linked pull requests, completion,
-and the auto-complete pause. It knows nothing about layout. This page records
+and the auto-complete hold. It knows nothing about layout. This page records
 why each piece sits where it does and the traps a change can fall into.
 
 ## Activity time
@@ -96,25 +96,37 @@ hold.
   A snapshot or replayed push that already carries `user_completed_at`
   releases nothing.
 
-## Auto-complete and the reopen pause
+## Auto-complete states
 
 [`ThreadAutoCompleteService`](../../../apps/server/src/features/thread-control/lifecycle/thread-auto-complete.ts)
-completes a thread when every linked PR is merged, the thread is active, and
-nothing on it needs the user. The rule is strict. An empty PR list never
-completes, and a closed, unmerged PR blocks it until the user completes the
-thread by hand. Unknown attention also blocks it.
+evaluates these states in order:
+
+| State | Meaning |
+| --- | --- |
+| `inactive` | The thread is deleted or already closed. |
+| `off` | The effective setting disables automatic completion. |
+| `held` | Reopening holds automatic completion. |
+| `waiting-for-merge` | No PR is linked, or at least one PR is not merged. |
+| `waiting-for-user` | Attention is unknown or something needs the user. |
+| `ready` | Every linked PR is merged and nothing needs the user. |
+
+Reopening by hand or sending a message to a closed thread enters held.
+The hold snapshot records which hold it belongs to and the PR numbers and states
+linked when it began. A hold without a valid snapshot, set by an older build,
+takes the thread's links at that moment as its snapshot. Only linking
+a PR outside that snapshot or changing a remembered PR's state releases it, so
+forgetting and re-linking the same PR keeps the hold. Activity,
+the thread's setting, removing links, and title or URL changes do not release it.
+The hold leaves the override intact and is stored as `auto_complete_paused_at`.
+Older builds sharing the database under [ADR 0030](../../adr/0030-shared-database-with-ledger-guard-and-compatibility-floor.md)
+still clear the hold on activity, writes to the thread's setting, and forgotten links.
 
 - The thread's `auto_complete_on_merge` override wins over the global
   `thread.completion.completeOnPrMerge` setting. Null inherits.
 - Evaluation is level-triggered. Each hint re-reads the current facts, and
   startup or turning the global setting on sweeps every thread. Every input of
-  `autoCompleteDecision` has a trigger that calls `evaluate`, and a test fails
+  `autoCompleteState` has a trigger that calls `evaluate`, and a test fails
   when an input is added without one. Add the trigger with the input.
-- Reopen sets `auto_complete_paused_at`. Without it, a reopened thread whose
-  PRs are all merged would complete again at once. The pause leaves the
-  override alone, so the menu switch still shows the user's preference.
-  Activity, a PR state change in the funnel, and an override write each clear
-  it. Repeated snapshots and metadata writes do not.
 - Automatic completions carry `completedBy: "auto"` on the lifecycle push.
   The Undo line uses it to offer Undo for completions the user did not make
   on this client.

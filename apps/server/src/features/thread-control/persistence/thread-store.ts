@@ -5,7 +5,7 @@
 
 import * as NodeCrypto from "node:crypto";
 import { z } from "zod";
-import { forgetThreadPullRequests } from "../../pull-requests/links/pull-request-link-funnel.js";
+import { forgetThreadPullRequests, readLinks } from "../../pull-requests/links/pull-request-link-funnel.js";
 import { rankPullRequests, ThreadPullRequestSchema } from "@mcode/contracts/models/thread-pull-request";
 import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
 import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
@@ -755,10 +755,16 @@ export class ThreadStore {
   /** Clear user-completion metadata in one transaction-safe statement. */
   reopen(id: string, reopenedAt = new Date().toISOString()): Thread | null {
     return this.orm.transaction((tx) => {
+      if (!tx.select({ id: threads.id }).from(threads).where(eq(threads.id, id)).get()) return null;
+      const holdSnapshot = {
+        heldAt: reopenedAt,
+        pullRequests: readLinks(this.db, id).map(({ number, state }) => ({ number, state })),
+      };
       const result = runChanges(tx.update(threads)
         .set({
           userCompletedAt: null,
           autoCompletePausedAt: reopenedAt,
+          autoCompleteHoldPullRequests: JSON.stringify(holdSnapshot),
           scheduledDeletionAt: null,
           cleanupState: null,
           cleanupReason: null,
@@ -1193,7 +1199,6 @@ export class ThreadStore {
   /** Persist model, provider, and supplied composer settings in one atomic update. */
   updateSettings(id: string, settings: ThreadSettings): boolean {
     const set = buildSettingsSet(settings);
-    if (settings.auto_complete_on_merge !== undefined) set.autoCompletePausedAt = null;
     if (Object.keys(set).length === 0) return false;
     const sessionAfterProviderChange = settings.provider === undefined
       ? {}
