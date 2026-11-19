@@ -1,5 +1,6 @@
 import { createContext, useContext, useRef, useState } from "react";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import type { BaseUIEvent } from "@base-ui/react/types";
 import type { ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
 import { MENU_LIST_CLASS } from "@/components/ui/menu-row";
 import { POPOVER_FADE_CLASS, POPOVER_SURFACE_CLASS } from "@/components/ui/overlay-surface";
@@ -41,13 +42,19 @@ function openPullRequest(pr: ThreadPullRequest, threadId: string, event: React.M
   if (pr.url) openGitHubUrl(pr.url, threadId, event);
 }
 
+// A press on a lone-PR chip opens the PR, but Base UI's hover rest timer started on the way in
+// survives the press and would open the list after the PR. The list refuses hover opens from a
+// pressed chip until the pointer leaves it.
+const pressedLoneChips = new WeakSet<Element>();
+
 function chipLabel(ranked: readonly ThreadPullRequest[], primary: ThreadPullRequest): string {
   return ranked.length > 1 ? `${ranked.length} pull requests` : `PR #${primary.number}, ${primary.state}`;
 }
 
 /**
  * The row's PR chip: the top-ranked PR's state icon and number, then `+N` for the rest when
- * several are linked. Pointing at it or activating it opens the shared list of every PR.
+ * several are linked. Pointing at it opens the shared list of every PR. Activating it opens that
+ * list only when several PRs are linked; a lone PR with a URL opens directly.
  */
 export function PullRequestChip({ threadId, ranked }: { threadId: string; ranked: readonly ThreadPullRequest[] }) {
   const handle = useContext(PullRequestListHandleContext);
@@ -65,12 +72,33 @@ export function PullRequestChip({ threadId, ranked }: { threadId: string; ranked
   // The top PR leads, then a count of the rest: "+2" beside a number reads as two more, not three.
   const label = <><StateIcon pr={primary} />{primary.number}{ranked.length > 1 ? <span>+{ranked.length - 1}</span> : null}</>;
   if (!handle) return <span role="img" {...props}>{label}</span>;
+  const lonePullRequest = ranked.length === 1 && primary.url ? primary : null;
   return (
     // Base UI's safe triangle gives up as soon as the pointer moves slower than 0.1px/ms or pauses
     // 40ms short of the list, even inside the cone, and a steep path to a tall list does both. The
     // close delay lets the pointer finish the trip: entering the list cancels it, and a pointer that
     // settles on another row still closes the list, then the thread card opens.
-    <MenuPrimitive.Trigger handle={handle} payload={{ threadId, ranked }} openOnHover delay={150} closeDelay={PULL_REQUEST_LIST_CLOSE_DELAY_MS} {...props}>
+    <MenuPrimitive.Trigger
+      handle={handle}
+      payload={{ threadId, ranked }}
+      openOnHover
+      delay={150}
+      closeDelay={PULL_REQUEST_LIST_CLOSE_DELAY_MS}
+      {...props}
+      // Base UI opens the list on mousedown, before the click, so a lone PR skips its handler on both.
+      {...(lonePullRequest && {
+        onMouseDown: (event: BaseUIEvent<React.MouseEvent>) => {
+          event.preventBaseUIHandler();
+          pressedLoneChips.add(event.currentTarget);
+        },
+        onMouseLeave: (event: React.MouseEvent) => pressedLoneChips.delete(event.currentTarget),
+        onClick: (event: BaseUIEvent<React.MouseEvent>) => {
+          event.preventBaseUIHandler();
+          handle.close();
+          openPullRequest(lonePullRequest, threadId, event);
+        },
+      })}
+    >
       {label}
     </MenuPrimitive.Trigger>
   );
@@ -126,6 +154,10 @@ export function PullRequestListMenu({ handle }: { handle: PullRequestListHandle 
       handle={handle}
       modal={false}
       onOpenChange={(next, details) => {
+        if (next && details.reason === "trigger-hover" && details.trigger && pressedLoneChips.has(details.trigger)) {
+          details.cancel();
+          return;
+        }
         if (next) openedByHover.current = details.reason === "trigger-hover";
         setOpen(next);
       }}
