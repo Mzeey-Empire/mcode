@@ -50,7 +50,7 @@ import { ParentAssistantTextCheckpointStore } from "../../turns/parent-assistant
 import { AgentWorkloadService } from "../../workload/agent-workload.js";
 import { createMockThread, createMockThreadPullRequest } from "@mcode/contracts/testing";
 import { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
-import { autoCompleteDecision } from "../../../thread-control/lifecycle/thread-auto-complete.js";
+import { autoCompleteState } from "../../../thread-control/lifecycle/thread-auto-complete.js";
 import { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import { WorkspaceService } from "../../../projects/lifecycle/workspace-service.js";
 import { ProjectLifecycleStore } from "../../../projects/lifecycle/project-lifecycle-store.js";
@@ -2142,10 +2142,10 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       onTestFinished(workload.onSubagentChange((threadId) => changes.push(threadId)));
       const attention = new ThreadAttentionService(db, databaseWriter, [], { coordinatorsWithUnfinishedTasks: () => new Set() },
         workload, () => {});
-      const decision = () => autoCompleteDecision({ ...createMockThread({ pull_requests: [createMockThreadPullRequest({ state: "merged" })] }),
+      const decision = () => autoCompleteState({ ...createMockThread({ pull_requests: [createMockThreadPullRequest({ state: "merged" })] }),
         attention: attention.get(execution.threadId), completeOnPrMerge: true });
 
-      expect(decision()).toBe("needs-user");
+      expect(decision()).toBe("waiting-for-user");
       release?.();
       await expect.poll(() => progress.depth().pending).toBe(0);
       expect(launchRecord()).toEqual({ status: "running", background: 1 });
