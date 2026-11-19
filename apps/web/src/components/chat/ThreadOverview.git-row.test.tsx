@@ -242,10 +242,8 @@ describe("ThreadOverview git row", () => {
 
       reviewBranch({ upstream: { ahead: 0 } });
       await act(async () => land({ success: true }));
-      // The pointer and focus stay on the row: the user's own push moves it on without leaving.
       expect(await screen.findByRole("button", { name: "Create PR…" })).toBeInTheDocument();
 
-      // Once it has moved on, the row holds again, so an agent's edit cannot swap Create PR… away.
       const probes = vi.mocked(mockTransport.getReviewState).mock.calls.length;
       reviewBranch({ uncommitted: { staged: 0, unstaged: 1, untracked: 0 }, upstream: { ahead: 0 } });
       act(() => useDiffStore.getState().bumpDiffRevision("thread-1"));
