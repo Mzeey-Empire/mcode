@@ -112,6 +112,7 @@ export function SettingsSelectPicker({
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         render={
+          // At 900px and narrower a picker may wrap under its label; the negative margin lines its text up with the label's.
           <Button
             type="button"
             variant="ghost"
@@ -119,7 +120,7 @@ export function SettingsSelectPicker({
             disabled={disabled || loading}
             data-testid={testId}
             aria-label={ariaLabel}
-            className="max-w-[28rem] justify-between gap-1.5 rounded-full pr-2 pl-3 font-normal hover:bg-hover data-popup-open:bg-hover"
+            className="max-w-[28rem] justify-between gap-1.5 rounded-full pr-2 pl-3 font-normal hover:bg-hover data-popup-open:bg-hover max-[901px]:-ml-3"
           >
             <TriggerLabel
               selected={selected}

@@ -263,7 +263,7 @@ export function ThreadDefaultsCapsule({ modelHit, modeHit, permissionHit, modelC
   const warningId = useId();
   return (
     <div className="flex flex-col gap-2 p-3">
-      <div role="group" aria-label="New threads start with" className="flex flex-wrap items-center gap-1 rounded-(--radius-composer) bg-background p-1.5">
+      <div role="group" aria-label="New threads start with" className="flex flex-wrap items-center gap-1 rounded-(--radius-composer) bg-hover-solid p-1.5">
         <DefaultModelPart hit={modelHit} coveredIds={modelCovers} describedBy={stale ? warningId : undefined} />
         <CapsuleDivider />
         <DefaultModeRadios hit={modeHit} drawn />

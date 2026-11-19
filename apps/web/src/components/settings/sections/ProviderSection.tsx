@@ -81,11 +81,13 @@ function BetaTag({ id }: { id: ProviderId }) {
 
 /**
  * The CLI state for an enabled provider. The app knows only whether the CLI was found, not
- * whether the user is signed in, so a found CLI shows nothing. Fixed width so switches line up.
+ * whether the user is signed in, so a found CLI shows nothing and leaves its width to the path.
+ * Fixed width at wide windows so statuses on different rows line up, as in the prototype.
  */
 function CliStatus({ row }: { row: ProviderAvailability }) {
   const status = row.enabled ? row.cli.status : "found";
-  return <span className={cn("w-33 shrink-0 text-compact", status === "not_found" ? "text-warning" : "text-muted")}>
+  if (status === "found") return null;
+  return <span className={cn("w-33 shrink-0 text-compact max-[901px]:w-auto", status === "not_found" ? "text-warning" : "text-muted")}>
     {status === "not_found" && <span data-testid={`provider-badge-${row.id}-cli-missing`}>CLI not found</span>}
     {status === "unchecked" && "Checking"}
   </span>;
