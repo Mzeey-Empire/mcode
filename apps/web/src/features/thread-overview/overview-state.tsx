@@ -51,10 +51,7 @@ function hasUncommittedChanges(state: ReviewState | null): boolean | null {
   return staged + unstaged + untracked > 0;
 }
 
-/**
- * Whether the branch has commits its upstream lacks, or null while Review has not answered.
- * A branch with no upstream counts its commits ahead of base as unpushed.
- */
+/** A branch with no upstream counts its commits ahead of base as unpushed. */
 function hasUnpushedCommits(state: ReviewState | null): boolean | null {
   if (!state?.isGitRepo) return null;
   if (state.upstream) return state.upstream.ahead > 0;
@@ -73,10 +70,7 @@ export type GitPushState =
 
 const IDLE_PUSH: GitPushState = { kind: "idle" };
 
-/**
- * Pushes the thread's branch from the git row. Lives with the Overview state rather than the
- * row so a push started before the card closes still reports when it reopens.
- */
+/** Lives with the Overview state rather than the row so a push started before the card closes still reports when it reopens. */
 function useGitPush(thread: Thread) {
   const [push, setPush] = useState<{ threadId: string; state: GitPushState }>({ threadId: thread.id, state: IDLE_PUSH });
   const [refresh, setRefresh] = useState(0);
@@ -98,11 +92,10 @@ function useGitPush(thread: Thread) {
       setPush({ threadId, state: { kind: "failed", message: err instanceof Error ? err.message : String(err) } });
     }
   }, [gitPush.kind, thread.branch, thread.id, thread.workspace_id]);
-  /** Clears a landed or failed push once the row no longer offers Push. */
-  const settlePush = useCallback(() => {
+  const clearFinishedPush = useCallback(() => {
     setPush((current) => current.state.kind === "pushing" ? current : { threadId: current.threadId, state: IDLE_PUSH });
   }, []);
-  return { gitPush, pushBranch, settlePush, refresh };
+  return { gitPush, pushBranch, clearFinishedPush, refresh };
 }
 
 /** Keeps shared Git and dialog state alive while the card is hidden. */
@@ -126,7 +119,7 @@ export function useOverviewState(
   } = useThreadGitActions(thread);
   const reviewLink = usePullRequestReviewLink(thread.id, open);
   const effectivePr = useMemo(() => getEffectiveThreadOverviewPr(pr, reviewLink), [pr, reviewLink]);
-  const { gitPush, pushBranch, settlePush, refresh } = useGitPush(thread);
+  const { gitPush, pushBranch, clearFinishedPush, refresh } = useGitPush(thread);
   // Only a named-branch worktree's git row reads uncommitted changes, and each probe spawns several
   // git processes. A landed push bumps refresh so Review re-probes and the row moves to the next step.
   const { state: reviewState } = useReviewState(prable ? thread.workspace_id : null, thread.id, refresh);
@@ -157,7 +150,7 @@ export function useOverviewState(
     open, branchCreation, prable, effectivePr, hasCommitsAhead,
     checks, openPrDetail, dirPath, createPrOpen, setCreatePrOpen,
     handleCommit, handleOpenPr, gitRow, createPrBranch,
-    createBranchBaseBranch, openProjectSettings, ciDot, gitPush, pushBranch, settlePush,
+    createBranchBaseBranch, openProjectSettings, ciDot, gitPush, pushBranch, clearFinishedPush,
   };
 }
 

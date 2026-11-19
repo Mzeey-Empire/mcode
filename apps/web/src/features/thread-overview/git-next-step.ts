@@ -33,7 +33,6 @@ export function planGitRow(facts: ThreadGitFacts): GitRowPlan | null {
   return planNamedBranchRow(facts);
 }
 
-/** The next step on a named branch with no PR yet: commit, then push, then open a PR. */
 function planNamedBranchRow(facts: ThreadGitFacts): GitRowPlan | null {
   if (facts.hasUncommittedChanges === null) return null;
   if (facts.hasUncommittedChanges) {

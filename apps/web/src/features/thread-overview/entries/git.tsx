@@ -101,7 +101,6 @@ function GitSplitRow({ plan, run, onMenuOpenChange, loading }: {
   );
 }
 
-/** One line under the row naming why the last push failed. */
 function GitPushError({ message }: { message: string }) {
   return (
     <div role="alert" data-testid="thread-overview-git-error" className="px-3 pb-1 text-caption text-error">
@@ -114,14 +113,13 @@ function offersPush(plan: GitRowPlan | null): boolean {
   return plan !== null && (plan.main === "push" || plan.alternates.includes("push"));
 }
 
-/** Clears a finished push's outcome once the row it reported on no longer offers Push. */
 function useSettlePush(gitRow: GitRowPlan | null) {
-  const { gitPush, settlePush } = useOverviewContext();
+  const { gitPush, clearFinishedPush } = useOverviewContext();
   const finished = gitPush.kind === "landed" || gitPush.kind === "failed";
   const stale = finished && !offersPush(gitRow);
   useEffect(() => {
-    if (stale) settlePush();
-  }, [stale, settlePush]);
+    if (stale) clearFinishedPush();
+  }, [stale, clearFinishedPush]);
 }
 
 function GitEntry() {
