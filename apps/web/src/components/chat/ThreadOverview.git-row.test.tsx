@@ -61,7 +61,6 @@ import { mockWorkspaceState } from "./__tests__/thread-overview-mocks";
 import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-overview-harness";
 import { ThreadOverview } from "./ThreadOverview";
 
-/** Review reports a git checkout with `count` uncommitted files. */
 function reviewUncommitted(count: number) {
   vi.mocked(mockTransport.getReviewState).mockResolvedValue({
     isGitRepo: true,

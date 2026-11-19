@@ -45,7 +45,6 @@ export function getThreadOverviewCiDot(
   return null;
 }
 
-/** Whether the checkout has uncommitted changes, or null while Review has not answered. */
 function hasUncommittedChanges(state: ReviewState | null): boolean | null {
   if (!state?.isGitRepo) return null;
   const { staged, unstaged, untracked } = state.uncommitted;
