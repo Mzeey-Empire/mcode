@@ -306,7 +306,10 @@ export class GitComparisonService {
       );
       return { ahead: Number(stdout.trim()) };
     } catch (error) {
-      if (gitExitCode(error) === 128 && gitFailureOutput(error) === `fatal: bad revision '${range}'`) return null;
+      // Match the line, not the whole output: GIT_TRACE and similar settings add lines around it.
+      const missingRef = `fatal: bad revision '${range}'`;
+      const lines = gitFailureOutput(error).split("\n").map((line) => line.trim());
+      if (gitExitCode(error) === 128 && lines.includes(missingRef)) return null;
       throw error;
     }
   }
