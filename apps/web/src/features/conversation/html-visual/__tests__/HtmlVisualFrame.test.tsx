@@ -6,6 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { MessageBubble } from "@/features/conversation/messages/MessageBubble";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
+import { useThreadStore } from "@/stores/threadStore";
 import { HtmlVisualFrame } from "../HtmlVisualFrame";
 import { buildHtmlVisualDocument } from "../html-visual-document";
 
@@ -126,6 +127,22 @@ describe("visual marker in a reply", () => {
     const { container } = renderReply("missing");
     expect(await screen.findByText("Latency")).toBeTruthy();
     expect(container.querySelector("img, iframe")).toBeNull();
+  });
+
+  it("requests one older page when the marker's visual is not loaded yet", async () => {
+    const loadOlderMessages = vi.fn(async () => "skipped" as const);
+    useThreadStore.setState({ loadOlderMessages });
+    renderReply("missing");
+    await screen.findByText("Latency");
+    expect(loadOlderMessages).toHaveBeenCalledExactlyOnceWith("thread-1");
+  });
+
+  it("requests no older page when the marker's visual is loaded", async () => {
+    const loadOlderMessages = vi.fn(async () => "skipped" as const);
+    useThreadStore.setState({ loadOlderMessages });
+    renderReply("visual-1");
+    await screen.findByTitle("Latency by provider");
+    expect(loadOlderMessages).not.toHaveBeenCalled();
   });
 });
 
