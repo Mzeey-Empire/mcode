@@ -39,13 +39,15 @@ interface SplitButtonProps {
   actionProps?: Omit<ButtonProps, "children" | "onClick" | "variant" | "size" | "disabled" | "loading"> & DataAttributes
   /** Open the menu beside the card that holds the control (overview rows) instead of below it. */
   menuBeside?: "left" | "right"
+  /** Called when the alternates menu opens or closes, so a caller can hold its content steady while it is open. */
+  onMenuOpenChange?: (open: boolean) => void
   /** Extra props for the chevron half. */
   menuTriggerProps?: Omit<ButtonProps, "children" | "variant" | "size" | "disabled" | "aria-label"> & DataAttributes
 }
 
 type SplitButtonMenuProps = Pick<
   SplitButtonProps,
-  "menu" | "menuLabel" | "menuBeside" | "menuTriggerProps"
+  "menu" | "menuLabel" | "menuBeside" | "menuTriggerProps" | "onMenuOpenChange"
 > & {
   variant: SplitButtonVariant
   size: SplitButtonSize
@@ -60,6 +62,7 @@ function SplitButtonMenu({
   menuLabel,
   menuBeside,
   menuTriggerProps,
+  onMenuOpenChange,
   variant,
   size,
   disabled,
@@ -67,7 +70,7 @@ function SplitButtonMenu({
   anchor,
 }: SplitButtonMenuProps) {
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onMenuOpenChange}>
       <DropdownMenuTrigger
         render={
           <Button

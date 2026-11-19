@@ -248,6 +248,18 @@ function defaultWorkspaceState() {
   };
 }
 
+/** Review reports a git checkout with `count` uncommitted files. */
+function mockReviewUncommitted(count: number) {
+  vi.mocked(mockTransport.getReviewState).mockResolvedValue({
+    isGitRepo: true,
+    head: "abc123",
+    branch: "feat/my-feature",
+    uncommitted: { staged: 0, unstaged: count, untracked: 0 },
+    commitsAhead: null,
+    branchDefault: { unavailable: "no-base" },
+  });
+}
+
 function renderHeaderActions(thread: Thread = makeThread()) {
   return render(<HeaderActions thread={thread} threadPaneWidth={1400} />);
 }
@@ -275,38 +287,35 @@ describe("HeaderActions - Create PR menu item", () => {
     mockUseHasCommitsAhead.mockReturnValue(null);
   });
 
-  it("offers Create PR in the consolidated menu on a worktree thread", () => {
+  it("offers Create PR in the git row on a clean worktree thread with commits ahead", async () => {
+    mockReviewUncommitted(0);
     mockUseHasCommitsAhead.mockReturnValue(true);
     renderHeaderActions();
-    const item = screen.getByTestId("workspace-menu-create-pr");
-    expect(item).toBeInTheDocument();
-    expect(item).not.toBeDisabled();
+    expect(await screen.findByTestId("workspace-menu-create-pr")).toBeEnabled();
   });
 
-  it("shows Commit… instead of Create PR when no commits ahead of base", () => {
-    mockUseHasCommitsAhead.mockReturnValue(false);
+  it("leads with Commit… instead of Create PR while the worktree has uncommitted changes", async () => {
+    mockReviewUncommitted(2);
+    mockUseHasCommitsAhead.mockReturnValue(true);
     renderHeaderActions();
-    expect(screen.getByTestId("workspace-menu-commit")).toBeInTheDocument();
+    expect(await screen.findByTestId("workspace-menu-commit")).toBeInTheDocument();
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-pr-status")).not.toBeInTheDocument();
   });
 
-  it("disables Create PR while loading (null)", () => {
+  it("shows no git row while commits-ahead state is unknown", async () => {
+    mockReviewUncommitted(0);
     mockUseHasCommitsAhead.mockReturnValue(null);
     renderHeaderActions();
-    expect(screen.getByTestId("workspace-menu-create-pr")).toBeDisabled();
+    await waitFor(() => expect(mockTransport.getReviewState).toHaveBeenCalled());
+    expect(screen.queryByTestId("thread-overview-git")).not.toBeInTheDocument();
   });
 
-  it("enables Create PR when commits exist ahead", () => {
-    mockUseHasCommitsAhead.mockReturnValue(true);
-    renderHeaderActions();
-    expect(screen.getByTestId("workspace-menu-create-pr")).not.toBeDisabled();
-  });
-
-  it("offers Create PR on a named worktree thread regardless of branch name", () => {
+  it("offers Create PR on a named worktree thread regardless of branch name", async () => {
+    mockReviewUncommitted(0);
     mockUseHasCommitsAhead.mockReturnValue(true);
     renderHeaderActions(makeThread({ branch: "main" }));
-    expect(screen.getByTestId("workspace-menu-create-pr")).toBeInTheDocument();
+    expect(await screen.findByTestId("workspace-menu-create-pr")).toBeInTheDocument();
   });
 
   it("hides Create PR and shows View PR when a PR already exists", () => {
@@ -314,36 +323,6 @@ describe("HeaderActions - Create PR menu item", () => {
     renderHeaderActions();
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
     expect(screen.getByTestId("workspace-menu-open-pr")).toHaveTextContent("PR #42");
-  });
-
-  it("explains Commit… when no commits are ahead", async () => {
-    mockUseHasCommitsAhead.mockReturnValue(false);
-    renderHeaderActions();
-    const item = screen.getByTestId("workspace-menu-commit");
-    const trigger = item.closest<HTMLElement>("[data-slot='tooltip-trigger']") ?? item;
-    const user = userEvent.setup();
-
-    await user.hover(trigger);
-    await waitFor(() => {
-      const tooltip = document.querySelector<HTMLElement>("[data-slot='tooltip-content']");
-      expect(tooltip).toBeVisible();
-      expect(tooltip).toHaveTextContent("Review and commit the changes");
-    });
-  });
-
-  it("shows a loading explanation while commits-ahead state is unknown", async () => {
-    mockUseHasCommitsAhead.mockReturnValue(null);
-    renderHeaderActions();
-    const item = screen.getByTestId("workspace-menu-create-pr");
-    const trigger = item.closest<HTMLElement>("[data-slot='tooltip-trigger']") ?? item;
-    const user = userEvent.setup();
-
-    await user.hover(trigger);
-    await waitFor(() => {
-      const tooltip = document.querySelector<HTMLElement>("[data-slot='tooltip-content']");
-      expect(tooltip).toBeVisible();
-      expect(tooltip).toHaveTextContent("Waiting for commits ahead of base branch");
-    });
   });
 });
 
@@ -477,7 +456,7 @@ describe("HeaderActions - consolidated header", () => {
     );
     expect(screen.getByTestId("thread-overview-local-branch")).toHaveTextContent("feat/my-feature");
     expect(screen.getByTestId("workspace-menu-branch")).toHaveTextContent("feat/my-feature");
-    expect(screen.getByTestId("thread-overview-pr")).toHaveTextContent("Create PR");
+    expect(screen.queryByTestId("thread-overview-pr")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-pr-status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-pr-detail")).not.toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-usage")).not.toBeInTheDocument();
@@ -587,11 +566,11 @@ describe("HeaderActions - consolidated header", () => {
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
 
     const usage = screen.getByTestId("thread-overview-usage");
-    const prAction = screen.getByTestId("thread-overview-pr");
+    const lane = screen.getByTestId("thread-overview-local");
     const recap = screen.getByTestId("thread-overview-recap");
     expect(usage).toHaveAttribute("aria-label", "Usage, 5-hour 12%, weekly 47%");
     expect(usage).not.toHaveAttribute("aria-expanded");
-    expect(Boolean(usage.compareDocumentPosition(prAction) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
+    expect(Boolean(usage.compareDocumentPosition(lane) & Node.DOCUMENT_POSITION_PRECEDING)).toBe(true);
     expect(Boolean(usage.compareDocumentPosition(recap) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(screen.getByText("5-hour")).toBeInTheDocument();
     expect(screen.getByText("Weekly")).toBeInTheDocument();
@@ -766,12 +745,13 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.queryByText("$12.34", { exact: false })).not.toBeInTheDocument();
   });
 
-  it("opens the Commit sheet on Review from the PR row when the branch is not ahead", () => {
+  it("opens the Commit sheet on Review from the git row when the worktree has uncommitted changes", async () => {
+    mockReviewUncommitted(1);
     mockUseHasCommitsAhead.mockReturnValue(false);
     renderHeaderActions();
-    fireEvent.click(screen.getByTestId("workspace-menu-commit"));
+    fireEvent.click(await screen.findByTestId("workspace-menu-commit"));
     expect(mockSetRightPanelTab).toHaveBeenCalledWith("ws-1", "thread-1", "changes");
-    expect(mockSetCommitSheetScopeId).toHaveBeenCalledWith("thread-1");
+    expect(mockSetCommitSheetScopeId).toHaveBeenCalledWith("thread-1", undefined);
   });
 
   it("renders the right-panel toggle only while the panel is closed", () => {
