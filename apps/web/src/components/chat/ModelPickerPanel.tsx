@@ -165,6 +165,17 @@ function lockedProviderOf(scope: PickerProviderScope, displayProvider: ModelProv
   return scope.kind === "selected-only" ? displayProvider : undefined;
 }
 
+/** The thread's provider when a pick on another provider hands the thread off, otherwise undefined. */
+function handoffSourceOf(scope: PickerProviderScope): string | undefined {
+  return scope.kind === "switchable" ? scope.threadProviderId : undefined;
+}
+
+/** Says, on another provider's tab, that a pick there hands the thread off. */
+function handoffNotice(handoffFrom: string | undefined, activeTab: ModelPickerTab): string | undefined {
+  if (!handoffFrom || activeTab === FAVORITES_TAB || activeTab === handoffFrom) return undefined;
+  return `This thread runs on ${providerName(handoffFrom)}. Picking a ${providerName(activeTab)} model hands it off to ${providerName(activeTab)}.`;
+}
+
 function getProvidersForLeftRail(lockedProvider: ModelProvider | undefined): readonly ModelProvider[] {
   if (lockedProvider) {
     return MODEL_PROVIDERS.filter((provider) => provider.id === lockedProvider.id);
@@ -582,6 +593,7 @@ export function ModelPickerPanel({
   const presentation = getSelectedModelPresentation(selectedModelId, selectedProviderId);
   const { displayProvider } = presentation;
   const lockedProvider = lockedProviderOf(providerScope, displayProvider);
+  const handoffFrom = handoffSourceOf(providerScope);
   const defaultTab = lockedProvider
     ? lockedProvider.id
     : getDefaultProviderId(selectedProviderId, displayProvider);
@@ -658,9 +670,12 @@ export function ModelPickerPanel({
         ) : undefined,
         // A model whose access ended can still be unstarred, but not newly starred.
         action: option.endedOn && !starred ? undefined : favoriteAction(option, starred, toggleFavorite),
+        activeHint: handoffFrom && option.providerId !== handoffFrom
+          ? { label: "Switch", description: `Switches to ${providerName(option.providerId)}` }
+          : undefined,
       };
     },
-    [starredKeys, toggleFavorite],
+    [starredKeys, toggleFavorite, handoffFrom],
   );
 
   const detail = useMemo((): PickerDetail<ModelPickerOption> | undefined => {
@@ -712,6 +727,7 @@ export function ModelPickerPanel({
       renderItem={renderItem}
       onSelect={handlePick}
       footer={footer}
+      notice={handoffNotice(handoffFrom, activeTab)}
       detail={detail}
       fill={fill}
       hairlines={false}

@@ -9,7 +9,7 @@ import { ProviderIcon } from "@/components/ui/provider-icon";
 import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatReasoningLabel, narrowModelLabel } from "@/lib/format-model-label";
-import { findProviderModel, listProviderModels } from "@/lib/model-registry";
+import { MODEL_PROVIDERS, findProviderModel, listProviderModels } from "@/lib/model-registry";
 import { cn } from "@/lib/utils";
 import { useComposerAccess, type ComposerAccessInput } from "../controls/ComposerAccessControls";
 import { persistReasoningLevel, useFastModeView, type ComposerModelPreferenceDefaults } from "../controls/ComposerModelPreferences";
@@ -53,12 +53,15 @@ interface ModelPartFacts {
   readonly fast: boolean;
   /** The access label while the agent runs without approval prompts, which the part flags. */
   readonly unsupervised: string | null;
+  /** The thread's provider name while the selection would hand the thread off to another provider on send. */
+  readonly handoffFrom: string | null;
 }
 
 /** Names the model part with everything it shows: the model, its reasoning level, Fast, and access while it is unsupervised. */
-function modelPartLabelOf(model: SelectedModelPresentation, { level, fast, unsupervised }: ModelPartFacts): string {
+function modelPartLabelOf(model: SelectedModelPresentation, { level, fast, unsupervised, handoffFrom }: ModelPartFacts): string {
   const levelText = level ? `, ${formatReasoningLabel(level)} reasoning` : "";
-  return `Model: ${model.shortLabel}${levelText}${fast ? ", Fast" : ""}${unsupervised ? `, ${unsupervised}` : ""}`;
+  const handoffText = handoffFrom ? `, hands off from ${handoffFrom} on send` : "";
+  return `Model: ${model.shortLabel}${levelText}${fast ? ", Fast" : ""}${unsupervised ? `, ${unsupervised}` : ""}${handoffText}`;
 }
 
 /**
@@ -77,6 +80,16 @@ function modelPickPatch(
     patch.reasoning = (model?.defaultReasoningLevel ?? levels[0]) as ReasoningLevel;
   }
   return patch;
+}
+
+/** The thread's provider name while the selection is on another provider, so the next send hands the thread off. */
+function handoffSourceName(scope: PickerProviderScope, selectedProviderId: string): string | null {
+  if (scope.kind !== "switchable" || scope.threadProviderId === selectedProviderId) return null;
+  return MODEL_PROVIDERS.find((provider) => provider.id === scope.threadProviderId)?.name ?? scope.threadProviderId;
+}
+
+function crossesProvider(scope: PickerProviderScope, providerId: string): boolean {
+  return scope.kind === "switchable" && scope.threadProviderId !== providerId;
 }
 
 /** The rule between the pill's parts. It paints under the hover fill, so the fill slides over it. */
@@ -115,12 +128,19 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
     current: selection.reasoning,
     onChoose: (modelId: string, provider: string, reasoning: ReasoningLevel) => {
       onSelectionChange({ modelId, provider, reasoning });
-      persistReasoningLevel(preferenceProps, reasoning);
+      // A pick on another provider must not write the thread's reasoning setting while the thread is still on its
+      // old provider; the send that hands it off carries the level.
+      if (!crossesProvider(providerScope, provider)) persistReasoningLevel(preferenceProps, reasoning);
       close();
     },
   };
   const level = reasoningLevels.includes(selection.reasoning) ? selection.reasoning : null;
-  const modelLabel = modelPartLabelOf(model, { level, fast, unsupervised: unsupervised ? access.selected.label : null });
+  const modelLabel = modelPartLabelOf(model, {
+    level,
+    fast,
+    unsupervised: unsupervised ? access.selected.label : null,
+    handoffFrom: handoffSourceName(providerScope, selection.provider),
+  });
   const AccessIcon = access.selected.icon;
 
   return (

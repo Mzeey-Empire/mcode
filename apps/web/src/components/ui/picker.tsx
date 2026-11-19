@@ -59,6 +59,16 @@ export interface PickerRow {
   readonly group?: string;
   /** Text heading drawn before the first row of this row's group, in place of the divider. */
   readonly groupLabel?: string;
+  /** What picking the row does beyond selecting it, shown in place of its keycap while it is highlighted or hovered. */
+  readonly activeHint?: PickerRowHint;
+}
+
+/** A short trailing label for the highlighted row, with the longer text the row reads as its description. */
+export interface PickerRowHint {
+  /** The visible label, a word or two. */
+  readonly label: string;
+  /** Read as part of the row's description, so the consequence is announced on every row that has it. */
+  readonly description: string;
 }
 
 /** The shortcut that runs the highlighted row's action from the search field. */
@@ -133,6 +143,8 @@ export interface PickerProps<T> {
   readonly unmatchedGroup?: string;
   /** Content under the list, set off by a divider, such as a toggle row. */
   readonly footer?: ReactNode;
+  /** A muted line above the list, under the search, that says what a pick here means. */
+  readonly notice?: ReactNode;
   /** Set false to separate groups and the footer with space instead of hairlines. Defaults to true. */
   readonly hairlines?: boolean;
   /** Set false to mark the selected row by its fill alone, without the trailing check. Defaults to true. */
@@ -316,6 +328,7 @@ export function Picker<T>(props: PickerProps<T>) {
   );
   const tabs = <PickerTabs tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} />;
   const listStatus = <PickerListStatus {...props} hasRows={hasRows} listId={listId} />;
+  const notice = props.notice == null ? null : <p className="shrink-0 px-2 pt-1 pb-1 text-caption text-muted">{props.notice}</p>;
   if (props.detail) {
     return (
       <PickerDetailLayout
@@ -324,7 +337,7 @@ export function Picker<T>(props: PickerProps<T>) {
         onTabChange={props.onTabChange}
         onKeyDown={handleNumberShortcut}
         search={search}
-        list={<>{tabs}{list}{listStatus}</>}
+        list={<>{tabs}{notice}{list}{listStatus}</>}
         detail={props.detail}
         paneItem={paneRow.item}
         paneKey={paneRow.key}
@@ -339,6 +352,7 @@ export function Picker<T>(props: PickerProps<T>) {
     <PickerFrame tabs={props.tabs} activeTab={props.activeTab} onTabChange={props.onTabChange} onKeyDown={handleNumberShortcut}>
       {search}
       {tabs}
+      {notice}
       {list}
       {listStatus}
       <PickerFooter loaded={items.length} total={props.total} countLabel={props.countLabel} footer={props.footer} hairline={hairlines} />
@@ -960,13 +974,15 @@ function PickerOption(props: PickerOptionProps) {
 /** What an option reads after its name: why it is disabled, and how to run its action from the keyboard. */
 function optionDescriptions(id: string, row: PickerRow, reason: string | undefined, digit: number | undefined) {
   const actionHint = row.action ? `${row.action.label} (${ROW_ACTION_SHORTCUT.label})` : undefined;
-  const describedBy = [reason && `${id}-reason`, actionHint && `${id}-action`].filter(Boolean).join(" ");
+  const pickHint = row.activeHint?.description;
+  const describedBy = [reason && `${id}-reason`, pickHint && `${id}-hint`, actionHint && `${id}-action`].filter(Boolean).join(" ");
   return {
     describedBy: describedBy || undefined,
     keyShortcuts: optionKeyShortcuts(digit, actionHint !== undefined),
     spans: (
       <>
         {reason ? <span id={`${id}-reason`} hidden>{reason}</span> : null}
+        {pickHint ? <span id={`${id}-hint`} hidden>{pickHint}</span> : null}
         {actionHint ? <span id={`${id}-action`} hidden>{actionHint}</span> : null}
       </>
     ),
@@ -1004,13 +1020,13 @@ function PickerOptionItem({ id, row, digit, active, keyboard, selected, selected
       )}
     >
       {/* A disabled row keeps its action for the pointer, so a starred row whose model went away can be unstarred. */}
-      <PickerOptionContent row={row} digit={digit} selected={selected} selectedCheck={selectedCheck} onRunAction={onRunAction} />
+      <PickerOptionContent row={row} digit={digit} active={active} selected={selected} selectedCheck={selectedCheck} onRunAction={onRunAction} />
       {descriptions.spans}
     </li>
   );
 }
 
-function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction }: { readonly row: PickerRow; readonly digit: number | undefined; readonly selected: boolean; readonly selectedCheck: boolean; readonly onRunAction: () => void }) {
+function PickerOptionContent({ row, digit, active, selected, selectedCheck, onRunAction }: { readonly row: PickerRow; readonly digit: number | undefined; readonly active: boolean; readonly selected: boolean; readonly selectedCheck: boolean; readonly onRunAction: () => void }) {
   return (
     <>
       {row.icon != null ? (
@@ -1031,16 +1047,7 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
       <PickerDisclosureChevron expanded={row.expanded} />
       {/* The action sits before the keycap, so the keycaps form a column near the row's end, not past an empty slot. */}
       {row.action ? <PickerRowActionButton action={row.action} onRun={onRunAction} /> : null}
-      {digit !== undefined ? (
-        // A narrow list keeps the name whole and drops the keycap; the chord still works. On a filled row the keycap
-        // takes ink, since muted over the key's tint and the row's fill drops below AA.
-        <span
-          aria-hidden
-          className="shrink-0 text-muted group-data-active/option:text-ink group-data-selected/option:text-ink @max-[240px]/picker-list:hidden"
-        >
-          <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
-        </span>
-      ) : null}
+      <PickerOptionTrailing hint={row.activeHint} digit={digit} active={active} />
       {selectedCheck ? (
         <span aria-hidden className="flex size-[1.4rem] shrink-0 items-center justify-center">
           {selected ? <CheckIcon className="size-[1.4rem] text-ink" /> : null}
@@ -1048,6 +1055,30 @@ function PickerOptionContent({ row, digit, selected, selectedCheck, onRunAction 
       ) : null}
     </>
   );
+}
+
+/** The keycap, or the row's hint in its place while the row is highlighted or hovered. */
+function PickerOptionTrailing({ hint, digit, active }: { readonly hint: PickerRowHint | undefined; readonly digit: number | undefined; readonly active: boolean }) {
+  // Only the highlighted or hovered row shows its hint, so a list of hinted rows never reads as a column of labels.
+  const keycap = digit === undefined || (hint && active) ? null : (
+    // A narrow list keeps the name whole and drops the keycap; the chord still works. On a filled row the keycap
+    // takes ink, since muted over the key's tint and the row's fill drops below AA.
+    <span
+      aria-hidden
+      className={cn(
+        "shrink-0 text-muted group-data-active/option:text-ink group-data-selected/option:text-ink @max-[240px]/picker-list:hidden",
+        hint && "group-hover/option:hidden",
+      )}
+    >
+      <Kbd variant="keycap">{formatKeybinding(`mod+${digit}`, isMac)}</Kbd>
+    </span>
+  );
+  const label = hint ? (
+    <span aria-hidden className={cn("shrink-0 text-caption text-ink", !active && "hidden group-hover/option:inline")}>
+      {hint.label}
+    </span>
+  ) : null;
+  return <>{keycap}{label}</>;
 }
 
 function PickerDisclosureChevron({ expanded }: { readonly expanded: boolean | undefined }) {
