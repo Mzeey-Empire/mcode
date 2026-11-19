@@ -1,4 +1,5 @@
 import { CONTEXT_COMPACTED_NOTICE, type Message } from "@mcode/contracts/models/message";
+import { replyPlacesVisual } from "../html-visual/visual-marker";
 import type { TurnNotice } from "../narrative/types";
 
 /** Where each context-compaction notice and HTML visual renders: within a turn, or as its own message row. */
@@ -52,7 +53,7 @@ function isVisualMessage(message: Message): boolean {
 
 function isPlacedInAnswer(visual: Message, answer: Message): boolean {
   // Placement is never saved, so a settled turn reads the marker alone.
-  return answer.content.includes(`](visual:${visual.id})`);
+  return replyPlacesVisual(answer.content, visual.id);
 }
 
 /** Maps a notice message to its row model, keeping its identity stable across renders. */

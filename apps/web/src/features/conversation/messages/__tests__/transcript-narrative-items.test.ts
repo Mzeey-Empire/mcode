@@ -460,6 +460,22 @@ describe("html visual placement", () => {
     expect(projected.map((item) => item.key)).not.toContain("visual-2");
   });
 
+  it("shows a settled visual above its answer when the answer shows its full marker inside a code fence", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "Paste:\n\n```md\n![Chart](visual:visual-2)\n```", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
+  it("shows a settled visual above its answer when the answer only links to it", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "See [Chart](visual:visual-2).", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
   function visual(sequence: number, visualPlacement?: "auto" | "inline"): Message {
     return createMockMessage({
       id: `visual-${sequence}`, thread_id: "thread", role: "system", content: "Chart", sequence,

@@ -19,7 +19,8 @@ import {
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { EntityToken, type EntityKind } from "./EntityToken";
 import { MarkdownTreeCache } from "./markdown-tree-cache";
-import { InlineVisualMarker, visualMarkerMessageId } from "@/features/conversation/html-visual/InlineVisualMarker";
+import { InlineVisualMarker } from "@/features/conversation/html-visual/InlineVisualMarker";
+import { visualMarkerMessageId } from "@/features/conversation/html-visual/visual-marker";
 
 /** Pass through workspace preview URLs and visual markers; otherwise use react-markdown's default sanitizer. */
 const markdownUrlTransform: UrlTransform = (value, key) => {
