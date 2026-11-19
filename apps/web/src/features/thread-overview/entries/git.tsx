@@ -102,8 +102,9 @@ function GitSplitRow({ plan, run, onMenuOpenChange, loading }: {
 }
 
 function GitPushError({ message }: { message: string }) {
+  // A remote hook's message spans several lines, and the server joins them with newlines.
   return (
-    <div role="alert" data-testid="thread-overview-git-error" className="px-3 pb-1 text-caption text-error">
+    <div role="alert" data-testid="thread-overview-git-error" className="whitespace-pre-line px-3 pb-1 text-caption text-error">
       {message}
     </div>
   );
