@@ -1,4 +1,4 @@
-import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockGitReviewState, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
@@ -39,10 +39,7 @@ beforeEach(() => {
 const THREAD = "thread-plan";
 
 function reviewState(uncommitted: number): ReviewState {
-  return {
-    isGitRepo: true, head: "a".repeat(40), branch: "main", uncommitted: { staged: 0, unstaged: uncommitted, untracked: 0 },
-    commitsAhead: null, branchDefault: { unavailable: "no-base" },
-  };
+  return createMockGitReviewState({ uncommitted: { staged: 0, unstaged: uncommitted, untracked: 0 } });
 }
 
 function makePlan(version: number, overrides: Partial<PlanVersion> = {}): PlanVersion {

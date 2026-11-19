@@ -1,4 +1,4 @@
-import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockGitReviewState, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { ThreadOverview } from "@/components/chat/ThreadOverview";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -156,11 +156,7 @@ describe("overview Changes, Tasks and Usage rows", () => {
       status: "ready",
       comparison: { files: [], additions: 0, deletions: 0 },
     });
-    vi.mocked(mockTransport.getReviewState).mockResolvedValue({
-      isGitRepo: true, head: "abc", branch: "main",
-      uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
-      commitsAhead: null, branchDefault: { base: "main" },
-    } as Awaited<ReturnType<typeof mockTransport.getReviewState>>);
+    vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState());
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
     await flushTimers(1_000);
 

@@ -3,6 +3,7 @@ import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewState } from "@mcode/contracts/models/review-comparison";
+import { createMockGitReviewState } from "@mcode/contracts/testing";
 import { reviewViewAvailability } from "@/lib/review-views";
 import { useDiffStore } from "@/stores/diffStore";
 import { useReviewState } from "./useReviewState";
@@ -14,11 +15,7 @@ beforeEach(() => {
   vi.mocked(mockTransport.getReviewState).mockReset();
 });
 
-const clean: ReviewState = {
-  isGitRepo: true, head: "abc123", branch: "main",
-  uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
-  commitsAhead: null, branchDefault: { unavailable: "no-base" },
-};
+const clean = createMockGitReviewState();
 describe("useReviewState", () => {
   beforeEach(() => {
     getReviewState.mockReset().mockResolvedValue(clean);

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockGitReviewState, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, renderHook } from "@testing-library/react";
@@ -8,7 +8,6 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ReviewState } from "@mcode/contracts/models/review-comparison";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
@@ -54,10 +53,10 @@ function delayedProbes() {
   const pending: Array<() => void> = [];
   getReviewState.mockImplementation((workspaceId, threadId) => {
     const cwd = checkoutOf(workspaceId, threadId);
-    const state: ReviewState = {
-      isGitRepo: true, head: git(cwd, "rev-parse", "HEAD"), branch: git(cwd, "rev-parse", "--abbrev-ref", "HEAD"),
-      uncommitted: { staged: 0, unstaged: 0, untracked: 0 }, commitsAhead: null, branchDefault: { unavailable: "no-base" },
-    };
+    const state = createMockGitReviewState({
+      head: git(cwd, "rev-parse", "HEAD"),
+      branch: git(cwd, "rev-parse", "--abbrev-ref", "HEAD"),
+    });
     return new Promise((resolve) => { pending.push(() => resolve(state)); });
   });
   return { release: async () => { await act(async () => { for (const finish of pending.splice(0)) finish(); }); } };
