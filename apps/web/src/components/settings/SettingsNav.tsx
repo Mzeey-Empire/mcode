@@ -1,27 +1,30 @@
 import { cn } from "@/lib/utils";
 import { useUpdateStore } from "@/stores/updateStore";
-import { SETTINGS_PAGES, type SettingsSection } from "./settings-nav";
+import { selectSettingsCanvas, useSettingsLocation } from "@/stores/settingsLocationStore";
+import { SETTINGS_PAGES } from "./settings-nav";
 import { SETTINGS_SIDEBAR_ROW_CLASS } from "./settings-sidebar-row";
+import { SettingsSearchField } from "./SettingsSearchField";
 
-interface SettingsNavProps {
-  section: SettingsSection;
-  onSection: (s: SettingsSection) => void;
-}
-
-/** Settings page navigation rendered inside the app sidebar. */
-export function SettingsNav({ section, onSection }: SettingsNavProps) {
+/** Settings search and page navigation rendered inside the app sidebar. */
+export function SettingsNav() {
   const version = useUpdateStore((s) => s.version);
+  const section = useSettingsLocation((s) => s.page);
+  const openPage = useSettingsLocation((s) => s.openPage);
+  // While results show, no page is the one on screen.
+  const showingResults = useSettingsLocation((s) => selectSettingsCanvas(s).kind === "results");
   return (
+    <>
+    <SettingsSearchField />
     <div className="flex flex-col gap-0.5 px-2 py-3">
       {SETTINGS_PAGES.map((page) => {
-        const current = section === page.id;
+        const current = !showingResults && section === page.id;
         const Icon = page.icon;
         return (
           <button
             key={page.id}
             type="button"
             aria-current={current ? "page" : undefined}
-            onClick={() => onSection(page.id)}
+            onClick={() => openPage(page.id)}
             className={cn(SETTINGS_SIDEBAR_ROW_CLASS, current && "bg-selected font-medium text-ink hover:bg-selected")}
           >
             <Icon size={16} aria-hidden className="shrink-0" />
@@ -33,5 +36,6 @@ export function SettingsNav({ section, onSection }: SettingsNavProps) {
         );
       })}
     </div>
+    </>
   );
 }

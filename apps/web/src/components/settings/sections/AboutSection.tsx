@@ -1,7 +1,9 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useUpdateStore } from "@/stores/updateStore";
+import { useShallow } from "zustand/shallow";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { SettingRow } from "../SettingRow";
+import { Setting, SettingRowFrame } from "../Setting";
+import { settingsPage, type SettingRowProps } from "../setting-def";
 import { SettingsGroup } from "../SettingsGroup";
 import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -52,12 +54,12 @@ function VersionValue({ version, stage }: { version: string | null | undefined; 
   return <span className="flex items-center gap-2 font-mono text-xs text-muted tabular-nums"><span>{version || "—"}</span>{stageLabel && <span className="text-ink">{stageLabel}</span>}</span>;
 }
 
-function AboutSettingsRows({ version, stage, updatesHint, status, statusLabel, canCheck, isBusy, installing, onInstall, onCheck, releaseLine, onReleaseLineChange, checkInterval, onCheckIntervalChange, autoDownload, onAutoDownloadChange, autoInstallOnQuit, onAutoInstallOnQuitChange }: { version: string | null | undefined; stage: BuildStage | null; updatesHint: string; status: UpdateStatus; statusLabel: string; canCheck: boolean; isBusy: boolean; installing: boolean; onInstall: () => void; onCheck: () => void; releaseLine: UpdateReleaseLine; onReleaseLineChange: (value: UpdateReleaseLine) => void; checkInterval: UpdateCheckInterval; onCheckIntervalChange: (value: UpdateCheckInterval) => void; autoDownload: boolean; onAutoDownloadChange: (value: boolean) => void; autoInstallOnQuit: boolean; onAutoInstallOnQuitChange: (value: boolean) => void }) {
-  return <SettingsGroup><SettingRow label="Version" hint="Currently installed build."><VersionValue version={version} stage={stage} /></SettingRow><SettingRow label="Updates" hint={updatesHint}><UpdateStatusControl status={status} statusLabel={statusLabel} canCheck={canCheck} isBusy={isBusy} installing={installing} onInstall={onInstall} onCheck={onCheck} /></SettingRow><SettingRow label="Release line" hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."><SegmentedControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => onReleaseLineChange(value as UpdateReleaseLine)} /></SettingRow><SettingRow label="Check interval" hint="How often to poll for new releases. Takes effect on next launch."><SegmentedControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => onCheckIntervalChange(value as UpdateCheckInterval)} /></SettingRow><SettingRow label="Auto-download" hint="Download updates in the background as soon as they are available."><Switch checked={autoDownload} onCheckedChange={onAutoDownloadChange} /></SettingRow><SettingRow label="Auto-install on quit" hint="Apply downloaded updates automatically when the app closes."><Switch checked={autoInstallOnQuit} onCheckedChange={onAutoInstallOnQuitChange} /></SettingRow></SettingsGroup>;
-}
-
 function getUpdatePreferences(settings: Settings): { autoDownload: boolean; autoInstallOnQuit: boolean; checkInterval: UpdateCheckInterval; releaseLine: UpdateReleaseLine } {
   return { autoDownload: settings.updates?.autoDownload ?? true, autoInstallOnQuit: settings.updates?.autoInstallOnQuit ?? true, checkInterval: settings.updates?.checkInterval ?? "4hours", releaseLine: settings.updates?.channel ?? "stable" };
+}
+
+function useUpdatePreferences() {
+  return useSettingsStore(useShallow((s) => getUpdatePreferences(s.settings)));
 }
 
 function isUpdateBusy(checking: boolean, status: UpdateStatus): boolean {
@@ -68,38 +70,30 @@ function getUpdateStatusLabel(upToDateLabel: boolean, status: UpdateStatus): str
   return upToDateLabel ? "Up to date" : describeStatus(status);
 }
 
-/**
- * About settings section: shows the running app version, the current
- * auto-updater state, and controls for update behavior.
- *
- * The version is read from the Electron main process at startup, so it
- * always reflects the installed build without manual maintenance.
- */
-export function AboutSection() {
+function aboutBridge() {
+  return typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
+}
+
+function VersionControl() {
   const version = useUpdateStore((s) => s.version);
   const stage = useUpdateStore((s) => s.stage);
+  return <VersionValue version={version} stage={stage} />;
+}
+
+/**
+ * Updates row: the live check status and the Check now or Restart to install action.
+ * Its hint follows the saved interval and release line, so the row draws it instead of the definition.
+ */
+function UpdatesRow({ def, variant }: SettingRowProps) {
   const status = useUpdateStore((s) => s.status);
-  const settings = useSettingsStore((s) => s.settings);
-  const updateSettings = useSettingsStore((s) => s.update);
+  const { checkInterval, releaseLine } = useUpdatePreferences();
+  const bridge = aboutBridge();
 
   /** True while a manually-triggered check is in flight. */
   const [checking, setChecking] = useState(false);
   /** Transient label shown for UP_TO_DATE_HOLD_MS after "no update" resolves. */
   const [upToDateLabel, setUpToDateLabel] = useReducer(upToDateLabelReducer, false);
   const upToDateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Latest stable version on GitHub, used to decide if nightly→stable is a downgrade. */
-  const [latestStable, setLatestStable] = useState<string | null>(null);
-  /** When non-null, the dialog is shown for the pending downgrade. */
-  const [pendingDowngrade, setPendingDowngrade] = useState<null | {
-    currentVersion: string;
-    latestStable: string;
-  }>(null);
-
-  /** The latest channel switch asked for, until it settles. Compared by identity: the same line can be queued twice. */
-  const requestedLine = useRef<{ readonly line: UpdateReleaseLine } | null>(null);
-  const channelSwitches = useRef<Promise<void>>(Promise.resolve());
-
-  const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
 
   /** Show the "Up to date" label for a few seconds, then clear it. */
   const flashUpToDate = () => {
@@ -127,6 +121,61 @@ export function AboutSection() {
     if (upToDateTimer.current) clearTimeout(upToDateTimer.current);
   }, []);
 
+  const handleCheck = async (): Promise<void> => {
+    if (!bridge) return;
+    setUpToDateLabel(false);
+    setChecking(true);
+    try {
+      const result = await bridge.checkForUpdates();
+      if (result.state === "not-available") {
+        flashUpToDate();
+      }
+    } catch {
+      // The main process broadcasts an error status via IPC, which surfaces as
+      // status.state === "error" and renders the failed operation in the status label.
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const { install, installing, dialog: installDialog } = useInstallUpdate(bridge);
+
+  return (
+    <SettingRowFrame def={def} variant={variant} hint={getUpdatesHint(checkInterval, releaseLine)}>
+      <UpdateStatusControl
+        status={status}
+        statusLabel={getUpdateStatusLabel(upToDateLabel, status)}
+        canCheck={Boolean(bridge)}
+        isBusy={isUpdateBusy(checking, status)}
+        installing={installing}
+        onInstall={() => void install()}
+        onCheck={() => void handleCheck()}
+      />
+      {installDialog}
+    </SettingRowFrame>
+  );
+}
+
+/**
+ * Release line switch. Owns the downgrade confirmation and the queue of channel switches,
+ * so choosing a line from search behaves exactly as on the About page.
+ */
+function ReleaseLineControl() {
+  const version = useUpdateStore((s) => s.version);
+  const { releaseLine } = useUpdatePreferences();
+  const updateSettings = useSettingsStore((s) => s.update);
+  /** Latest stable version on GitHub, used to decide if nightly→stable is a downgrade. */
+  const [latestStable, setLatestStable] = useState<string | null>(null);
+  /** When non-null, the dialog is shown for the pending downgrade. */
+  const [pendingDowngrade, setPendingDowngrade] = useState<null | {
+    currentVersion: string;
+    latestStable: string;
+  }>(null);
+
+  /** The latest channel switch asked for, until it settles. Compared by identity: the same line can be queued twice. */
+  const requestedLine = useRef<{ readonly line: UpdateReleaseLine } | null>(null);
+  const channelSwitches = useRef<Promise<void>>(Promise.resolve());
+
   // Fetch the latest stable version once on mount. Used only to decide
   // whether nightly → stable is a downgrade. Failure is non-fatal — the
   // downgrade prompt simply won't appear.
@@ -152,27 +201,6 @@ export function AboutSection() {
     };
   }, []);
 
-  const handleCheck = async (): Promise<void> => {
-    if (!bridge) return;
-    setUpToDateLabel(false);
-    setChecking(true);
-    try {
-      const result = await bridge.checkForUpdates();
-      if (result.state === "not-available") {
-        flashUpToDate();
-      }
-    } catch {
-      // The main process broadcasts an error status via IPC, which surfaces as
-      // status.state === "error" and renders the failed operation in the status label.
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  const { install, installing, dialog: installDialog } = useInstallUpdate(bridge);
-
-  const { autoDownload, autoInstallOnQuit, checkInterval, releaseLine } = getUpdatePreferences(settings);
-
   /**
    * Persist the new channel AND tell the main process to switch the running
    * updater. Persistence MUST happen first because the main process's next
@@ -183,6 +211,7 @@ export function AboutSection() {
     allowDowngrade: boolean,
   ): Promise<void> => {
     await updateSettings({ updates: { channel: next } });
+    const bridge = aboutBridge();
     if (bridge?.applyReleaseLine) {
       await bridge.applyReleaseLine({ releaseLine: next, allowDowngrade });
     }
@@ -233,17 +262,9 @@ export function AboutSection() {
     await applyChannelSwitch(next, false);
   };
 
-  const isBusy = isUpdateBusy(checking, status);
-
-  const updatesHint = getUpdatesHint(checkInterval, releaseLine);
-
-  // Derive the inline status label shown beside the button.
-  const statusLabel = getUpdateStatusLabel(upToDateLabel, status);
-
   return (
-    <div>
-      <AboutSettingsRows version={version} stage={stage} updatesHint={updatesHint} status={status} statusLabel={statusLabel} canCheck={Boolean(bridge)} isBusy={isBusy} installing={installing} onInstall={() => void install()} onCheck={() => void handleCheck()} releaseLine={releaseLine} onReleaseLineChange={(value) => void handleChannelChange(value)} checkInterval={checkInterval} onCheckIntervalChange={(value) => void updateSettings({ updates: { checkInterval: value } })} autoDownload={autoDownload} onAutoDownloadChange={(value) => void updateSettings({ updates: { autoDownload: value } })} autoInstallOnQuit={autoInstallOnQuit} onAutoInstallOnQuitChange={(value) => void updateSettings({ updates: { autoInstallOnQuit: value } })} />
-      {installDialog}
+    <>
+      <SegmentedControl options={RELEASE_LINE_OPTIONS} value={releaseLine} onChange={(value) => void handleChannelChange(value as UpdateReleaseLine)} />
       {pendingDowngrade && (
         <ConfirmChannelDowngradeDialog
           currentVersion={pendingDowngrade.currentVersion}
@@ -255,7 +276,83 @@ export function AboutSection() {
           }}
         />
       )}
-    </div>
+    </>
+  );
+}
+
+function CheckIntervalControl() {
+  const { checkInterval } = useUpdatePreferences();
+  const updateSettings = useSettingsStore((s) => s.update);
+  return <SegmentedControl options={INTERVAL_OPTIONS} value={checkInterval} onChange={(value) => void updateSettings({ updates: { checkInterval: value as UpdateCheckInterval } })} />;
+}
+
+function AutoDownloadControl() {
+  const { autoDownload } = useUpdatePreferences();
+  const updateSettings = useSettingsStore((s) => s.update);
+  return <Switch aria-label="Auto-download" checked={autoDownload} onCheckedChange={(value) => void updateSettings({ updates: { autoDownload: value } })} />;
+}
+
+function AutoInstallOnQuitControl() {
+  const { autoInstallOnQuit } = useUpdatePreferences();
+  const updateSettings = useSettingsStore((s) => s.update);
+  return <Switch aria-label="Auto-install on quit" checked={autoInstallOnQuit} onCheckedChange={(value) => void updateSettings({ updates: { autoInstallOnQuit: value } })} />;
+}
+
+/** Settings on the About page. */
+export const ABOUT = settingsPage("about", {
+  version: {
+    label: "Version",
+    hint: "Currently installed build.",
+    synonyms: "version about build release installed",
+    Control: VersionControl,
+  },
+  updates: {
+    label: "Updates",
+    synonyms: "update check now upgrade new release install restart download",
+    Row: UpdatesRow,
+  },
+  releaseLine: {
+    label: "Release line",
+    hint: "Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them.",
+    synonyms: "release channel stable nightly beta prerelease version update",
+    configKey: "updates.channel",
+    Control: ReleaseLineControl,
+  },
+  checkInterval: {
+    label: "Check interval",
+    hint: "How often to poll for new releases. Takes effect on next launch.",
+    synonyms: "update check interval poll frequency",
+    configKey: "updates.checkInterval",
+    Control: CheckIntervalControl,
+  },
+  autoDownload: {
+    label: "Auto-download",
+    hint: "Download updates in the background as soon as they are available.",
+    synonyms: "update download automatic background",
+    configKey: "updates.autoDownload",
+    Control: AutoDownloadControl,
+  },
+  autoInstallOnQuit: {
+    label: "Auto-install on quit",
+    hint: "Apply downloaded updates automatically when the app closes.",
+    synonyms: "update install quit close restart automatic",
+    configKey: "updates.autoInstallOnQuit",
+    Control: AutoInstallOnQuitControl,
+  },
+});
+
+/**
+ * About settings section: shows the running app version, the current
+ * auto-updater state, and controls for update behavior.
+ *
+ * The version is read from the Electron main process at startup, so it
+ * always reflects the installed build without manual maintenance.
+ */
+export function AboutSection() {
+  return (
+    <SettingsGroup>
+      {ABOUT.all.map((def) => <Setting key={def.id} def={def} />)}
+    </SettingsGroup>
   );
 }
 

@@ -2,8 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // vi.hoisted ensures these refs are available inside the vi.mock factory below.
-const { mockSettingsSelector, mockPmState } = vi.hoisted(() => ({
-  mockSettingsSelector: vi.fn(),
+const { mockPmState } = vi.hoisted(() => ({
   mockPmState: {
     models: {} as Record<string, import("@/lib/model-registry").ModelDefinition[]>,
     loading: {} as Record<string, boolean>,
@@ -11,25 +10,6 @@ const { mockSettingsSelector, mockPmState } = vi.hoisted(() => ({
     initialize: vi.fn(),
   },
 }));
-
-vi.mock("@/stores/settingsStore", () => {
-  const store = Object.assign(
-    vi.fn((selector: (s: unknown) => unknown) => mockSettingsSelector(selector)),
-    {
-      getState: vi.fn().mockReturnValue({
-        settings: {
-        model: {
-            defaults: { provider: "claude", id: "claude-opus-4-7", reasoning: "high" },
-            utility: { provider: "", id: "" },
-          },
-          provider: { cli: { codex: "", claude: "", copilot: "", cursor: "" } },
-        },
-      }),
-      setState: vi.fn(),
-    },
-  );
-  return { useSettingsStore: store };
-});
 
 vi.mock("@/stores/providerModelsStore", () => ({
   useProviderModelsStore: (fn: (s: typeof mockPmState) => unknown) => fn(mockPmState),
@@ -54,51 +34,36 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import { ThreadModelSettings } from "../ThreadModelSettings";
-
-/** Builds the full settings state shape required by ThreadModelSettings. */
-function makeState(provider: string, modelId: string, reasoning = "high") {
-  return {
-    settings: {
-      model: {
-        defaults: { provider, id: modelId, reasoning },
-        utility: { provider: "", id: "" },
-      },
-      provider: {
-        cli: { codex: "", claude: "", copilot: "", cursor: "" },
-        claude: { fastMode: false },
-        codex: { fastMode: false },
-      },
-    },
-    update: vi.fn(),
-  };
-}
+import { getDefaultSettings, type ReasoningLevel, type SettingsProviderId } from "@mcode/contracts/models/settings";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { ThreadsSection } from "../ThreadsSection";
 
 /**
- * Renders ThreadModelSettings after configuring the store mock to return the given
- * provider and model. Returns the rendered component for optional further querying.
+ * Renders the Threads page with the given default provider and model.
+ * Returns the update spy for asserting what a control writes.
  */
 function renderWithModel(provider: string, modelId: string, reasoning = "high") {
-  const state = makeState(provider, modelId, reasoning);
-  mockSettingsSelector.mockImplementation((selector: (s: unknown) => unknown) =>
-    selector(state),
-  );
-  return { state, ...render(<ThreadModelSettings />) };
+  const defaults = getDefaultSettings();
+  const update = vi.fn(async () => {});
+  useSettingsStore.setState({
+    settings: {
+      ...defaults,
+      model: {
+        ...defaults.model,
+        defaults: { ...defaults.model.defaults, provider: provider as SettingsProviderId, id: modelId, reasoning: reasoning as ReasoningLevel },
+      },
+    },
+    update,
+  });
+  return { state: { update }, ...render(<ThreadsSection />) };
 }
 
-/**
- * Finds the reasoning effort segmented control radiogroup.
- * The component renders multiple radiogroups (provider, model, reasoning);
- * we locate ours by finding the "Reasoning effort" label and querying within its row.
- */
+/** The Reasoning effort row; the page has several segmented controls, so queries stay inside it. */
 function getReasoningRow(): HTMLElement {
-  const label = screen.getByText("Reasoning effort");
-  // Walk up to the SettingRow container div (two levels up from the <span>)
-  const row = label.closest("div[class]")?.parentElement as HTMLElement;
-  return row;
+  return screen.getByText("Reasoning effort").closest("[data-setting-id]") as HTMLElement;
 }
 
-describe("ThreadModelSettings reasoning options", () => {
+describe("Threads page model controls", () => {
   it("keeps the primary model controls without a fallback model setting", () => {
     renderWithModel("claude", "claude-opus-4-7");
     expect(screen.getByText("Default model")).toBeInTheDocument();

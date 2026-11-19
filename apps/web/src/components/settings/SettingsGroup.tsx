@@ -1,7 +1,10 @@
 import { useId, type ReactNode } from "react";
+import type { SettingsGroupRef } from "./setting-def";
 
 /** Props for a visually grouped set of related settings. */
 export interface SettingsGroupProps {
+  /** Named group shared with the page's setting definitions; supplies title and description. */
+  group?: SettingsGroupRef;
   /** Heading that identifies the settings group; a page's only group may go without one. */
   title?: string;
   /** Short explanation of what the group controls. */
@@ -15,8 +18,9 @@ export interface SettingsGroupProps {
  * The first and last rows take the panel's corners so a row's hover fill never squares them off.
  */
 export function SettingsGroup({
-  title,
-  description,
+  group,
+  title = group?.title,
+  description = group?.description,
   children,
 }: SettingsGroupProps) {
   const headingId = useId();

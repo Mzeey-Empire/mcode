@@ -42,7 +42,8 @@ import { useOpenPlanWhenReady } from "@/components/panels/plan/use-open-plan-whe
 import { usePlanCommands } from "@/components/panels/plan/use-plan-commands";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastLane } from "@/components/ui/toast";
-import type { SettingsSection } from "@/components/settings/settings-nav";
+import { isSettingsSection } from "@/components/settings/settings-sections";
+import { useSettingsLocation } from "@/stores/settingsLocationStore";
 import {
   BrowserAutomationHost,
   BrowserSurfaceHostRoot,
@@ -97,10 +98,8 @@ type AppLayoutProps = {
   showProjectlessCanvas: boolean;
   showPullRequests: boolean;
   settingsOpen: boolean;
-  settingsSection: SettingsSection;
   pullRequestTab: PullRequestHistoryTab;
   setSettingsOpen: (open: boolean) => void;
-  setSettingsSection: (section: SettingsSection) => void;
   setPullRequestTab: (tab: PullRequestHistoryTab) => void;
   closeSettings: () => void;
 };
@@ -108,16 +107,12 @@ type AppLayoutProps = {
 function DockedSidebar({
   visible,
   settingsOpen,
-  settingsSection,
   setSettingsOpen,
-  setSettingsSection,
   closeSettings,
 }: {
   visible: boolean;
   settingsOpen: boolean;
-  settingsSection: SettingsSection;
   setSettingsOpen: (open: boolean) => void;
-  setSettingsSection: (section: SettingsSection) => void;
   closeSettings: () => void;
 }) {
   return (
@@ -140,8 +135,6 @@ function DockedSidebar({
       >
         <Sidebar
           settingsOpen={settingsOpen}
-          settingsSection={settingsSection}
-          onSettingsSection={setSettingsSection}
           onOpenSettings={() => setSettingsOpen(true)}
           onCloseSettings={closeSettings}
         />
@@ -191,12 +184,12 @@ function CanvasSurface({ children }: { children: ReactNode }) {
 
 function AppPrimarySurface(props: Pick<
   AppLayoutProps,
-  "settingsOpen" | "settingsSection" | "showPullRequests" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
+  "settingsOpen" | "showPullRequests" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
 >) {
   if (props.settingsOpen) {
     return (
       <Suspense fallback={<CanvasSurface>{null}</CanvasSurface>}>
-        <LazySettingsView section={props.settingsSection} />
+        <LazySettingsView />
       </Suspense>
     );
   }
@@ -212,7 +205,7 @@ function AppPrimarySurface(props: Pick<
 
 function AppMainSurface(props: Pick<
   AppLayoutProps,
-  "rightPanelMaximized" | "showPullRequests" | "showNewThreadCanvas" | "showProjectlessCanvas" | "settingsOpen" | "settingsSection" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
+  "rightPanelMaximized" | "showPullRequests" | "showNewThreadCanvas" | "showProjectlessCanvas" | "settingsOpen" | "isDesktop" | "pullRequestTab" | "setPullRequestTab" | "navigateHistory"
 > & { mainRef: (element: HTMLElement | null) => void }) {
   if (props.rightPanelMaximized && isRightPanelMounted(props)) return null;
   const useFlexibleWidth = props.showNewThreadCanvas || props.settingsOpen || props.showPullRequests;
@@ -288,9 +281,7 @@ function AppLayout(props: AppLayoutProps) {
             <DockedSidebar
               visible={props.dockedSidebarVisible}
               settingsOpen={props.settingsOpen}
-              settingsSection={props.settingsSection}
               setSettingsOpen={props.setSettingsOpen}
-              setSettingsSection={props.setSettingsSection}
               closeSettings={props.closeSettings}
             />
             <div
@@ -355,8 +346,7 @@ export function App() {
   const theme = useSettingsStore((s) => s.settings.appearance.theme);
   const settingsLoaded = useSettingsStore((s) => s.loaded);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsSection, setSettingsSection] =
-    useState<SettingsSection>("general");
+  const settingsSection = useSettingsLocation((s) => s.page);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const rightPanelMaximized = useUiStore((s) => s.rightPanelMaximized);
   const primarySurface = useUiStore((s) => s.primarySurface);
@@ -386,6 +376,9 @@ export function App() {
   useEffect(() => {
     if (settingsOpen) {
       useUiStore.setState({ sidebarCollapsed: false });
+    } else {
+      // Every way out of Settings forgets the search and the page, so the next plain open shows General.
+      useSettingsLocation.getState().leave();
     }
   }, [settingsOpen]);
 
@@ -414,7 +407,7 @@ export function App() {
         return true;
       }
       if (location.kind === "settings") {
-        setSettingsSection(location.section);
+        useSettingsLocation.getState().openPage(location.section);
         setSettingsOpen(true);
         return true;
       }
@@ -530,10 +523,9 @@ export function App() {
   // Listen for deep-link requests to open a specific settings section
   useEffect(() => {
     const handler = (e: Event) => {
-      const section =
-        (e as CustomEvent<{ section: SettingsSection }>).detail?.section ??
-        "general";
-      setSettingsSection(section);
+      // The event is public, so an unknown section falls back to the first page instead of an empty canvas.
+      const requested = (e as CustomEvent<{ section?: unknown } | null>).detail?.section;
+      useSettingsLocation.getState().openPage(isSettingsSection(requested) ? requested : "general");
       setSettingsOpen(true);
     };
     window.addEventListener("mcode:open-settings", handler);
@@ -796,10 +788,8 @@ export function App() {
       showProjectlessCanvas={showProjectlessCanvas}
       showPullRequests={showPullRequests}
       settingsOpen={settingsOpen}
-      settingsSection={settingsSection}
       pullRequestTab={pullRequestTab}
       setSettingsOpen={setSettingsOpen}
-      setSettingsSection={setSettingsSection}
       setPullRequestTab={setPullRequestTab}
       closeSettings={closeSettings}
     />
