@@ -152,6 +152,7 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       // Optional because saved events from earlier builds lack them, and builds that share the database reparse them.
       kind: BackgroundCallKindSchema().optional(),
       label: z.string().max(500).optional(),
+      taskId: z.string().min(1).max(256).optional(),
     }),
     z.object({
       type: z.literal(AgentEventType.TurnComplete),

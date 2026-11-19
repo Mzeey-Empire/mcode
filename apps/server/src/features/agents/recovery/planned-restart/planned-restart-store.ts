@@ -12,7 +12,7 @@ const restartSchema = z.object({
   version: z.literal(1),
   stoppedAt: z.string().datetime().optional(),
   resumes: z.array(z.object({ threadId: z.string(), turnId: z.string(), executionId: z.string() })),
-  wakes: z.array(z.object({ threadId: z.string(), anchorTurnId: z.string() })),
+  wakes: z.array(z.object({ threadId: z.string(), anchorTurnId: z.string(), commandIds: z.array(z.string()).optional() })),
 });
 
 /** Work to continue after a planned stop. */

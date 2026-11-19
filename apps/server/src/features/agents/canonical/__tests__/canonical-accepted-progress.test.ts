@@ -8,7 +8,11 @@ import { CanonicalAgentProgressFrameSchema, type CanonicalAgentProgressFrame } f
 import { ProviderRuntimeExtensionSchema, type ProviderRuntimeExtension } from "@mcode/contracts/events/provider-runtime-event";
 import { MessageSchema } from "@mcode/contracts/models/message";
 import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } from "@mcode/contracts/models/narrative-recovery";
-import { encodeCanonicalSubagentDetailTarget } from "@mcode/contracts/models/tool-call-record";
+import { encodeCanonicalSubagentDetailTarget, ToolCallRecordSchema } from "@mcode/contracts/models/tool-call-record";
+import { BackgroundCommandStore } from "../../background/background-command-store.js";
+import { BackgroundToolSettlementEffect } from "../../turns/background-tool-settlement-effect.js";
+import { createBackgroundToolkit } from "../../../mcode-mcp/toolkits/background-toolkit.js";
+import { McodeSessionAuthority } from "../../../mcode-mcp/mcode-session-authority.js";
 import { reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState } from "@mcode/contracts/compat/agent-model";
 import { BoundedProgressRetention } from "../../execution/progress-retention-budget.js";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -2025,6 +2029,230 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(publication).not.toHaveProperty("turnExecutionId");
   });
 
+  async function launchCommands(ids: readonly string[], identity = execution, onLaunched?: () => Promise<void>) {
+    const activeLease = { ...lease, leaseId: identity.executionId };
+    await send(1, start("claude", identity), identity, activeLease);
+    let sequence = 1;
+    let ordinal = 2;
+    for (const id of ids) {
+      const use = draft("claude", sequence++, "toolUse", { toolCallId: `call-${id}`, toolName: "Bash",
+        toolInput: { command: `bun run ${id}` } }, identity);
+      const hold = draft("claude", sequence++, "toolBackgrounded", { toolCallId: `call-${id}`,
+        kind: "command", label: `bun run ${id}`, taskId: `task-${id}` }, identity);
+      for (const event of [use, hold]) {
+        const accepted = await send(ordinal++, { kind: "event", phase: "running", nativeCursor: null, events: [event] }, identity, activeLease);
+        expect(accepted.result.kind).toBe("accepted");
+      }
+    }
+    await onLaunched?.();
+    await send(ordinal++, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", sequence++, "textDelta", { delta: "Background work started.", isFinalResponse: true }, identity)] }, identity, activeLease);
+    const completed = await send(ordinal++, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", sequence, "turnComplete", {}, identity)],
+      terminalInput: { ...identity, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } },
+    identity, activeLease);
+    expect(completed.result.kind).toBe("accepted");
+    await progress.waitForSaved(identity.threadId);
+    await send(ordinal, { kind: "release" }, identity, activeLease);
+  }
+
+  function backgroundCommands() {
+    const commands = new BackgroundCommandStore(reader, databaseWriter);
+    const source = threadDescendantsSource({ loadLiveStatuses: () => [], liveParentCandidates: (parents) => new Set(parents) },
+      { backgroundSubagentThreadIds: () => new Set() }, commands);
+    const attention = new ThreadAttentionService(db, databaseWriter, [], source, () => {});
+    onTestFinished(commands.onChanged((threadId) => attention.invalidate(threadId)));
+    const settlement = new BackgroundToolSettlementEffect(new CanonicalAgentStore(db, () => {}), { subagentToolChanged: () => {} });
+    settlement.bindAcceptedProgress(progress);
+    return { commands, source, attention, settlement };
+  }
+
+  it("marks only running commands in the authenticated thread and reports settled and unknown ids", async () => {
+    const other = { threadId: "other-thread", turnId: "other-turn", executionId: "00000000-0000-4000-8000-000000000567" };
+    insertThread(other.threadId);
+    await launchCommands(["build", "done"]);
+    await launchCommands(["other"], other);
+    const { commands, settlement } = backgroundCommands();
+    settlement.settle({ ...execution, toolCallId: "call-done", status: "completed", output: "Passed" });
+    await progress.waitForSaved(execution.threadId);
+    const authority = new McodeSessionAuthority();
+    const token = authority.attach({ providerId: "claude", sessionId: "mcode-live-thread", threadId: execution.threadId, threadControl: false }).token;
+    const session = authority.resolve(token);
+    if (!session) throw new Error("Expected an authenticated session");
+    const toolkit = createBackgroundToolkit(commands, (threadId) => progress.waitForSaved(threadId));
+    expect(toolkit.bind({ ...session, providerId: "cursor" })).toBeNull();
+    const tool = toolkit.bind(session)?.tools.find(({ name }) => name === "background_wait");
+    if (!tool) throw new Error("Expected background_wait");
+    const call = { toolCallId: "mcp-call", signal: new AbortController().signal };
+    await expect(tool.call({ taskIds: ["task-build"], threadId: other.threadId }, call)).rejects.toMatchObject({ code: -32602 });
+    const result = await tool.call({ taskIds: ["task-other", "unknown", "task-done"] }, call);
+    expect(result.structuredContent).toEqual({ matched: [
+      { taskId: "task-done", label: "bun run done", status: "completed", awaited: false },
+    ], unmatched: ["task-other", "unknown"] });
+    expect(db.query("SELECT thread_id, tool_call_id FROM background_command_awaits").all()).toEqual([]);
+    const marked = await tool.call({ taskIds: [" task-build "] }, call);
+    expect(marked.structuredContent).toEqual({ matched: [
+      { taskId: "task-build", label: "bun run build", status: "running", awaited: true },
+    ], unmatched: [] });
+    expect(db.query("SELECT thread_id, tool_call_id FROM background_command_awaits").all())
+      .toEqual([{ thread_id: execution.threadId, tool_call_id: "call-build" }]);
+    db.query(`UPDATE canonical_agent_items SET payload_json = json_remove(payload_json,
+      '$.record.background_task_id', '$.narrative.record.background_task_id') WHERE id = 'toolCall:call-build'`).run();
+    const cleared = await tool.call({ taskIds: ["call-build"], waiting: false }, call);
+    expect(cleared.structuredContent).toEqual({ matched: [
+      { taskId: "call-build", label: "bun run build", status: "running", awaited: false },
+    ], unmatched: [] });
+    expect(db.query("SELECT thread_id, tool_call_id FROM background_command_awaits").all()).toEqual([]);
+  });
+
+  it("keeps only awaited running commands in attention and discovers their threads", async () => {
+    const other = { threadId: "other-thread", turnId: "other-turn", executionId: "00000000-0000-4000-8000-000000000567" };
+    insertThread(other.threadId);
+    const { commands, source, attention, settlement } = backgroundCommands();
+    await launchCommands(["build", "watch"], execution, async () => {
+      await progress.waitForSaved(execution.threadId);
+      expect(attention.get(execution.threadId)?.descendants).toBe("none");
+      expect(source.candidates()).toEqual(new Set());
+      await commands.setAwaited(execution.threadId, ["call-build"], true);
+    });
+    await launchCommands(["test"], other);
+    await commands.setAwaited(other.threadId, ["call-test"], true);
+    expect(attention.get(execution.threadId)?.descendants).toBe("running");
+    expect(source.candidates()).toEqual(new Set([execution.threadId, other.threadId]));
+    const record = ToolCallRecordSchema().parse(completedTool(1).record);
+    const oldReader = ToolCallRecordSchema().omit({ background_task_id: true });
+    expect(oldReader.parse({ ...record, background_task_id: "task-build" })).toEqual(record);
+    settlement.settle({ ...execution, toolCallId: "call-build", status: "completed", output: "Passed" });
+    await progress.waitForSaved(execution.threadId);
+    await commands.setAwaited(execution.threadId, ["call-build"], true);
+    expect(attention.get(execution.threadId)?.descendants).toBe("none");
+    expect(source.candidates()).toEqual(new Set([other.threadId]));
+    expect(commands.list(execution.threadId, { running: true })).toEqual([
+      { toolCallId: "call-watch", taskId: "task-watch", label: "bun run watch", startedAt: expect.any(String), status: "running", awaited: false },
+    ]);
+    expect(db.query("SELECT tool_call_id FROM background_command_awaits ORDER BY tool_call_id").all()).toEqual([{ tool_call_id: "call-test" }]);
+  });
+
+  it.each(["live", "gone", "raced"] as const)("stops a command with a %s provider session", async (session) => {
+    await launchCommands(["build"]);
+    const { commands, attention, settlement } = backgroundCommands();
+    await commands.setAwaited(execution.threadId, ["call-build"], true);
+    const stopTask = vi.fn(async () => session === "live" ? "stopped" as const : "not-running" as const);
+
+    const result = await settlement.stopCommand(commands, execution.threadId, "call-build", session === "gone" ? undefined : stopTask);
+    if (session === "live") {
+      expect(result).toBe("stopped");
+      expect(attention.get(execution.threadId)?.descendants).toBe("running");
+      settlement.settle({ ...execution, toolCallId: "call-build", status: "cancelled", output: "Stopped build" });
+      await progress.waitForSaved(execution.threadId);
+    } else {
+      expect(result).toBe("not-running");
+    }
+    expect(stopTask.mock.calls).toEqual(session === "gone" ? [] : [["mcode-live-thread", "task-build"]]);
+    expect(commands.list(execution.threadId)).toMatchObject([{ toolCallId: "call-build", status: "cancelled", awaited: false }]);
+    expect(attention.get(execution.threadId)?.descendants).toBe("none");
+  });
+
+  it("settles a held command without a task id even when its provider supports Stop", async () => {
+    await launchCommands(["build"]);
+    const { commands, settlement } = backgroundCommands();
+    db.query(`UPDATE canonical_agent_items SET payload_json = json_remove(payload_json,
+      '$.record.background_task_id', '$.narrative.record.background_task_id') WHERE id = 'toolCall:call-build'`).run();
+    const stopTask = vi.fn(async () => "stopped" as const);
+    await expect(settlement.stopCommand(commands, execution.threadId, "call-build", stopTask)).resolves.toBe("not-running");
+    expect(stopTask.mock.calls).toEqual([]);
+    expect(commands.list(execution.threadId)).toMatchObject([{ toolCallId: "call-build", status: "cancelled" }]);
+  });
+
+  it.each(["fresh", "partial", "resume", "wake"])("settles restart orphans after warning for a %s start", async (state) => {
+    await launchCommands(["build", "watch"]);
+    const { commands, attention, settlement } = backgroundCommands();
+    await commands.setAwaited(execution.threadId, ["call-build"], true);
+    expect(attention.get(execution.threadId)?.descendants).toBe("running");
+    const warnings = () => db.query("SELECT id, system_notice ->> 'noticeKey' AS key FROM messages WHERE system_notice ->> 'kind' = 'warning'").all();
+    if (state === "partial") {
+      await commands.noteRestartOrphans(execution.threadId, ["call-build", "call-watch"]);
+      settlement.settle({ ...execution, toolCallId: "call-build", status: "cancelled", output: "Stopped when Mcode restarted." });
+      await progress.waitForSaved(execution.threadId);
+    }
+    const before = warnings();
+    await settlement.settleOrphansAtStartup(commands, () => state === "wake");
+    const first = warnings();
+    expect(first).toEqual(state === "wake" ? [] : [
+      { id: expect.any(String), key: expect.stringMatching(/^background-restart:[0-9a-f]+$/) },
+    ]);
+    if (state === "partial") expect(first).toEqual(before);
+    expect(commands.list(execution.threadId).map(({ status, awaited }) => ({ status, awaited }))).toEqual([
+      { status: "cancelled", awaited: false }, { status: "cancelled", awaited: false },
+    ]);
+    expect(attention.get(execution.threadId)?.descendants).toBe("none");
+    await settlement.settleOrphansAtStartup(commands, () => state === "wake");
+    expect(warnings()).toEqual(first);
+  });
+
+  it("warns only for commands cancelled by graceful shutdown, including an accepted unsaved launch", async () => {
+    await launchCommands(["build"]);
+    const other = { threadId: "unsaved-launch", turnId: "unsaved-turn", executionId: "00000000-0000-4000-8000-000000000568" };
+    insertThread(other.threadId);
+    const { commands, settlement } = backgroundCommands();
+    const warnings = () => db.query("SELECT id, thread_id, system_notice ->> 'noticeKey' AS key FROM messages WHERE system_notice ->> 'kind' = 'warning'").all();
+    holdWrites();
+    const launch = launchCommands(["watch"], other);
+    await expect.poll(() => progress.unsavedThreadIds((event) => event.payload.type === "turn.completed")).toEqual([other.threadId]);
+    expect(commands.list(other.threadId)).toEqual([]);
+
+    settlement.beginShutdown();
+    settlement.settle({ ...execution, toolCallId: "call-build", status: "completed", output: "Build exited naturally" });
+    settlement.settle({ ...other, toolCallId: "call-watch", status: "cancelled", output: "Stopped because the provider session ended." });
+    settlement.recordStoppedCommands(other.threadId, ["call-watch"]);
+    const note = settlement.noteStoppedCommandsAtShutdown(commands);
+    release?.();
+    await Promise.all([launch, note, progress.waitForSaved(execution.threadId)]);
+
+    const beforeBoot = warnings();
+    expect(beforeBoot).toEqual([{ id: expect.any(String), thread_id: other.threadId, key: expect.stringMatching(/^background-restart:[0-9a-f]+$/) }]);
+    expect(commands.list(execution.threadId)).toMatchObject([{ toolCallId: "call-build", status: "completed" }]);
+    expect(commands.list(other.threadId)).toMatchObject([{ toolCallId: "call-watch", status: "cancelled" }]);
+    await expect(settlement.settleOrphansAtStartup(commands)).resolves.toEqual([]);
+    expect(warnings()).toEqual(beforeBoot);
+  });
+
+  it("writes shutdown warnings one at a time and leaves unwritten ones for an overlapping persistence call", async () => {
+    const { settlement } = backgroundCommands();
+    let active = 0;
+    let peak = 0;
+    let failOnce = true;
+    let reportLate = true;
+    const noteRestartOrphans = vi.fn(async (threadId: string) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      if (threadId === "shutdown-a" && reportLate) {
+        reportLate = false;
+        settlement.recordStoppedCommands("shutdown-a", ["shutdown-a-late"]);
+      }
+      await Promise.resolve();
+      active -= 1;
+      if (threadId === "shutdown-b" && failOnce) {
+        failOnce = false;
+        throw new Error("Database writer admission is full");
+      }
+    });
+    settlement.beginShutdown();
+    for (const threadId of ["shutdown-a", "shutdown-b", "shutdown-c"]) settlement.recordStoppedCommands(threadId, [`${threadId}-call`]);
+
+    const servicePhase = settlement.noteStoppedCommandsAtShutdown({ noteRestartOrphans });
+    settlement.recordStoppedCommands("shutdown-d", ["shutdown-d-call"]);
+    settlement.stopWaitingForProgress();
+    const persistence = settlement.noteStoppedCommandsAtShutdown({ noteRestartOrphans });
+
+    await expect(servicePhase).rejects.toThrow("Could not record background command shutdown warnings");
+    await persistence;
+    expect(noteRestartOrphans.mock.calls).toEqual([
+      ["shutdown-a", ["shutdown-a-call"]], ["shutdown-b", ["shutdown-b-call"]], ["shutdown-c", ["shutdown-c-call"]],
+      ["shutdown-d", ["shutdown-d-call"]], ["shutdown-a", ["shutdown-a-late"]], ["shutdown-b", ["shutdown-b-call"]],
+    ]);
+    expect(peak).toBe(1);
+  });
+
   it("leaves a background call's running step for the call's late result instead of the turn end", async () => {
     await send(1, start("claude"));
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
@@ -2142,7 +2370,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       const changes: string[] = [];
       onTestFinished(workload.onSubagentChange((threadId) => changes.push(threadId)));
       const attention = new ThreadAttentionService(db, databaseWriter, [],
-        threadDescendantsSource({ loadLiveStatuses: () => [], liveParentCandidates: (parents) => new Set(parents) }, workload), () => {});
+        threadDescendantsSource({ loadLiveStatuses: () => [], liveParentCandidates: (parents) => new Set(parents) }, workload,
+          new BackgroundCommandStore(reader, databaseWriter)), () => {});
       const decision = () => autoCompleteState({ ...createMockThread({ pull_requests: [createMockThreadPullRequest({ state: "merged" })] }),
         attention: attention.get(execution.threadId), completeOnPrMerge: true });
 

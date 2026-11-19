@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { backgroundCommandWriteHandlers } from "./background/background-command-store.js";
 import { ApprovalReceiptStore } from "./approvals/approval-receipt-store.js";
 import { databaseWriteHandler } from "../../runtime/persistence/sqlite/database-write-operation.js";
 import { MessageStore } from "./conversation/persistence/message-store.js";
@@ -124,5 +125,6 @@ function planCommentHandlers(db: Database): ReadonlyMap<string, (input: unknown)
 
 /** Agent feature operation contribution constructed only against the worker's writable database. */
 export function agentStorageWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {
-  return new Map([...messageHandlers(db), ...narrativeHandlers(db), ...taskHandlers(db), ...planAndTurnHandlers(db), ...planCommentHandlers(db)]);
+  return new Map([...backgroundCommandWriteHandlers(db), ...messageHandlers(db), ...narrativeHandlers(db), ...taskHandlers(db),
+    ...planAndTurnHandlers(db), ...planCommentHandlers(db)]);
 }

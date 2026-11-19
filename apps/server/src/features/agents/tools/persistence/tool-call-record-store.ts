@@ -53,6 +53,7 @@ export interface CreateToolCallRecordInput {
   /** True when the provider keeps this call running after its turn ends. */
   background?: boolean;
   backgroundKind?: import("@mcode/contracts/models/tool-call-record").BackgroundCallKind;
+  backgroundTaskId?: string;
   backgroundLabel?: string;
 }
 
@@ -109,6 +110,7 @@ function toolCallRecordFromInsert(
     ...(input.phase ? { phase: input.phase } : {}),
     ...(input.background === true ? { background: true } : {}),
     ...(input.backgroundKind ? { background_kind: input.backgroundKind } : {}),
+    ...(input.backgroundTaskId !== undefined ? { background_task_id: input.backgroundTaskId } : {}),
     ...(input.backgroundLabel !== undefined ? { background_label: input.backgroundLabel } : {}),
     started_at: insert.startedAt,
     completed_at: insert.completedAt,

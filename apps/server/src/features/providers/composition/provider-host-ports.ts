@@ -69,6 +69,7 @@ export interface ProviderHostPortDependencies {
 export interface HostTurnSink {
   open: ProviderTurnPort["open"];
   settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "providerId">): Promise<void>;
+  recordStoppedBackgroundCommands?: ProviderTurnPort["recordStoppedBackgroundCommands"];
 }
 
 /** Injection token for the server service that admits provider-started turns. */
@@ -129,6 +130,8 @@ export function createProviderHostPorts(
         dependencies.occupancy.touch({ providerId, threadId: result.threadId });
         return dependencies.turns().settleBackgroundTool(result);
       },
+      recordStoppedBackgroundCommands: (threadId, toolCallIds) =>
+        dependencies.turns().recordStoppedBackgroundCommands?.(threadId, toolCallIds),
     },
   };
 }

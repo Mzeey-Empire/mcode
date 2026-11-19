@@ -136,6 +136,29 @@ describe("successful database migration recovery", () => {
     }
   });
 
+  it("upgrades 0110 with thread-owned command awaits", () => {
+    const current = process.env.MCODE_DRIZZLE_MIGRATIONS_DIR ?? "";
+    const previous = NodePath.join(directory, "drizzle-through-0110");
+    copyMigrationsThrough(current, previous, "0110_polite_gladiator");
+    process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = previous;
+    openDatabase({ dbPath: databasePath }).close(true);
+    process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = current;
+
+    const upgraded = openDatabase({ dbPath: databasePath });
+    try {
+      expectColumns(upgraded, "background_command_awaits", { present: ["thread_id", "tool_call_id", "awaited_at"] });
+      expect(upgraded.query("PRAGMA table_info(background_command_awaits)").all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "thread_id", pk: 1 }),
+        expect.objectContaining({ name: "tool_call_id", pk: 2 }),
+      ]));
+      expect(upgraded.query("PRAGMA foreign_key_list(background_command_awaits)").all()).toEqual([
+        expect.objectContaining({ table: "threads", from: "thread_id", to: "id", on_delete: "CASCADE" }),
+      ]);
+    } finally {
+      upgraded.close(true);
+    }
+  });
+
   it("reports whether bootstrap applied migrations", () => {
     const first: DatabaseLaunchObservations = { migrated: false, marks: [] };
     openDatabase({ dbPath: databasePath, launchTelemetry: first }).close(true);

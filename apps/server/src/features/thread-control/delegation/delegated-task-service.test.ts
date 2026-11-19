@@ -944,7 +944,8 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     db.query(`INSERT INTO thread_control_approvals (id, thread_id, workspace_id, prompt, execution_json, placement_json, turn_id, status)
       SELECT task_id, coordinator_thread_id, ?, '', '{}', '{}', task_id, 'rejected'
       FROM delegated_tasks WHERE coordinator_thread_id = ? AND client_request_id LIKE 'finished-%'`).run(f.coordinator.workspace_id, f.coordinator.id);
-    const source = threadDescendantsSource(f.roster, { backgroundSubagentThreadIds: () => new Set() });
+    const source = threadDescendantsSource(f.roster, { backgroundSubagentThreadIds: () => new Set() },
+      { hasAwaitedRunning: () => false, threadsWithAwaitedRunning: () => new Set() });
     const attention = new ThreadAttentionService(f.runtime.reader, f.runtime.writer, [], source, () => {});
     f.pendingApprovals.push({ requestId: "ask", threadId: task.threadId, body: {
       requestedAt: new Date().toISOString(), origin: { kind: "agent" },

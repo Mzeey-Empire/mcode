@@ -141,6 +141,9 @@ import { TaskRepo } from "../../features/agents/orchestration/persistence/task-r
 import { PlanQuestionAnswersRepo } from "../../features/agents/planning/persistence/plan-question-answers-repo.js";
 import { PlanQuestionService } from "../../features/agents/planning/plan-question-service.js";
 import { BackgroundToolSettlementEffect } from "../../features/agents/turns/background-tool-settlement-effect.js";
+import { BackgroundCommandStore } from "../../features/agents/background/background-command-store.js";
+import { createBackgroundToolkit } from "../../features/mcode-mcp/toolkits/background-toolkit.js";
+import { SessionOccupancyRegistry } from "../../features/session-occupancy/session-occupancy-registry.js";
 import { AgentWorkloadService } from "../../features/agents/workload/agent-workload.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
 import { PlanService, type PlanImplementRuntime } from "../../features/agents/planning/plan-service.js";
@@ -397,10 +400,16 @@ const startupAgentPhaseObserver = container.resolve(StartupAgentPhaseObserver);
 startupAgentPhaseObserver.start();
 const externalThreadControlPairingService = container.resolve(ExternalThreadControlPairingService);
 const externalThreadControlMcpRuntime = container.resolve(ExternalThreadControlMcpRuntime);
+const db = container.resolve<Database>("Database");
+const databaseWriter = container.resolve(ApplicationDatabaseWriter);
+const backgroundCommands = new BackgroundCommandStore(db, databaseWriter);
 const mcodeMcpServer = new McodeMcpServer({
   authority: container.resolve(McodeSessionAuthority),
   toolkits: [
     browserToolkit,
+    createBackgroundToolkit(backgroundCommands, async (threadId) => {
+      await workerOwnedTurnRuntime.progress?.waitForSaved(threadId);
+    }),
     createVisualsToolkit({
       authority: container.resolve(McodeSessionAuthority),
       visuals: {
@@ -455,6 +464,7 @@ const terminalDiagnosticsService = container.resolve(TerminalDiagnosticsService)
 const messageRepo = container.resolve(MessageRepo);
 const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
+const sessionOccupancy = container.resolve(SessionOccupancyRegistry);
 const providerEventIngress = container.resolve(ProviderEventIngress);
 const workerOwnedTurnRuntime = container.resolve(WorkerOwnedTurnRuntime);
 const snapshotRefPins = container.resolve(SnapshotRefPins);
@@ -571,8 +581,6 @@ const prDraftService = container.resolve(PrDraftService);
 const recapService = container.resolve(RecapService);
 const handoffStorage = container.resolve(HandoffStorage);
 const handoffCheckoutService = container.resolve(HandoffCheckoutService);
-const db = container.resolve<Database>("Database");
-const databaseWriter = container.resolve(ApplicationDatabaseWriter);
 const fileEvidenceLedger = new TurnFileEvidenceLedger(db, databaseWriter, snapshotService, (execution) => {
   snapshotRefPins.attention?.invalidate(execution.threadId);
   snapshotRefPins.runInBackground(() => snapshotRefPins.settleExecution(execution.threadId, execution.executionId));
@@ -581,7 +589,7 @@ container.resolve(TurnRuntimeController).bindFileEvidence(fileEvidenceLedger);
 bindTurnFileEvidenceLedger(fileEvidenceLedger);
 const threadAttentionService = new ThreadAttentionService(db, databaseWriter,
   [approvalWaitingSource(approvalService), planWaitingSource(db, "questions"), planWaitingSource(db, "plan")],
-  threadDescendantsSource(subagentRosterService, agentWorkload),
+  threadDescendantsSource(subagentRosterService, agentWorkload, backgroundCommands),
   (attention) => broadcast("thread.attention", attention));
 threadRepo.attention = threadAttentionService;
 workerOwnedTurnRuntime.bindPlanPhaseChanged((threadId) => threadRepo.publishPlanPhase(threadId));
@@ -609,6 +617,11 @@ const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter);
 const jobObject = container.resolve<JobObject>("JobObject");
 
 const portPush = new PortPush();
+const stopObservingBackgroundCommands = backgroundCommands.onChanged((threadId) => {
+  threadAttentionService.invalidate(threadId);
+  broadcast("backgroundCommand.changed", { threadId });
+  portPush.send("backgroundCommand.changed", { threadId });
+});
 turnResumeScheduler.onChange((event) => {
   broadcast("thread.resumeScheduled", event);
   portPush.send("thread.resumeScheduled", event);
@@ -762,7 +775,8 @@ async function recoverTurnsAtStartup(): Promise<void> {
 /** Stops background tool calls whose provider process ended with the previous server. */
 async function settleOrphanedBackgroundToolsAtStartup(): Promise<void> {
   if (!workerOwnedTurnRuntime.progress) return;
-  const settled = await container.resolve(BackgroundToolSettlementEffect).settleOrphansAtStartup();
+  const settled = await container.resolve(BackgroundToolSettlementEffect)
+    .settleOrphansAtStartup(backgroundCommands, (threadId) => plannedRestart.hasPendingWake(threadId));
   if (settled.length > 0) logger.info("Stopped orphaned background tool calls during startup recovery", { count: settled.length });
 }
 
@@ -946,6 +960,14 @@ codexCatalogService.onSkillsChanged((cwd) => {
 // Create and start HTTP + WS server
 const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   threadAttentionService,
+  backgroundCommands,
+  stopBackgroundCommand: (threadId, toolCallId) => {
+    const providerId = threadRepo.findById(threadId)?.provider;
+    const provider = providerId && sessionOccupancy.stamp({ threadId, providerId })
+      ? providerRegistry.resolveAll().find(({ id }) => id === providerId) : undefined;
+    return container.resolve(BackgroundToolSettlementEffect)
+      .stopCommand(backgroundCommands, threadId, toolCallId, provider?.stopBackgroundTask?.bind(provider));
+  },
   workerQueueDepth: () => workerOwnedTurnRuntime.scheduler.depth(),
   runtime: hostRuntime,
   workspaceService,
@@ -1207,11 +1229,11 @@ async function bootstrapServer(): Promise<void> {
     launchTelemetry.mark("interrupted plans recovered");
     planImplementStartupObserver.start();
     settleActionObserver.start();
-    await turnResumeScheduler.start();
-    launchTelemetry.mark("resume scheduler started");
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
     recordStartupCheckpoint("orphaned background tools settled");
+    await turnResumeScheduler.start();
+    launchTelemetry.mark("resume scheduler started");
     coordinatorWakeReady = true;
     await coordinatorWake.recoverAtStartup();
     launchTelemetry.mark("coordinator wake recovered");
@@ -1258,6 +1280,7 @@ async function shutdown(): Promise<void> {
     }
   };
 
+  const backgroundTools = container.resolve(BackgroundToolSettlementEffect);
   await runShutdownPhases({
     stopServices: async () => {
       shutdownCoordinator.setPhase("begin shutdown");
@@ -1270,6 +1293,7 @@ async function shutdown(): Promise<void> {
       stopObservingRestartNotices();
       // A provider that exits from here on was stopped by this shutdown, so its turn must resume, not count as a crash.
       agentService.beginShutdown();
+      backgroundTools.beginShutdown();
       plannedRestart.beginShutdown();
       await captureCleanupFailure(() => plannedRestart.record());
       // Admission is closed, so a scheduled resume that came due now would be refused; the next start fires it.
@@ -1316,6 +1340,8 @@ async function shutdown(): Promise<void> {
       await captureCleanupFailure(() => providerRegistry.shutdown());
       shutdownCoordinator.setPhase("shutdown provider event workers");
       await captureCleanupFailure(() => providerEventIngress.stopAdmissionAndDrain());
+      shutdownCoordinator.setPhase("save stopped background commands");
+      await captureCleanupFailure(() => backgroundTools.noteStoppedCommandsAtShutdown(backgroundCommands));
       browserAutomationBroker.shutdown();
       browserAutomationSessionLease.shutdown();
 
@@ -1357,8 +1383,11 @@ async function shutdown(): Promise<void> {
     },
     persist: async (saveAttemptsUntil) => {
       shutdownCoordinator.setPhase("write accepted turn output");
+      backgroundTools.stopWaitingForProgress();
       await captureCleanupFailure(() => workerOwnedTurnRuntime.close({ attemptsUntil: saveAttemptsUntil }));
       logUnsavedTurnOutput("Shutdown stopped retrying before every accepted save was written");
+      // After a service overrun the cancellations above can save without the service phase reaching its note.
+      await captureCleanupFailure(() => backgroundTools.noteStoppedCommandsAtShutdown(backgroundCommands));
       // Turns are drained, so no further turn facts arrive; finish startup writes before the writer closes.
       await captureCleanupFailure(() => startupAgentPhaseObserver.stop());
       await captureCleanupFailure(() => planImplementStartupObserver.stop());
@@ -1370,6 +1399,7 @@ async function shutdown(): Promise<void> {
       stopObservingDelegatedTurns();
       stopObservingBackgroundRosters();
       stopObservingSubagentAttention();
+      stopObservingBackgroundCommands();
       shutdownCoordinator.setPhase("close application database writer");
       fileEvidenceLedger.close();
       await captureCleanupFailure(() => databaseWriter.close());

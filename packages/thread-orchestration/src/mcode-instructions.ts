@@ -11,6 +11,7 @@ export type McodeInstructionSectionKey =
   | "mcode_thread_control"
   | "mcode_browser"
   | "mcode_visuals"
+  | "mcode_background"
   | "mcode_repository_search";
 
 /** One self-contained concern delivered through a provider's native context. */
@@ -24,6 +25,7 @@ export interface McodeAttachedToolkits {
   readonly threadControl: boolean;
   readonly browser: boolean;
   readonly visuals: boolean;
+  readonly background?: boolean;
 }
 
 /** Toolkit flags used when the session has no mcode attachment. */
@@ -103,6 +105,9 @@ const SECTION_REGISTRY: readonly {
   { key: "mcode_thread_control", text: (input) => input.toolkits.threadControl ? THREAD_CONTROL_BLOCK : undefined },
   { key: "mcode_browser", text: (input) => input.toolkits.browser ? BROWSER_BLOCK : undefined },
   { key: "mcode_visuals", text: (input) => input.toolkits.visuals ? VISUALS_BLOCK : undefined },
+  { key: "mcode_background", text: (input) => input.toolkits.background
+    ? "Use background_wait for background commands whose results you need, such as builds and tests. Leave dev servers and watchers unmarked."
+    : undefined },
   { key: "mcode_repository_search", text: () => REPOSITORY_SEARCH_BLOCK },
 ];
 

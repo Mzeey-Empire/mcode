@@ -1,6 +1,7 @@
 import { CanonicalChildRosterRequestSchema, CanonicalChildRosterSchema, type CanonicalChildActivity, type CanonicalChildRoster, type CanonicalChildRosterRequest, type CanonicalChildRow } from "./canonical-child-roster.js";
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
+import { canonicalBackgroundRecord } from "../workload/agent-workload.js";
 import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
 import { TaskStore as TaskRepo } from "../orchestration/persistence/task-store.js";
 import { and, asc, between, desc, eq, getTableColumns, inArray, isNotNull, isNull, max, or, placeholder, sql } from "drizzle-orm";
@@ -3690,6 +3691,11 @@ export class CanonicalAgentStore {
       updatedAt: parsed.updatedAt,
     });
     this.contentTail.clear(parsed);
+    const record = canonicalBackgroundRecord(parsed);
+    if (record?.background_kind === "command" && typeof record.id === "string"
+      && (record.status !== "running" || parsed.payload.projection === "narrativeRecoveryDiscarded")) {
+      this.db.query("DELETE FROM background_command_awaits WHERE thread_id = ? AND tool_call_id = ?").run(parsed.threadId, record.id);
+    }
   }
 
   private persistAction(action: CollaborationAction): void {

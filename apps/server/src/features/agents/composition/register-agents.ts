@@ -285,6 +285,7 @@ export function registerAgentServices(container: DependencyContainer): void {
       return {
         open: (request) => turns.openProviderTurn(request),
         settleBackgroundTool: async (settlement) => backgroundTools.settle(settlement),
+        recordStoppedBackgroundCommands: (threadId, toolCallIds) => backgroundTools.recordStoppedCommands(threadId, toolCallIds),
       };
     },
   });

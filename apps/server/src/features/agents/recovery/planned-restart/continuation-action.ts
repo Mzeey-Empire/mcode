@@ -3,4 +3,4 @@ export type RecordedTurn = { threadId: string; turnId: string; executionId: stri
 /** One continuation per thread. */
 export type ContinuationAction =
   | { kind: "resume"; turn: RecordedTurn }
-  | { kind: "wake"; threadId: string; anchorTurnId: string };
+  | { kind: "wake"; threadId: string; anchorTurnId: string; commandIds?: string[] };

@@ -1,6 +1,17 @@
 /** Prefix of the notice key on every planned-restart notice; a wake's key ends with its anchor turn id. */
 export const PLANNED_RESTART_NOTICE_KEY_PREFIX = "planned-restart:";
 
+/** Prefix of the notice key on the note that boot stopped a thread's leftover background commands. */
+export const BACKGROUND_RESTART_NOTICE_KEY_PREFIX = "background-restart:";
+
+/**
+ * True for the note that boot stopped background commands. It keeps the `warning` kind, which the
+ * transcript hides for provider warnings, so the key prefix is what lets the timeline show it.
+ */
+export function isBackgroundRestartNotice(notice: { systemNotice?: { noticeKey?: string } | null }): boolean {
+  return notice.systemNotice?.noticeKey?.startsWith(BACKGROUND_RESTART_NOTICE_KEY_PREFIX) === true;
+}
+
 /** Output written on a background tool call that a planned restart stopped. */
 export const ORPHANED_BACKGROUND_TOOL_OUTPUT = "Stopped when Mcode restarted.";
 

@@ -117,7 +117,10 @@ describe("McodeProviderPort", () => {
   it("attaches nothing when neither toolkit applies, and reports which toolkits do", async () => {
     const { port } = createPort({ browser: false });
 
-    expect(await port.attach({ ...request, threadControl: false })).toBeNull();
+    expect(await port.attach({ ...request, providerId: "cursor", threadControl: false })).toBeNull();
+    expect(await port.attach({ ...request, threadControl: false })).toMatchObject({
+      toolkits: { background: true, browser: false, threadControl: false, visuals: false },
+    });
     expect(await port.attach(request)).toMatchObject({ toolkits: { browser: false, threadControl: true, visuals: true } });
   });
 

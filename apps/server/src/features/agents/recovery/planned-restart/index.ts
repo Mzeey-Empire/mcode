@@ -3,6 +3,7 @@ import { logger } from "@mcode/shared";
 import { PLANNED_RESTART_NOTICE_KEY_PREFIX, plannedRestartNoticeText } from "@mcode/shared/planned-restart";
 import { turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
+import { BackgroundCommandStore } from "../../background/background-command-store.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { TurnRecoveryService } from "../turn-recovery-service.js";
 import { TurnRecoveryError, turnRecoveryErrorCode } from "../turn-recovery-error.js";
@@ -19,6 +20,16 @@ function threadOf(action: ContinuationAction): string {
 /** Success and failure share a key so a fallback that fails after the success notice replaces it instead of contradicting it. */
 function noticeKeyOf(action: ContinuationAction): string {
   return `${PLANNED_RESTART_NOTICE_KEY_PREFIX}${action.kind === "resume" ? action.turn.executionId : action.anchorTurnId}`;
+}
+
+/**
+ * Run each step after the previous one, because the database writer admits a bounded queue, and run every step
+ * even when one fails, so one failed warning cannot leave later threads pending.
+ */
+async function eachInTurn<T>(items: Iterable<T>, step: (item: T) => Promise<void>): Promise<void> {
+  const failures: unknown[] = [];
+  for (const item of items) await step(item).catch((error: unknown) => { failures.push(error); });
+  if (failures.length > 0) throw new AggregateError(failures, "Could not record background restart warnings");
 }
 
 /** The continuation's own message is hidden, so this tells the user why the agent started working. */
@@ -43,6 +54,7 @@ export class PlannedRestart {
     @inject(CanonicalAgentBoundary) private readonly canonical: CanonicalAgentBoundary,
     @inject(TurnRecoveryService) private readonly recovery: Pick<TurnRecoveryService, "resumeTurn" | "wakeParent">,
     @inject(MessageRepo) private readonly messages: MessageRepo,
+    @inject(BackgroundCommandStore) private readonly commands?: Pick<BackgroundCommandStore, "noteRestartOrphans">,
   ) {}
 
   /** Prevent further continuation admissions; turns this stop interrupts end after this moment. */
@@ -70,16 +82,25 @@ export class PlannedRestart {
       this.add({ kind: "resume", turn });
     }
     for (const wake of saved.wakes) this.add({ kind: "wake", ...wake });
-    for (const call of held) {
+    for (const call of held) this.addHeldWake(call);
+    this.store.record({ version: 1, ...this.unfinished() });
+  }
+
+  private addHeldWake(call: StoppedBackgroundCall): void {
+    if (!this.pending.has(call.threadId)) {
       const latest = this.canonical.loadLatestTurn(call.threadId);
       if (latest) this.add({ kind: "wake", threadId: call.threadId, anchorTurnId: latest.id });
     }
-    this.store.record({ version: 1, ...this.unfinished() });
+    const wake = this.pending.get(call.threadId);
+    if (wake?.kind !== "wake" || call.kind !== "command") return;
+    const ids = wake.commandIds ??= [];
+    if (!ids.includes(call.toolCallId)) ids.push(call.toolCallId);
   }
 
   private add(action: ContinuationAction): void {
     const threadId = threadOf(action);
-    if (!this.pending.has(threadId) && this.valid(action)) this.pending.set(threadId, action);
+    if (this.pending.has(threadId)) return;
+    if (this.valid(action) || (action.kind === "wake" && action.commandIds?.length)) this.pending.set(threadId, action);
   }
 
   private unfinished(): Pick<PlannedRestartRecord, "resumes" | "wakes"> {
@@ -87,7 +108,10 @@ export class PlannedRestart {
     const wakes: PlannedRestartRecord["wakes"] = [];
     for (const action of this.pending.values()) {
       if (action.kind === "resume") resumes.push(action.turn);
-      else wakes.push({ threadId: action.threadId, anchorTurnId: action.anchorTurnId });
+      else {
+        const { threadId, anchorTurnId, commandIds } = action;
+        wakes.push({ threadId, anchorTurnId, commandIds });
+      }
     }
     return { resumes, wakes };
   }
@@ -120,8 +144,11 @@ export class PlannedRestart {
   /** Hold coordinator wakes until their planned continuation is resolved. */
   isPending(threadId: string): boolean { return this.pending.has(threadId); }
 
+  /** Whether the pending continuation is a wake anchored to a completed turn. */
+  hasPendingWake(threadId: string): boolean { return this.pending.get(threadId)?.kind === "wake"; }
+
   /** Drop work cancelled by the user. */
-  async cancel(threadId: string): Promise<void> { this.release(threadId); }
+  async cancel(threadId: string): Promise<void> { await this.releaseWithoutNotice(threadId); }
 
   /** Observe admissions and drops. */
   onReleased(listener: (threadId: string) => void): () => void {
@@ -140,7 +167,7 @@ export class PlannedRestart {
     this.load();
     if (!this.store.clear()) {
       // The next start would read the file again and repeat whatever fails here, and a continuation is never retried.
-      for (const threadId of this.pending.keys()) this.release(threadId);
+      await eachInTurn(this.pending.keys(), (threadId) => this.releaseWithoutNotice(threadId));
       return;
     }
     const queue = [...this.pending.values()];
@@ -151,6 +178,7 @@ export class PlannedRestart {
         await this.runAction(action, dispatch);
       }
     }));
+    if (this.stopping) await eachInTurn(this.pending.values(), (action) => this.warnStoppedCommands(action));
   }
 
   private valid(action: ContinuationAction): boolean {
@@ -172,7 +200,7 @@ export class PlannedRestart {
   private async runAction(action: ContinuationAction, dispatch: TurnDispatch): Promise<void> {
     const threadId = threadOf(action);
     if (!this.pending.has(threadId)) return;
-    if (!this.valid(action)) { this.release(threadId); return; }
+    if (!this.valid(action)) { await this.releaseWithoutNotice(threadId); return; }
     let admitted = false;
     let nativeTurnId: string | undefined;
     const guarded: TurnDispatch = (command) => dispatch({ ...command, admissionGuard: () => {
@@ -185,6 +213,7 @@ export class PlannedRestart {
     } });
     const failure = plannedRestartNoticeText(action.kind, "failed");
     const report = this.reporter(threadId, noticeKeyOf(action));
+    let noticeWritten = false;
     const context = { onLateFailure: (error: unknown) => {
       if (this.lostRace(error)) return;
       logger.warn(failure, { threadId, error: String(error) });
@@ -193,16 +222,17 @@ export class PlannedRestart {
     try {
       if (action.kind === "resume") await this.recovery.resumeTurn(action.turn, guarded, context);
       else await this.recovery.wakeParent(action, guarded, context);
-      await report.success(startedNotice(action));
+      noticeWritten = await report.success(startedNotice(action));
     } catch (error) {
       // Shutdown already listed this unadmitted work for the next start, so it stays pending rather than failing.
       if (this.stopping && !admitted) return;
       if (this.shouldReport(action, error, admitted)) {
         logger.warn(failure, { threadId, error: String(error) });
-        await report.failure(failure);
+        noticeWritten = await report.failure(failure);
       }
     }
-    this.release(threadId);
+    if (noticeWritten) this.release(threadId);
+    else await this.releaseWithoutNotice(threadId);
   }
 
   private guardAdmission(action: ContinuationAction, admitted: boolean, nativeTurnId: string | undefined): void {
@@ -231,8 +261,8 @@ export class PlannedRestart {
    * A fallback can fail before or after the success notice is written. Writes run in call order and a failure
    * suppresses any later success, so the failure is always the notice left under the shared key.
    */
-  private reporter(threadId: string, noticeKey: string): { success(content: string): Promise<void>; failure(content: string): Promise<void> } {
-    let written = Promise.resolve();
+  private reporter(threadId: string, noticeKey: string): { success(content: string): Promise<boolean>; failure(content: string): Promise<boolean> } {
+    let written = Promise.resolve(false);
     let failed = false;
     const write = (content: string) => (written = written.then(() => this.notice(threadId, content, noticeKey)));
     return {
@@ -245,14 +275,14 @@ export class PlannedRestart {
    * A late failure replaces the success notice and moves after the attempt's output, so it reads where it
    * happened and stays newer than the last turn for attention. The publication reaches an open thread live.
    */
-  private async notice(threadId: string, content: string, noticeKey: string): Promise<void> {
+  private async notice(threadId: string, content: string, noticeKey: string): Promise<boolean> {
     const systemNotice = { kind: "diagnostic", presentation: "timeline", noticeKey } as const;
     let written: { id: string; sequence: number };
     try {
       written = await this.messages.replaceKeyedSystemNotice(threadId, content, systemNotice);
     } catch (error) {
       logger.error("Planned restart notice was not written", { threadId, error: String(error) });
-      return;
+      return false;
     }
     for (const listener of this.noticeListeners) listener(threadId);
     try {
@@ -262,11 +292,27 @@ export class PlannedRestart {
       // The notice is saved, so a client that missed this publication still reads it on its next load.
       logger.error("Planned restart notice was not published", { threadId, error: String(error) });
     }
+    return true;
   }
 
   private release(threadId: string): void {
     this.attempts.delete(threadId);
     if (!this.pending.delete(threadId)) return;
     for (const listener of this.releaseListeners) listener(threadId);
+  }
+
+  private async releaseWithoutNotice(threadId: string): Promise<void> {
+    const action = this.pending.get(threadId);
+    try {
+      if (action) await this.warnStoppedCommands(action);
+    } finally {
+      this.release(threadId);
+    }
+  }
+
+  private async warnStoppedCommands(action: ContinuationAction): Promise<void> {
+    if (action.kind === "wake" && action.commandIds?.length) {
+      await this.commands?.noteRestartOrphans(action.threadId, action.commandIds);
+    }
   }
 }
