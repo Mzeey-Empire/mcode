@@ -32,7 +32,7 @@ export function RangeControl({
 }: RangeControlProps) {
   const [local, setLocal] = useState<number | null>(null);
   const display = local ?? value;
-  const formatted = formatValue ? formatValue(display) : String(display);
+  const formatted = formatValue ? formatValue(display) : display.toLocaleString();
 
   const commit = (v: number) => {
     setLocal(null);
@@ -44,26 +44,34 @@ export function RangeControl({
 
   const VALUE_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"]);
 
-  const trackStyle: React.CSSProperties & Record<"--range-fraction", number> = {
-    "--range-fraction": max > min ? (display - min) / (max - min) : 0,
-  };
+  const fraction = max > min ? (display - min) / (max - min) : 0;
 
   return (
     <div className="flex items-center gap-3">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={display}
-        aria-label={ariaLabel}
-        onChange={(e) => setLocal(Number(e.target.value))}
-        onMouseUp={handlePointerCommit}
-        onKeyUp={(e) => { if (VALUE_KEYS.has(e.key)) commit(Number(e.currentTarget.value)); }}
-        onTouchEnd={() => { if (local !== null) commit(local); }}
-        style={trackStyle}
-        className="settings-range w-40"
-      />
+      {/* The track and fill are spans under a see-through input, because a gradient fill ends in a square cut beside
+          the round knob. This fill ends at the thumb box's right edge with a full round end, so it wraps the knob
+          with the same 3px it is inset by, as the composer's SteppedSlider does. */}
+      <span className="relative flex h-5 w-40 items-center">
+        <span aria-hidden="true" className="absolute inset-0 rounded-full bg-selected dark:bg-control-border/30" />
+        <span
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 rounded-full bg-primary/26"
+          style={{ width: `calc((100% - 2rem) * ${fraction} + 2rem)` }}
+        />
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={display}
+          aria-label={ariaLabel}
+          onChange={(e) => setLocal(Number(e.target.value))}
+          onMouseUp={handlePointerCommit}
+          onKeyUp={(e) => { if (VALUE_KEYS.has(e.key)) commit(Number(e.currentTarget.value)); }}
+          onTouchEnd={() => { if (local !== null) commit(local); }}
+          className="settings-range relative w-full"
+        />
+      </span>
       <span className="min-w-12 text-right text-body-small text-ink tabular-nums">
         {formatted}
       </span>
