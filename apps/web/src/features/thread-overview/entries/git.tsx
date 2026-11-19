@@ -6,7 +6,7 @@ import type { OverviewSubject } from "@/features/thread-overview/overview-subjec
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { cn } from "@/lib/utils";
 import { ArrowUp, ArrowUpFromLine, GitBranchPlus, GitCommitHorizontal, GitPullRequest, type LucideIcon } from "lucide-react";
-import { useState, type FocusEvent } from "react";
+import { useEffect, useState, type FocusEvent } from "react";
 import {
   OVERVIEW_ROW_CLASS,
   OVERVIEW_SPLIT_CHEVRON_CLASS,
@@ -110,12 +110,28 @@ function GitPushError({ message }: { message: string }) {
   );
 }
 
+function offersPush(plan: GitRowPlan | null): boolean {
+  return plan !== null && (plan.main === "push" || plan.alternates.includes("push"));
+}
+
+/** Clears a finished push's outcome once the row it reported on no longer offers Push. */
+function useSettlePush(gitRow: GitRowPlan | null) {
+  const { gitPush, settlePush } = useOverviewContext();
+  const finished = gitPush.kind === "landed" || gitPush.kind === "failed";
+  const stale = finished && !offersPush(gitRow);
+  useEffect(() => {
+    if (stale) settlePush();
+  }, [stale, settlePush]);
+}
+
 function GitEntry() {
   const { gitRow, gitPush } = useOverviewContext();
   const { held, wrapperProps, setMenuOpen } = useRowHold();
   const pushing = gitPush.kind === "pushing";
-  // A push in flight holds the row too, so the Push it is reporting on cannot swap away.
-  const plan = useHeldPlan(gitRow, held || pushing);
+  useSettlePush(gitRow);
+  // A push in flight holds the row so its Push cannot swap away. Once it lands, the pointer that
+  // pushed no longer holds the row: the user's own action finished, so the next step shows at once.
+  const plan = useHeldPlan(gitRow, pushing || (held && gitPush.kind !== "landed"));
   const run = useRunGitStep();
   if (!plan) return null;
   return (
