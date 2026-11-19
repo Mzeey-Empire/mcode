@@ -219,7 +219,7 @@ function ComposerProviderUnavailableNotice({
       detail={providerUnavailableMessage(model.effectiveProviderId, model.providerReason)}
       action={{
         label: "Open Settings",
-        onClick: () => window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } })),
+        onClick: () => window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "providers" } })),
       }}
       data-testid="provider-unavailable-notice"
       className="mb-2"

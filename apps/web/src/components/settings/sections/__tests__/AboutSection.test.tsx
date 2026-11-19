@@ -89,70 +89,6 @@ describe("AboutSection update status label", () => {
   });
 });
 
-describe("AboutSection provider CLI checks", () => {
-  beforeEach(() => {
-    saves.length = 0;
-    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  afterEach(() => {
-    persisted.updates = { channel: "stable" };
-  });
-
-  it("defaults on and saves the setting when switched off", async () => {
-    render(<AboutSection />);
-    const toggle = screen.getByRole("switch", { name: "Provider CLI checks" });
-    expect(toggle).toBeChecked();
-    expect(screen.getByText("Ask the npm registry once a day for newer provider CLIs.")).toBeInTheDocument();
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ updates: { providerCliChecks: false } }]));
-  });
-
-  it("reads a saved off setting and saves it back on", async () => {
-    persisted.updates = { channel: "stable", providerCliChecks: false };
-    render(<AboutSection />);
-    const toggle = screen.getByRole("switch", { name: "Provider CLI checks" });
-    expect(toggle).not.toBeChecked();
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ updates: { providerCliChecks: true } }]));
-  });
-});
-
-describe("AboutSection diagnostics recording", () => {
-  beforeEach(() => {
-    saves.length = 0;
-    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    persisted.diagnostics = {};
-  });
-
-  it("defaults on and saves the setting when switched off", async () => {
-    render(<AboutSection />);
-    const toggle = screen.getByRole("switch", { name: "Troubleshooting logs" });
-    expect(toggle).toBeChecked();
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { recording: false } }]));
-  });
-
-  it("reads a saved off setting and saves it back on", async () => {
-    persisted.diagnostics = { recording: false };
-    render(<AboutSection />);
-    const toggle = screen.getByRole("switch", { name: "Troubleshooting logs" });
-    expect(toggle).not.toBeChecked();
-
-    fireEvent.click(toggle);
-    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { recording: true } }]));
-  });
-});
-
 describe("AboutSection version row", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
@@ -175,56 +111,24 @@ describe("AboutSection version row", () => {
   });
 });
 
-describe("AboutSection hardware acceleration", () => {
-  const relaunch = vi.fn(() => Promise.resolve());
-
-  function stubDesktopBridge(runningEnabled: boolean): void {
-    vi.stubGlobal("desktopBridge", {
-      app: {
-        getHardwareAcceleration: () => Promise.resolve({ enabled: runningEnabled }),
-        relaunch,
-      },
-    });
-  }
-
+describe("AboutSection moved rows", () => {
   beforeEach(() => {
-    saves.length = 0;
-    relaunch.mockClear();
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
+    vi.stubGlobal("desktopBridge", {
+      app: { getHardwareAcceleration: () => Promise.resolve({ enabled: false }), relaunch: vi.fn() },
+    });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    persisted.graphics = { hardwareAcceleration: false };
   });
 
-  it("is absent without the desktop bridge", () => {
+  it("no longer shows the rows that moved to Troubleshooting and Providers", async () => {
     render(<AboutSection />);
-    expect(screen.queryByRole("switch", { name: "Hardware acceleration" })).toBeNull();
-  });
-
-  it("saves the setting when toggled", async () => {
-    stubDesktopBridge(false);
-    render(<AboutSection />);
-    fireEvent.click(await screen.findByRole("switch", { name: "Hardware acceleration" }));
-    await waitFor(() =>
-      expect(saves.map((save) => save.partial)).toEqual([{ graphics: { hardwareAcceleration: true } }]),
-    );
-  });
-
-  it("offers a restart that relaunches when the saved value differs from the running one", async () => {
-    persisted.graphics = { hardwareAcceleration: true };
-    stubDesktopBridge(false);
-    render(<AboutSection />);
-    fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
-    expect(relaunch).toHaveBeenCalledTimes(1);
-  });
-
-  it("offers no restart when the saved value matches the running one", async () => {
-    persisted.graphics = { hardwareAcceleration: true };
-    stubDesktopBridge(true);
-    render(<AboutSection />);
-    expect(await screen.findByRole("switch", { name: "Hardware acceleration" })).toBeChecked();
-    expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
+    await screen.findByText("Version");
+    await Promise.resolve();
+    for (const name of ["Troubleshooting logs", "Hardware acceleration", "Provider CLI checks", "Check for CLI updates"]) {
+      expect(screen.queryByRole("switch", { name })).toBeNull();
+    }
   });
 });
 

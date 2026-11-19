@@ -1,69 +1,36 @@
 import type { ComponentType } from "react";
-import { ModelSection } from "./sections/ModelSection";
-import { AgentSection } from "./sections/AgentSection";
-import { AppearanceSection } from "./sections/AppearanceSection";
-import { NotificationsSection } from "./sections/NotificationsSection";
-import { TerminalSection } from "@/features/terminal";
-import { ExternalAppsSection } from "./sections/ExternalAppsSection";
+import { GeneralSection } from "./sections/GeneralSection";
 import { ThreadsSection } from "./sections/ThreadsSection";
+import { ProvidersSection } from "./sections/ProvidersSection";
+import { TerminalSection } from "@/features/terminal";
 import { KeyboardShortcutsSection } from "./sections/KeyboardShortcutsSection";
+import { TroubleshootingSection } from "./sections/TroubleshootingSection";
 import { AboutSection } from "./sections/AboutSection";
 
-/** Available settings pages/sections in the app. */
+/** Available settings pages in the app. */
 export type SettingsSection =
-  | "model"
-  | "agent"
-  | "appearance"
-  | "notifications"
-  | "terminal"
-  | "externalApps"
-  | "keyboard"
+  | "general"
   | "threads"
+  | "providers"
+  | "terminal"
+  | "keyboard"
+  | "troubleshooting"
   | "about";
 
-/** Represents a navigation group in the settings sidebar. */
-export interface NavGroup {
-  label: string;
-  items: { id: SettingsSection; label: string }[];
+/** One settings page: its id, sidebar label, and the component that renders it. */
+export interface SettingsPage {
+  readonly id: SettingsSection;
+  readonly label: string;
+  readonly component: ComponentType;
 }
 
-/** Settings navigation structure grouped by category. */
-export const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "AI",
-    items: [
-      { id: "model", label: "Model" },
-      { id: "agent", label: "Agent" },
-    ],
-  },
-  {
-    label: "Interface",
-    items: [
-      { id: "appearance", label: "Appearance" },
-      { id: "keyboard", label: "Keyboard Shortcuts" },
-      { id: "notifications", label: "Notifications" },
-      { id: "terminal", label: "Terminal" },
-      { id: "externalApps", label: "External Apps" },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { id: "threads", label: "Threads" },
-      { id: "about", label: "About" },
-    ],
-  },
+/** Settings pages in sidebar order. */
+export const SETTINGS_PAGES: readonly SettingsPage[] = [
+  { id: "general", label: "General", component: GeneralSection },
+  { id: "threads", label: "Threads", component: ThreadsSection },
+  { id: "providers", label: "Providers", component: ProvidersSection },
+  { id: "terminal", label: "Terminal", component: TerminalSection },
+  { id: "keyboard", label: "Keyboard shortcuts", component: KeyboardShortcutsSection },
+  { id: "troubleshooting", label: "Troubleshooting", component: TroubleshootingSection },
+  { id: "about", label: "About", component: AboutSection },
 ];
-
-/** Maps each settings section to its component. */
-export const SECTION_MAP: Record<SettingsSection, ComponentType> = {
-  model: ModelSection,
-  agent: AgentSection,
-  appearance: AppearanceSection,
-  notifications: NotificationsSection,
-  terminal: TerminalSection,
-  externalApps: ExternalAppsSection,
-  keyboard: KeyboardShortcutsSection,
-  threads: ThreadsSection,
-  about: AboutSection,
-};

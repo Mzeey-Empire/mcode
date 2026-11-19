@@ -154,7 +154,7 @@ async function tryConfiguredPath(
       version: null,
       message:
         `GitHub Copilot CLI path contains invalid characters: "${configuredPath}". ` +
-        "Check the path in Settings > Provider > Copilot CLI path.",
+        "Check the path in Settings > Providers > Copilot CLI path.",
     };
   }
   if (!io.exists(configuredPath)) return null;
@@ -243,7 +243,7 @@ export async function formatCopilotNotFoundMessage(
   ghInstalled ??= false;
   const base =
     "GitHub Copilot CLI not found. Install it with: npm install -g @github/copilot\n\n" +
-    "Or set a custom path in Settings > Provider > Copilot CLI path.";
+    "Or set a custom path in Settings > Providers > Copilot CLI path.";
   const disambig = ghInstalled === true
     ? "\n\nNote: the `gh copilot` GitHub CLI extension is installed, which is different " +
       "from the `@github/copilot` npm package Mcode needs."

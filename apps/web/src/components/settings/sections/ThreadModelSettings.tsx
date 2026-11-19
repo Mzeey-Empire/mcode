@@ -1,5 +1,4 @@
 import { useMemo, useEffect, useRef, type ComponentProps, type ReactNode } from "react";
-import { ProviderSection } from "./ProviderSection";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
@@ -110,19 +109,19 @@ function shouldShowThinking(provider: string, modelId: string): boolean {
 }
 
 /**
- * Model settings section: provider, default model, fallback model, reasoning effort
- * (only when the provider exposes an effort tier), utility model provider/model,
- * and CLI paths.
+ * Model defaults for new threads (provider, default model, reasoning effort when the
+ * provider exposes an effort tier, fast mode, thinking) and the model for small tasks.
+ * `agentRows` renders inside the new-thread group after reasoning effort.
  *
- * Default and fallback pickers merge live `listProviderModels` results with static
+ * Default and utility pickers merge live `listProviderModels` results with static
  * catalog fallbacks (needed for Cursor, Copilot, and Claude API discovery). Stale
  * saved IDs that disappear from the catalog stay selectable with a warning until the user changes them.
  *
  * Model options update when the provider changes. Switching provider resets the default
- * model to the new provider's first model and clears the fallback. The reasoning level
+ * model to the new provider's first model. The reasoning level
  * is normalized down when the new model does not support the current tier.
  */
-export function ModelSection() {
+export function ThreadModelSettings({ agentRows }: { agentRows?: ReactNode }) {
   const provider = useSettingsStore((s) => s.settings.model.defaults.provider);
   const modelId = useSettingsStore((s) => s.settings.model.defaults.id);
   const reasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
@@ -340,6 +339,7 @@ export function ModelSection() {
 
   return (
     <ModelSettingsContent
+      agentRows={agentRows}
       provider={provider}
       modelId={modelId}
       reasoning={reasoning}
@@ -373,6 +373,7 @@ export function ModelSection() {
 }
 
 interface ModelSettingsContentProps {
+  agentRows?: ReactNode;
   provider: string;
   modelId: string;
   reasoning: string;
@@ -402,6 +403,7 @@ interface ModelSettingsContentProps {
 }
 
 function ModelSettingsContent({
+  agentRows,
   provider,
   modelId,
   reasoning,
@@ -430,55 +432,45 @@ function ModelSettingsContent({
   onUtilityModelChange,
 }: ModelSettingsContentProps) {
   return (
-    <div data-testid="model-settings-section" className="mx-auto w-full max-w-[88rem] pb-10">
-      <header className="mb-8 border-b border-border/45 px-1 pb-6">
-        <h1 className="text-2xl leading-7 font-semibold tracking-tight text-ink">
-          Models &amp; providers
-        </h1>
-        <p className="mt-2 max-w-[65ch] text-sm leading-4 text-muted">
-          Configure the providers and model defaults used across new threads and utility tasks.
-        </p>
-      </header>
-
-      <div className="space-y-8">
-        <ProviderSection />
-        <DefaultModelSettings
-          provider={provider}
-          modelId={modelId}
-          reasoning={reasoning}
-          thinking={thinking}
-          fastMode={fastMode}
-          providerOptions={providerOptions}
-          modelOptions={modelOptions}
-          modelsLoading={modelsLoading}
-          defaultModelStale={defaultModelStale}
-          showReasoning={showReasoning}
-          reasoningOptions={reasoningOptions}
-          reasoningHint={reasoningHint}
-          fastModeProvider={fastModeProvider}
-          showThinking={showThinking}
-          onProviderChange={onProviderChange}
-          onModelChange={onModelChange}
-          onReasoningChange={onReasoningChange}
-          onFastModeChange={onFastModeChange}
-          onThinkingChange={onThinkingChange}
-        />
-        <UtilityModelSettings
-          utilityProvider={utilityProvider}
-          utilityModelId={utilityModelId}
-          utilityProviderOptions={utilityProviderOptions}
-          utilityModelOptions={utilityModelOptions}
-          utilityModelsLoading={utilityModelsLoading}
-          onUtilityProviderChange={onUtilityProviderChange}
-          onUtilityModelChange={onUtilityModelChange}
-        />
-      </div>
-    </div>
+    <>
+      <DefaultModelSettings
+        agentRows={agentRows}
+        provider={provider}
+        modelId={modelId}
+        reasoning={reasoning}
+        thinking={thinking}
+        fastMode={fastMode}
+        providerOptions={providerOptions}
+        modelOptions={modelOptions}
+        modelsLoading={modelsLoading}
+        defaultModelStale={defaultModelStale}
+        showReasoning={showReasoning}
+        reasoningOptions={reasoningOptions}
+        reasoningHint={reasoningHint}
+        fastModeProvider={fastModeProvider}
+        showThinking={showThinking}
+        onProviderChange={onProviderChange}
+        onModelChange={onModelChange}
+        onReasoningChange={onReasoningChange}
+        onFastModeChange={onFastModeChange}
+        onThinkingChange={onThinkingChange}
+      />
+      <UtilityModelSettings
+        utilityProvider={utilityProvider}
+        utilityModelId={utilityModelId}
+        utilityProviderOptions={utilityProviderOptions}
+        utilityModelOptions={utilityModelOptions}
+        utilityModelsLoading={utilityModelsLoading}
+        onUtilityProviderChange={onUtilityProviderChange}
+        onUtilityModelChange={onUtilityModelChange}
+      />
+    </>
   );
 }
 
 type DefaultModelSettingsProps = Pick<
   ModelSettingsContentProps,
+  | "agentRows"
   | "provider"
   | "modelId"
   | "reasoning"
@@ -501,6 +493,7 @@ type DefaultModelSettingsProps = Pick<
 >;
 
 function DefaultModelSettings({
+  agentRows,
   provider,
   modelId,
   reasoning,
@@ -522,7 +515,7 @@ function DefaultModelSettings({
   onThinkingChange,
 }: DefaultModelSettingsProps) {
   return (
-    <SettingsGroup title="Model defaults" description="Defaults applied when you start a new thread.">
+    <SettingsGroup title="New threads start with" description="Defaults applied when you start a new thread.">
       <SettingRow label="Provider" configKey="model.defaults.provider" hint="AI provider for new threads.">
         <SettingsSelectPicker
           value={provider}
@@ -554,6 +547,7 @@ function DefaultModelSettings({
           <SegmentedControl options={reasoningOptions} value={reasoning} onChange={onReasoningChange} />
         </SettingRow>
       )}
+      {agentRows}
       {fastModeProvider && (
         <SettingRow
           label="Fast mode"
@@ -605,7 +599,7 @@ function UtilityModelSettings({
 }: UtilityModelSettingsProps) {
   return (
     <SettingsGroup
-      title="Utility model"
+      title="Model for small tasks"
       description="Provider and model for lightweight tasks such as PR drafts."
     >
       <SettingRow

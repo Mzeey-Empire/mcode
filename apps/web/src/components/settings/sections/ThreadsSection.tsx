@@ -2,10 +2,14 @@ import { useRef, useState } from "react";
 import { FieldError } from "@/components/ui/field-error";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useSettingsStore } from "@/stores/settingsStore";
+import type { AgentDefaultMode } from "@mcode/contracts/models/settings";
 import { SectionHeading } from "../SectionHeading";
 import { SettingRow } from "../SettingRow";
+import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker } from "../SettingsSelectPicker";
+import { ThreadModelSettings } from "./ThreadModelSettings";
 
 const DEFAULT_RETENTION_DAYS = 3;
 
@@ -100,8 +104,59 @@ function RetentionDaysControl({
   );
 }
 
-/** Settings for completed-thread retention and automatic deletion. */
+function AgentDefaultRows() {
+  const mode = useSettingsStore((s) => s.settings.agent.defaults.mode);
+  const permission = useSettingsStore((s) => s.settings.agent.defaults.permission);
+  const update = useSettingsStore((s) => s.update);
+
+  return (
+    <>
+      <SettingRow label="Default mode" configKey="agent.defaults.mode" hint="Interaction mode for new sessions.">
+        <SegmentedControl
+          options={[
+            { value: "plan", label: "Plan" },
+            { value: "build", label: "Build" },
+            { value: "agent", label: "Agent", disabled: true, title: "Coming soon" },
+          ]}
+          value={mode}
+          onChange={(v) => update({ agent: { defaults: { mode: v as AgentDefaultMode } } })}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Default permission"
+        configKey="agent.defaults.permission"
+        hint="Supervised requires approval before file writes."
+      >
+        <SegmentedControl
+          options={[
+            { value: "full", label: "Full" },
+            { value: "supervised", label: "Supervised" },
+          ]}
+          value={permission}
+          onChange={(v) => update({ agent: { defaults: { permission: v as "full" | "supervised" } } })}
+        />
+      </SettingRow>
+    </>
+  );
+}
+
+/**
+ * Threads settings page: what new threads start with, the model for small tasks,
+ * and when closed threads move to Older or get deleted.
+ */
 export function ThreadsSection() {
+  return (
+    <div>
+      <SectionHeading>Threads</SectionHeading>
+      <div className="space-y-8">
+        <ThreadModelSettings agentRows={<AgentDefaultRows />} />
+        <ThreadCleanupSettings />
+      </div>
+    </div>
+  );
+}
+
+function ThreadCleanupSettings() {
   const completeOnPrMerge = useSettingsStore((state) => state.settings.thread.completion.completeOnPrMerge);
   const olderAfterDays = useSettingsStore((state) => state.settings.thread.olderAfterDays);
   const [mergeError, setMergeError] = useState<string | null>(null);
@@ -121,8 +176,7 @@ export function ThreadsSection() {
   };
 
   return (
-    <div>
-      <SectionHeading>Threads</SectionHeading>
+    <SettingsGroup title="Closing and cleanup">
       <SettingRow label="Close threads when their PRs merge" configKey="thread.completion.completeOnPrMerge">
         <div className="flex flex-wrap items-center gap-3">
           <Switch
@@ -169,6 +223,6 @@ export function ThreadsSection() {
           onUpdate={updateRetentionDays}
         />
       </SettingRow>
-    </div>
+    </SettingsGroup>
   );
 }

@@ -1,0 +1,131 @@
+import { useMemo } from "react";
+import { Sparkles } from "lucide-react";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { useOpenInApps } from "@/hooks/useOpenInApps";
+import { openInAppIcon } from "@/components/chat/openInAppIcons";
+import type { OpenInApp } from "@/transport/types";
+import type { Theme } from "@mcode/contracts/models/settings";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Switch } from "@/components/ui/switch";
+import { SettingRow } from "../SettingRow";
+import { SectionHeading } from "../SectionHeading";
+import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
+
+/** Empty `defaultEditor` selects tier-3 auto-resolution (the "Auto" option). */
+const AUTO_VALUE = "";
+
+/**
+ * Builds the picker options for the global default open-in app: an "Auto" entry
+ * (empty value, tier-3 auto-resolution) first, then every installed app with its
+ * registry icon. A saved id that is no longer installed is appended as a
+ * selectable "(not installed)" row so a stale default stays visible and clearable
+ * instead of silently disappearing.
+ *
+ * @param apps - All registry apps with detection status, from {@link useOpenInApps}.
+ * @param currentValue - The saved `externalApps.defaultEditor` value.
+ * @returns Ordered options for {@link SettingsSelectPicker}.
+ */
+export function buildOpenInAppOptions(
+  apps: readonly OpenInApp[],
+  currentValue: string,
+): SettingsPickOption[] {
+  const installed = apps.filter((app) => app.detected);
+  const options: SettingsPickOption[] = [
+    {
+      value: AUTO_VALUE,
+      label: "Auto",
+      disabled: false,
+      icon: <Sparkles size={14} aria-hidden />,
+      title: "Resolve to your highest-priority installed editor, then File Explorer",
+    },
+    ...installed.map((app) => ({
+      value: app.id,
+      label: app.label,
+      disabled: false,
+      icon: openInAppIcon(app.iconKey, 14),
+    })),
+  ];
+
+  if (currentValue && !installed.some((app) => app.id === currentValue)) {
+    options.push({
+      value: currentValue,
+      label: `${currentValue} (not installed)`,
+      disabled: false,
+      title: "This app was not detected on this system",
+    });
+  }
+
+  return options;
+}
+
+function ThemeSetting() {
+  const theme = useSettingsStore((s) => s.settings.appearance.theme);
+  const update = useSettingsStore((s) => s.update);
+  return (
+    <SettingRow label="Theme" configKey="appearance.theme" hint="Color scheme for the interface.">
+      <SegmentedControl
+        options={[
+          { value: "system", label: "System" },
+          { value: "dark", label: "Dark" },
+          { value: "light", label: "Light" },
+        ]}
+        value={theme}
+        onChange={(v) => update({ appearance: { theme: v as Theme } })}
+      />
+    </SettingRow>
+  );
+}
+
+function NotificationsSetting() {
+  const enabled = useSettingsStore((s) => s.settings.notifications.enabled);
+  const update = useSettingsStore((s) => s.update);
+  return (
+    <SettingRow
+      label="Notifications"
+      configKey="notifications.enabled"
+      hint="Notify when a thread finishes, fails or needs you while Mcode is in the background."
+    >
+      <Switch checked={enabled} onCheckedChange={(v) => update({ notifications: { enabled: v } })} />
+    </SettingRow>
+  );
+}
+
+/**
+ * Chooses the global default open-in app (`externalApps.defaultEditor`, tier 2
+ * of the three-tier resolution). New threads with no per-thread override open
+ * in this app; "Auto" clears the setting and falls back to auto-resolution.
+ */
+function DefaultOpenInAppSetting() {
+  const defaultEditor = useSettingsStore((s) => s.settings.externalApps.defaultEditor);
+  const update = useSettingsStore((s) => s.update);
+  const apps = useOpenInApps();
+  const options = useMemo(() => buildOpenInAppOptions(apps, defaultEditor), [apps, defaultEditor]);
+
+  return (
+    <SettingRow
+      label="Default open-in app"
+      configKey="externalApps.defaultEditor"
+      hint="New threads open in this app. Auto picks your highest-priority installed editor and falls back to File Explorer."
+    >
+      <SettingsSelectPicker
+        value={defaultEditor}
+        onChange={(v) => void update({ externalApps: { defaultEditor: v } })}
+        options={options}
+        searchPlaceholder="Search apps"
+        data-testid="settings-default-open-in-trigger"
+      />
+    </SettingRow>
+  );
+}
+
+/** General settings page: theme, notifications, and the default open-in app. */
+export function GeneralSection() {
+  return (
+    <div>
+      <SectionHeading>General</SectionHeading>
+      <ThemeSetting />
+      <NotificationsSetting />
+      <DefaultOpenInAppSetting />
+    </div>
+  );
+}

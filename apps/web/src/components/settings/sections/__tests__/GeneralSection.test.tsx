@@ -16,7 +16,8 @@ vi.mock("@/hooks/useOpenInApps", () => ({
   useOpenInApps: () => mockApps.value,
 }));
 
-import { ExternalAppsSection, buildOpenInAppOptions } from "../ExternalAppsSection";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { GeneralSection, buildOpenInAppOptions } from "../GeneralSection";
 
 /** Minimal OpenInApp factory for option-building assertions. */
 function app(partial: Partial<OpenInApp> & Pick<OpenInApp, "id">): OpenInApp {
@@ -60,17 +61,20 @@ describe("buildOpenInAppOptions", () => {
 /** Configures the settings store mock to return the given defaultEditor + update spy. */
 function renderSection(defaultEditor: string) {
   const update = vi.fn();
-  const state = { settings: { externalApps: { defaultEditor } }, update };
+  const defaults = getDefaultSettings();
+  const state = { settings: { ...defaults, externalApps: { ...defaults.externalApps, defaultEditor } }, update };
   mockSettingsSelector.mockImplementation((selector: (s: unknown) => unknown) => selector(state));
-  render(<ExternalAppsSection />);
+  render(<GeneralSection />);
   return { update };
 }
 
-describe("ExternalAppsSection", () => {
-  it("renders the heading and labeled control", () => {
+describe("GeneralSection", () => {
+  it("renders theme, notifications and the default open-in app under General", () => {
     mockApps.value = [CODE];
     renderSection("");
-    expect(screen.getByText("External Apps")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByText("Theme")).toBeInTheDocument();
+    expect(screen.getByText("Notifications")).toBeInTheDocument();
     expect(screen.getByText("Default open-in app")).toBeInTheDocument();
   });
 
