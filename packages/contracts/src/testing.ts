@@ -5,6 +5,7 @@ import type { Message } from "./models/message.js";
 import type { ThreadPullRequest } from "./models/thread-pull-request.js";
 import type { ThreadAttention } from "./models/thread-attention.js";
 import type { ThreadStartup } from "./thread-startup.js";
+import type { BackgroundCommand } from "./models/tool-call-record.js";
 
 const DEFAULT_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 
@@ -37,6 +38,14 @@ export function createMockThreadAttention(overrides: Partial<ThreadAttention> = 
   return {
     threadId: "thread-1", waiting: null, lastTurn: null, seen: { sequence: null, at: null },
     descendants: "none", restartFailure: null, ...overrides,
+  };
+}
+
+/** Build a running, unawaited background command. */
+export function createMockBackgroundCommand(overrides: Partial<BackgroundCommand> = {}): BackgroundCommand {
+  return {
+    toolCallId: "tool-1", taskId: "task-1", label: "bun run build", startedAt: DEFAULT_TIMESTAMP,
+    status: "running", awaited: false, ...overrides,
   };
 }
 

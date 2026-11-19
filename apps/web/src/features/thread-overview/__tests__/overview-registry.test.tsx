@@ -64,6 +64,7 @@ describe("overview registry", () => {
       ["usage", "usage", 90],
       ["repository", "lane", 95],
       ["subagents", "activity", 100],
+      ["background-commands", "activity", 105],
       ["pull-request", "lane", 110],
       ["browser", "activity", 120],
       ["sources", "activity", 130],

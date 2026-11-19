@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from "react";
+import { BackgroundCommandsEntryBlock } from "./entries/background-commands";
 import { BranchEntryBlock, BranchEntryState } from "./entries/branch";
 import { BrowserEntryBlock, BrowserEntryState } from "./entries/browser";
 import { ChangesEntryBlock, ChangesEntryState } from "./entries/changes";
@@ -53,6 +54,7 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   { id: "terminals", section: "terminals", order: 85, subjects: ["thread"], Entry: OverviewTerminalsSection },
   { id: "usage", section: "usage", order: 90, subjects: ["thread"], Entry: UsageEntryBlock },
   { id: "subagents", section: "activity", order: 100, subjects: ["thread"], Entry: SubagentsEntryBlock },
+  { id: "background-commands", section: "activity", order: 105, subjects: ["thread"], Entry: BackgroundCommandsEntryBlock },
   { id: "pull-request", section: "lane", order: 110, subjects: ["thread"], Entry: PullRequestEntryBlock },
   { id: "browser", section: "activity", order: 120, subjects: ["thread"], Entry: BrowserEntryBlock, State: BrowserEntryState },
   { id: "sources", section: "activity", order: 130, subjects: ["thread"], Entry: SourcesEntryBlock },

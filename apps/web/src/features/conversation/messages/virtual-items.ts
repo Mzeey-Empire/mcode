@@ -10,7 +10,7 @@ import { buildNarrativeItems, computeLiveStreamingText } from "../narrative/buil
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
 import { isTurnWorkRunning } from "../narrative/narrative-builder-helpers";
-import { deriveRunStatus, type RunHoldingSignals, type RunStatus } from "../narrative/run-status";
+import { deriveRunStatus, descendantsRunStatus, type RunHoldingSignals, type RunStatus } from "../narrative/run-status";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 import { isHiddenPlanAnswer } from "@/lib/plan-fences";
 import { approvalReviewNote, persistedTurnCounts, persistedTurnDurationMs } from "../turn/turn-summary";
@@ -681,10 +681,7 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
 }
 
 function descendantsOnlyIndicatorItem(descendants: NonNullable<RunHoldingSignals["descendants"]>): ChatVirtualItem {
-  const status: RunStatus = descendants === "needs-you"
-    ? { label: "Subagent needs you", icon: "layers" }
-    : deriveRunStatus({ ...NO_HOLDING_SIGNALS, subagentsRunning: true, answering: false });
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: 0, status, startTime: undefined };
+  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: 0, status: descendantsRunStatus(descendants), startTime: undefined };
 }
 
 function sameAgentDisplayState(

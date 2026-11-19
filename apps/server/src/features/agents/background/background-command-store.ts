@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
 import { z } from "zod";
 import { BackgroundCommandSchema, type BackgroundCommand } from "@mcode/contracts/models/tool-call-record";
+import { BACKGROUND_RESTART_NOTICE_KEY_PREFIX as RESTART_NOTICE_PREFIX } from "@mcode/shared/planned-restart";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
@@ -25,7 +26,6 @@ const setAwaitedOperation = databaseWriteOperation("backgroundCommand.setAwaited
 const noteRestartOperation = databaseWriteOperation("backgroundCommand.noteRestart", z.object({
   threadId: z.string().min(1), toolCallIds: z.array(z.string().min(1)).min(1),
 }).strict(), z.void());
-const RESTART_NOTICE_PREFIX = "background-restart:";
 
 /** Worker-side registration keeps the running check and the mark in the same write transaction. */
 export function backgroundCommandWriteHandlers(db: Database): ReadonlyMap<string, (input: unknown) => unknown> {

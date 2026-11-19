@@ -142,6 +142,18 @@ describe("buildStableItems", () => {
     expect(buildStableItems(retained)).toHaveLength(3);
   });
 
+  it("keeps the note that a restart stopped background commands, unlike a provider warning", () => {
+    const restartNote = makeMessage({
+      id: "restart", role: "system", content: "Background commands were stopped when Mcode restarted.",
+      systemNotice: { kind: "warning", presentation: "timeline", noticeKey: "background-restart:abc" },
+    });
+    const providerWarning = makeMessage({
+      id: "provider", role: "system", systemNotice: { kind: "warning", presentation: "timeline", noticeKey: "provider:abc" },
+    });
+    expect(buildStableItems([restartNote, providerWarning])).toEqual(buildStableItems([restartNote]));
+    expect(buildStableItems([restartNote])).toHaveLength(1);
+  });
+
   it("does not add a separate hook row before the final response", () => {
     const hooks = [{ hookName: "Setup", hookType: "permission" as const, status: "completed" as const, startedAt: 1, outputLines: [], fullOutput: [] }];
     const active = buildVolatileItems([], STREAMING_AGENT, 1, "Answer", hooks);
@@ -1243,13 +1255,13 @@ describe("provider retry status", () => {
 describe("delegated task status", () => {
   const leftoverTools = [makeToolCall({ id: "edit", toolName: "Edit" })];
 
-  it("keeps a live 'Waiting on subagents' line without steps or clock after the own turn ends", () => {
+  it("keeps a live 'Waiting on background work' line without steps or clock after the own turn ends", () => {
     const items = buildVolatileItems(
       leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
       { stopPending: true, compacting: false, planning: true, descendants: "running" },
     );
     expect(findIndicator(items)).toMatchObject({
-      stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
+      stepCount: 0, startTime: undefined, status: { label: "Waiting on background work", icon: "layers" },
     });
   });
 
@@ -1276,7 +1288,7 @@ describe("delegated task status", () => {
     const live = build(leftoverTools, COMPLETED_AGENT, 1, undefined, [], [], undefined, undefined, undefined,
       { stopPending: false, compacting: false, descendants: "running" });
     expect(findIndicator(live)).toMatchObject({
-      stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
+      stepCount: 0, startTime: undefined, status: { label: "Waiting on background work", icon: "layers" },
     });
     const settled = build(leftoverTools, COMPLETED_AGENT, 1, undefined, [], [], undefined, undefined, undefined,
       { stopPending: false, compacting: false });
