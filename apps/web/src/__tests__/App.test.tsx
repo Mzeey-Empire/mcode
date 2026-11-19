@@ -215,7 +215,7 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(
-      await screen.findByRole("button", { name: "Back to chat" }),
+      await screen.findByRole("button", { name: "Close Settings" }),
     );
 
     await waitFor(() => {
@@ -312,7 +312,8 @@ describe("App", () => {
       executeCommand("settings.about");
     });
 
-    expect(await screen.findByRole("button", { name: "Back to chat" })).toBeInTheDocument();
+    const main = await screen.findByRole("main");
+    expect(await within(main).findByRole("heading", { level: 1, name: "About" })).toBeInTheDocument();
   });
 
   it.each([

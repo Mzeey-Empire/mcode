@@ -1057,59 +1057,127 @@ diffs-container:has([data-jump-highlight="true"]) {
   }
 }
 
-/* Settings range slider — custom track and thumb matching the theme */
+/* Settings range slider: the composer effort slider's anatomy (SteppedSlider) without stop dots. A pill track,
+   an amber tint that ends at the knob's far edge, and an amber knob inset 3px. --range-fraction is the value as 0 to 1. */
 input[type="range"].settings-range {
   -webkit-appearance: none;
   appearance: none;
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
+  height: 2rem;
+  margin: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
   outline: none;
 }
 input[type="range"].settings-range::-webkit-slider-runnable-track {
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
+  height: 2rem;
+  border-radius: 999px;
+  background: linear-gradient(to right, color-mix(in oklab, var(--primary) 26%, transparent) calc((100% - 2rem) * var(--range-fraction, 0) + 2rem), var(--selected) 0);
+}
+input[type="range"].settings-range::-moz-range-track {
+  height: 2rem;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(to right, color-mix(in oklab, var(--primary) 26%, transparent) calc((100% - 2rem) * var(--range-fraction, 0) + 2rem), var(--selected) 0);
 }
 input[type="range"].settings-range::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--ink);
-  border: 2px solid var(--background);
-  margin-top: -5px;
-  cursor: pointer;
-  transition: transform 100ms ease, box-shadow 100ms ease;
-}
-input[type="range"].settings-range::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
-}
-input[type="range"].settings-range::-webkit-slider-thumb:active {
-  transform: scale(1.05);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--focus) 20%, transparent);
-}
-input[type="range"].settings-range:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--focus);
-}
-input[type="range"].settings-range:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--focus);
-}
-input[type="range"].settings-range::-moz-range-track {
-  height: 4px;
-  background: var(--border);
-  border-radius: 2px;
-  border: none;
+  width: 2rem;
+  height: 2rem;
+  border: 0.3rem solid transparent;
+  border-radius: 999px;
+  background: var(--primary);
+  background-clip: content-box;
 }
 input[type="range"].settings-range::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--ink);
-  border: 2px solid var(--background);
-  cursor: pointer;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 0.3rem solid transparent;
+  border-radius: 999px;
+  background: var(--primary);
+  background-clip: content-box;
 }
+input[type="range"].settings-range:hover::-webkit-slider-thumb { background-color: var(--primary-hover); }
+input[type="range"].settings-range:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--focus); outline-offset: 1px; }
+input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* Settings controls. Scoped to the Settings canvas so the shared Switch, SegmentedControl and outline Button keep
+   their look everywhere else; unlayered, so these win over the components' utility classes without !important. */
+
+/* Switch: off is an outline so only "on" carries a fill; a smaller knob when off gives the state a shape cue. */
+[data-settings-surface] [data-slot="switch"] {
+  border-color: color-mix(in oklab, var(--ink) 38%, transparent);
+  background: transparent;
+}
+[data-settings-surface] [data-slot="switch"]:hover {
+  border-color: color-mix(in oklab, var(--ink) 50%, transparent);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+[data-settings-surface] [data-slot="switch-thumb"] { background: var(--neutral-300); scale: 0.75; }
+[data-settings-surface] [data-slot="switch"]:hover [data-slot="switch-thumb"] { background: var(--neutral-200); }
+[data-settings-surface] [data-slot="switch"][data-checked] { border-color: var(--primary); background: var(--primary); }
+[data-settings-surface] [data-slot="switch"][data-checked]:hover { border-color: var(--primary-hover); background: var(--primary-hover); }
+[data-settings-surface] [data-slot="switch"][data-checked] [data-slot="switch-thumb"] { background: var(--primary-ink); scale: 1; }
+/* Disabled drops the amber: amber means "you set this and can change it". Knob side and the grey fill still show the value. */
+[data-settings-surface] [data-slot="switch"][data-disabled] {
+  opacity: 1;
+  cursor: not-allowed;
+  border-color: color-mix(in oklab, var(--ink) 14%, transparent);
+  background: transparent;
+}
+[data-settings-surface] [data-slot="switch"][data-disabled] [data-slot="switch-thumb"] { background: color-mix(in oklab, var(--ink) 26%, transparent); }
+[data-settings-surface] [data-slot="switch"][data-disabled][data-checked] { border-color: transparent; background: color-mix(in oklab, var(--ink) 16%, transparent); }
+[data-settings-surface] [data-slot="switch"][data-disabled][data-checked] [data-slot="switch-thumb"] { background: color-mix(in oklab, var(--ink) 42%, transparent); }
+
+/* Segmented control, "Line": a hairline track, the chosen option tinted like a selected sidebar row.
+   The focus ring sits inside the track so it never clips a neighbour. */
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] {
+  height: 3.2rem;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ink) 14%, transparent);
+}
+/* The shared tray gives every option an equal flex-1 share of a track sized to the sum of the labels, so the
+   longest label overflows its share. Here each option, and the tooltip wrapper around a disabled one, sizes to
+   its own label instead. */
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > span,
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"] {
+  flex: none;
+}
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"] { height: 2.8rem; }
+/* The sliding hover fill is square-cornered; under the rounded chosen option its corners showed as an edge. */
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > [data-slot="sliding-highlight"] {
+  border-radius: var(--radius-md);
+}
+/* Hover needs no rule: the control's sliding highlight already paints --hover, the 5% ink tint, under the pointer. */
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"]:active:not([aria-checked="true"]) { background: color-mix(in oklch, var(--ink) 10%, transparent); }
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"][aria-checked="true"] {
+  background: color-mix(in oklch, var(--ink) 12%, transparent);
+  color: var(--ink);
+  font-weight: 600;
+}
+[data-settings-surface] [data-slot="segmented-control"][data-variant="tray"] > * > [role="radio"]:focus-visible { outline-offset: -2px; }
+
+/* Outline buttons: a faint ink fill inside the same hairline family as the Line segmented control. */
+[data-settings-surface] [data-slot="button"][data-variant="outline"] {
+  height: 3rem;
+  padding-inline: 1rem;
+  border-color: color-mix(in oklch, var(--ink) 16%, transparent);
+  background: color-mix(in oklch, var(--ink) 4%, transparent);
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+[data-settings-surface] [data-slot="button"][data-variant="outline"]:hover { background: var(--hover); }
+
+/* Text fields share the Line control's tone and carry no border; focus shows only the keyboard ring. */
+[data-settings-surface] [data-slot="input"] {
+  height: 3.2rem;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: color-mix(in oklch, var(--ink) 7%, transparent);
+}
+[data-settings-surface] [data-slot="input"]:hover { background: color-mix(in oklch, var(--ink) 10%, transparent); }
+[data-settings-surface] [data-slot="input"]::placeholder { color: var(--muted); }
 
 @keyframes blink {
   0%, 50% { opacity: 1; }

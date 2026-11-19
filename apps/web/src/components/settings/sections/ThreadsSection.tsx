@@ -5,7 +5,6 @@ import { Switch } from "@/components/ui/switch";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { AgentDefaultMode } from "@mcode/contracts/models/settings";
-import { SectionHeading } from "../SectionHeading";
 import { SettingRow } from "../SettingRow";
 import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker } from "../SettingsSelectPicker";
@@ -146,12 +145,9 @@ function AgentDefaultRows() {
  */
 export function ThreadsSection() {
   return (
-    <div>
-      <SectionHeading>Threads</SectionHeading>
-      <div className="space-y-8">
-        <ThreadModelSettings agentRows={<AgentDefaultRows />} />
-        <ThreadCleanupSettings />
-      </div>
+    <div className="space-y-8">
+      <ThreadModelSettings agentRows={<AgentDefaultRows />} />
+      <ThreadCleanupSettings />
     </div>
   );
 }

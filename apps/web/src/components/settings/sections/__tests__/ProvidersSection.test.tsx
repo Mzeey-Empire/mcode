@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -20,7 +20,7 @@ beforeEach(() => {
 describe("ProvidersSection", () => {
   it("shows the provider list and the CLI update check switch", () => {
     render(<ProvidersSection />);
-    expect(within(screen.getByRole("region", { name: "Providers" })).getByText("Claude")).toBeInTheDocument();
+    expect(screen.getByText("Claude")).toBeInTheDocument();
     expect(screen.getByText("Asks the npm registry once a day for newer provider CLIs.")).toBeInTheDocument();
   });
 

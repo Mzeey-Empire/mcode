@@ -8,7 +8,7 @@ import type { Theme } from "@mcode/contracts/models/settings";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { SettingRow } from "../SettingRow";
-import { SectionHeading } from "../SectionHeading";
+import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
 
 /** Empty `defaultEditor` selects tier-3 auto-resolution (the "Auto" option). */
@@ -121,11 +121,10 @@ function DefaultOpenInAppSetting() {
 /** General settings page: theme, notifications, and the default open-in app. */
 export function GeneralSection() {
   return (
-    <div>
-      <SectionHeading>General</SectionHeading>
+    <SettingsGroup>
       <ThemeSetting />
       <NotificationsSetting />
       <DefaultOpenInAppSetting />
-    </div>
+    </SettingsGroup>
   );
 }

@@ -12,7 +12,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useTerminalSettingsStore, type TerminalWorkspaceOverride } from "./terminalSettingsStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { RangeControl } from "@/components/settings/RangeControl";
-import { SectionHeading } from "@/components/settings/SectionHeading";
+import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { SettingRow } from "@/components/settings/SettingRow";
 
@@ -382,12 +382,12 @@ function ProfileRecoveryNotices({ model }: { readonly model: TerminalSectionMode
   return (
     <>
       {model.selectedProfileUnavailable ? (
-        <p role="alert" className="mx-1 border-b border-border/50 px-1 py-2 text-xs text-destructive">
+        <p role="alert" className="px-4 py-2.5 text-caption text-destructive">
           Selected profile is unavailable: {model.globalDefault}
         </p>
       ) : null}
       {model.recovery ? (
-        <div role="alert" className="mx-1 border-b border-border/50 px-1 py-2 text-xs text-destructive">
+        <div role="alert" className="px-4 py-2.5 text-caption text-destructive">
           Terminal settings need repair. Reset Terminal preferences to restore defaults.
         </div>
       ) : null}
@@ -397,7 +397,7 @@ function ProfileRecoveryNotices({ model }: { readonly model: TerminalSectionMode
 
 function WorkspaceProfileDefault({ model }: { readonly model: TerminalSectionModel }) {
   if (!model.activeWorkspaceId) {
-    return <p className="border-b border-border/50 px-1 py-3 text-xs text-muted">Open a project to set a project default.</p>;
+    return <p className="px-4 py-2.5 text-caption text-muted">Open a project to set a project default.</p>;
   }
 
   return (
@@ -455,7 +455,7 @@ function ProfileDeleteReferences({ references }: {
 }) {
   if (!references) return null;
   return (
-    <div role="alert" className="mx-1 border-b border-border/50 px-1 py-2 text-xs text-destructive">
+    <div role="alert" className="px-4 py-2.5 text-caption text-destructive">
       This profile is still in use.
       {references.globalDefault ? " It is the global default." : ""}
       {references.workspaceIds.length ? ` Project references: ${references.workspaceIds.join(", ")}.` : ""}
@@ -518,14 +518,12 @@ function TerminalProfileLists({ model }: { readonly model: TerminalSectionModel 
 
 function TerminalProfilesSection({ model }: { readonly model: TerminalSectionModel }) {
   return (
-    <section aria-labelledby="terminal-profiles-heading">
-      <h2 id="terminal-profiles-heading" className="mb-1 px-1 text-sm font-semibold text-ink">Profiles and defaults</h2>
-      <p className="mb-2 px-1 text-xs text-muted">Defaults apply to new terminals.</p>
+    <SettingsGroup title="Profiles and defaults" description="Defaults apply to new terminals.">
       <GlobalProfileDefault model={model} />
       <ProfileRecoveryNotices model={model} />
       <WorkspaceProfileDefault model={model} />
       <TerminalProfileLists model={model} />
-    </section>
+    </SettingsGroup>
   );
 }
 
@@ -546,8 +544,7 @@ function handleFontFamilyKey(
 function TerminalPresentationSection({ model }: { readonly model: TerminalSectionModel }) {
   const presentation = model.terminalSettings.presentation;
   return (
-    <section aria-labelledby="terminal-presentation-heading">
-      <h2 id="terminal-presentation-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-ink">Presentation</h2>
+    <SettingsGroup title="Presentation">
       <SettingRow label="Font family" configKey="terminal.presentation.fontFamily" hint="Changes apply to new and open terminals.">
         <Input
           aria-label="Terminal font family"
@@ -586,15 +583,14 @@ function TerminalPresentationSection({ model }: { readonly model: TerminalSectio
       <SettingRow label="Ligatures" configKey="terminal.presentation.ligatures">
         <Switch aria-label="Terminal ligatures" checked={presentation.ligatures} disabled={model.pending} onCheckedChange={(value) => model.updatePresentation("ligatures", value)} />
       </SettingRow>
-    </section>
+    </SettingsGroup>
   );
 }
 
 function TerminalBehaviorSection({ model }: { readonly model: TerminalSectionModel }) {
   const behavior = model.terminalSettings.behavior;
   return (
-    <section aria-labelledby="terminal-behavior-heading">
-      <h2 id="terminal-behavior-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-ink">Behavior</h2>
+    <SettingsGroup title="Behavior">
       <SettingRow label="Scrollback lines" configKey="terminal.behavior.scrollback" hint="Lines to retain in the buffer.">
         <RangeControl ariaLabel="Scrollback lines" min={100} max={5000} step={100} value={behavior.scrollback} onCommit={(value) => model.updateBehavior("scrollback", value)} />
       </SettingRow>
@@ -618,15 +614,14 @@ function TerminalBehaviorSection({ model }: { readonly model: TerminalSectionMod
       <SettingRow label="Confirm multiline paste" configKey="terminal.behavior.confirmMultilinePaste">
         <Switch aria-label="Confirm multiline paste" checked={behavior.confirmMultilinePaste} disabled={model.pending} onCheckedChange={(value) => model.updateBehavior("confirmMultilinePaste", value)} />
       </SettingRow>
-    </section>
+    </SettingsGroup>
   );
 }
 
 function TerminalAccessibilitySection({ model }: { readonly model: TerminalSectionModel }) {
   const accessibility = model.terminalSettings.accessibility;
   return (
-    <section aria-labelledby="terminal-accessibility-heading">
-      <h2 id="terminal-accessibility-heading" className="mb-1 mt-6 px-1 text-sm font-semibold text-ink">Accessibility</h2>
+    <SettingsGroup title="Accessibility">
       <SettingRow label="Screen reader" configKey="terminal.accessibility.screenReaderMode" hint="Automatic uses the terminal default.">
         <SegmentedControl
           options={[
@@ -638,20 +633,19 @@ function TerminalAccessibilitySection({ model }: { readonly model: TerminalSecti
           onChange={(value) => model.updateAccessibility(value as typeof accessibility.screenReaderMode)}
         />
       </SettingRow>
-    </section>
+    </SettingsGroup>
   );
 }
 
 function TerminalSectionContent({ model }: { readonly model: TerminalSectionModel }) {
   return (
-    <div aria-busy={model.pending || model.profilesLoading || model.workspaceLoading}>
-      <SectionHeading>Terminal</SectionHeading>
+    <div aria-busy={model.pending || model.profilesLoading || model.workspaceLoading} className="space-y-8">
       <PreferencesStatus pending={model.pending} error={model.error} />
       <TerminalProfilesSection model={model} />
       <TerminalPresentationSection model={model} />
       <TerminalBehaviorSection model={model} />
       <TerminalAccessibilitySection model={model} />
-      <div className="mt-6 flex justify-end border-t border-border/50 px-1 pt-4">
+      <div className="flex justify-end">
         <Button variant="outline" disabled={model.pending} onClick={model.resetTerminalPreferences}>
           Reset Terminal preferences
         </Button>
