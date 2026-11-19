@@ -19,6 +19,7 @@ import { useToastStore } from "@/stores/toastStore";
 import { getTransport } from "@/transport";
 import { useSubagentRoster, useSubagentRosterStore } from "../state/subagentRosterStore";
 import { subagentStatusLabel } from "../subagent-status";
+import { SubagentStatusMark } from "../SubagentStatusMark";
 import { elapsed, useNow } from "../live-duration";
 import { subagentKind } from "../subagent-kind";
 import { openSubagentDetail, openSubagentsPanel } from "./open-subagent-detail";
@@ -33,7 +34,7 @@ function providerName(entry: SubagentRosterEntry): string {
 /** One roster entry as its own rail tab: what the parent asked, then what the entry's tier can show. */
 export function SubagentDetailTab({ threadId, entryId }: { readonly threadId: string; readonly entryId: string }) {
   const roster = useSubagentRoster(threadId);
-  const rosterLost = useSubagentRosterStore((state) => state.errors.has(threadId)) && !roster;
+  const rosterLost = useSubagentRosterStore((state) => state.loads.get(threadId)?.kind === "failed");
   const entry = roster?.entries.find((candidate) => candidate.id === entryId);
   if (!entry) {
     return roster || rosterLost
@@ -77,8 +78,8 @@ function DetailHeader({ threadId, entry }: { readonly threadId: string; readonly
       </Button>
       <div data-testid="subagent-detail-meta" className="flex h-8 min-w-0 items-center gap-2 rounded-[18px] bg-selected px-3">
         {/* Status and duration lead and never shrink: in a narrow panel they matter more than the model's name. */}
-        <span aria-hidden className={cn("size-[7px] shrink-0 rounded-full", running ? "bg-success" : "bg-muted")} />
-        {/* The list names the state beside its dot, so the detail does too; the sr-only status already speaks it. */}
+        <SubagentStatusMark status={entry.status} />
+        {/* The list names the state beside its icon, so the detail does too; the sr-only status already speaks it. */}
         <span aria-hidden className="shrink-0 text-xs text-ink">{subagentStatusLabel(entry.status)}</span>
         {duration && <span className="shrink-0 font-mono text-xs text-ink">· {duration}</span>}
         {kind && <span className="text-fade min-w-0 text-xs text-muted">{kind}</span>}

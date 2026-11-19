@@ -31,7 +31,9 @@ type SubagentChipView =
 const VISIBLE_CHIPS = 2;
 
 function remainingLabel(entries: readonly SubagentRosterEntry[]): string {
-  const { active, done } = subagentOverviewCounts(entries);
+  const counts = subagentOverviewCounts(entries);
+  const active = counts.needsYou + counts.running;
+  const done = counts.failed + counts.finished;
   return [active > 0 ? `+${active} working` : "", done > 0 ? `${active > 0 ? "" : "+"}${done} finished` : ""].filter(Boolean).join(", ");
 }
 

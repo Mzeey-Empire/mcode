@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SubagentRosterSchema, SubagentDetailSchema, isSubagentLaunchToolName, type SubagentRoster } from "../subagent-roster.js";
+import { SubagentRosterSchema, SubagentDetailSchema, compareRosterEntries, isSubagentLaunchToolName, type SubagentRoster } from "../subagent-roster.js";
 
 const roster: SubagentRoster = {
   owningParentThreadId: "parent", epoch: "boot-one", revision: 7, truncated: false,
@@ -49,4 +49,29 @@ describe("isSubagentLaunchToolName", () => {
       expect(isSubagentLaunchToolName(name)).toBe(false);
     },
   );
+
+  it("orders entries by status rank before start time", () => {
+    const entry = roster.entries[0];
+    const at = (minute: number) => `2026-10-10T10:${String(minute).padStart(2, "0")}:00.000Z`;
+    const entries = [
+      { ...entry, id: "finished", status: "finished" as const, startedAt: at(9) },
+      { ...entry, id: "stopped", status: "stopped" as const, startedAt: at(1) },
+      { ...entry, id: "failed", status: "failed" as const, startedAt: at(8) },
+      { ...entry, id: "running", status: "running" as const, startedAt: at(2) },
+      { ...entry, id: "setting-up", status: "setting-up" as const, startedAt: at(7) },
+      { ...entry, id: "needs-you", status: "needs-you" as const, startedAt: at(0) },
+    ];
+    expect(entries.sort(compareRosterEntries).map((item) => item.id))
+      .toEqual(["needs-you", "setting-up", "running", "failed", "stopped", "finished"]);
+  });
+
+  it("orders one status newest first, then by id", () => {
+    const entry = roster.entries[0];
+    const entries = [
+      { ...entry, id: "b", startedAt: "2026-10-10T10:00:00.000Z" },
+      { ...entry, id: "c", startedAt: "2026-10-10T10:05:00.000Z" },
+      { ...entry, id: "a", startedAt: "2026-10-10T10:00:00.000Z" },
+    ];
+    expect(entries.sort(compareRosterEntries).map((item) => item.id)).toEqual(["c", "a", "b"]);
+  });
 });

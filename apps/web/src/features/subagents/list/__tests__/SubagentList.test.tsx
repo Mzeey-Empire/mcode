@@ -53,7 +53,7 @@ function rowOrder(): string[] {
 
 describe("SubagentList in the Subagents panel", () => {
   beforeEach(() => {
-    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+    useSubagentRosterStore.setState({ loads: new Map() });
     transport.loadSubagentRoster.mockReset();
     transport.loadSubagentDetail.mockReset();
     transport.stopCanonicalSubagent.mockReset();
@@ -61,7 +61,7 @@ describe("SubagentList in the Subagents panel", () => {
 
   it("orders running rows newest first, then a divider, then finished rows newest first", async () => {
     transport.loadSubagentRoster.mockResolvedValue(roster([
-      entry("old done", { status: "done", startedAt: at(0), endedAt: at(30) }),
+      entry("old done", { status: "finished", startedAt: at(0), endedAt: at(30) }),
       codex("old running", { startedAt: at(10) }),
       entry("new failed", { provider: "cursor", status: "failed", startedAt: at(40), endedAt: at(50) }),
       entry("new running", { startedAt: at(60) }),
@@ -75,23 +75,25 @@ describe("SubagentList in the Subagents panel", () => {
     ]);
   });
 
-  it("groups a child waiting on the user with running rows", async () => {
+  it("leads the live group with needs-you, then setting-up, then running rows", async () => {
     transport.loadSubagentRoster.mockResolvedValue(roster([
-      entry("old done", { status: "done", startedAt: at(0), endedAt: at(30) }),
-      codex("asking", { status: "waiting", startedAt: at(40) }),
-      entry("working", { startedAt: at(20) }),
+      entry("old done", { status: "finished", startedAt: at(0), endedAt: at(30) }),
+      codex("asking", { status: "needs-you", startedAt: at(10) }),
+      entry("working", { startedAt: at(40) }),
+      entry("launching", { status: "setting-up", startedAt: at(20) }),
     ]));
     render(<SubagentsPanel threadId="parent" />);
-    await screen.findByRole("button", { name: "Open asking details, Waiting" });
+    await screen.findByRole("button", { name: "Open asking details, Needs you" });
+    await screen.findByRole("button", { name: "Open launching details, Setting up" });
 
-    expect(rowOrder()).toEqual(["call:asking", "call:working", "divider", "call:old done"]);
+    expect(rowOrder()).toEqual(["call:asking", "call:launching", "call:working", "divider", "call:old done"]);
   });
 
   it("offers Stop only on running rows that can stop", async () => {
     transport.loadSubagentRoster.mockResolvedValue(roster([
       codex("codex child"),
       entry("claude child"),
-      codex("codex finished", { status: "done", endedAt: at(5) }),
+      codex("codex finished", { status: "finished", endedAt: at(5) }),
     ]));
     render(<SubagentsPanel threadId="parent" />);
     await screen.findByRole("button", { name: "Open codex child details, Running" });
@@ -165,10 +167,10 @@ describe("SubagentList live time", () => {
   it("ticks a running row every second and shows a finished row's fixed duration", () => {
     vi.useFakeTimers();
     vi.setSystemTime(START + 48_000);
-    renderList([entry("live"), entry("finished", { status: "done", endedAt: at(3780) })]);
+    renderList([entry("live"), entry("finished", { status: "finished", endedAt: at(3780) })]);
 
     expect(screen.getByRole("button", { name: "Open live details, Running" })).toHaveTextContent("48s");
-    expect(screen.getByRole("button", { name: "Open finished details, Done" })).toHaveTextContent("1h 3m");
+    expect(screen.getByRole("button", { name: "Open finished details, Finished" })).toHaveTextContent("1h 3m");
     act(() => { vi.advanceTimersByTime(24_000); });
     expect(screen.getByRole("button", { name: "Open live details, Running" })).toHaveTextContent("1m 12s");
   });

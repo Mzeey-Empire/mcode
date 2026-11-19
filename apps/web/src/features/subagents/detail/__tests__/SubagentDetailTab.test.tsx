@@ -39,7 +39,7 @@ beforeEach(() => {
 function entry(overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return {
     id: "call:explore", provider: "codex", title: "Explore", prompt: "Map the rail",
-    subagentType: null, model: null, reasoningEffort: null, stepCount: 0, status: "done",
+    subagentType: null, model: null, reasoningEffort: null, stepCount: 0, status: "finished",
     startedAt: "2026-10-13T10:00:00.000Z", endedAt: "2026-10-13T10:00:09.000Z", tier: "steps", canStop: false,
     sourceToolCallId: "explore", childThreadId: null, sourceMessageId: "message-7", parentEntryId: null,
     ...overrides,
@@ -84,7 +84,7 @@ function seedLiveChild(prompt: string) {
 }
 
 async function renderTab(rows: SubagentRosterEntry[]) {
-  useSubagentRosterStore.setState({ rosters: new Map([["thread-1", roster(rows)]]), errors: new Set() });
+  useSubagentRosterStore.setState({ loads: new Map([["thread-1", { kind: "ready", roster: roster(rows) }]]) });
   await act(async () => { render(<SubagentDetailTab threadId="thread-1" entryId="call:explore" />); });
 }
 
@@ -127,11 +127,11 @@ describe("SubagentDetailTab", () => {
   it("leads with the status, then labels the agent, model, and effort the way the composer does, leaving out what was not reported", async () => {
     transport.loadSubagentDetail.mockResolvedValue(detail());
     await renderTab([entry({ subagentType: "Hubble", model: "gpt-5.6-sol", reasoningEffort: "xhigh" })]);
-    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^Done· 9sHubble · GPT-5\.6 Sol X-High$/);
+    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^Finished· 9sHubble · GPT-5\.6 Sol X-High$/);
 
     cleanup();
     await renderTab([entry({ provider: "claude" })]);
-    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^Done· 9s$/);
+    expect(screen.getByTestId("subagent-detail-meta")).toHaveTextContent(/^Finished· 9s$/);
   });
 
   it("says activity is loading until the subagent's steps arrive", async () => {
@@ -183,7 +183,7 @@ describe("SubagentDetailTab", () => {
     expect(screen.queryByTestId("subagent-parent-prompt")).toBeNull();
 
     act(() => useSubagentRosterStore.setState({
-      rosters: new Map([["thread-1", roster([entry({ provider: "cursor", tier: "meta", prompt: "Audit the rail" })], 2)]]),
+      loads: new Map([["thread-1", { kind: "ready", roster: roster([entry({ provider: "cursor", tier: "meta", prompt: "Audit the rail" })], 2) }]]),
     }));
     expect(screen.getByTestId("subagent-parent-prompt")).toHaveTextContent("Audit the rail");
   });
@@ -192,7 +192,7 @@ describe("SubagentDetailTab", () => {
     transport.loadSubagentDetail.mockResolvedValue(detail());
     await renderTab([entry({ status: "running", endedAt: null })]);
     await act(async () => useSubagentRosterStore.setState({
-      rosters: new Map([["thread-1", roster([entry()], 2)]]),
+      loads: new Map([["thread-1", { kind: "ready", roster: roster([entry()], 2) }]]),
     }));
     expect(transport.loadSubagentDetail.mock.calls).toEqual([
       ["thread-1", "call:explore"], ["thread-1", "call:explore"],

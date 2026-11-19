@@ -52,15 +52,14 @@ import { ThreadOverview } from "./ThreadOverview";
 
 function rosterEntry(id: string, overrides: Partial<SubagentRosterEntry> = {}): SubagentRosterEntry {
   return { id: `call:${id}`, provider: "codex", title: id, prompt: null, subagentType: null, model: null, reasoningEffort: null,
-    stepCount: 0, status: "done", startedAt: "2026-10-10T10:00:00.000Z", endedAt: null,
+    stepCount: 0, status: "finished", startedAt: "2026-10-10T10:00:00.000Z", endedAt: null,
     tier: "transcript", canStop: false, sourceToolCallId: id, childThreadId: null,
     sourceMessageId: null, parentEntryId: null, ...overrides };
 }
 
 function seedSubagentRoster(threadId: string, entries: SubagentRosterEntry[]): void {
   useSubagentRosterStore.setState({
-    rosters: new Map([[threadId, { owningParentThreadId: threadId, epoch: "test", revision: 1, entries, truncated: false }]]),
-    errors: new Set(),
+    loads: new Map([[threadId, { kind: "ready", roster: { owningParentThreadId: threadId, epoch: "test", revision: 1, entries, truncated: false } }]]),
   });
 }
 
@@ -79,9 +78,9 @@ describe("ThreadOverview subagents", () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     const summary = screen.getByTestId("thread-overview-subagents");
-    expect(summary).toHaveAccessibleName("Subagents, 1 active, 0 done");
-    expect(summary).toHaveTextContent("Subagents1 active");
-    expect(summary).not.toHaveTextContent("done");
+    expect(summary).toHaveAccessibleName("Subagents, 1 running");
+    expect(summary).toHaveTextContent("Subagents1 running");
+    expect(summary).not.toHaveTextContent("finished");
     expect(summary).not.toHaveTextContent("total");
     expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(1);
     expect(screen.queryByTestId("thread-overview-subagents-running")).not.toBeInTheDocument();
@@ -111,20 +110,20 @@ describe("ThreadOverview subagents", () => {
     expect(usage.compareDocumentPosition(subagents) & Node.DOCUMENT_POSITION_PRECEDING).not.toBe(0);
   });
 
-  it("bounds the disc stack to three, lets the text carry the total, and omits the zero active count", () => {
+  it("bounds the disc stack to three, lets the text carry the total, and omits the zero running count", () => {
     const thread = branchlessThread();
     seedSubagentRoster(thread.id, Array.from({ length: 8 }, (_, index) => rosterEntry(`agent-${index}`)));
 
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     const summary = screen.getByTestId("thread-overview-subagents");
-    expect(summary).toHaveAccessibleName("Subagents, 0 active, 8 done");
-    expect(summary).toHaveTextContent("8 done");
-    expect(summary).not.toHaveTextContent("active");
+    expect(summary).toHaveAccessibleName("Subagents, 8 finished");
+    expect(summary).toHaveTextContent("8 finished");
+    expect(summary).not.toHaveTextContent("running");
     expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(3);
   });
 
-  it("counts failed and stopped entries as done", () => {
+  it("counts failed entries apart and stopped entries as finished", () => {
     const thread = branchlessThread();
     seedSubagentRoster(thread.id, [
       rosterEntry("failed", { status: "failed" }),
@@ -134,6 +133,6 @@ describe("ThreadOverview subagents", () => {
 
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
-    expect(screen.getByTestId("thread-overview-subagents")).toHaveAccessibleName("Subagents, 1 active, 2 done");
+    expect(screen.getByTestId("thread-overview-subagents")).toHaveAccessibleName("Subagents, 1 running · 1 failed · 1 finished");
   });
 });

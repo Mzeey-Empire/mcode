@@ -4,18 +4,19 @@ import { formatLiveDuration, subagentChipStatus, subagentOverviewCounts, subagen
 
 describe("shared subagent surface words", () => {
   it.each([
+    ["needs-you", "Needs you", "needs you"],
+    ["setting-up", "Setting up", "setting up"],
     ["running", "Running", "working"],
-    ["waiting", "Waiting", "waiting for you"],
-    ["done", "Done", "finished"],
     ["failed", "Failed", "failed"],
     ["stopped", "Stopped", "stopped"],
+    ["finished", "Finished", "finished"],
   ] as const)("maps %s without deriving another lifecycle", (status, list, chip) => {
     expect(subagentStatusLabel(status)).toBe(list);
     expect(subagentChipStatus(status)).toBe(chip);
   });
 
-  it("counts every terminal outcome as done", () => {
-    const entries = ["running", "waiting", "done", "failed", "stopped"].map((status, index) =>
+  it("counts setting up as running, stopped as finished, and failed apart", () => {
+    const entries = ["needs-you", "setting-up", "running", "failed", "stopped", "finished"].map((status, index) =>
       SubagentRosterEntrySchema().parse({
         id: `call:${index}`, provider: "claude", title: "Inspect", prompt: null,
         subagentType: null, model: null, reasoningEffort: null, stepCount: 0, status,
@@ -23,8 +24,8 @@ describe("shared subagent surface words", () => {
         canStop: false, sourceToolCallId: String(index), childThreadId: null,
         sourceMessageId: null, parentEntryId: null,
       }));
-    expect(subagentOverviewCounts(entries)).toEqual({ active: 2, done: 3 });
-    expect(subagentOverviewCounts([])).toEqual({ active: 0, done: 0 });
+    expect(subagentOverviewCounts(entries)).toEqual({ needsYou: 1, running: 2, failed: 1, finished: 2 });
+    expect(subagentOverviewCounts([])).toEqual({ needsYou: 0, running: 0, failed: 0, finished: 0 });
   });
 });
 

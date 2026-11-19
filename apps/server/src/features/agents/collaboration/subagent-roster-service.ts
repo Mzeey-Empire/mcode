@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { SubagentRosterSchema, isDelegateTaskToolName, isLiveSubagentStatus, type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest, type SubagentRosterRequest } from "@mcode/contracts/models/subagent-roster";
+import { SubagentRosterSchema, compareRosterEntries, isDelegateTaskToolName, type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest, type SubagentRosterRequest } from "@mcode/contracts/models/subagent-roster";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { SUBAGENT_REPORTING, isChildTurnCancellable, type IAgentProvider, type IProviderRegistry, type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { type CanonicalSubagentStopRequest, type CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
@@ -68,9 +68,7 @@ export class SubagentRosterService {
       ?? this.durability.loadSubagentRoster(canonicalRequest);
     const entries = this.projectEntries(parentId, [...canonical.active, ...canonical.done]);
     for (const entry of this.delegatedTasks?.rosterEntries(parentId) ?? []) entries.set(entry.id, entry);
-    const ordered = [...entries.values()].sort((left, right) =>
-      Number(isLiveSubagentStatus(right.status)) - Number(isLiveSubagentStatus(left.status))
-      || right.startedAt.localeCompare(left.startedAt) || left.id.localeCompare(right.id));
+    const ordered = [...entries.values()].sort(compareRosterEntries);
     return SubagentRosterSchema().parse({
       owningParentThreadId: parentId, epoch: this.epoch, revision: this.revisions.get(parentId) ?? 0,
       entries: ordered.slice(0, 256), truncated: ordered.length > 256,
@@ -190,11 +188,11 @@ export class SubagentRosterService {
   private canonicalEntry(parentId: string, row: CanonicalChildRow, narrative: SubagentRosterEntry | undefined,
     id: string, sourceToolCallId: string | null, children: readonly CanonicalChildRow[]): SubagentRosterEntry {
     const awaitingFirstTurn = row.latestTurnStatus === null && row.endedAt === null && row.activityState === "Idle";
-    const status = awaitingFirstTurn ? "running" : subagentStatusFrom(row.latestTurnStatus ?? row.activityState);
+    const status = awaitingFirstTurn ? "setting-up" : subagentStatusFrom(row.latestTurnStatus ?? row.activityState);
     return {
       ...canonicalEntryMetadata(row, narrative),
       id, provider: row.provider, status, tier: "transcript",
-      canStop: status === "running" && this.withStopAvailability(parentId, row).canStop,
+      canStop: (status === "running" || status === "setting-up") && this.withStopAvailability(parentId, row).canStop,
       sourceToolCallId, childThreadId: row.id, sourceMessageId: narrative?.sourceMessageId ?? null,
       parentEntryId: canonicalParentEntryId(row, children),
     };
@@ -271,7 +269,7 @@ export class SubagentRosterService {
     } catch (error) {
       return this.failed(request.childThreadId, error instanceof Error ? error.message : "Sub-agent interruption failed.");
     }
-    return { childThreadId: request.childThreadId, status: entry.status === "running" ? "interrupted" : "already-terminal" };
+    return { childThreadId: request.childThreadId, status: entry.status === "running" || entry.status === "setting-up" ? "interrupted" : "already-terminal" };
   }
 
   private async stopOne(request: CanonicalSubagentStopRequest): Promise<CanonicalSubagentStopResult> {

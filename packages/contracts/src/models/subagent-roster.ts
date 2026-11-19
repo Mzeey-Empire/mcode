@@ -3,16 +3,30 @@ import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderIdSchema } from "./settings.js";
 
 /**
- * One normalized subagent outcome shared by every surface.
- * `waiting` is a live child blocked on the user's answer.
+ * One normalized subagent state shared by every surface, in thread-row words.
+ * `needs-you` is a live child blocked on the user's answer; `setting-up` is a
+ * child that is launching or still in startup.
  */
-export const SubagentStatusSchema = z.enum(["running", "waiting", "done", "failed", "stopped"]);
-/** One normalized subagent outcome shared by every surface. */
+export const SubagentStatusSchema = z.enum(["needs-you", "setting-up", "running", "failed", "stopped", "finished"]);
+/** One normalized subagent state shared by every surface. */
 export type SubagentStatus = z.infer<typeof SubagentStatusSchema>;
 
-/** Whether a child is still live: working, or blocked on the user's answer. */
+/** Whether a child is still live: setting up, working, or blocked on the user's answer. */
 export function isLiveSubagentStatus(status: SubagentStatus): boolean {
-  return status === "running" || status === "waiting";
+  return status === "needs-you" || status === "setting-up" || status === "running";
+}
+
+const STATUS_RANK: Record<SubagentStatus, number> = {
+  "needs-you": 0, "setting-up": 1, running: 2, failed: 3, stopped: 4, finished: 5,
+};
+
+/** Roster order shared by server and web: status rank, then newest start, then id. */
+export function compareRosterEntries(
+  a: Pick<SubagentRosterEntry, "status" | "startedAt" | "id">,
+  b: Pick<SubagentRosterEntry, "status" | "startedAt" | "id">,
+): number {
+  return STATUS_RANK[a.status] - STATUS_RANK[b.status]
+    || b.startedAt.localeCompare(a.startedAt) || a.id.localeCompare(b.id);
 }
 /** Detail supported by this entry's persisted evidence. */
 export const SubagentDetailTierSchema = z.enum(["transcript", "steps", "meta"]);
@@ -42,7 +56,7 @@ export const SubagentRosterEntrySchema = lazySchema(() => z.object({
 /** Stable server projection of one delegated Agent call or canonical child. */
 export type SubagentRosterEntry = z.infer<ReturnType<typeof SubagentRosterEntrySchema>>;
 
-/** One parent roster, ordered running first and newest first within each group. */
+/** One parent roster, ordered by `compareRosterEntries`: needs-you, setting-up, running, failed, stopped, finished; newest first within each, then by id. */
 export const SubagentRosterSchema = lazySchema(() => z.object({
   owningParentThreadId: z.string().min(1),
   epoch: z.string().min(1),

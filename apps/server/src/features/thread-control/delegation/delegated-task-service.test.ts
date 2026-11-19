@@ -858,7 +858,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
       }
     }));
     await f.service.delegate(f.source, f.input);
-    expect(preparing).toEqual(["failed", "running"]);
+    expect(preparing).toEqual(["failed", "setting-up"]);
     expect([...f.service.coordinatorsWithUnfinishedTasks()]).toEqual([f.coordinator.id]);
   });
 
@@ -882,7 +882,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
       providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: null, narrative: [] }),
     });
     expect(changed).toEqual([task.taskId]);
-    expect(statuses).toEqual([["done"]]);
+    expect(statuses).toEqual([["finished"]]);
   });
 
   it("covers answered questions but delivers a newly pending question", async () => {
@@ -924,7 +924,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
       choices: [{ id: "answer", intent: "provider", label: "Answer" }],
     } });
     f.service.childChanged(task.threadId);
-    expect(loadEntry()).toEqual({ revision: before.revision + 1, status: "waiting" });
+    expect(loadEntry()).toEqual({ revision: before.revision + 1, status: "needs-you" });
     f.pendingApprovals.pop();
     f.service.childChanged(task.threadId);
     expect(loadEntry()).toEqual({ revision: before.revision + 2, status: "running" });
@@ -1072,7 +1072,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const task = requireTask(await f.service.delegate(f.source, f.input));
     expect(task.state).toEqual({ status: "waiting", reason: "approval" });
     expect(f.roster.loadRoster({ owningParentThreadId: f.coordinator.id }).entries.map((entry) =>
-      [entry.tier, entry.childThreadId, entry.status])).toEqual([["meta", null, "waiting"]]);
+      [entry.tier, entry.childThreadId, entry.status])).toEqual([["meta", null, "needs-you"]]);
     expect(f.startups.get(task.taskId)).toBeNull();
     expect(f.threads.listByWorkspace(f.workspace.id)).toHaveLength(1);
     expect(f.control.listPendingApprovals(f.coordinator.id)[0]?.subject).toMatchObject({ kind: "delegate_task", taskId: task.taskId, commit: f.localSha.slice(0, 12) });
@@ -1124,7 +1124,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
       .toMatchObject({ stopApprovalId: expect.any(String), state: { status: "waiting", reason: "needs_input" } });
     const waiting = f.roster.loadRoster({ owningParentThreadId: f.coordinator.id }).entries
       .find((entry) => entry.id === delegatedTaskRosterEntryId(running.taskId));
-    expect(waiting).toMatchObject({ status: "waiting", canStop: true });
+    expect(waiting).toMatchObject({ status: "needs-you", canStop: true });
   });
 
   it("still wakes the Coordinator for a child the user stopped, but not for one it cancelled itself", async () => {
@@ -1177,7 +1177,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
   });
 
   it.each([
-    ["completed", "done"], ["errored", "failed"], ["cancelled", "stopped"], ["interrupted", "stopped"],
+    ["completed", "finished"], ["errored", "failed"], ["cancelled", "stopped"], ["interrupted", "stopped"],
   ] as const)("projects a running delegated transcript and its %s outcome", async (outcome, expected) => {
     const f = await harness();
     await f.threads.updateProvider(f.coordinator.id, "claude");
