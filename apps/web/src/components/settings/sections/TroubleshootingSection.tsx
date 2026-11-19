@@ -28,8 +28,8 @@ function HardwareAccelerationControl() {
   }, [bridge]);
 
   const needsRestart = runningEnabled !== null && runningEnabled !== savedEnabled;
-  // The switch sits on the row's anchored edge in both layouts, so Restart appearing never moves it.
-  return <div className="flex items-center gap-3 min-[80rem]:flex-row-reverse"><Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} />{needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge?.relaunch?.()}>Restart</Button>}</div>;
+  // The switch stays on the row's right edge, so Restart appearing never moves it.
+  return <div className="flex flex-row-reverse items-center gap-3"><Switch aria-label="Hardware acceleration" checked={savedEnabled} onCheckedChange={(value) => void updateSettings({ graphics: { hardwareAcceleration: value } })} />{needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge?.relaunch?.()}>Restart</Button>}</div>;
 }
 
 function DiagnosticsRecordingControl() {

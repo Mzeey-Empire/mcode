@@ -15,7 +15,7 @@ export function SettingsNav() {
   return (
     <>
     <SettingsSearchField />
-    <div className="flex flex-col gap-0.5 px-2 py-3">
+    <div className="flex flex-col gap-0.5 px-2 pt-2 pb-3">
       {SETTINGS_PAGES.map((page) => {
         const current = !showingResults && section === page.id;
         const Icon = page.icon;

@@ -17,7 +17,8 @@ export interface SettingsGroupProps {
 
 function GroupHeading({ id, title, aside }: { readonly id: string; readonly title: string; readonly aside: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
+    // At 900px and narrower the caption moves under the heading, as in the approved prototype; Tailwind's max-* excludes its bound.
+    <div className="flex items-baseline justify-between gap-3 max-[901px]:flex-col max-[901px]:gap-0.5">
       <h2 id={id} className="text-body-small font-semibold text-ink">
         {title}
       </h2>

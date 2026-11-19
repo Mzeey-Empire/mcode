@@ -4,9 +4,11 @@ import { useShallow } from "zustand/shallow";
 import { useSettingsLocation } from "@/stores/settingsLocationStore";
 import type { SettingCondition, SettingDef, SettingId, SettingVariant } from "./setting-def";
 
-/** Responsive grid shared by standard and provider-specific setting rows. */
-export const SETTING_ROW_GRID_CLASS =
-  "grid gap-3 min-[80rem]:grid-cols-[minmax(0,1fr)_auto] min-[80rem]:items-center min-[80rem]:gap-x-6";
+/**
+ * Row layout: the control sits on the label's line and wraps under it only when the label would get
+ * narrower than 24rem, so a narrow window keeps rows on one line as long as they fit.
+ */
+const SETTING_ROW_CLASS = "flex flex-wrap items-center gap-x-6 gap-y-2";
 
 /** Thin inset outline on the row a search location opened; dimmer than the focus ring, no fill. */
 export const SEARCH_HIT_CLASS =
@@ -70,7 +72,7 @@ export interface SettingRowFrameProps {
 
 /**
  * The labelled row layout: label and hint on the left, the control on the right.
- * Stacks the control below the label on narrow viewports. Other matches in search hide the hint.
+ * Other matches in search hide the hint.
  */
 export function SettingRowFrame({ def, variant, label = def.label, hint, children, className }: SettingRowFrameProps) {
   const hit = useSettingHit([def]);
@@ -80,15 +82,15 @@ export function SettingRowFrame({ def, variant, label = def.label, hint, childre
       ref={hit.ref}
       {...hit.attrs}
       data-setting-id={def.id}
-      className={cn(SETTING_ROW_GRID_CLASS, SEARCH_HIT_CLASS, "content-center px-4", ROW_SPACING[variant], className)}
+      className={cn(SETTING_ROW_CLASS, SEARCH_HIT_CLASS, "px-4", ROW_SPACING[variant], className)}
     >
-      <div className="min-w-0">
+      <div className="min-w-0 flex-[1_1_24rem]">
         <span className="text-body-small font-semibold text-ink">{label}</span>
         {shownHint ? (
           <p className="mt-0.5 max-w-[46rem] text-compact leading-[1.8rem] text-muted">{shownHint}</p>
         ) : null}
       </div>
-      <div className="min-w-0 min-[80rem]:justify-self-end">{children}</div>
+      <div className="max-w-full min-w-0 shrink-0">{children}</div>
     </div>
   );
 }
