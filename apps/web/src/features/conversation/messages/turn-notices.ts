@@ -75,6 +75,8 @@ export function turnNoticeFromMessage(message: Message): TurnNotice {
 export function placeTurnNotices(messages: readonly Message[], owner: LiveNoticeOwner): TurnNoticePlacement {
   const draft: PlacementDraft = { byResponseId: {}, live: [], visualsByResponseId: {}, liveVisuals: [], moved: new Set() };
   let pending: PendingTurnMessages = { notices: [], visuals: [] };
+  // A steer adds a prompt mid-turn, so a visual published before it keeps its own row until a later reply places it.
+  const unclaimed: Message[] = [];
   for (const message of messages) {
     if (isContextCompactedNotice(message)) {
       pending.notices.push(message);
@@ -85,26 +87,39 @@ export function placeTurnNotices(messages: readonly Message[], owner: LiveNotice
       continue;
     }
     if (message.role === "system") continue;
-    if (message.role === "assistant" && message.id === owner.responseId) moveToLiveTurn(draft, pending);
-    else if (message.role === "assistant") moveToSettledTurn(draft, pending, message);
+    if (message.role === "assistant" && message.id === owner.responseId) moveToLiveTurn(draft, pending, unclaimed);
+    else if (message.role === "assistant") moveToSettledTurn(draft, pending, message, unclaimed);
+    else unclaimed.push(...pending.visuals);
     pending = { notices: [], visuals: [] };
   }
-  if (owner.ownsTrailing) moveToLiveTurn(draft, pending);
+  if (owner.ownsTrailing) moveToLiveTurn(draft, pending, unclaimed);
   return placementFrom(messages, draft);
 }
 
-function moveToLiveTurn(draft: PlacementDraft, pending: PendingTurnMessages): void {
+function moveToLiveTurn(draft: PlacementDraft, pending: PendingTurnMessages, unclaimed: Message[]): void {
   draft.live.push(...pending.notices.map(turnNoticeFromMessage));
   // An inline visual shows only where the streamed reply places it, so the live turn gives it no slot.
   draft.liveVisuals.push(...pending.visuals.filter((visual) => visual.visualPlacement !== "inline"));
   for (const message of [...pending.notices, ...pending.visuals]) draft.moved.add(message.id);
+  claim(draft, unclaimed, (visual) => visual.visualPlacement === "inline");
 }
 
-function moveToSettledTurn(draft: PlacementDraft, pending: PendingTurnMessages, answer: Message): void {
+function moveToSettledTurn(draft: PlacementDraft, pending: PendingTurnMessages, answer: Message, unclaimed: Message[]): void {
   if (pending.notices.length > 0) draft.byResponseId[answer.id] = pending.notices;
   const visuals = pending.visuals.filter((visual) => !isPlacedInAnswer(visual, answer));
   if (visuals.length > 0) draft.visualsByResponseId[answer.id] = visuals;
   for (const message of [...pending.notices, ...pending.visuals]) draft.moved.add(message.id);
+  claim(draft, unclaimed, (visual) => isPlacedInAnswer(visual, answer));
+}
+
+/** Takes an unclaimed visual out of its own row once a reply places it, so it renders only at its marker. */
+function claim(draft: PlacementDraft, unclaimed: Message[], isPlaced: (visual: Message) => boolean): void {
+  for (let index = unclaimed.length - 1; index >= 0; index -= 1) {
+    const visual = unclaimed[index];
+    if (!visual || !isPlaced(visual)) continue;
+    draft.moved.add(visual.id);
+    unclaimed.splice(index, 1);
+  }
 }
 
 function placementFrom(messages: readonly Message[], draft: PlacementDraft): TurnNoticePlacement {

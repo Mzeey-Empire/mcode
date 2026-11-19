@@ -476,6 +476,33 @@ describe("html visual placement", () => {
     expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
   });
 
+  it("shows a visual once, at its marker, when the reply after a steer places it", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("steer", "user", "Make it blue", 3), turnMessage("answer", "assistant", "See:\n\n![Chart](visual:visual-2)", 4)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [],
+    });
+    expect(projected.map((item) => item.key)).not.toContain("visual-2");
+  });
+
+  it("keeps a visual published before a steer on its own row when the reply does not place it", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("steer", "user", "Make it blue", 3), turnMessage("answer", "assistant", "Done", 4)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [],
+    });
+    const keys = projected.map((item) => item.key);
+    expect(keys.indexOf("visual-2")).toBeGreaterThan(-1);
+    expect(keys.indexOf("visual-2")).toBeLessThan(keys.indexOf("steer"));
+  });
+
+  it("does not show an inline visual published before a steer while the turn runs", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2, "inline"), turnMessage("steer", "user", "Make it blue", 3)],
+      currentTurn: { threadId: "thread", executionId: "execution", responseKey: "live-answer" },
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: "Here it is", toolCalls: [liveTool],
+    });
+    expect(projected.map((item) => item.key)).not.toContain("visual-2");
+  });
+
   function visual(sequence: number, visualPlacement?: "auto" | "inline"): Message {
     return createMockMessage({
       id: `visual-${sequence}`, thread_id: "thread", role: "system", content: "Chart", sequence,
