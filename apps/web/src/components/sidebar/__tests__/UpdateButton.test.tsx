@@ -152,7 +152,7 @@ describe("Install", () => {
     await userEvent.click(screen.getByRole("button", { name: /Install/ }));
     const dialog = await screen.findByRole("dialog", { name: "Install update" });
     expect(dialog).toHaveTextContent("0.10.0");
-    expect(dialog).toHaveTextContent("1 agent is running. Installing restarts Mcode and stops them.");
+    expect(dialog).toHaveTextContent("1 agent is running. Installing restarts Mcode. Running work continues after it restarts.");
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "When they finish" })).toHaveFocus());
     await userEvent.click(within(dialog).getByRole("button", { name: "When they finish" }));
     expect(app.installWhenIdle).toHaveBeenCalledOnce();
@@ -173,7 +173,8 @@ describe("Install", () => {
     app.installUpdate.mockResolvedValue(busy(null));
     render(<UpdateButton />);
     await userEvent.click(screen.getByRole("button", { name: /Install/ }));
-    expect(await screen.findByRole("dialog", { name: "Install update" })).toHaveTextContent("Agents may be running.");
+    expect(await screen.findByRole("dialog", { name: "Install update" })).toHaveTextContent("Agents may be running. Installing restarts Mcode. "
+      + "Running work continues after it restarts.");
   });
 });
 

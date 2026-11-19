@@ -827,6 +827,19 @@ export class CanonicalAgentStore {
     return rows[0] ? this.turnFromRow(rows[0]) : null;
   }
 
+  /**
+   * Turns ended by Mcode closing at or after an intentional stop. Listed once before startup admits new work;
+   * creation can commit after shutdown closes admission, so it cannot bound this query.
+   */
+  listTurnsInterruptedByStop(stoppedAt: string): Array<{ threadId: string; turnId: string; executionId: string }> {
+    return this.orm.select({ threadId: canonicalAgentTurns.threadId, turnId: canonicalAgentTurns.id,
+      executionId: canonicalAgentTurns.executionId }).from(canonicalAgentTurns)
+      .where(and(eq(canonicalAgentTurns.status, "Interrupted"),
+        sql`${canonicalAgentTurns.endedAt} >= ${stoppedAt}`,
+        sql`json_extract(${canonicalAgentTurns.endingJson}, '$.cause') = 'app_closed'`))
+      .all();
+  }
+
   /** Load the newest canonical turn for one thread. */
   loadLatestTurn(threadId: string): AgentTurn | null {
     const row = this.orm.select().from(canonicalAgentTurns)

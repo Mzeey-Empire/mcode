@@ -69,7 +69,7 @@ function progressLabel(percent: number, pendingVersion: string | null): string {
 /** Copy for the install dialog body, singular for one agent. */
 export function runningAgentsSentence(count: number): string {
   const subject = count === 1 ? "1 agent is" : `${count} agents are`;
-  return `${subject} running. Installing restarts Mcode and stops them.`;
+  return `${subject} running. Installing restarts Mcode. Running work continues after it restarts.`;
 }
 
 /** GitHub release page for a version, opened from the release notes card. */

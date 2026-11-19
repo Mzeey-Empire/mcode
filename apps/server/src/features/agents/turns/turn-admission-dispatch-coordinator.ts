@@ -111,6 +111,11 @@ export type SendMessageCommand = Omit<SendMessageInput, "permissionMode" | "prov
   forceFreshSession?: boolean;
   /** Interrupted execution consumed atomically when the replacement turn starts. */
   retryOfExecutionId?: string;
+  /**
+   * Throws when this turn must no longer start. It runs once the thread's runtime slot is reserved, so no other turn
+   * can start on the thread between this check and the turn's commit.
+   */
+  admissionGuard?: () => void;
   /** Continues the thread's native provider session or fails; never opens a fresh one. */
   resumeRequired?: boolean;
   /** Stores the user row hidden from the transcript, for server-authored continuation prompts. */
@@ -268,7 +273,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly platform: NodeJS.Platform,
     private readonly models: TurnModelCatalog,
     private readonly parentStartOwner: TurnParentStartOwner,
-    private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
+    private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unscheduleForSend">,
     private readonly providerSwitch?: ProviderSwitchService,
     private readonly completionHolds: CompletionHolds = new CompletionHolds(),
   ) {}
@@ -280,14 +285,14 @@ export class TurnAdmissionDispatchCoordinator {
     canReserve?: () => boolean,
   ): Promise<TurnAdmissionResult> {
     this.completionHolds.cancel(command.threadId);
-    await this.resumeScheduler?.unschedule(command.threadId);
+    await this.resumeScheduler?.unscheduleForSend(command.threadId);
     const release = command.stagedDraftImageIds?.length
       ? this.attachments.leaseDraftImages(command.threadId, command.stagedDraftImageIds)
       : undefined;
     try {
       const admitted = await this.admitLeased(command, runtime, canReserve);
       // A schedule can be requested while preparation awaits I/O and the old attempt is still latest.
-      await this.resumeScheduler?.unschedule(command.threadId);
+      await this.resumeScheduler?.unscheduleForSend(command.threadId);
       command.onAdmissionComplete?.(admitted.kind === "dispatch");
       return admitted;
     } finally {
@@ -635,6 +640,7 @@ export class TurnAdmissionDispatchCoordinator {
     parentStartInput.revertNoticeIds = revertNotice.revertIds;
     let wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
     if (!runtime.owns(lease)) throw new TurnAdmissionOwnershipLostError();
+    prepared.command.admissionGuard?.();
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
     if (prepared.command.planCommentIds?.length) {
       const { comments, versions } = this.plans.sentComments(prepared.thread.id, prepared.command.planCommentIds);

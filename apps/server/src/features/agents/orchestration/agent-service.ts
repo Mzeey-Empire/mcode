@@ -67,6 +67,11 @@ export class AgentService {
     return this.runtime.onRuntimeReleased(listener);
   }
 
+  /** Mark the server as shutting down, before any provider is stopped. */
+  beginShutdown(): void {
+    this.runtime.beginShutdown();
+  }
+
   /** Stop all active provider sessions during shutdown. */
   stopAll(): Promise<void> {
     return this.runtime.stopAll();

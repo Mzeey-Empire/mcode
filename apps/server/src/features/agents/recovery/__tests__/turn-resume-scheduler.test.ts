@@ -11,6 +11,7 @@ import { logger } from "@mcode/shared";
 import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import type { ScheduledTurnResume } from "@mcode/contracts/models/turn-recovery";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
+import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
@@ -43,7 +44,6 @@ import { TurnAdmissionDispatchCoordinator, type SendMessageCommand, type TurnRun
 import { TurnRecoveryService } from "../turn-recovery-service.js";
 import { TurnResumeScheduleStore } from "../turn-resume-schedule-store.js";
 import { TurnResumeScheduler, type TurnResumeSchedulerClock } from "../turn-resume-scheduler.js";
-import { RESUME_CONTINUATION_PROMPT } from "../turn-resume.js";
 
 import { testModelCatalog } from "../../__tests__/provider-model-fixture.js";
 
@@ -94,6 +94,8 @@ describe("TurnResumeScheduler", () => {
   let published: Array<{ threadId: string; resume: ScheduledTurnResume | null }>;
   let dispatch: ReturnType<typeof vi.fn<(command: SendMessageCommand) => Promise<void>>>;
   let firedAt: number[];
+  /** Set once the fake admission refuses turns, as the server's does from the moment shutdown begins. */
+  let admissionClosed: boolean;
 
   function startTurn(turnId: string, executionId: string): void {
     sink.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-resume", providerId: "codex", createdAt: NOW },
@@ -115,6 +117,35 @@ describe("TurnResumeScheduler", () => {
   }
 
   const input = (at = "2026-10-11T12:01:00.000Z") => ({ threadId: THREAD_ID, turnId: TURN_ID, at });
+
+  /** The real admission coordinator, so a send reaches the scheduler the way the server's sends do. */
+  function openAdmission(startParent?: () => Promise<void>) {
+    const writer = agentStorageTestWriter(db);
+    const workspaces = new WorkspaceRepo(db, writer);
+    const messageRepo = new MessageRepo(db, writer);
+    const provider: IAgentProvider = Object.assign(new NodeEvents.EventEmitter(), {
+      id: "codex" as const, descriptor: { id: "codex" as const, capabilities: [] }, supportsCompletion: false,
+      subagentReporting: null,
+       maxInputCharactersPerTurn: 100_000,
+
+      sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: testModelCatalog.listModels,
+    });
+    const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
+    const settings = new SettingsService();
+    const commands = new AgentRuntimeCommandPort();
+    const plans = new PlanTurnService(threads, providers,
+      new PlanQuestionService(messageRepo, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
+    const parentOwner = createTestParentStartOwner(db);
+    const admission = new TurnAdmissionDispatchCoordinator(threads, workspaces, messageRepo, new TurnRevertStore(db),
+      new GitWorktreeService(workspaces, new FakeGitExecutor(), hostRuntime), new AttachmentService(), providers,
+      new ProviderAvailabilityService(settings, providers), boundary, settings, plans,
+      new GoalLifecycleService(threads, providers, writer, commands, boundary), undefined, undefined, hostRuntime.platform, testModelCatalog,
+      { start: async (start) => {
+        await startParent?.();
+        await parentOwner.start(start);
+      } }, scheduler);
+    return { admission, settings };
+  }
 
   beforeEach(async () => {
     db = openAgentStorageTestDatabase();
@@ -143,11 +174,13 @@ describe("TurnResumeScheduler", () => {
     clock = new FakeClock();
     published = [];
     firedAt = [];
+    admissionClosed = false;
     dispatch = vi.fn(async (command) => {
       firedAt.push(clock.now());
       expect(store.get(THREAD_ID)).toBeNull();
       expect(published.at(-1)).toEqual({ threadId: THREAD_ID, resume: null });
-      await scheduler.unschedule(command.threadId);
+      await scheduler.unscheduleForSend(command.threadId);
+      if (admissionClosed) throw new TurnAdmissionError("unavailable", "Mcode is shutting down");
       if (!command.sourceTurnId) throw new Error("Resume requires an attempt identity");
       sink.startParentTurn({ thread: { id: THREAD_ID, workspaceId: "workspace-resume", providerId: "codex", createdAt: NOW },
         turnId: command.sourceTurnId, executionId: NodeCrypto.randomUUID(), permissionMode: "supervised", providerIdentities: [],
@@ -181,7 +214,7 @@ describe("TurnResumeScheduler", () => {
     expect(firedAt).toEqual([Date.parse("2026-10-11T12:01:00.000Z")]);
     expect(dispatch).toHaveBeenCalledTimes(1);
     const command = dispatch.mock.calls[0]?.[0];
-    expect(command).toMatchObject({ content: RESUME_CONTINUATION_PROMPT, internalUserMessage: true, forceFreshSession: true,
+    expect(command).toMatchObject({ content: "The previous turn was interrupted before it finished. Continue the task. Check the working tree before repeating a step.", internalUserMessage: true, forceFreshSession: true,
       retryOfExecutionId: EXECUTION_ID });
     expect(command?.providerWireOverride).toContain("Finish the task");
     expect(threads.findById(THREAD_ID)?.scheduled_resume).toBeNull();
@@ -239,30 +272,9 @@ describe("TurnResumeScheduler", () => {
 
   it.each([false, true])("clears a new send even with a schedule requested during preparation: %s", async (reschedule) => {
     await scheduler.schedule(input());
-    const writer = agentStorageTestWriter(db);
-    const workspaces = new WorkspaceRepo(db, writer);
-    const messageRepo = new MessageRepo(db, writer);
-    const provider: IAgentProvider = Object.assign(new NodeEvents.EventEmitter(), {
-      id: "codex" as const, descriptor: { id: "codex" as const, capabilities: [] }, supportsCompletion: false,
-      subagentReporting: null,
-       maxInputCharactersPerTurn: 100_000,
-
-      sendTurn: async () => {}, stopSession: () => {}, shutdown: () => {}, listModels: testModelCatalog.listModels,
+    const { admission, settings } = openAdmission(async () => {
+      if (reschedule) await scheduler.schedule(input("2026-10-11T12:02:00.000Z"));
     });
-    const providers: IProviderRegistry = { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
-    const settings = new SettingsService();
-    const commands = new AgentRuntimeCommandPort();
-    const plans = new PlanTurnService(threads, providers,
-      new PlanQuestionService(messageRepo, new PlanQuestionAnswersRepo(db, writer)), new PlanRepo(db, writer), new AgentTurnCommandPort(commands));
-    const parentOwner = createTestParentStartOwner(db);
-    const admission = new TurnAdmissionDispatchCoordinator(threads, workspaces, messageRepo, new TurnRevertStore(db),
-      new GitWorktreeService(workspaces, new FakeGitExecutor(), hostRuntime), new AttachmentService(), providers,
-      new ProviderAvailabilityService(settings, providers), boundary, settings, plans,
-      new GoalLifecycleService(threads, providers, writer, commands, boundary), undefined, undefined, hostRuntime.platform, testModelCatalog,
-      { start: async (start) => {
-        if (reschedule) await scheduler.schedule(input("2026-10-11T12:02:00.000Z"));
-        await parentOwner.start(start);
-      } }, scheduler);
     const runtime: TurnRuntimeAdmissionAuthority = {
       reserve: () => ({ threadId: THREAD_ID, turnExecutionId: NodeCrypto.randomUUID(), mutationReservationToken: NodeCrypto.randomUUID(), generation: 1 }),
       activate: () => {}, abort: async () => {}, release: () => {}, owns: () => true,
@@ -420,5 +432,59 @@ describe("TurnResumeScheduler", () => {
     expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
     expect(published.at(-1)).toEqual({ threadId: THREAD_ID, resume: null });
     expect(errorLog).toHaveBeenCalledWith("Scheduled turn resume failed", { threadId: THREAD_ID, error: "Provider unavailable" });
+  });
+
+  const savedRow = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, runAt: "2026-10-11T12:01:00.000Z", createdAt: NOW };
+
+  it.each([
+    ["already firing", true],
+    ["not yet due", false],
+  ])("keeps a resume whose timer is %s when shutdown closes admission, and fires it on the next start", async (_case, firing) => {
+    await scheduler.schedule(input());
+    // A due callback first waits for the writer to delete its row, which is where shutdown can overtake it.
+    const due = firing ? clock.advance(60_000) : Promise.resolve();
+    admissionClosed = true;
+    scheduler.beginShutdown();
+    await due;
+    await clock.advance(60_000);
+    await scheduler.shutdown();
+    expect(store.listAll()).toEqual([savedRow]);
+    expect(threads.findById(THREAD_ID)?.scheduled_resume).toEqual({ turnId: TURN_ID, at: savedRow.runAt });
+
+    admissionClosed = false;
+    scheduler = new TurnResumeScheduler(store, recovery, dispatch, (event) => published.push(event), clock);
+    await scheduler.start();
+    expect(sink.loadLatestTurn(THREAD_ID)?.attemptOf).toBe(TURN_ID);
+    expect(store.listAll()).toEqual([]);
+  });
+
+  it("leaves the schedule when shutdown refuses a send", async () => {
+    await scheduler.schedule(input());
+    const { admission, settings } = openAdmission();
+    scheduler.beginShutdown();
+    const runtime: TurnRuntimeAdmissionAuthority = {
+      reserve: () => { throw new TurnAdmissionError("unavailable", "Mcode is shutting down"); },
+      activate: () => {}, abort: async () => {}, release: () => {}, owns: () => true,
+    };
+    try {
+      await expect(admission.admit({ threadId: THREAD_ID, content: "A different request" }, runtime))
+        .rejects.toThrow("Mcode is shutting down");
+      expect(store.listAll()).toEqual([savedRow]);
+      expect(published).toEqual([{ threadId: THREAD_ID, resume: { turnId: TURN_ID, at: savedRow.runAt } }]);
+    } finally { settings.dispose(); }
+  });
+
+  it("keeps a schedule cancelled while shutdown refuses its resume cancelled", async () => {
+    await scheduler.schedule(input());
+    dispatch.mockImplementationOnce(async () => {
+      await scheduler.unschedule(THREAD_ID);
+      admissionClosed = true;
+      scheduler.beginShutdown();
+      throw new TurnAdmissionError("unavailable", "Mcode is shutting down");
+    });
+    await clock.advance(60_000);
+    await scheduler.shutdown();
+    expect(store.listAll()).toEqual([]);
+    expect(published.at(-1)).toEqual({ threadId: THREAD_ID, resume: null });
   });
 });

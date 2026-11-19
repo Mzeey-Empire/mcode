@@ -11,11 +11,13 @@ export interface TaskFacts {
   error?: string;
   needsInput?: boolean;
   launching?: boolean;
+  /** A planned restart owns this interrupted attempt or its native attempt handing over to a fallback. */
+  resumePending?: boolean;
 }
 
 /** Derive current task state without freezing resumable terminal outcomes. */
 export function deriveTaskState(facts: TaskFacts): TaskState {
-  if (facts.turn) return turnState(facts);
+  if (facts.turn) return turnState(facts, facts.turn.status);
   const startup = startupState(facts.startup);
   if (startup) return startup;
   const approval = approvalState(facts.approval);
@@ -45,14 +47,16 @@ function approvalState(approval: TaskFacts["approval"]): TaskState | null {
   }
 }
 
-function turnState(facts: TaskFacts): TaskState {
-  switch (facts.turn?.status) {
+function turnState(facts: TaskFacts, status: AgentTurn["status"]): TaskState {
+  switch (status) {
     case "Completed":
       return { status: "finished", outcome: "completed", ...(facts.summary ? { summary: facts.summary.slice(0, 8_000) } : {}) };
     case "Errored":
+      if (facts.resumePending) return { status: "working", phase: "running" };
       return { status: "finished", outcome: "failed", ...(facts.error ? { error: facts.error.slice(0, 8_000) } : {}) };
     case "Cancelled": return { status: "finished", outcome: "cancelled" };
-    case "Interrupted": return { status: "finished", outcome: "interrupted" };
+    case "Interrupted":
+      return facts.resumePending ? { status: "working", phase: "running" } : { status: "finished", outcome: "interrupted" };
     default:
       return facts.needsInput ? { status: "waiting", reason: "needs_input" } : { status: "working", phase: "running" };
   }

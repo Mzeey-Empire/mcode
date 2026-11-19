@@ -11,6 +11,7 @@ import type { TurnSteerService } from "../../agents/steering/turn-steer-service.
 import type { TurnSteerRuntime } from "../../agents/steering/turn-steer-runtime-port.js";
 import type { SendMessageCommand } from "../../agents/turns/turn-admission-dispatch-coordinator.js";
 import { threadContinuationSettings } from "../../agents/recovery/turn-recovery-service.js";
+import type { PlannedRestart } from "../../agents/recovery/planned-restart/index.js";
 
 type WakeTimer = ReturnType<typeof setTimeout> | number;
 
@@ -28,6 +29,8 @@ export interface CoordinatorWakeDeps {
   messages: Pick<MessageRepo, "findById">;
   steers: Pick<TurnSteerRepo, "find">;
   steer: Pick<TurnSteerService, "steer">;
+  /** A pending restart continuation must start first: a wake turn would make it stale, and it would be dropped. */
+  plannedRestart: Pick<PlannedRestart, "isPending">;
   runtime: Pick<TurnSteerRuntime, "runningTurn"> & {
     isActive(threadId: string): boolean;
     sendMessage(command: SendMessageCommand): Promise<void>;
@@ -124,7 +127,9 @@ export class CoordinatorWakeService {
       await this.deliverSteer(coordinatorId, turn.turnExecutionId);
       return;
     }
-    if (this.deps.runtime.isActive(coordinatorId)) return this.hold(coordinatorId, "busy");
+    if (this.deps.runtime.isActive(coordinatorId) || this.deps.plannedRestart.isPending(coordinatorId)) {
+      return this.hold(coordinatorId, "busy");
+    }
     await this.deliverIdle(thread);
   }
 

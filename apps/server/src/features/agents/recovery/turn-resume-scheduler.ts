@@ -16,7 +16,8 @@ export interface TurnResumeSchedulerClock {
   clearTimeout(timer: ResumeTimer): void;
 }
 
-type ArmedResume = { row: TurnResumeScheduleRow; timer?: ResumeTimer };
+/** `firing` is set once the resume is being admitted; the entry stays so a cancellation meanwhile can still remove it. */
+type ArmedResume = { row: TurnResumeScheduleRow; timer?: ResumeTimer; firing?: boolean };
 
 const systemClock: TurnResumeSchedulerClock = {
   now: () => Date.now(),
@@ -28,6 +29,7 @@ const systemClock: TurnResumeSchedulerClock = {
 export class TurnResumeScheduler {
   private readonly armed = new Map<string, ArmedResume>();
   private readonly firing = new Set<Promise<void>>();
+  private stopping = false;
 
   constructor(
     private readonly store: TurnResumeScheduleStore,
@@ -80,6 +82,25 @@ export class TurnResumeScheduler {
     this.publish({ threadId, resume: null });
   }
 
+  /**
+   * Clear the schedule because a send on the thread replaces it. Once shutdown has begun admission refuses the send,
+   * so the schedule stays for the next start. A resume already firing has removed its own row; it is left to that
+   * resume, which a send cannot cancel the way the user can.
+   */
+  async unscheduleForSend(threadId: string): Promise<void> {
+    if (this.stopping || this.armed.get(threadId)?.firing) return;
+    await this.unschedule(threadId);
+  }
+
+  /**
+   * Stop every timer when shutdown begins, because admission closes then and would refuse a resume that came due.
+   * Saved schedules stay, so the next start fires them.
+   */
+  beginShutdown(): void {
+    this.stopping = true;
+    for (const entry of this.armed.values()) this.clearTimer(entry);
+  }
+
   /** Recover deadlines after turn and startup reconciliation have finished. */
   async start(): Promise<void> {
     for (const row of this.store.listAll()) {
@@ -97,17 +118,23 @@ export class TurnResumeScheduler {
 
   /** Stop timers and drain already firing admissions before the database closes. */
   async shutdown(): Promise<void> {
-    for (const threadId of this.armed.keys()) this.disarm(threadId);
+    this.beginShutdown();
     await Promise.all(this.firing);
   }
 
   private disarm(threadId: string): void {
     const entry = this.armed.get(threadId);
-    if (entry?.timer !== undefined) this.clock.clearTimeout(entry.timer);
+    if (entry) this.clearTimer(entry);
     this.armed.delete(threadId);
   }
 
+  private clearTimer(entry: ArmedResume): void {
+    if (entry.timer !== undefined) this.clock.clearTimeout(entry.timer);
+    entry.timer = undefined;
+  }
+
   private arm(entry: ArmedResume): void {
+    if (this.stopping) return;
     const remaining = Date.parse(entry.row.runAt) - this.clock.now();
     entry.timer = this.clock.setTimeout(async () => {
       if (this.armed.get(entry.row.threadId) !== entry) return;
@@ -132,11 +159,32 @@ export class TurnResumeScheduler {
     await this.store.delete(threadId);
     // A send, cancellation, or replacement during the writer await wins over this callback.
     if (this.armed.get(threadId) !== entry) return;
-    this.disarm(threadId);
+    entry.firing = true;
     this.publish({ threadId, resume: null });
-    if (!stored || stored.executionId !== executionId) return;
-    const turn = this.recovery.requireResumableUsageLimitTurn({ threadId, turnId });
-    if (turn.executionId !== executionId) return;
-    await this.recovery.resumeTurn({ threadId, turnId }, this.dispatch);
+    try {
+      if (!stored || stored.executionId !== executionId) return;
+      const turn = this.recovery.requireResumableUsageLimitTurn({ threadId, turnId });
+      if (turn.executionId !== executionId) return;
+      await this.resume(entry, stored);
+    } finally {
+      if (this.armed.get(threadId) === entry) this.armed.delete(threadId);
+    }
+  }
+
+  /**
+   * A resume refused once shutdown has begun was refused by its closed admission, so its schedule is saved again for
+   * the next start, unless the user cancelled or replaced it meanwhile.
+   */
+  private async resume(entry: ArmedResume, stored: TurnResumeScheduleRow): Promise<void> {
+    const { threadId, turnId } = stored;
+    try {
+      await this.recovery.resumeTurn({ threadId, turnId }, this.dispatch);
+    } catch (error) {
+      if (!this.stopping || this.armed.get(threadId) !== entry) throw error;
+      await this.store.upsert(stored);
+      this.publish({ threadId, resume: { turnId, at: stored.runAt } });
+      logger.info("Scheduled turn resume left for the next start", { threadId,
+        error: error instanceof Error ? error.message : String(error) });
+    }
   }
 }

@@ -22,7 +22,7 @@ import {
 import { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
 import { TurnRecoveryError } from "./turn-recovery-error.js";
 import { launchTelemetry } from "../../../runtime/diagnostics/launch-telemetry.js";
-import { chooseResumePath, NativeResumeWatch, RESUME_CONTINUATION_PROMPT, type ResumePathInput } from "./turn-resume.js";
+import { chooseResumePath, continuationPrompt, NativeResumeWatch, type RestartContext, type ResumePathInput } from "./turn-resume.js";
 import type { SendMessageCommand } from "../orchestration/agent-service.js";
 import type { AgentTurnEnding } from "@mcode/contracts/compat/agent-model";
 import type { IProviderRegistry } from "@mcode/contracts/providers/interfaces";
@@ -45,6 +45,8 @@ export interface RecoverableTurn {
   readonly ending: AgentTurnEnding | null;
   readonly thread: Thread;
   readonly message: Message;
+  /** Last message a seeded session replays; defaults to the turn's own prompt. */
+  readonly historyThroughSequence?: number;
 }
 
 /** Command fields that attach an attempt to the turn's existing user row, which already owns the attachments. */
@@ -161,7 +163,8 @@ export class TurnRecoveryService {
       // A failed resume attempt resumes again, so it keeps the native-session guard or reseeds a fresh session
       // instead of sending the bare continuation prompt to a session that may no longer exist.
       const thread = { ...target.thread, model: input.model ?? target.thread.model };
-      return { turnId: (await this.continueTurn({ ...target, thread }, dispatch)).turnId };
+      return { turnId: (await this.continueTurn({ ...target, thread }, dispatch, false,
+        continuationPrompt(null), true)).turnId };
     }
     const reuse = options.reuseUserMessage === true;
     const stored = target.message.attachments ?? [];
@@ -180,10 +183,31 @@ export class TurnRecoveryService {
    * is tried first when it can be resumed; when the provider reports that session gone, a fresh session seeded with
    * the conversation takes over.
    */
-  async resumeTurn(input: TurnResumeParams, dispatch: TurnDispatch): Promise<TurnResumeResult> {
+  async resumeTurn(input: TurnResumeParams, dispatch: TurnDispatch, context?: RestartContext): Promise<TurnResumeResult> {
     const interrupted = this.requireRecoverableTurn(input, "Interrupted");
     const target = { ...interrupted, thread: { ...interrupted.thread, model: input.model ?? interrupted.thread.model } };
-    return this.continueTurn(target, dispatch, this.limitedBeforeOutput(target));
+    const restart = context ?? (target.ending?.outcome === "interrupted" && target.ending.cause === "app_closed"
+      ? {} : null);
+    return this.continueTurn(target, dispatch, this.limitedBeforeOutput(target), continuationPrompt(restart), true,
+      context?.onLateFailure);
+  }
+
+  /** Start a hidden continuation for a finished parent without retrying its execution. */
+  async wakeParent(input: { threadId: string; anchorTurnId: string }, dispatch: TurnDispatch, context: RestartContext): Promise<TurnResumeResult> {
+    const turn = this.canonicalSink.loadTurn(input.anchorTurnId);
+    if (!turn || turn.threadId !== input.threadId || !turn.executionId) {
+      throw new TurnRecoveryError("TURN_RECOVERY_NOT_FOUND", "Parent turn not found");
+    }
+    const state = this.canonicalSink.loadTurnRetryState(input.threadId, turn.id);
+    if (state.hasLaterTurn || state.hasRunningTurn) {
+      throw new TurnRecoveryError("TURN_RECOVERY_CONFLICT", "Parent is no longer idle and latest");
+    }
+    this.requireTerminalStartup(input.threadId);
+    // A wake follows a finished turn, so a seeded session must see that turn's reply, not just its prompt.
+    const target = { turnId: turn.id, executionId: turn.executionId, ending: turn.ending,
+      ...this.requireRecoveryInput(input.threadId, turn.id),
+      historyThroughSequence: this.messages.getLatestSequenceIncludingInternal(input.threadId) };
+    return this.continueTurn(target, dispatch, false, continuationPrompt(context), false, context.onLateFailure);
   }
 
   /** Check that the latest attempt is a usage-limit interruption that can be resumed, without consuming it. */
@@ -208,11 +232,14 @@ export class TurnRecoveryService {
     target: RecoverableTurn,
     dispatch: TurnDispatch,
     resendPrompt = false,
+    prompt = continuationPrompt(null),
+    retry = true,
+    onLateFailure?: (error: unknown) => void,
   ): Promise<TurnResumeResult> {
     if (chooseResumePath(this.resumePathInput(target.thread)) === "native-session") {
-      return this.resumeNatively(target, dispatch, resendPrompt);
+      return this.resumeNatively(target, dispatch, resendPrompt, prompt, retry, onLateFailure);
     }
-    return { turnId: await this.dispatchSeededResume(target, target.executionId, dispatch), mode: "seeded-session" };
+    return { turnId: await this.dispatchSeededResume(target, retry ? target.executionId : undefined, dispatch, prompt), mode: "seeded-session" };
   }
 
   private resumePathInput(thread: Thread): ResumePathInput {
@@ -229,6 +256,9 @@ export class TurnRecoveryService {
     target: RecoverableTurn,
     dispatch: TurnDispatch,
     resendPrompt: boolean,
+    prompt: string,
+    retry: boolean,
+    onLateFailure: ((error: unknown) => void) | undefined,
   ): Promise<TurnResumeResult> {
     const turnId = NodeCrypto.randomUUID();
     const watch = new NativeResumeWatch(turnId);
@@ -236,7 +266,7 @@ export class TurnRecoveryService {
     const released = new Promise<void>((resolve) => { releaseRuntime = resolve; });
     try {
       await this.dispatchAttempt(turnId, {
-        ...(resendPrompt ? this.promptResendCommand(target) : this.continuationCommand(target, target.executionId)),
+        ...(resendPrompt ? this.promptResendCommand(target) : this.continuationCommand(target, retry ? target.executionId : undefined, prompt)),
         resumeRequired: true,
         onRuntimeReleased: releaseRuntime,
       }, dispatch);
@@ -245,12 +275,18 @@ export class TurnRecoveryService {
       throw error;
     }
     // The fallback hangs off runtime release, not this request, so it still runs after the client stops waiting.
-    const settled = released.then(() => this.settleNativeAttempt(watch, target, turnId, dispatch));
+    const settled = released.then(() => this.settleNativeAttempt(watch, target, turnId, dispatch, prompt, retry));
+    let decided = false;
     settled.catch((error: unknown) => {
       logger.error("Seeded resume fallback failed", { threadId: target.thread.id, turnId,
         error: error instanceof Error ? error.message : String(error) });
+      // A failure before the decision reaches the caller as a rejection; after it, this is the only report.
+      if (decided) onLateFailure?.(error);
     });
-    return this.awaitNativeDecision(turnId, watch, settled);
+    return this.awaitNativeDecision(turnId, watch, settled).then((result) => {
+      decided = true;
+      return result;
+    });
   }
 
   /** Runs after the native attempt released its runtime, so a seeded attempt can admit on the same thread. */
@@ -259,12 +295,14 @@ export class TurnRecoveryService {
     target: RecoverableTurn,
     turnId: string,
     dispatch: TurnDispatch,
+    prompt: string,
+    retry: boolean,
   ): Promise<TurnResumeResult> {
     watch.close();
     if (!watch.resumeUnavailable) return { turnId, mode: "native-session" };
     const executionId = this.canonicalSink.loadTurn(turnId)?.executionId;
     if (!executionId) throw new Error(`Native resume attempt lost its execution: ${turnId}`);
-    return { turnId: await this.dispatchSeededResume(target, executionId, dispatch), mode: "seeded-session" };
+    return { turnId: await this.dispatchSeededResume(target, retry ? executionId : undefined, dispatch, prompt), mode: "seeded-session" };
   }
 
   private async awaitNativeDecision(
@@ -286,16 +324,17 @@ export class TurnRecoveryService {
 
   private async dispatchSeededResume(
     target: RecoverableTurn,
-    retryOfExecutionId: string,
+    retryOfExecutionId: string | undefined,
     dispatch: TurnDispatch,
+    prompt: string,
   ): Promise<string> {
     // Built before dispatch so a history that cannot fit fails the resume instead of sending a truncated message.
-    const handoff = this.seededResumeHandoff(target);
+    const handoff = this.seededResumeHandoff(target, prompt);
     const turnId = NodeCrypto.randomUUID();
     await this.dispatchAttempt(turnId, {
-      ...this.continuationCommand(target, retryOfExecutionId),
+      ...this.continuationCommand(target, retryOfExecutionId, prompt),
       forceFreshSession: true,
-      providerWireOverride: `${handoff.preamble}${RESUME_CONTINUATION_PROMPT}`,
+      providerWireOverride: `${handoff.preamble}${prompt}`,
     }, dispatch);
     await this.writeRecoveryAudit(target.thread, handoff);
     return turnId;
@@ -306,7 +345,7 @@ export class TurnRecoveryService {
    * one. Only this path seeds history: a retry on the thread's own session already has it, and a provider switch
    * builds its own handoff for the command it sends.
    */
-  private seededResumeHandoff(target: RecoverableTurn): FencedHandoff {
+  private seededResumeHandoff(target: RecoverableTurn, prompt: string): FencedHandoff {
     const { thread } = target;
     const providerId = ProviderIdSchema.parse(thread.provider);
     const rows = loadHandoffMessages({ messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId: thread.id });
@@ -318,10 +357,10 @@ export class TurnRecoveryService {
         toProvider: providerId,
         rows,
         afterSequence: 0,
-        throughSequence: target.message.sequence,
+        throughSequence: target.historyThroughSequence ?? target.message.sequence,
         contextWindow: thread.context_window ?? null,
         inputCharacterCap: targetInputCharacterCap(this.providers.resolve(providerId)),
-        userText: RESUME_CONTINUATION_PROMPT,
+        userText: prompt,
         attachments: [],
       });
       requireTaskInHandoff(handoff, rows, target.message);
@@ -442,13 +481,13 @@ export class TurnRecoveryService {
     return this.retryCommand(target.thread, target.message, attachments, target.executionId);
   }
 
-  private continuationCommand(target: RecoverableTurn, retryOfExecutionId: string): SendMessageCommand {
+  private continuationCommand(target: RecoverableTurn, retryOfExecutionId: string | undefined, prompt: string): SendMessageCommand {
     return {
       ...threadContinuationSettings(target.thread),
-      content: RESUME_CONTINUATION_PROMPT,
+      content: prompt,
       attachments: [],
       internalUserMessage: true,
-      retryOfExecutionId,
+      ...(retryOfExecutionId ? { retryOfExecutionId } : {}),
     };
   }
 

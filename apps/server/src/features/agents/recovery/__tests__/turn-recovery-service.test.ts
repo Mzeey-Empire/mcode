@@ -30,12 +30,13 @@ import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-st
 import { turnRecoveryErrorCode } from "../turn-recovery-error.js";
 import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js";
 import { notifyCommittedCanonicalEvents } from "../../canonical/committed-canonical-events.js";
-import { chooseResumePath, RESUME_CONTINUATION_PROMPT } from "../turn-resume.js";
+import { chooseResumePath, continuationPrompt } from "../turn-resume.js";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 
 const NOW = "2026-08-10T09:00:00.000Z";
+const RESUME_CONTINUATION_PROMPT = continuationPrompt(null);
 const THREAD_ID = "00000000-0000-4000-8000-000000000021";
 const TURN_ID = "turn-recovery";
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000015";
@@ -167,6 +168,8 @@ describe("TurnRecoveryService", () => {
 
     async function admit(command: SendMessageCommand): Promise<void> {
       if (!command.sourceTurnId) throw new Error("Retry must assign its returned turn identity");
+      // Real admission runs the guard once the thread is reserved, before the turn commits.
+      command.admissionGuard?.();
       const persisted = await attachments.persist(THREAD_ID, command.attachments ?? []);
       sink.startParentTurn({
         thread: { id: THREAD_ID, workspaceId: "workspace-recovery", providerId: "codex", createdAt: NOW },
@@ -433,6 +436,48 @@ describe("TurnRecoveryService", () => {
       const resume = (dispatch: (command: SendMessageCommand) => Promise<void>) =>
         service.resumeTurn({ threadId: THREAD_ID, turnId: TURN_ID }, dispatch);
 
+      it.each([false, true])("wakes a parent without retrying its execution (native %s)", async (native) => {
+        interruptTurn();
+        if (native) withNativeSession();
+        const commands: SendMessageCommand[] = [];
+        const result = await service.wakeParent({ threadId: THREAD_ID, anchorTurnId: TURN_ID }, async (command) => {
+          commands.push(command);
+          await admit(command);
+          if (native) notifyCommittedCanonicalEvents([providerStarted(sourceTurnId(command))]);
+        }, {});
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ internalUserMessage: true,
+          content: "Mcode restarted while you were working. Check where you left off, then continue. Anything you had running was stopped, including background subagents, background commands and dev servers, so start again whatever the task still needs." });
+        expect(Object.hasOwn(commands[0]!, "retryOfExecutionId")).toBe(false);
+        expect(sink.loadUserMessage(result.turnId)?.is_internal).toBe(true);
+        expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("interrupted");
+      });
+
+      it("seeds a woken parent with the reply its finished turn gave", async () => {
+        const answer = messageRepo.createAssistantIdempotent({ id: "anchor-answer", threadId: THREAD_ID,
+          content: "I started a reviewer in the background.", sequence: 2 });
+        sink.finishParentTurn({ threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+          providerId: "codex", providerIdentities: [], outcome: "completed", projectTurn: () => ({ message: answer, narrative: [] }) });
+        const commands: SendMessageCommand[] = [];
+        await service.wakeParent({ threadId: THREAD_ID, anchorTurnId: TURN_ID }, async (command) => {
+          commands.push(command);
+          await admit(command);
+        }, {});
+        expect(commands[0]?.providerWireOverride).toContain("repeat only when asked");
+        expect(commands[0]?.providerWireOverride).toContain("I started a reviewer in the background.");
+      });
+
+      it("manually resumes app_closed with a hidden restart instruction", async () => {
+        await service.reconcileOnStartup();
+        const result = await resume(admit);
+        expect(sink.loadUserMessage(result.turnId)).toMatchObject({
+          is_internal: true,
+          content: continuationPrompt({}),
+        });
+        expect(messageRepo.listByThread(THREAD_ID, 100).messages.filter((message) => message.role === "user" && !message.is_internal)
+          .map((message) => message.content)).toEqual(["repeat only when asked"]);
+      });
+
       it.each([
         { supportsSessionResume: true, sdkSessionId: "s", threadProvider: "codex", turnProvider: "codex", mode: "native-session" },
         { supportsSessionResume: false, sdkSessionId: "s", threadProvider: "codex", turnProvider: "codex", mode: "seeded-session" },
@@ -665,6 +710,34 @@ describe("TurnRecoveryService", () => {
         } finally {
           vi.useRealTimers();
         }
+      });
+
+      it("reports a seeded fallback that fails after the wait bound already answered native-session", async () => {
+        withNativeSession();
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        const lateFailures: unknown[] = [];
+        let admitted = false;
+        const pending = service.resumeTurn({ threadId: THREAD_ID, turnId: TURN_ID }, async (command) => {
+          commands.push(command);
+          if (commands.length > 1) throw new Error("provider unavailable");
+          await admit(command);
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+          admitted = true;
+        }, { onLateFailure: (error) => { lateFailures.push(error); } });
+        try {
+          await vi.waitFor(() => expect(admitted).toBe(true));
+          await vi.advanceTimersByTimeAsync(15_000);
+          await expect(pending).resolves.toMatchObject({ mode: "native-session" });
+        } finally {
+          vi.useRealTimers();
+        }
+        const [native] = commands;
+        if (!native) throw new Error("Native attempt missing");
+        errorAttempt(sourceTurnId(native), UNAVAILABLE);
+        native.onRuntimeReleased?.();
+        await vi.waitFor(() => expect(commands).toHaveLength(2));
+        await vi.waitFor(() => expect(lateFailures).toEqual([expect.objectContaining({ message: "provider unavailable" })]));
       });
 
       it.each([
