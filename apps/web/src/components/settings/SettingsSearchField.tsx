@@ -19,7 +19,7 @@ export function SettingsSearchField() {
   };
 
   return (
-    <div className="flex flex-col gap-1 px-2 pt-3">
+    <div className="flex flex-col gap-1 px-2">
       <div className="flex h-8 items-center gap-2 rounded-sm bg-panel px-2.5 text-muted focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-solid focus-within:outline-focus">
         <Search size={14} aria-hidden className="shrink-0" />
         <input

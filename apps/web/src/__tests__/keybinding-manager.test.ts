@@ -219,4 +219,9 @@ describe("keybindingKeycaps", () => {
   it("names special keys", () => {
     expect(keybindingKeycaps("Escape", false)).toEqual(["Esc"]);
   });
+
+  it("draws arrow keys as arrows", () => {
+    expect(keybindingKeycaps("alt+ArrowLeft", false)).toEqual(["Alt", "←"]);
+    expect(keybindingKeycaps("alt+arrowright", false)).toEqual(["Alt", "→"]);
+  });
 });

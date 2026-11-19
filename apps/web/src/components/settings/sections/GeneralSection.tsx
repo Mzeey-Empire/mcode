@@ -1,24 +1,25 @@
 import { useMemo } from "react";
-import { Sparkles } from "lucide-react";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useOpenInApps } from "@/hooks/useOpenInApps";
 import { openInAppIcon } from "@/components/chat/openInAppIcons";
+import { resolveDefaultOpenInApp } from "@/lib/resolveDefaultOpenInApp";
 import type { OpenInApp } from "@/transport/types";
 import type { Theme } from "@mcode/contracts/models/settings";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
-import { Setting } from "../Setting";
+import { SEARCH_HIT_CLASS, Setting, useSettingHit } from "../Setting";
 import { settingsPage } from "../setting-def";
 import { settingsValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
 import { SettingsSelectPicker, type SettingsPickOption } from "../SettingsSelectPicker";
+import { ThemeTiles } from "./ThemeTiles";
 
 /** Empty `defaultEditor` selects tier-3 auto-resolution (the "Auto" option). */
 const AUTO_VALUE = "";
 
 /**
  * Builds the picker options for the global default open-in app: an "Auto" entry
- * (empty value, tier-3 auto-resolution) first, then every installed app with its
+ * (empty value, tier-3 auto-resolution) naming the app it resolves to, then every installed app with its
  * registry icon. A saved id that is no longer installed is appended as a
  * selectable "(not installed)" row so a stale default stays visible and clearable
  * instead of silently disappearing.
@@ -32,13 +33,14 @@ export function buildOpenInAppOptions(
   currentValue: string,
 ): SettingsPickOption[] {
   const installed = apps.filter((app) => app.detected);
+  // Before the app list loads, Auto names nothing rather than guessing File Explorer.
+  const autoApp = apps.length > 0 ? resolveDefaultOpenInApp(null, null, apps) : undefined;
   const options: SettingsPickOption[] = [
     {
       value: AUTO_VALUE,
       label: "Auto",
+      detail: autoApp === undefined ? undefined : (apps.find((app) => app.id === autoApp)?.label ?? "File Explorer"),
       disabled: false,
-      icon: <Sparkles size={14} aria-hidden />,
-      title: "Resolve to your highest-priority installed editor, then File Explorer",
     },
     ...installed.map((app) => ({
       value: app.id,
@@ -103,7 +105,6 @@ function DefaultOpenInAppControl() {
 export const GENERAL = settingsPage("general", {
   theme: {
     label: "Theme",
-    hint: "Color scheme for the interface.",
     synonyms: "theme dark light mode appearance color colour scheme system",
     value: settingsValue((s) => s.appearance.theme, (theme) => ({ appearance: { theme } })),
     Control: ThemeControl,
@@ -117,20 +118,34 @@ export const GENERAL = settingsPage("general", {
   },
   openIn: {
     label: "Default open-in app",
-    hint: "New threads open in this app. Auto picks your highest-priority installed editor and falls back to File Explorer.",
+    hint: "Auto picks your highest-priority installed editor and falls back to File Explorer.",
     synonyms: "open in editor vscode cursor ide external app explorer",
     value: settingsValue((s) => s.externalApps.defaultEditor, (defaultEditor) => ({ externalApps: { defaultEditor } })),
     Control: DefaultOpenInAppControl,
   },
 });
 
-/** General settings page: theme, notifications, and the default open-in app. */
+/** The Theme group's panel: the window previews, marked when search opens the Theme setting. */
+function ThemePanel() {
+  const hit = useSettingHit([GENERAL.theme]);
+  return (
+    <div ref={hit.ref} {...hit.attrs} data-setting-id={GENERAL.theme.id} className={SEARCH_HIT_CLASS}>
+      <ThemeTiles />
+    </div>
+  );
+}
+
+/** General settings page: theme previews, then notifications and the default open-in app. */
 export function GeneralSection() {
   return (
-    <SettingsGroup>
-      <Setting def={GENERAL.theme} />
-      <Setting def={GENERAL.notifications} />
-      <Setting def={GENERAL.openIn} />
-    </SettingsGroup>
+    <div className="space-y-8">
+      <SettingsGroup title="Theme">
+        <ThemePanel />
+      </SettingsGroup>
+      <SettingsGroup>
+        <Setting def={GENERAL.notifications} />
+        <Setting def={GENERAL.openIn} />
+      </SettingsGroup>
+    </div>
   );
 }

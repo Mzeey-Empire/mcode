@@ -1066,16 +1066,18 @@ input[type="range"].settings-range {
   cursor: pointer;
   outline: none;
 }
+/* RangeControl draws the track and its round-ended fill under the input, so the native track stays clear. The focus
+   ring's -1px offset leaves a 2px gap around the 1.4rem knob inside the 2rem thumb box, matching SteppedSlider. */
 input[type="range"].settings-range::-webkit-slider-runnable-track {
   height: 2rem;
   border-radius: 999px;
-  background: linear-gradient(to right, color-mix(in oklab, var(--primary) 26%, transparent) calc((100% - 2rem) * var(--range-fraction, 0) + 2rem), var(--selected) 0);
+  background: transparent;
 }
 input[type="range"].settings-range::-moz-range-track {
   height: 2rem;
   border-radius: 999px;
   border: none;
-  background: linear-gradient(to right, color-mix(in oklab, var(--primary) 26%, transparent) calc((100% - 2rem) * var(--range-fraction, 0) + 2rem), var(--selected) 0);
+  background: transparent;
 }
 input[type="range"].settings-range::-webkit-slider-thumb {
   -webkit-appearance: none;
@@ -1096,8 +1098,8 @@ input[type="range"].settings-range::-moz-range-thumb {
   background-clip: content-box;
 }
 input[type="range"].settings-range:hover::-webkit-slider-thumb { background-color: var(--primary-hover); }
-input[type="range"].settings-range:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--focus); outline-offset: 1px; }
-input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2px solid var(--focus); outline-offset: 1px; }
+input[type="range"].settings-range:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--focus); outline-offset: -1px; }
+input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2px solid var(--focus); outline-offset: -1px; }
 
 /* Settings controls. Scoped to the Settings canvas so the shared Switch, SegmentedControl and outline Button keep
    their look everywhere else; unlayered, so these win over the components' utility classes without !important. */
@@ -1173,6 +1175,26 @@ input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2p
 }
 [data-settings-surface] [data-slot="input"]:hover { background: color-mix(in oklch, var(--ink) 10%, transparent); }
 [data-settings-surface] [data-slot="input"]::placeholder { color: var(--muted); }
+
+/* Theme picker previews draw a light and a dark window whatever theme is active, so they name ramp steps, not roles. */
+.theme-preview-light {
+  --preview-side: var(--neutral-100);
+  --preview-main: var(--neutral-50);
+  --preview-bar: color-mix(in oklch, var(--neutral-300) 55%, transparent);
+  --preview-selected: var(--neutral-200);
+  --preview-composer: var(--neutral-100);
+  --preview-line: var(--neutral-200);
+  --preview-accent: var(--amber-500);
+}
+.theme-preview-dark {
+  --preview-side: var(--neutral-950);
+  --preview-main: var(--neutral-900);
+  --preview-bar: color-mix(in oklch, var(--neutral-300) 45%, transparent);
+  --preview-selected: var(--neutral-600);
+  --preview-composer: var(--neutral-800);
+  --preview-line: var(--neutral-600);
+  --preview-accent: var(--amber-500);
+}
 
 @keyframes blink {
   0%, 50% { opacity: 1; }

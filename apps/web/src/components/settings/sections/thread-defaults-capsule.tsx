@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Hammer, ListChecks, Sparkles, Zap } from "lucide-react";
+import { ChevronDown, Hammer, ListChecks, Zap } from "lucide-react";
 import type { AgentDefaultMode, SettingsProviderId } from "@mcode/contracts/models/settings";
 import { fastModeDefault, fastModeSettingProvider } from "@mcode/shared/fast-mode";
 import { getSelectedModelPresentation, ModelPickerPanel, type ModelPickerLead, type ModelPickerReasoning } from "@/components/chat/ModelPickerPanel";
@@ -263,7 +263,7 @@ export function ThreadDefaultsCapsule({ modelHit, modeHit, permissionHit, modelC
   const warningId = useId();
   return (
     <div className="flex flex-col gap-2 p-3">
-      <div role="group" aria-label="New threads start with" className="flex flex-wrap items-center gap-1 rounded-(--radius-composer) bg-background p-1.5">
+      <div role="group" aria-label="New threads start with" className="flex flex-wrap items-center gap-1 rounded-(--radius-composer) bg-hover-solid p-1.5">
         <DefaultModelPart hit={modelHit} coveredIds={modelCovers} describedBy={stale ? warningId : undefined} />
         <CapsuleDivider />
         <DefaultModeRadios hit={modeHit} drawn />
@@ -280,14 +280,7 @@ export function ThreadDefaultsCapsule({ modelHit, modeHit, permissionHit, modelC
 }
 
 function SmallTaskLabel({ provider, modelId }: { readonly provider: string; readonly modelId: string }): ReactNode {
-  if (!modelId) {
-    return (
-      <>
-        <Sparkles aria-hidden size={12} className="shrink-0 text-muted" />
-        <span>Auto</span>
-      </>
-    );
-  }
+  if (!modelId) return <span>Auto</span>;
   const model = getSelectedModelPresentation(modelId, provider || undefined);
   return (
     <>

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ChevronDown, Plus, SquareTerminal } from "lucide-react";
+import { ChevronDown, Plus, TerminalIcon } from "lucide-react";
 import type { TerminalCustomProfile, TerminalProfileReference } from "@mcode/contracts/models/terminal";
 import type { TerminalPreferencesUpdate, TerminalSettings } from "@mcode/contracts/models/terminal-settings";
-import { Badge } from "@/components/ui/badge";
+import { SettingsTag } from "@/components/settings/SettingsTag";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -126,6 +126,7 @@ function ProfilePicker({
   value,
   certified,
   custom,
+  automatic,
   disabled,
   onChange,
   allowInherit = false,
@@ -133,13 +134,15 @@ function ProfilePicker({
   value: string;
   certified: readonly ProfileOption[];
   custom: readonly TerminalCustomProfile[];
+  /** The profile Auto launches now, named after "Auto". */
+  automatic: { readonly name: string } | undefined;
   disabled?: boolean;
   onChange: (value: string) => void;
   allowInherit?: boolean;
 }) {
   const options: SettingsPickOption[] = [
     ...(allowInherit ? [{ value: INHERIT_PROFILE, label: "Use inherited global profile" }] : []),
-    { value: "automatic", label: "Automatic" },
+    { value: "automatic", label: "Auto", detail: automatic?.name },
     ...certified.map((profile) => ({ value: profile.id, label: profile.name })),
     ...custom.map((profile) => ({ value: profile.id, label: profile.name })),
     ...(terminalProfileUnavailable(value, certified, custom)
@@ -216,23 +219,17 @@ function useTerminalProfiles() {
 
 type TerminalProfiles = ReturnType<typeof useTerminalProfiles>;
 
-function globalProfileHint(profiles: TerminalProfiles): string | undefined {
-  if (profiles.globalDefault === "automatic" && profiles.automaticProfile) {
-    return `Automatic currently uses ${profiles.automaticProfile.name}.`;
-  }
-  if (profiles.selectedProfileUnavailable) return "The selected profile is unavailable. Choose another profile.";
-  return undefined;
-}
-
 function GlobalProfileRow({ def, variant }: SettingRowProps) {
   const profiles = useTerminalProfiles();
   const setGlobalDefault = useTerminalSettingsStore((state) => state.setGlobalDefault);
+  const hint = profiles.selectedProfileUnavailable ? "The selected profile is unavailable. Choose another profile." : undefined;
   return (
-    <SettingRowFrame def={def} variant={variant} hint={globalProfileHint(profiles)}>
+    <SettingRowFrame def={def} variant={variant} hint={hint}>
       <ProfilePicker
         value={profiles.globalDefault}
         certified={profiles.certifiedOptions}
         custom={profiles.customProfiles}
+        automatic={profiles.automaticProfile}
         disabled={!profiles.profilesLoaded || profiles.pending}
         onChange={(value) => { void setGlobalDefault(value as TerminalProfileReference); }}
       />
@@ -293,6 +290,7 @@ function ProjectProfileFrame({ def, variant, workspaceId }: SettingRowProps & { 
           value={workspaceOverride?.defaultProfileId ?? INHERIT_PROFILE}
           certified={profiles.certifiedOptions}
           custom={profiles.customProfiles}
+          automatic={profiles.automaticProfile}
           disabled={!profiles.profilesLoaded || workspaceLoading || profiles.pending}
           allowInherit
           onChange={selectWorkspaceProfile}
@@ -308,7 +306,7 @@ function ProjectProfileFrame({ def, variant, workspaceId }: SettingRowProps & { 
 }
 
 function InUseTag() {
-  return <Badge variant="secondary" size="compact">In use</Badge>;
+  return <SettingsTag>In use</SettingsTag>;
 }
 
 function CustomProfileRow({
@@ -390,6 +388,15 @@ function DetectedProfilesRow({ def, variant }: SettingRowProps) {
   );
 }
 
+function CustomProfilesRow({ def, variant }: SettingRowProps) {
+  const hasProfiles = useTerminalSettingsStore((state) => state.customProfiles.length > 0);
+  return (
+    <SettingRowFrame def={def} variant={variant} hint={hasProfiles ? undefined : "None yet."}>
+      <CustomProfilesControl />
+    </SettingRowFrame>
+  );
+}
+
 function CustomProfilesControl() {
   const profiles = useTerminalProfiles();
   const createProfile = useTerminalSettingsStore((state) => state.createProfile);
@@ -421,7 +428,7 @@ function CustomProfilesControl() {
             {profile.name}
             <span className="ml-2 text-muted">{profile.executable}</span>
           </span>
-          <Badge variant="secondary" size="compact">Recovered</Badge>
+          <SettingsTag>Recovered</SettingsTag>
         </div>
       ))}
       <Button
@@ -618,7 +625,7 @@ function TerminalSampleHead() {
     ?? profiles.customProfiles.find((profile) => profile.id === profiles.inUseProfileId);
   return (
     <div className="flex h-9 items-center gap-2 pr-1 pl-4 text-caption text-muted">
-      <SquareTerminal aria-hidden className="size-3.5" />
+      <TerminalIcon aria-hidden className="size-3.5" />
       <span className="font-medium text-ink">{inUse?.name ?? "Terminal"}</span>
       {profiles.globalDefault === "automatic" ? <span>· Auto</span> : null}
     </div>
@@ -712,7 +719,7 @@ function ScreenReaderControl() {
   );
 }
 
-const PROFILES = settingsGroup("Profiles", "Defaults apply to new terminals.");
+const PROFILES = settingsGroup("Profiles");
 const AVAILABLE_PROFILES = settingsGroup("Available profiles");
 const FONT_AND_CURSOR = settingsGroup("Font and cursor");
 const BEHAVIOR = settingsGroup("Behavior");
@@ -745,10 +752,9 @@ export const TERMINAL = settingsPage("terminal", {
   customProfiles: {
     group: AVAILABLE_PROFILES,
     label: "Custom profiles",
-    hint: "Custom profiles remain after a Terminal preference reset.",
     synonyms: "custom profile shell add executable arguments nushell zsh fish detected",
     value: notRevertible("A list edited through dialogs; recreating a deleted profile gives it a new id."),
-    Control: CustomProfilesControl,
+    Row: CustomProfilesRow,
   },
   fontFamily: {
     group: FONT_AND_CURSOR,

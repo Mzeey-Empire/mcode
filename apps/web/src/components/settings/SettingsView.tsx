@@ -41,7 +41,7 @@ export function SettingsView() {
         {canvas.kind === "page" ? <RevertVisitButton onReverted={() => headingRef.current?.focus()} /> : null}
       </CanvasHeader>
       <div data-settings-surface="" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[760px] px-10 pt-6 pb-24">
+        <div className="mx-auto w-full max-w-[760px] px-10 pt-6 pb-24 max-[901px]:px-6 max-[901px]:pb-16">
           {/* The pill names the page, so the heading stays for screen readers and as the focus target after navigation. */}
           {canvas.kind === "results" ? (
             <SettingsSearchResults query={canvas.query.trim()} />

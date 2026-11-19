@@ -183,6 +183,10 @@ export function keybindingKeycaps(key: string, isMac: boolean): string[] {
     "\\": "\\",
     ",": ",",
     plus: "+",
+    arrowleft: "←",
+    arrowright: "→",
+    arrowup: "↑",
+    arrowdown: "↓",
   };
 
   keycaps.push(keyDisplay[keyPart.toLowerCase()] ?? keyPart.toUpperCase());

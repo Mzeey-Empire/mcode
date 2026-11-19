@@ -11,6 +11,8 @@ export interface SettingsPickOption {
   /** Saved value. The empty string is a real choice, such as "Auto" or "Off". */
   readonly value: string;
   readonly label: string;
+  /** What the option stands for right now, such as the app "Auto" resolves to; muted after the label as "· detail". */
+  readonly detail?: string;
   /** Shown as the row's muted tag when the options span more than one group, e.g. the model family. */
   readonly group?: string;
   readonly disabled?: boolean;
@@ -46,7 +48,7 @@ function toRow(option: SettingsPickOption, showGroup: boolean): PickerRow {
     key: option.value,
     name: option.label,
     icon: option.icon,
-    tag: showGroup ? option.group : undefined,
+    tag: option.detail ?? (showGroup ? option.group : undefined),
     disabled: option.disabled,
     disabledReason: option.disabled ? option.title : undefined,
   };
@@ -57,15 +59,18 @@ function findSelected(options: readonly SettingsPickOption[], value: string): Se
   return options.find((o) => o.value === value && !o.disabled) ?? options.find((o) => o.value === value);
 }
 
-function TriggerLabel({ selected, text, showIcon }: { readonly selected?: SettingsPickOption; readonly text: string; readonly showIcon: boolean }) {
+function TriggerLabel({ selected, text, ready }: { readonly selected?: SettingsPickOption; readonly text: string; readonly ready: boolean }) {
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2">
-      {showIcon && selected?.icon != null ? (
+      {ready && selected?.icon != null ? (
         <span aria-hidden className="flex size-4 shrink-0 items-center justify-center text-muted [&_svg]:size-[1.4rem]">
           {selected.icon}
         </span>
       ) : null}
-      <span className="min-w-0 flex-1 text-fade text-left">{text}</span>
+      <span className="min-w-0 flex-1 text-fade text-left">
+        {text}
+        {ready && selected?.detail ? <span className="text-muted"> · {selected.detail}</span> : null}
+      </span>
     </span>
   );
 }
@@ -95,7 +100,7 @@ export function SettingsSelectPicker({
 
   const filtered = useMemo(() => {
     const tokens = tokenizeSearch(query);
-    return options.filter((o) => matchesAllTokens([o.label, o.value, o.group ?? ""], tokens));
+    return options.filter((o) => matchesAllTokens([o.label, o.value, o.group ?? "", o.detail ?? ""], tokens));
   }, [options, query]);
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -107,6 +112,7 @@ export function SettingsSelectPicker({
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger
         render={
+          // At 900px and narrower a picker may wrap under its label; the negative margin lines its text up with the label's.
           <Button
             type="button"
             variant="ghost"
@@ -114,12 +120,12 @@ export function SettingsSelectPicker({
             disabled={disabled || loading}
             data-testid={testId}
             aria-label={ariaLabel}
-            className="max-w-[28rem] justify-between gap-1.5 rounded-full pr-2 pl-3 font-normal hover:bg-hover data-popup-open:bg-hover"
+            className="max-w-[28rem] justify-between gap-1.5 rounded-full pr-2 pl-3 font-normal hover:bg-hover data-popup-open:bg-hover max-[901px]:-ml-3"
           >
             <TriggerLabel
               selected={selected}
               text={loading ? "Loading…" : (selected?.label ?? (value || emptyTriggerLabel))}
-              showIcon={!loading}
+              ready={!loading}
             />
             <ChevronDown aria-hidden className="size-4 shrink-0 text-muted" />
           </Button>
