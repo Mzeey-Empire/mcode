@@ -196,7 +196,7 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       /** Typed metadata used when this notice is persisted in the transcript. */
       systemNotice: SystemNoticeMetadataSchema().optional(),
       visual: HtmlVisualSchema().optional(),
-      /** Where `visual` shows. Live only: never saved, so a reloaded visual has none. */
+      /** Where `visual` shows. Not copied onto the saved message, so a reloaded visual has none. */
       visualPlacement: HtmlVisualPlacementSchema().optional(),
     }),
     z.object({

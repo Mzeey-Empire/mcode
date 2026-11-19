@@ -443,6 +443,14 @@ describe("html visual placement", () => {
     expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
   });
 
+  it("shows a settled visual above its answer when the answer only quotes its marker as code", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "The id is `visual:visual-2`.", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
   it("does not show a running turn's inline visual above its streaming reply", () => {
     const projected = createTranscriptItemProjector()({
       messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2, "inline")],

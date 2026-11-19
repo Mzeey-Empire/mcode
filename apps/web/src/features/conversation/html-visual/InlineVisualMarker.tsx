@@ -21,7 +21,6 @@ export function InlineVisualMarker({ threadId, messageId, alt }: {
   readonly messageId: string;
   readonly alt: string;
 }) {
-  // Selecting the visual object, not the message list, keeps unrelated message updates from re-rendering the reply.
   const visual = useThreadStore((state): HtmlVisual | undefined => {
     if (!threadId) return undefined;
     const message = state.records.get(threadId)?.messages.find((candidate) => candidate.id === messageId);

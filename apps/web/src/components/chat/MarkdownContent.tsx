@@ -21,10 +21,7 @@ import { EntityToken, type EntityKind } from "./EntityToken";
 import { MarkdownTreeCache } from "./markdown-tree-cache";
 import { InlineVisualMarker, visualMarkerMessageId } from "@/features/conversation/html-visual/InlineVisualMarker";
 
-/**
- * Pass through workspace preview URLs and visual marker image sources; otherwise use react-markdown's default sanitizer.
- * The `img` renderer resolves a marker to its visual and never hands it to a real image.
- */
+/** Pass through workspace preview URLs and visual markers; otherwise use react-markdown's default sanitizer. */
 const markdownUrlTransform: UrlTransform = (value, key) => {
   const trimmed = value.trim();
   if (isPreviewableUrl(trimmed)) return trimmed;
@@ -553,7 +550,6 @@ function makeComponents(
   };
 }
 
-/** Swaps a reply's `visual:` marker for the visual it names; other images render as before. */
 function makeImageRenderer(threadId: string | null) {
   return ({ src, alt, node: _node, ...rest }: React.ComponentProps<"img"> & { node?: unknown }) => {
     const messageId = typeof src === "string" ? visualMarkerMessageId(src) : undefined;

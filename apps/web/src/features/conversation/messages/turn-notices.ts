@@ -50,10 +50,9 @@ function isVisualMessage(message: Message): boolean {
   return message.role === "system" && Boolean(message.visual);
 }
 
-/** A visual the answer places through its marker; one the answer forgot falls back above the answer. */
 function isPlacedInAnswer(visual: Message, answer: Message): boolean {
   // Placement is never saved, so a settled turn reads the marker alone.
-  return answer.content.includes(`visual:${visual.id}`);
+  return answer.content.includes(`](visual:${visual.id})`);
 }
 
 /** Maps a notice message to its row model, keeping its identity stable across renders. */
