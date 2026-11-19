@@ -139,6 +139,60 @@ describe("ClaudeProvider shutdown", () => {
     }
   });
 
+  it("retries a failed session retirement before allowing a replacement turn", async () => {
+    const closed = deferred();
+    const close = vi.fn(closed.resolve).mockImplementationOnce(() => {
+      throw new Error("SDK query close failed");
+    });
+    const replacementPrompt = Promise.withResolvers<unknown>();
+    mockQuery.mockImplementationOnce(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+      const stream = (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield { type: "system", subtype: "init", session_id: "sdk-original" };
+        await closed.promise;
+      })();
+      return Object.assign(stream, { close });
+    });
+    mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+      const stream = (async function* () {
+        const prompts = prompt[Symbol.asyncIterator]();
+        const first = await prompts.next();
+        replacementPrompt.resolve(first.value);
+        yield { type: "system", subtype: "init", session_id: "sdk-replacement" };
+        await prompts.next();
+      })();
+      return Object.assign(stream, { close: () => {} });
+    });
+    const provider = new ClaudeProvider(
+      stubEnvService(), stubJobObject(), undefined, undefined, undefined, mockShutdownHost(() => {}),
+    );
+    const turn = {
+      turnId: "turn-original", turnExecutionId: "11111111-1111-4111-8111-111111111111",
+      sessionId: "mcode-thread-retirement", threadId: "thread-retirement", workspaceId: "workspace-retirement",
+      message: "Original prompt", cwd: "/tmp", model: "claude-sonnet-4-6", permissionMode: "supervised",
+      approvalReviewMode: "manual", interactionMode: "build", providerOptions: {},
+    } satisfies Parameters<ClaudeProvider["sendTurn"]>[0];
+    try {
+      await provider.sendTurn(turn);
+      await expect(provider.stopSession(turn.sessionId)).rejects.toBeInstanceOf(AggregateError);
+
+      await provider.waitForSessionExit(turn.sessionId);
+      expect(close).toHaveBeenCalledTimes(2);
+      await closed.promise;
+
+      await provider.sendTurn({
+        ...turn, turnId: "turn-replacement", turnExecutionId: "22222222-2222-4222-8222-222222222222",
+        message: "Replacement prompt",
+      });
+      await expect(replacementPrompt.promise).resolves.toMatchObject({
+        type: "user", message: { content: "Replacement prompt" },
+      });
+    } finally {
+      await provider.shutdown();
+      mockQuery.mockReset();
+    }
+  });
+
   it("waits for a result mapper after native close and delivers its final events", async () => {
     const billingEntered = deferred();
     const billingReleased = deferred();

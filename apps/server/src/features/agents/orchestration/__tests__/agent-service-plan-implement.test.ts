@@ -52,10 +52,6 @@ const pushes = vi.hoisted((): {
   versions: Array<{ threadId: string; version: PlanVersion }>;
   events: Array<{ channel: string; payload: unknown }>;
 } => ({ versions: [], events: [] }));
-vi.mock("../../../../runtime/process/containment/process-kill.js", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../../../runtime/process/containment/process-kill.js")>(),
-  killDescendantsByName: async () => undefined,
-}));
 vi.mock("../../../../application/transport/push.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../application/transport/push.js")>();
   return { ...actual, broadcast: (...args: Parameters<typeof actual.broadcast>) => {

@@ -626,70 +626,6 @@ async function readUnixProcessStartMarker(
   }
 }
 
-/**
- * Recursively find descendant processes matching a given name.
- * On Windows uses PowerShell CIM to query the process tree (returns name + PID).
- * On Unix uses pgrep (returns PIDs only, without names), so name matching
- * will never produce results there. Callers that need name-based filtering
- * should guard with a platform check (see {@link killDescendantsByName}).
- * Best-effort: returns an empty array on failure.
- */
-export async function findDescendantsByName(
-  parentPid: number,
-  processName: string,
-  platform: NodeJS.Platform,
-): Promise<number[]> {
-  const matched: number[] = [];
-  const visited = new Set<number>();
-  const queue = [parentPid];
-
-  while (queue.length > 0) {
-    const pid = queue.shift()!;
-    if (visited.has(pid)) continue;
-    visited.add(pid);
-
-    let children: Array<{ name: string; pid: number }>;
-    try {
-      children = await listDirectChildren(pid, platform);
-    } catch {
-      continue;
-    }
-
-    for (const child of children) {
-      if (child.name.toLowerCase() === processName.toLowerCase()) {
-        matched.push(child.pid);
-      }
-      queue.push(child.pid);
-    }
-  }
-
-  return matched;
-}
-
-/**
- * Find descendant processes matching a name and kill each one.
- * Best-effort: never throws. Used to clean up SDK subprocesses that
- * outlive their stream connection.
- *
- * Windows-only: on Unix, process cwd does not hold ancestor directory
- * handles, so the directory locking problem this solves does not occur.
- * The Windows process tree scan also has no Unix equivalent that
- * returns process names without additional per-PID lookups.
- */
-export async function killDescendantsByName(
-  parentPid: number,
-  processName: string,
-  platform: NodeJS.Platform,
-): Promise<void> {
-  if (platform !== "win32") return;
-
-  const pids = await findDescendantsByName(parentPid, processName, platform);
-  if (pids.length === 0) return;
-
-  logger.info("Killing descendant processes", { parentPid, processName, pids });
-  await Promise.all(pids.map((pid) => killProcessTree(pid, { platform })));
-}
-
 // 2 s grace period between each signal ladder step
 const GRACEFUL_KILL_STEP_MS = 2_000;
 
@@ -819,17 +755,6 @@ function isAliveAfterGracefulSignal(
 /** Returns true when the error code indicates the process no longer exists. */
 function isEsrch(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "ESRCH";
-}
-
-/**
- * List direct child processes of a given PID.
- * Returns name and PID for each child.
- */
-export async function listDirectChildren(
-  pid: number,
-  platform: NodeJS.Platform,
-): Promise<Array<{ name: string; pid: number }>> {
-  return listDirectChildrenWith(pid, platform, execFile);
 }
 
 async function listDirectChildrenWith(

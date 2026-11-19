@@ -26,16 +26,9 @@ import {
   WorkspaceService,
 } from "../../../projects/index.js";
 import type { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";
-import { killDescendantsByName } from "../../../../runtime/process/containment/process-kill.js";
 import { getMcodeDir } from "@mcode/shared";
 
 const TEST_HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
-
-// Avoid real wmic/taskkill on Windows: unbounded wall time and Vitest's default
-// 5s test timeout (integration tests must not depend on the host process tree).
-vi.mock("../../../../runtime/process/containment/process-kill.js", () => ({
-  killDescendantsByName: vi.fn().mockResolvedValue(undefined),
-}));
 
 const WT_BASE = NodePath.join(getMcodeDir(), "worktrees", "integration-test");
 
@@ -56,7 +49,6 @@ describe("Cleanup integration", () => {
   let projectWorktreeService: ProjectWorktreeService;
 
   beforeEach(() => {
-    vi.mocked(killDescendantsByName).mockClear();
     db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
     cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     threadRepo = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -173,8 +165,6 @@ describe("Cleanup integration", () => {
 
     // Step 2: Worker processes the job
     await worker.poll();
-
-    expect(vi.mocked(killDescendantsByName)).toHaveBeenCalledWith(process.pid, "claude.exe", "win32");
 
     // Verify: subprocess signalled, terminals killed, worktree removed
     expect(mockClaudeProvider.waitForSessionExit).toHaveBeenCalledWith(

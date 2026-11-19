@@ -19,7 +19,6 @@ import {
   SandboxWorktreeCleanupPolicy,
 } from "../../projects/index.js";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
-import { killDescendantsByName } from "../../../runtime/process/containment/process-kill.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { HandoffStorage } from "../../handoff/index.js";
@@ -433,10 +432,9 @@ export class CleanupWorker {
 
   private async teardownThreadRuntime(threadId: string): Promise<void> {
     await this.threadDeletionTeardownService.teardownThread(threadId);
+    // Stopping the session kills its own process tree. Do not sweep by process name here:
+    // other threads' live sessions run under the same server process.
     await this.claudeProvider.waitForSessionExit(`mcode-${threadId}`, SESSION_EXIT_TIMEOUT_MS);
-
-    // Claude does not report each child process, so this releases remaining Windows file handles.
-    await killDescendantsByName(process.pid, "claude.exe", this.hostRuntime.platform);
     if (this.hostRuntime.platform === "win32") {
       await new Promise<void>((resolve) => setTimeout(resolve, this.handleReleaseDelayMs));
     }

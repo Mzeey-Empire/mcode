@@ -25,10 +25,6 @@ import type { AttachmentService } from "../../../attachments/storage/attachment-
 import type { HandoffStorage } from "../../../handoff/index.js";
 import type { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";
 
-vi.mock("../../../../runtime/process/containment/process-kill.js", () => ({
-  killDescendantsByName: vi.fn().mockResolvedValue(undefined),
-}));
-
 describe("completed thread cleanup Git safety", () => {
   let database: Database;
   let testRootPath: string;
