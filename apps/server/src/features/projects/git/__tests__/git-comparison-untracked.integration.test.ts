@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockGitReviewState } from "@mcode/contracts/testing";
 import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -217,11 +218,11 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
       expect((await read("unstaged")).files).toEqual([
         { path: "visible.txt", previousPath: null, changeType: "added", binary: false, additions: 1, deletions: 0, untracked: true },
       ]);
-      expect(await service.readReviewState("fixture", cwd)).toEqual({
-        isGitRepo: true, head: null, branch: "main",
+      expect(await service.readReviewState("fixture", cwd)).toEqual(createMockGitReviewState({
+        head: null,
         uncommitted: { staged: 0, unstaged: 0, untracked: 1 },
-        commitsAhead: null, branchDefault: { unavailable: "unborn" },
-      });
+        branchDefault: { unavailable: "unborn" },
+      }));
     } finally { vi.unstubAllEnvs(); }
   });
 
@@ -324,29 +325,29 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
     write("tracked.txt", "changed\n");
     write("notes.md", "notes\n");
-    expect(await service.readReviewState("fixture", cwd)).toEqual({
-      isGitRepo: true, head: git("rev-parse", "HEAD"), branch: "main",
-      uncommitted: { staged: 0, unstaged: 1, untracked: 1 }, commitsAhead: null,
+    expect(await service.readReviewState("fixture", cwd)).toEqual(createMockGitReviewState({
+      head: git("rev-parse", "HEAD"),
+      uncommitted: { staged: 0, unstaged: 1, untracked: 1 },
       branchDefault: { base: "refs/remotes/origin/main", compare: "refs/heads/main" },
-    });
+    }));
   });
 
   it("counts untracked-only and staged-only trees as dirty without refreshing the real index", async () => {
     write("notes.md", "notes\n");
     const before = indexHash();
-    expect(await service.readReviewState("fixture", cwd)).toEqual({
-      isGitRepo: true, head: null, branch: "main",
+    expect(await service.readReviewState("fixture", cwd)).toEqual(createMockGitReviewState({
+      head: null,
       uncommitted: { staged: 0, unstaged: 0, untracked: 1 },
-      commitsAhead: null, branchDefault: { unavailable: "unborn" },
-    });
+      branchDefault: { unavailable: "unborn" },
+    }));
     expect(indexHash()).toBe(before);
     git("add", "notes.md");
     const staged = indexHash();
-    expect(await service.readReviewState("fixture", cwd)).toEqual({
-      isGitRepo: true, head: null, branch: "main",
+    expect(await service.readReviewState("fixture", cwd)).toEqual(createMockGitReviewState({
+      head: null,
       uncommitted: { staged: 1, unstaged: 0, untracked: 0 },
-      commitsAhead: null, branchDefault: { unavailable: "unborn" },
-    });
+      branchDefault: { unavailable: "unborn" },
+    }));
     expect(indexHash()).toBe(staged);
   });
 
@@ -387,12 +388,11 @@ describe("Review comparisons with the real Git index", { timeout: 30_000 }, () =
     write("feature.txt", "feature\n");
     commit();
     const before = indexHash();
-    expect(await service.readReviewState("fixture", cwd)).toEqual({
-      isGitRepo: true, head: git("rev-parse", "HEAD"), branch: "feature",
-      uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
+    expect(await service.readReviewState("fixture", cwd)).toEqual(createMockGitReviewState({
+      head: git("rev-parse", "HEAD"), branch: "feature",
       commitsAhead: { count: 1, base: "refs/heads/main" },
       branchDefault: { base: "refs/heads/main", compare: "refs/heads/feature" },
-    });
+    }));
     expect(indexHash()).toBe(before);
   });
 

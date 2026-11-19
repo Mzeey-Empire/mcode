@@ -1,4 +1,4 @@
-import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
+import { createMockGitReviewState, createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -1071,11 +1071,11 @@ describe("resolveThreadOverviewChangeSummary", () => {
 
   it("uses the default branch comparison when the thread has no turn or uncommitted changes", async () => {
     const transport = makeSummaryTransport({
-      getReviewState: vi.fn().mockResolvedValue({
-        isGitRepo: true, head: "abc123", branch: "feat/x",
-        uncommitted: { staged: 0, unstaged: 0, untracked: 0 }, commitsAhead: { count: 1, base: "origin/main" },
+      getReviewState: vi.fn().mockResolvedValue(createMockGitReviewState({
+        branch: "feat/x",
+        commitsAhead: { count: 1, base: "origin/main" },
         branchDefault: { base: "origin/main", compare: "feat/x" },
-      }),
+      })),
       getReviewComparison: vi.fn()
         .mockResolvedValueOnce({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } })
         .mockResolvedValueOnce({ status: "ready", comparison: { files: [{ path: "src/branch.ts", previousPath: null, changeType: "modified", binary: false, additions: 13, deletions: 3, untracked: false } satisfies ReviewFileChange], additions: 13, deletions: 3 } }),

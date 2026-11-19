@@ -1,4 +1,4 @@
-import { createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockGitReviewState, createMockWorkspace } from "@mcode/contracts/testing";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,11 +18,11 @@ beforeEach(() => {
   vi.mocked(mockTransport.getReviewState).mockReset();
 });
 
-const NOTHING_AHEAD: ReviewState = {
-  isGitRepo: true, head: "abc123", branch: "feature",
+const NOTHING_AHEAD: ReviewState = createMockGitReviewState({
+  branch: "feature",
   uncommitted: { staged: 0, unstaged: 1, untracked: 0 },
   commitsAhead: { count: 0, base: "main" }, branchDefault: { compare: "feature", base: "main" },
-};
+});
 
 function header() {
   return (

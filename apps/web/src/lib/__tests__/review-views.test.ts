@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ReviewState, ReviewTurn } from "@mcode/contracts/models/review-comparison";
+import { createMockGitReviewState } from "@mcode/contracts/testing";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import {
   REVIEW_VIEWS,
@@ -15,15 +16,13 @@ import type { DiffViewMode } from "@/stores/diffStore";
 type GitState = Extract<ReviewState, { isGitRepo: true }>;
 
 function gitState(overrides: Partial<GitState> = {}): GitState {
-  return {
-    isGitRepo: true,
-    head: "abc123",
+  return createMockGitReviewState({
     branch: "feature",
     uncommitted: { staged: 1, unstaged: 1, untracked: 0 },
     commitsAhead: { count: 2, base: "main" },
     branchDefault: { compare: "feature", base: "main" },
     ...overrides,
-  };
+  });
 }
 
 const TURN: ReviewTurn = {

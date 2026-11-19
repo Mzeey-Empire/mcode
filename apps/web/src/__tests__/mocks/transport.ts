@@ -1,4 +1,4 @@
-import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockGitReviewState, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import type {
   McodeTransport,
   ProviderCatalogRequest,
@@ -254,7 +254,7 @@ const transportDefaults: Partial<McodeTransport> = {
       isComparisonAvailable: false,
     }),
   getRemoteUrl: vi.fn().mockResolvedValue({ webUrl: null, label: "test-project" }),
-  getReviewState: vi.fn().mockResolvedValue({ isGitRepo: true, head: "abc123", branch: "main", uncommitted: { staged: 0, unstaged: 0, untracked: 0 }, commitsAhead: null, branchDefault: { unavailable: "no-base" } }),
+  getReviewState: vi.fn().mockResolvedValue(createMockGitReviewState({ head: "abc123" })),
   push: vi.fn().mockResolvedValue({ success: true }),
   generatePrDraft: vi.fn().mockResolvedValue({ title: "", body: "" }),
   createPr: vi.fn().mockResolvedValue({ number: 1, url: "" }),
