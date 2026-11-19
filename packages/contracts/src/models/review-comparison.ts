@@ -91,6 +91,11 @@ export const ReviewStateSchema = lazySchema(() => z.discriminatedUnion("isGitRep
       untracked: z.number().int().nonnegative(),
     }),
     commitsAhead: z.object({ count: z.number().int().nonnegative(), base: z.string() }).nullable(),
+    /**
+     * Counts commits on HEAD that are absent from the branch's upstream.
+     * Null when HEAD is detached, the branch has no upstream, or the configured upstream ref no longer exists.
+     */
+    upstream: z.object({ ahead: z.number().int().nonnegative() }).nullable(),
     branchDefault: z.union([
       z.object({ compare: z.string(), base: z.string() }),
       z.object({ unavailable: z.enum(["unborn", "no-base"]) }),

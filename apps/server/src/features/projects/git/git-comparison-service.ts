@@ -273,7 +273,7 @@ export class GitComparisonService {
   async readReviewState(workspaceId: string, repoPath?: string, savedBaseBranch?: string | null): Promise<ReviewState> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
     const { stdout } = await this.gitExecutor.exec(
-      ["-C", cwd, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"],
+      ["-C", cwd, "status", "--porcelain=v2", "--branch", "--ahead-behind", "-z", "--untracked-files=normal"],
       { timeout: 10_000, env: { GIT_OPTIONAL_LOCKS: "0" } },
     );
     const status = parseReviewStatus(stdout);
@@ -706,15 +706,24 @@ function parsePerFileNumstat(stdout: string): Map<string, { additions: number | 
   return stats;
 }
 
-function reviewStatusHeader(records: readonly string[], prefix: string, absent: string): string | null {
-  const value = records.find((record) => record.startsWith(prefix))?.slice(prefix.length);
-  return !value || value === absent ? null : value;
+function reviewStatusHeader(records: readonly string[], prefix: string, absent?: string): string | null {
+  for (const record of records) {
+    // A rename's original path can resemble a header, so stop before file entries.
+    if (!record.startsWith("# ")) break;
+    if (record.startsWith(prefix)) {
+      const value = record.slice(prefix.length);
+      return !value || value === absent ? null : value;
+    }
+  }
+  return null;
 }
 
-function parseReviewStatus(stdout: string): Pick<Extract<ReviewState, { isGitRepo: true }>, "head" | "branch" | "uncommitted"> {
+function parseReviewStatus(stdout: string): Pick<Extract<ReviewState, { isGitRepo: true }>, "head" | "branch" | "uncommitted" | "upstream"> {
   const records = stdout.split("\0");
   const head = reviewStatusHeader(records, "# branch.oid ", "(initial)");
   const branch = reviewStatusHeader(records, "# branch.head ", "(detached)");
+  const upstreamCounts = reviewStatusHeader(records, "# branch.ab ")?.match(/^\+(\d+) -\d+$/);
+  const upstream = upstreamCounts ? { ahead: Number(upstreamCounts[1]) } : null;
   const uncommitted = { staged: 0, unstaged: 0, untracked: 0 };
   for (let index = 0; index < records.length; index++) {
     const record = records[index] ?? "";
@@ -725,7 +734,7 @@ function parseReviewStatus(stdout: string): Pick<Extract<ReviewState, { isGitRep
       if (record.startsWith("2 ")) index++;
     }
   }
-  return { head, branch, uncommitted };
+  return { head, branch, uncommitted, upstream };
 }
 
 function selectBranchComparison(context: BranchComparisonContext): BranchComparisonSelection {
