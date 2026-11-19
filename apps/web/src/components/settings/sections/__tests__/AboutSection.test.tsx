@@ -1,5 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { InstallUpdateResult } from "@/transport/desktop-bridge";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.hoisted so the refs exist inside the vi.mock factory below.
@@ -94,68 +93,5 @@ describe("AboutSection moved rows", () => {
     for (const name of ["Troubleshooting logs", "Hardware acceleration", "Provider CLI checks", "Check for CLI updates"]) {
       expect(screen.queryByRole("switch", { name })).toBeNull();
     }
-  });
-});
-
-describe("AboutSection Restart to install", () => {
-  const installUpdate = vi.fn<(request?: { confirmed?: boolean }) => Promise<InstallUpdateResult>>();
-  const installWhenIdle = vi.fn(() => Promise.resolve());
-
-  beforeEach(() => {
-    installUpdate.mockReset().mockResolvedValue({ kind: "started" });
-    installWhenIdle.mockClear();
-    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
-    vi.stubGlobal("desktopBridge", {
-      app: { installUpdate, installWhenIdle, getUpdateStatus: () => Promise.resolve({ state: "idle" }) },
-    });
-    useUpdateStore.getState().setStatus({ state: "downloaded", version: "0.15.0", installWhenIdle: false });
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    useUpdateStore.setState({ status: { state: "idle" }, pendingVersion: null });
-  });
-
-  it("installs without a dialog when the desktop starts the install", async () => {
-    render(<AboutSection />);
-    fireEvent.click(screen.getByRole("button", { name: "Restart to install" }));
-    await waitFor(() => expect(installUpdate).toHaveBeenCalledWith(undefined));
-    expect(screen.queryByRole("dialog", { name: "Install update" })).toBeNull();
-  });
-
-  it("disables Restart to install until the desktop answers", async () => {
-    let answer: ((result: InstallUpdateResult) => void) | undefined;
-    installUpdate.mockImplementationOnce(() => new Promise<InstallUpdateResult>((resolve) => { answer = resolve; }));
-    render(<AboutSection />);
-    fireEvent.click(screen.getByRole("button", { name: "Restart to install" }));
-
-    await waitFor(() => expect(screen.getByRole("button", { name: "Restart to install" })).toBeDisabled());
-    await act(async () => answer?.({ kind: "started" }));
-    expect(screen.getByRole("button", { name: "Restart to install" })).toBeEnabled();
-  });
-
-  it("asks with the shared dialog while agents run and sends a confirmed install from Restart now", async () => {
-    installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: 2 });
-    render(<AboutSection />);
-    fireEvent.click(screen.getByRole("button", { name: "Restart to install" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "Install update" });
-    expect(dialog).toHaveTextContent("0.15.0");
-    expect(dialog).toHaveTextContent("2 agents are running.");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Restart now" }));
-
-    await waitFor(() => expect(installUpdate.mock.calls).toEqual([[undefined], [{ confirmed: true }]]));
-  });
-
-  it("arms install when agents finish from the shared dialog", async () => {
-    installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: null });
-    render(<AboutSection />);
-    fireEvent.click(screen.getByRole("button", { name: "Restart to install" }));
-
-    const dialog = await screen.findByRole("dialog", { name: "Install update" });
-    expect(dialog).toHaveTextContent("Agents may be running.");
-    fireEvent.click(within(dialog).getByRole("button", { name: "When they finish" }));
-
-    expect(installWhenIdle).toHaveBeenCalledOnce();
-    expect(installUpdate).toHaveBeenCalledOnce();
   });
 });

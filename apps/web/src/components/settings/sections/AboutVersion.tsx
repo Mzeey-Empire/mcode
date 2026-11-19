@@ -1,8 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { readActiveAgentCount } from "@/features/updates/active-agent-count";
 import { releaseNotesUrl, type FailedUpdateOperation } from "@/features/updates/update-button-state";
 import { friendlyUpdateError } from "@/lib/update-error-message";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -37,8 +36,11 @@ export interface VersionPhaseContext {
   readonly pendingVersion: string | null;
   /** Running threads this window has loaded. */
   readonly runningAgents: number;
-  /** The server's count across every window; null when it was unreadable or late. */
-  readonly serverAgents: number | null;
+  /**
+   * The count the desktop gave when it refused an unconfirmed install: undefined before it has refused one,
+   * null when it could not count.
+   */
+  readonly desktopAgents: number | null | undefined;
 }
 
 /** Maps the desktop update status to the phase the Version row shows. */
@@ -61,10 +63,11 @@ export function deriveVersionPhase(status: UpdateStatus, context: VersionPhaseCo
   }
 }
 
-// The server sees agents this window has not loaded; the local count can be ahead of a stale server read.
-function readyAgents({ runningAgents, serverAgents }: VersionPhaseContext): number | null {
-  if (serverAgents === null) return runningAgents > 0 ? runningAgents : null;
-  return Math.max(runningAgents, serverAgents);
+// The desktop counts agents this window has not loaded; the local count can be ahead of its last answer.
+function readyAgents({ runningAgents, desktopAgents }: VersionPhaseContext): number | null {
+  if (desktopAgents === undefined) return runningAgents;
+  if (desktopAgents === null) return runningAgents > 0 ? runningAgents : null;
+  return Math.max(runningAgents, desktopAgents);
 }
 
 function downloadedPhase(status: Extract<UpdateStatus, { state: "downloaded" }>, runningAgents: number | null): VersionPhase {
@@ -158,9 +161,9 @@ type DesktopAppBridge = NonNullable<Window["desktopBridge"]>["app"];
 interface VersionActions {
   readonly check: () => void;
   readonly download: () => void;
-  /** Resolves true when the restart began. */
+  /** Restarts past running agents, for a held press; resolves true when the restart began. */
   readonly restart: () => Promise<boolean>;
-  /** Restarts only if the server still counts no agents; otherwise records the count so the row asks for a hold. */
+  /** Restarts only if the desktop counts no agents; otherwise records its count so the row asks for a hold. */
   readonly restartIfIdle: () => void;
   readonly installWhenIdle: () => void;
   readonly cancelWhenIdle: () => void;
@@ -169,8 +172,10 @@ interface VersionActions {
 function useVersionActions(
   app: DesktopAppBridge,
   setChecking: (checking: boolean) => void,
-  setServerAgents: (count: number | null) => void,
+  setDesktopAgents: (count: number | null) => void,
 ): VersionActions {
+  // State lags a render behind, so a second click in the same tick would send a second install.
+  const installLock = useRef(false);
   // The desktop publishes why a call failed; reading the status back shows it even if that push was missed.
   // A failed read-back must not reject its caller, or a held Restart would never return to idle.
   const readBackStatus = async () => {
@@ -188,23 +193,26 @@ function useVersionActions(
       await readBackStatus();
     }
   };
-  const restart = async () => {
-    const started = await app.installUpdate().catch((error: unknown) => {
-      console.error("[updates] installUpdate failed", error);
+  // The desktop owns the running-agents check: an unconfirmed install it refuses names the count instead.
+  const requestInstall = async (confirmed: boolean): Promise<boolean> => {
+    if (installLock.current) return false;
+    installLock.current = true;
+    try {
+      const result = await app.installUpdate(confirmed ? { confirmed: true } : undefined).catch((error: unknown) => {
+        console.error("[updates] installUpdate failed", error);
+        return null;
+      });
+      if (result?.kind === "started") return true;
+      if (result?.kind === "agents-running") setDesktopAgents(result.runningAgents);
+      else await readBackStatus();
       return false;
-    });
-    if (!started) await readBackStatus();
-    return started;
+    } finally {
+      installLock.current = false;
+    }
   };
   const download = readBackOnFailure("downloadUpdate", () => app.downloadUpdate());
   const installWhenIdle = readBackOnFailure("installWhenIdle", () => app.installWhenIdle());
   const cancelWhenIdle = readBackOnFailure("cancelInstallWhenIdle", () => app.cancelInstallWhenIdle());
-  // The plain Restart may rest on a stale count; another window can have started agents since.
-  const restartIfIdle = async () => {
-    const count = await readActiveAgentCount();
-    if (count === 0) return restart();
-    setServerAgents(count);
-  };
   const check = async () => {
     setChecking(true);
     try {
@@ -218,8 +226,8 @@ function useVersionActions(
   return {
     check: () => void check(),
     download: () => void download(),
-    restart,
-    restartIfIdle: () => void restartIfIdle(),
+    restart: () => requestInstall(true),
+    restartIfIdle: () => void requestInstall(false),
     installWhenIdle: () => void installWhenIdle(),
     cancelWhenIdle: () => void cancelWhenIdle(),
   };
@@ -323,21 +331,11 @@ function useRunningAgentCount(): number {
   return useThreadStore((s) => getExecutingThreadIds(s).length);
 }
 
-// Reads the server's count while an update is ready, and again whenever this window's count moves.
-// Until the first read lands it counts 0; a plain Restart re-checks before installing anyway.
-function useServerAgentCount(ready: boolean, runningAgents: number) {
-  const [count, setCount] = useState<number | null>(0);
-  useEffect(() => {
-    if (!ready) return;
-    let current = true;
-    void readActiveAgentCount().then((next) => {
-      if (current) setCount(next);
-    });
-    return () => {
-      current = false;
-    };
-  }, [ready, runningAgents]);
-  return { count, set: setCount };
+// The desktop's count describes the update it refused to install, so a newer status drops it.
+function useDesktopAgentCount(status: UpdateStatus) {
+  const [refusal, setRefusal] = useState<{ readonly status: UpdateStatus; readonly agents: number | null } | null>(null);
+  const set = useCallback((agents: number | null) => setRefusal({ status: useUpdateStore.getState().status, agents }), []);
+  return { count: refusal?.status === status ? refusal.agents : undefined, set };
 }
 
 function DesktopVersionRow({ def, variant, app }: SettingRowProps & { readonly app: DesktopAppBridge }) {
@@ -345,11 +343,10 @@ function DesktopVersionRow({ def, variant, app }: SettingRowProps & { readonly a
   const pendingVersion = useUpdateStore((s) => s.pendingVersion);
   const checksOff = useSettingsStore((s) => s.settings.updates?.checkInterval === "never");
   const runningAgents = useRunningAgentCount();
-  const installPending = (status.state === "downloaded" && !status.installWhenIdle) || (status.state === "error" && status.failedOperation === "install");
-  const serverAgents = useServerAgentCount(installPending, runningAgents);
+  const desktopAgents = useDesktopAgentCount(status);
   const [checking, setChecking] = useState(false);
-  const actions = useVersionActions(app, setChecking, serverAgents.set);
-  const phase = deriveVersionPhase(status, { checking, checksOff, pendingVersion, runningAgents, serverAgents: serverAgents.count });
+  const actions = useVersionActions(app, setChecking, desktopAgents.set);
+  const phase = deriveVersionPhase(status, { checking, checksOff, pendingVersion, runningAgents, desktopAgents: desktopAgents.count });
   return (
     <SettingRowFrame def={def} variant={variant} label={<VersionLabel notesVersion={pendingVersionOf(phase)} />} hint={<VersionHint phase={phase} />}>
       <VersionAction phase={phase} actions={actions} />

@@ -1,33 +1,26 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
-import { mockTransport } from "@/__tests__/mocks/transport";
-import { AGENT_COUNT_DEADLINE_MS } from "@/features/updates/active-agent-count";
 import { releaseNotesUrl } from "@/features/updates/update-button-state";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useUpdateStore } from "@/stores/updateStore";
-import type { UpdateStatus } from "@/transport/desktop-bridge";
+import type { InstallUpdateResult, UpdateStatus } from "@/transport/desktop-bridge";
 import { AboutSection } from "../AboutSection";
 import { HOLD_TO_RESTART_MS } from "../HoldToRestartButton";
-
-vi.mock("@/transport", async () => ({
-  ...(await vi.importActual("@/transport")),
-  getTransport: () => mockTransport,
-}));
 
 const app = {
   checkForUpdates: vi.fn(() => Promise.resolve<UpdateStatus>({ state: "not-available", version: "0.16.0" })),
   downloadUpdate: vi.fn(() => Promise.resolve()),
-  installUpdate: vi.fn(() => Promise.resolve(true)),
+  installUpdate: vi.fn<(request?: { readonly confirmed?: boolean }) => Promise<InstallUpdateResult>>(),
   installWhenIdle: vi.fn(() => Promise.resolve()),
   cancelInstallWhenIdle: vi.fn(() => Promise.resolve()),
   getUpdateStatus: vi.fn(() => Promise.resolve<UpdateStatus>({ state: "idle" })),
 };
 const openExternalUrl = vi.fn(() => Promise.resolve());
-const getActiveAgentCount = vi.mocked(mockTransport.getActiveAgentCount);
 
 const READY: UpdateStatus = { state: "downloaded", version: "0.17.0", installWhenIdle: false };
+const CONFIRMED = { confirmed: true };
 
 function setStatuses(...statuses: UpdateStatus[]) {
   for (const status of statuses) useUpdateStore.getState().setStatus(status);
@@ -51,7 +44,7 @@ function actionNames(): string[] {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  getActiveAgentCount.mockReset().mockResolvedValue(0);
+  app.installUpdate.mockReset().mockResolvedValue({ kind: "started" });
   useSettingsStore.setState({ settings: getDefaultSettings(), loaded: true, update: vi.fn(async () => {}) });
   useUpdateStore.setState({ version: "0.16.0", stage: "stable", status: { state: "idle" }, pendingVersion: null });
   setRunningAgents(0);
@@ -135,7 +128,7 @@ describe("About version row download", () => {
 });
 
 describe("About version row restart", () => {
-  // Fails if a plain click restarts while agents run, or a short press restarts.
+  // Fails if a plain click restarts while agents run, a short press restarts, or the hold skips the desktop's confirmation.
   it("restarts after a 1200ms hold with agents running, not after 1100ms", () => {
     setRunningAgents(2);
     setStatuses(READY);
@@ -151,7 +144,7 @@ describe("About version row restart", () => {
 
     fireEvent.pointerDown(hold, { button: 0 });
     act(() => vi.advanceTimersByTime(HOLD_TO_RESTART_MS));
-    expect(app.installUpdate).toHaveBeenCalledTimes(1);
+    expect(app.installUpdate.mock.calls).toEqual([[CONFIRMED]]);
     expect(hold.textContent).toContain("Restarting");
   });
 
@@ -170,12 +163,13 @@ describe("About version row restart", () => {
 
     fireEvent.keyDown(hold, { key: " " });
     act(() => vi.advanceTimersByTime(HOLD_TO_RESTART_MS));
-    expect(app.installUpdate).toHaveBeenCalledTimes(1);
+    expect(app.installUpdate.mock.calls).toEqual([[CONFIRMED]]);
   });
 
   it("commits a second held Retry after the first install fails", async () => {
     const failed: UpdateStatus = { state: "error", message: "Update installation blocked: busy", failedOperation: "install" };
-    app.installUpdate.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    const refused: InstallUpdateResult = { kind: "refused", message: "busy" };
+    app.installUpdate.mockResolvedValueOnce(refused).mockResolvedValueOnce(refused);
     app.getUpdateStatus.mockResolvedValueOnce(failed).mockResolvedValueOnce(failed);
     setRunningAgents(1);
     setStatuses(failed);
@@ -193,8 +187,10 @@ describe("About version row restart", () => {
 
   it("returns held Restart to idle when the install and the status read-back both fail", async () => {
     const failed: UpdateStatus = { state: "error", message: "Update installation blocked: busy", failedOperation: "install" };
-    app.installUpdate.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    const refused: InstallUpdateResult = { kind: "refused", message: "busy" };
+    app.installUpdate.mockResolvedValueOnce(refused).mockResolvedValueOnce(refused);
     app.getUpdateStatus.mockRejectedValueOnce(new Error("bridge gone")).mockResolvedValueOnce(failed);
+    vi.spyOn(console, "error").mockImplementation(() => {});
     setRunningAgents(1);
     setStatuses(failed);
     render(<AboutSection />);
@@ -220,71 +216,76 @@ describe("About version row restart", () => {
     expect(app.installUpdate).not.toHaveBeenCalled();
   });
 
-  // Fails if Restart needs a hold when nothing would be lost, or skips the server re-check.
-  it("restarts on a click when the server counts no agents", async () => {
-    getActiveAgentCount.mockResolvedValue(0);
+  // Fails if a plain Restart claims the confirmation that only a hold may give.
+  it("asks the desktop to install without confirming on a plain Restart", async () => {
     setStatuses(READY);
     render(<AboutSection />);
-    await act(() => vi.advanceTimersByTimeAsync(0));
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(getActiveAgentCount).toHaveBeenCalledTimes(2);
+    expect(app.installUpdate.mock.calls).toEqual([[undefined]]);
+  });
+
+  // Fails if a quick double click sends two installs before the desktop answers the first.
+  it("sends one install for a double click", async () => {
+    app.installUpdate.mockReturnValueOnce(new Promise<InstallUpdateResult>(() => {}));
+    setStatuses(READY);
+    render(<AboutSection />);
+    const restart = screen.getByRole("button", { name: "Restart" });
+    fireEvent.click(restart);
+    fireEvent.click(restart);
+    await act(() => vi.advanceTimersByTimeAsync(0));
     expect(app.installUpdate).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("About version row server agent count", () => {
-  // Fails if the row trusts only this window's threads and offers a plain Restart over agents elsewhere.
-  it("asks for a hold when the server counts agents this window has not loaded", async () => {
-    getActiveAgentCount.mockResolvedValue(2);
+describe("About version row desktop agent check", () => {
+  // Fails if the row trusts only this window's threads after the desktop counts agents elsewhere.
+  it("asks for a hold when the desktop refuses because agents are running", async () => {
+    app.installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: 2 });
     setStatuses(READY);
     render(<AboutSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(hintText()).toBe("v0.17.0 is ready. Restarting ends 2 agents.");
+
     const hold = screen.getByRole("button", { name: "Hold to restart. Ends 2 running agents." });
-    fireEvent.click(hold);
-    await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(app.installUpdate).not.toHaveBeenCalled();
+    fireEvent.pointerDown(hold, { button: 0 });
+    await act(() => vi.advanceTimersByTimeAsync(HOLD_TO_RESTART_MS));
+    expect(app.installUpdate.mock.calls).toEqual([[undefined], [CONFIRMED]]);
   });
 
-  // Fails if a plain Restart installs on a stale count after agents started elsewhere.
-  it("switches to hold when the click's re-check finds agents", async () => {
-    getActiveAgentCount.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+  // Fails if an unknown count is read as "no agents" and offers a plain Restart again.
+  it("says agents may be running when the desktop cannot count them", async () => {
+    app.installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: null });
     setStatuses(READY);
     render(<AboutSection />);
-    await act(() => vi.advanceTimersByTimeAsync(0));
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(app.installUpdate).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Hold to restart. Ends 1 running agent." })).toBeTruthy();
-  });
-
-  // Fails if an unreadable or late count is read as "no agents" and installs.
-  it.each([
-    ["rejects", () => getActiveAgentCount.mockRejectedValueOnce(new Error("socket closed"))],
-    ["misses the deadline", () => getActiveAgentCount.mockReturnValueOnce(new Promise<number>(() => {}))],
-  ])("does not install when the re-check %s", async (_name, failRecheck) => {
-    getActiveAgentCount.mockResolvedValueOnce(0);
-    setStatuses(READY);
-    render(<AboutSection />);
-    await act(() => vi.advanceTimersByTimeAsync(0));
-    failRecheck();
-    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
-    await act(() => vi.advanceTimersByTimeAsync(AGENT_COUNT_DEADLINE_MS));
-    expect(app.installUpdate).not.toHaveBeenCalled();
     expect(hintText()).toBe("v0.17.0 is ready. Agents may be running.");
     expect(screen.getByRole("status").textContent).toBe("v0.17.0 is ready. Agents may be running.");
+    expect(screen.getByRole("button", { name: "Hold to restart. Agents may be running." })).toBeTruthy();
   });
 
-  // Fails if Retry after a failed install restarts over agents the re-check finds.
-  it("re-checks the server before retrying a failed install", async () => {
-    getActiveAgentCount.mockResolvedValueOnce(0).mockResolvedValueOnce(3);
+  // Fails if Retry after a failed install restarts over agents the desktop finds.
+  it("asks for a hold when a retried install finds agents", async () => {
+    app.installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: 3 });
     setStatuses({ state: "error", message: "Update installation blocked: busy", failedOperation: "install" });
     render(<AboutSection />);
-    await act(() => vi.advanceTimersByTimeAsync(0));
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await act(() => vi.advanceTimersByTimeAsync(0));
-    expect(app.installUpdate).not.toHaveBeenCalled();
+    expect(app.installUpdate.mock.calls).toEqual([[undefined]]);
     expect(screen.getByRole("button", { name: "Hold to restart. Ends 3 running agents." })).toBeTruthy();
+  });
+
+  // Fails if a count for one update keeps asking for a hold on the next one.
+  it("forgets the desktop's count when a newer update is ready", async () => {
+    app.installUpdate.mockResolvedValueOnce({ kind: "agents-running", runningAgents: 2 });
+    setStatuses(READY);
+    render(<AboutSection />);
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    act(() => setStatuses({ ...READY, version: "0.18.0" }));
+    expect(actionNames()).toEqual(["Restart"]);
   });
 });
 
