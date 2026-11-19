@@ -117,6 +117,7 @@ describe("Cleanup integration", () => {
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
       mockThreadDeletion,
       { run: vi.fn().mockResolvedValue(undefined) },
+      threadService,
       TEST_HOST_RUNTIME,
       undefined,
       0,
@@ -253,6 +254,108 @@ describe("Cleanup integration", () => {
     // Now thread and job are gone
     expect(threadRepo.findById("thread-retry")).toBeNull();
     expect(cleanupJobRepo.count()).toBe(0);
+  });
+
+  it("retention cleanup of a coordinator deletes its finished delegated child instead of listing it", async () => {
+    const ws = (await workspaceRepo.create("retention-test", "/test-repo-5"));
+    const wtPath = NodePath.join(WT_BASE, "coordinator-wt");
+    const coordinator = await threadRepo.create(ws.id, "Coordinator", "worktree", "mcode/coordinator");
+    const child = await threadRepo.create(ws.id, "Council seat", "worktree", "mcode/coordinator", false, "codex", {
+      delegation: { coordinatorThreadId: coordinator.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    await threadRepo.updateWorktreePath(coordinator.id, wtPath);
+    await threadRepo.updateWorktreePath(child.id, wtPath);
+    db.prepare("UPDATE threads SET user_completed_at = ?, scheduled_deletion_at = ? WHERE id = ?")
+      .run("2026-08-12T09:00:00.000Z", "2026-08-12T09:01:00.000Z", coordinator.id);
+
+    await worker.poll();
+
+    expect(threadRepo.findById(coordinator.id)).toBeNull();
+    expect(threadService.list(ws.id).map((thread) => thread.title)).not.toContain("Council seat");
+    expect(threadRepo.findById(child.id)).toBeNull();
+    expect(mockGitWorktrees.removeWorktree).toHaveBeenCalledWith(
+      "/test-repo-5",
+      "coordinator-wt",
+      expect.objectContaining({ worktreePath: wtPath }),
+    );
+  });
+
+  it("retention cleanup of a coordinator detaches its running delegated child as a visible thread", async () => {
+    const ws = await workspaceRepo.create("retention-running-test", "/test-repo-running");
+    const coordinator = await threadRepo.create(ws.id, "Coordinator", "direct", "main");
+    const child = await threadRepo.create(ws.id, "Running council seat", "direct", "main", true, "codex", {
+      delegation: { coordinatorThreadId: coordinator.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, ?, ?, 'codex', 'Active', ?, ?)`).run(child.id, ws.id, child.id, now, now);
+    db.prepare(`INSERT INTO canonical_agent_turns
+      (id, thread_id, execution_id, status, trigger_json, permission_mode, created_at, updated_at)
+      VALUES ('running-turn', ?, 'running-execution', 'Running', '{"kind":"user"}', 'supervised', ?, ?)`)
+      .run(child.id, now, now);
+    db.prepare("UPDATE threads SET user_completed_at = ?, scheduled_deletion_at = ? WHERE id = ?")
+      .run("2026-08-12T09:00:00.000Z", "2026-08-12T09:01:00.000Z", coordinator.id);
+
+    await worker.poll();
+
+    expect(threadRepo.findById(coordinator.id)).toBeNull();
+    expect(threadRepo.findById(child.id)).toMatchObject({
+      delegation_coordinator_thread_id: null,
+      status: "active",
+    });
+    expect(threadService.list(ws.id).map((thread) => thread.id)).toEqual([child.id]);
+  });
+
+  it("retention cleanup processes delegated children of another completed coordinator sharing the worktree", async () => {
+    const ws = await workspaceRepo.create("linked-coordinators-test", "/test-repo-linked");
+    const wtPath = NodePath.join(WT_BASE, "linked-coordinators-wt");
+    const due = await threadRepo.create(ws.id, "Due coordinator", "worktree", "mcode/linked");
+    const linked = await threadRepo.create(ws.id, "Linked coordinator", "worktree", "mcode/linked");
+    const child = await threadRepo.create(ws.id, "Finished council seat", "direct", "main", true, "codex", {
+      delegation: { coordinatorThreadId: linked.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    await threadRepo.updateWorktreePath(due.id, wtPath);
+    await threadRepo.updateWorktreePath(linked.id, wtPath);
+    db.prepare("UPDATE threads SET user_completed_at = ?, scheduled_deletion_at = ? WHERE id = ?")
+      .run("2026-08-12T09:00:00.000Z", "2026-08-12T09:01:00.000Z", due.id);
+    db.prepare("UPDATE threads SET user_completed_at = ?, scheduled_deletion_at = ? WHERE id = ?")
+      .run("2026-08-12T09:00:00.000Z", "2099-08-12T09:01:00.000Z", linked.id);
+
+    await worker.poll();
+
+    expect(threadRepo.findById(due.id)).toBeNull();
+    expect(threadRepo.findById(linked.id)).toBeNull();
+    expect(threadService.list(ws.id).map((thread) => thread.id)).not.toContain(child.id);
+    expect(threadRepo.findById(child.id)).toBeNull();
+  });
+
+  it("retention cleanup keeps a shared worktree for a running delegated child", async () => {
+    const ws = await workspaceRepo.create("retention-shared-test", "/test-repo-shared");
+    const wtPath = NodePath.join(WT_BASE, "running-shared-wt");
+    const coordinator = await threadRepo.create(ws.id, "Coordinator", "worktree", "mcode/shared");
+    const child = await threadRepo.create(ws.id, "Running council seat", "worktree", "mcode/shared", false, "codex", {
+      delegation: { coordinatorThreadId: coordinator.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    await threadRepo.updateWorktreePath(coordinator.id, wtPath);
+    await threadRepo.updateWorktreePath(child.id, wtPath);
+    const now = new Date().toISOString();
+    db.prepare(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, ?, ?, 'codex', 'Active', ?, ?)`).run(child.id, ws.id, child.id, now, now);
+    db.prepare(`INSERT INTO canonical_agent_turns
+      (id, thread_id, execution_id, status, trigger_json, permission_mode, created_at, updated_at)
+      VALUES ('running-turn', ?, 'running-execution', 'Running', '{"kind":"user"}', 'supervised', ?, ?)`)
+      .run(child.id, now, now);
+    db.prepare("UPDATE threads SET user_completed_at = ?, scheduled_deletion_at = ? WHERE id = ?")
+      .run("2026-08-12T09:00:00.000Z", "2026-08-12T09:01:00.000Z", coordinator.id);
+
+    await worker.poll();
+
+    expect(threadRepo.findById(coordinator.id)).toBeNull();
+    expect(threadService.list(ws.id)).toMatchObject([{ id: child.id, status: "active" }]);
+    expect(threadRepo.findById(child.id)).toMatchObject({ delegation_coordinator_thread_id: null });
+    expect(mockGitWorktrees.removeWorktree).not.toHaveBeenCalled();
   });
 
   it("duplicate delete is idempotent (INSERT OR IGNORE)", async () => {

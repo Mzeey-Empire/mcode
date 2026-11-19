@@ -151,7 +151,8 @@ export class ThreadService {
     return deleted;
   }
 
-  private async deleteDelegatedChildren(coordinator: Thread, cleanupWorktree: boolean): Promise<void> {
+  /** Deletes finished delegated children, scheduling cleanup for separate managed worktrees, and detaches running children as ordinary threads. */
+  async deleteDelegatedChildren(coordinator: Thread, cleanupWorktree: boolean): Promise<void> {
     const children = this.threadRepo.listDelegatedChildren(coordinator.id);
     const detached = new Set(await this.threadRepo.detachActiveDelegatedChildren(coordinator.id));
     for (const child of children) {

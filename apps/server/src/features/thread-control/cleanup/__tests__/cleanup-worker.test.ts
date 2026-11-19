@@ -80,6 +80,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
       threadDeletion,
       { run: vi.fn().mockResolvedValue(undefined) },
+      { deleteDelegatedChildren: vi.fn().mockResolvedValue(undefined) },
       HOST_RUNTIME,
       new ThreadControlMutationReservationService(),
       0,
@@ -491,7 +492,9 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
       gitWorktrees, cleanupPolicy, mutationLock, ownedWorkspaces,
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
-      threadDeletion, { run: vi.fn().mockResolvedValue(undefined) }, HOST_RUNTIME, new ThreadControlMutationReservationService(), 0,
+      threadDeletion, { run: vi.fn().mockResolvedValue(undefined) },
+      { deleteDelegatedChildren: vi.fn().mockResolvedValue(undefined) },
+      HOST_RUNTIME, new ThreadControlMutationReservationService(), 0,
     );
 
     await expect(uncertainCleanup.processOneJob()).rejects.toBeInstanceOf(DatabaseWriteOutcomeUnknown);
@@ -621,6 +624,7 @@ describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
         { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
         threadDeletion,
         new CleanupActionRunner(environment),
+        { deleteDelegatedChildren: vi.fn().mockResolvedValue(undefined) },
         HOST_RUNTIME,
         new ThreadControlMutationReservationService(),
         0,

@@ -206,6 +206,24 @@ describe("ThreadService.delete", () => {
     expect(teardownThread).toHaveBeenCalledExactlyOnceWith(parent.id);
   });
 
+  it("detaches a delegated child whose startup is running before any turn exists", async () => {
+    const workspace = await workspaces.create("Project", "/repo");
+    const parent = await threads.create(workspace.id, "Coordinator", "direct", "main");
+    const child = await threads.create(workspace.id, "Starting", "direct", "main", true, "codex", {
+      delegation: { coordinatorThreadId: parent.id, creatorTurnId: "turn", creatorToolCallId: "call" },
+    });
+    database.prepare(`INSERT INTO thread_startups
+      (startup_id, workspace_id, kind, state, phase, steps_json, transcript_json, revision, thread_id)
+      VALUES ('running-startup', ?, 'direct', 'running', 'agent', '[]', '[]', 1, ?)`)
+      .run(workspace.id, child.id);
+
+    expect(await threadService.delete(parent.id, true)).toBe(true);
+
+    expect(threads.findById(parent.id)).toBeNull();
+    expect(threads.findById(child.id)).toMatchObject({ status: "active", delegation_coordinator_thread_id: null });
+    expect(threadService.list(workspace.id).map((thread) => thread.id)).toEqual([child.id]);
+  });
+
   it("keeps an attached delegated child's shared checkout out of child cleanup", async () => {
     const workspace = await workspaces.create("Project", "/repo");
     const parent = await threads.create(workspace.id, "Coordinator", "worktree", "feature/delete");

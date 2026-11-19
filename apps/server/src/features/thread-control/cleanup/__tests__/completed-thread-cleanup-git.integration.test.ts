@@ -95,6 +95,7 @@ describe("completed thread cleanup Git safety", () => {
         deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
       } as unknown as ThreadDeletionTeardownService,
       { run: vi.fn().mockResolvedValue(undefined) },
+      { deleteDelegatedChildren: vi.fn().mockResolvedValue(undefined) },
       hostRuntime,
       undefined,
       0,
