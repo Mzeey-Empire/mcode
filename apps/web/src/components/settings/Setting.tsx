@@ -57,7 +57,7 @@ export interface SettingRowFrameProps {
   readonly def: SettingDef;
   readonly variant: SettingVariant;
   /** Shorter label where the surrounding row already names the subject, such as "CLI path" under a provider. Omit to show `def.label`. */
-  readonly label?: string;
+  readonly label?: ReactNode;
   /** Live hint that replaces the static one, such as update status. Omit to show `def.hint`. */
   readonly hint?: ReactNode;
   readonly children: ReactNode;
