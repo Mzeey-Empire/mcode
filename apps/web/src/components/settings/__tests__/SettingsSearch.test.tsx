@@ -163,6 +163,7 @@ describe("Settings search", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Go to .* in Providers, Claude$/ }));
     const marked = document.querySelector("[data-search-hit]") as HTMLElement;
     expect(marked).toHaveAttribute("data-setting-id", "providers.claude.cliPath");
+    expect(marked).toHaveFocus();
     expect(within(marked).getByRole("textbox")).toBeVisible();
   });
 

@@ -50,8 +50,9 @@ vi.mock("@/components/ui/badge", () => ({
 
 // @base-ui/react (used by Tooltip) does not work in jsdom; stub it out.
 vi.mock("@/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Tooltip: ({ children }: { children: React.ReactNode | (() => React.ReactNode) }) => <>{typeof children === "function" ? null : children}</>,
+  TooltipTrigger: ({ children, render }: { children?: React.ReactNode; render?: React.ReactNode }) => <>{render ?? children}</>,
+  createTooltipHandle: () => ({}),
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -87,15 +88,31 @@ describe("ProviderSection", () => {
     expect(screen.getByTestId("provider-switch-claude")).toBeDisabled();
     expect(screen.getByText(`At least one provider must be enabled. ${warning}`)).toBeInTheDocument();
   });
-  it.each(["Claude Code is not installed.", "Point the CLI path at claude.exe or the claude binary."])("shows Claude installation guidance: %s", (message) => {
+
+  // Fails if the last-enabled guard is dropped and the switch lets Claude turn off.
+  it("blocks disabling the last enabled provider", async () => {
+    const user = userEvent.setup();
+    const update = vi.fn().mockResolvedValue(undefined);
+    useSettingsStore.setState({ settings: getDefaultSettings(), update });
+    useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => ({ ...row, enabled: row.id === "claude" })) }));
+    render(<ProviderSection />);
+    const toggle = screen.getByRole("switch", { name: "Claude enabled" });
+    expect(toggle).toBeDisabled();
+    await user.click(toggle);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  // Fails if the missing CLI moves into a hover-only tooltip.
+  it.each(["Claude Code is not installed.", "Point the CLI path at claude.exe or the claude binary."])("shows a missing CLI and its guidance without hover: %s", (message) => {
     useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
       ? { ...row, cli: { ...row.cli, status: "not_found", message } }
       : row) }));
     render(<ProviderSection />);
     expect(screen.getByTestId("provider-badge-claude-cli-missing")).toHaveTextContent("CLI not found");
-    expect(screen.getAllByText(message)).toHaveLength(2);
+    expect(screen.getByText(message)).toBeVisible();
   });
-  it("shows a version warning as a hint without a missing CLI badge", () => {
+
+  it("shows a version warning as a hint without a missing CLI state", () => {
     const warning = "Update Claude Code to a supported version.";
     useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
       ? { ...row, cli: { ...row.cli, warning } }
@@ -104,6 +121,18 @@ describe("ProviderSection", () => {
     expect(screen.getByText(warning)).toBeInTheDocument();
     expect(screen.queryByTestId("provider-badge-claude-cli-missing")).not.toBeInTheDocument();
   });
+
+  // Fails if the path line drops the file name or loses the full path for hover and screen readers.
+  it("shows the CLI file name first and keeps the full path as its accessible name", () => {
+    useProviderAvailabilityStore.setState(({ providers }) => ({ providers: providers.map((row) => row.id === "claude"
+      ? { ...row, cli: { ...row.cli, resolvedPath: "C:\\Users\\me\\bin\\claude.exe" } }
+      : row) }));
+    render(<ProviderSection />);
+    const path = screen.getByLabelText("C:\\Users\\me\\bin\\claude.exe");
+    expect(path.firstElementChild).toHaveTextContent(/^claude\.exe$/);
+    expect(path).toHaveTextContent("C:\\Users\\me\\bin");
+  });
+
   it("renders switches only for available providers", () => {
     render(<ProviderSection />);
     const switches = screen.getAllByRole("switch");
@@ -126,42 +155,59 @@ describe("ProviderSection", () => {
     expect(screen.queryByTestId("provider-badge-opencode-comingsoon")).not.toBeInTheDocument();
   });
 
-  it("groups planned providers after available providers without adapter copy", () => {
+  it("shows a coming-soon provider as a disabled row with no switch or details", () => {
     render(<ProviderSection />);
-
-    const comingSoon = screen.getByTestId("coming-soon-providers");
-    expect(within(comingSoon).getByText("Gemini")).toBeInTheDocument();
-    expect(within(comingSoon).queryByText("OpenCode")).not.toBeInTheDocument();
+    const row = screen.getByTestId("provider-row-gemini-comingsoon");
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    expect(within(row).getByText("Gemini")).toBeInTheDocument();
+    expect(within(row).queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Gemini settings" })).not.toBeInTheDocument();
     expect(screen.queryByText("Adapter not available yet.")).not.toBeInTheDocument();
-    expect(
-      screen
-        .getByTestId("provider-config-trigger-copilot")
-        .compareDocumentPosition(comingSoon) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
   });
 
-  it("renders a CLI-not-found badge when enabled and status='not_found'", () => {
+  it("lists coming-soon providers after every available provider", () => {
+    render(<ProviderSection />);
+    const comingSoon = screen.getByTestId("provider-row-gemini-comingsoon");
+    const lastAvailable = screen.getByTestId("provider-switch-devin");
+    expect(lastAvailable.compareDocumentPosition(comingSoon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("renders a CLI-not-found state when enabled and status='not_found'", () => {
     render(<ProviderSection />);
     expect(screen.getByTestId("provider-badge-codex-cli-missing")).toBeInTheDocument();
   });
 
-  it("does not render controls for coming-soon providers", () => {
-    render(<ProviderSection />);
-    expect(screen.queryByTestId("provider-switch-gemini")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("provider-config-trigger-gemini")).not.toBeInTheDocument();
-  });
-
-  it("keeps stable provider configuration collapsed and opens Beta configuration by default", () => {
+  it("starts with every provider's details closed", () => {
     render(<ProviderSection />);
     expect(screen.queryByTestId("provider-cli-path-claude")).not.toBeInTheDocument();
-    expect(screen.getByTestId("provider-cli-path-copilot")).toBeEnabled();
-    expect(screen.queryByTestId("provider-cli-path-gemini")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("provider-cli-path-copilot")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Claude settings" })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("updates a disabled Beta provider's CLI path", () => {
+  // Fails if the row stops opening its details, or if the switch's click bubbles up and opens them.
+  it("opens a provider's details from its row but not from its switch", async () => {
+    const user = userEvent.setup();
+    render(<ProviderSection />);
+
+    await user.click(screen.getByRole("switch", { name: "Codex enabled" }));
+    expect(screen.queryByTestId("provider-cli-path-codex")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Claude"));
+    expect(screen.getByTestId("provider-cli-path-claude")).toBeVisible();
+    const trigger = screen.getByRole("button", { name: "Claude settings" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(trigger.getAttribute("aria-controls") ?? "")).toContainElement(screen.getByTestId("provider-cli-path-claude"));
+
+    await user.click(trigger);
+    expect(screen.queryByTestId("provider-cli-path-claude")).not.toBeInTheDocument();
+  });
+
+  it("updates a disabled Beta provider's CLI path", async () => {
+    const user = userEvent.setup();
     const update = vi.fn().mockResolvedValue(undefined);
     useSettingsStore.setState({ settings: getDefaultSettings(), update });
     render(<ProviderSection />);
+    await user.click(screen.getByRole("button", { name: "GitHub Copilot settings" }));
 
     fireEvent.change(screen.getByTestId("provider-cli-path-copilot"), {
       target: { value: "/custom/copilot" },
@@ -172,26 +218,12 @@ describe("ProviderSection", () => {
     });
   });
 
-  it("expands a stable provider's CLI path on request", async () => {
-    const user = userEvent.setup();
-    render(<ProviderSection />);
-
-    await user.click(screen.getByTestId("provider-config-trigger-claude"));
-
-    expect(screen.getByTestId("provider-cli-path-claude")).toBeVisible();
-  });
-
-  it("does not expose a disclosure trigger for coming-soon providers", () => {
-    render(<ProviderSection />);
-
-    expect(screen.queryByTestId("provider-config-trigger-gemini")).not.toBeInTheDocument();
-  });
-
-  it("commits a normalized OpenCode serve URL on blur", async () => {
+  it("commits a normalized OpenCode server URL on blur", async () => {
     const user = userEvent.setup();
     const update = vi.fn().mockResolvedValue(undefined);
     useSettingsStore.setState({ settings: getDefaultSettings(), update });
     render(<ProviderSection />);
+    await user.click(screen.getByRole("button", { name: "OpenCode settings" }));
 
     const input = screen.getByTestId("provider-serve-url-opencode");
     await user.type(input, "http://127.0.0.1:4096/");
@@ -202,11 +234,12 @@ describe("ProviderSection", () => {
     expect(input).toHaveValue("http://127.0.0.1:4096");
   });
 
-  it("rejects a non-http OpenCode serve URL without saving it", async () => {
+  it("rejects a non-http OpenCode server URL without saving it", async () => {
     const user = userEvent.setup();
     const update = vi.fn().mockResolvedValue(undefined);
     useSettingsStore.setState({ settings: getDefaultSettings(), update });
     render(<ProviderSection />);
+    await user.click(screen.getByRole("button", { name: "OpenCode settings" }));
 
     const input = screen.getByTestId("provider-serve-url-opencode");
     await user.type(input, "file:///tmp/serve{Enter}");
@@ -216,8 +249,10 @@ describe("ProviderSection", () => {
     expect(screen.getByText("Enter an http or https URL, or leave it empty.")).toBeInTheDocument();
   });
 
-  it("shows the OpenCode CLI path alongside its serve URL", () => {
+  it("shows the OpenCode CLI path alongside its server URL", async () => {
+    const user = userEvent.setup();
     render(<ProviderSection />);
+    await user.click(screen.getByRole("button", { name: "OpenCode settings" }));
     expect(screen.getByTestId("provider-cli-path-opencode")).toBeEnabled();
     expect(screen.getByTestId("provider-serve-url-opencode")).toHaveAttribute("placeholder", "http://127.0.0.1:4096");
   });
