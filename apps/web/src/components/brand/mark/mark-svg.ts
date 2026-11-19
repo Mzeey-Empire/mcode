@@ -108,6 +108,7 @@ const MARK_LABEL: Record<McodeMarkState, string> = {
   quiet: "Mcode",
   running: "Mcode, running",
   "setting-up": "Mcode, setting up",
+  waiting: "Mcode, waiting",
   "needs-you": "Mcode, needs you",
   finished: "Mcode, finished",
   failed: "Mcode, failed",

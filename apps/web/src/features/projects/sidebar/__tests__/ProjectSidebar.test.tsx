@@ -1646,6 +1646,25 @@ describe("ProjectSidebar action-required indicator", () => {
 
       expect(within(screen.getByTestId("project-row-ws-1")).queryByRole("img", { name: "Approval required" })).toBeNull();
     });
+
+    it("leaves the selected thread kept under a collapsed project to its own row", () => {
+      const state = setupStoreMocks({ threads: [
+        makeThread({ id: "thread-shown", title: "Shown" }),
+        makeThread({ id: "thread-hidden", title: "Hidden" }),
+      ] });
+      Object.assign(state, { activeThreadId: "thread-shown" });
+      useSidebarUiStore.setState({ expandedProjects: new Set([]) });
+      applyAttention(attention("thread-shown", waitingOn("approval")));
+      render(<ProjectSidebar />);
+      const projectRow = screen.getByTestId("project-row-ws-1");
+
+      expect(within(projectRow).queryByRole("img", { name: "Approval required" })).toBeNull();
+      expect(within(screen.getByRole("button", { name: /^Shown/ })).getByRole("img", { name: "Approval required" })).toBeVisible();
+
+      applyAttention(attention("thread-hidden", waitingOn("questions")));
+
+      expect(within(projectRow).getByRole("img", { name: "Answers required" })).toBeVisible();
+    });
   });
 
   it("dims only the content of a client scaffold row, not its status", () => {

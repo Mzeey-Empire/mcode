@@ -1246,17 +1246,27 @@ describe("delegated task status", () => {
   it("keeps a live 'Waiting on subagents' line without steps or clock after the own turn ends", () => {
     const items = buildVolatileItems(
       leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
-      { stopPending: true, compacting: false, planning: true, delegating: true },
+      { stopPending: true, compacting: false, planning: true, descendants: "running" },
     );
     expect(findIndicator(items)).toMatchObject({
       stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
     });
   });
 
+  it("says a subagent needs the user, with the subagent icon, after the own turn ends", () => {
+    const items = buildVolatileItems(
+      leftoverTools, undefined, 1, undefined, [], [], undefined, undefined, undefined,
+      { stopPending: false, compacting: false, descendants: "needs-you" },
+    );
+    expect(findIndicator(items)).toMatchObject({
+      stepCount: 0, startTime: undefined, status: { label: "Subagent needs you", icon: "layers" },
+    });
+  });
+
   it("lets an approval wait outrank delegation", () => {
     const items = buildVolatileItems(
       [], undefined, undefined, undefined, [], [], undefined, undefined, undefined,
-      { stopPending: false, compacting: false, waitingFor: "approval", delegating: true },
+      { stopPending: false, compacting: false, waitingFor: "approval", descendants: "needs-you" },
     );
     expect(findIndicator(items)?.status.label).toBe("Waiting for approval");
   });
@@ -1264,7 +1274,7 @@ describe("delegated task status", () => {
   it("drops the delegated-only line immediately when the last task settles", () => {
     const build = createVolatileItemsBuilder();
     const live = build(leftoverTools, COMPLETED_AGENT, 1, undefined, [], [], undefined, undefined, undefined,
-      { stopPending: false, compacting: false, delegating: true });
+      { stopPending: false, compacting: false, descendants: "running" });
     expect(findIndicator(live)).toMatchObject({
       stepCount: 0, startTime: undefined, status: { label: "Waiting on subagents", icon: "layers" },
     });

@@ -16,8 +16,8 @@ export interface RunHoldingSignals {
   waitingFor?: "approval" | "answers";
   /** The server is writing the plan after the questions were answered. */
   planning?: boolean;
-  /** Tasks this thread delegated, or subagents it started in the background, still run now. */
-  delegating?: boolean;
+  /** What this thread's subagents are doing; absent when none still runs or waits on the user. */
+  descendants?: "running" | "needs-you";
 }
 
 /** Everything the status line needs to pick one label for a running turn. */

@@ -664,10 +664,10 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
   // An integration can ask for approval, and plan questions wait on the user after their turn ends; the status line still has to say the thread waits.
   const signals = holdingSignals ?? NO_HOLDING_SIGNALS;
   const ownLive = isAgentRunning || signals.waitingFor !== undefined;
-  const live = ownLive || signals.delegating === true;
-  // The settled footer replaces this row in the same render; a leftover item would draw an empty row.
-  if (!live) return undefined;
-  if (!ownLive) return delegatedOnlyIndicatorItem();
+  if (!ownLive) {
+    // The settled footer replaces this row in the same render; a leftover item would draw an empty row.
+    return signals.descendants ? descendantsOnlyIndicatorItem(signals.descendants) : undefined;
+  }
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
   const running = topLevelTools.filter(isTurnWorkRunning);
   const status = deriveRunStatus({
@@ -680,8 +680,10 @@ function narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime, thoughts
   return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, status, startTime };
 }
 
-function delegatedOnlyIndicatorItem(): ChatVirtualItem {
-  const status = deriveRunStatus({ ...NO_HOLDING_SIGNALS, subagentsRunning: true, answering: false });
+function descendantsOnlyIndicatorItem(descendants: NonNullable<RunHoldingSignals["descendants"]>): ChatVirtualItem {
+  const status: RunStatus = descendants === "needs-you"
+    ? { label: "Subagent needs you", icon: "layers" }
+    : deriveRunStatus({ ...NO_HOLDING_SIGNALS, subagentsRunning: true, answering: false });
   return { key: "narrative-indicator", type: "narrative-indicator", stepCount: 0, status, startTime: undefined };
 }
 

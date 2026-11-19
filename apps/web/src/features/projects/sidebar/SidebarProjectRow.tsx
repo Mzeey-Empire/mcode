@@ -120,7 +120,13 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
   const scope = useSidebarScope();
   const completions = useCompletionStore((state) => state.entries);
   const scopedThreads = useMemo(() => threads.filter((thread) => inScope(thread, scope, completions)), [threads, scope, completions]);
-  const collapsedStatus = useRolledUpThreadRowState(item.collapsed ? scopedThreads : NO_THREADS);
+  const selectedThreadId = useWorkspaceStore((state) => state.activeThreadId);
+  // A collapsed project keeps the selected thread listed under it with its own status, so the roll-up covers only the threads it hides.
+  const hiddenThreads = useMemo(
+    () => (item.collapsed ? scopedThreads.filter((thread) => thread.id !== selectedThreadId) : NO_THREADS),
+    [item.collapsed, scopedThreads, selectedThreadId],
+  );
+  const collapsedStatus = useRolledUpThreadRowState(hiddenThreads);
   if (!workspace) return null;
   return (
     <>
