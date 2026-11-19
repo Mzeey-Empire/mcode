@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import type { OpenInApp } from "@/transport/types";
 
@@ -77,12 +77,27 @@ describe("GeneralSection", () => {
     expect(screen.getByText("Default open-in app")).toBeInTheDocument();
   });
 
-  it("shows Auto on the trigger when no global default is set", () => {
-    mockApps.value = [CODE];
+  it("shows Auto and the app it resolves to when no global default is set", () => {
+    mockApps.value = [ZED_UNDETECTED, CURSOR, CODE];
     renderSection("");
     expect(
       screen.getByTestId("settings-default-open-in-trigger"),
-    ).toHaveTextContent("Auto");
+    ).toHaveTextContent("Auto · Cursor");
+  });
+
+  it("names no app after Auto before the app list loads", () => {
+    mockApps.value = [];
+    renderSection("");
+    expect(
+      screen.getByTestId("settings-default-open-in-trigger"),
+    ).toHaveTextContent(/^Auto$/);
+  });
+
+  it("picks the theme from its window previews", () => {
+    mockApps.value = [CODE];
+    const { update } = renderSection("");
+    fireEvent.click(screen.getByRole("radio", { name: "Light" }));
+    expect(update).toHaveBeenCalledWith({ appearance: { theme: "light" } });
   });
 
   it("shows the selected app label on the trigger when a default is set", () => {

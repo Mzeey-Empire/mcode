@@ -9,7 +9,7 @@ import { SettingsGroup } from "../SettingsGroup";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
+import { SettingsTag } from "../SettingsTag";
 import { ProviderIcon } from "@/components/ui/provider-icon";
 import { Tooltip, TooltipContent, TooltipTrigger, type TooltipHandle } from "@/components/ui/tooltip";
 import { PathLine, PathTooltipRoot, usePathTooltip } from "../PathLine";
@@ -76,7 +76,7 @@ function useAvailability(id: ProviderId): ProviderAvailability | undefined {
 }
 
 function BetaTag({ id }: { id: ProviderId }) {
-  return <Tooltip><TooltipTrigger><Badge variant="secondary" data-testid={`provider-badge-${id}-beta`}>Beta</Badge></TooltipTrigger><TooltipContent>This provider is in early phase. Expect bugs or incomplete features.</TooltipContent></Tooltip>;
+  return <Tooltip><TooltipTrigger><SettingsTag data-testid={`provider-badge-${id}-beta`}>Beta</SettingsTag></TooltipTrigger><TooltipContent>This provider is in early phase. Expect bugs or incomplete features.</TooltipContent></Tooltip>;
 }
 
 /**
@@ -403,7 +403,7 @@ function ComingSoonProviderRow({ row }: { row: ProviderAvailability }) {
       <ProviderIcon provider={row.id} size={20} />
       <div className="flex items-center gap-2 text-body-small font-medium text-ink">
         {labelFor(row.id)}
-        <Badge variant="secondary" data-testid={`provider-badge-${row.id}-comingsoon`}>Coming soon</Badge>
+        <SettingsTag data-testid={`provider-badge-${row.id}-comingsoon`}>Coming soon</SettingsTag>
       </div>
     </div>
   );

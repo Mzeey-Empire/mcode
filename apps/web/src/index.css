@@ -1174,6 +1174,26 @@ input[type="range"].settings-range:focus-visible::-moz-range-thumb { outline: 2p
 [data-settings-surface] [data-slot="input"]:hover { background: color-mix(in oklch, var(--ink) 10%, transparent); }
 [data-settings-surface] [data-slot="input"]::placeholder { color: var(--muted); }
 
+/* Theme picker previews draw a light and a dark window whatever theme is active, so they name ramp steps, not roles. */
+.theme-preview-light {
+  --preview-side: var(--neutral-100);
+  --preview-main: var(--neutral-50);
+  --preview-bar: color-mix(in oklch, var(--neutral-300) 55%, transparent);
+  --preview-selected: var(--neutral-200);
+  --preview-composer: var(--neutral-100);
+  --preview-line: var(--neutral-200);
+  --preview-accent: var(--amber-500);
+}
+.theme-preview-dark {
+  --preview-side: var(--neutral-950);
+  --preview-main: var(--neutral-900);
+  --preview-bar: color-mix(in oklch, var(--neutral-300) 45%, transparent);
+  --preview-selected: var(--neutral-600);
+  --preview-composer: var(--neutral-800);
+  --preview-line: var(--neutral-600);
+  --preview-accent: var(--amber-500);
+}
+
 @keyframes blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }

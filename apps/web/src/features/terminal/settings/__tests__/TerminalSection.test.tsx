@@ -103,7 +103,7 @@ describe("TerminalSection", () => {
     expect(screen.getByLabelText("Session limit")).toHaveAttribute("min", "1");
     expect(screen.getByLabelText("Session limit")).toHaveAttribute("max", "20");
     expect(screen.getByRole("button", { name: "Reset Terminal preferences" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Default Terminal profile" })).toHaveTextContent("Automatic");
+    expect(screen.getByRole("button", { name: "Default Terminal profile" })).toHaveTextContent(/^Auto$/);
   });
 
   it("keeps inherited and explicit Automatic workspace profiles distinct", { timeout: 15_000 }, async () => {
@@ -116,7 +116,7 @@ describe("TerminalSection", () => {
     expect(trigger).toHaveTextContent("Use inherited global profile");
     await user.click(trigger);
     await screen.findByRole("option", { name: "Use inherited global profile" });
-    await user.click(await screen.findByRole("option", { name: "Automatic" }));
+    await user.click(await screen.findByRole("option", { name: "Auto" }));
     const setWorkspaceDefault = useTerminalSettingsStore.getState().setWorkspaceDefault as ReturnType<typeof vi.fn>;
     expect(setWorkspaceDefault).toHaveBeenCalledWith(workspaceId, "automatic");
   });
@@ -170,11 +170,14 @@ describe("TerminalSection", () => {
   it("tags the profile a new terminal opens with", () => {
     useTerminalSettingsStore.setState({ certifiedProfiles: [detected("pwsh", "PowerShell"), detected("cmd", "Command Prompt")] });
     const { rerender } = render(<TerminalSection />);
+    const defaultProfile = screen.getByRole("button", { name: "Default Terminal profile" });
+    expect(defaultProfile).toHaveTextContent("Auto · PowerShell");
     expect(profileRowOf("PowerShell")).toHaveTextContent("In use");
     expect(profileRowOf("Command Prompt")).not.toHaveTextContent("In use");
 
     setDefaultProfile("certified:cmd");
     rerender(<TerminalSection />);
+    expect(defaultProfile).toHaveTextContent(/^Command Prompt$/);
     expect(profileRowOf("PowerShell")).not.toHaveTextContent("In use");
     expect(profileRowOf("Command Prompt")).toHaveTextContent("In use");
   });

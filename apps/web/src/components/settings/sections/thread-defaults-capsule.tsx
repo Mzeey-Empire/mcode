@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Hammer, ListChecks, Sparkles, Zap } from "lucide-react";
+import { ChevronDown, Hammer, ListChecks, Zap } from "lucide-react";
 import type { AgentDefaultMode, SettingsProviderId } from "@mcode/contracts/models/settings";
 import { fastModeDefault, fastModeSettingProvider } from "@mcode/shared/fast-mode";
 import { getSelectedModelPresentation, ModelPickerPanel, type ModelPickerLead, type ModelPickerReasoning } from "@/components/chat/ModelPickerPanel";
@@ -280,14 +280,7 @@ export function ThreadDefaultsCapsule({ modelHit, modeHit, permissionHit, modelC
 }
 
 function SmallTaskLabel({ provider, modelId }: { readonly provider: string; readonly modelId: string }): ReactNode {
-  if (!modelId) {
-    return (
-      <>
-        <Sparkles aria-hidden size={12} className="shrink-0 text-muted" />
-        <span>Auto</span>
-      </>
-    );
-  }
+  if (!modelId) return <span>Auto</span>;
   const model = getSelectedModelPresentation(modelId, provider || undefined);
   return (
     <>
