@@ -5,7 +5,7 @@ import type { GitRowPlan, GitStep } from "@/features/thread-overview/git-next-st
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { cn } from "@/lib/utils";
-import { ArrowUpFromLine, GitBranchPlus, GitCommitHorizontal, GitPullRequest, type LucideIcon } from "lucide-react";
+import { ArrowUp, ArrowUpFromLine, GitBranchPlus, GitCommitHorizontal, GitPullRequest, type LucideIcon } from "lucide-react";
 import { useState, type FocusEvent } from "react";
 import {
   OVERVIEW_ROW_CLASS,
@@ -18,6 +18,7 @@ const GIT_STEP_PRESENTATION: Record<GitStep, { label: string; icon: LucideIcon; 
   "create-branch": { label: "Create branch…", icon: GitBranchPlus, testId: "thread-overview-create-branch" },
   commit: { label: "Commit…", icon: GitCommitHorizontal, testId: "workspace-menu-commit" },
   "commit-and-push": { label: "Commit and push…", icon: ArrowUpFromLine, testId: "workspace-menu-commit-and-push" },
+  push: { label: "Push", icon: ArrowUp, testId: "workspace-menu-push" },
   "create-pr": { label: "Create PR…", icon: GitPullRequest, testId: "workspace-menu-create-pr" },
 };
 
@@ -52,11 +53,12 @@ function useRowHold() {
 }
 
 function useRunGitStep(): (step: GitStep) => void {
-  const { branchCreation, handleCommit, setCreatePrOpen } = useOverviewContext();
+  const { branchCreation, handleCommit, setCreatePrOpen, pushBranch } = useOverviewContext();
   return (step) => {
     if (step === "create-branch") branchCreation.setOpen(true);
     else if (step === "commit") handleCommit();
     else if (step === "commit-and-push") handleCommit({ push: true });
+    else if (step === "push") void pushBranch();
     else setCreatePrOpen(true);
   };
 }
@@ -69,8 +71,9 @@ function GitStepContent({ step }: { step: GitStep }) {
   </>);
 }
 
-function GitSplitRow({ plan, run, onMenuOpenChange }: {
+function GitSplitRow({ plan, run, onMenuOpenChange, loading }: {
   plan: GitRowPlan;
+  loading: boolean;
   run: (step: GitStep) => void;
   onMenuOpenChange: (open: boolean) => void;
 }) {
@@ -80,6 +83,7 @@ function GitSplitRow({ plan, run, onMenuOpenChange }: {
       className="w-full"
       menuLabel="More git actions"
       menuBeside="left"
+      loading={loading}
       onClick={() => run(plan.main)}
       onMenuOpenChange={onMenuOpenChange}
       actionProps={{
@@ -97,21 +101,33 @@ function GitSplitRow({ plan, run, onMenuOpenChange }: {
   );
 }
 
+/** One line under the row naming why the last push failed. */
+function GitPushError({ message }: { message: string }) {
+  return (
+    <div role="alert" data-testid="thread-overview-git-error" className="px-3 pb-1 text-caption text-error">
+      {message}
+    </div>
+  );
+}
+
 function GitEntry() {
-  const { gitRow } = useOverviewContext();
+  const { gitRow, gitPush } = useOverviewContext();
   const { held, wrapperProps, setMenuOpen } = useRowHold();
-  const plan = useHeldPlan(gitRow, held);
+  const pushing = gitPush.kind === "pushing";
+  // A push in flight holds the row too, so the Push it is reporting on cannot swap away.
+  const plan = useHeldPlan(gitRow, held || pushing);
   const run = useRunGitStep();
   if (!plan) return null;
   return (
     <div data-testid="thread-overview-git" {...wrapperProps}>
       {plan.alternates.length > 0 ? (
-        <GitSplitRow plan={plan} run={run} onMenuOpenChange={setMenuOpen} />
+        <GitSplitRow plan={plan} run={run} onMenuOpenChange={setMenuOpen} loading={pushing} />
       ) : (
         <Button
           variant="ghost"
           size="compact"
           type="button"
+          loading={pushing}
           data-testid={GIT_STEP_PRESENTATION[plan.main].testId}
           onClick={() => run(plan.main)}
           className={cn(OVERVIEW_ROW_CLASS, "justify-start text-ink")}
@@ -119,6 +135,7 @@ function GitEntry() {
           <GitStepContent step={plan.main} />
         </Button>
       )}
+      {gitPush.kind === "failed" ? <GitPushError message={gitPush.message} /> : null}
     </div>
   );
 }
