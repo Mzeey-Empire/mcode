@@ -144,13 +144,13 @@ export function EntityToken({
       )}
       {...props}
     >
-      {/* Flex centring puts the icon on the cap-height middle, but labels are mostly
-          lowercase, so the icon read as sitting high. 0.07em lowers it onto the x-height middle. */}
+      {/* Centred as is, the icon's ink rests on the label's baseline. A downward nudge, tried before, sank it
+          about 1px below the text. */}
       <EntityIcon
         kind={kind}
         filePath={filePath}
         commandName={isCommandInvocation ? displayLabel : undefined}
-        className="flex size-3.5 translate-y-[0.07em] items-center justify-center text-current"
+        className="flex size-3.5 items-center justify-center text-current"
       />
       <span className="min-w-0 self-baseline text-fade">{displayLabel}</span>
     </span>
