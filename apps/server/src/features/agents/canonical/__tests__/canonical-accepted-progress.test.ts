@@ -1217,6 +1217,19 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       .toMatchObject({ role: "system", content: "Visual: Reload", visual });
   });
 
+  it("publishes an inline placement on the live event but saves the visual without it", async () => {
+    await send(1, start("codex"));
+    const visual = { title: "Inline", html: "<p/>", maxHeight: 720 };
+    const published = progress.acceptTurnVisual({ ...execution, visual, placement: "inline" });
+    const publication = acceptedEvents().find((event) =>
+      event.payload.type === "publication.recorded" && event.payload.event.type === "system");
+    expect(publication).toMatchObject({ payload: { event: { messageId: published.messageId, visual, visualPlacement: "inline" } } });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    const saved = conversationPage().messages.find((message) => message.id === published.messageId);
+    expect(saved?.visual).toEqual(visual);
+    expect(saved).not.toHaveProperty("visualPlacement");
+  });
+
   it("rejects visuals without the running head without consuming a message sequence", async () => {
     const visual = { title: "Chart", html: "<p/>", maxHeight: 720 };
     expect(() => progress.acceptTurnVisual({ ...execution, visual })).toThrow(TurnVisualRejectedError);

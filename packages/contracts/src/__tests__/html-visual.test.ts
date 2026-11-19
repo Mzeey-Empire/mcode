@@ -2,6 +2,7 @@ import { createMockMessage } from "@mcode/contracts/testing";
 import { describe, expect, it } from "vitest";
 import { HtmlVisualSchema } from "@mcode/contracts/models/html-visual";
 import { MessageSchema } from "@mcode/contracts/models/message";
+import { AgentEventSchema } from "../events/agent-event.js";
 
 const visual = { title: "Latency by provider", html: "<p>chart</p>", maxHeight: 480 };
 
@@ -33,10 +34,13 @@ describe("HtmlVisualSchema", () => {
     expect(HtmlVisualSchema().safeParse({ ...visual, maxHeight: 300.5 }).success).toBe(false);
   });
 
-  it("accepts an inline placement and still parses a saved visual without one", () => {
-    expect(HtmlVisualSchema().parse({ ...visual, placement: "inline" }).placement).toBe("inline");
-    expect(HtmlVisualSchema().parse(visual).placement).toBeUndefined();
-    expect(HtmlVisualSchema().safeParse({ ...visual, placement: "sidebar" }).success).toBe(false);
+  it("rejects a placement, so a saved visual keeps the shape older builds parse", () => {
+    expect(HtmlVisualSchema().safeParse({ ...visual, placement: "inline" }).success).toBe(false);
+  });
+
+  it("keeps a live visual placement beside the visual on a system event", () => {
+    const event = AgentEventSchema().parse({ type: "system", threadId: "thread", subtype: "mcode.visual", visual, visualPlacement: "inline" });
+    expect(event).toMatchObject({ visual, visualPlacement: "inline" });
   });
 
   it("rejects unknown fields", () => {

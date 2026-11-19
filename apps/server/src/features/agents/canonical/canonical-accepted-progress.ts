@@ -11,7 +11,7 @@ import { agentEventDelivery, type AgentEvent, AgentEventSchema } from "@mcode/co
 import { type CanonicalSubagentStopRequest } from "@mcode/contracts/models/canonical-subagent-roster";
 import { HookExecutionRecordSchema } from "@mcode/contracts/models/hook-execution";
 import { type PlanVersion } from "@mcode/contracts/models/plan";
-import { type HtmlVisual, HtmlVisualSchema, HTML_VISUAL_SYSTEM_SUBTYPE, htmlVisualContent } from "@mcode/contracts/models/html-visual";
+import { type HtmlVisual, type HtmlVisualPlacement, HtmlVisualSchema, HTML_VISUAL_SYSTEM_SUBTYPE, htmlVisualContent } from "@mcode/contracts/models/html-visual";
 import { broadcast, subscribedThreadIds } from "../../../application/transport/push.js";
 import { BoundedProgressRetention } from "../execution/progress-retention-budget.js";
 import { ThreadProgressOwner } from "../execution/thread-progress-owner.js";
@@ -659,7 +659,7 @@ export class CanonicalAcceptedProgress {
   }
 
   /** Append a validated visual to the running turn before its final reply. */
-  acceptTurnVisual(request: { readonly threadId: string; readonly turnId: string; readonly visual: HtmlVisual }): { readonly messageId: string } {
+  acceptTurnVisual(request: { readonly threadId: string; readonly turnId: string; readonly visual: HtmlVisual; readonly placement?: HtmlVisualPlacement }): { readonly messageId: string } {
     this.assertOpen();
     const head = this.threads.get(request.threadId)?.head;
     if (!head || head.execution.turnId !== request.turnId || head.phase !== "running") {
@@ -668,7 +668,7 @@ export class CanonicalAcceptedProgress {
     const visual = HtmlVisualSchema().parse(request.visual);
     const published = this.acceptThreadSystemObservation({ type: "system", threadId: request.threadId,
       turnExecutionId: head.execution.executionId, subtype: HTML_VISUAL_SYSTEM_SUBTYPE,
-      message: htmlVisualContent(visual), visual });
+      message: htmlVisualContent(visual), visual, ...(request.placement && { visualPlacement: request.placement }) });
     if (!published.messageId) throw new Error("Accepted visual lost its message identity");
     return { messageId: published.messageId };
   }

@@ -61,9 +61,9 @@ export function createVisualsToolkit(deps: VisualsToolkitDeps): McodeToolkit {
           if (bytes > HTML_VISUAL_MAX_HTML_BYTES) {
             throw new Error(`html is ${bytes.toLocaleString("en-US")} bytes after inlining ${inlined.count} images; the limit is ${HTML_VISUAL_MAX_HTML_BYTES.toLocaleString("en-US")} bytes. Shrink or drop images.`);
           }
-          const visual = HtmlVisualSchema().parse({ title: input.title, html: inlined.html, maxHeight: input.height, placement: input.placement });
+          const visual = HtmlVisualSchema().parse({ title: input.title, html: inlined.html, maxHeight: input.height });
           call.signal.throwIfAborted();
-          const { messageId } = deps.visuals.acceptTurnVisual({ threadId: authority.sourceThreadId, turnId: authority.sourceTurnId, visual });
+          const { messageId } = deps.visuals.acceptTurnVisual({ threadId: authority.sourceThreadId, turnId: authority.sourceTurnId, visual, placement: input.placement });
           const marker = input.placement === "inline" ? visualMarker(visual.title, messageId) : undefined;
           const result = HtmlRenderOutputSchema.parse({ messageId, title: visual.title, bytes, inlinedImages: inlined.count, placement: input.placement, ...(marker && { marker }) });
           if (marker) return structuredResult(result, `Published visual "${visual.title}". Put this line in your reply where the page should appear: ${marker}`);

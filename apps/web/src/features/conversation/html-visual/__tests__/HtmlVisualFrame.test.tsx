@@ -89,7 +89,7 @@ describe("visual message", () => {
 });
 
 describe("visual marker in a reply", () => {
-  const published = createMockMessage({ id: "visual-1", thread_id: "thread-1", role: "system", content: "Visual: Latency by provider", visual: { ...visual, placement: "inline" } });
+  const published = createMockMessage({ id: "visual-1", thread_id: "thread-1", role: "system", content: "Visual: Latency by provider", visual });
   beforeEach(() => resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [published] }]]) }));
   afterEach(() => resetThreadStoreForTests());
 

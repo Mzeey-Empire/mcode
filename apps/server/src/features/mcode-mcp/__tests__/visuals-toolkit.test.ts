@@ -72,7 +72,7 @@ describe("Visuals toolkit", () => {
     expect((await call({ title: " Chart ", html: "<p/>" })).structuredContent)
       .toEqual({ messageId: MESSAGE_ID, title: "Chart", bytes: 4, inlinedImages: 0, placement: "auto" });
     expect(published).toEqual([{ threadId: "source-thread", turnId: "source-turn",
-      visual: { title: "Chart", html: "<p/>", maxHeight: 720, placement: "auto" } }]);
+      visual: { title: "Chart", html: "<p/>", maxHeight: 720 }, placement: "auto" }]);
   });
 
   it("returns a reply marker with the published id and an escaped title for an inline visual", async () => {
@@ -81,7 +81,8 @@ describe("Visuals toolkit", () => {
     const marker = `![Cost \\[a\\\\b\\]](visual:${MESSAGE_ID})`;
     expect(result.structuredContent).toMatchObject({ placement: "inline", marker });
     expect(result.content).toContainEqual({ type: "text", text: `Published visual "Cost [a\\b]". Put this line in your reply where the page should appear: ${marker}` });
-    expect(published[0]?.visual.placement).toBe("inline");
+    expect(published[0]?.placement).toBe("inline");
+    expect(published[0]?.visual).not.toHaveProperty("placement");
   });
 
   it("returns no marker for an auto visual", async () => {

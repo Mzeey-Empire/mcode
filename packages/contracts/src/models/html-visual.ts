@@ -34,6 +34,7 @@ export const HtmlVisualPlacementSchema = lazySchema(() => z.enum(["auto", "inlin
 /** Where a visual shows: above the reply ("auto"), or at the marker the agent puts in its reply ("inline"). */
 export type HtmlVisualPlacement = z.infer<ReturnType<typeof HtmlVisualPlacementSchema>>;
 
+// Stays strict and unchanged: older builds sharing the database parse saved visuals with this schema.
 /** A self-contained HTML page shown in a sandboxed frame in the thread timeline. */
 export const HtmlVisualSchema = lazySchema(() => z.object({
   title: z.string().trim().min(1).max(HTML_VISUAL_MAX_TITLE_LENGTH),
@@ -43,8 +44,6 @@ export const HtmlVisualSchema = lazySchema(() => z.object({
     }),
   /** The frame grows with its content up to this height, then scrolls. */
   maxHeight: z.number().int().min(HTML_VISUAL_MIN_HEIGHT).max(HTML_VISUAL_MAX_HEIGHT),
-  /** Absent on visuals saved before placement existed; they show as "auto". */
-  placement: HtmlVisualPlacementSchema().optional(),
 }).strict());
 
 /** A self-contained HTML page shown in a sandboxed frame in the thread timeline. */

@@ -11,7 +11,7 @@ export function agentEventDelivery(event: Pick<AgentEvent, "type">): AgentEventD
     ? AgentEventDelivery.Live : AgentEventDelivery.Saved;
 }
 import { SystemNoticeMetadataSchema } from "../models/message.js";
-import { HtmlVisualSchema } from "../models/html-visual.js";
+import { HtmlVisualPlacementSchema, HtmlVisualSchema } from "../models/html-visual.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderBillingModeSchema, QuotaCategorySchema } from "../providers/usage.js";
 import { StoredAttachmentSchema } from "../models/attachment.js";
@@ -196,6 +196,8 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       /** Typed metadata used when this notice is persisted in the transcript. */
       systemNotice: SystemNoticeMetadataSchema().optional(),
       visual: HtmlVisualSchema().optional(),
+      /** Where `visual` shows. Live only: never saved, so a reloaded visual has none. */
+      visualPlacement: HtmlVisualPlacementSchema().optional(),
     }),
     z.object({
       /** Emitted when the SDK starts or finishes compacting the context window. */

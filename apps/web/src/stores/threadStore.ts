@@ -1879,7 +1879,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     }
     const notice = systemNoticeFor(event.subtype, event.message);
     if (!notice) return;
-    const next = createSystemMessage(event.threadId, notice, event.messageId, event.systemNotice, event.visual, event.sequence);
+    const created = createSystemMessage(event.threadId, notice, event.messageId, event.systemNotice, event.visual, event.sequence);
+    const next = event.visualPlacement ? { ...created, visualPlacement: event.visualPlacement } : created;
     if (!event.visual) rememberCurrentSessionNotice(event.threadId, next);
     if (event.systemNotice?.scope === "session") {
       return;

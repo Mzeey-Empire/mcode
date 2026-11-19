@@ -50,9 +50,10 @@ function isVisualMessage(message: Message): boolean {
   return message.role === "system" && Boolean(message.visual);
 }
 
-/** An inline visual the answer places through its marker; one the answer forgot falls back above the answer. */
+/** A visual the answer places through its marker; one the answer forgot falls back above the answer. */
 function isPlacedInAnswer(visual: Message, answer: Message): boolean {
-  return visual.visual?.placement === "inline" && answer.content.includes(`visual:${visual.id}`);
+  // Placement is never saved, so a settled turn reads the marker alone.
+  return answer.content.includes(`visual:${visual.id}`);
 }
 
 /** Maps a notice message to its row model, keeping its identity stable across renders. */
@@ -95,7 +96,7 @@ export function placeTurnNotices(messages: readonly Message[], owner: LiveNotice
 function moveToLiveTurn(draft: PlacementDraft, pending: PendingTurnMessages): void {
   draft.live.push(...pending.notices.map(turnNoticeFromMessage));
   // An inline visual shows only where the streamed reply places it, so the live turn gives it no slot.
-  draft.liveVisuals.push(...pending.visuals.filter((visual) => visual.visual?.placement !== "inline"));
+  draft.liveVisuals.push(...pending.visuals.filter((visual) => visual.visualPlacement !== "inline"));
   for (const message of [...pending.notices, ...pending.visuals]) draft.moved.add(message.id);
 }
 
