@@ -1,4 +1,4 @@
-import { createMockThread, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockThread, createMockThreadAttention, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
@@ -171,13 +171,10 @@ describe("SidebarList thread menu", () => {
 
   it("refuses Close thread on a thread waiting for approval and names the reason", async () => {
     seedThread({});
-    act(() => threadAttentionStore.getState().apply({
+    act(() => threadAttentionStore.getState().apply(createMockThreadAttention({
       threadId: "t1",
       waiting: { kind: "approval", since: "2026-10-11T12:00:00.000Z" },
-      lastTurn: null,
-      seen: { sequence: null, at: null },
-      hasUnfinishedDelegatedTasks: false,
-    }));
+    })));
     await openThreadMenu();
 
     const close = await screen.findByRole("menuitem", { name: "Close thread" });
