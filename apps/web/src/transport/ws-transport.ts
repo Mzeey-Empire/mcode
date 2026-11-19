@@ -1204,7 +1204,6 @@ export function createWsTransport(
       WS_METHODS()["attachments.stageDraft"].result.parse(
         await rpc<unknown>("attachments.stageDraft", { threadId, attachment }),
       ),
-    getActiveAgentCount: () => rpc<number>("agent.activeCount", {}),
     listRunning: () => rpc<import("@mcode/contracts/models/turn-runtime").TurnRuntimeSnapshot[]>("agent.listRunning", {}),
     subscribeThread: (threadId) => rpc<void>("push.subscribeThread", { threadId }),
     unsubscribeThread: (threadId) => rpc<void>("push.unsubscribeThread", { threadId }),

@@ -55,7 +55,6 @@ beforeEach(() => {
     status: "already-terminal",
     dispatchState: "unknown",
   }));
-  vi.mocked(mockTransport.getActiveAgentCount).mockReset().mockResolvedValue(0);
   vi.mocked(mockTransport.discoverConfig).mockReset().mockResolvedValue({});
   vi.mocked(mockTransport.getVersion).mockReset().mockResolvedValue("0.2.0");
   vi.mocked(mockTransport.touchLastOpened).mockReset().mockResolvedValue(undefined);

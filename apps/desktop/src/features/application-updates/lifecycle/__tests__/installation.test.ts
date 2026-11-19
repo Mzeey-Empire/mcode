@@ -82,7 +82,7 @@ describe("update installation lifecycle", () => {
       throw new Error("server teardown failed");
     });
 
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+    await expect(current.lifecycle.installUpdate()).resolves.toMatchObject({ kind: "refused" });
 
     expect(current.updater.quitAndInstall).not.toHaveBeenCalled();
     expect(current.status.get()).toEqual({
@@ -99,10 +99,10 @@ describe("update installation lifecycle", () => {
 
     const first = current.lifecycle.installUpdate();
     const second = current.lifecycle.installUpdate();
-    expect(second).toBe(first);
+    await vi.waitFor(() => expect(teardown).toHaveBeenCalled());
     releaseTeardown?.();
 
-    await expect(first).resolves.toBe(true);
+    await expect(Promise.all([first, second])).resolves.toEqual([{ kind: "started" }, { kind: "started" }]);
     expect(teardown).toHaveBeenCalledOnce();
     expect(current.updater.quitAndInstall).toHaveBeenCalledOnce();
   });
@@ -111,11 +111,71 @@ describe("update installation lifecycle", () => {
     const teardown = vi.fn().mockRejectedValueOnce(new Error("server teardown failed")).mockResolvedValue(undefined);
     current.lifecycle.setBeforeInstallHook(teardown);
 
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+    await expect(current.lifecycle.installUpdate()).resolves.toMatchObject({ kind: "refused" });
     markDownloaded(current.status);
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(true);
+    await expect(current.lifecycle.installUpdate()).resolves.toEqual({ kind: "started" });
 
     expect(teardown).toHaveBeenCalledTimes(2);
+  });
+
+  describe("running-agent guard", () => {
+    it.each([
+      ["a busy count", () => current.getActiveAgentCount.mockResolvedValue(2), 2],
+      ["an unreadable count", () => current.getActiveAgentCount.mockRejectedValue(new Error("timed out")), null],
+    ])("asks for confirmation on %s without stopping the server", async (_label, arrange, runningAgents) => {
+      const teardown = vi.fn().mockResolvedValue(undefined);
+      current.lifecycle.setBeforeInstallHook(teardown);
+      arrange();
+      const before = current.status.get();
+
+      await expect(current.lifecycle.installUpdate()).resolves.toEqual({ kind: "agents-running", runningAgents });
+
+      expect(teardown).not.toHaveBeenCalled();
+      expect(current.updater.quitAndInstall).not.toHaveBeenCalled();
+      expect(current.status.get()).toEqual(before);
+    });
+
+    it("keeps an armed idle install when it asks for confirmation", async () => {
+      vi.useFakeTimers();
+      current.getActiveAgentCount.mockResolvedValue(1);
+      current.lifecycle.installWhenIdle();
+
+      await expect(current.lifecycle.installUpdate()).resolves.toMatchObject({ kind: "agents-running" });
+
+      expect(current.status.get()).toMatchObject({ state: "downloaded", installWhenIdle: true });
+    });
+
+    it("installs once when confirmed despite a busy count", async () => {
+      const teardown = vi.fn().mockResolvedValue(undefined);
+      current.lifecycle.setBeforeInstallHook(teardown);
+      current.getActiveAgentCount.mockResolvedValue(3);
+
+      await expect(current.lifecycle.installUpdate({ confirmed: true })).resolves.toEqual({ kind: "started" });
+
+      expect(current.getActiveAgentCount).not.toHaveBeenCalled();
+      expect(teardown).toHaveBeenCalledOnce();
+      expect(current.updater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+
+    it("joins an install that started while it read a busy count", async () => {
+      let resolveCount: ((count: number) => void) | undefined;
+      current.getActiveAgentCount.mockImplementation(() => new Promise<number>((resolve) => { resolveCount = resolve; }));
+
+      const asking = current.lifecycle.installUpdate();
+      await vi.waitFor(() => expect(resolveCount).toBeDefined());
+      const confirmed = current.lifecycle.installUpdate({ confirmed: true });
+      resolveCount?.(2);
+
+      await expect(Promise.all([asking, confirmed])).resolves.toEqual([{ kind: "started" }, { kind: "started" }]);
+      expect(current.updater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+
+    it("installs without asking when no agents run", async () => {
+      await expect(current.lifecycle.installUpdate()).resolves.toEqual({ kind: "started" });
+
+      expect(current.getActiveAgentCount).toHaveBeenCalledOnce();
+      expect(current.updater.quitAndInstall).toHaveBeenCalledOnce();
+    });
   });
 
   describe("refused installs", () => {
@@ -134,7 +194,7 @@ describe("update installation lifecycle", () => {
       current.lifecycle.setBeforeInstallHook(teardown);
       arrange();
 
-      await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+      await expect(current.lifecycle.installUpdate()).resolves.toMatchObject({ kind: "refused" });
 
       expect(current.status.get()).toEqual(blocked(reason));
       expect(teardown).not.toHaveBeenCalled();
@@ -147,8 +207,8 @@ describe("update installation lifecycle", () => {
       throw new Error("installer crashed");
     });
 
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(true);
+    await expect(current.lifecycle.installUpdate()).resolves.toMatchObject({ kind: "refused" });
+    await expect(current.lifecycle.installUpdate()).resolves.toEqual({ kind: "started" });
 
     expect(current.updater.quitAndInstall).toHaveBeenCalledTimes(2);
     expect(current.status.get()).toEqual({
@@ -159,9 +219,9 @@ describe("update installation lifecycle", () => {
   it("resets the manual guard when installation does not begin shutdown", async () => {
     current.updater.quitAndInstall.mockImplementationOnce(() => false);
 
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+    await expect(current.lifecycle.installUpdate()).resolves.toMatchObject({ kind: "refused" });
     markDownloaded(current.status);
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(true);
+    await expect(current.lifecycle.installUpdate()).resolves.toEqual({ kind: "started" });
 
     expect(current.updater.quitAndInstall).toHaveBeenCalledTimes(2);
   });
@@ -174,7 +234,7 @@ describe("update installation lifecycle", () => {
       current.listeners.get("before-quit")?.({ preventDefault: vi.fn() });
     });
 
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(true);
+    await expect(current.lifecycle.installUpdate()).resolves.toEqual({ kind: "started" });
     expect(current.application.quit).toHaveBeenCalledOnce();
   });
 
@@ -227,12 +287,12 @@ describe("update installation lifecycle", () => {
     current.lifecycle.setBeforeInstallHook(
       () => new Promise<void>((resolve) => (resolveTeardown = resolve)),
     );
-    const install = current.lifecycle.installUpdate();
+    const install = current.lifecycle.installUpdate({ confirmed: true });
 
     current.lifecycle.cleanup();
     resolveTeardown?.();
 
-    await expect(install).resolves.toBe(false);
+    await expect(install).resolves.toMatchObject({ kind: "refused" });
     expect(current.updater.quitAndInstall).not.toHaveBeenCalled();
     expect(current.application.removeListener).toHaveBeenCalledOnce();
     expect(current.status.get()).toEqual({
@@ -247,7 +307,7 @@ describe("update installation lifecycle", () => {
       current.lifecycle.cleanup();
     });
 
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+    await expect(current.lifecycle.installUpdate()).resolves.toMatchObject({ kind: "refused" });
 
     expect(current.status.get()).toEqual({
       state: "error",
@@ -266,7 +326,7 @@ describe("update installation lifecycle", () => {
       current.listeners.get("before-quit")?.({ preventDefault: vi.fn() });
     });
 
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(true);
+    await expect(current.lifecycle.installUpdate()).resolves.toEqual({ kind: "started" });
 
     expect(forceReplace).not.toHaveBeenCalled();
     expect(current.updater.quitAndInstall).toHaveBeenCalledOnce();
@@ -386,7 +446,7 @@ describe("update installation lifecycle", () => {
     current.lifecycle.installWhenIdle();
     current.lifecycle.setBeforeInstallHook(async () => { throw new Error("server unavailable"); });
 
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+    await expect(current.lifecycle.installUpdate({ confirmed: true })).resolves.toMatchObject({ kind: "refused" });
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(20_000);
     expect(current.getActiveAgentCount).not.toHaveBeenCalled();
@@ -407,7 +467,7 @@ describe("update installation lifecycle", () => {
   it("re-arms idle installation from a failed install", async () => {
     vi.useFakeTimers();
     current.lifecycle.setBeforeInstallHook(async () => { throw new Error("server unavailable"); });
-    await expect(current.lifecycle.installUpdate()).resolves.toBe(false);
+    await expect(current.lifecycle.installUpdate()).resolves.toMatchObject({ kind: "refused" });
     current.lifecycle.setBeforeInstallHook(async () => {});
 
     current.lifecycle.installWhenIdle();

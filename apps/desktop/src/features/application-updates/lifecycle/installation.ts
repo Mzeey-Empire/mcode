@@ -21,11 +21,32 @@ export interface InstallationDependencies {
   getActiveAgentCount: () => Promise<number>;
 }
 
+/** Caller intent for a manual install. */
+export interface InstallUpdateRequest {
+  /** The user already confirmed restarting while agents run, so skip the agent count. */
+  readonly confirmed?: boolean;
+}
+
+/**
+ * Outcome of a manual install request. `agents-running` asks the caller to
+ * confirm; `runningAgents` is null when the count could not be read, which
+ * counts as busy because an unreadable count is not evidence of idleness.
+ */
+export type InstallUpdateResult =
+  | { readonly kind: "started" }
+  | { readonly kind: "agents-running"; readonly runningAgents: number | null }
+  | { readonly kind: "refused"; readonly message: string };
+
+type InstallRefused = Extract<InstallUpdateResult, { kind: "refused" }>;
+
+const STARTED: InstallUpdateResult = { kind: "started" };
+
 /** Installation operations owned by one Application Updates instance. */
 export interface InstallationLifecycle {
   createBeforeInstallHook(forceReplace: () => Promise<void>): BeforeInstallHook;
   setBeforeInstallHook(hook: BeforeInstallHook): void;
-  installUpdate(): Promise<boolean>;
+  /** Install the downloaded update, asking for confirmation while agents run unless already confirmed. */
+  installUpdate(request?: InstallUpdateRequest): Promise<InstallUpdateResult>;
   /** Arm installation after two consecutive idle agent counts. */
   installWhenIdle(): void;
   /** Cancel a scheduled idle installation. */
@@ -50,7 +71,7 @@ export function createInstallationLifecycle(
   let pollInFlight = false;
   let unsubscribeStatus: (() => void) | null = null;
   let downloadedUpdate: Extract<UpdateStatus, { state: "downloaded" }> | null = null;
-  let installInFlight: Promise<boolean> | null = null;
+  let installInFlight: Promise<InstallUpdateResult> | null = null;
 
   const disarmIdleInstall = (): void => {
     if (idleInterval !== null) timer.clearInterval(idleInterval);
@@ -112,6 +133,21 @@ export function createInstallationLifecycle(
     status.publish({ ...update, installWhenIdle: true });
   };
 
+  const installRefusalReason = (): string | null => {
+    if (!active) return "the updater is not running";
+    if (!application.isPackaged) return "updates install only from the packaged app";
+    if (!installableUpdate()) return "no downloaded update is ready to install";
+    return null;
+  };
+
+  const readRunningAgents = async (): Promise<number | null> => {
+    try {
+      return await getActiveAgentCount();
+    } catch {
+      return null;
+    }
+  };
+
   const createBeforeInstallHook = (
     forceReplace: () => Promise<void>,
   ): BeforeInstallHook => {
@@ -127,32 +163,30 @@ export function createInstallationLifecycle(
   const operationIsCurrent = (operationGeneration: number): boolean =>
     active && operationGeneration === generation;
 
-  const publishBlockedInstall = (logMessage: string, statusMessage = logMessage): void => {
+  const publishBlockedInstall = (logMessage: string, statusMessage = logMessage): InstallRefused => {
     console.error(`[auto-updater] ${logMessage}`);
-    status.publish({ state: "error", message: `Update installation blocked: ${statusMessage}`, failedOperation: "install" });
+    const message = `Update installation blocked: ${statusMessage}`;
+    status.publish({ state: "error", message, failedOperation: "install" });
+    return { kind: "refused", message };
   };
 
-  const refuseInstall = (reason: string): false => {
-    publishBlockedInstall(reason);
-    return false;
-  };
+  const refuseInstall = (reason: string): InstallRefused => publishBlockedInstall(reason);
 
-  const abandonInterruptedInstall = (): false =>
+  const abandonInterruptedInstall = (): InstallRefused =>
     refuseInstall("the updater was reset while installing, try again");
 
   const runBeforeInstallHook = async (
     operationGeneration: number,
     failureContext: string,
-  ): Promise<boolean> => {
-    if (!beforeInstallHook) return true;
+  ): Promise<"ran" | "stale" | InstallRefused> => {
+    if (!beforeInstallHook) return "ran";
     try {
       await beforeInstallHook();
-      return true;
+      return "ran";
     } catch (error) {
-      if (!operationIsCurrent(operationGeneration)) return false;
+      if (!operationIsCurrent(operationGeneration)) return "stale";
       const message = error instanceof Error ? error.message : String(error);
-      publishBlockedInstall(`${failureContext}: ${message}`, message);
-      return false;
+      return publishBlockedInstall(`${failureContext}: ${message}`, message);
     }
   };
 
@@ -162,22 +196,19 @@ export function createInstallationLifecycle(
     if (isPromiseLike(initiation)) await initiation;
   };
 
-  const finishInstallerQuit = (operationGeneration: number): boolean => {
-    if (!operationIsCurrent(operationGeneration)) return false;
-    if (installerQuitObserved) {
-      isCompletingStoppedServerQuit = false;
-      return true;
-    }
+  const finishInstallerQuit = (operationGeneration: number): InstallUpdateResult | null => {
+    if (!operationIsCurrent(operationGeneration)) return null;
     isCompletingStoppedServerQuit = false;
-    publishBlockedInstall("Update installer did not begin application shutdown");
-    return false;
+    if (installerQuitObserved) return STARTED;
+    return publishBlockedInstall("Update installer did not begin application shutdown");
   };
 
-  const runQuitAndInstall = async (): Promise<boolean> => {
+  const runQuitAndInstall = async (): Promise<InstallUpdateResult> => {
     cancelInstallWhenIdle();
     const operationGeneration = generation;
-    if (!(await runBeforeInstallHook(operationGeneration, "beforeInstallHook failed, cancelling install"))) {
-      return operationIsCurrent(operationGeneration) ? false : abandonInterruptedInstall();
+    const hook = await runBeforeInstallHook(operationGeneration, "beforeInstallHook failed, cancelling install");
+    if (hook !== "ran") {
+      return hook !== "stale" && operationIsCurrent(operationGeneration) ? hook : abandonInterruptedInstall();
     }
     if (!operationIsCurrent(operationGeneration)) return abandonInterruptedInstall();
     installerQuitObserved = false;
@@ -188,12 +219,10 @@ export function createInstallationLifecycle(
       if (operationGeneration !== generation) return abandonInterruptedInstall();
       isCompletingStoppedServerQuit = false;
       const message = error instanceof Error ? error.message : String(error);
-      publishBlockedInstall(`quitAndInstall failed: ${message}`, message);
-      return false;
+      return publishBlockedInstall(`quitAndInstall failed: ${message}`, message);
     }
     await new Promise<void>((resolve) => timer.setImmediate(resolve));
-    if (!operationIsCurrent(operationGeneration)) return abandonInterruptedInstall();
-    return finishInstallerQuit(operationGeneration);
+    return finishInstallerQuit(operationGeneration) ?? abandonInterruptedInstall();
   };
 
   /**
@@ -201,9 +230,9 @@ export function createInstallationLifecycle(
    * Concurrent callers share one run: the teardown hook stops the server and
    * must not run again while the first attempt is still waiting on it.
    */
-  const quitAndInstallSafely = (): Promise<boolean> => {
+  const quitAndInstallSafely = (): Promise<InstallUpdateResult> => {
     if (installInFlight) return installInFlight;
-    const run: Promise<boolean> = runQuitAndInstall().finally(() => {
+    const run: Promise<InstallUpdateResult> = runQuitAndInstall().finally(() => {
       if (installInFlight === run) installInFlight = null;
     });
     installInFlight = run;
@@ -230,7 +259,7 @@ export function createInstallationLifecycle(
     active && application.isPackaged && settings().autoInstallOnQuit && status.get().state === "downloaded";
 
   const completePendingInstall = async (operationGeneration: number): Promise<void> => {
-    if (!(await runBeforeInstallHook(operationGeneration, "server stop failed before silent install on quit"))) return;
+    if ((await runBeforeInstallHook(operationGeneration, "server stop failed before silent install on quit")) !== "ran") return;
     if (!operationIsCurrent(operationGeneration)) return;
     try {
       application.quit();
@@ -249,14 +278,18 @@ export function createInstallationLifecycle(
     setBeforeInstallHook,
     installWhenIdle,
     cancelInstallWhenIdle,
-    installUpdate: () => {
+    installUpdate: async (request) => {
       if (installInFlight) return installInFlight;
+      if (installRefusalReason() === null && request?.confirmed !== true) {
+        const runningAgents = await readRunningAgents();
+        if (installInFlight) return installInFlight;
+        if (runningAgents !== 0) return { kind: "agents-running", runningAgents };
+      }
       cancelInstallWhenIdle();
-      if (!active) return Promise.resolve(refuseInstall("the updater is not running"));
-      if (!application.isPackaged) return Promise.resolve(refuseInstall("updates install only from the packaged app"));
+      const reason = installRefusalReason();
+      if (reason) return refuseInstall(reason);
       const update = installableUpdate();
-      if (!update) return Promise.resolve(refuseInstall("no downloaded update is ready to install"));
-      if (status.get().state !== "downloaded") status.publish(update);
+      if (update && status.get().state !== "downloaded") status.publish(update);
       return quitAndInstallSafely();
     },
     register: () => {

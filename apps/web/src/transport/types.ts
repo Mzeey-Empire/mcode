@@ -382,7 +382,6 @@ export interface McodeTransport {
   saveClipboardFile(data: ArrayBuffer, mimeType: string, fileName: string): Promise<AttachmentMeta | null>;
   /** Copies a saved image into the thread's durable draft storage and returns its staging reference. */
   stageDraftImage(threadId: string, attachment: AttachmentMeta): Promise<import("@mcode/contracts/models/next-message-draft").StagedDraftImage>;
-  getActiveAgentCount(): Promise<number>;
   /**
    * Returns runtime snapshots for live sessions, used to reconcile optimistic
    * running state after reload, reconnect, or a new tab.

@@ -66,7 +66,7 @@ describe("application update IPC handlers", () => {
 
   it("returns stable version, status, and delegated lifecycle results", async () => {
     const checkResult = { state: "checking" as const };
-    const installResult = true;
+    const installResult = { kind: "started" as const };
     vi.mocked(api.checkForUpdatesNow).mockReturnValue(
       Promise.resolve(checkResult),
     );
@@ -84,8 +84,30 @@ describe("application update IPC handlers", () => {
     );
     await expect(handlers.get("app:download-update")?.({})).resolves.toBeUndefined();
     expect(api.downloadUpdate).toHaveBeenCalledOnce();
-    await expect(handlers.get("app:install-update")?.({})).resolves.toBe(true);
+    await expect(handlers.get("app:install-update")?.({})).resolves.toBe(installResult);
   });
+
+  it("passes the renderer's confirmation through to the install guard", async () => {
+    vi.mocked(api.installUpdate).mockResolvedValue({ kind: "started" });
+    const { ipc, handlers } = createIpc();
+    registerApplicationUpdateHandlers(ipc, api);
+
+    await handlers.get("app:install-update")?.({}, { confirmed: true });
+    await handlers.get("app:install-update")?.({});
+
+    expect(vi.mocked(api.installUpdate).mock.calls).toEqual([[{ confirmed: true }], [undefined]]);
+  });
+
+  it.each([null, "yes", { confirmed: "true" }, {}, { confirmed: true, unexpected: 1 }])(
+    "rejects install request %j without installing",
+    (payload) => {
+      const { ipc, handlers } = createIpc();
+      registerApplicationUpdateHandlers(ipc, api);
+
+      expect(() => handlers.get("app:install-update")?.({}, payload)).toThrow("Invalid install-update request");
+      expect(api.installUpdate).not.toHaveBeenCalled();
+    },
+  );
 
   it("propagates a rejected download to the renderer", async () => {
     vi.mocked(api.downloadUpdate).mockRejectedValue(new Error("disk full"));

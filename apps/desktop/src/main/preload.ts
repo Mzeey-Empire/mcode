@@ -222,9 +222,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     checkForUpdates(): Promise<unknown> {
       return ipcRenderer.invoke("app:check-for-updates");
     },
-    /** Quit and install a downloaded update. Returns false if nothing to install. */
-    installUpdate(): Promise<boolean> {
-      return ipcRenderer.invoke("app:install-update");
+    /** Quit and install a downloaded update; answers agents-running unless `confirmed`. */
+    installUpdate(request?: { readonly confirmed?: boolean }): Promise<unknown> {
+      return ipcRenderer.invoke("app:install-update", request);
     },
     /** Arm installation once running agents finish. */
     installWhenIdle(): Promise<void> {
