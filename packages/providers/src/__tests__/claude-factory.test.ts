@@ -88,6 +88,36 @@ afterEach(async () => {
 });
 async function completed(events: () => ProviderRuntimeEvent[], count: number) { await vi.waitFor(() => expect(events().filter(({ event }) => event.type === AgentEventType.TurnComplete)).toHaveLength(count)); }
 
+it("sends earlier user-only skill instructions before the native Claude command block", async () => {
+  const { inputs } = installTransport();
+  const input = {
+    configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 },
+    host: fixtureHost(),
+    claude: {
+      skills: {
+        list: async () => [
+          { name: "to-spec", description: "Write a spec", kind: "skill" as const, source: "user" as const, providers: ["claude"], path: "/skills/to-spec/SKILL.md", userInvocationOnly: true },
+          { name: "to-tickets", description: "Write tickets", kind: "skill" as const, source: "user" as const, providers: ["claude"], path: "/skills/to-tickets/SKILL.md", userInvocationOnly: true },
+        ],
+      },
+    },
+  };
+  const provider = createClaudeProvider(input);
+  providers.push(provider);
+
+  await provider.sendTurn(request({ message: "Start with /to-spec  and /to-tickets" }));
+
+  await vi.waitFor(() => expect(inputs).toHaveLength(1));
+  expect(inputs[0]).toMatchObject({
+    message: {
+      content: [
+        { type: "text", text: "Start with /to-spec [The user invoked this skill. Follow the instructions at: /skills/to-spec/SKILL.md]  and /to-tickets" },
+        { type: "text", text: "/to-tickets" },
+      ],
+    },
+  });
+});
+
 async function createNativePlanFixture(proof: string) {
   const scratch = NodePath.resolve(import.meta.dirname, "../../../../.dev/claude-plan-tests");
   await NodeFSPromises.mkdir(scratch, { recursive: true });

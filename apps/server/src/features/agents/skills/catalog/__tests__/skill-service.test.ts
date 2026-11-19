@@ -48,6 +48,22 @@ describe("SkillService", () => {
   });
 
 
+  it("only marks skills with disable-model-invocation as user-invoked", async () => {
+    const skillsDir = NodePath.join(fakeHome, ".claude", "skills");
+    const specDir = NodePath.join(skillsDir, "to-spec");
+    const reviewDir = NodePath.join(skillsDir, "review");
+    NodeFS.mkdirSync(specDir, { recursive: true });
+    NodeFS.mkdirSync(reviewDir, { recursive: true });
+    writeMd(NodePath.join(specDir, "SKILL.md"), { description: "Write a spec", "disable-model-invocation": "true" });
+    writeMd(NodePath.join(reviewDir, "SKILL.md"), { description: "Review a spec" });
+
+    const items = await new SkillService().list(undefined, "claude");
+
+    expect(items.find((item) => item.name === "to-spec")).toMatchObject({ userInvocationOnly: true });
+    expect(items.find((item) => item.name === "review")).toMatchObject({ name: "review" });
+    expect(items.find((item) => item.name === "review")).not.toHaveProperty("userInvocationOnly");
+  });
+
   it("lists skills without blocking the event loop", async () => {
     const skillDir = NodePath.join(fakeHome, ".claude", "skills", "audit");
     NodeFS.mkdirSync(skillDir, { recursive: true });
