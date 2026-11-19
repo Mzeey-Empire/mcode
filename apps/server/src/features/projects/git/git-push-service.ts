@@ -8,7 +8,7 @@ import { CiWatcherService } from "../../pull-requests/status/ci-watcher.js";
 import { ReviewWorktreeService } from "../../pull-requests/reviews/review-worktree-service.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { CommitPushDestination } from "./commits/commit-request.js";
-import { gitExitCode, gitFailureOutput, gitPushFailureReason } from "./execution/git-failure.js";
+import { gitExitCode, gitFailureOutput, gitPushFailureReason, gitWasKilled } from "./execution/git-failure.js";
 import type { GitExecutor } from "./execution/types.js";
 import { GitRepositoryService } from "./git-repository-service.js";
 import { PullRequestReviewGitService } from "./pull-request-review-git-service.js";
@@ -54,7 +54,7 @@ export class GitPushService {
     @inject("ThreadRepo") private readonly threadRepo: Pick<ThreadRepo, "findById">,
   ) {}
 
-  /** Push the checked-out branch, using a linked Review task's persisted target when there is one. */
+  /** Push the checked-out branch to its upstream or a linked Review task's persisted target. */
   async pushCheckedOutBranch(request: CheckedOutBranchPush): Promise<void> {
     const resolution = request.threadId
       ? this.reviewWorktrees.resolvePushTarget(request.threadId)
@@ -71,7 +71,7 @@ export class GitPushService {
           target.expectedHeadRepositoryUrl,
         );
       } else {
-        await this.gitRepository.push(request.workspacePath, request.branch);
+        await this.pushStandardBranch(request.workspacePath, request.branch);
       }
     } catch (error) {
       throw toPushFailure(error);
@@ -160,6 +160,40 @@ export class GitPushService {
     }
   }
 
+  private async pushStandardBranch(workspacePath: string, branch: string): Promise<void> {
+    const upstream = await this.readPushUpstream(workspacePath, branch);
+    if (!upstream) {
+      await this.gitRepository.push(workspacePath, branch);
+      return;
+    }
+    await this.gitExecutor.exec(
+      ["-C", workspacePath, "push", "--", upstream.remote, `refs/heads/${branch}:${upstream.merge}`],
+      { timeout: PUSH_TIMEOUT_MS },
+    );
+  }
+
+  private async readPushUpstream(repoPath: string, branch: string): Promise<{ remote: string; merge: string } | null> {
+    validateBranchName(branch);
+    const [remote, merge] = await Promise.all([
+      this.readGitConfig(repoPath, `branch.${branch}.remote`),
+      this.readGitConfig(repoPath, `branch.${branch}.merge`),
+    ]);
+    if (remote && remote !== "." && REMOTE_NAME.test(remote) && merge?.startsWith("refs/heads/")) {
+      return { remote, merge };
+    }
+    return null;
+  }
+
+  private async readGitConfig(repoPath: string, key: string): Promise<string | null> {
+    try {
+      const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "config", "--get", key]);
+      return stdout.trim();
+    } catch (error) {
+      if (gitExitCode(error) === 1) return null;
+      throw error;
+    }
+  }
+
   private matchReviewTarget(target: ReviewPushTarget, workspaceId: string, branch: string): ReviewPushTarget {
     if (target.workspaceId !== workspaceId || target.localBranch !== branch) {
       throw new Error("Review task push target does not match the requested Workspace branch.");
@@ -193,8 +227,10 @@ function invalidReviewLink(): Error {
  * client would show as the reason. Errors git did not raise already read as reasons and pass through.
  */
 function toPushFailure(error: unknown): unknown {
-  if (gitExitCode(error) === null) return error;
+  const killed = gitWasKilled(error);
+  if (!killed && gitExitCode(error) === null) return error;
   const output = gitFailureOutput(error);
   logger.warn("Push failed", { detail: output });
-  return new Error(gitPushFailureReason(output), { cause: error });
+  const reason = killed ? `Push timed out after ${PUSH_TIMEOUT_MS / 1_000}s` : gitPushFailureReason(output);
+  return new Error(reason, { cause: error });
 }
