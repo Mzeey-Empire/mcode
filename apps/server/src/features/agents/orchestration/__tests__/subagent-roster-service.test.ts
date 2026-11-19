@@ -197,6 +197,15 @@ describe("SubagentRosterService", () => {
     expect(service.loadRoster(request).entries.map((row) => row.id)).toEqual(["call:one", "call:two", "child:child-1"]);
   });
 
+  it("lists a new idle canonical child as running before its first turn", () => {
+    const { children, service } = harness();
+    children.push({ ...child(), activityState: "Idle", latestTurnStatus: null, endedAt: null });
+
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([
+      ["child:child-1", "running"],
+    ]);
+  });
+
   it("collapses old Devin double calls and excludes Agent markers from steps without trusting fake nativeThreadId", () => {
     const { db, call, service } = harness("devin");
     message(db, "message", "devin");
@@ -258,17 +267,28 @@ describe("SubagentRosterService", () => {
     ]);
   });
 
-  it("orders running first and caps the final merged list at 256", () => {
+  it("keeps running and waiting entries ahead of finished entries at the 256 cap", () => {
     const { db, call, service } = harness();
     message(db, "message", "claude");
     for (let index = 0; index < 257; index++) call(String(index), "message", {
       startedAt: new Date(Date.parse(NOW) + index * 1000).toISOString(),
       status: index === 0 ? "running" : "completed",
     });
+    service.bindDelegatedTasks({
+      rosterEntries: () => [{
+        id: "task:waiting", provider: "codex", title: "Inspect", prompt: null, subagentType: null,
+        model: null, reasoningEffort: null, stepCount: 0, status: "waiting",
+        startedAt: "2026-10-10T09:59:00.000Z", endedAt: null, tier: "meta", canStop: true,
+        sourceToolCallId: null, childThreadId: null, sourceMessageId: null, parentEntryId: null,
+      }],
+      stopForUser: async () => false,
+      onRosterChanged: () => () => {},
+    });
+
     const roster = service.loadRoster(request);
     expect(roster.entries).toHaveLength(256);
-    expect(roster.entries.slice(0, 3).map((row) => row.id)).toEqual(["call:0", "call:256", "call:255"]);
-    expect(roster.entries.at(-1)?.id).toBe("call:2");
+    expect(roster.entries.slice(0, 4).map((row) => row.id)).toEqual(["call:0", "task:waiting", "call:256", "call:255"]);
+    expect(roster.entries.at(-1)?.id).toBe("call:3");
     expect(roster.truncated).toBe(true);
   });
 

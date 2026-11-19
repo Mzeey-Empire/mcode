@@ -33,7 +33,7 @@ export interface DelegatedTaskDeps {
   approvals: ThreadControlApprovalRepo;
   canonical: Pick<CanonicalAgentBoundary, "loadLatestAttempt" | "loadTerminalProjection">;
   resumes: Pick<TurnResumeScheduleStore, "get">;
-  plannedRestart: Pick<PlannedRestart, "hasPendingResume" | "cancel" | "onReleased">;
+  plannedRestart: Pick<PlannedRestart, "hasPendingResume" | "pendingResumeTurnIds" | "cancel" | "onReleased">;
   targets: Pick<DelegationTargetResolver, "resolve">;
   git: Pick<GitWorktreeService, "resolveHeadCommit">;
   control: Pick<ThreadControlService, "threadStop" | "publishThreadApproval" | "cancelDelegationApproval">;
@@ -83,11 +83,9 @@ export class DelegatedTaskService {
   /** Derive Coordinators with working or waiting delegated tasks from current lifecycle facts. */
   coordinatorsWithUnfinishedTasks(coordinatorThreadId?: string): ReadonlySet<string> {
     const coordinators = new Set<string>();
-    for (const task of this.deps.tasks.listUnfinishedCandidates(coordinatorThreadId)) {
-      const state = deriveTaskState({
-        turn: this.latestAttempt(task), startup: this.deps.startups.get(task.taskId),
-        approval: this.deps.approvals.status(task.taskId), launching: this.launching.has(task.taskId),
-      });
+    const resuming = this.deps.plannedRestart.pendingResumeTurnIds();
+    for (const task of this.deps.tasks.listUnfinishedCandidates(coordinatorThreadId, resuming)) {
+      const { state } = this.snapshot(task);
       if (state.status !== "finished") coordinators.add(task.coordinatorThreadId);
     }
     return coordinators;
@@ -503,7 +501,7 @@ function rejection(code: ThreadControlError["code"], message: string, retryable 
 function notFound(): TaskRejection { return rejection("not_found", "Task not found"); }
 
 function rosterStatus(state: TaskState): SubagentStatus {
-  if (state.status === "waiting" && (state.reason === "needs_input" || state.reason === "setup_blocked")) return "waiting";
+  if (state.status === "waiting") return "waiting";
   if (state.status !== "finished") return "running";
   switch (state.outcome) {
     case "completed": return "done";

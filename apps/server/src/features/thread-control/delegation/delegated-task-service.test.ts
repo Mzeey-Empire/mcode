@@ -489,6 +489,13 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     expect(w.messages()).toHaveLength(1);
   });
 
+  it("keeps the Coordinator unfinished while its child's restart resume is pending", async () => {
+    const f = await harness();
+    await childAwaitingRestart(f);
+
+    expect([...f.service.coordinatorsWithUnfinishedTasks()]).toEqual([f.coordinator.id]);
+  });
+
   it("reports a child working while its restart resume is pending, and cancelling it drops the resume", async () => {
     const f = await harness();
     const task = await childAwaitingRestart(f);
@@ -1065,7 +1072,7 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     const task = requireTask(await f.service.delegate(f.source, f.input));
     expect(task.state).toEqual({ status: "waiting", reason: "approval" });
     expect(f.roster.loadRoster({ owningParentThreadId: f.coordinator.id }).entries.map((entry) =>
-      [entry.tier, entry.childThreadId, entry.status])).toEqual([["meta", null, "running"]]);
+      [entry.tier, entry.childThreadId, entry.status])).toEqual([["meta", null, "waiting"]]);
     expect(f.startups.get(task.taskId)).toBeNull();
     expect(f.threads.listByWorkspace(f.workspace.id)).toHaveLength(1);
     expect(f.control.listPendingApprovals(f.coordinator.id)[0]?.subject).toMatchObject({ kind: "delegate_task", taskId: task.taskId, commit: f.localSha.slice(0, 12) });

@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import type { Database } from "bun:sqlite";
-import { and, asc, eq, getTableColumns, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { PermissionModeSchema } from "@mcode/contracts/models/enums";
@@ -92,8 +92,15 @@ export class DelegatedTaskStore {
       .where(eq(delegatedTasks.coordinatorThreadId, coordinatorThreadId)).all().map((row) => this.parse(row));
   }
 
-  /** Read task receipts without durable terminal evidence. */
-  listUnfinishedCandidates(coordinatorThreadId?: string): DelegatedTask[] {
+  /**
+   * Read task receipts without durable terminal evidence, plus those whose interrupted turn or attempt is in
+   * `resumingTurnIds`: a planned restart resumes them, so their terminal-looking turn is not their outcome.
+   */
+  listUnfinishedCandidates(coordinatorThreadId?: string, resumingTurnIds: ReadonlySet<string> = new Set()): DelegatedTask[] {
+    const resuming = [...resumingTurnIds];
+    const resumingClause = resuming.length === 0 ? sql`0` : sql`(${inArray(delegatedTasks.taskId, resuming)}
+      OR EXISTS (SELECT 1 FROM ${canonicalAgentTurns} attempt WHERE attempt.attempt_of = ${delegatedTasks.taskId}
+        AND ${inArray(sql`attempt.id`, resuming)}))`;
     return this.orm.select(getTableColumns(delegatedTasks)).from(delegatedTasks)
       .leftJoin(canonicalAgentTurns, eq(canonicalAgentTurns.id, delegatedTasks.taskId))
       .leftJoin(threadStartups, eq(threadStartups.startupId, delegatedTasks.taskId))
@@ -108,7 +115,7 @@ export class DelegatedTaskStore {
             THEN ${threadStartups.state} NOT IN ('failed', 'interrupted', 'cancelled')
           ELSE ${threadControlApprovals.status} IS NULL
             OR ${threadControlApprovals.status} NOT IN ('rejected', 'expired', 'cancelled')
-        END)`,
+        END OR ${resumingClause})`,
       )).all().map((row) => this.parse(row));
   }
 
