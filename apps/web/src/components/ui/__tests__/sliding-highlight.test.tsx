@@ -203,4 +203,35 @@ describe("SlidingHighlight", () => {
     await nextFrame();
     expect(fill.style.transform).toBe("translate(4px,4px)");
   });
+
+  it("snaps the fill to its part's new width when the group resizes", async () => {
+    let onResize = () => {};
+    vi.stubGlobal(
+      "ResizeObserver",
+      class StubResizeObserver {
+        constructor(callback: ResizeObserverCallback) {
+          onResize = () => callback([], this);
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    const { container } = render(<Parts />);
+    fireEvent.pointerOver(screen.getByRole("button", { name: "Model" }));
+    await nextFrame();
+    const fill = fillOf(container);
+    expect(fill.style.width).toBe("200px");
+
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const row = this.getAttribute("data-row");
+      if (row === null) return DOMRect.fromRect({ x: 0, y: 0, width: 128, height: 200 });
+      return DOMRect.fromRect({ ...rectAt(Number(row)).toJSON(), width: 120 });
+    });
+    onResize();
+    await nextFrame();
+    expect(fill.style.width).toBe("120px");
+    expect(showing(fill)).toBe(true);
+    expect(slides(fill)).toBe(false);
+  });
 });

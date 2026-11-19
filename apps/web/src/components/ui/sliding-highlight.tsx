@@ -130,6 +130,9 @@ function followPointer(group: HTMLElement, fill: HTMLElement, selector: string):
     schedule("moved");
   };
   const onFocusChange = () => schedule("moved");
+  // Rows have no CSS hover of their own here, so a resize with no pointer or focus event (a panel drag) must re-fit the fill.
+  const resizeObserver = new ResizeObserver(() => schedule("rebuilt"));
+  resizeObserver.observe(group);
   group.addEventListener("pointerover", onPointer);
   group.addEventListener("pointermove", onPointer);
   group.addEventListener("pointerout", onOut);
@@ -137,6 +140,7 @@ function followPointer(group: HTMLElement, fill: HTMLElement, selector: string):
   group.addEventListener("focusin", onFocusChange);
   group.addEventListener("focusout", onFocusChange);
   return () => {
+    resizeObserver.disconnect();
     group.removeEventListener("pointerover", onPointer);
     group.removeEventListener("pointermove", onPointer);
     group.removeEventListener("pointerout", onOut);
