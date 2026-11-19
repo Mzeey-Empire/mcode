@@ -168,6 +168,21 @@ function handoffSourceOf(scope: PickerProviderScope): string | undefined {
   return scope.kind === "switchable" ? scope.threadProviderId : undefined;
 }
 
+/**
+ * The rail can drop the remembered tab's provider while the picker is open (a turn starts and locks it, or a provider
+ * becomes unusable), so fall back to a visible tab rather than keep a hidden provider's models pickable.
+ */
+function visiblePickerTab(
+  pickerTab: ModelPickerTab,
+  lockedProvider: ModelProvider | undefined,
+  railProviders: readonly ModelProvider[],
+  handoffFrom: string | undefined,
+): ModelPickerTab {
+  if (lockedProvider) return lockedProvider.id;
+  if (pickerTab === FAVORITES_TAB || railProviders.some((provider) => provider.id === pickerTab)) return pickerTab;
+  return handoffFrom ?? pickerTab;
+}
+
 function handoffNotice(handoffFrom: string | undefined, activeTab: ModelPickerTab): string | undefined {
   if (!handoffFrom || activeTab === FAVORITES_TAB || activeTab === handoffFrom) return undefined;
   return `This thread runs on ${providerName(handoffFrom)}. Picking a ${providerName(activeTab)} model hands it off to ${providerName(activeTab)}.`;
@@ -602,8 +617,6 @@ export function ModelPickerPanel({
     ? lockedProvider.id
     : getDefaultProviderId(selectedProviderId, displayProvider);
   const [pickerTab, setActiveTab] = usePickerTab(defaultTab, tab, onTabChange);
-  // The scope can narrow while the picker is open, when a turn starts, so a locked rail overrides the remembered tab.
-  const activeTab = lockedProvider ? lockedProvider.id : pickerTab;
   const [legacyFold, setLegacyFold] = useState<LegacyFoldState>("auto");
 
   const favorites = useModelFavoritesStore((store) => store.entries);
@@ -623,6 +636,7 @@ export function ModelPickerPanel({
     () => getProvidersForLeftRail(lockedProvider, handoffFrom, canUseProvider),
     [lockedProvider, handoffFrom, canUseProvider],
   );
+  const activeTab = visiblePickerTab(pickerTab, lockedProvider, railProviders, handoffFrom);
   const tabs = getPickerTabs(
     railProviders,
     lockedProvider !== undefined,
