@@ -6,6 +6,7 @@ import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";
 import { mockTransport } from "@/__tests__/mocks/transport";
+import type { PickerProviderScope } from "@/components/chat/ModelPickerPanel";
 import { GENIE_CLOSE_MS } from "@/components/ui/genie";
 import { registerProviderModels } from "@/lib/model-registry";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
@@ -67,7 +68,7 @@ function part(name: RegExp): HTMLElement {
 interface SplitOverrides {
   readonly selection?: Partial<ComposerAgentSelection>;
   readonly reasoningLevels?: ReasoningLevel[];
-  readonly isProviderLocked?: boolean;
+  readonly providerScope?: PickerProviderScope;
   readonly permissionLocked?: boolean;
   readonly approvalReviewSupported?: boolean;
   readonly threadId?: string;
@@ -86,7 +87,7 @@ async function renderSplit(overrides: SplitOverrides = {}) {
       reasoningLevels={overrides.reasoningLevels ?? LEVELS}
       permissionLocked={overrides.permissionLocked ?? false}
       approvalReviewSupported={overrides.approvalReviewSupported ?? true}
-      isProviderLocked={overrides.isProviderLocked ?? false}
+      providerScope={overrides.providerScope ?? { kind: "all" }}
       onSelectionChange={onSelectionChange}
       onSelectionTouched={vi.fn()}
     />,
@@ -281,7 +282,7 @@ describe("ComposerCapsuleSplit", () => {
   });
 
   it("opens the model picker while the agent runs", async () => {
-    await renderSplit({ isProviderLocked: true });
+    await renderSplit({ providerScope: { kind: "selected-only" } });
 
     expect(await openModelPicker()).toBeInTheDocument();
   });
@@ -338,7 +339,7 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
 
   it("sets and persists the selected model's level in one click while the agent runs, and closes", async () => {
     const setThreadSettings = vi.spyOn(useThreadStore.getState(), "setThreadSettings").mockResolvedValue(true);
-    const onSelectionChange = await renderSplit({ threadId: "thread-1", isProviderLocked: true });
+    const onSelectionChange = await renderSplit({ threadId: "thread-1", providerScope: { kind: "selected-only" } });
     await openModelPicker();
 
     expect(within(pane("GPT-9 Deep")).getByRole("option", { name: "High" })).toHaveAttribute("aria-selected", "true");
@@ -425,7 +426,7 @@ describe("ComposerCapsuleSplit reasoning pane", () => {
             reasoningLevels={LEVELS}
             permissionLocked={false}
             approvalReviewSupported
-            isProviderLocked={false}
+            providerScope={{ kind: "all" }}
             onSelectionChange={(patch) => setCurrent((previous) => ({ ...previous, ...patch }))}
             onSelectionTouched={vi.fn()}
           />

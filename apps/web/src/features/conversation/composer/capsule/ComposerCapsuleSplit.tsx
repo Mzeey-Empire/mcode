@@ -2,7 +2,7 @@ import { Zap } from "lucide-react";
 import { useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import { PERMISSION_MODES } from "@/transport";
-import { getSelectedModelPresentation, ModelPickerPanel, type SelectedModelPresentation } from "@/components/chat/ModelPickerPanel";
+import { getSelectedModelPresentation, ModelPickerPanel, type PickerProviderScope, type SelectedModelPresentation } from "@/components/chat/ModelPickerPanel";
 import { PICKER_PANEL_CLASS } from "@/components/ui/picker";
 import { Popover, PopoverContent, PopoverTrigger, type PopoverMotion, type PopoverRootActions } from "@/components/ui/popover";
 import { ProviderIcon } from "@/components/ui/provider-icon";
@@ -22,8 +22,8 @@ export interface ComposerCapsuleSplitProps extends ComposerAccessInput {
   readonly anchorRef: RefObject<HTMLElement | null>;
   readonly defaults: ComposerModelPreferenceDefaults;
   readonly reasoningLevels: ReasoningLevel[];
-  /** Started thread: model changes stay within its provider. */
-  readonly isProviderLocked: boolean;
+  /** Which providers the model picker offers and whether a pick on another provider hands the thread off. */
+  readonly providerScope: PickerProviderScope;
   /** Controls that share the pill after the model part, outside its hover fill: the context label and Send. */
   readonly children?: ReactNode;
 }
@@ -89,7 +89,7 @@ export function CapsuleDivider() {
  * selected model's options and the turn's access, which change in place. Picking a model or a level closes the picker.
  */
 export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
-  const { anchorRef, selection, defaults, reasoningLevels, isProviderLocked, onSelectionChange } = props;
+  const { anchorRef, selection, defaults, reasoningLevels, providerScope, onSelectionChange } = props;
   const [open, setOpen] = useState(false);
   // The search and the provider tab start over on each open.
   const [query, setQuery] = useState("");
@@ -179,7 +179,7 @@ export function ComposerCapsuleSplit(props: ComposerCapsuleSplitProps) {
             <ModelPickerPanel
               selectedModelId={selection.modelId}
               selectedProviderId={selection.provider}
-              providerLocked={isProviderLocked}
+              providerScope={providerScope}
               query={query}
               onQueryChange={setQuery}
               tab={tab}

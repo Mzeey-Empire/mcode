@@ -166,10 +166,10 @@ describe("ModelSelector", () => {
     expect(screen.getByText("Nothing matches “shared”")).toBeInTheDocument();
   });
 
-  it("keeps a search to the thread's provider when the provider is locked", async () => {
+  it("keeps a search to the thread's provider when the scope is the selected provider only", async () => {
     setProviders({ claude: true, codex: true });
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} providerLocked />);
+      onSelect={vi.fn()} providerScope={{ kind: "selected-only" }} />);
     await openPicker();
 
     await userEvent.type(screen.getByRole("combobox", { name: "Search models" }), "5.6 sol");
@@ -210,10 +210,10 @@ describe("ModelSelector", () => {
     expect(screen.getByRole("radio", { name: "Claude" })).toHaveAttribute("aria-checked", "true");
   });
 
-  it("lists only the thread's provider, with no tabs, when the provider is locked", async () => {
+  it("lists only the thread's provider, with no tabs, when the scope is the selected provider only", async () => {
     setProviders({ claude: true, codex: true });
     render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
-      onSelect={vi.fn()} providerLocked />);
+      onSelect={vi.fn()} providerScope={{ kind: "selected-only" }} />);
     await openPicker();
 
     expect(screen.queryAllByRole("radio")).toHaveLength(0);

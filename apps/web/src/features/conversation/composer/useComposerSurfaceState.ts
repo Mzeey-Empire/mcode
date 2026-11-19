@@ -4,6 +4,7 @@ import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnot
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
+import { pickerProviderScopeOf } from "./picker-provider-scope";
 import { useNumberedDiffComments } from "./draft/draft-diff-comments";
 import { useNumberedFileComments } from "./draft/draft-file-comments";
 import { reconcileOrphanedDraftSubmissions } from "./draft/draft-submission-lifecycle";
@@ -68,10 +69,11 @@ function getComposerLocks(
     startingThread: Boolean(
       input.activeThread?.clientPreparing || input.activeThread?.clientError || startupPending,
     ),
-    isProviderLocked: Boolean(
-      input.threadId && !input.isNewThread && !input.branchFromMessageId
-        && input.activeThread?.provider,
-    ),
+    providerScope: pickerProviderScopeOf({
+      started: Boolean(input.threadId && !input.isNewThread && !input.branchFromMessageId),
+      threadProviderId: input.activeThread?.provider,
+      isAgentRunning: input.isAgentRunning,
+    }),
   };
 }
 
