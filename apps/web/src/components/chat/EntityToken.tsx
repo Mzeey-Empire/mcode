@@ -131,25 +131,28 @@ export function EntityToken({
       ? label.replace(/^@+/, "")
       : label;
 
+  // An inline-flex box takes its baseline from its first item, here the icon's bottom edge, which put the label off
+  // the prose baseline by a different amount at each font size. Only the label joins baseline alignment, so the
+  // token's baseline is the label's and it sits on the line's baseline.
   return (
     <span
       data-entity-token={kind}
       className={cn(
-        "mx-px inline-flex max-w-full items-center gap-1 align-[-0.2em] font-sans text-[length:inherit] font-medium leading-none",
+        "mx-px inline-flex max-w-full items-center gap-1 align-baseline font-sans text-[length:inherit] font-medium leading-none",
         ENTITY_TEXT_CLASS[kind],
         className,
       )}
       {...props}
     >
-      {/* Flex centring puts the icon on the cap-height middle, but labels are mostly
-          lowercase, so the icon read as sitting high. 0.07em lowers it onto the x-height middle. */}
+      {/* Centred as is, the icon's ink rests on the label's baseline. A downward nudge, tried before, sank it
+          about 1px below the text. */}
       <EntityIcon
         kind={kind}
         filePath={filePath}
         commandName={isCommandInvocation ? displayLabel : undefined}
-        className="flex size-3.5 translate-y-[0.07em] items-center justify-center text-current"
+        className="flex size-3.5 items-center justify-center text-current"
       />
-      <span className="min-w-0 text-fade">{displayLabel}</span>
+      <span className="min-w-0 self-baseline text-fade">{displayLabel}</span>
     </span>
   );
 }
