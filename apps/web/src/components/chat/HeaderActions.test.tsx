@@ -249,14 +249,10 @@ function defaultWorkspaceState() {
 }
 
 function mockReviewUncommitted(count: number) {
-  vi.mocked(mockTransport.getReviewState).mockResolvedValue({
-    isGitRepo: true,
-    head: "abc123",
+  vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({
     branch: "feat/my-feature",
     uncommitted: { staged: 0, unstaged: count, untracked: 0 },
-    commitsAhead: null,
-    branchDefault: { unavailable: "no-base" },
-  });
+  }));
 }
 
 function renderHeaderActions(thread: Thread = makeThread()) {

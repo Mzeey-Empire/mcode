@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
-import { createMockThreadPullRequest } from "@mcode/contracts/testing";
+import { createMockGitReviewState, createMockThreadPullRequest } from "@mcode/contracts/testing";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,14 +62,10 @@ import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-o
 import { ThreadOverview } from "./ThreadOverview";
 
 function reviewUncommitted(count: number) {
-  vi.mocked(mockTransport.getReviewState).mockResolvedValue({
-    isGitRepo: true,
-    head: "abc123",
+  vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({
     branch: "feat/x",
     uncommitted: { staged: 0, unstaged: count, untracked: 0 },
-    commitsAhead: null,
-    branchDefault: { unavailable: "no-base" },
-  });
+  }));
 }
 
 function namedThread(overrides: Partial<Thread> = {}): Thread {
