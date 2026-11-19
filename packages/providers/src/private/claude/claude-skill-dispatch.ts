@@ -12,7 +12,7 @@ export interface ClaudeSkillTarget {
 
 /** Text blocks for a prompt with a recognized Claude skill mention. */
 export interface ClaudeSkillDispatch {
-  /** The whole prompt, or `undefined` when the last skill mention opens it. */
+  /** The whole prompt with a file note after each earlier user-only skill, or `undefined` when only whitespace precedes the last mention. */
   readonly leadingText: string | undefined;
   /** `/name` plus everything after the last mention: the block Claude Code expands. */
   readonly commandText: string;

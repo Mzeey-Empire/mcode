@@ -1,6 +1,7 @@
 import sdkMetadata from "../../../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
 import { ClaudeProvider as RuntimeClaudeProvider } from "../../claude-provider.js";
 import type { ProviderHostPorts, ProviderEventSinkPort, ProviderBrowserPort, ProviderBrowserLeaseRequest, ProviderBrowserLeaseHandle, ProviderBrowserLeaseGrant } from "../../../../host-ports.js";
+import type { SkillInfo } from "@mcode/contracts/skills";
 import { mockProviderHostRuntime } from "./mock-sdk-query.js";
 
 /** A deterministic host authority for the extracted adapter tests. */
@@ -31,6 +32,7 @@ export class ClaudeProvider extends RuntimeClaudeProvider {
     browser?: ProviderHostPorts["browser"],
     _threadControl?: unknown,
     suppliedHost?: Pick<ProviderHostPorts, "runtime" | "events"> & Partial<Pick<ProviderHostPorts, "mcode">>,
+    claudeSkills: SkillInfo[] = [],
   ) {
     let emit: ((event: unknown) => void) | undefined;
     const host = fixtureHost({
@@ -49,7 +51,7 @@ export class ClaudeProvider extends RuntimeClaudeProvider {
       }
       return receipt;
     } };
-    super(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 }, { skills: { list: async () => [] } });
+    super(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 }, { skills: { list: async () => claudeSkills } });
     emit = (event) => { this.emit("event", event); };
   }
 }

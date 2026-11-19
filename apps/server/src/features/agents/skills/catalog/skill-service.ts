@@ -16,7 +16,7 @@ import type { SkillInfo, SkillSource, SkillDiagnostics } from "@mcode/contracts/
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const DESC_RE = /^description:\s*(?:"([^"]*)"|'([^']*)'|(.*))$/m;
 const NAME_RE = /^name:\s*(?:"([^"]*)"|'([^']*)'|(.*))$/m;
-const USER_INVOCATION_ONLY_RE = /^disable-model-invocation:[ \t]*(?:true|"true"|'true')[ \t]*\r?$/m;
+const USER_INVOCATION_ONLY_RE = /^disable-model-invocation:[ \t]*(?:true|"true"|'true')[ \t]*(?:#.*)?\r?$/m;
 
 interface ScanContext {
   out: SkillInfo[];
@@ -37,7 +37,6 @@ const SOURCE_PRIORITY: Record<SkillSource, number> = {
   plugin: 3,
 };
 
-/** Read skill metadata from the leading YAML frontmatter of a markdown file. */
 async function readSkillFileMetadata(filePath: string): Promise<SkillFileMetadata> {
   try {
     return skillFileMetadata(await NodeFSPromises.readFile(filePath, "utf-8"));

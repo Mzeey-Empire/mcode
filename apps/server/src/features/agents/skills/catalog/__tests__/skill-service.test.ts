@@ -54,7 +54,7 @@ describe("SkillService", () => {
     const reviewDir = NodePath.join(skillsDir, "review");
     NodeFS.mkdirSync(specDir, { recursive: true });
     NodeFS.mkdirSync(reviewDir, { recursive: true });
-    writeMd(NodePath.join(specDir, "SKILL.md"), { description: "Write a spec", "disable-model-invocation": "true" });
+    writeMd(NodePath.join(specDir, "SKILL.md"), { description: "Write a spec", "disable-model-invocation": "true # only the user starts it" });
     writeMd(NodePath.join(reviewDir, "SKILL.md"), { description: "Review a spec" });
 
     const items = await new SkillService().list(undefined, "claude");

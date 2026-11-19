@@ -404,7 +404,6 @@ async function planMutationDenial(session: Pick<ClaudeSessionState, "planRoots" 
 
 type ClaudeTextContent = string | { type: "text"; text: string }[];
 
-/** Wrap prompt content in the SDK's user message envelope. */
 function toUserMessage(content: SDKUserMessage["message"]["content"], sessionId: string): SDKUserMessage {
   return {
     type: "user" as const,
@@ -2918,10 +2917,10 @@ export class ClaudeProvider
     let queued: QueuedRead;
     try {
       const content = await this.buildPromptText(input.message, session.cwd);
-      // The skill lookup may have outlived the turn or its session.
-      if (this.runtime.get(input.sessionId) !== session) return finish(CLAUDE_STEER_TURN_GONE);
-      const refusalAfterLookup = claudeSteerRefusal(stream, input.turnExecutionId);
-      if (refusalAfterLookup) return finish(refusalAfterLookup);
+      const refusalAfterSkillLookup = this.runtime.get(input.sessionId) === session
+        ? claudeSteerRefusal(stream, input.turnExecutionId)
+        : CLAUDE_STEER_TURN_GONE;
+      if (refusalAfterSkillLookup) return finish(refusalAfterSkillLookup);
       answered = new Promise<boolean>((settle) => stream.steersAwaitingTurn.set(steerId, settle));
       queued = session.pushAndAwaitRead({ ...toUserMessage(content, input.sessionId), priority: "now", uuid: steerId });
       diag.emit("claude.turn", { th: stream.threadId }, () => ({
