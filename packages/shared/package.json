@@ -17,7 +17,8 @@
     "./browser-control": "./src/browser-preview/browser-control.ts",
     "./browser-page-identity": "./src/browser-preview/page-identity.ts",
     "./plan-fence": "./src/plan-fence-parser.ts",
-    "./turn-admission": "./src/turn-admission/index.ts"
+    "./turn-admission": "./src/turn-admission/index.ts",
+    "./planned-restart": "./src/planned-restart/index.ts"
   },
   "scripts": {
     "typecheck": "tsc-rs --noEmit",

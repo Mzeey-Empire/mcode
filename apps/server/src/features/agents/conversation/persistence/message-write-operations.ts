@@ -30,6 +30,9 @@ export const messageWriteOperations = {
   createSystemNotice: databaseWriteOperation("message.createSystemNotice", z.tuple([
     z.string(), z.string(), z.number().int(), SystemNoticeMetadataSchema().optional(),
   ]), MessageSchema()),
+  replaceKeyedSystemNotice: databaseWriteOperation("message.replaceKeyedSystemNotice", z.tuple([
+    z.string(), z.string(), SystemNoticeMetadataSchema().and(z.object({ noticeKey: z.string().min(1) })),
+  ]), MessageSchema()),
   beginNoticeSession: databaseWriteOperation("message.beginNoticeSession", z.tuple([z.string(), z.string().optional()]), z.void()),
   createAssistantIdempotent: databaseWriteOperation("message.createAssistantIdempotent", z.tuple([assistantInput]), MessageSchema()),
   setAssistantOutcome: databaseWriteOperation("message.setAssistantOutcome", z.tuple([z.string(), TurnOutcomeSchema, z.string().optional()]), z.void()),

@@ -858,6 +858,8 @@ const stopObservingWakeTurns = subscribeCommittedCanonicalEvents((events) => {
 const stopObservingWakeReleases = agentService.onRuntimeReleased(nudgeCoordinatorForThread);
 // A wake held behind a pending restart continuation is delivered once that continuation starts or is dropped.
 const stopObservingRestartReleases = plannedRestart.onReleased(nudgeCoordinatorForThread);
+// A failed continuation can leave no failed turn behind, so its notice refreshes attention itself.
+const stopObservingRestartNotices = plannedRestart.onNoticeWritten((threadId) => threadAttentionService.invalidate(threadId));
 
 /** No steer call survives a restart, so pending steers are held as uncertain before RPCs arrive. */
 async function reconcileSteers(): Promise<void> {
@@ -1258,6 +1260,7 @@ async function shutdown(): Promise<void> {
       stopObservingWakeTurns();
       stopObservingWakeReleases();
       stopObservingRestartReleases();
+      stopObservingRestartNotices();
       // A provider that exits from here on was stopped by this shutdown, so its turn must resume, not count as a crash.
       agentService.beginShutdown();
       plannedRestart.beginShutdown();

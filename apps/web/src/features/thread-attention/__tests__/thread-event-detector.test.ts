@@ -86,6 +86,126 @@ describe("thread event toasts", () => {
     expect(toasts()).toEqual([{ kind: "failed", title: "Refactor auth", meta: "Failed · 14:32", dedupeKey: "a" }]);
   });
 
+  it("toasts a planned-restart failure that left no turn, once, and takes it back when the thread is seen", () => {
+    stop = startThreadEventDetector();
+    const failure = { ...turn("a", 2, "completed", 2), restartFailure: { sequence: 3, at: ENDED } };
+    push(failure);
+    const failedA = { kind: "failed", title: "Refactor auth", meta: "Failed · 14:32", dedupeKey: "a" };
+    expect(toasts()).toEqual([failedA]);
+    push({ ...failure });
+    expect(toasts()).toEqual([failedA]);
+    push({ ...failure, seen: { sequence: 3, at: ENDED } });
+    expect(toasts()).toEqual([]);
+  });
+
+  it("toasts an unseen restart failure found at hydration once per client session", () => {
+    stop = startThreadEventDetector();
+    const failure = { ...turn("a", 2, "completed", 2), restartFailure: { sequence: 3, at: ENDED } };
+    const failedA = { kind: "failed", title: "Refactor auth", meta: "Failed · 14:32", dedupeKey: "a" };
+    threadAttentionStore.getState().hydrate([failure], threadAttentionStore.getState().byThreadId);
+    expect(toasts()).toEqual([failedA]);
+    useToastStore.setState({ toasts: [] });
+    threadAttentionStore.getState().hydrate([{ ...failure }], threadAttentionStore.getState().byThreadId);
+    push({ ...failure });
+    expect(toasts()).toEqual([]);
+  });
+
+  it("toasts a hydrated restart failure once its thread row loads later", () => {
+    const rows = useWorkspaceStore.getState().threads;
+    useWorkspaceStore.setState({ threads: rows.filter((thread) => thread.id !== "a") });
+    stop = startThreadEventDetector();
+    const failure = { ...turn("a", 2, "completed", 2), restartFailure: { sequence: 3, at: ENDED } };
+    threadAttentionStore.getState().hydrate([failure], threadAttentionStore.getState().byThreadId);
+    expect(toasts()).toEqual([]);
+    useWorkspaceStore.setState({ threads: rows });
+    const failedA = { kind: "failed", title: "Refactor auth", meta: "Failed · 14:32", dedupeKey: "a" };
+    expect(toasts()).toEqual([failedA]);
+    useToastStore.setState({ toasts: [] });
+    push({ ...failure });
+    expect(toasts()).toEqual([]);
+  });
+
+  it("toasts a hydrated restart failure once its running thread stops, once", () => {
+    setRunning("a");
+    stop = startThreadEventDetector();
+    const failure = { ...turn("a", 2, "completed", 2), restartFailure: { sequence: 3, at: ENDED } };
+    threadAttentionStore.getState().hydrate([failure], threadAttentionStore.getState().byThreadId);
+    expect(toasts()).toEqual([]);
+    setRunning();
+    expect(toasts()).toEqual([{ kind: "failed", title: "Refactor auth", meta: "Failed · 14:32", dedupeKey: "a" }]);
+    useToastStore.setState({ toasts: [] });
+    push({ ...failure });
+    expect(toasts()).toEqual([]);
+  });
+
+  it("drops a hydrated restart failure the user sees while its thread is still running", () => {
+    setRunning("a");
+    stop = startThreadEventDetector();
+    const failure = { ...turn("a", 2, "completed", 2), restartFailure: { sequence: 3, at: ENDED } };
+    threadAttentionStore.getState().hydrate([failure], threadAttentionStore.getState().byThreadId);
+    push({ ...failure, seen: { sequence: 3, at: ENDED } });
+    setRunning();
+    setRunning("a");
+    setRunning();
+    expect(toasts()).toEqual([]);
+  });
+
+  it("toasts a hydrated restart failure once its approval wait clears, after a live evaluation in between", () => {
+    stop = startThreadEventDetector();
+    const failure = { ...turn("a", 2, "completed", 2), restartFailure: { sequence: 3, at: ENDED } };
+    const waiting = { ...failure, waiting: { kind: "approval" as const, since: ASKED } };
+    threadAttentionStore.getState().hydrate([waiting], threadAttentionStore.getState().byThreadId);
+    useWorkspaceStore.setState({ threads: [...useWorkspaceStore.getState().threads] });
+    useThreadStore.setState({ pendingStopCounts: {} });
+    expect(toasts().filter((toast) => toast.kind === "failed")).toEqual([]);
+    push({ ...failure });
+    const failedA = { kind: "failed", title: "Refactor auth", meta: "Failed · 14:32", dedupeKey: "a" };
+    expect(toasts()).toEqual([failedA]);
+    useToastStore.setState({ toasts: [] });
+    push({ ...failure });
+    expect(toasts()).toEqual([]);
+  });
+
+  const failureA = { ...turn("a", 2, "completed", 2), restartFailure: { sequence: 3, at: ENDED } };
+  const rowsWithout = (id: string) => useWorkspaceStore.getState().threads.filter((thread) => thread.id !== id);
+  const rowsAll = () => useWorkspaceStore.getState().threads;
+  const blockingStates: { name: string; block: () => ThreadAttention; clear: () => void }[] = [
+    {
+      name: "row not loaded",
+      block: () => { const all = rowsAll(); useWorkspaceStore.setState({ threads: rowsWithout("a") }); blockingRows = all; return failureA; },
+      clear: () => useWorkspaceStore.setState({ threads: blockingRows }),
+    },
+    { name: "running", block: () => { setRunning("a"); return failureA; }, clear: () => setRunning() },
+    { name: "approval wait", block: () => ({ ...failureA, waiting: { kind: "approval", since: ASKED } }), clear: () => push({ ...failureA }) },
+    { name: "questions wait", block: () => ({ ...failureA, waiting: { kind: "questions", since: ASKED } }), clear: () => push({ ...failureA }) },
+    { name: "plan wait", block: () => ({ ...failureA, waiting: { kind: "plan", since: ASKED } }), clear: () => push({ ...failureA }) },
+  ];
+  let blockingRows: ReturnType<typeof rowsAll> = [];
+
+  it.each(blockingStates)("toasts a hydrated restart failure exactly once after $name clears", ({ block, clear }) => {
+    const attention = block();
+    stop = startThreadEventDetector();
+    threadAttentionStore.getState().hydrate([attention], threadAttentionStore.getState().byThreadId);
+    useWorkspaceStore.setState({ activeThreadId: "b" });
+    useThreadStore.setState({ pendingStopCounts: {} });
+    expect(toasts().filter((toast) => toast.kind === "failed")).toEqual([]);
+    clear();
+    useWorkspaceStore.setState({ activeThreadId: "b" });
+    push({ ...failureA });
+    const failed = toasts().filter((toast) => toast.kind === "failed");
+    expect(failed).toEqual([{ kind: "failed", title: "Refactor auth", meta: "Failed · 14:32", dedupeKey: "a" }]);
+    useToastStore.setState({ toasts: [] });
+    push({ ...failureA });
+    expect(toasts()).toEqual([]);
+  });
+
+  it("does not toast a restart failure the user has already seen when hydrating", () => {
+    stop = startThreadEventDetector();
+    threadAttentionStore.getState().hydrate([{ ...turn("a", 2, "completed", 3), restartFailure: { sequence: 3, at: ENDED } }],
+      threadAttentionStore.getState().byThreadId);
+    expect(toasts()).toEqual([]);
+  });
+
   it("shows an approval wait and takes it back when the wait resolves", () => {
     stop = startThreadEventDetector();
     push({ ...turn("a", 2, "completed", 2), waiting: { kind: "approval", since: ASKED } });

@@ -25,6 +25,8 @@ import { DeltaBlock } from "../narrative/DeltaBlock";
 import { TURN_PROSE_CLASS } from "../narrative/narrative-layout";
 import { PersistedTurnHooks } from "../narrative/PersistedTurnHooks";
 import { TimelineNote } from "../narrative/TimelineNote";
+import { PlannedRestartNotice } from "../narrative/PlannedRestartNotice";
+import { isPlannedRestartNotice } from "@mcode/shared/planned-restart";
 import { parseGoalStatusNotice } from "@/lib/goal-message";
 import { useRetriableAttachmentImage } from "@/components/chat/useRetriableAttachmentImage";
 import { MentionedText } from "@/components/chat/MentionedText";
@@ -753,6 +755,7 @@ function SystemNoticeContent({ message }: Pick<MessageBubbleProps, "message">) {
       </div>
     );
   }
+  if (isPlannedRestartNotice(message)) return <PlannedRestartNotice message={message} />;
   return <TimelineNote text={message.content} />;
 }
 

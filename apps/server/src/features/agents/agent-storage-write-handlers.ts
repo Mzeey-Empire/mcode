@@ -32,6 +32,7 @@ function messageHandlers(db: Database): ReadonlyMap<string, (input: unknown) => 
   return new Map([
     [ops.create.name, databaseWriteHandler(ops.create, input => store.create(...input))],
     [ops.createSystemNotice.name, databaseWriteHandler(ops.createSystemNotice, input => store.createSystemNotice(...input))],
+    [ops.replaceKeyedSystemNotice.name, databaseWriteHandler(ops.replaceKeyedSystemNotice, input => store.replaceKeyedSystemNotice(...input))],
     [ops.beginNoticeSession.name, databaseWriteHandler(ops.beginNoticeSession, input => store.beginNoticeSession(...input))],
     [ops.createAssistantIdempotent.name, databaseWriteHandler(ops.createAssistantIdempotent, input => store.createAssistantIdempotent(...input))],
     [ops.setAssistantOutcome.name, databaseWriteHandler(ops.setAssistantOutcome, input => store.setAssistantOutcome(...input))],

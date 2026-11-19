@@ -1,5 +1,6 @@
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
+import { PLANNED_RESTART_NOTICE_KEY_PREFIX, plannedRestartNoticeText } from "@mcode/shared/planned-restart";
 import { turnAdmissionFailureReason } from "@mcode/shared/turn-admission";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -17,12 +18,12 @@ function threadOf(action: ContinuationAction): string {
 
 /** Success and failure share a key so a fallback that fails after the success notice replaces it instead of contradicting it. */
 function noticeKeyOf(action: ContinuationAction): string {
-  return `planned-restart:${action.kind === "resume" ? action.turn.executionId : action.anchorTurnId}`;
+  return `${PLANNED_RESTART_NOTICE_KEY_PREFIX}${action.kind === "resume" ? action.turn.executionId : action.anchorTurnId}`;
 }
 
 /** The continuation's own message is hidden, so this tells the user why the agent started working. */
 function startedNotice(action: ContinuationAction): string {
-  return action.kind === "resume" ? "Resumed after Mcode restarted" : "Woke after Mcode restarted";
+  return plannedRestartNoticeText(action.kind, "started");
 }
 
 /** Continues work interrupted by an intentional application stop. */
@@ -36,6 +37,7 @@ export class PlannedRestart {
   /** The first attempt a continuation admitted, by thread; it can end before the seeded fallback admits. */
   private readonly attempts = new Map<string, string>();
   private readonly releaseListeners = new Set<(threadId: string) => void>();
+  private readonly noticeListeners = new Set<(threadId: string) => void>();
 
   constructor(
     @inject(CanonicalAgentBoundary) private readonly canonical: CanonicalAgentBoundary,
@@ -115,6 +117,12 @@ export class PlannedRestart {
     return () => { this.releaseListeners.delete(listener); };
   }
 
+  /** Observe each written notice; a failure notice changes the thread's attention. */
+  onNoticeWritten(listener: (threadId: string) => void): () => void {
+    this.noticeListeners.add(listener);
+    return () => { this.noticeListeners.delete(listener); };
+  }
+
   /** Await every dispatch, with at most four continuations in flight. */
   async continueAtStartup(dispatch: TurnDispatch): Promise<void> {
     this.load();
@@ -163,7 +171,7 @@ export class PlannedRestart {
       }
       admitted = true;
     } });
-    const failure = `Could not ${action.kind} after Mcode restarted`;
+    const failure = plannedRestartNoticeText(action.kind, "failed");
     const report = this.reporter(threadId, noticeKeyOf(action));
     const context = { onLateFailure: (error: unknown) => {
       if (this.lostRace(error)) return;
@@ -221,12 +229,26 @@ export class PlannedRestart {
     };
   }
 
+  /**
+   * A late failure replaces the success notice and moves after the attempt's output, so it reads where it
+   * happened and stays newer than the last turn for attention. The publication reaches an open thread live.
+   */
   private async notice(threadId: string, content: string, noticeKey: string): Promise<void> {
+    const systemNotice = { kind: "diagnostic", presentation: "timeline", noticeKey } as const;
+    let written: { id: string; sequence: number };
     try {
-      await this.messages.createSystemNotice(threadId, content, this.messages.getLatestSequenceIncludingInternal(threadId) + 1,
-        { kind: "diagnostic", presentation: "timeline", noticeKey });
+      written = await this.messages.replaceKeyedSystemNotice(threadId, content, systemNotice);
     } catch (error) {
       logger.error("Planned restart notice was not written", { threadId, error: String(error) });
+      return;
+    }
+    for (const listener of this.noticeListeners) listener(threadId);
+    try {
+      this.canonical.recordSynthesizedPublications(threadId, [{ type: "system", threadId, subtype: "planned-restart.notice",
+        message: content, messageId: written.id, sequence: written.sequence, systemNotice }]);
+    } catch (error) {
+      // The notice is saved, so a client that missed this publication still reads it on its next load.
+      logger.error("Planned restart notice was not published", { threadId, error: String(error) });
     }
   }
 

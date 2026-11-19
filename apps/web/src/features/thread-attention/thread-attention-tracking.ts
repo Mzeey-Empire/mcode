@@ -1,4 +1,5 @@
 import { MessageSchema } from "@mcode/contracts/models/message";
+import { isPlannedRestartFailure } from "@mcode/shared/planned-restart";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { ThreadRecord } from "@/stores/thread-record";
@@ -38,9 +39,16 @@ export function startThreadAttentionTracking(): () => void {
   const refresh = (): void => {
     const threadId = useWorkspaceStore.getState().activeThreadId;
     const record = threadId ? useThreadStore.getState().records.get(threadId) : undefined;
-    const lastTurn = threadId ? threadAttentionStore.getState().byThreadId[threadId]?.lastTurn : null;
+    const attention = threadId ? threadAttentionStore.getState().byThreadId[threadId] : undefined;
+    const lastTurn = attention?.lastTurn;
     const settled = messagesForRecord(record).flatMap((message) =>
       message.outcome != null || message.sequence === lastTurn?.sequence ? [message.sequence] : []);
+    // A restart failure notice sits after the last turn, so it is seen only once the open thread has loaded it.
+    const restartSequence = attention?.restartFailure?.sequence;
+    if (restartSequence !== undefined && record?.messages.some((message) =>
+      (message.serverSequence ?? message.sequence) === restartSequence && isPlannedRestartFailure(message))) {
+      settled.push(restartSequence);
+    }
     threadAttentionStore.getState().refreshOnScreen(threadId, settled.length ? Math.max(...settled) : null);
   };
   const unsubscribeThread = useThreadStore.subscribe(refresh);

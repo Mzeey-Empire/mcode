@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { isTurnSeen, ThreadAttentionSchema, threadHasRunningDescendants, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import { hasUnseenRestartFailure, isTurnSeen, RestartFailureSchema, ThreadAttentionSchema, threadHasRunningDescendants, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import { restartFailureNoticeSql } from "./restart-failure-notice-sql.js";
 import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { threadWriteOperations } from "../persistence/thread-write-operations.js";
@@ -23,13 +24,28 @@ const attentionSelect = `SELECT t.id AS threadId, t.seen_through_sequence AS see
   t.last_turn_sequence AS sequence,
   (SELECT json_extract(s.file_effects, '$.fileCount') FROM turn_snapshots s
     JOIN messages m ON m.id = s.message_id
-    WHERE s.thread_id = t.id AND m.sequence = t.last_turn_sequence LIMIT 1) AS changedFileCount
+    WHERE s.thread_id = t.id AND m.sequence = t.last_turn_sequence LIMIT 1) AS changedFileCount,
+  (SELECT json_object('sequence', m.sequence, 'at', m.timestamp) FROM messages m
+    WHERE m.thread_id = t.id AND m.sequence > COALESCE(t.last_turn_sequence, -1) AND ${restartFailureNoticeSql("m")}
+    ORDER BY m.sequence DESC LIMIT 1) AS restartFailure
   FROM threads t WHERE t.deleted_at IS NULL`;
 
 type AttentionRow = {
   threadId: string; seenSequence: number | null; seenAt: string | null;
   outcome: string | null; endedAt: string | null; sequence: number | null; changedFileCount: number | null;
+  /** JSON `{ sequence, at }` of the newest failure notice after the last turn; the bound keeps the scan on the index. */
+  restartFailure: string | null;
 };
+
+/**
+ * A restart failure alerts only when it is newer than the last settled turn. A failure before admission leaves
+ * that turn interrupted (resume) or completed (wake), so an errored last turn is the attempt itself and already
+ * alerted, whether or not it has been seen since.
+ */
+function restartFailureOf(row: AttentionRow): ThreadAttention["restartFailure"] {
+  if (row.restartFailure === null || row.outcome === "errored") return null;
+  return RestartFailureSchema().parse(JSON.parse(row.restartFailure));
+}
 
 /** Combines durable outcomes and acknowledgements with live waiting sources. */
 export class ThreadAttentionService {
@@ -69,7 +85,7 @@ export class ThreadAttentionService {
     const withSubagents = this.subagents.backgroundSubagentThreadIds();
     return this.db.query<AttentionRow, []>(attentionSelect).all()
       .map((row) => this.fromRow(row, waiting, coordinators.has(row.threadId), withSubagents))
-      .filter((attention) => attention.waiting !== null || threadHasRunningDescendants(attention)
+      .filter((attention) => attention.waiting !== null || threadHasRunningDescendants(attention) || hasUnseenRestartFailure(attention)
         || attention.lastTurn !== null && !isTurnSeen(attention.lastTurn.sequence, attention.seen.sequence));
   }
 
@@ -113,6 +129,7 @@ export class ThreadAttentionService {
         outcome: row.outcome, endedAt: row.endedAt, sequence: row.sequence, changedFileCount: row.changedFileCount,
       },
       seen: { sequence: row.seenSequence, at: row.seenAt },
+      restartFailure: restartFailureOf(row),
     });
   }
 }

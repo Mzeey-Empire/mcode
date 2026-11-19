@@ -34,6 +34,11 @@ export class MessageRepo {
     return this.writer.execute(messageWriteOperations.createSystemNotice, [threadId, content, sequence, systemNotice]);
   }
 
+  /** Replace the notices under one key with a single notice after the thread's latest message. */
+  replaceKeyedSystemNotice(...input: Parameters<MessageStore["replaceKeyedSystemNotice"]>): Promise<ReturnType<MessageStore["replaceKeyedSystemNotice"]>> {
+    return this.writer.execute(messageWriteOperations.replaceKeyedSystemNotice, input);
+  }
+
   beginNoticeSession(threadId: Parameters<MessageStore["beginNoticeSession"]>[0], sessionId: Parameters<MessageStore["beginNoticeSession"]>[1]): Promise<ReturnType<MessageStore["beginNoticeSession"]>> {
     return this.writer.execute(messageWriteOperations.beginNoticeSession, [threadId, sessionId]);
   }

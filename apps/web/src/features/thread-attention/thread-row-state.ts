@@ -1,4 +1,4 @@
-import { isTurnSeen, threadHasRunningDescendants, type ThreadAttention } from "@mcode/contracts/models/thread-attention";
+import { hasUnseenRestartFailure, isTurnSeen, threadHasRunningDescendants, type ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 
 /** Third-line label for a thread that is blocked on the user. */
@@ -74,6 +74,8 @@ const OUTCOME_ROW_STATE: Record<TurnOutcome, ThreadRowState> = {
 };
 
 function settledRowState({ attention, onScreen }: ThreadRowFacts): ThreadRowState {
+  // The server sets a restart failure only when it is newer than the last turn, so it outranks that turn's outcome.
+  if (attention && !onScreen && hasUnseenRestartFailure(attention)) return { kind: "failed" };
   const turn = attention?.lastTurn;
   if (!turn || onScreen || isTurnSeen(turn.sequence, attention.seen.sequence)) return { kind: "quiet" };
   return OUTCOME_ROW_STATE[turn.outcome];

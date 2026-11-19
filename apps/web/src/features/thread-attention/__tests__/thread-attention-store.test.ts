@@ -9,6 +9,7 @@ import { snapshotBuilder } from "@/features/conversation/hydration/snapshot-buil
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { sinceLookedBaseline, threadAttentionStore } from "../thread-attention-store";
 import { startThreadAttentionTracking } from "../thread-attention-tracking";
+import { plannedRestartNoticeText } from "@mcode/shared/planned-restart";
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 
@@ -76,6 +77,18 @@ describe("on-screen thread acknowledgements", () => {
     expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toEqual([["a", 3], ["a", 5]]);
     expect(useThreadStore.getState().records.get("a")?.messages.map((message) => message.sequence)).toEqual([4, 7]);
     expect(useThreadStore.getState().records.get("a")?.messages[1]).toMatchObject({ id: "assistant-2", serverSequence: 5 });
+  });
+
+  it("acknowledges a restart failure only once its notice is loaded on the open thread", async () => {
+    threadAttentionStore.setState({ byThreadId: { a: { ...attention, seen: { sequence: 8, at: BEFORE }, restartFailure: { sequence: 9, at: NOW } } } });
+    renderSettled(8); stop = startThreadAttentionTracking();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).not.toContainEqual(["a", 9]);
+
+    useThreadStore.getState().addMessage(createMockMessage({ id: "restart-notice", thread_id: "a", role: "system", sequence: 9,
+      content: plannedRestartNoticeText("wake", "failed"), systemNotice: { kind: "diagnostic", presentation: "timeline", noticeKey: "planned-restart:turn-1" } }));
+    await vi.advanceTimersByTimeAsync(150);
+    expect(vi.mocked(mockTransport.acknowledgeSeen).mock.calls).toContainEqual(["a", 9]);
   });
 
   it("acknowledges a reloaded empty ending only after its actual server prompt is rendered", async () => {

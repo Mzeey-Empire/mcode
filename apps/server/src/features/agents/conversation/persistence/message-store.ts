@@ -358,6 +358,22 @@ export class MessageStore {
     return this.db.transaction(() => this.writeSystemNotice(threadId, content, sequence, metadata))();
   }
 
+  /**
+   * Replace every notice under `noticeKey` with one written after the thread's latest message. Unlike the
+   * upsert in `createSystemNotice`, the notice moves to where the replacement happened, so readers that order
+   * by sequence (attention, seen marks, the timeline) treat it as new.
+   */
+  replaceKeyedSystemNotice(threadId: string, content: string, systemNotice: SystemNoticeMetadata & { noticeKey: string }): Message {
+    const metadata = SystemNoticeMetadataSchema().parse(systemNotice);
+    return this.db.transaction(() => {
+      this.orm.delete(messages).where(and(
+        eq(messages.threadId, threadId),
+        sql`json_extract(${messages.systemNotice}, '$.noticeKey') = ${systemNotice.noticeKey}`,
+      )).run();
+      return this.writeSystemNotice(threadId, content, this.getLatestSequenceIncludingInternal(threadId) + 1, metadata);
+    })();
+  }
+
   private writeSystemNotice(threadId: string, content: string, sequence: number, systemNotice: SystemNoticeMetadata | undefined): Message {
     if (systemNotice?.noticeKey) {
       const existing = this.orm.select().from(messages).where(and(
