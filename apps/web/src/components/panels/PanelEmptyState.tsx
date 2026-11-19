@@ -2,6 +2,7 @@ import { getKeybindingForCommand, keybindingKeycaps } from "@/lib/keybinding-man
 import { isMac } from "@/lib/platform";
 import { ShortcutCombo } from "@/components/ui/shortcut-keys";
 import { Button } from "@/components/ui/button";
+import { SlidingHighlight } from "@/components/ui/sliding-highlight";
 import {
   shownTabTypes,
   type PanelScope,
@@ -57,7 +58,9 @@ export function PanelEmptyState({
           </h2>
         </header>
         {/* One list of quiet rows, like a menu: seven outlined cards read as seven competing panels. */}
-        <div className="flex flex-col gap-0.5">
+        {/* One sliding fill for the list, like menus and pickers, so hover glides between rows. */}
+        <div className="relative flex flex-col gap-0.5">
+          <SlidingHighlight follow={{ pointer: "button" }} />
           {rows.map((type) => {
             const Icon = type.icon;
             const keycaps = tabKeycaps(type);
@@ -71,8 +74,9 @@ export function PanelEmptyState({
                 aria-label={`Open ${type.label}`}
                 onClick={() => onOpen(type.id)}
                 // The shortcut shares the title's line, which is short, so the blurb below gets the
-                // row's full width and reads whole at the panel's minimum width.
-                className="grid h-auto w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-3 rounded-control px-3 py-2.5 text-left"
+                // row's full width and reads whole at the panel's minimum width. The sliding fill draws
+                // hover, so the row drops the ghost's own hover fill.
+                className="grid h-auto w-full grid-cols-[auto_minmax(0,1fr)] items-center justify-start gap-3 rounded-control px-3 py-2.5 text-left hover:bg-transparent"
               >
                 <span className="grid size-8 flex-none place-items-center text-muted">
                   <Icon size={18} />
