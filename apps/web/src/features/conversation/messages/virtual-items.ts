@@ -876,7 +876,7 @@ function isAssistantInsertionPoint(stableItems: readonly ChatVirtualItem[], inde
   return previous?.type === "work-fold" && previous.messageId === item.message.id;
 }
 
-function isSavedVisualItem(item: ChatVirtualItem | undefined): boolean {
+function isVisualItem(item: ChatVirtualItem | undefined): boolean {
   return item?.type === "message" && item.message.role === "system" && Boolean(item.message.visual);
 }
 
@@ -886,15 +886,14 @@ function isSavedVisualItem(item: ChatVirtualItem | undefined): boolean {
  */
 function replyStartIndex(stableItems: readonly ChatVirtualItem[], assistantIndex: number): number {
   let index = assistantIndex;
-  while (isSavedVisualItem(stableItems[index - 1])) index -= 1;
+  while (isVisualItem(stableItems[index - 1])) index -= 1;
   return index;
 }
 
 function isNarrativeHeadItem(item: ChatVirtualItem): boolean {
-  if (item.type === "narrative-flow") return true;
-  if (item.type !== "message") return false;
   // A live visual belongs to the reply, so it sits above the saved answer with the rest of the live turn.
-  return item.message.role === "system" ? Boolean(item.message.visual) : item.message.role === "assistant" && isAgentDisplayActive(item.agentDisplayState);
+  if (item.type === "narrative-flow" || isVisualItem(item)) return true;
+  return item.type === "message" && item.message.role === "assistant" && isAgentDisplayActive(item.agentDisplayState);
 }
 
 function spliceNarrativeItems(stableItems: readonly ChatVirtualItem[], volatileItems: readonly ChatVirtualItem[], assistantIndex: number): ChatVirtualItem[] | undefined {
