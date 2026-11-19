@@ -484,6 +484,135 @@ describe("SidebarThreadRow", () => {
       expect(openExternalUrl).not.toHaveBeenCalled();
       expect(setActiveThread).not.toHaveBeenCalled();
     });
+
+    describe("with one PR", () => {
+      const ONE_PR = [createMockThreadPullRequest({ number: 42, state: "open", url: PR_URL(42), title: "Only change" })];
+      const press = async (chip: HTMLElement, init: { ctrlKey?: boolean } = {}) => {
+        fireEvent.pointerDown(chip, { pointerType: "mouse", button: 0 });
+        fireEvent.mouseDown(chip, { button: 0, ...init });
+        fireEvent.mouseUp(chip, { button: 0, ...init });
+        fireEvent.click(chip, { button: 0, ...init });
+        await act(() => vi.advanceTimersByTimeAsync(500));
+      };
+
+      it("opens the PR on click without showing the list or selecting the row", async () => {
+        const setActiveThread = vi.fn();
+        useWorkspaceStore.setState({ setActiveThread });
+        renderThread({ pull_requests: ONE_PR });
+
+        await press(screen.getByRole("button", { name: "PR #42, open" }));
+
+        expect(openExternalUrl).toHaveBeenCalledWith(PR_URL(42));
+        expect(prList()).toBeNull();
+        expect(setActiveThread).not.toHaveBeenCalled();
+      });
+
+      it("still lists the PR on hover, and a click then opens it and closes the list", async () => {
+        renderThread({ pull_requests: ONE_PR });
+        const chip = screen.getByRole("button", { name: "PR #42, open" });
+        await hover(chip);
+        expect(within(openList()).getByRole("menuitem", { name: "#42Only change" })).toBeTruthy();
+
+        await press(chip);
+
+        expect(openExternalUrl).toHaveBeenCalledWith(PR_URL(42));
+        expect(prList()).toBeNull();
+      });
+
+      it("keeps the list shut after a click that beats the hover delay, until the pointer leaves and returns", async () => {
+        renderThread({ pull_requests: ONE_PR });
+        const chip = screen.getByRole("button", { name: "PR #42, open" });
+        fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+        fireEvent.mouseEnter(chip, { clientX: 200, clientY: 40 });
+        fireEvent.mouseMove(chip, { clientX: 201, clientY: 40 });
+
+        await press(chip);
+        await act(() => vi.advanceTimersByTimeAsync(1000));
+        expect(openExternalUrl).toHaveBeenCalledWith(PR_URL(42));
+        expect(prList()).toBeNull();
+
+        fireEvent.mouseLeave(chip, { clientX: 40, clientY: 300 });
+        await act(() => vi.advanceTimersByTimeAsync(1000));
+        await hover(chip);
+        expect(prList()).not.toBeNull();
+      });
+
+      it("opens the PR from the keyboard instead of the list", async () => {
+        renderThread({ pull_requests: ONE_PR });
+        const chip = screen.getByRole("button", { name: "PR #42, open" });
+        act(() => chip.focus());
+
+        fireEvent.keyDown(chip, { key: "Enter" });
+        fireEvent.click(chip, { detail: 0 });
+        await act(() => vi.advanceTimersByTimeAsync(500));
+
+        expect(openExternalUrl).toHaveBeenCalledWith(PR_URL(42));
+        expect(prList()).toBeNull();
+      });
+
+      it("opens the PR in the in-app browser on Ctrl+click", async () => {
+        renderThread({ pull_requests: ONE_PR });
+
+        await press(screen.getByRole("button", { name: "PR #42, open" }), { ctrlKey: true });
+
+        expect(resolveNavigation).toHaveBeenCalledWith(PR_URL(42), expect.anything());
+        expect(openExternalUrl).not.toHaveBeenCalled();
+        expect(prList()).toBeNull();
+      });
+
+      it("keeps the list shut after a keyboard activation while the pointer rests on the chip", async () => {
+        renderThread({ pull_requests: ONE_PR });
+        const chip = screen.getByRole("button", { name: "PR #42, open" });
+        fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+        fireEvent.mouseEnter(chip, { clientX: 200, clientY: 40 });
+        fireEvent.mouseMove(chip, { clientX: 201, clientY: 40 });
+
+        act(() => chip.focus());
+        fireEvent.keyDown(chip, { key: "Enter" });
+        fireEvent.click(chip, { detail: 0 });
+        await act(() => vi.advanceTimersByTimeAsync(1000));
+
+        expect(openExternalUrl).toHaveBeenCalledWith(PR_URL(42));
+        expect(prList()).toBeNull();
+      });
+
+      it("still lists the PR on a later hover after a keyboard activation made with the pointer elsewhere", async () => {
+        renderThread({ pull_requests: ONE_PR });
+        const chip = screen.getByRole("button", { name: "PR #42, open" });
+        act(() => chip.focus());
+        fireEvent.keyDown(chip, { key: "Enter" });
+        fireEvent.click(chip, { detail: 0 });
+        await act(() => vi.advanceTimersByTimeAsync(500));
+
+        await hover(chip);
+        expect(prList()).not.toBeNull();
+      });
+
+      it("opens nothing on click when the PR has no link, and still lists it on hover", async () => {
+        renderThread({ pull_requests: [createMockThreadPullRequest({ number: 7, state: "unresolved", url: null })] });
+        const chip = screen.getByRole("button", { name: "PR #7, unresolved" });
+
+        await press(chip);
+        expect(prList()).toBeNull();
+        expect(openExternalUrl).not.toHaveBeenCalled();
+
+        await hover(chip);
+        expect(prList()).not.toBeNull();
+      });
+    });
+
+    it("shows the list on click when several PRs are linked", async () => {
+      renderThread({ pull_requests: TWO_PRS });
+      const chip = screen.getByRole("button", { name: "2 pull requests" });
+      fireEvent.pointerDown(chip, { pointerType: "mouse", button: 0 });
+      fireEvent.mouseDown(chip, { button: 0 });
+      fireEvent.mouseUp(chip, { button: 0 });
+      fireEvent.click(chip, { button: 0 });
+      await act(() => vi.advanceTimersByTimeAsync(500));
+
+      expect(within(openList()).getAllByRole("menuitem")).toHaveLength(2);
+      expect(openExternalUrl).not.toHaveBeenCalled();
+    });
   });
 
   describe("thread menu", () => {
