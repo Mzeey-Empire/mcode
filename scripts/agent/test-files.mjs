@@ -13,13 +13,10 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
-import { readWorkspaces, workspaceOf } from "./check-changed.mjs";
+import { readWorkspaces, TAKES_FILE_ARGUMENTS, workspaceOf } from "./check-changed.mjs";
 
 const USAGE = "Usage: bun run test:files <path> [<path> ...]";
 const VITEST_FLAGS = ["--reporter=dot", "--silent=passed-only"];
-// Only a script that ends in the Vitest CLI receives appended paths; packages/oxlint-plugin starts Vitest from inline
-// code that ignores them, so a named file there would run nothing or everything.
-const TAKES_FILE_ARGUMENTS = /\bvitest(?:\.mjs)?\s+run\s*$/;
 
 /**
  * One Vitest run per workspace that owns a requested path, in first-mention order. Throws before any run when the list
