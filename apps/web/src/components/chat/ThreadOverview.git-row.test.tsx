@@ -233,7 +233,8 @@ describe("ThreadOverview git row", () => {
       vi.mocked(mockTransport.push).mockReturnValueOnce(new Promise((resolve) => { land = resolve; }));
       reviewBranch({ upstream: { ahead: 1 } });
       vi.mocked(useHasCommitsAhead).mockReturnValue(true);
-      renderOverview(namedThread());
+      const thread = namedThread();
+      const { rerender } = renderOverview(thread);
 
       await user.click(await screen.findByTestId("workspace-menu-push"));
       expect(mockTransport.push).toHaveBeenCalledWith("ws-1", "feat/x", "thread-1");
@@ -241,10 +242,17 @@ describe("ThreadOverview git row", () => {
 
       reviewBranch({ upstream: { ahead: 0 } });
       await act(async () => land({ success: true }));
-      // The row keeps its step while pointer or focus is on it, so leave it as the user would.
-      await user.unhover(screen.getByTestId("thread-overview-git"));
-      act(() => screen.getByTestId("workspace-menu-push").blur());
+      // The pointer and focus stay on the row: the user's own push moves it on without leaving.
       expect(await screen.findByRole("button", { name: "Create PR…" })).toBeInTheDocument();
+
+      // Once it has moved on, the row holds again, so an agent's edit cannot swap Create PR… away.
+      const probes = vi.mocked(mockTransport.getReviewState).mock.calls.length;
+      reviewBranch({ uncommitted: { staged: 0, unstaged: 1, untracked: 0 }, upstream: { ahead: 0 } });
+      act(() => useDiffStore.getState().bumpDiffRevision("thread-1"));
+      rerender(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+      await waitFor(() => expect(vi.mocked(mockTransport.getReviewState).mock.calls.length).toBeGreaterThan(probes));
+      await act(async () => {});
+      expect(screen.getByTestId("thread-overview-git")).toHaveTextContent("Create PR…");
     });
 
     it("shows a failed push's reason in place and keeps Push", async () => {
