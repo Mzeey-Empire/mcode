@@ -1,4 +1,4 @@
-import { createMockThread } from "@mcode/contracts/testing";
+import { createMockThread, createMockThreadAttention } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
@@ -20,10 +20,10 @@ const ASKED = new Date(2026, 9, 10, 14, 35).toISOString();
 let stop: (() => void) | undefined;
 
 function turn(threadId: string, sequence: number, outcome: TurnOutcome = "completed", seen: number | null = null): ThreadAttention {
-  return {
-    threadId, waiting: null, lastTurn: { outcome, endedAt: ENDED, sequence, changedFileCount: null },
-    seen: { sequence: seen, at: null }, hasUnfinishedDelegatedTasks: false,
-  };
+  return createMockThreadAttention({
+    threadId, lastTurn: { outcome, endedAt: ENDED, sequence, changedFileCount: null },
+    seen: { sequence: seen, at: null },
+  });
 }
 
 function toasts(): { kind: string; title: string; meta?: string; dedupeKey?: string }[] {

@@ -147,7 +147,7 @@ async function harness(
   const projects = new ProjectWorktreeService(threads, workspaces, runtime.writer, worktrees,
     new SandboxWorktreeCleanupPolicy(new WorktreeSafetyService(executor, host), repository, host));
   const threadService = new ThreadService(threads, projects, attachments, new HandoffStorage(), {
-    teardownThread: async () => {}, deletePersistentData: async (_ids, remove) => remove(),
+    teardownThread: async () => {}, deletePersistentData: async (_ids, remove) => remove(), notifyThreadsHidden: () => {},
   });
   const creation = new ThreadCreationCoordinator(threads, () => threadService, admission, repository, workspaces, fetchDecisions,
     undefined, undefined, () => startups);
@@ -192,7 +192,7 @@ async function harness(
   const audit = new ThreadControlAuditRepo(runtime.writer);
   child.registerInstance(ThreadControlAuditRepo, audit);
   child.registerInstance<Pick<AgentService, "stopSession" | "runtimeAccess">>(AgentService, { stopSession,
-    runtimeAccess: () => ({ activeThreadIds: () => [...active], activeCount: () => active.size, runtimeSnapshots: () => [] }) });
+    runtimeAccess: () => ({ activeThreadIds: () => [...active], activeTurnThreadIds: () => [...active], runtimeSnapshots: () => [] }) });
   child.registerInstance(ThreadStartupService, startups);
   child.registerInstance(ThreadStartupFetchDecisions, fetchDecisions);
   child.registerInstance(WorkspaceEnvironmentService, environment);

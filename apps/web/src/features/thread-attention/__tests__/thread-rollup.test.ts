@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createMockThread } from "@mcode/contracts/testing";
+import { createMockThread, createMockThreadAttention } from "@mcode/contracts/testing";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
@@ -15,7 +15,7 @@ const AT = "2026-10-10T10:00:00.000Z";
 const PENDING_STARTUP: PendingStartup = { startupId: "a", context: "new-direct", queuedMessage: "hello" };
 
 function attention(threadId: string, overrides: Partial<ThreadAttention> = {}): ThreadAttention {
-  return { threadId, waiting: null, lastTurn: null, seen: { sequence: null, at: null }, hasUnfinishedDelegatedTasks: false, ...overrides };
+  return createMockThreadAttention({ threadId, ...overrides });
 }
 
 function endedTurn(outcome: TurnOutcome): Pick<ThreadAttention, "lastTurn"> {

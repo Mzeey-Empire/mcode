@@ -316,6 +316,20 @@ describe("ClaudeEventMapper user interrupts", () => {
 });
 
 describe("ClaudeEventMapper background tools", () => {
+  it.each([
+    ["Agent", "subagent", "Investigate", "Investigate"],
+    ["Bash", "command", "Friendly description", "bun run dev"],
+    ["Agent", "subagent", "x".repeat(501), "x".repeat(500)],
+    ["Bash", "command", "Ignored", "x".repeat(500)],
+  ])("classifies %s background calls and bounds their labels (%s)", async (name, kind, description, expected) => {
+    const { mapper, events } = createMapper();
+    const command = description === "Ignored" ? "x".repeat(501) : "bun run dev";
+    await mapper.map({ type: "assistant", message: { content: [{ type: "tool_use", id: "bg", name, input: { description, command } }] } });
+    await mapper.map({ type: "user", tool_use_result: name === "Agent" ? { status: "async_launched", agentId: "task" } : { backgroundTaskId: "task" },
+      message: { content: [{ type: "tool_result", tool_use_id: "bg", content: "started" }] } });
+    expect(events.at(-1)).toEqual({ type: "toolBackgrounded", threadId: "test", toolCallId: "bg", kind, label: expected });
+  });
+
   const launch = (id: string) => ({
     type: "user",
     tool_use_result: { status: "async_launched", isAsync: true, agentId: `agent-${id}` },

@@ -21,7 +21,7 @@ import { workerLossIncidentId } from "../execution/execution-worker-loss-coordin
 import type { TurnStopCause } from "@mcode/contracts/compat/agent-model";
 import { publishTurnPersisted } from "../execution/turn-persisted-publication.js";
 import { admittedSessionId, coverageOf, type CompletedTurnWatermark } from "../turns/completed-turn-watermark.js";
-import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
+import { CanonicalAgentBoundary, type CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
 import { syntheticThreadExecutionId } from "./canonical-thread-execution.js";
 import { CanonicalWriterAcknowledgementCapacity, type CanonicalAgentWriterClient } from "./canonical-agent-writer-client.js";
 import type { CanonicalAcceptedWriteReceipt } from "./canonical-agent-writer-protocol.js";
@@ -200,6 +200,8 @@ export class CanonicalAcceptedProgress {
   private pendingSaved: readonly CanonicalAcceptedWriteReceipt[] = [];
   private closing = false;
   private readonly deletingThreads = new Set<string>();
+  /** Late tool results that arrived while their thread was fenced, kept in arrival order until the fence lifts. */
+  private readonly fencedLateResults = new Map<string, { executionId: string; result: LateToolResult }[]>();
   /** Steer callers wait for their transcript save, keyed by accepted operation id. */
   private readonly steerSaves = new Map<string, { threadId: string; resolve(): void; reject(error: Error): void }>();
 
@@ -247,7 +249,10 @@ export class CanonicalAcceptedProgress {
   /** Release the admission fence if the durable command fails or conflicts. */
   cancelDurableCommand(threadId: string): void {
     const thread = this.threads.get(threadId);
-    if (thread && !thread.exit) thread.commandPending = false;
+    if (thread && !thread.exit) {
+      thread.commandPending = false;
+      this.admitFencedLateResults(threadId);
+    }
   }
 
   /**
@@ -975,12 +980,14 @@ export class CanonicalAcceptedProgress {
 
   /**
    * Settle a background tool call against the finished turn that launched it, even after
-   * another turn starts. A repeated identical result is a no-op.
+   * another turn starts. A repeated identical result is a no-op. A result that arrives while
+   * a durable command, an unsaved-turn exit, or a deletion fences the thread is saved once the
+   * fence lifts, unless the deletion succeeded.
    */
   acceptLateToolResult(threadId: string, executionId: string, result: LateToolResult): void {
     this.assertOpen();
+    if (this.holdWhileFenced(threadId, executionId, result)) return;
     const thread = this.thread(threadId);
-    this.assertAdmission(thread);
     const turn = acceptedTerminalTurn(thread.state, threadId, executionId);
     const execution = { threadId, turnId: turn.id, executionId };
     const message = exactTerminalAssistant(thread.state, execution);
@@ -996,6 +1003,20 @@ export class CanonicalAcceptedProgress {
     ];
     this.acceptAuxiliary(thread, `late-tool:${record.id}`, execution, events, "post-terminal");
     thread.publicationSequence += 1;
+  }
+
+  /**
+   * Threads named by accepted events that match and are not yet in SQLite. A turn's worker can be released while
+   * its writes are still queued, so a reader of saved state alone would miss work the provider already started.
+   */
+  unsavedThreadIds(matches: (event: CanonicalAgentEventDraft) => boolean): string[] {
+    const ids = new Set<string>();
+    for (const thread of this.threads.values()) {
+      for (const batch of thread.owner.recoveryCut().retained) {
+        for (const { draft } of batch.events) if (matches(draft)) ids.add(draft.routing.threadId);
+      }
+    }
+    return [...ids];
   }
 
   /** Resolve once every accepted write for the thread has reached SQLite, releasing its owner slot. */
@@ -1075,8 +1096,15 @@ export class CanonicalAcceptedProgress {
     for (const owner of owners) await this.discardThread(owner);
   }
 
-  /** Release the temporary admission fence after the caller's durable deletion attempt finishes. */
-  finishThreadDeletion(threadId: string): void { this.deletingThreads.delete(threadId); }
+  /**
+   * Release the temporary admission fence after the caller's durable deletion attempt finishes. Late results held
+   * by the fence go with a deleted thread; a thread that survives a failed deletion saves them.
+   */
+  finishThreadDeletion(threadId: string, deleted: boolean): void {
+    this.deletingThreads.delete(threadId);
+    if (deleted) this.fencedLateResults.delete(threadId);
+    else this.admitFencedLateResults(threadId);
+  }
 
   /** Stop admission, then write every accepted save still queued, starting no attempt at or after `attemptsUntil`. */
   async close(options: { readonly attemptsUntil?: number } = {}): Promise<void> {
@@ -1102,6 +1130,32 @@ export class CanonicalAcceptedProgress {
 
   private assertAdmission(thread: ProgressThread): void {
     if (thread.commandPending) throw new Error("Accepted progress is fenced by a durable thread command");
+  }
+
+  private holdWhileFenced(threadId: string, executionId: string, result: LateToolResult): boolean {
+    if (!this.deletingThreads.has(threadId) && !this.threads.get(threadId)?.commandPending) return false;
+    // The provider sends each result once, often because the fencing command closed its session, so a
+    // refusal here would leave the call running in storage until the next restart.
+    const pending = this.fencedLateResults.get(threadId) ?? [];
+    pending.push({ executionId, result });
+    this.fencedLateResults.set(threadId, pending);
+    return true;
+  }
+
+  /** Save the late results the fence held back, now that the thread admits progress again. */
+  private admitFencedLateResults(threadId: string): void {
+    const pending = this.fencedLateResults.get(threadId);
+    if (!pending || this.closing) return;
+    this.fencedLateResults.delete(threadId);
+    for (const { executionId, result } of pending) {
+      try {
+        this.acceptLateToolResult(threadId, executionId, result);
+      } catch (error) {
+        // The result is dropped, so its call stays running in storage until the startup sweep stops it.
+        logger.error("Background tool result held by a thread fence could not be saved", { threadId, executionId,
+          toolCallId: result.toolCallId, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
   }
 
   private saveThread(threadId: string): ProgressThread {
@@ -1357,6 +1411,7 @@ export class CanonicalAcceptedProgress {
       else {
         thread.commandPending = false;
         this.rejectWaiters(thread, batch.execution.threadId, failure.error);
+        this.admitFencedLateResults(batch.execution.threadId);
       }
     }
     logger.error(source === "receipt" ? "Accepted progress receipt processing failed" : "Accepted progress save failed", { threadId: batch.execution.threadId,
@@ -1515,7 +1570,10 @@ export class CanonicalAcceptedProgress {
       thread.exit = undefined;
       thread.commandPending = false;
     }
-    if (current) this.publishSaving(threadId);
+    if (!current) return;
+    this.publishSaving(threadId);
+    // The exit stops the agent first, and a stopped Claude session settles its background calls while this fence holds.
+    this.admitFencedLateResults(threadId);
   }
 
   private saveBlocked(threadId: string, error: Error): ThreadSaveBlockedError {

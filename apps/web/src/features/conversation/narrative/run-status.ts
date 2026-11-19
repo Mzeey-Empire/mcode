@@ -16,7 +16,7 @@ export interface RunHoldingSignals {
   waitingFor?: "approval" | "answers";
   /** The server is writing the plan after the questions were answered. */
   planning?: boolean;
-  /** Tasks this thread delegated are unfinished now. */
+  /** Tasks this thread delegated, or subagents it started in the background, still run now. */
   delegating?: boolean;
 }
 

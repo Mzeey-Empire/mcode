@@ -67,7 +67,7 @@ describe("disconnected Terminal creates", () => {
         authToken: "test-token",
         singleInstance: false,
         shutdown: () => undefined,
-        agentService: { runtimeAccess: () => ({ activeCount: () => 0 }) },
+        agentWorkload: { count: () => 0 },
         terminalService,
         resolveBrowserAutomationHostAuthorization: () => null,
       } as never));
@@ -116,7 +116,7 @@ describe("disconnected Terminal creates", () => {
       authToken: "test-token",
       singleInstance: false,
       shutdown: () => undefined,
-      agentService: { runtimeAccess: () => ({ activeCount: () => 0 }) },
+      agentWorkload: { count: () => 0 },
       terminalService,
       resolveBrowserAutomationHostAuthorization: () => null,
     } as never));
@@ -159,7 +159,7 @@ describe("disconnected Terminal creates", () => {
       authToken: "test-token",
       singleInstance: false,
       shutdown: () => undefined,
-      agentService: { runtimeAccess: () => ({ activeCount: () => 0 }) },
+      agentWorkload: { count: () => 0 },
       terminalService,
       resolveBrowserAutomationHostAuthorization: () => null,
     } as never));

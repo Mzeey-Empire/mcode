@@ -1,4 +1,4 @@
-import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockThread, createMockThreadAttention, createMockWorkspace } from "@mcode/contracts/testing";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "@/components/ui/command";
@@ -140,13 +140,11 @@ describe("ThreadSearchView", () => {
 
   it("shows the sidebar lane marker for the thread's row state", () => {
     act(() => {
-      threadAttentionStore.setState({ byThreadId: { [thread.id]: {
+      threadAttentionStore.setState({ byThreadId: { [thread.id]: createMockThreadAttention({
         threadId: thread.id,
         waiting: { kind: "approval", since: "2026-10-10T10:00:00.000Z" },
         lastTurn: { outcome: "errored", endedAt: "2026-10-10T10:00:00.000Z", sequence: 4, changedFileCount: null },
-        seen: { sequence: null, at: null },
-        hasUnfinishedDelegatedTasks: false,
-      } } });
+      }) } });
     });
     const { rerender } = render(<Command shouldFilter={false}><ThreadSearchView /></Command>);
     expect(statusGlyph(screen.getByRole("img", { name: "Approval required" }))).toBe("shield-alert");

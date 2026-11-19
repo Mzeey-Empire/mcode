@@ -7,6 +7,9 @@ import { TURN_FEATURE_EFFECTS, type TurnFeatureEffects } from "./turn-feature-ef
 /** The summary a background call gets when the provider that ran it did not survive a restart. */
 export const ORPHANED_BACKGROUND_TOOL_OUTPUT = "Stopped when Mcode restarted.";
 
+/** A held background call stopped because its provider did not survive startup. */
+export type StoppedBackgroundCall = ReturnType<CanonicalAgentBoundary["listHeldBackgroundToolCalls"]>[number];
+
 /** Settles background tool calls against the finished turn that launched them. */
 @injectable()
 export class BackgroundToolSettlementEffect {
@@ -34,7 +37,7 @@ export class BackgroundToolSettlementEffect {
    * Stop every background call still held after a restart. No provider process survives
    * one, so no late result can arrive for these calls.
    */
-  async settleOrphansAtStartup(): Promise<number> {
+  async settleOrphansAtStartup(): Promise<StoppedBackgroundCall[]> {
     const progress = this.progress();
     const held = this.canonical.listHeldBackgroundToolCalls();
     for (const [index, call] of held.entries()) {
@@ -43,7 +46,7 @@ export class BackgroundToolSettlementEffect {
       // must land before the sweep moves on to the next one.
       if (held[index + 1]?.threadId !== call.threadId) await progress.waitForSaved(call.threadId);
     }
-    return held.length;
+    return held;
   }
 
   private progress(): NonNullable<BackgroundToolSettlementEffect["acceptedProgress"]> {

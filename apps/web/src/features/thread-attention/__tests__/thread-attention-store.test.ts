@@ -1,4 +1,4 @@
-import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
+import { createMockMessage, createMockThread, createMockThreadAttention } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcknowledgeSeenResult, ThreadAttention } from "@mcode/contracts/models/thread-attention";
@@ -14,10 +14,10 @@ vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
 
 const BEFORE = "2026-10-10T10:00:00.000Z";
 const NOW = "2026-10-10T10:01:00.000Z";
-const attention: ThreadAttention = {
-  threadId: "a", waiting: null, lastTurn: { outcome: "completed", endedAt: NOW, sequence: 8, changedFileCount: null },
-  seen: { sequence: 2, at: BEFORE }, hasUnfinishedDelegatedTasks: false,
-};
+const attention: ThreadAttention = createMockThreadAttention({
+  threadId: "a", lastTurn: { outcome: "completed", endedAt: NOW, sequence: 8, changedFileCount: null },
+  seen: { sequence: 2, at: BEFORE },
+});
 let focused = true;
 let stop: (() => void) | undefined;
 
@@ -202,6 +202,13 @@ describe("on-screen thread acknowledgements", () => {
     const observed = threadAttentionStore.getState().byThreadId;
     threadAttentionStore.getState().hydrate([], observed);
     expect(threadAttentionStore.getState().byThreadId.a?.hasUnfinishedDelegatedTasks).toBe(false);
+  });
+
+  it("clears a background subagent that a reconnect snapshot omits", () => {
+    threadAttentionStore.getState().apply({ ...attention, hasRunningBackgroundSubagents: true });
+    const observed = threadAttentionStore.getState().byThreadId;
+    threadAttentionStore.getState().hydrate([], observed);
+    expect(threadAttentionStore.getState().byThreadId.a?.hasRunningBackgroundSubagents).toBe(false);
   });
 
   it("keeps a newer push over an in-flight reconnect snapshot and never regresses an optimistic mark", () => {

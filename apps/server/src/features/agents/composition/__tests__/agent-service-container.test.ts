@@ -563,13 +563,13 @@ describe("AgentService container composition", () => {
       threadId: thread.id, turnExecutionId: request.turnExecutionId, phase: "cancelled" } });
     expect(sealing.mock.calls.map(([input]) => input.outcome)).toEqual(["cancelled"]);
     expect(recover).not.toHaveBeenCalled();
-    await waitFor(() => service.runtimeAccess().activeCount() === 0 && runtime.owner.current(thread.id) === undefined);
+    await waitFor(() => service.runtimeAccess().activeTurnThreadIds().length === 0 && runtime.owner.current(thread.id) === undefined);
     await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.cancelled"));
     expect(database?.query("SELECT status FROM canonical_agent_turns WHERE execution_id=?").get(request.turnExecutionId)).toEqual({ status: "Cancelled" });
     expect(canonicalPayloadTypes(thread.id).filter((type) => ["turn.completed", "turn.cancelled", "turn.errored", "turn.interrupted"].includes(type))).toEqual(["turn.cancelled"]);
     await service.sendMessage({ threadId: thread.id, content: "follow-up", permissionMode: "full", provider: "copilot", model: "gpt-4.1" });
     expect(runtime.owner.current(thread.id)?.execution.executionId).not.toBe(request.turnExecutionId);
-    expect(service.runtimeAccess().activeCount()).toBe(1);
+    expect(service.runtimeAccess().activeTurnThreadIds()).toEqual([thread.id]);
     expect((await service.stopSession(thread.id, { by: "user" })).status).toBe("cancelled");
     expect(recover).not.toHaveBeenCalled();
   });
@@ -611,7 +611,7 @@ describe("AgentService container composition", () => {
     expect(sealing.mock.calls.map(([input]) => input.outcome)).toEqual(["errored"]);
     expect(stop).not.toHaveBeenCalled();
     expect(recover).not.toHaveBeenCalled();
-    expect(service.runtimeAccess().activeCount()).toBe(0);
+    expect(service.runtimeAccess().activeTurnThreadIds()).toEqual([]);
     expect(runtime.owner.current(thread.id)).toBeUndefined();
     await waitFor(() => canonicalPayloadTypes(thread.id).includes("turn.errored"));
     expect(database?.query("SELECT status FROM canonical_agent_turns WHERE execution_id=?").get(request.turnExecutionId)).toEqual({ status: "Errored" });

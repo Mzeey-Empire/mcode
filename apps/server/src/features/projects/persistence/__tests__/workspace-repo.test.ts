@@ -103,6 +103,7 @@ describe("WorkspaceService", () => {
       {
         teardownThread: vi.fn().mockResolvedValue(undefined),
         deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
+        notifyThreadsHidden: vi.fn(),
       },
       new FakeGitExecutor(),
       { killByThread: vi.fn().mockResolvedValue(undefined) },

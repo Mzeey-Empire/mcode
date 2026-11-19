@@ -11,7 +11,7 @@ import { ParentNarrativeRecoveryItemSchema, type ParentNarrativeRecoveryItem } f
 import { encodeCanonicalSubagentDetailTarget } from "@mcode/contracts/models/tool-call-record";
 import { reduceAgentEventBatch, type AcceptedCanonicalAgentEventEnvelope, type AgentModelState } from "@mcode/contracts/compat/agent-model";
 import { BoundedProgressRetention } from "../../execution/progress-retention-budget.js";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { openMigratedTestDatabase } from "../../../../runtime/persistence/sqlite/testing/migrated-test-database.js";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
@@ -47,6 +47,14 @@ import { TurnSavingStatusSchema, type TurnSavingStatus } from "@mcode/contracts/
 import { diag, parseDiagLine, threadRecordingFileId } from "@mcode/shared/diagnostics";
 import { AcceptedContentRejected } from "../accepted-save-failure.js";
 import { ParentAssistantTextCheckpointStore } from "../../turns/parent-assistant-text-checkpoint-store.js";
+import { AgentWorkloadService } from "../../workload/agent-workload.js";
+import { createMockThread, createMockThreadPullRequest } from "@mcode/contracts/testing";
+import { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
+import { autoCompleteState } from "../../../thread-control/lifecycle/thread-auto-complete.js";
+import { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
+import { WorkspaceService } from "../../../projects/lifecycle/workspace-service.js";
+import { ProjectLifecycleStore } from "../../../projects/lifecycle/project-lifecycle-store.js";
+import { projectLifecycleWriteOperations } from "../../../projects/lifecycle/project-lifecycle-write-operations.js";
 
 const copilotSdk = vi.hoisted(() => ({ session: undefined as CopilotPersistenceSession | undefined }));
 vi.mock("../../../../../../../packages/providers/node_modules/@github/copilot-sdk/dist/index.js", () => ({
@@ -1982,7 +1990,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
     await send(3, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent" })] });
+      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("claude", 3, "textDelta", { delta: "Started a background agent", isFinalResponse: true })] });
     expect((await finish()).result.kind).toBe("accepted");
@@ -1992,7 +2000,8 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT status, completed_at, background FROM tool_call_records WHERE id = 'agent'").get())
       .toEqual({ status: "running", completed_at: null, background: 1 });
     expect(saved.listHeldBackgroundToolCalls())
-      .toEqual([{ threadId: execution.threadId, executionId: execution.executionId, toolCallId: "agent" }]);
+      .toEqual([{ threadId: execution.threadId, executionId: execution.executionId, toolCallId: "agent",
+        kind: "subagent", label: "Look around" }]);
     const original = progress.latestAssistantMessage(execution.threadId);
     if (!original) throw new Error("Expected original accepted assistant");
 
@@ -2020,7 +2029,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     await send(2, { kind: "event", phase: "running", nativeCursor: null,
       events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
     await send(3, { kind: "event", phase: "running", nativeCursor: null,
-      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent" })] });
+      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
     await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "toolUse",
       { toolCallId: "agent-step", toolName: "Bash", toolInput: { command: "ls" }, parentToolCallId: "agent" })] });
     await send(5, { kind: "event", phase: "running", nativeCursor: null,
@@ -2040,6 +2049,233 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
 
     const agent = db.prepare("SELECT completed_at FROM tool_call_records WHERE id = 'agent'").get();
     expect(step()).toEqual({ parent_tool_call_id: "agent", message_id: original.id, status: "completed", ...agent });
+  });
+
+  it("keeps counting a background subagent after its worker is released and before its turn's ending is saved", async () => {
+    const reserved = new Set([execution.threadId]);
+    const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [...reserved] }, new CanonicalAgentStore(db, () => {}));
+    onTestFinished(workload.observeCommittedEvents());
+    await send(1, start("claude"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    holdWrites();
+    await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "turnComplete")],
+      terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await send(5, { kind: "release" });
+    reserved.clear();
+
+    expect(turnStatus()).toEqual({ status: "Running" });
+    expect(workload.count()).toBe(1);
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(turnStatus()).toEqual({ status: "Completed" });
+    expect(workload.count()).toBe(1);
+  });
+
+  it("keeps counting a background subagent whose launch is not saved when its worker is released", async () => {
+    const reserved = new Set([execution.threadId]);
+    const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [...reserved] },
+      new CanonicalAgentStore(db, () => {}), progress);
+    onTestFinished(workload.observeCommittedEvents());
+    const agentRecord = () => db.prepare("SELECT status, background FROM tool_call_records WHERE id = 'agent'").get();
+    await send(1, start("claude"));
+    await send(2, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    holdWrites();
+    await send(3, { kind: "event", phase: "running", nativeCursor: null,
+      events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
+    expect(workload.count()).toBe(1);
+    await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "turnComplete")],
+      terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+    await send(5, { kind: "release" });
+    reserved.clear();
+
+    expect(agentRecord()).toEqual({ status: "running", background: 0 });
+    expect(workload.count()).toBe(1);
+    release?.();
+    await expect.poll(() => progress.depth().pending).toBe(0);
+    expect(agentRecord()).toEqual({ status: "running", background: 1 });
+    expect(workload.count()).toBe(1);
+  });
+
+  describe("when a background launch is still unsaved after its worker is released", () => {
+    const launchRecord = () => db.prepare("SELECT status, background FROM tool_call_records WHERE id = 'launch'").get();
+
+    /** Launches one background call, then ends its turn and releases the worker while every write is held. */
+    async function releaseWithUnsavedLaunch(kind: "subagent" | "command",
+      beforeLaunch?: (workload: AgentWorkloadService) => Promise<void>) {
+      const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [] }, new CanonicalAgentStore(db, () => {}), progress);
+      onTestFinished(workload.observeCommittedEvents());
+      await send(1, start("claude"));
+      await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 1, "toolUse",
+        kind === "subagent"
+          ? { toolCallId: "launch", toolName: "Agent", toolInput: { prompt: "Look around" } }
+          : { toolCallId: "launch", toolName: "Bash", toolInput: { command: "bun run build" } })] });
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      await beforeLaunch?.(workload);
+      holdWrites();
+      await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "launch", kind, label: "Background work" })] });
+      await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "turnComplete")],
+        terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await send(5, { kind: "release" });
+      expect(launchRecord()).toEqual({ status: "running", background: 0 });
+      return workload;
+    }
+
+    it("does not count a background command", async () => {
+      const workload = await releaseWithUnsavedLaunch("command");
+
+      expect(workload.count()).toBe(0);
+      release?.();
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(workload.count()).toBe(0);
+    });
+
+    it("keeps auto-completion from completing the thread, and reports the subagent once", async () => {
+      const workload = await releaseWithUnsavedLaunch("subagent");
+      const changes: string[] = [];
+      onTestFinished(workload.onSubagentChange((threadId) => changes.push(threadId)));
+      const attention = new ThreadAttentionService(db, databaseWriter, [], { coordinatorsWithUnfinishedTasks: () => new Set() },
+        workload, () => {});
+      const decision = () => autoCompleteState({ ...createMockThread({ pull_requests: [createMockThreadPullRequest({ state: "merged" })] }),
+        attention: attention.get(execution.threadId), completeOnPrMerge: true });
+
+      expect(decision()).toBe("waiting-for-user");
+      release?.();
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(launchRecord()).toEqual({ status: "running", background: 1 });
+      expect(workload.backgroundSubagentThreadIds().has(execution.threadId)).toBe(true);
+      expect(changes).toEqual([execution.threadId]);
+    });
+
+    /** Soft-deletes the thread's workspace with its teardown blocked, so the thread stays hidden and its rows stay. */
+    async function hideWorkspace(workload: AgentWorkloadService) {
+      const unused = (): never => { throw new Error("Only the soft deletion is under test"); };
+      const deletion = new ThreadDeletionTeardownService({ findById: unused }, { beginThreadDeletion: unused, cancelSetupForThread: unused },
+        { beginThreadTeardown: unused, stopForThread: unused }, { cancelForRepoPath: unused }, { teardownThread: unused },
+        { teardownThread: unused }, { unwatchThreadWorktree: unused });
+      deletion.bindAcceptedProgress(progress);
+      onTestFinished(deletion.onPersistentDataDeleted((hidden) => workload.refreshTracked(hidden)));
+      // Runs the soft deletion against this test's database; the blocked teardown never reaches the later write.
+      const lifecycleWriter = { execute: async (operation: unknown, input: [string]) => {
+        if (operation !== projectLifecycleWriteOperations.beginWorkspaceDeletion) throw new Error("Unexpected write");
+        return new ProjectLifecycleStore(db).beginWorkspaceDeletion(...input);
+      } } as unknown as ApplicationDatabaseWriter;
+      const unusedDependency = {} as never;
+      const workspaces = new WorkspaceService(unusedDependency, unusedDependency, lifecycleWriter, { removeForThread: () => {} },
+        Object.assign(deletion, { teardownThread: () => new Promise<void>(() => {}) }), unusedDependency, { killByThread: async () => {} });
+
+      void workspaces.delete("workspace");
+      await expect.poll(() => db.prepare("SELECT deleted_at IS NOT NULL AS hidden FROM threads WHERE id = ?").get(execution.threadId))
+        .toEqual({ hidden: 1 });
+    }
+
+    async function expectUncountedButSaved(workload: AgentWorkloadService) {
+      expect(workload.count()).toBe(0);
+      expect(workload.backgroundSubagentThreadIds().has(execution.threadId)).toBe(false);
+      release?.();
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      expect(launchRecord()).toEqual({ status: "running", background: 1 });
+      expect(workload.count()).toBe(0);
+    }
+
+    it("stops counting it when its workspace is soft-deleted, and still saves it", async () => {
+      const workload = await releaseWithUnsavedLaunch("subagent");
+      expect(workload.count()).toBe(1);
+
+      await hideWorkspace(workload);
+
+      await expectUncountedButSaved(workload);
+    });
+
+    it("does not count one launched after its workspace is soft-deleted, and still saves it", async () => {
+      const workload = await releaseWithUnsavedLaunch("subagent", hideWorkspace);
+
+      await expectUncountedButSaved(workload);
+    });
+  });
+
+  describe("when a background call's late result arrives while its thread is fenced", () => {
+    const next = { ...execution, turnId: "next-turn", executionId: "00000000-0000-4000-8000-000000000127" };
+    const nextLease = { ...lease, leaseId: "next-lease" };
+    const agentStatus = () => db.prepare("SELECT status, output_summary FROM tool_call_records WHERE id = 'agent'").get();
+
+    /** Ends a Claude turn that leaves one background subagent running, and counts the thread's running agents. */
+    async function holdBackgroundSubagent() {
+      const workload = new AgentWorkloadService({ activeTurnThreadIds: () => [] }, new CanonicalAgentStore(db, () => {}));
+      const stopObserving = workload.observeCommittedEvents();
+      onTestFinished(stopObserving);
+      await send(1, start("claude"));
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 1, "toolUse", { toolCallId: "agent", toolName: "Agent", toolInput: { prompt: "Look around" } })] });
+      await send(3, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 2, "toolBackgrounded", { toolCallId: "agent", kind: "subagent", label: "Look around" })] });
+      await send(4, { kind: "event", phase: "running", nativeCursor: null, events: [draft("claude", 3, "turnComplete")],
+        terminalInput: { ...execution, providerId: "claude", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } } });
+      await expect.poll(() => progress.depth().pending).toBe(0);
+      await send(5, { kind: "release" });
+      expect(workload.count()).toBe(1);
+      return workload;
+    }
+
+    it("saves it once the durable command finishes, keeping a repeated result a no-op", async () => {
+      const workload = await holdBackgroundSubagent();
+      const result = { toolCallId: "agent", status: "completed", output: "Found the bug" } as const;
+
+      await progress.beforeDurableCommand(execution.threadId);
+      progress.acceptLateToolResult(execution.threadId, execution.executionId, result);
+      progress.acceptLateToolResult(execution.threadId, execution.executionId, result);
+      expect(agentStatus()).toEqual({ status: "running", output_summary: "" });
+      progress.cancelDurableCommand(execution.threadId);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+
+      expect(agentStatus()).toEqual({ status: "completed", output_summary: "Found the bug" });
+      expect(workload.count()).toBe(0);
+    });
+
+    it("saves the result its stopped agent sends during an unsaved-turn exit, once the exit ends", async () => {
+      const workload = await holdBackgroundSubagent();
+      await send(1, start("claude", next), next, nextLease);
+      db.run("CREATE TRIGGER fail_progress BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.operation_id = 'next-lease:2' BEGIN SELECT RAISE(ABORT, 'disk checkpoint unavailable'); END");
+      // Stopping a Claude session settles every background call it still holds, as the provider does on stream end.
+      progress.bindUnsavedAgentStop(async () => progress.acceptLateToolResult(execution.threadId, execution.executionId,
+        { toolCallId: "agent", status: "cancelled", output: "Stopped with its session." }));
+      await send(2, { kind: "event", phase: "running", nativeCursor: null,
+        events: [draft("claude", 1, "textDelta", { delta: "Unsaved reply", isFinalResponse: true }, next)] }, next, nextLease);
+      await expect.poll(() => turnStatus(next.turnId)).toEqual({ status: "Interrupted" });
+      await admitsCommands();
+      db.run("DROP TRIGGER fail_progress");
+      await expect.poll(() => progress.depth().pending).toBe(0);
+
+      expect(agentStatus()).toEqual({ status: "cancelled", output_summary: "Stopped with its session." });
+      expect(workload.count()).toBe(0);
+    });
+
+    it.each([
+      ["a durable command held before the deletion", true],
+      ["the deletion itself", false],
+    ])("saves a result fenced by %s once that deletion fails", async (_fence, heldBeforeDeletion) => {
+      const workload = await holdBackgroundSubagent();
+      const result = { toolCallId: "agent", status: "cancelled", output: "Stopped with its session." } as const;
+
+      if (heldBeforeDeletion) {
+        await progress.beforeDurableCommand(execution.threadId);
+        progress.acceptLateToolResult(execution.threadId, execution.executionId, result);
+      }
+      await progress.discardThreads([execution.threadId]);
+      if (!heldBeforeDeletion) progress.acceptLateToolResult(execution.threadId, execution.executionId, result);
+      expect(agentStatus()).toEqual({ status: "running", output_summary: "" });
+      progress.finishThreadDeletion(execution.threadId, false);
+      await expect.poll(() => progress.depth().pending).toBe(0);
+
+      expect(agentStatus()).toEqual({ status: "cancelled", output_summary: "Stopped with its session." });
+      expect(workload.count()).toBe(0);
+    });
   });
 
   it("assigns live plan, task and notice projections before storage and persists those same identities", async () => {
@@ -2193,7 +2429,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     expect(db.prepare("SELECT event_id FROM canonical_agent_events WHERE event_id = ?").get(`${execution.executionId}:raw:2`)).toBeNull();
     expect(() => progress.acceptSynthesizedPublications(execution.threadId,
       [{ type: "system", threadId: execution.threadId, subtype: "late" }])).toThrow("deletion is in progress");
-    progress.finishThreadDeletion(execution.threadId);
+    progress.finishThreadDeletion(execution.threadId, true);
   });
 
   it("interrupts a fully saved family child on restart even after its parent has completed", async () => {

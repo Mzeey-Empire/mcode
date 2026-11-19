@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMockThread, createMockThreadPullRequest } from "@mcode/contracts/testing";
+import { createMockThread, createMockThreadAttention, createMockThreadPullRequest } from "@mcode/contracts/testing";
 import { getDefaultSettings, type Settings } from "@mcode/contracts/models/settings";
 import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import type { ThreadPullRequest } from "@mcode/contracts/models/thread-pull-request";
@@ -22,8 +22,7 @@ const AT = "2030-01-01T10:00:00.000Z";
 const MERGED = createMockThreadPullRequest({ state: "merged" });
 
 function quietAttention(): ThreadAttention {
-  return { threadId: "thread", waiting: null, lastTurn: null,
-    seen: { sequence: null, at: null }, hasUnfinishedDelegatedTasks: false };
+  return createMockThreadAttention({ threadId: "thread" });
 }
 
 function decisionInput(overrides: Partial<AutoCompleteStateInput> = {}): AutoCompleteStateInput {
@@ -61,6 +60,7 @@ describe("autoCompleteState", () => {
     [{ deleted_at: AT }, "inactive"],
     [{ attention: null }, "waiting-for-user"],
     [{ attention: { ...quietAttention(), hasUnfinishedDelegatedTasks: true } }, "waiting-for-user"],
+    [{ attention: { ...quietAttention(), hasRunningBackgroundSubagents: true } }, "waiting-for-user"],
   ] satisfies Array<[Partial<AutoCompleteStateInput>, string]>)("honours lifecycle and preference gates: %j", (input, expected) => {
     expect(autoCompleteState(decisionInput(input))).toBe(expected);
   });
@@ -79,7 +79,7 @@ async function fixture() {
   const workspace = await new WorkspaceRepo(runtime.reader, runtime.writer).create("Auto-complete", "/fixture");
   const thread = await threads.create(workspace.id, "Feature", "direct", "main");
   const attention = new ThreadAttentionService(runtime.reader, runtime.writer, [],
-    { coordinatorsWithUnfinishedTasks: () => new Set() }, () => {});
+    { coordinatorsWithUnfinishedTasks: () => new Set() }, { backgroundSubagentThreadIds: () => new Set<string>() }, () => {});
   const funnel = new PullRequestLinkFunnel(runtime.writer, () => {}, () => {});
   const reservations = new ThreadControlMutationReservationService();
   let settings = getDefaultSettings();

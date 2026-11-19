@@ -89,6 +89,7 @@ describe("Cleanup integration", () => {
       teardownThread: vi.fn().mockResolvedValue(undefined),
       bindAcceptedProgress: vi.fn(),
       deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove(),
+      notifyThreadsHidden: vi.fn(),
     } as unknown as ThreadDeletionTeardownService;
     projectWorktreeService = new ProjectWorktreeService(
       threadRepo,

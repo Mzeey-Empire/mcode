@@ -16,7 +16,7 @@ import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderBillingModeSchema, QuotaCategorySchema } from "../providers/usage.js";
 import { StoredAttachmentSchema } from "../models/attachment.js";
 import { GoalStateSchema } from "../models/goal.js";
-import { SubagentPresentationSchema, ToolExecutionStatusSchema, ToolCallPhaseSchema } from "../models/tool-call-record.js";
+import { BackgroundCallKindSchema, SubagentPresentationSchema, ToolExecutionStatusSchema, ToolCallPhaseSchema } from "../models/tool-call-record.js";
 import { TurnOutcomeSchema } from "../models/turn-outcome.js";
 import { TurnFailureSchema } from "../models/turn-failure.js";
 import { ApprovalDecidedPayloadSchema } from "../models/approval-receipt.js";
@@ -149,6 +149,9 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       type: z.literal(AgentEventType.ToolBackgrounded),
       threadId: z.string(),
       toolCallId: z.string(),
+      // Optional because saved events from earlier builds lack them, and builds that share the database reparse them.
+      kind: BackgroundCallKindSchema().optional(),
+      label: z.string().max(500).optional(),
     }),
     z.object({
       type: z.literal(AgentEventType.TurnComplete),

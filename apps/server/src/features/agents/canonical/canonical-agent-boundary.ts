@@ -205,6 +205,16 @@ export class CanonicalAgentBoundary {
     return this.reader.listHeldBackgroundToolCalls();
   }
 
+  /** List a visible thread's running background subagent calls, whatever their launching turn's status. */
+  listRunningBackgroundSubagentIds(threadId: string): string[] {
+    return this.reader.listRunningBackgroundSubagentIds(threadId);
+  }
+
+  /** Return the given threads that no longer exist. */
+  listMissingThreadIds(threadIds: readonly string[]): string[] {
+    return this.reader.listMissingThreadIds(threadIds);
+  }
+
   /** Load interrupted checkpoints that permit an explicit recovery action. */
   listInterruptedCheckpoints(...args: Parameters<CanonicalAgentStore["listInterruptedCheckpoints"]>): ReturnType<CanonicalAgentStore["listInterruptedCheckpoints"]> {
     return this.reader.listInterruptedCheckpoints(...args);

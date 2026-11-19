@@ -256,9 +256,10 @@ describe("CodexLiveEventReducer", () => {
     const reducer = new CodexLiveEventReducer(execution);
     reduceEvent(reducer, "turnStarted");
     reduceEvent(reducer, "toolUse", { toolCallId: "held", toolName: "Agent", toolInput: { prompt: "Long" } });
-    const marked = reduceEvent(reducer, "toolBackgrounded", { toolCallId: "held" });
+    const marked = reduceEvent(reducer, "toolBackgrounded", { toolCallId: "held", kind: "subagent", label: "Long investigation" });
     expect(marked.writer).toContainEqual({ kind: "narrative-recovery", discardedItemIds: [],
-      items: [expect.objectContaining({ record: expect.objectContaining({ id: "held", status: "running", background: true }) })] });
+      items: [expect.objectContaining({ record: expect.objectContaining({ id: "held", status: "running", background: true,
+        background_kind: "subagent", background_label: "Long investigation" }) })] });
     reduceEvent(reducer, "toolUse", { toolCallId: "stopped", toolName: "Agent", toolInput: { prompt: "Short" } });
     reduceEvent(reducer, "toolResult", { toolCallId: "stopped", output: "Stopped", isError: false, cancelled: true });
     const terminal = reduceEvent(reducer, "turnComplete", { reason: "stop", costUsd: 0, tokensIn: 0, tokensOut: 0 });

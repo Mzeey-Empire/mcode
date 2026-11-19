@@ -13,7 +13,8 @@ import {
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
 import { CleanupJobRepo } from "../../cleanup/persistence/cleanup-job-repo.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
-import type { ThreadDeletionTeardownService } from "../thread-deletion-teardown-service.js";
+import { AgentWorkloadService } from "../../../agents/workload/agent-workload.js";
+import { ThreadDeletionTeardownService } from "../thread-deletion-teardown-service.js";
 import { ThreadService } from "../thread-service.js";
 import { effectiveAutoCompleteOnMerge } from "@mcode/contracts/models/thread";
 
@@ -26,6 +27,7 @@ describe("ThreadService.delete", () => {
   let threadService: ThreadService;
   let teardownThread: ReturnType<typeof vi.fn>;
   let deletePersistentData: ReturnType<typeof vi.fn>;
+  let hiddenStatuses: (string | undefined)[];
 
   beforeEach(() => {
     database = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
@@ -45,12 +47,14 @@ describe("ThreadService.delete", () => {
     } as unknown as GitWorktreeService;
     teardownThread = vi.fn().mockResolvedValue(undefined);
     deletePersistentData = vi.fn(async <Result>(_ids: readonly string[], remove: () => Promise<Result>): Promise<Result> => remove());
+    hiddenStatuses = [];
+    const notifyThreadsHidden = () => { hiddenStatuses.push(threads.findById("thread-1")?.status); };
     threadService = new ThreadService(
       threads,
       new ProjectWorktreeService(threads, workspaces, persistenceRuntime.writer, worktrees, cleanupPolicy),
       { removeForThread: vi.fn() } as unknown as AttachmentService,
       { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
-      { teardownThread, deletePersistentData, bindAcceptedProgress: vi.fn() } as unknown as ThreadDeletionTeardownService,
+      { teardownThread, deletePersistentData, notifyThreadsHidden, bindAcceptedProgress: vi.fn() } as unknown as ThreadDeletionTeardownService,
     );
   });
 
@@ -101,6 +105,41 @@ describe("ThreadService.delete", () => {
       branch: "feature/delete",
     });
     expect(threads.findById("thread-1")?.status).toBe("deleted");
+    // Running-agent occupancy re-reads its threads here, before cleanup removes the hidden thread.
+    expect(hiddenStatuses).toEqual(["deleted"]);
+    expect(deletePersistentData).not.toHaveBeenCalled();
+  });
+
+  it("stops counting a deleted worktree thread's running turn while its cleanup is still queued", async () => {
+    const workspace = (await workspaces.create("Project", "/repo"));
+    addWorktreeThread(workspace.id, "thread-1", "C:\\Users\\user\\.mcode\\worktrees\\repo\\feature", "feature/delete");
+    const deletion = new ThreadDeletionTeardownService(
+      { findById: vi.fn() },
+      { beginThreadDeletion: vi.fn(), cancelSetupForThread: vi.fn() },
+      { beginThreadTeardown: vi.fn(), stopForThread: vi.fn() },
+      { cancelForRepoPath: vi.fn() },
+      { teardownThread: vi.fn() },
+      { teardownThread: vi.fn() },
+      { unwatchThreadWorktree: vi.fn() },
+    );
+    const workload = new AgentWorkloadService(
+      { activeTurnThreadIds: () => ["thread-1"] },
+      { listRunningBackgroundSubagentIds: () => [], listMissingThreadIds: (ids) => ids.filter((id) => !threads.findById(id)) },
+    );
+    deletion.onPersistentDataDeleted((hidden) => workload.refreshTracked(hidden));
+    const service = new ThreadService(
+      threads,
+      new ProjectWorktreeService(threads, workspaces, persistenceRuntime.writer, { createWorktree: vi.fn(), removeWorktree: vi.fn() } as unknown as GitWorktreeService, cleanupPolicy),
+      { removeForThread: vi.fn() } as unknown as AttachmentService,
+      { deleteThreadFiles: vi.fn() } as unknown as HandoffStorage,
+      deletion,
+    );
+    expect(workload.count()).toBe(1);
+
+    expect(await service.delete("thread-1", true)).toBe(true);
+
+    expect(threads.findById("thread-1")?.status).toBe("deleted");
+    expect(workload.count()).toBe(0);
   });
 
   it.each([

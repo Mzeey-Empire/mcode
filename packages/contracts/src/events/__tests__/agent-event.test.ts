@@ -2,6 +2,13 @@ import { describe, it, expect } from "vitest";
 import { AgentEventSchema, AgentEventType } from "../agent-event.js";
 import { ProviderRuntimeEventSchema } from "../provider-runtime-event.js";
 
+it("validates background call classification and bounded labels", () => {
+  const event = { type: "toolBackgrounded", threadId: "t", toolCallId: "bg", kind: "subagent", label: "Investigate" };
+  expect(AgentEventSchema().parse(event)).toEqual(event);
+  expect(AgentEventSchema().safeParse({ ...event, kind: "unknown" }).success).toBe(false);
+  expect(AgentEventSchema().safeParse({ ...event, label: "x".repeat(501) }).success).toBe(false);
+});
+
 describe("child-thread runtime boundary", () => {
   const extension = { providerId: "copilot", kind: "child-thread",
     childThread: { role: "child", path: ["task-1"], nativeItemId: "message-1" } };

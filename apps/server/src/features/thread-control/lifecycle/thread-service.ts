@@ -39,7 +39,7 @@ export class ThreadService {
     @inject(HandoffStorage) private readonly handoffStorage: HandoffStorage,
     // CI watcher registration follows ThreadService construction during bootstrap.
     @inject(delay(() => ThreadDeletionTeardownService))
-    private readonly threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread" | "deletePersistentData">,
+    private readonly threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread" | "deletePersistentData" | "notifyThreadsHidden">,
     @inject(TurnResumeScheduler, { isOptional: true }) private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
   ) {}
 
@@ -130,6 +130,8 @@ export class ThreadService {
       // Stop the scheduled resume before asynchronous cleanup safety checks can admit it.
       await this.resumeScheduler?.unschedule(threadId);
       if (await this.projectWorktreeService.scheduleCleanup(threadId)) {
+        // Cleanup can wait on a session stop or fail, and a hidden thread must not hold install-when-idle until then.
+        this.threadDeletionTeardownService.notifyThreadsHidden([threadId]);
         // Disarm any resume scheduled while cleanup safety checks were pending.
         await this.resumeScheduler?.unschedule(threadId);
         return true;

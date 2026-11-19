@@ -1,4 +1,5 @@
 import { inject, injectable } from "tsyringe";
+import { logger } from "@mcode/shared";
 import { GithubService } from "../../pull-requests/github/github-service.js";
 import { CiWatcherService } from "../../pull-requests/status/ci-watcher.js";
 import { GitWatcherService } from "../../projects/git/git-watcher-service.js";
@@ -14,33 +15,64 @@ import { ThreadStartupService } from "../../thread-startup/thread-startup-servic
 export class ThreadDeletionTeardownService {
   private acceptedProgress: Pick<import("../../agents/canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
     "discardThreads" | "finishThreadDeletion"> | undefined;
+  private readonly deletionListeners = new Set<(hiddenThreadIds: readonly string[]) => void>();
 
   /** Compose retained-save disposal for direct deletion, delayed cleanup, and workspace cascades. */
   bindAcceptedProgress(progress: NonNullable<ThreadDeletionTeardownService["acceptedProgress"]>): void {
     this.acceptedProgress = progress;
   }
 
+  /**
+   * Observe every finished deletion attempt, including failed ones, and every thread hidden until its cleanup
+   * deletes it. A hidden notice carries the hidden thread ids; a finished deletion carries none, because it also
+   * removes child threads its caller never lists, so listeners re-read the threads they track instead.
+   */
+  onPersistentDataDeleted(listener: (hiddenThreadIds: readonly string[]) => void): () => void {
+    this.deletionListeners.add(listener);
+    return () => { this.deletionListeners.delete(listener); };
+  }
+
   /** Fence late admission while the exact in-flight save settles and persistent deletion runs. */
   async deletePersistentData<Result>(threadIds: readonly string[], remove: () => Promise<Result>): Promise<Result> {
     const progress = this.acceptedProgress;
     if (!progress) throw new Error("Conversation deletion requires its accepted progress boundary");
+    let deleted = false;
     try {
       await progress.discardThreads(threadIds);
-      return await remove();
+      const result = await remove();
+      deleted = true;
+      return result;
     } finally {
-      for (const id of threadIds) progress.finishThreadDeletion(id);
+      for (const id of threadIds) progress.finishThreadDeletion(id, deleted);
+      this.notifyDeletionListeners([]);
+    }
+  }
+
+  /** Report threads soft-deleted for later cleanup, which must stop counting as running before cleanup finishes. */
+  notifyThreadsHidden(threadIds: readonly string[]): void {
+    this.notifyDeletionListeners(threadIds);
+  }
+
+  private notifyDeletionListeners(hiddenThreadIds: readonly string[]): void {
+    for (const listener of this.deletionListeners) {
+      // The rows are already gone, so a listener failure must not turn a finished deletion into a failed one.
+      try {
+        listener(hiddenThreadIds);
+      } catch (error) {
+        logger.error("Thread deletion listener failed", { error: error instanceof Error ? error.message : String(error) });
+      }
     }
   }
 
   constructor(
-    @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
+    @inject(ThreadRepo) private readonly threadRepo: Pick<ThreadRepo, "findById">,
     @inject(WorkspaceEnvironmentService)
-    private readonly workspaceEnvironmentService: WorkspaceEnvironmentService,
-    @inject(ProjectActionService) private readonly projectActionService: ProjectActionService,
-    @inject(GithubService) private readonly githubService: GithubService,
-    @inject(CiWatcherService) private readonly ciWatcherService: CiWatcherService,
-    @inject(ThreadTeardownService) private readonly threadTeardownService: ThreadTeardownService,
-    @inject(GitWatcherService) private readonly gitWatcherService: GitWatcherService,
+    private readonly workspaceEnvironmentService: Pick<WorkspaceEnvironmentService, "beginThreadDeletion" | "cancelSetupForThread">,
+    @inject(ProjectActionService) private readonly projectActionService: Pick<ProjectActionService, "beginThreadTeardown" | "stopForThread">,
+    @inject(GithubService) private readonly githubService: Pick<GithubService, "cancelForRepoPath">,
+    @inject(CiWatcherService) private readonly ciWatcherService: Pick<CiWatcherService, "teardownThread">,
+    @inject(ThreadTeardownService) private readonly threadTeardownService: Pick<ThreadTeardownService, "teardownThread">,
+    @inject(GitWatcherService) private readonly gitWatcherService: Pick<GitWatcherService, "unwatchThreadWorktree">,
     @inject(TurnResumeScheduler, { isOptional: true }) private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
     @inject(ThreadStartupService, { isOptional: true }) private readonly startups?: Pick<ThreadStartupService, "findByThreadId" | "fail">,
   ) {}

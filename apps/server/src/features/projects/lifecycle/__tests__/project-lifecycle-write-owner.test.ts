@@ -35,6 +35,7 @@ async function harness() {
   const deletion = {
     teardownThread,
     deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>) => remove(),
+    notifyThreadsHidden: vi.fn(),
   };
   const killByThread = vi.fn(async (_scopeId: string) => undefined);
   const service = new WorkspaceService(workspaces, threads, owned.writer, { removeForThread }, deletion, new FakeGitExecutor(), { killByThread });

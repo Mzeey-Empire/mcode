@@ -1,9 +1,10 @@
 import type { Database } from "bun:sqlite";
-import { ThreadAttentionSchema, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import { isTurnSeen, ThreadAttentionSchema, threadHasRunningDescendants, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { threadWriteOperations } from "../persistence/thread-write-operations.js";
 import type { DelegatedTaskService } from "../delegation/delegated-task-service.js";
+import type { AgentWorkload } from "../../agents/workload/agent-workload.js";
 
 /** Supplies live waits on their owning threads, with the earliest request time. */
 export interface ThreadWaitingSource {
@@ -41,6 +42,7 @@ export class ThreadAttentionService {
     private readonly writer: ApplicationDatabaseWriter,
     sources: readonly ThreadWaitingSource[],
     private readonly delegations: ThreadDelegationSource,
+    private readonly subagents: Pick<AgentWorkload, "backgroundSubagentThreadIds">,
     private readonly publish: (attention: ThreadAttention) => void,
   ) {
     this.sources = waitingPrecedence.flatMap((kind) => sources.filter((source) => source.kind === kind));
@@ -55,17 +57,20 @@ export class ThreadAttentionService {
   /** Read attention for a live thread, including one whose outcome is already seen. */
   get(threadId: string): ThreadAttention | null {
     const row = this.db.query<AttentionRow, [string]>(`${attentionSelect} AND t.id = ?`).get(threadId);
-    return row ? this.fromRow(row, this.waiting(), this.delegations.coordinatorsWithUnfinishedTasks(threadId).has(threadId)) : null;
+    if (!row) return null;
+    return this.fromRow(row, this.waiting(), this.delegations.coordinatorsWithUnfinishedTasks(threadId).has(threadId),
+      this.subagents.backgroundSubagentThreadIds());
   }
 
-  /** Hydrate live threads with a wait, delegated work, or an unseen settled turn. */
+  /** Hydrate live threads with a wait, delegated work, a background subagent, or an unseen settled turn. */
   listInteresting(): ThreadAttention[] {
     const waiting = this.waiting();
     const coordinators = this.delegations.coordinatorsWithUnfinishedTasks();
+    const withSubagents = this.subagents.backgroundSubagentThreadIds();
     return this.db.query<AttentionRow, []>(attentionSelect).all()
-      .map((row) => this.fromRow(row, waiting, coordinators.has(row.threadId)))
-      .filter(({ waiting, lastTurn, seen, hasUnfinishedDelegatedTasks }) => waiting !== null || hasUnfinishedDelegatedTasks
-        || lastTurn !== null && (seen.sequence === null || seen.sequence < lastTurn.sequence));
+      .map((row) => this.fromRow(row, waiting, coordinators.has(row.threadId), withSubagents))
+      .filter((attention) => attention.waiting !== null || threadHasRunningDescendants(attention)
+        || attention.lastTurn !== null && !isTurnSeen(attention.lastTurn.sequence, attention.seen.sequence));
   }
 
   /** Broadcast a changed read model to every client, including background threads. */
@@ -96,10 +101,14 @@ export class ThreadAttentionService {
     return waiting;
   }
 
-  private fromRow(row: AttentionRow, waiting: ReturnType<ThreadAttentionService["waiting"]>, hasUnfinishedDelegatedTasks: boolean): ThreadAttention {
+  private fromRow(
+    row: AttentionRow, waiting: ReturnType<ThreadAttentionService["waiting"]>, hasUnfinishedDelegatedTasks: boolean,
+    withSubagents: ReadonlySet<string>,
+  ): ThreadAttention {
     return ThreadAttentionSchema().parse({
       threadId: row.threadId, waiting: waiting.get(row.threadId) ?? null,
       hasUnfinishedDelegatedTasks,
+      hasRunningBackgroundSubagents: withSubagents.has(row.threadId),
       lastTurn: row.outcome === null || row.sequence === null ? null : {
         outcome: row.outcome, endedAt: row.endedAt, sequence: row.sequence, changedFileCount: row.changedFileCount,
       },
@@ -135,4 +144,12 @@ export function invalidateAttentionOnSettledTurns(
     const settled = new Set(events.flatMap((event) => settledTurnEvents.has(event.payload.type) ? [event.routing.threadId] : []));
     for (const threadId of settled) attention.invalidate(threadId);
   });
+}
+
+/** Background subagents start and finish outside their parent's turn, so no settled turn event refreshes the parent's attention. */
+export function invalidateAttentionOnSubagentChange(
+  attention: Pick<ThreadAttentionService, "invalidate">,
+  workload: Pick<AgentWorkload, "onSubagentChange">,
+): () => void {
+  return workload.onSubagentChange((threadId) => attention.invalidate(threadId));
 }

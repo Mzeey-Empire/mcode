@@ -1,4 +1,4 @@
-import { createMockApproval } from "@mcode/contracts/testing";
+import { createMockApproval, createMockThreadAttention } from "@mcode/contracts/testing";
 import "reflect-metadata";
 import * as NodeFS from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -16,12 +16,24 @@ import { CanonicalExecutionSemanticWriter } from "../../../agents/canonical/cano
 import { ExecutionWorkerHandler } from "../../../agents/execution/execution-worker-handler.js";
 import { deriveTurnAssistantMessageId } from "../../../agents/turns/turn-assistant-message-id.js";
 import { MessageStore } from "../../../agents/conversation/persistence/message-store.js";
-import { invalidateAttentionOnSettledTurns, ThreadAttentionService } from "../thread-attention-service.js";
+import { invalidateAttentionOnSettledTurns, invalidateAttentionOnSubagentChange, ThreadAttentionService } from "../thread-attention-service.js";
 import { notifyCommittedCanonicalEvents, subscribeCommittedCanonicalEvents } from "../../../agents/canonical/committed-canonical-events.js";
 import { approvalWaitingSource } from "../approval-waiting-source.js";
 
 const BEFORE = "2026-10-10T10:00:00.000Z";
 const ENDED = "2026-10-10T10:01:00.000Z";
+
+function backgroundSubagents() {
+  const running = new Set<string>();
+  const listeners = new Set<(threadId: string) => void>();
+  const announce = (threadId: string) => { for (const listener of listeners) listener(threadId); };
+  return {
+    backgroundSubagentThreadIds: () => running,
+    onSubagentChange: (listener: (threadId: string) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    launch: (threadId: string) => { running.add(threadId); announce(threadId); },
+    settle: (threadId: string) => { running.delete(threadId); announce(threadId); },
+  };
+}
 
 async function fixture() {
   const runtime = createThreadPersistenceTestRuntime();
@@ -34,7 +46,8 @@ async function fixture() {
   const pushes: ThreadAttention[] = [];
   const coordinators = new Set<string>();
   const delegations = { coordinatorsWithUnfinishedTasks: () => coordinators };
-  const service = new ThreadAttentionService(runtime.reader, runtime.writer, [approvalWaitingSource(approvals)], delegations, (attention) => pushes.push(attention));
+  const subagents = backgroundSubagents();
+  const service = new ThreadAttentionService(runtime.reader, runtime.writer, [approvalWaitingSource(approvals)], delegations, subagents, (attention) => pushes.push(attention));
   approvals.start({
     publishApprovalRequest: (request) => service.invalidate(request.threadId),
     publishApprovalResolved: (resolved) => service.invalidate(resolved.threadId),
@@ -48,7 +61,7 @@ async function fixture() {
       .run(`message-${sequence}`, a.id, sequence, outcome);
   };
   const markBefore = () => runtime.database.query("UPDATE threads SET seen_through_sequence = 2, seen_at = ? WHERE id = ?").run(BEFORE, a.id);
-  return { ...runtime, a, b, workspace, threads, service, approvals, snapshots, requests, pushes, settle, markBefore, coordinators, delegations };
+  return { ...runtime, a, b, workspace, threads, service, approvals, snapshots, requests, pushes, settle, markBefore, coordinators, delegations, subagents };
 }
 
 describe("thread attention through real SQLite and the serialized writer", () => {
@@ -62,6 +75,37 @@ describe("thread attention through real SQLite and the serialized writer", () =>
       .toEqual([{ threadId: t.a.id, waiting: null, hasUnfinishedDelegatedTasks: true }]);
     t.coordinators.clear();
     expect(t.service.listInteresting()).toEqual([]);
+  });
+
+  it("hydrates a seen thread only while a background subagent runs", async () => {
+    const t = await fixture();
+    t.settle(2);
+    t.markBefore();
+    await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
+    t.subagents.launch(t.a.id);
+    expect(t.service.listInteresting().map(({ threadId, hasRunningBackgroundSubagents }) => ({ threadId, hasRunningBackgroundSubagents })))
+      .toEqual([{ threadId: t.a.id, hasRunningBackgroundSubagents: true }]);
+    t.subagents.settle(t.a.id);
+    expect(t.service.listInteresting()).toEqual([]);
+  });
+
+  it("republishes attention when a background subagent launches and when it settles", async () => {
+    const t = await fixture();
+    t.settle(2);
+    t.markBefore();
+    await t.threads.recordTurnOutcome(t.a.id, "completed", ENDED);
+    t.pushes.length = 0;
+    const unsubscribe = invalidateAttentionOnSubagentChange(t.service, t.subagents);
+    try {
+      t.subagents.launch(t.a.id);
+      t.subagents.settle(t.a.id);
+      expect(t.pushes.map(({ threadId, hasRunningBackgroundSubagents }) => ({ threadId, hasRunningBackgroundSubagents })))
+        .toEqual([{ threadId: t.a.id, hasRunningBackgroundSubagents: true }, { threadId: t.a.id, hasRunningBackgroundSubagents: false }]);
+    } finally {
+      unsubscribe();
+    }
+    t.subagents.launch(t.a.id);
+    expect(t.pushes).toHaveLength(2);
   });
 
   it("publishes delegation changes once and emits one clearing frame", async () => {
@@ -188,8 +232,8 @@ describe("thread attention through real SQLite and the serialized writer", () =>
       expect(t.pushes).toEqual([]);
       notifyCommittedCanonicalEvents([event("message.recorded"), event("turn.completed")]);
       notifyCommittedCanonicalEvents([event("turn.completed")]);
-      expect(t.pushes).toEqual([{ threadId: t.a.id, waiting: null, hasUnfinishedDelegatedTasks: false,
-        lastTurn: { outcome: "completed", endedAt: ENDED, sequence: 3, changedFileCount: null }, seen: { sequence: null, at: null } }]);
+      expect(t.pushes).toEqual([createMockThreadAttention({ threadId: t.a.id,
+        lastTurn: { outcome: "completed", endedAt: ENDED, sequence: 3, changedFileCount: null }, seen: { sequence: null, at: null } })]);
     } finally {
       unsubscribe();
     }
@@ -206,8 +250,8 @@ describe("thread attention through real SQLite and the serialized writer", () =>
     expect(result.current.at).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     expect(t.service.get(t.a.id)?.seen).toEqual(result.current);
     expect(t.threads.findById(t.a.id)?.status).toBe("paused");
-    expect(t.pushes).toEqual([{ threadId: t.a.id, waiting: null, hasUnfinishedDelegatedTasks: false,
-      lastTurn: { outcome: "completed", endedAt: ENDED, sequence: 4, changedFileCount: null }, seen: result.current }]);
+    expect(t.pushes).toEqual([createMockThreadAttention({ threadId: t.a.id,
+      lastTurn: { outcome: "completed", endedAt: ENDED, sequence: 4, changedFileCount: null }, seen: result.current })]);
     expect(t.service.listInteresting()).toEqual([]);
   });
 
@@ -266,7 +310,7 @@ describe("thread attention through real SQLite and the serialized writer", () =>
     t.approvals.publish({ requestId: request.requestId, threadId: request.threadId, body: {
       requestedAt: request.requestedAt, subject: request.subject, choices: request.choices, origin: request.origin,
     } }, { id: "codex" });
-    const reloaded = new ThreadAttentionService(t.reader, t.writer, [approvalWaitingSource(t.approvals)], t.delegations, () => {});
+    const reloaded = new ThreadAttentionService(t.reader, t.writer, [approvalWaitingSource(t.approvals)], t.delegations, t.subagents, () => {});
     expect(reloaded.listInteresting().map(({ threadId, waiting }) => ({ threadId, waiting }))).toEqual([
       { threadId: t.a.id, waiting: { kind: "approval", since: BEFORE } },
     ]);
