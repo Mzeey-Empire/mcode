@@ -398,6 +398,19 @@ describe("html visual placement", () => {
     expect(after).toBe(before);
   });
 
+  it("keeps a just-settled turn's work inside its fold when the turn has a visual", () => {
+    const turn = { threadId: "thread", executionId: "execution", messageId: "answer" };
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "Done", 3)],
+      currentTurn: turn, agentDisplayState: { phase: "completed" }, agentStartTime: 1000, streamingText: undefined,
+      toolCalls: [liveTool], committedAssistantBody: "Done", persistedNarrativeByMessage: records,
+    });
+    const closed = expandTranscriptNarrative(projected, records, new Set(), turn);
+    expect(closed.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+    const open = expandTranscriptNarrative(projected, records, new Set(["work-fold:answer"]), turn);
+    expect(open.map((item) => item.type)).toEqual(["message", "work-fold", "narrative-row", "message", "message", "turn-meta-line"]);
+  });
+
   it("keeps a visual published after the last answer on its own row when no turn runs", () => {
     const projected = createTranscriptItemProjector()({
       messages: [turnMessage("prompt", "user", "Draw it", 1), turnMessage("answer", "assistant", "Done", 2), visual(3)],
