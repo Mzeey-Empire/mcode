@@ -56,6 +56,7 @@ vi.mock("./CreatePrDialog", async () =>
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useDiffStore } from "@/stores/diffStore";
+import { threadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import type { Thread } from "@/transport";
 import { mockWorkspaceState } from "./__tests__/thread-overview-mocks";
 import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-overview-harness";
@@ -64,6 +65,7 @@ import { ThreadOverview } from "./ThreadOverview";
 function reviewUncommitted(count: number) {
   vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({
     branch: "feat/x",
+    upstream: { ahead: 0 },
     uncommitted: { staged: 0, unstaged: count, untracked: 0 },
   }));
 }
@@ -195,6 +197,30 @@ describe("ThreadOverview git row", () => {
       reviewBranch({ commitsAhead: { count: 1, base: "main" } });
       renderOverview(namedThread());
       expect(await screen.findByRole("button", { name: "Push" })).toBeInTheDocument();
+    });
+
+    it("treats an uncountable base as unknown and hides the row on a never-pushed branch", async () => {
+      reviewBranch({ upstream: null, commitsAhead: null });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+      await settleReview();
+      expect(screen.queryByTestId("thread-overview-git")).not.toBeInTheDocument();
+    });
+
+    it("re-reads a push made outside the row when the card reopens", async () => {
+      reviewBranch({ upstream: { ahead: 1 } });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+      expect(await screen.findByTestId("workspace-menu-push")).toBeInTheDocument();
+
+      const key = threadOverviewKey("thread-1");
+      act(() => useOverviewStore.getState().toggle(key, true));
+      expect(screen.queryByTestId("thread-overview-git")).not.toBeInTheDocument();
+      reviewBranch({ upstream: { ahead: 0 } });
+      act(() => useOverviewStore.getState().toggle(key, true));
+
+      expect(await screen.findByRole("button", { name: "Create PR…" })).toBeInTheDocument();
+      expect(screen.queryByTestId("workspace-menu-push")).not.toBeInTheDocument();
     });
 
     it("lists Push after Commit and push… on a dirty branch with unpushed commits", async () => {

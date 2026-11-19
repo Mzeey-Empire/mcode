@@ -252,6 +252,7 @@ function mockReviewUncommitted(count: number) {
   vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({
     branch: "feat/my-feature",
     uncommitted: { staged: 0, unstaged: count, untracked: 0 },
+    upstream: { ahead: 0 },
   }));
 }
 

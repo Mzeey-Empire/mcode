@@ -55,7 +55,9 @@ function hasUncommittedChanges(state: ReviewState | null): boolean | null {
 function hasUnpushedCommits(state: ReviewState | null): boolean | null {
   if (!state?.isGitRepo) return null;
   if (state.upstream) return state.upstream.ahead > 0;
-  return (state.commitsAhead?.count ?? 0) > 0;
+  // The server sends null when it cannot count against base; that is unknown, not zero.
+  if (state.commitsAhead === null) return null;
+  return state.commitsAhead.count > 0;
 }
 
 /**
@@ -98,6 +100,17 @@ function useGitPush(thread: Thread) {
   return { gitPush, pushBranch, clearFinishedPush, refresh };
 }
 
+/** Counts the card's openings, derived during render so a reopen re-probes without an extra pass. */
+function useOpenings(open: boolean): number {
+  const [seen, setSeen] = useState({ open, openings: 0 });
+  if (seen.open !== open) {
+    const next = { open, openings: open ? seen.openings + 1 : seen.openings };
+    setSeen(next);
+    return next.openings;
+  }
+  return seen.openings;
+}
+
 /** Keeps shared Git and dialog state alive while the card is hidden. */
 export function useOverviewState(
   thread: Thread,
@@ -120,9 +133,10 @@ export function useOverviewState(
   const reviewLink = usePullRequestReviewLink(thread.id, open);
   const effectivePr = useMemo(() => getEffectiveThreadOverviewPr(pr, reviewLink), [pr, reviewLink]);
   const { gitPush, pushBranch, clearFinishedPush, refresh } = useGitPush(thread);
+  const openings = useOpenings(open);
   // Only a named-branch worktree's git row reads uncommitted changes, and each probe spawns several
-  // git processes. A landed push bumps refresh so Review re-probes and the row moves to the next step.
-  const { state: reviewState } = useReviewState(prable ? thread.workspace_id : null, thread.id, refresh);
+  // git processes. A landed push or a reopened card re-probes, since a push from elsewhere moves only the upstream ref.
+  const { state: reviewState } = useReviewState(prable ? thread.workspace_id : null, thread.id, refresh + openings);
   const gitRow = useMemo(() => planGitRow({
     mode: thread.mode,
     checkoutState: thread.checkout_state,
