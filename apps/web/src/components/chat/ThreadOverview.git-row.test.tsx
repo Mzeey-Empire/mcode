@@ -175,4 +175,87 @@ describe("ThreadOverview git row", () => {
     await user.unhover(screen.getByTestId("thread-overview-git"));
     expect(await screen.findByRole("button", { name: "Create PR…" })).toBeInTheDocument();
   });
+  describe("Push", () => {
+    function reviewBranch(overrides: Parameters<typeof createMockGitReviewState>[0]) {
+      vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({ branch: "feat/x", ...overrides }));
+    }
+
+    it("leads a clean branch with unpushed commits with Push and offers Create PR…", async () => {
+      const user = userEvent.setup();
+      reviewBranch({ upstream: { ahead: 2 } });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+
+      expect(await screen.findByTestId("workspace-menu-push")).toHaveTextContent("Push");
+      await user.click(screen.getByRole("button", { name: "More git actions" }));
+      expect(await screen.findByRole("menuitem", { name: "Create PR…" })).toBeInTheDocument();
+    });
+
+    it("counts commits ahead of base as unpushed on a branch with no upstream", async () => {
+      reviewBranch({ commitsAhead: { count: 1, base: "main" } });
+      renderOverview(namedThread());
+      expect(await screen.findByRole("button", { name: "Push" })).toBeInTheDocument();
+    });
+
+    it("lists Push after Commit and push… on a dirty branch with unpushed commits", async () => {
+      const user = userEvent.setup();
+      reviewBranch({ upstream: { ahead: 1 }, uncommitted: { staged: 0, unstaged: 2, untracked: 0 } });
+      renderOverview(namedThread());
+
+      expect(await screen.findByTestId("workspace-menu-commit")).toHaveTextContent("Commit…");
+      await user.click(screen.getByRole("button", { name: "More git actions" }));
+      const menu = await screen.findByRole("menu");
+      expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Commit and push…", "Push"]);
+    });
+
+    it.each([
+      ["dirty", 2],
+      ["clean", 0],
+    ])("offers no Push on a %s branch its upstream already has", async (_state, unstaged) => {
+      const user = userEvent.setup();
+      reviewBranch({ upstream: { ahead: 0 }, uncommitted: { staged: 0, unstaged, untracked: 0 } });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+      await settleReview();
+
+      expect(screen.queryByTestId("workspace-menu-push")).not.toBeInTheDocument();
+      const menuButton = screen.queryByRole("button", { name: "More git actions" });
+      if (menuButton) {
+        await user.click(menuButton);
+        await screen.findByRole("menu");
+        expect(screen.queryByRole("menuitem", { name: "Push" })).not.toBeInTheDocument();
+      }
+    });
+
+    it("pushes, shows progress, then moves to Create PR… once the push lands", async () => {
+      const user = userEvent.setup();
+      let land!: (value: { success: boolean }) => void;
+      vi.mocked(mockTransport.push).mockReturnValueOnce(new Promise((resolve) => { land = resolve; }));
+      reviewBranch({ upstream: { ahead: 1 } });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+
+      await user.click(await screen.findByTestId("workspace-menu-push"));
+      expect(mockTransport.push).toHaveBeenCalledWith("ws-1", "feat/x", "thread-1");
+      expect(screen.getByTestId("workspace-menu-push")).toHaveAttribute("aria-busy", "true");
+
+      reviewBranch({ upstream: { ahead: 0 } });
+      await act(async () => land({ success: true }));
+      // The row keeps its step while pointer or focus is on it, so leave it as the user would.
+      await user.unhover(screen.getByTestId("thread-overview-git"));
+      act(() => screen.getByTestId("workspace-menu-push").blur());
+      expect(await screen.findByRole("button", { name: "Create PR…" })).toBeInTheDocument();
+    });
+
+    it("shows a failed push's reason in place and keeps Push", async () => {
+      const user = userEvent.setup();
+      vi.mocked(mockTransport.push).mockRejectedValueOnce(new Error("rejected: non-fast-forward"));
+      reviewBranch({ upstream: { ahead: 1 } });
+      renderOverview(namedThread());
+
+      await user.click(await screen.findByRole("button", { name: "Push" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("rejected: non-fast-forward");
+      expect(screen.getByTestId("workspace-menu-push")).toHaveTextContent("Push");
+    });
+  });
 });
