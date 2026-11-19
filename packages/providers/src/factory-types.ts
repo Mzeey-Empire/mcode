@@ -17,10 +17,18 @@ export interface ProviderFactoryConfiguration {
 export interface ProviderFactoryInput {
   configuration: ProviderFactoryConfiguration;
   host: ProviderHostPorts;
+  claude?: ClaudeProviderPorts;
   codex?: CodexProviderPorts;
   cursor?: CursorProviderPorts;
   devin?: DevinProviderPorts;
   copilot?: CopilotProviderPorts;
+}
+
+/** Server-owned authorities required by the Claude Provider. */
+export interface ClaudeProviderPorts {
+  skills: {
+    list(cwd: string, provider: "claude"): Promise<SkillInfo[]>;
+  };
 }
 
 /** Exact canonical turn and delivery attempt that produced Claude events. */

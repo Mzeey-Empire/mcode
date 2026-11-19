@@ -73,7 +73,11 @@ function fixture() {
   const sink = new DeterministicCanonicalSink();
   const drafts: ProviderEventDraft[] = [];
   const host = fixtureHost({ events: { submit: async (batch) => { drafts.push(...batch.events); return sink.submit(batch); } } });
-  const input: ProviderFactoryInput = { configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 }, host };
+  const input: ProviderFactoryInput = {
+    configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 },
+    host,
+    claude: { skills: { list: async () => [] } },
+  };
   const provider = createClaudeProvider(input);
   providers.push(provider);
   const events = (): ProviderRuntimeEvent[] => drafts.flatMap((draft) => draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent" ? [ProviderRuntimeEventSchema().parse(JSON.parse(JSON.stringify(draft.payload.item.payload.runtimeEvent)))] : []);
@@ -90,14 +94,14 @@ async function completed(events: () => ProviderRuntimeEvent[], count: number) { 
 
 it("sends earlier user-only skill instructions before the native Claude command block", async () => {
   const { inputs } = installTransport();
-  const input = {
+  const input: ProviderFactoryInput = {
     configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 },
     host: fixtureHost(),
     claude: {
       skills: {
         list: async () => [
-          { name: "to-spec", description: "Write a spec", kind: "skill" as const, source: "user" as const, providers: ["claude"], path: "/skills/to-spec/SKILL.md", userInvocationOnly: true },
-          { name: "to-tickets", description: "Write tickets", kind: "skill" as const, source: "user" as const, providers: ["claude"], path: "/skills/to-tickets/SKILL.md", userInvocationOnly: true },
+          { name: "to-spec", description: "Write a spec", kind: "skill", source: "user", providers: ["claude"], path: "/skills/to-spec/SKILL.md", userInvocationOnly: true },
+          { name: "to-tickets", description: "Write tickets", kind: "skill", source: "user", providers: ["claude"], path: "/skills/to-tickets/SKILL.md", userInvocationOnly: true },
         ],
       },
     },

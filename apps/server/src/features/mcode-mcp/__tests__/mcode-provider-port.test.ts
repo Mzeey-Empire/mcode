@@ -36,6 +36,7 @@ function createPort(options: { endpoint?: string | null; browser?: boolean } = {
 function createClaudeFixture(port: McodeProviderPort) {
   const provider = createClaudeProvider({
     configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 },
+    claude: { skills: { list: async () => [] } },
     host: {
       occupancy: new SessionOccupancyRegistry({ now: Date.now }),
       runtime: hostRuntime,

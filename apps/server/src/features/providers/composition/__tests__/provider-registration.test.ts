@@ -41,7 +41,7 @@ const cases: ReadonlyArray<{
     input: (host) => ({
       configuration: { cliPath: "claude", idleSessionTtlMs: 600_000 },
       host,
-
+      claude: { skills: { list: async () => [] } },
     }),
     tokens: ["IAgentProvider", "ClaudeProvider"],
   },

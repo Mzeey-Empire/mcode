@@ -96,7 +96,8 @@ async function replayClaudePlan(trace: Extract<SyntheticPlanTrace, { providerId:
   planReplay.requests.push(...trace.requests);
   const sink = new DeterministicCanonicalSink();
   const provider = createClaudeProvider({ configuration: { cliPath: process.execPath, idleSessionTtlMs: 60_000 },
-    host: fixtureHost({ events: sink }) });
+    host: fixtureHost({ events: sink }),
+    claude: { skills: { list: async () => [] } } });
   const captures: PlanCapture[] = [];
   provider.on("plan_captured", (capture) => captures.push(capture));
   try {

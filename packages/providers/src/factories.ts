@@ -19,7 +19,10 @@ export function createClaudeProvider(input: ProviderFactoryInput): ClaudeProvide
   for (const method of ["isConfigured", "issue", "refresh", "release", "revokeCredential"] as const) {
     if (typeof input.host.browser[method] !== "function") throw new TypeError(`Claude browser ${method} port is required`);
   }
-  return new ClaudeProvider(input.host, input.configuration);
+  if (typeof input.claude?.skills?.list !== "function") {
+    throw new TypeError("Claude Provider port skills.list is required");
+  }
+  return new ClaudeProvider(input.host, input.configuration, input.claude);
 }
 
 /** Prepares the Codex Provider boundary without inspecting or spawning its CLI. */

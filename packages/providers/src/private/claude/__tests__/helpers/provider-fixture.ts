@@ -49,7 +49,7 @@ export class ClaudeProvider extends RuntimeClaudeProvider {
       }
       return receipt;
     } };
-    super(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 });
+    super(host, { cliPath: process.execPath, idleSessionTtlMs: 600_000 }, { skills: { list: async () => [] } });
     emit = (event) => { this.emit("event", event); };
   }
 }

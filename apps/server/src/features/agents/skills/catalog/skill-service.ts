@@ -16,6 +16,7 @@ import type { SkillInfo, SkillSource, SkillDiagnostics } from "@mcode/contracts/
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const DESC_RE = /^description:\s*(?:"([^"]*)"|'([^']*)'|(.*))$/m;
 const NAME_RE = /^name:\s*(?:"([^"]*)"|'([^']*)'|(.*))$/m;
+const USER_INVOCATION_ONLY_RE = /^disable-model-invocation:[ \t]*(?:true|"true"|'true')[ \t]*\r?$/m;
 
 interface ScanContext {
   out: SkillInfo[];
@@ -25,6 +26,7 @@ interface ScanContext {
 interface SkillFileMetadata {
   name: string | undefined;
   description: string;
+  userInvocationOnly?: true;
 }
 
 /** Source priority: lower number = higher priority (overrides on duplicate name). */
@@ -35,7 +37,7 @@ const SOURCE_PRIORITY: Record<SkillSource, number> = {
   plugin: 3,
 };
 
-/** Extract `description:` from the leading YAML frontmatter of a markdown file. */
+/** Read skill metadata from the leading YAML frontmatter of a markdown file. */
 async function readSkillFileMetadata(filePath: string): Promise<SkillFileMetadata> {
   try {
     return skillFileMetadata(await NodeFSPromises.readFile(filePath, "utf-8"));
@@ -52,16 +54,12 @@ function skillFileMetadata(content: string): SkillFileMetadata {
   return {
     name: name ? frontmatterValue(name) : undefined,
     description: description ? frontmatterValue(description) : "",
+    ...(USER_INVOCATION_ONLY_RE.test(frontmatter[1]) ? { userInvocationOnly: true } : {}),
   };
 }
 
 function frontmatterValue(match: RegExpExecArray): string {
   return (match[1] ?? match[2] ?? match[3] ?? "").trim();
-}
-
-/** Extract `description:` from the leading YAML frontmatter of a markdown file. */
-async function readDescription(filePath: string): Promise<string> {
-  return (await readSkillFileMetadata(filePath)).description;
 }
 
 /** Read a directory, recording each scan attempt in diagnostics. Never throws. */
@@ -117,6 +115,7 @@ async function scanSkillsDir(
       providers,
       nativeName: metadata.name || entry.name,
       path: skillFile,
+      ...(metadata.userInvocationOnly ? { userInvocationOnly: true } : {}),
     });
     ctx.diag.totalSkills++;
   }
@@ -134,14 +133,17 @@ async function scanCommandsDir(
     if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
     const baseName = entry.name.slice(0, -3);
     const name = prefix ? `${prefix}:${baseName}` : baseName;
+    const path = NodePath.join(dir, entry.name);
+    const metadata = await readSkillFileMetadata(path);
     ctx.out.push({
       name,
-      description: await readDescription(NodePath.join(dir, entry.name)),
+      description: metadata.description,
       kind: "command",
       source,
       providers,
       nativeName: baseName,
-      path: NodePath.join(dir, entry.name),
+      path,
+      ...(metadata.userInvocationOnly ? { userInvocationOnly: true } : {}),
     });
     ctx.diag.totalCommands++;
   }
