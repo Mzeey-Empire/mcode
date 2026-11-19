@@ -131,6 +131,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   private initialized = false;
   /** Set once graceful shutdown begins; the process exits afterward, so it never resets. */
   private shuttingDown = false;
+  /** Set by `beginShutdown` only: `stopAll` alone stops running turns without closing admission. */
+  private admissionClosed = false;
   /** Callbacks keyed by turn execution that run once that runtime releases its active slot, so follow-up turns can admit. */
   private readonly runtimeReleaseCallbacks = new Map<string, (cause?: RuntimeReleaseCause) => void>();
   private readonly runtimeReleaseListeners = new Set<(threadId: string) => void>();
@@ -387,6 +389,8 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Reserve one runtime generation and its mutation lease for a new admitted turn. */
   private reserveTurnAdmission(command: SendMessageCommand): TurnRuntimeLease {
+    // Shutdown's last capture of running turns may already be taken, and a turn admitted after it would be lost.
+    if (this.admissionClosed) throw new TurnAdmissionError("unavailable", "Mcode is shutting down");
     if (!this.reserveTurn(command.threadId)) {
       throw new TurnAdmissionError("busy", `Thread ${command.threadId} already has an active agent session`);
     }
@@ -2043,6 +2047,15 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Classify provider exits from now on as caused by Mcode closing, and admit no further turn. Shutdown calls this
+   * when it begins, because providers can exit while transport drains and servers close, well before `stopAll`.
+   */
+  beginShutdown(): void {
+    this.shuttingDown = true;
+    this.admissionClosed = true;
   }
 
   /** Stop all active agent sessions (for graceful shutdown). */

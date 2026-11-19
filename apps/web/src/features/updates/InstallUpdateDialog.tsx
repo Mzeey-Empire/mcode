@@ -19,7 +19,7 @@ interface InstallUpdateDialogProps {
 
 /** Asks whether to restart now or wait, when Install is clicked with agents running (state 7). */
 export function InstallUpdateDialog({ version, runningAgents, onRestartNow, onInstallWhenIdle, onCancel }: InstallUpdateDialogProps) {
-  // Enter must not stop running agents, so focus starts on the button that waits for them.
+  // Enter must not restart Mcode under running agents, so focus starts on the button that waits for them.
   const waitButton = useRef<HTMLButtonElement>(null);
   return (
     <Dialog open onOpenChange={(open) => !open && onCancel()}>
@@ -29,7 +29,7 @@ export function InstallUpdateDialog({ version, runningAgents, onRestartNow, onIn
           <p className="font-mono text-body-small text-ink">{version}</p>
           <DialogDescription className="text-body-small text-muted">
             {runningAgents === null
-              ? "Agents may be running. Installing restarts Mcode and stops them."
+              ? "Agents may be running. Installing restarts Mcode. Running work continues after it restarts."
               : runningAgentsSentence(runningAgents)}
           </DialogDescription>
         </div>

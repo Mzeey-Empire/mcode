@@ -26,6 +26,7 @@ import { AgentService } from "../../agents/orchestration/agent-service.js";
 import { AgentTurnCommandPort } from "../../agents/orchestration/agent-turn-command-port.js";
 import { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
 import { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
+import { PlannedRestart } from "../../agents/recovery/planned-restart/index.js";
 import { DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
 import { ApprovalService } from "../../agents/approvals/approval-service.js";
 import { CompletionHolds } from "../lifecycle/completion-holds.js";
@@ -50,6 +51,7 @@ export function registerThreadControlServices(container: DependencyContainer): v
     tasks: c.resolve(DelegatedTaskRepo), threads: c.resolve(ThreadRepo), startups: c.resolve(ThreadStartupService),
     approvals: c.resolve(ThreadControlApprovalRepo), canonical: c.resolve(CanonicalAgentBoundary),
     resumes: c.resolve(TurnResumeScheduleStore),
+    plannedRestart: c.resolve(PlannedRestart),
     targets: c.resolve(delay(() => DelegationTargetResolver)), git: c.resolve(delay(() => GitWorktreeService)),
     control: c.resolve(delay(() => ThreadControlService)), approvalService: c.resolve(delay(() => ApprovalService)),
     cancellation: c.resolve<CancelThreadStartupDeps>("CancelThreadStartupDeps"),

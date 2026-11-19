@@ -3,10 +3,16 @@ import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import type { TurnResumeMode } from "@mcode/contracts/models/turn-recovery";
 import { SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
+/** Hidden prompt shared by planned resumes and background wakes. */
+export function continuationPrompt(context: RestartContext | null): string {
+  if (!context) return "The previous turn was interrupted before it finished. Continue the task. Check the working tree before repeating a step.";
+  return "Mcode restarted while you were working. Check where you left off, then continue. Anything you had running was stopped, including background subagents, background commands and dev servers, so start again whatever the task still needs.";
+}
 
-/** Hidden user turn that asks the agent to pick up where the interrupted turn stopped. */
-export const RESUME_CONTINUATION_PROMPT =
-  "The previous turn was interrupted before it finished. Continue the task. Check the working tree before repeating a step.";
+/** Reports seeded fallback failures after a native resume already returned. */
+export interface RestartContext {
+  readonly onLateFailure?: (error: unknown) => void;
+}
 
 /** Facts that decide whether the provider can continue its own session or needs a seeded fresh one. */
 export interface ResumePathInput {

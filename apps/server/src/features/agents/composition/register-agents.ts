@@ -5,6 +5,7 @@ import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/a
 import { TurnResumeScheduleStore } from "../recovery/turn-resume-schedule-store.js";
 import { TurnRevertStore } from "../turns/persistence/turn-revert-store.js";
 import { TurnResumeScheduler } from "../recovery/turn-resume-scheduler.js";
+import { PlannedRestart } from "../recovery/planned-restart/index.js";
 import { sendRecoveryAttempt } from "../transport/turn-message-dispatch.js";
 
 import {
@@ -170,6 +171,7 @@ export function registerAgentServices(container: DependencyContainer): void {
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(ProviderSwitchService, { useClass: ProviderSwitchService }, { lifecycle: Lifecycle.Singleton });
+  container.register(PlannedRestart, { useClass: PlannedRestart }, { lifecycle: Lifecycle.Singleton });
   container.register(TurnResumeScheduleStore, { useClass: TurnResumeScheduleStore }, { lifecycle: Lifecycle.Singleton });
   container.register(TurnResumeScheduler, {
     useFactory: instanceCachingFactory((c) => new TurnResumeScheduler(

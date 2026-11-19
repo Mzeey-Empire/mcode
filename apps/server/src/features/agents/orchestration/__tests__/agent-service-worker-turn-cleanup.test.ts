@@ -486,6 +486,14 @@ describe("AgentService cleanup through production worker composition", { timeout
     expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
   });
 
+  it("records a provider that exits after shutdown begins, but before stopAll, as app_closed", async () => {
+    const fixture = await openFixture();
+    const turn = await sendTurn(fixture);
+    fixture.service.beginShutdown();
+    await endTurn(fixture, { type: "ended", threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId, reason: "provider_lost" });
+    expect(fixture.canonical.loadTurnByExecution(turn.turnExecutionId)?.ending).toEqual({ outcome: "interrupted", cause: "app_closed" });
+  });
+
   it("writes every accepted save queued behind a busy database when shutdown closes persistence", async () => {
     const fixture = await openFixture();
     const turn = await sendTurn(fixture);

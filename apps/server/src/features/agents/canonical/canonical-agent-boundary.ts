@@ -145,6 +145,11 @@ export class CanonicalAgentBoundary {
     return this.reader.loadParentNarrativeForBinding(...args);
   }
 
+  /** Read saved interruptions belonging to an intentional application stop. */
+  listTurnsInterruptedByStop(stoppedAt: string): ReturnType<CanonicalAgentStore["listTurnsInterruptedByStop"]> {
+    return this.reader.listTurnsInterruptedByStop(stoppedAt);
+  }
+
   /** Load one canonical turn record. */
   loadTurn(...args: Parameters<CanonicalAgentStore["loadTurn"]>): ReturnType<CanonicalAgentStore["loadTurn"]> {
     return this.reader.loadTurn(...args);

@@ -23,6 +23,7 @@ import {
   taskNoticeKey, taskNoticeStatus, noticeCovered, renderTaskNotices, selectEntriesWithinBudget, type TaskNoticeEntry,
 } from "./task-notice.js";
 import type { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
+import type { PlannedRestart } from "../../agents/recovery/planned-restart/index.js";
 
 /** Existing owners used by delegation; the control reference is delayed at composition. */
 export interface DelegatedTaskDeps {
@@ -32,6 +33,7 @@ export interface DelegatedTaskDeps {
   approvals: ThreadControlApprovalRepo;
   canonical: Pick<CanonicalAgentBoundary, "loadLatestAttempt" | "loadTerminalProjection">;
   resumes: Pick<TurnResumeScheduleStore, "get">;
+  plannedRestart: Pick<PlannedRestart, "hasPendingResume" | "cancel" | "onReleased">;
   targets: Pick<DelegationTargetResolver, "resolve">;
   git: Pick<GitWorktreeService, "resolveHeadCommit">;
   control: Pick<ThreadControlService, "threadStop" | "publishThreadApproval" | "cancelDelegationApproval">;
@@ -56,7 +58,10 @@ export class DelegatedTaskService {
   private readonly launching = new Map<string, Promise<void>>();
   private readonly rosterListeners = new Set<(coordinatorThreadId: string) => void>();
 
-  constructor(private readonly deps: DelegatedTaskDeps) {}
+  constructor(private readonly deps: DelegatedTaskDeps) {
+    // A dropped or failed restart resume writes no turn event, so the Coordinator would otherwise never hear of it.
+    deps.plannedRestart.onReleased((threadId) => this.childChanged(threadId));
+  }
 
   /** Observe task changes for one Coordinator's roster. */
   onRosterChanged(listener: (coordinatorThreadId: string) => void): () => void {
@@ -259,6 +264,7 @@ export class DelegatedTaskService {
         if (startup) await cancelThreadStartup(this.deps.cancellation, taskId);
         return this.cancelReport(task, origin);
       }
+      await this.deps.plannedRestart.cancel(startup.threadId);
       const stopped = await stop(startup.threadId);
       if (stopped.status === "rejected") return { status: "rejected", error: stopped.error };
       return { ...await this.cancelReport(task, origin),
@@ -473,6 +479,7 @@ export class DelegatedTaskService {
       summary: turn?.status === "Completed" ? this.deps.canonical.loadTerminalProjection(turn.id).message?.content : undefined,
       error: ending?.outcome === "errored" ? ending.failure.message : undefined,
       needsInput: this.needsInput(threadId),
+      resumePending: Boolean(turn && this.deps.plannedRestart.hasPendingResume(turn.threadId, turn.id)),
     });
     return { taskId: task.taskId, ...(threadId ? { threadId } : {}), state };
   }

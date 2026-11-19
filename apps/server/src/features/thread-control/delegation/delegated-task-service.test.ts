@@ -6,6 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { container } from "tsyringe";
+import { SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 import { diag, parseDiagLine, threadRecordingFileId, type DiagRecord } from "@mcode/shared/diagnostics";
 import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
 import { SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
@@ -69,6 +70,9 @@ import { DelegationTargetResolver } from "../../agents/collaboration/delegation-
 import { DelegatedTaskRepo } from "./delegated-task-repo.js";
 import { DelegatedTaskService } from "./delegated-task-service.js";
 import { TurnResumeScheduleStore } from "../../agents/recovery/turn-resume-schedule-store.js";
+import { PlannedRestart } from "../../agents/recovery/planned-restart/index.js";
+import { PlannedRestartStore } from "../../agents/recovery/planned-restart/planned-restart-store.js";
+import type { TurnRecoveryService } from "../../agents/recovery/turn-recovery-service.js";
 import { CoordinatorWakeService, type CoordinatorWakeClock } from "./coordinator-wake-service.js";
 import { TurnSteerService } from "../../agents/steering/turn-steer-service.js";
 import { TurnSteerRepo } from "../../agents/steering/persistence/turn-steer-repo.js";
@@ -88,6 +92,7 @@ const disposables: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
   for (const dispose of disposables.splice(0)) await dispose();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 const DEFAULT_CATALOG: ProviderModelInfo[] = [{ id: "gpt-test", name: "Test" }];
@@ -202,8 +207,13 @@ async function harness(
   const control = child.resolve(ThreadControlService);
   const tasks = new DelegatedTaskRepo(runtime.reader, runtime.writer);
   const resumes = new TurnResumeScheduleStore(runtime.reader, runtime.writer);
+  const restartRecovery = { resumeTurn: vi.fn<TurnRecoveryService["resumeTurn"]>(),
+    wakeParent: vi.fn<TurnRecoveryService["wakeParent"]>() };
+  vi.stubEnv("MCODE_DB_PATH", runtime.reader.filename);
+  const plannedRestart = new PlannedRestart(
+    canonical, restartRecovery, messages);
   const service = new DelegatedTaskService({ tasks, threads, startups, approvals, canonical, targets, git: worktrees, control, resumes,
-    approvalService, cancellation,
+    approvalService, cancellation, plannedRestart,
     commands: { createAndSend: async (command, options) => {
       const created = await creation.createInitialTurn(command, options);
       if (created.kind === "dispatch") {
@@ -228,7 +238,8 @@ async function harness(
   disposables.push(startups.subscribe((startup) => service.taskChanged(startup.startupId)));
   disposables.push(roster.observeCommittedEvents());
   return { ...fixture, service, tasks, threads, threadService, roster, startups, approvals, control, canonical, canonicalStore, messages, environment, audit,
-    coordinator, source, input, dispatch, active, admission, authority, resumes, pendingApprovals, settings, firstTurns };
+    coordinator, source, input, dispatch, active, admission, authority, resumes, pendingApprovals, settings, firstTurns, plannedRestart, restartRecovery,
+    restartStore: new PlannedRestartStore(runtime.reader.filename) };
 }
 
 function requireTask(result: DelegateTaskResult): Exclude<DelegateTaskResult, { status: "rejected" }>;
@@ -310,7 +321,7 @@ async function wakeHarness(f: Fixture) {
     }
   };
   const deps = { tasks: f.service, threads: f.threads, canonical: f.canonical, messages: f.messages,
-    steers, steer, runtime: { runningTurn, isActive: (id: string) => f.active.has(id), sendMessage } };
+    steers, steer, plannedRestart: f.plannedRestart, runtime: { runningTurn, isActive: (id: string) => f.active.has(id), sendMessage } };
   const wake = new CoordinatorWakeService(deps, clock);
   disposables.push(() => wake.dispose());
   const tick = async () => {
@@ -413,6 +424,121 @@ describe("Coordinator task notices", { timeout: 30_000 }, () => {
     expect(w.messages().map((row) => SystemNoticeMetadataSchema().parse(JSON.parse(row.system_notice)).delegatedTasks?.[0]?.status)).toEqual(["interrupted", "completed"]);
     expect(w.messages()[1]?.content).toContain("Replacement complete");
     expect(f.tasks.get(task.taskId)?.noticeDelivered).toBe(`finished:completed:${attemptId}`);
+  });
+
+  /** A child its planned restart will resume: interrupted by the stop, and recorded before it. */
+  async function childAwaitingRestart(f: Fixture) {
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    const turn = f.canonical.loadTurn(task.taskId);
+    if (!task.threadId || !turn?.executionId) throw new Error("Expected admitted child");
+    await f.restartStore.record({ version: 1, stoppedAt: new Date().toISOString(), resumes: [], wakes: [] });
+    await f.canonicalStore.finishParentTurnBatched({ threadId: task.threadId, turnId: task.taskId, executionId: turn.executionId,
+      providerId: "codex", providerIdentities: [], outcome: "interrupted", ending: { cause: "app_closed" },
+      projectTurn: () => ({ message: null, narrative: [] }) });
+    f.plannedRestart.load();
+    return task;
+  }
+
+  it("tells the Coordinator about a planned-restart child whose resume fails, without another turn event", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    // Production nudges the Coordinator on roster changes the same way.
+    disposables.push(f.service.onRosterChanged((coordinatorId) => w.wake.nudge(coordinatorId)));
+    const task = await childAwaitingRestart(f);
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.messages()).toEqual([]);
+    f.restartRecovery.resumeTurn.mockRejectedValue(new Error("provider unavailable"));
+
+    await f.plannedRestart.continueAtStartup(async () => undefined);
+    await w.tick();
+
+    expect(f.restartRecovery.resumeTurn).toHaveBeenCalledOnce();
+    expect(w.messages().map((message) => SystemNoticeMetadataSchema().parse(JSON.parse(message.system_notice)).delegatedTasks?.[0]))
+      .toMatchObject([{ taskId: task.taskId, status: "interrupted" }]);
+  });
+
+  it("holds a Coordinator wake until the Coordinator's own restart continuation has started", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    // Production nudges the thread and its Coordinator when a restart entry is released.
+    disposables.push(f.plannedRestart.onReleased((threadId) => w.wake.nudge(threadId)));
+    const coordinatorTurnId = await startCoordinator(f);
+    const task = requireTask(await f.service.delegate(f.source, { ...f.input, isolation: "shared" }));
+    if (!task.threadId) throw new Error("Expected child");
+    await finish(f, task.threadId, task.taskId);
+    const coordinatorTurn = f.canonical.loadTurn(coordinatorTurnId);
+    if (!coordinatorTurn?.executionId) throw new Error("Expected Coordinator turn");
+    await f.restartStore.record({ version: 1, stoppedAt: new Date().toISOString(), resumes: [], wakes: [] });
+    await finish(f, f.coordinator.id, coordinatorTurnId, "interrupted");
+    f.plannedRestart.load();
+    const order: string[] = [];
+    f.restartRecovery.resumeTurn.mockImplementation(async () => {
+      order.push(`resume after ${w.state.sends} wake sends`);
+      return { turnId: NodeCrypto.randomUUID(), mode: "seeded-session" };
+    });
+
+    w.wake.nudge(f.coordinator.id);
+    await w.tick();
+    expect(w.state.sends).toBe(0);
+    await f.plannedRestart.continueAtStartup(async () => undefined);
+    await w.tick();
+
+    expect(order).toEqual(["resume after 0 wake sends"]);
+    expect(w.state.sends).toBe(1);
+    expect(w.messages()).toHaveLength(1);
+  });
+
+  it("reports a child working while its restart resume is pending, and cancelling it drops the resume", async () => {
+    const f = await harness();
+    const task = await childAwaitingRestart(f);
+    expect(requireTask(await f.service.status(f.source, { taskId: task.taskId })).state).toEqual({ status: "working", phase: "running" });
+
+    await f.service.cancel(f.source, { taskId: task.taskId });
+    await f.plannedRestart.continueAtStartup(async () => undefined);
+
+    expect(f.restartRecovery.resumeTurn).not.toHaveBeenCalled();
+    expect(f.restartStore.read()).toBeNull();
+    expect(requireTask(await f.service.status(f.source, { taskId: task.taskId })).state).toEqual({ status: "finished", outcome: "interrupted" });
+  });
+
+  it("keeps the child working without a Coordinator failure while its native restart attempt hands over", async () => {
+    const f = await harness();
+    const w = await wakeHarness(f);
+    const task = await childAwaitingRestart(f);
+    const threadId = task.threadId!;
+    const original = f.canonical.loadTurn(task.taskId)!;
+    const attemptId = NodeCrypto.randomUUID();
+    const executionId = NodeCrypto.randomUUID();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    f.restartRecovery.resumeTurn.mockImplementation(async (_turn, dispatch) => {
+      await dispatch({ threadId, content: "", sourceTurnId: attemptId });
+      await f.canonicalStore.startParentTurn({
+        thread: { id: threadId, workspaceId: f.workspace.id, providerId: "codex", createdAt: new Date().toISOString() },
+        turnId: attemptId, executionId, retryOfExecutionId: original.executionId!,
+        permissionMode: "full", providerIdentities: [],
+        projectUserMessage: () => new MessageStore(f.runtime.database).create(threadId, "user", "Resume", 3),
+      });
+      await f.canonicalStore.finishParentTurnBatched({ threadId, turnId: attemptId, executionId,
+        providerId: "codex", providerIdentities: [], outcome: "errored", error: "Session unavailable",
+        ending: { failure: { kind: "fatal", provider: "codex", code: SESSION_RESUME_UNAVAILABLE_CODE, message: "Session unavailable" } },
+        projectTurn: () => ({ message: null, narrative: [] }) });
+      await held;
+      return { turnId: attemptId, mode: "seeded-session" };
+    });
+    const running = f.plannedRestart.continueAtStartup(async (command) => { command.admissionGuard?.(); });
+    try {
+      await vi.waitFor(() => expect(f.canonical.loadTurn(attemptId)?.status).toBe("Errored"));
+      w.wake.nudge(f.coordinator.id);
+      await w.tick();
+      expect(w.messages()).toEqual([]);
+      expect(requireTask(await f.service.status(f.source, { taskId: task.taskId })).state)
+        .toEqual({ status: "working", phase: "running" });
+    } finally {
+      release();
+      await running;
+    }
   });
 
   it("holds a usage-limit interruption while its auto-resume is scheduled", async () => {

@@ -29,6 +29,8 @@ import { PtyPidRegistry } from "../../features/terminal/host/pty-pid-registry.js
 
 // Services
 import { TurnResumeScheduler } from "../../features/agents/recovery/turn-resume-scheduler.js";
+import { PlannedRestart } from "../../features/agents/recovery/planned-restart/index.js";
+import { sendRecoveryAttempt } from "../../features/agents/transport/turn-message-dispatch.js";
 import { isRunningRuntime } from "../../features/agents/orchestration/agent-service-helpers.js";
 import {
   FilesystemBrowser,
@@ -373,6 +375,7 @@ workspaceEnvironmentService.setAutomaticSetupDispatcher({
   const stopObservingSubagentRosters = subagentRosterService.observeCommittedEvents();
 const turnRecoveryService = container.resolve(TurnRecoveryService);
 const turnResumeScheduler = container.resolve(TurnResumeScheduler);
+const plannedRestart = container.resolve(PlannedRestart);
 const threadControlService = container.resolve(ThreadControlService);
 const delegatedTaskService = container.resolve(DelegatedTaskService);
 const threadLaunchService = container.resolve(ThreadLaunchService);
@@ -830,7 +833,7 @@ const turnSteers = container.resolve(TurnSteerService);
 const steerRuntime = container.resolve(TurnSteerRuntimePort);
 const coordinatorWake = new CoordinatorWakeService({
   tasks: delegatedTaskService, threads: threadRepo, canonical: canonicalSink, messages: messageRepo,
-  steers: container.resolve(TurnSteerRepo), steer: turnSteers,
+  steers: container.resolve(TurnSteerRepo), steer: turnSteers, plannedRestart,
   runtime: { runningTurn: (threadId) => steerRuntime.runningTurn(threadId),
     isActive: (threadId) => agentService.runtimeAccess().activeThreadIds().includes(threadId),
     sendMessage: (command) => agentService.sendMessage(command) },
@@ -853,6 +856,8 @@ const stopObservingWakeTurns = subscribeCommittedCanonicalEvents((events) => {
   }
 });
 const stopObservingWakeReleases = agentService.onRuntimeReleased(nudgeCoordinatorForThread);
+// A wake held behind a pending restart continuation is delivered once that continuation starts or is dropped.
+const stopObservingRestartReleases = plannedRestart.onReleased(nudgeCoordinatorForThread);
 
 /** No steer call survives a restart, so pending steers are held as uncertain before RPCs arrive. */
 async function reconcileSteers(): Promise<void> {
@@ -1050,6 +1055,7 @@ function listen(port: number): void {
       externalThreadControlMcpRuntime.setPort(listeningPort);
       logger.info(`Mcode server started on ${HOST}:${listeningPort}`);
       recordStartupCheckpoint("HTTP listener opened");
+      startPlannedRestartContinuations();
 
       const browserMcpHost = HOST === "::1" ? "[::1]" : "127.0.0.1";
       mcodeMcpServer.setPort(listeningPort, browserMcpHost);
@@ -1074,6 +1080,16 @@ function listen(port: number): void {
       }
     },
   });
+}
+
+/**
+ * Continuations start once the HTTP listener has bound, because binding is the last startup step that exits the
+ * process on failure. A continuation admitted and released before such an exit would be lost.
+ */
+function startPlannedRestartContinuations(): void {
+  void launchTelemetry.trackLaunchTask("planned restart resume", plannedRestart.continueAtStartup(
+    (command) => sendRecoveryAttempt(agentService, command),
+  )).catch((error: unknown) => logger.error("Planned restart recovery failed", { error: String(error) }));
 }
 
 /**
@@ -1171,6 +1187,8 @@ async function bootstrapServer(): Promise<void> {
       },
     });
     await recoverTurnsAtStartup();
+    // List this stop's work before recovery can admit new turns, and save wakes before settlement erases held calls.
+    plannedRestart.load(canonicalSink.listHeldBackgroundToolCalls());
     launchTelemetry.mark("turn reconciliation");
     await fileEvidenceLedger.resolveAbandoned(undefined, "restarted");
     launchTelemetry.mark("abandoned evidence resolved");
@@ -1182,12 +1200,12 @@ async function bootstrapServer(): Promise<void> {
     settleActionObserver.start();
     await turnResumeScheduler.start();
     launchTelemetry.mark("resume scheduler started");
-    coordinatorWakeReady = true;
-    await coordinatorWake.recoverAtStartup();
-    launchTelemetry.mark("coordinator wake recovered");
     recordStartupCheckpoint("turn recovery completed");
     await settleOrphanedBackgroundToolsAtStartup();
     recordStartupCheckpoint("orphaned background tools settled");
+    coordinatorWakeReady = true;
+    await coordinatorWake.recoverAtStartup();
+    launchTelemetry.mark("coordinator wake recovered");
     // Pin settlement does git work, which must not delay startup.
     snapshotRefPins.runInBackground(() => launchTelemetry.trackLaunchTask("snapshot pin sweep", sweepSnapshotPins()));
     await threadControlService.recoverApprovals();
@@ -1239,6 +1257,14 @@ async function shutdown(): Promise<void> {
       stopObservingWakeTasks();
       stopObservingWakeTurns();
       stopObservingWakeReleases();
+      stopObservingRestartReleases();
+      // A provider that exits from here on was stopped by this shutdown, so its turn must resume, not count as a crash.
+      agentService.beginShutdown();
+      plannedRestart.beginShutdown();
+      await captureCleanupFailure(() => plannedRestart.record());
+      // Admission is closed, so a scheduled resume that came due now would be refused; the next start fires it.
+      turnResumeScheduler.beginShutdown();
+      const drained = stopAdmissionAndDrain();
       await coordinatorWake.dispose();
 
       // Disarm the grace-period controller so its timer does not fire after
@@ -1247,7 +1273,7 @@ async function shutdown(): Promise<void> {
       graceController = null;
 
       shutdownCoordinator.setPhase("drain admitted transport work");
-      await stopAdmissionAndDrain();
+      await drained;
       await turnResumeScheduler.shutdown();
 
       // 0. Close the MessagePort stream transport
