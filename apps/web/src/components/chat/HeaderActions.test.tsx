@@ -248,7 +248,6 @@ function defaultWorkspaceState() {
   };
 }
 
-/** Review reports a git checkout with `count` uncommitted files. */
 function mockReviewUncommitted(count: number) {
   vi.mocked(mockTransport.getReviewState).mockResolvedValue({
     isGitRepo: true,

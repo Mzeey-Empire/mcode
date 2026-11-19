@@ -140,7 +140,6 @@ function SheetFooter({
   readonly push: boolean;
 }) {
   const { submission } = model;
-  // A branchless checkout cannot push, so a sheet opened to push falls back to a plain commit there.
   const leadWithPush = push && !branchless;
   const count = model.selected.length;
   return (

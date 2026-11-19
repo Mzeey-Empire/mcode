@@ -36,7 +36,6 @@ function useHeldPlan(live: GitRowPlan | null, held: boolean): GitRowPlan | null 
   return held ? kept : live;
 }
 
-/** Tracks whether the pointer, focus, or the row's menu is on the git row. */
 function useRowHold() {
   const [pointerInside, setPointerInside] = useState(false);
   const [focusInside, setFocusInside] = useState(false);
