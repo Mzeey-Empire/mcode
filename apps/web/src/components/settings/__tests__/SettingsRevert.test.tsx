@@ -280,6 +280,32 @@ describe("Settings Revert", () => {
     expect(screen.getByRole("button", { name: "Revert 1 change" })).toBeInTheDocument();
   });
 
+  it("keeps a change made after a pending write's claim when that write later fails", async () => {
+    render(<SettingsView />);
+    let fail: () => void = () => {};
+    vi.mocked(mockTransport.updateSettings).mockImplementationOnce(() => new Promise((_resolve, reject) => {
+      fail = () => reject(new Error("offline"));
+    }));
+    let lightWrite: Promise<unknown> = Promise.resolve();
+    act(() => {
+      lightWrite = useSettingsStore.getState().update({ appearance: { theme: "light" } });
+    });
+    act(() => useSettingsStore.getState()._applyPush(themeOf(useSettingsStore.getState().settings, "light")));
+    await act(async () => {
+      await useSettingsStore.getState().update({ appearance: { theme: "system" } });
+      await useSettingsStore.getState().update({ appearance: { theme: "dark" } });
+    });
+    await act(async () => {
+      fail();
+      await lightWrite;
+    });
+
+    expect(useSettingsStore.getState().settings.appearance.theme).toBe("dark");
+    fireEvent.click(screen.getByRole("button", { name: "Revert 1 change" }));
+    await flush();
+    expect(vi.mocked(mockTransport.updateSettings).mock.calls.at(-1)?.[0]).toEqual({ appearance: { theme: "system" } });
+  });
+
   it("claims its own write when the push for it arrives before the write's response", async () => {
     render(<SettingsView />);
     vi.mocked(mockTransport.updateSettings).mockImplementationOnce((patch) => {

@@ -121,29 +121,38 @@ function sendsProfile(scope: LocalWriteScope, step: RestoreStep): boolean {
   return false;
 }
 
+/** The one changed field of a terminal default, which is the profile it points at. */
+const PROFILE_FIELD = "profile";
+
 /**
- * Indexes into `scopes` of the in-flight writes that explain how `def` changed from `prev` to `next`, or null when
- * some changed field is not sent, with its new value, by any of them. `restore(x, x)` names what writing a value sends,
- * so the fields that differ between the two steps are what changed. Matching each changed field and its value, not the
- * whole value, keeps a pending write to one field of a grouped row (both Fast flags) from claiming an outside change
- * to another; the window's own push can arrive before its RPC response, so arrival path alone cannot tell them apart.
+ * For each field of `def` that changed from `prev` to `next`, the index into `scopes` of an in-flight write that sends
+ * it, or null when some changed field is not sent, with its new value, by any of them. `restore(x, x)` names what
+ * writing a value sends, so the fields that differ between the two steps are what changed. Matching each changed field
+ * and its value, not the whole value, keeps a pending write to one field of a grouped row (both Fast flags) from
+ * claiming an outside change to another; the window's own push can arrive before its RPC response, so arrival path
+ * alone cannot tell them apart.
  */
-function explainingWrites(def: RevertibleDef, scopes: readonly LocalWriteScope[], prev: RevertSource, next: RevertSource): number[] | null {
+function explainingWrites(
+  def: RevertibleDef,
+  scopes: readonly LocalWriteScope[],
+  prev: RevertSource,
+  next: RevertSource,
+): ReadonlyMap<string, number> | null {
   const before = def.value.restore(prev, prev);
   const after = def.value.restore(next, next);
   if (after.sink !== "settings" && after.sink !== "terminalPreferences") {
     const index = scopes.findIndex((scope) => sendsProfile(scope, after));
-    return index === -1 ? null : [index];
+    return index === -1 ? null : new Map([[PROFILE_FIELD, index]]);
   }
   const paths = before.sink === after.sink ? changedPaths(before.patch, after.patch) : leafPaths(after.patch);
   if (paths.length === 0) return null;
-  const used = new Set<number>();
+  const byField = new Map<string, number>();
   for (const path of paths) {
     const index = scopes.findIndex((scope) => scope.sink === after.sink && patchSendsPath(scope.patch, path, after.patch));
     if (index === -1) return null;
-    used.add(index);
+    byField.set(path.join("\0"), index);
   }
-  return [...used];
+  return byField;
 }
 
 /**
@@ -255,8 +264,8 @@ const useVisitStore = create<{ readonly visit: Visit | null }>(() => ({ visit: n
 let nextVisitId = 0;
 let lastSource: RevertSource | null = null;
 let stopListening: (() => void) | null = null;
-/** For each claimed setting, every in-flight write its local attributions relied on to land. */
-let reliedOn = new Map<SettingId, readonly number[]>();
+/** For each claimed setting, per changed field, the sequence of the local write that field relied on to land. */
+let reliedOn = new Map<SettingId, ReadonlyMap<string, number>>();
 
 function sameSource(a: RevertSource, b: RevertSource): boolean {
   return a.settings === b.settings
@@ -291,10 +300,11 @@ function recordReliance(journal: ReadonlyMap<SettingId, JournalEntry>, prev: Rev
       reliedOn.delete(def.id);
       continue;
     }
-    // Keep earlier writes: a grouped row (both Fast flags) can rely on a pending write to one field while a write to
-    // the other lands. A write that already landed never fails, so keeping it is harmless.
-    const seqs = explaining.map((index) => writes[index]?.seq ?? 0);
-    reliedOn.set(def.id, [...new Set([...(reliedOn.get(def.id) ?? []), ...seqs])]);
+    // Replace per field: a later local write to a field ends that field's reliance on an earlier write, while a grouped
+    // row (both Fast flags) keeps relying on a pending write to the field the latest write did not touch.
+    const fields = new Map(reliedOn.get(def.id));
+    for (const [field, index] of explaining) fields.set(field, writes[index]?.seq ?? 0);
+    reliedOn.set(def.id, fields);
   }
 }
 
@@ -302,7 +312,7 @@ function recordReliance(journal: ReadonlyMap<SettingId, JournalEntry>, prev: Rev
 function onWriteFailed(seq: number): void {
   const visit = useVisitStore.getState().visit;
   if (visit === null) return;
-  const released = [...reliedOn].filter(([, seqs]) => seqs.includes(seq)).map(([id]) => id);
+  const released = [...reliedOn].filter(([, fields]) => [...fields.values()].includes(seq)).map(([id]) => id);
   if (released.length === 0) return;
   const journal = new Map(visit.journal);
   for (const id of released) {
