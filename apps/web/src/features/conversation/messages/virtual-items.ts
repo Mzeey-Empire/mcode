@@ -18,6 +18,7 @@ import { fileEvidenceNotice, sameTurnEndNotice, type TurnEndNoticeView } from ".
 import type { FileEvidenceByExecution } from "@/stores/thread-store/file-evidence";
 import type { TurnEnding } from "../turn-ending/turn-endings-projection";
 import { createTurnNoticePlacer, turnNoticeFromMessage } from "./turn-notices";
+import { replyPlacesVisual } from "../html-visual/visual-marker";
 
 /**
  * A plan-questions assistant message is a COMPLETED "ask the user" turn whose
@@ -643,7 +644,7 @@ export function buildVolatileItems(
 
   return [
     narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, notices ?? EMPTY_NOTICES, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning && !holdingSignals?.stopPending, agentStartTime, committedAssistantBody),
-    ...liveVisualItems(visuals),
+    ...liveVisualItems(visuals, liveText),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
     agentDisplayState?.phase === "cancelled" ? undefined : narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
@@ -653,9 +654,15 @@ function narrativeFlowItem(toolCalls: readonly ToolCall[], hooks: readonly HookE
   return isAgentRunning || [toolCalls, thoughts, approvals, notices].some((rows) => rows.length > 0) ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, approvals, notices, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
 }
 
-/** Keyed by message id like the settled row, so the visual's frame survives the turn settling. */
-function liveVisualItems(visuals: readonly Message[] = EMPTY_NOTICE_MESSAGES): ChatVirtualItem[] {
-  return visuals.map((visual) => ({ key: visual.id, type: "message", message: visual }));
+/**
+ * Keyed by message id like the settled row, so the visual's frame survives the turn settling.
+ * A visual the streamed reply already places is dropped: a reloaded visual has no saved placement,
+ * and checking here keeps streamed text out of the per-message-list notice placement cache.
+ */
+function liveVisualItems(visuals: readonly Message[] | undefined, liveText: string): ChatVirtualItem[] {
+  return (visuals ?? EMPTY_NOTICE_MESSAGES)
+    .filter((visual) => !replyPlacesVisual(liveText, visual.id))
+    .map((visual) => ({ key: visual.id, type: "message", message: visual }));
 }
 
 function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIdentity | undefined, agentDisplayState: AgentDisplayState | undefined, textIsStreaming?: boolean): ChatVirtualItem | undefined {

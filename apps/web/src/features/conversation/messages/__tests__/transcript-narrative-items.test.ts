@@ -427,10 +427,95 @@ describe("html visual placement", () => {
     expect(projected.map((item) => item.key)).toEqual(["work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
   });
 
-  function visual(sequence: number): Message {
+  it("leaves a settled visual out of the slot above its answer when the answer places it, without a saved placement", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "See:\n\n![Chart](visual:visual-2)", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "answer", "turn-meta-line:answer"]);
+  });
+
+  it("shows a settled visual above its answer when the answer has no marker for it", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "Done", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
+  it("shows a settled visual above its answer when the answer only quotes its marker as code", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "The id is `visual:visual-2`.", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
+  it("does not show a running turn's inline visual above its streaming reply", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2, "inline")],
+      currentTurn: { threadId: "thread", executionId: "execution", responseKey: "live-answer" },
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: "Here it is", toolCalls: [liveTool],
+    });
+    expect(projected.map((item) => item.key)).not.toContain("visual-2");
+  });
+
+  it("shows a settled visual above its answer when the answer shows its full marker inside a code fence", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "Paste:\n\n```md\n![Chart](visual:visual-2)\n```", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
+  it("shows a settled visual above its answer when the answer only links to it", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("answer", "assistant", "See [Chart](visual:visual-2).", 3)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [], persistedNarrativeByMessage: records,
+    });
+    expect(projected.map((item) => item.key)).toEqual(["prompt", "work-fold:answer", "visual-2", "answer", "turn-meta-line:answer"]);
+  });
+
+  it("shows a visual once, at its marker, when the reply after a steer places it", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("steer", "user", "Make it blue", 3), turnMessage("answer", "assistant", "See:\n\n![Chart](visual:visual-2)", 4)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [],
+    });
+    expect(projected.map((item) => item.key)).not.toContain("visual-2");
+  });
+
+  it("keeps a visual published before a steer on its own row when the reply does not place it", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2), turnMessage("steer", "user", "Make it blue", 3), turnMessage("answer", "assistant", "Done", 4)],
+      agentStartTime: undefined, streamingText: undefined, toolCalls: [],
+    });
+    const keys = projected.map((item) => item.key);
+    expect(keys.indexOf("visual-2")).toBeGreaterThan(-1);
+    expect(keys.indexOf("visual-2")).toBeLessThan(keys.indexOf("steer"));
+  });
+
+  it("does not show an inline visual published before a steer while the turn runs", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2, "inline"), turnMessage("steer", "user", "Make it blue", 3)],
+      currentTurn: { threadId: "thread", executionId: "execution", responseKey: "live-answer" },
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: "Here it is", toolCalls: [liveTool],
+    });
+    expect(projected.map((item) => item.key)).not.toContain("visual-2");
+  });
+
+  it("drops a running turn's visual slot once the streaming reply places it, without a saved placement", () => {
+    const projected = createTranscriptItemProjector()({
+      messages: [turnMessage("prompt", "user", "Draw it", 1), visual(2)],
+      currentTurn: { threadId: "thread", executionId: "execution", responseKey: "live-answer" },
+      agentDisplayState: { phase: "streaming" }, agentStartTime: 1000, streamingText: "See:\n\n![Chart](visual:visual-2)", toolCalls: [liveTool],
+    });
+    expect(projected.map((item) => item.key)).not.toContain("visual-2");
+  });
+
+  function visual(sequence: number, visualPlacement?: "auto" | "inline"): Message {
     return createMockMessage({
       id: `visual-${sequence}`, thread_id: "thread", role: "system", content: "Chart", sequence,
-      timestamp: new Date(1000 + sequence).toISOString(), visual: { title: "Chart", html: "<p>chart</p>", maxHeight: 720 },
+      timestamp: new Date(1000 + sequence).toISOString(), visual: { title: "Chart", html: "<p>chart</p>", maxHeight: 720 }, ...(visualPlacement && { visualPlacement }),
     });
   }
 

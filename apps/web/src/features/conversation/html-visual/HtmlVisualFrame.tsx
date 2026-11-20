@@ -3,6 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppearance } from "@/hooks/useTheme";
 import { buildHtmlVisualDocument, HTML_VISUAL_THEME_MESSAGE, readHtmlVisualHeight, readHtmlVisualTheme } from "./html-visual-document";
 
+// A settling reply swaps its Markdown subtree and remounts an inline frame; starting at the last height keeps the reply below from jumping.
+const measuredHeights = new WeakMap<HtmlVisual, number>();
+
 /**
  * Shows an agent's HTML visual in a sandboxed frame as wide as the reply column.
  * The page is untrusted. Without allow-same-origin it runs in an opaque origin, so it cannot
@@ -10,7 +13,7 @@ import { buildHtmlVisualDocument, HTML_VISUAL_THEME_MESSAGE, readHtmlVisualHeigh
  */
 export function HtmlVisualFrame({ visual }: { readonly visual: HtmlVisual }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(HTML_VISUAL_MIN_HEIGHT);
+  const [height, setHeight] = useState(() => measuredHeights.get(visual) ?? HTML_VISUAL_MIN_HEIGHT);
   const appearance = useAppearance();
   // Built once per page: theme changes are posted to the running page, because a new srcdoc would reload it.
   const srcDoc = useMemo(() => buildHtmlVisualDocument(visual.html, readHtmlVisualTheme()), [visual.html]);
@@ -27,11 +30,13 @@ export function HtmlVisualFrame({ visual }: { readonly visual: HtmlVisual }) {
       if (event.source === null || event.source !== frameRef.current?.contentWindow) return;
       const contentHeight = readHtmlVisualHeight(event.data);
       if (contentHeight === null) return;
-      setHeight(Math.min(visual.maxHeight, Math.max(HTML_VISUAL_MIN_HEIGHT, Math.ceil(contentHeight))));
+      const measured = Math.min(visual.maxHeight, Math.max(HTML_VISUAL_MIN_HEIGHT, Math.ceil(contentHeight)));
+      measuredHeights.set(visual, measured);
+      setHeight(measured);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [visual.maxHeight]);
+  }, [visual]);
 
   return (
     <iframe

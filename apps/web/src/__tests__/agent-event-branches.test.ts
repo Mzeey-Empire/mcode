@@ -69,6 +69,15 @@ describe("handleAgentEvent branches", () => {
     expect(readThreadField("thread-1", (record) => record.sessionNotices)).toEqual([]);
   });
 
+  it("carries a live visual placement onto the visual's message", () => {
+    useThreadStore.getState().handleAgentEvent({
+      type: "system", threadId: "thread-1", subtype: "mcode.visual", message: "Visual: Inline",
+      messageId: "4b8f3f7e-7c1e-4a55-9f8a-0d6a2f1c9b31",
+      visual: { title: "Inline", html: "<p/>", maxHeight: 720 }, visualPlacement: "inline",
+    });
+    expect(getTestActiveMessages()).toMatchObject([{ id: "4b8f3f7e-7c1e-4a55-9f8a-0d6a2f1c9b31", visualPlacement: "inline" }]);
+  });
+
   it("session.error clears thread running state and sets error", () => {
     useThreadStore.getState().handleAgentEvent({ type: "error", threadId: "thread-1", error: "Out of tokens", failure: { kind: "fatal" } });
 

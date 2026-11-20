@@ -1,11 +1,12 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import type { HtmlVisual } from "@mcode/contracts/models/html-visual";
 import { act, render, screen } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/features/conversation/messages/MessageBubble";
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
+import { useThreadStore } from "@/stores/threadStore";
 import { HtmlVisualFrame } from "../HtmlVisualFrame";
 import { buildHtmlVisualDocument } from "../html-visual-document";
 
@@ -67,6 +68,22 @@ describe("HtmlVisualFrame", () => {
     expect(frame.style.height).toBe("80px");
   });
 
+  it("starts a remounted frame at the height its visual last measured", () => {
+    const measured: HtmlVisual = { ...visual };
+    const first = render(<HtmlVisualFrame visual={measured} />);
+    const firstFrame = screen.getByTitle<HTMLIFrameElement>("Latency by provider");
+    if (!firstFrame.contentWindow) throw new Error("frame has no window");
+    postFrom(firstFrame.contentWindow, { type: "mcode:visual-height", height: 312 });
+    first.unmount();
+
+    const remounted = render(<HtmlVisualFrame visual={measured} />);
+    expect(screen.getByTitle<HTMLIFrameElement>("Latency by provider").style.height).toBe("312px");
+    remounted.unmount();
+
+    render(<HtmlVisualFrame visual={{ ...measured }} />);
+    expect(screen.getByTitle<HTMLIFrameElement>("Latency by provider").style.height).toBe("80px");
+  });
+
   it("ignores height messages from anything but its own page", () => {
     const { frame, contentWindow } = renderFrame();
     postFrom(window, { type: "mcode:visual-height", height: 400 });
@@ -85,6 +102,47 @@ describe("visual message", () => {
     render(<MessageBubble message={message} />);
     expect(screen.getByTitle("Latency by provider").tagName).toBe("IFRAME");
     expect(screen.queryByText("Visual: Latency by provider")).toBeNull();
+  });
+});
+
+describe("visual marker in a reply", () => {
+  const published = createMockMessage({ id: "visual-1", thread_id: "thread-1", role: "system", content: "Visual: Latency by provider", visual });
+  // Keep the lazy renderer's cold load outside the find* wait, which a loaded runner can outlast.
+  beforeAll(() => import("@/components/chat/MarkdownContent"));
+  beforeEach(() => resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [published] }]]) }));
+  afterEach(() => resetThreadStoreForTests());
+
+  function renderReply(markerId: string) {
+    const reply = createMockMessage({ id: "answer", thread_id: "thread-1", role: "assistant", content: `Before\n\n![Latency](visual:${markerId})\n\nAfter` });
+    return render(<MessageBubble message={reply} />);
+  }
+
+  it("shows the thread's visual where the reply places its marker", async () => {
+    const { container } = renderReply("visual-1");
+    expect((await screen.findByTitle("Latency by provider")).tagName).toBe("IFRAME");
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("shows the marker's title as text when the thread has no such visual", async () => {
+    const { container } = renderReply("missing");
+    expect(await screen.findByText("Latency")).toBeTruthy();
+    expect(container.querySelector("img, iframe")).toBeNull();
+  });
+
+  it("requests one older page when the marker's visual is not loaded yet", async () => {
+    const loadOlderMessages = vi.fn(async () => "skipped" as const);
+    useThreadStore.setState({ loadOlderMessages });
+    renderReply("missing");
+    await screen.findByText("Latency");
+    expect(loadOlderMessages).toHaveBeenCalledExactlyOnceWith("thread-1");
+  });
+
+  it("requests no older page when the marker's visual is loaded", async () => {
+    const loadOlderMessages = vi.fn(async () => "skipped" as const);
+    useThreadStore.setState({ loadOlderMessages });
+    renderReply("visual-1");
+    await screen.findByTitle("Latency by provider");
+    expect(loadOlderMessages).not.toHaveBeenCalled();
   });
 });
 

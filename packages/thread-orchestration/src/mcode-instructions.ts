@@ -90,6 +90,7 @@ const BROWSER_BLOCK = [
 const VISUALS_BLOCK = [
   "Mcode Visuals",
   "- When a chart, table, diagram, or mockup says more than prose would, build it as a self-contained HTML page, check it carefully, and publish it with html_render before you write your reply.",
+  "- For several visuals, or one that belongs at a point in your explanation, pass placement \"inline\" and put the marker html_render returns on its own line at that point in your reply.",
   "- Do not restate the page's contents in the reply.",
 ].join("\n");
 

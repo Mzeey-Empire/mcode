@@ -28,6 +28,13 @@ export const HTML_VISUAL_THEME_TOKENS = [
   "--font-sans", "--font-mono",
 ] as const;
 
+/** Where a visual shows: above the reply ("auto"), or at the marker the agent puts in its reply ("inline"). */
+export const HtmlVisualPlacementSchema = lazySchema(() => z.enum(["auto", "inline"]));
+
+/** Parsed {@link HtmlVisualPlacementSchema}. */
+export type HtmlVisualPlacement = z.infer<ReturnType<typeof HtmlVisualPlacementSchema>>;
+
+// Stays strict and unchanged: older builds sharing the database parse saved visuals with this schema.
 /** A self-contained HTML page shown in a sandboxed frame in the thread timeline. */
 export const HtmlVisualSchema = lazySchema(() => z.object({
   title: z.string().trim().min(1).max(HTML_VISUAL_MAX_TITLE_LENGTH),

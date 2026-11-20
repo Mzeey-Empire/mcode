@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { HtmlVisualSchema, HTML_VISUAL_DEFAULT_HEIGHT, HTML_VISUAL_MAX_HEIGHT, HTML_VISUAL_MIN_HEIGHT, HTML_VISUAL_MAX_HTML_BYTES, HTML_VISUAL_MAX_TITLE_LENGTH, HTML_VISUAL_THEME_TOKENS } from "@mcode/contracts/models/html-visual";
+import { HtmlVisualPlacementSchema, HtmlVisualSchema, HTML_VISUAL_DEFAULT_HEIGHT, HTML_VISUAL_MAX_HEIGHT, HTML_VISUAL_MIN_HEIGHT, HTML_VISUAL_MAX_HTML_BYTES, HTML_VISUAL_MAX_TITLE_LENGTH, HTML_VISUAL_THEME_TOKENS } from "@mcode/contracts/models/html-visual";
 import { FeatureRetentionLimitError } from "../../agents/canonical/accepted-feature-observations.js";
 import { TurnVisualRejectedError, type CanonicalAcceptedProgress } from "../../agents/canonical/canonical-accepted-progress.js";
 import { McodeThreadControlDeniedError, type McodeSessionAuthority, type McodeSession } from "../mcode-session-authority.js";
@@ -13,19 +13,27 @@ const HtmlRenderInputSchema = z.object({
   title: z.string().trim().min(1).max(HTML_VISUAL_MAX_TITLE_LENGTH),
   height: z.number().int().min(HTML_VISUAL_MIN_HEIGHT).max(HTML_VISUAL_MAX_HEIGHT).default(HTML_VISUAL_DEFAULT_HEIGHT)
     .describe("Maximum frame height in px. The frame shrinks to shorter content."),
+  placement: HtmlVisualPlacementSchema().default("auto")
+    .describe('"auto" shows the page above your reply. "inline" shows it where you put the returned marker in your reply; without the marker it shows above your reply.'),
 }).strict();
 const HtmlRenderOutputSchema = z.object({
   messageId: z.string().uuid(), title: z.string(), bytes: z.number().int(), inlinedImages: z.number().int(),
+  placement: HtmlVisualPlacementSchema(), marker: z.string().optional(),
 });
 const TURN_ERROR = "html_render works only while a turn is running.";
 const DESCRIPTION = [
-  "Publish a self-contained HTML page inline in the Thread. The page is shown above your final reply, so call this before you write the reply, and do not restate the page in the reply.",
+  "Publish a self-contained HTML page inline in the Thread. By default the page is shown above your final reply, so call this before you write the reply, and do not restate the page in the reply.",
   "The page runs in a sandboxed frame. Put all styles and scripts inline. Remote URLs (http, https, CDNs, web fonts) never load. To show a local image, reference it by absolute file path (C:\\path\\chart.png, /home/me/chart.png, or file:///...) in src, href, or CSS url(); it is inlined as a data URI at publish time. Supported: png, jpg, jpeg, gif, webp, svg, avif, bmp, ico.",
   "There is no preview tool yet, so read your HTML once more before publishing: a script error shows a blank frame.",
   "Layout: leave the page background to the Thread (it is already var(--background)). Use fluid width. Do not add an outer card, border, or banner. Give charts and canvases a fixed pixel height. Do not use vh or other viewport-based heights; the frame sizes to your content up to height.",
   `Theme tokens on :root: ${HTML_VISUAL_THEME_TOKENS.join(" ")}. Use them so the page follows light and dark themes.`,
   `Limits: html up to ${HTML_VISUAL_MAX_HTML_BYTES.toLocaleString("en-US")} bytes after images are inlined; title up to ${HTML_VISUAL_MAX_TITLE_LENGTH} characters; height ${HTML_VISUAL_MIN_HEIGHT} to ${HTML_VISUAL_MAX_HEIGHT} px, default ${HTML_VISUAL_DEFAULT_HEIGHT}.`,
 ].join("\n\n");
+
+/** Markdown image line the web client swaps for the visual's frame. Escaping keeps a title's brackets from ending the alt text. */
+function visualMarker(title: string, messageId: string): string {
+  return `![${title.replace(/[\\[\]]/g, "\\$&")}](visual:${messageId})`;
+}
 
 /** Authority, publication and filesystem boundaries for the Visuals toolkit. */
 export interface VisualsToolkitDeps {
@@ -55,8 +63,10 @@ export function createVisualsToolkit(deps: VisualsToolkitDeps): McodeToolkit {
           }
           const visual = HtmlVisualSchema().parse({ title: input.title, html: inlined.html, maxHeight: input.height });
           call.signal.throwIfAborted();
-          const { messageId } = deps.visuals.acceptTurnVisual({ threadId: authority.sourceThreadId, turnId: authority.sourceTurnId, visual });
-          const result = HtmlRenderOutputSchema.parse({ messageId, title: visual.title, bytes, inlinedImages: inlined.count });
+          const { messageId } = deps.visuals.acceptTurnVisual({ threadId: authority.sourceThreadId, turnId: authority.sourceTurnId, visual, placement: input.placement });
+          const marker = input.placement === "inline" ? visualMarker(visual.title, messageId) : undefined;
+          const result = HtmlRenderOutputSchema.parse({ messageId, title: visual.title, bytes, inlinedImages: inlined.count, placement: input.placement, ...(marker && { marker }) });
+          if (marker) return structuredResult(result, `Published visual "${visual.title}". Put this line in your reply where the page should appear: ${marker}`);
           return structuredResult(result, `Published visual "${visual.title}" (${bytes.toLocaleString("en-US")} bytes, ${inlined.count} image${inlined.count === 1 ? "" : "s"} inlined). It is shown above your reply; do not restate it.`);
         } catch (error) {
           if (error instanceof McodeThreadControlDeniedError || error instanceof TurnVisualRejectedError) throw new Error(TURN_ERROR);
