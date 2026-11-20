@@ -388,6 +388,45 @@ describe("ClaudeProvider native background tasks", () => {
 });
 
 describe("ClaudeProvider background agents", () => {
+  it("stops a background Bash task through the pooled query after its launching turn ends", async () => {
+    const stopTask = vi.fn<(taskId: string) => Promise<void>>();
+    mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+      const stopped = Promise.withResolvers<string>();
+      const closed = Promise.withResolvers<void>();
+      stopTask.mockImplementation(async (taskId) => { stopped.resolve(taskId); });
+      const stream = (async function* () {
+        await prompt[Symbol.asyncIterator]().next();
+        yield { type: "system", subtype: "init", session_id: "sdk-provider-turn" };
+        yield { type: "assistant", parent_tool_use_id: null, message: { content: [
+          { type: "tool_use", id: "bash-call", name: "Bash", input: { command: "bun run build" } },
+        ] } };
+        yield { type: "user", parent_tool_use_id: null, tool_use_result: { backgroundTaskId: "bash-task" },
+          message: { content: [{ type: "tool_result", tool_use_id: "bash-call", content: "Backgrounded" }] } };
+        yield { type: "result", is_error: false, result: "launched", usage: { output_tokens: 1 } };
+        const taskId = await Promise.race([stopped.promise, closed.promise]);
+        if (taskId) yield { type: "system", subtype: "task_notification", task_id: taskId, status: "stopped", summary: "Stopped build" };
+        await closed.promise;
+      })();
+      return Object.assign(stream, { stopTask, close: () => closed.resolve() });
+    });
+    const events: ProviderRuntimeEvent[] = [];
+    const settleBackgroundTool = vi.fn(async () => {});
+    const provider = providerWith(events, { open: vi.fn(), settleBackgroundTool });
+    try {
+      await sendUserTurn(provider);
+      await vi.waitFor(() => expect(events.some(({ event }) => event.type === AgentEventType.Ended)).toBe(true));
+      await expect(provider.stopBackgroundTask("mcode-thread-provider", "bash-task")).resolves.toBe("stopped");
+      await vi.waitFor(() => expect(settleBackgroundTool).toHaveBeenCalledExactlyOnceWith({
+        providerId: "claude", threadId: "thread-provider", executionId: USER_EXECUTION_ID,
+        toolCallId: "bash-call", status: "cancelled", output: "Stopped build",
+      }));
+    } finally {
+      await provider.shutdown();
+    }
+    await expect(provider.stopBackgroundTask("mcode-thread-provider", "bash-task")).resolves.toBe("not-running");
+    expect(stopTask.mock.calls).toEqual([["bash-task"]]);
+  });
+
   const userEnded = (events: ProviderRuntimeEvent[]) =>
     events.some(({ event }) => event.type === AgentEventType.Ended && event.turnExecutionId === USER_EXECUTION_ID);
   const agentResults = (events: ProviderRuntimeEvent[]) =>

@@ -112,6 +112,8 @@ const transportDefaults: Partial<McodeTransport> = {
     childThreadId: "child-1",
     status: "interrupted",
   }),
+  listBackgroundCommands: vi.fn().mockResolvedValue([]),
+  stopBackgroundCommand: vi.fn().mockResolvedValue("stopped"),
   updateThreadTitle: vi.fn().mockResolvedValue(true),
   updateThreadSettings: vi.fn().mockResolvedValue(true),
   listAttention: vi.fn().mockResolvedValue([]),

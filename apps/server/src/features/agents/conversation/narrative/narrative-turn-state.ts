@@ -739,7 +739,8 @@ export class NarrativeTurnState {
    * Mark a running call the provider keeps alive after its turn ends. Turn
    * settlement then leaves it running until its own late result arrives.
    */
-  markToolCallBackground(threadId: string, toolCallId: string, kind?: Extract<AgentEvent, { type: "toolBackgrounded" }>["kind"], label?: string): void {
+  markToolCallBackground(threadId: string, toolCallId: string, kind?: Extract<AgentEvent, { type: "toolBackgrounded" }>["kind"],
+    label?: string, taskId?: string): void {
     this.assertThread(threadId);
     this.removeAgentFromStack(threadId, toolCallId);
     const toolCall = this.mutableBufferedToolCall(threadId, toolCallId);
@@ -747,6 +748,7 @@ export class NarrativeTurnState {
     toolCall.background = true;
     toolCall.backgroundKind = kind;
     toolCall.backgroundLabel = label;
+    toolCall.backgroundTaskId = taskId;
     this.recordRecoveryChange(this.toolCallRecoveryItem(toolCall));
   }
 
@@ -988,6 +990,7 @@ export class NarrativeTurnState {
       ...(toolCall.background ? { background: true } : {}),
       ...(toolCall.backgroundKind ? { background_kind: toolCall.backgroundKind } : {}),
       ...(toolCall.backgroundLabel !== undefined ? { background_label: toolCall.backgroundLabel } : {}),
+      ...(toolCall.backgroundTaskId !== undefined ? { background_task_id: toolCall.backgroundTaskId } : {}),
     };
   }
 

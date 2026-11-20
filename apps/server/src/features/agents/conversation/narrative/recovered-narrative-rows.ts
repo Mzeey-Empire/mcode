@@ -89,6 +89,7 @@ private recoveredToolCallState(item: RecoveredToolCallItem) {
       ...(record.phase ? { phase: record.phase } : {}),
       ...(record.background === true ? { background: true } : {}),
       backgroundKind: record.background_kind,
+      backgroundTaskId: record.background_task_id,
       backgroundLabel: record.background_label,
       startedAt: record.started_at,
       completedAt: this.optionalRecoveryValue(record.completed_at),

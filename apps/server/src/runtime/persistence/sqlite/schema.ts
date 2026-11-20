@@ -180,6 +180,13 @@ export const threads = sqliteTable(
   ],
 );
 
+/** Background command calls a thread is waiting for. */
+export const backgroundCommandAwaits = sqliteTable("background_command_awaits", {
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  toolCallId: text("tool_call_id").notNull(),
+  awaitedAt: text("awaited_at").notNull(),
+}, (table) => [primaryKey({ columns: [table.threadId, table.toolCallId] })]);
+
 /** One user-authorized resume deadline per thread. */
 export const turnResumeSchedules = sqliteTable("turn_resume_schedules", {
   threadId: text("thread_id").primaryKey().notNull().references(() => threads.id, { onDelete: "cascade" }),

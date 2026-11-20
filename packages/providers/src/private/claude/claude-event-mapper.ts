@@ -19,6 +19,7 @@ type Message = Record<string, unknown>;
 /** A timeline row retained until the native task settles. */
 export interface HeldBackgroundCall {
   executionId: string;
+  kind: "command" | "subagent";
   taskId?: string;
   startedAt: number;
   label: string;
@@ -113,7 +114,7 @@ export interface ClaudeEventMapperCallbacks {
   /** Execution whose turn is open now; undefined between turns. */
   liveExecutionId(): string | undefined;
   /** Settles a background call whose launching turn has already ended. */
-  settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "threadId" | "providerId">): void;
+  settleBackgroundTool(settlement: Omit<ProviderBackgroundToolSettlement, "threadId" | "providerId">): Promise<void> | void;
 }
 
 /** Usage metrics read from a successful Claude result message. */
@@ -303,16 +304,21 @@ export class ClaudeEventMapper {
   }
 
   /** Stops every held call because the SDK process that runs them is gone. */
-  settleAllBackgroundTools(): void {
+  settleAllBackgroundTools(): { commandIds: string[]; settlements: Promise<void>[] } {
     this.nativeSource = {};
     this.backgroundDirty = true;
     this.liveTasks = new Map();
     this.levelFirstSeenAt.clear();
     this.launchLabels.clear();
+    const commandIds: string[] = [];
+    const settlements: Promise<void>[] = [];
     for (const [toolCallId, row] of this.backgroundTools) {
       this.backgroundTools.delete(toolCallId);
-      this.settleBackgroundTool(toolCallId, row.executionId, "cancelled", SESSION_ENDED_OUTPUT);
+      if (row.kind === "command") commandIds.push(toolCallId);
+      const settlement = this.settleBackgroundTool(toolCallId, row.executionId, "cancelled", SESSION_ENDED_OUTPUT);
+      if (settlement) settlements.push(settlement);
     }
+    return { commandIds, settlements };
   }
 
   /** Native occupancy, independent of the turn's timeline rows. */
@@ -355,6 +361,11 @@ export class ClaudeEventMapper {
     return undefined;
   }
 
+  /** Whether this query still owns the launch for the given SDK task. */
+  hasHeldBackgroundTask(taskId: string): boolean {
+    return this.heldCallForTask(taskId) !== undefined;
+  }
+
   /** Notifies only when native background tasks have changed. */
   flushBackgroundChange(changed: () => void): void {
     if (!this.backgroundDirty) return;
@@ -379,10 +390,9 @@ export class ClaudeEventMapper {
     });
   }
 
-  private settleBackgroundTool(toolCallId: string, executionId: string, status: BackgroundToolStatus, output: string): void {
+  private settleBackgroundTool(toolCallId: string, executionId: string, status: BackgroundToolStatus, output: string): Promise<void> | void {
     if (executionId !== this.callbacks.liveExecutionId()) {
-      this.callbacks.settleBackgroundTool({ executionId, toolCallId, status, output });
-      return;
+      return this.callbacks.settleBackgroundTool({ executionId, toolCallId, status, output });
     }
     this.emit({
       type: AgentEventType.ToolResult,
@@ -880,10 +890,12 @@ export class ClaudeEventMapper {
       throw new Error("Claude background tool bound exceeded");
     const labels = this.launchLabels.get(toolCallId);
     this.launchLabels.delete(toolCallId);
-    this.backgroundTools.set(toolCallId, { executionId, taskId, startedAt: Date.now(), label: labels?.task ?? toolName });
+    const kind = toolName === "Agent" ? "subagent" : "command";
+    this.backgroundTools.set(toolCallId, { executionId, kind, taskId, startedAt: Date.now(), label: labels?.task ?? toolName });
     this.backgroundDirty = true;
     this.emit({ type: AgentEventType.ToolBackgrounded, threadId: this.threadId, toolCallId,
-      kind: toolName === "Agent" ? "subagent" : "command", label: labels?.call ?? "" });
+      kind, label: labels?.call ?? "",
+      ...(validIdentity(taskId, 256) && { taskId }) });
   }
   private streamEvent(message: Message): ClaudeMapOutcome {
     const event = objectValue(message.event);
@@ -1067,8 +1079,8 @@ function launchLabel(value: string): string {
   if (end < value.length && last >= 0xD800 && last <= 0xDBFF) end--;
   return value.slice(0, end);
 }
-function validIdentity(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= 512 ? value : undefined;
+function validIdentity(value: unknown, maxLength = 512): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maxLength ? value : undefined;
 }
 /** The first piece keeps the native id, so events saved before chunking existed keep their replay identity. */
 function chunkNativeEventId(nativeEventId: string | undefined, chunk: number): string | undefined {

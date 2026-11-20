@@ -232,6 +232,8 @@ export interface ProviderTurnPort {
    * event route is already retired, so the result cannot use `events.submit`.
    */
   settleBackgroundTool(settlement: ProviderBackgroundToolSettlement): Promise<void>;
+  /** Report commands cancelled by provider session teardown for the shutdown warning. */
+  recordStoppedBackgroundCommands?(threadId: string, toolCallIds: readonly string[]): void;
 }
 
 /** The final outcome of a background tool call whose launching turn has ended. */

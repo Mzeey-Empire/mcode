@@ -49,6 +49,7 @@ import type { ConversationOlderPage, ConversationOlderPageRequest } from "@mcode
 import type { ConversationTail } from "@mcode/contracts/models/conversation-tail";
 import type { SubagentRoster, SubagentDetail } from "@mcode/contracts/models/subagent-roster";
 import type { CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
+import type { BackgroundCommand } from "@mcode/contracts/models/tool-call-record";
 import type { SetThreadSubscriptionsInput, SetThreadSubscriptionsResult } from "@mcode/contracts/ws/methods";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import type { PrDraft, CreatePrResult, ChecksStatus } from "@mcode/contracts/github";
@@ -1221,6 +1222,9 @@ export function createWsTransport(
         owningParentThreadId,
         childThreadId,
       }),
+    listBackgroundCommands: (threadId) => rpc<BackgroundCommand[]>("backgroundCommand.list", { threadId }),
+    stopBackgroundCommand: (threadId, toolCallId) =>
+      rpc<"stopped" | "not-running">("backgroundCommand.stop", { threadId, toolCallId }),
     loadOlderConversationPage: (request: ConversationOlderPageRequest) =>
       rpc<ConversationOlderPage>("conversation.olderPage", request),
     loadNewerConversationPage: (request: ConversationNewerPageRequest) =>

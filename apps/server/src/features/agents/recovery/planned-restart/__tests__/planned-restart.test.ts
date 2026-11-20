@@ -6,6 +6,7 @@ import * as NodeEvents from "node:events";
 import type { Database } from "bun:sqlite";
 import { container } from "tsyringe";
 import { logger } from "@mcode/shared";
+import { isBackgroundRestartNotice } from "@mcode/shared/planned-restart";
 import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { IAgentProvider, IProviderRegistry, TurnRequest } from "@mcode/contracts/providers/interfaces";
@@ -16,6 +17,7 @@ import { AgentService } from "../../../orchestration/agent-service.js";
 import { AgentEventPublicationRegistry } from "../../../orchestration/agent-event-publication-registry.js";
 import type { ProviderHostPorts } from "@mcode/providers";
 import { BackgroundToolSettlementEffect } from "../../../turns/background-tool-settlement-effect.js";
+import { BackgroundCommandStore } from "../../../background/background-command-store.js";
 import { CanonicalAgentBoundary } from "../../../canonical/canonical-agent-boundary.js";
 import { TurnRecoveryService } from "../../turn-recovery-service.js";
 import { sendRecoveryAttempt } from "../../../transport/turn-message-dispatch.js";
@@ -551,6 +553,28 @@ describe("planned restart runtime", () => {
     expect(asked).toEqual([]);
   }, 30_000);
 
+  it("releases every dropped wake when one stopped-command warning fails to write", async () => {
+    const fixture = await openWorkerServiceFixture("claude");
+    try {
+      new PlannedRestartStore().record({ version: 1, resumes: [], wakes: [
+        { threadId: "dropped-a", anchorTurnId: "turn-a", commandIds: ["call-a"] },
+        { threadId: "dropped-b", anchorTurnId: "turn-b", commandIds: ["call-b"] },
+      ] });
+      const noteRestartOrphans = vi.fn(async (threadId: string) => {
+        if (threadId === "dropped-a") throw new Error("Database writer admission is full");
+      });
+      const start = new PlannedRestart(fixture.canonical, container.resolve(TurnRecoveryService), fixture.messages, { noteRestartOrphans });
+      start.load();
+      vi.spyOn(PlannedRestartStore.prototype, "clear").mockReturnValueOnce(false);
+
+      await expect(start.continueAtStartup(async () => {})).rejects.toThrow("Could not record background restart warnings");
+      expect(noteRestartOrphans.mock.calls.map(([threadId]) => threadId)).toEqual(["dropped-a", "dropped-b"]);
+      expect([start.isPending("dropped-a"), start.isPending("dropped-b")]).toEqual([false, false]);
+    } finally {
+      await fixture.close();
+    }
+  }, 30_000);
+
   it("rechecks the admission guard after an ordinary turn finishes during wake preparation", async () => {
     await open("race");
     const [threadId] = await createThreads(1);
@@ -629,6 +653,10 @@ describe("planned restart runtime", () => {
 
 
 describe("planned restart capture of held work", () => {
+  function restartCommands() {
+    return new BackgroundCommandStore(container.resolve<Database>("Database"), container.resolve(ApplicationDatabaseWriter));
+  }
+
   it("aborts a failed refresh before settlement and preserves the wake for the following start", async () => {
     let fixture = await openWorkerServiceFixture("claude");
     try {
@@ -664,7 +692,7 @@ describe("planned restart capture of held work", () => {
       settlement.bindAcceptedProgress(fixture.workers.progress!);
       const start = container.resolve(PlannedRestart);
       start.load(fixture.canonical.listHeldBackgroundToolCalls());
-      await settlement.settleOrphansAtStartup();
+      await settlement.settleOrphansAtStartup(restartCommands(), (id) => start.hasPendingWake(id));
       const asked: string[] = [];
       await start.continueAtStartup(async (command) => { asked.push(command.threadId); });
       expect(asked).toEqual([threadId]);
@@ -675,7 +703,8 @@ describe("planned restart capture of held work", () => {
   }, 30_000);
 
   async function endWork(fixture: Awaited<ReturnType<typeof openWorkerServiceFixture>>, status: string): Promise<void> {
-    const turn = fixture.sent[0]!;
+    const turn = fixture.sent.at(-1);
+    if (!turn) throw new Error("Expected a dispatched turn");
     const route = { threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId };
     if (status === "completed" || status === "crash") {
       await fixture.emit({ type: "turnComplete", ...route, reason: "end_turn",
@@ -694,16 +723,87 @@ describe("planned restart capture of held work", () => {
     }
   }
 
+  async function recoverHeldCommands(fixture: Awaited<ReturnType<typeof openWorkerServiceFixture>>, status: string) {
+    await container.resolve(TurnRecoveryService).reconcileOnStartup();
+    const settlement = container.resolve(BackgroundToolSettlementEffect);
+    settlement.bindAcceptedProgress(fixture.workers.progress!);
+    const start = container.resolve(PlannedRestart);
+    const held = fixture.canonical.listHeldBackgroundToolCalls();
+    const threadId = fixture.thread.id;
+    const willContinue = ["running", "completed"].includes(status);
+    if (willContinue) expect(held).toMatchObject([{ threadId, toolCallId: "review", kind: "command" }]);
+    start.load(held);
+    expect(start.hasPendingWake(threadId)).toBe(status === "completed");
+    await settlement.settleOrphansAtStartup(restartCommands(), (id) => start.hasPendingWake(id));
+    if (willContinue) {
+      expect(fixture.messages.listByThread(threadId, 100).messages.filter(isBackgroundRestartNotice))
+        .toHaveLength(status === "running" ? 1 : 0);
+    }
+    return start;
+  }
+
+  it.each(["invalid anchor", "failed clear", "shutdown"])("keeps the stopped-command warning when a wake is dropped by %s", async (reason) => {
+    const fixture = await openWorkerServiceFixture("claude");
+    try {
+      const threadId = fixture.thread.id;
+      await fixture.service.sendMessage({ threadId, content: "Build in the background",
+        provider: "claude", model: "claude-sonnet-4-6", permissionMode: "default" });
+      const route = { threadId, turnExecutionId: fixture.sent[0]!.turnExecutionId };
+      await fixture.emit({ type: "toolUse", ...route, toolCallId: "build", toolName: "Bash", toolInput: { command: "bun run build" } });
+      await fixture.emit({ type: "toolBackgrounded", ...route, toolCallId: "build", kind: "command", label: "bun run build" });
+      await endWork(fixture, "completed");
+      await fixture.workers.progress!.waitForTerminalSaves(threadId);
+      await vi.waitFor(() => expect(fixture.workers.owner.current(threadId)).toBeUndefined());
+
+      const start = container.resolve(PlannedRestart);
+      new PlannedRestartStore().record({ version: 1, resumes: [], wakes: [] });
+      start.load(fixture.canonical.listHeldBackgroundToolCalls());
+      expect(start.hasPendingWake(threadId)).toBe(true);
+      const settlement = container.resolve(BackgroundToolSettlementEffect);
+      settlement.bindAcceptedProgress(fixture.workers.progress!);
+      await settlement.settleOrphansAtStartup(restartCommands(), (id) => start.hasPendingWake(id));
+      expect(fixture.messages.listByThread(threadId, 100).messages.filter(isBackgroundRestartNotice)).toEqual([]);
+      if (reason === "invalid anchor") {
+        await fixture.service.sendMessage({ threadId, content: "I moved on" });
+        await endWork(fixture, "completed");
+        await fixture.workers.progress!.waitForTerminalSaves(threadId);
+      } else if (reason === "failed clear") {
+        vi.spyOn(PlannedRestartStore.prototype, "clear").mockReturnValueOnce(false);
+      } else {
+        start.beginShutdown();
+        await start.record();
+      }
+
+      const asked: string[] = [];
+      await start.continueAtStartup(async (command) => { asked.push(command.threadId); });
+      expect(asked).toEqual([]);
+      expect(fixture.messages.listByThread(threadId, 100).messages.filter(isBackgroundRestartNotice)
+        .map((message) => message.content)).toEqual(["Background commands were stopped when Mcode restarted."]);
+    } finally {
+      await finishDispatches();
+      await fixture.close();
+    }
+  }, 30_000);
+
   it.each(["running", "completed", "usage_limit", "cancelled", "crash"] as const)(
     "decides from saved work after shutdown begins: %s", async (status) => {
       let fixture = await openWorkerServiceFixture("claude");
       try {
-        await fixture.service.sendMessage({ threadId: fixture.thread.id, content: "Review in the background",
-          provider: "claude", model: "claude-sonnet-4-6", permissionMode: "default" });
+        const message = { threadId: fixture.thread.id, provider: "claude", model: "claude-sonnet-4-6", permissionMode: "default" } as const;
+        await fixture.service.sendMessage({ ...message, content: "Review in the background" });
         const turn = fixture.sent[0]!;
         const route = { threadId: fixture.thread.id, turnExecutionId: turn.turnExecutionId };
-        await fixture.emit({ type: "toolUse", ...route, toolCallId: "review", toolName: "Agent", toolInput: { description: "Review" } });
-        await fixture.emit({ type: "toolBackgrounded", ...route, toolCallId: "review", kind: "subagent", label: "Review" });
+        await fixture.emit({ type: "toolUse", ...route, toolCallId: "review", toolName: "Bash", toolInput: { command: "bun run review" } });
+        await fixture.emit({ type: "toolBackgrounded", ...route, toolCallId: "review", kind: "command", label: "bun run review" });
+        if (status === "running") {
+          // A command held by an earlier turn can survive the newer turn's interruption.
+          await endWork(fixture, "completed");
+          await fixture.workers.progress!.waitForTerminalSaves(fixture.thread.id);
+          await vi.waitFor(() => expect(fixture.workers.owner.current(fixture.thread.id)).toBeUndefined());
+          await fixture.service.sendMessage({ ...message, content: "Keep working while the review runs" });
+        }
+        const latest = fixture.sent.at(-1);
+        if (!latest) throw new Error("Expected a dispatched turn");
         const restart = container.resolve(PlannedRestart);
         if (status !== "crash") {
           fixture.service.beginShutdown();
@@ -713,17 +813,12 @@ describe("planned restart capture of held work", () => {
         await endWork(fixture, status);
         await fixture.workers.progress!.waitForTerminalSaves(fixture.thread.id);
         await fixture.workers.progress!.waitForSaved(fixture.thread.id);
-        if (status === "running") expect(restart.hasPendingResume(fixture.thread.id, turn.turnId)).toBe(true);
+        if (status === "running") expect(restart.hasPendingResume(fixture.thread.id, latest.turnId)).toBe(true);
         const directory = fixture.directory;
         const threadId = fixture.thread.id;
         await fixture.close({ keepDirectory: true });
         fixture = await openWorkerServiceFixture("claude", { directory, threadId });
-        await container.resolve(TurnRecoveryService).reconcileOnStartup();
-        const settlement = container.resolve(BackgroundToolSettlementEffect);
-        settlement.bindAcceptedProgress(fixture.workers.progress!);
-        const start = container.resolve(PlannedRestart);
-        start.load(fixture.canonical.listHeldBackgroundToolCalls());
-        await settlement.settleOrphansAtStartup();
+        const start = await recoverHeldCommands(fixture, status);
         const asked: SendMessageCommand[] = [];
         if (status === "completed") {
           // The settled calls are gone by the next launch; the rewritten wakes must survive without them.
@@ -731,7 +826,7 @@ describe("planned restart capture of held work", () => {
           fixture = await openWorkerServiceFixture("claude", { directory, threadId });
         }
         const following = status === "completed"
-          ? new PlannedRestart(fixture.canonical, container.resolve(TurnRecoveryService), fixture.messages) : start;
+          ? new PlannedRestart(fixture.canonical, container.resolve(TurnRecoveryService), fixture.messages, restartCommands()) : start;
         await following.continueAtStartup(async (command) => { asked.push(command); });
         expect(asked.map((command) => command.threadId))
           .toEqual(status === "running" || status === "completed" ? [threadId] : []);

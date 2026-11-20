@@ -1,4 +1,5 @@
-import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { AgentItem, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
+import type { BackgroundCallKind } from "@mcode/contracts/models/tool-call-record";
 import type { CanonicalAcceptedProgress } from "../canonical/canonical-accepted-progress.js";
 import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import { subscribeCommittedCanonicalEvents } from "../canonical/committed-canonical-events.js";
@@ -58,7 +59,7 @@ export class AgentWorkloadService implements AgentWorkload {
     return subscribe((events) => {
       // A late settlement also saves its tool call record with `background: true`, so tool
       // results need no separate check.
-      const threads = new Set(events.filter(touchesBackgroundCalls).map((event) => event.routing.threadId));
+      const threads = new Set(events.filter((event) => touchesBackgroundCalls(event)).map((event) => event.routing.threadId));
       for (const threadId of threads) this.refresh(threadId);
     });
   }
@@ -100,27 +101,36 @@ function launchesBackgroundSubagent(event: Pick<CanonicalAgentEventEnvelope, "pa
   if (payload.type === "publication.recorded") {
     return payload.event.type === "toolBackgrounded" && payload.event.kind === "subagent";
   }
-  const record = toolCallRecordOf(event);
-  return isBackgroundRecord(record) && "background_kind" in record && record.background_kind === "subagent"
-    && "status" in record && record.status === "running";
+  const record = payload.type === "item.recorded" ? canonicalBackgroundRecord(payload.item) : undefined;
+  return record?.background_kind === "subagent" && record.status === "running";
 }
 
-function toolCallRecordOf(event: Pick<CanonicalAgentEventEnvelope, "payload">): unknown {
+/** Read background metadata from both canonical tool records and recovery projections. */
+export function canonicalBackgroundRecord(item: AgentItem): { id?: unknown; background_kind?: unknown; status?: unknown } | undefined {
+  if (item.kind !== "tool-call") return undefined;
+  const payload = item.payload;
+  if (payload.projection === "toolCall") return backgroundRecord(payload.record);
+  if (payload.projection !== "narrativeRecovery" && payload.projection !== "narrativeRecoveryDiscarded") return undefined;
+  const narrative: unknown = payload.narrative;
+  if (typeof narrative === "object" && narrative !== null && "record" in narrative) return backgroundRecord(narrative.record);
+}
+
+/** Match both the launch publication and canonical records written through late settlement. */
+export function touchesBackgroundCalls(event: Pick<CanonicalAgentEventEnvelope, "payload">, kind?: BackgroundCallKind): boolean {
   const payload = event.payload;
-  if (payload.type !== "item.recorded" || payload.item.kind !== "tool-call") return undefined;
-  const item = payload.item.payload;
-  if (item.projection === "toolCall") return item.record;
-  if (item.projection !== "narrativeRecovery" && item.projection !== "narrativeRecoveryDiscarded") return undefined;
-  const narrative: unknown = item.narrative;
-  return typeof narrative === "object" && narrative !== null && "record" in narrative ? narrative.record : undefined;
+  if (payload.type === "publication.recorded") {
+    return payload.event.type === "toolBackgrounded" && (kind === undefined || payload.event.kind === kind);
+  }
+  if (payload.type !== "item.recorded") return false;
+  const record = canonicalBackgroundRecord(payload.item);
+  return record !== undefined && (kind === undefined || record.background_kind === kind);
 }
 
-function touchesBackgroundCalls(event: Pick<CanonicalAgentEventEnvelope, "payload">): boolean {
-  const payload = event.payload;
-  if (payload.type === "publication.recorded") return payload.event.type === "toolBackgrounded";
-  return isBackgroundRecord(toolCallRecordOf(event));
-}
-
-function isBackgroundRecord(record: unknown): record is object {
-  return typeof record === "object" && record !== null && "background" in record && record.background === true;
+function backgroundRecord(record: unknown) {
+  if (typeof record !== "object" || record === null || !("background" in record) || record.background !== true) return undefined;
+  return {
+    id: "id" in record ? record.id : undefined,
+    background_kind: "background_kind" in record ? record.background_kind : undefined,
+    status: "status" in record ? record.status : undefined,
+  };
 }

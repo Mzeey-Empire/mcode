@@ -224,6 +224,10 @@ function routeTerminalDiagnostics(
 
 /** Service dependencies for the router. */
 export interface RouterDeps {
+  /** Lists a thread's background commands for the thread view. */
+  backgroundCommands: Pick<import("../../features/agents/background/background-command-store.js").BackgroundCommandStore, "list">;
+  /** Stops one background command through its provider, or settles it cancelled when no session owns it. */
+  stopBackgroundCommand(threadId: string, toolCallId: string): Promise<"stopped" | "not-running">;
   /** Immutable host facts required by provider transport routes. */
   runtime: Pick<HostRuntime, "platform">;
   /** Routes browser operations to renderer hosts when visible-browser automation is enabled. */

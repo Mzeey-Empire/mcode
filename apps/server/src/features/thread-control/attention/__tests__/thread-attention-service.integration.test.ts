@@ -21,6 +21,7 @@ import { threadDescendantsSource } from "../thread-descendants.js";
 import { CanonicalAgentBoundary } from "../../../agents/canonical/canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../../../agents/canonical/canonical-agent-writer-client.js";
 import { SubagentRosterService } from "../../../agents/collaboration/subagent-roster-service.js";
+import { BackgroundCommandStore } from "../../../agents/background/background-command-store.js";
 import { NarrativeStore } from "../../../agents/conversation/narrative/narrative-store.js";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
 import { ToolCallRecordRepo } from "../../../agents/tools/persistence/tool-call-record-repo.js";
@@ -64,7 +65,7 @@ async function fixture() {
   const canonical = new CanonicalAgentBoundary(reader, writer, new CanonicalAgentWriterClient(writer), () => {});
   const roster = new SubagentRosterService(canonical, new ProviderRegistry([]), narrative, reader);
   roster.bindPendingInput(approvals, new ThreadControlApprovalRepo(reader, writer));
-  const rosterSource = threadDescendantsSource(roster, subagents);
+  const rosterSource = threadDescendantsSource(roster, subagents, new BackgroundCommandStore(reader, writer));
   const descendants = {
     descendants: (id: string) => coordinators.has(id) ? "running" as const : rosterSource.descendants(id),
     candidates: () => new Set([...coordinators, ...rosterSource.candidates()]),

@@ -30,6 +30,8 @@ function admissionFixture(sendMessage: AgentRouterDeps["agentService"]["sendMess
 } {
   const unused = (): never => { throw new Error("Unexpected dependency in admission-only route"); };
   const deps: AgentRouterDeps = {
+    backgroundCommands: { list: unused },
+    stopBackgroundCommand: unused,
     agentService: { sendMessage, createAndSend: unused, stopSession: unused, runtimeAccess: unused },
     approvalService: { respondToApproval: unused, listPendingApprovals: unused },
     hookExecutionRepo: { listByMessage: unused },

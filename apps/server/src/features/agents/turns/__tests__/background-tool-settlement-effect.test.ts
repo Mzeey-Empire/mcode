@@ -49,7 +49,9 @@ describe("BackgroundToolSettlementEffect", () => {
     ];
     const { effect, steps, acceptLateToolResult, bind } = harness(held);
     bind();
-    await expect(effect.settleOrphansAtStartup()).resolves.toEqual(held);
+    const noteRestartOrphans = vi.fn();
+    await expect(effect.settleOrphansAtStartup({ noteRestartOrphans })).resolves.toEqual(held);
+    expect(noteRestartOrphans.mock.calls).toEqual([]);
     expect(acceptLateToolResult).toHaveBeenCalledWith("first", EXECUTION_ID,
       { toolCallId: "a", status: "cancelled", output: ORPHANED_BACKGROUND_TOOL_OUTPUT });
     expect(steps).toEqual([

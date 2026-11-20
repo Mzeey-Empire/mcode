@@ -56,6 +56,16 @@ const RUN_STATUS_RULES: readonly RunStatusRule[] = [
   { icon: "layers", label: (input) => (input.answering ? "Answering" : undefined) },
 ];
 
+/**
+ * The status line after the thread's own turn ended. `running` covers awaited background commands
+ * as well as subagents, and cannot tell them apart, so it names neither.
+ */
+export function descendantsRunStatus(descendants: NonNullable<RunHoldingSignals["descendants"]>): RunStatus {
+  return descendants === "needs-you"
+    ? { label: "Subagent needs you", icon: "layers" }
+    : { label: "Waiting on background work", icon: "layers" };
+}
+
 /** Picks the status line label and icon for a running turn. */
 export function deriveRunStatus(input: RunStatusInput): RunStatus {
   for (const rule of RUN_STATUS_RULES) {

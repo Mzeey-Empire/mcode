@@ -51,6 +51,8 @@ type AgentRpcMethod =
   | "agent.answerQuestions"
   | "agent.dismissPlanQuestions"
   | "agent.child.stop"
+  | "backgroundCommand.list"
+  | "backgroundCommand.stop"
   | "subagent.roster"
   | "subagent.detail"
   | "plan.saveVersion"
@@ -82,6 +84,8 @@ type AgentRpcParams<Method extends AgentRpcMethod> = Method extends "subagent.ro
 
 /** Defines the services required to route validated Agent RPC calls. */
 export interface AgentRouterDeps {
+  backgroundCommands: Pick<import("../background/background-command-store.js").BackgroundCommandStore, "list">;
+  stopBackgroundCommand(threadId: string, toolCallId: string): Promise<"stopped" | "not-running">;
   agentWorkload: import("../workload/agent-workload.js").AgentWorkload;
   canonicalProgress?: Pick<import("../canonical/canonical-accepted-progress.js").CanonicalAcceptedProgress,
     "retry" | "getTasks">;
@@ -202,6 +206,8 @@ const agentHandlers: AgentRpcHandlerMap = {
   },
   "agent.dismissPlanQuestions": (deps, params) => deps.planTurnService.dismissQuestions(params.threadId),
   "agent.child.stop": (deps, params) => deps.subagentRosterService.stop(params),
+  "backgroundCommand.list": (deps, { threadId }) => deps.backgroundCommands.list(threadId, { running: true }),
+  "backgroundCommand.stop": (deps, { threadId, toolCallId }) => deps.stopBackgroundCommand(threadId, toolCallId),
   "subagent.roster": (deps, params) => deps.subagentRosterService.loadRoster(params),
   "subagent.detail": (deps, params) => deps.subagentRosterService.loadDetail(params),
   "plan.saveVersion": (deps, params) => deps.planService.saveVersion(params),

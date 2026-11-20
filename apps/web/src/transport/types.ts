@@ -26,7 +26,7 @@ import type { PullRequestTargetsListParams, PullRequestTargetsListResult, PrInfo
 import type { ProviderCatalogRequest, ProviderCatalogSnapshot } from "@mcode/contracts/providers/capability-catalog";
 import type { PermissionMode, InteractionMode, OrchestrationMode, DevinMode } from "@mcode/contracts/models/enums";
 import type { ReasoningLevel, Settings, PartialSettings } from "@mcode/contracts/models/settings";
-import type { ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
+import type { BackgroundCommand, ToolCallRecord } from "@mcode/contracts/models/tool-call-record";
 import type { ThoughtSegmentRecord } from "@mcode/contracts/models/thought-segment";
 import type { HookExecutionRecord } from "@mcode/contracts/models/hook-execution";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
@@ -454,6 +454,10 @@ export interface McodeTransport {
     owningParentThreadId: string,
     childThreadId: string,
   ): Promise<CanonicalSubagentStopResult>;
+  /** List the background commands still running in one thread, awaited or not. */
+  listBackgroundCommands(threadId: string): Promise<BackgroundCommand[]>;
+  /** Ask the provider to stop the background command started by one tool call. */
+  stopBackgroundCommand(threadId: string, toolCallId: string): Promise<"stopped" | "not-running">;
   /** Fetch one identity-bound and byte-bounded page of older conversation history. */
   loadOlderConversationPage(request: ConversationOlderPageRequest): Promise<ConversationOlderPage>;
   /** Fetch one identity-bound and byte-bounded page of newer conversation history. */

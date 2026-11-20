@@ -3,7 +3,7 @@ import { AgentEventSchema, AgentEventType } from "../agent-event.js";
 import { ProviderRuntimeEventSchema } from "../provider-runtime-event.js";
 
 it("validates background call classification and bounded labels", () => {
-  const event = { type: "toolBackgrounded", threadId: "t", toolCallId: "bg", kind: "subagent", label: "Investigate" };
+  const event = { type: "toolBackgrounded", threadId: "t", toolCallId: "bg", kind: "subagent", label: "Investigate", taskId: "task-1" };
   expect(AgentEventSchema().parse(event)).toEqual(event);
   expect(AgentEventSchema().safeParse({ ...event, kind: "unknown" }).success).toBe(false);
   expect(AgentEventSchema().safeParse({ ...event, label: "x".repeat(501) }).success).toBe(false);

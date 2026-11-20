@@ -5,6 +5,7 @@ import type {
 } from "@mcode/providers";
 import type { McodeMcpServer } from "./mcode-mcp-server.js";
 import type { McodeSessionAuthority } from "./mcode-session-authority.js";
+import { providerReportsBackgroundCommands } from "./toolkits/background-toolkit.js";
 
 /** Dependencies for the Provider-facing `mcode` port. */
 export interface McodeProviderPortOptions {
@@ -22,8 +23,9 @@ export class McodeProviderPort implements ProviderMcodePort {
   async attach(request: ProviderMcodeAttachRequest): Promise<ProviderMcodeAttachment | null> {
     const url = this.options.server().endpoint();
     if (url === null) return null;
-    const toolkits = { browser: this.options.isBrowserConfigured(), threadControl: request.threadControl, visuals: request.threadControl };
-    if (!toolkits.browser && !toolkits.threadControl) return null;
+    const toolkits = { browser: this.options.isBrowserConfigured(), threadControl: request.threadControl, visuals: request.threadControl,
+      background: providerReportsBackgroundCommands(request.providerId) };
+    if (!toolkits.browser && !toolkits.threadControl && !toolkits.background) return null;
     const { token } = this.options.authority.attach(request);
     return { serverName: "mcode", url, token, toolkits };
   }

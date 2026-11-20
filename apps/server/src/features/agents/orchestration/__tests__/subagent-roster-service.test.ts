@@ -124,7 +124,8 @@ describe("SubagentRosterService", () => {
     call("foreground", "message");
     expect(service.loadRoster(request).entries.map(({ status }) => status)).toEqual(["running"]);
     expect(service.loadLiveStatuses("parent")).toEqual([]);
-    const source = threadDescendantsSource(service, { backgroundSubagentThreadIds: () => new Set(["background-parent"]) });
+    const source = threadDescendantsSource(service, { backgroundSubagentThreadIds: () => new Set(["background-parent"]) },
+      { hasAwaitedRunning: () => false, threadsWithAwaitedRunning: () => new Set() });
     expect(source.descendants("parent")).toBe("none");
     expect(source.descendants("background-parent")).toBe("running");
     expect(source.candidates()).toEqual(new Set(["background-parent"]));

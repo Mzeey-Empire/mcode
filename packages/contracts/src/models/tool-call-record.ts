@@ -319,6 +319,7 @@ export const ToolCallRecordSchema = lazySchema(() => z.object({
    */
   background: z.boolean().optional(),
   background_kind: BackgroundCallKindSchema().optional(),
+  background_task_id: z.string().max(256).optional(),
   background_label: z.string().max(500).optional(),
   started_at: z.string(),
   completed_at: z.string().nullable(),
@@ -327,3 +328,16 @@ export const ToolCallRecordSchema = lazySchema(() => z.object({
 
 /** Persisted tool call record linked to an assistant message. */
 export type ToolCallRecord = z.infer<ReturnType<typeof ToolCallRecordSchema>>;
+
+/** Canonical background command and its thread's current wait mark. */
+export const BackgroundCommandSchema = lazySchema(() => z.object({
+  toolCallId: z.string(),
+  taskId: z.string().max(256).nullable(),
+  label: z.string(),
+  startedAt: z.string(),
+  status: ToolCallStatusSchema,
+  awaited: z.boolean(),
+}));
+
+/** Background command returned to thread clients. */
+export type BackgroundCommand = z.infer<ReturnType<typeof BackgroundCommandSchema>>;

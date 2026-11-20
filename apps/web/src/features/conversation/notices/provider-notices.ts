@@ -1,8 +1,9 @@
+import { isBackgroundRestartNotice } from "@mcode/shared/planned-restart";
 import type { Message } from "@/transport";
 
 /** Hides routine provider updates while retaining security and actionable diagnostics. */
 export function isRoutineProviderNotice(message: Message): boolean {
-  if (message.role !== "system") return false;
+  if (message.role !== "system" || isBackgroundRestartNotice(message)) return false;
   const kind = message.systemNotice?.kind;
   return kind === "warning" || kind === "configuration" || kind === "deprecation" || kind === "authentication-recovered";
 }
@@ -62,7 +63,8 @@ export function getComposerProviderNotice(
   message: Message,
   collectionSessionId?: string | null,
 ): ComposerProviderNotice | null {
-  if (message.role !== "system" || !message.systemNotice || isRoutineProviderNotice(message)) return null;
+  // The restart note belongs to the timeline only; it is not a provider warning to raise above the Composer.
+  if (message.role !== "system" || !message.systemNotice || isRoutineProviderNotice(message) || isBackgroundRestartNotice(message)) return null;
   const { kind, noticeKey, sessionId, toModel } = message.systemNotice;
   if (!isComposerNoticeKind(kind)) return null;
   const tone = COMPOSER_NOTICE_TONES[kind];

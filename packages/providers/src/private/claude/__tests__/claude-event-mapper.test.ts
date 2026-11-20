@@ -362,7 +362,7 @@ describe("ClaudeEventMapper background tools", () => {
     await mapper.map({ type: "assistant", message: { content: [{ type: "tool_use", id: "bg", name, input: { description, command } }] } });
     await mapper.map({ type: "user", tool_use_result: name === "Agent" ? { status: "async_launched", agentId: "task" } : { backgroundTaskId: "task" },
       message: { content: [{ type: "tool_result", tool_use_id: "bg", content: "started" }] } });
-    expect(events.at(-1)).toEqual({ type: "toolBackgrounded", threadId: "test", toolCallId: "bg", kind, label: expected });
+    expect(events.at(-1)).toEqual({ type: "toolBackgrounded", threadId: "test", toolCallId: "bg", kind, label: expected, taskId: "task" });
   });
 
   const launch = (id: string) => ({

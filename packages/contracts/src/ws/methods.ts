@@ -77,7 +77,7 @@ import {
 import { AttachmentMetaSchema } from "../models/attachment.js";
 import { StagedDraftImageSchema } from "../models/next-message-draft.js";
 import { MAX_ATTACHMENTS } from "../models/file-types.js";
-import { ToolCallRecordSchema } from "../models/tool-call-record.js";
+import { BackgroundCommandSchema, ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { NarrativeEntrySchema, TurnRangeSchema } from "../models/narrative-entry.js";
 import { WorktreeSchema, BranchComparisonSchema, GitRefNameSchema, GitRemoteUrlSchema, GitBranchNameSchema, GitRefsListParamsSchema, GitRefsListResultSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
@@ -1255,6 +1255,16 @@ export const WS_METHODS = lazySchema(() => ({
   "agent.child.stop": {
     params: CanonicalSubagentStopRequestSchema() as z.ZodTypeAny,
     result: CanonicalSubagentStopResultSchema() as z.ZodTypeAny,
+  },
+  /** List background commands still running in this thread. */
+  "backgroundCommand.list": {
+    params: z.object({ threadId: z.string().min(1).max(256) }).strict(),
+    result: z.array(BackgroundCommandSchema()),
+  },
+  /** Request a stop against the provider task recorded for this tool call. */
+  "backgroundCommand.stop": {
+    params: z.object({ threadId: z.string().min(1).max(256), toolCallId: z.string().min(1).max(512) }).strict(),
+    result: z.enum(["stopped", "not-running"]),
   },
   "conversation.olderPage": {
     ...ConversationOlderPageMethod,

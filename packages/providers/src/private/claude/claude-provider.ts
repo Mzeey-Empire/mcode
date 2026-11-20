@@ -2141,8 +2141,8 @@ export class ClaudeProvider
   }
 
   /** The launching turn's event route is retired, so its late result goes through the host. */
-  private settleEndedTurnBackgroundTool(settlement: ProviderBackgroundToolSettlement): void {
-    void this.host.turns.settleBackgroundTool(settlement).catch((error: unknown) => {
+  private settleEndedTurnBackgroundTool(settlement: ProviderBackgroundToolSettlement): Promise<void> {
+    return this.host.turns.settleBackgroundTool(settlement).catch((error: unknown) => {
       // Startup recovery stops the call if this settlement never lands.
       logger.error("Claude background tool settlement failed", {
         executionId: settlement.executionId,
@@ -2495,7 +2495,8 @@ export class ClaudeProvider
   ): Promise<void> {
     this.recentStderr.delete(sessionId);
     // Stop, discard, shutdown and close all end the stream, and the SDK process takes its background calls with it.
-    state.mapper.settleAllBackgroundTools();
+    const stopped = state.mapper.settleAllBackgroundTools();
+    if (stopped.commandIds.length > 0) this.host.turns.recordStoppedBackgroundCommands?.(state.threadId, stopped.commandIds);
     this.flushNativeBackgroundChange(state);
     releaseUnconfirmedSteers(state);
     const suppressedQuery = this.suppressEndedQueries.delete(q);
@@ -2514,6 +2515,7 @@ export class ClaudeProvider
       cause: state.suppressEnded || suppressedQuery || current?.suppressEnded ? "discarded" : "ended",
     }));
     this.emit(`_streamDone:${sessionId}`);
+    await Promise.all(stopped.settlements);
     if (
       !this.canEmitClaudeEnded(state, suppressedQuery, superseded, current, q)
     )
@@ -2933,6 +2935,14 @@ export class ClaudeProvider
     const outcome = await awaitSteerAnswer(queued, answered);
     if (outcome.outcome === "rejected") stream.steersAwaitingTurn.delete(steerId);
     return finish(outcome);
+  }
+
+  /** A pooled query can stop its own task even after the launching turn ends. */
+  async stopBackgroundTask(sessionId: string, taskId: string): Promise<"stopped" | "not-running"> {
+    const state = this.runtime.get(sessionId);
+    if (!state || !this.streamStates.get(state.query)?.mapper.hasHeldBackgroundTask(taskId)) return "not-running";
+    await state.query.stopTask(taskId);
+    return "stopped";
   }
 
   /** Abort a running session, or record a pending stop if the session hasn't been created yet. */

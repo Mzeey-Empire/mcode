@@ -38,6 +38,7 @@ export const CANONICAL_AGENT_EVENT_BATCH_MAX = 256;
 export const WS_CHANNELS = {
   "thread.resumeScheduled": ThreadResumeScheduledSchema(),
   "thread.attention": ThreadAttentionSchema(),
+  "backgroundCommand.changed": z.object({ threadId: z.string().min(1).max(256) }).strict(),
   /** Invalidates the owning parent's unified subagent roster. */
   "subagents.changed": z.object({
     threadId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(),
