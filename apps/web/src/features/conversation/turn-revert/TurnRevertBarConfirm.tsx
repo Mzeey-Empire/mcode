@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { RevertConfirm } from "./RevertConfirm";
 import { turnRevertTitle } from "./revert-copy";
 import { useTurnRevert } from "./useTurnRevert";
@@ -21,7 +21,7 @@ export interface RevertTurnFacts {
  * the server answers authoritatively.
  */
 export function useRevertTurnDisabledReason(threadId: string | null | undefined, facts: RevertTurnFacts): string | null {
-  const running = useThreadStore((s) => (threadId ? s.runningThreadIds.has(threadId) : false));
+  const running = useThreadStore((s) => (threadId ? isThreadExecuting(threadId, s) : false));
   const knownNotGit = useWorkspaceStore((s) => {
     const workspaceId = s.threads.find((t) => t.id === threadId)?.workspace_id;
     return s.workspaces.find((w) => w.id === workspaceId)?.is_git_repo === false;
