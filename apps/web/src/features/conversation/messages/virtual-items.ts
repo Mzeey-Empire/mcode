@@ -231,6 +231,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
     const stableInput = {
       messages: notices.messages,
       turnNoticesByResponseId: notices.byResponseId,
+      turnVisualsByResponseId: notices.visualsByResponseId,
       persistedFilesChanged: input.persistedFilesChanged,
       latestTurnWithChanges: input.latestTurnWithChanges,
       currentTurn: input.currentTurn,
@@ -261,6 +262,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
         stableInput.providerContinuationMessageIds,
         stableInput.turnNoticesByResponseId,
         stableInput.fileEvidenceByExecutionId,
+        stableInput.turnVisualsByResponseId,
       );
     previousStableInput = stableInput;
     previousStableItems = stableItems;
@@ -278,8 +280,9 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.holdingSignals,
       input.approvals,
       notices.live,
+      notices.liveVisuals,
     );
-    return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input) || notices.live.length > 0, responseMessageId);
+    return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input) || notices.live.length > 0 || notices.liveVisuals.length > 0, responseMessageId);
   };
 }
 
@@ -289,13 +292,14 @@ type StableTranscriptInput = Pick<TranscriptProjectionInput,
   | "turnDurationsByMessageId" | "providerContinuationMessageIds" | "turnEndingsByMessageId" | "fileEvidenceByExecutionId"> & {
   currentTurnLiveNarrative: SettledLiveNarrative | undefined;
   turnNoticesByResponseId: Readonly<Record<string, readonly Message[]>>;
+  turnVisualsByResponseId: Readonly<Record<string, readonly Message[]>>;
 };
 
 const STABLE_TRANSCRIPT_KEYS = [
   "messages", "persistedFilesChanged", "latestTurnWithChanges", "currentTurn", "agentDisplayState",
   "responseTextIsStreaming", "persistedNarrativeByMessage", "turnSummariesByMessageId", "turnDurationsByMessageId",
   "turnEndingsByMessageId", "fileEvidenceByExecutionId", "currentTurnLiveNarrative",
-  "providerContinuationMessageIds", "turnNoticesByResponseId",
+  "providerContinuationMessageIds", "turnNoticesByResponseId", "turnVisualsByResponseId",
 ] as const satisfies readonly (keyof StableTranscriptInput)[];
 
 function sameStableTranscriptInput(previous: StableTranscriptInput | undefined, current: StableTranscriptInput): boolean {
@@ -428,9 +432,10 @@ export function buildStableItems(
   providerContinuationMessageIds?: ReadonlySet<string>,
   turnNoticesByResponseId?: Readonly<Record<string, readonly Message[]>>,
   fileEvidenceByExecutionId?: FileEvidenceByExecution,
+  turnVisualsByResponseId?: Readonly<Record<string, readonly Message[]>>,
 ): ChatVirtualItem[] {
   return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
-    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId, providerContinuationMessageIds, turnNoticesByResponseId, fileEvidenceByExecutionId,
+    persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState, responseTextIsStreaming, currentTurnLiveNarrative, turnEndingsByMessageId, turnDurationsByMessageId, providerContinuationMessageIds, turnNoticesByResponseId, fileEvidenceByExecutionId, turnVisualsByResponseId,
   }));
 }
 
@@ -450,6 +455,8 @@ interface StableItemInput {
   /** Notices taken out of the message list, keyed by the answer of the turn they happened in. */
   turnNoticesByResponseId?: Readonly<Record<string, readonly Message[]>>;
   fileEvidenceByExecutionId?: FileEvidenceByExecution;
+  /** Visuals taken out of the message list, keyed by the answer of the turn that published them. */
+  turnVisualsByResponseId?: Readonly<Record<string, readonly Message[]>>;
 };
 
 function isCurrentResponse(message: Message, input: Pick<StableItemInput, "currentTurn">): boolean {
@@ -586,9 +593,11 @@ function stableItemsForMessage(message: Message, input: StableItemInput): ChatVi
   const settled = !isAgentDisplayActive(currentResponseState(message, input));
   const summary = settled ? settledTurnSummary(message, input) : undefined;
   const workItems = turnWorkItems(message, input, summary, ending);
+  const visualItems = (input.turnVisualsByResponseId?.[message.id] ?? EMPTY_NOTICE_MESSAGES).map((visual) => messageVirtualItem(visual, input));
   const changes = turnChangesItem(message, input);
   return definedItems([
     ...workItems,
+    ...visualItems,
     messageVirtualItem(message, input),
     summary && turnMetaLineItem(message, summary, input, workItems.some((item) => item.type === "work-fold")),
     changes,
@@ -619,6 +628,7 @@ export function buildVolatileItems(
   holdingSignals?: RunHoldingSignals,
   approvals?: readonly ApprovalReceipt[],
   notices?: readonly TurnNotice[],
+  visuals?: readonly Message[],
 ): ChatVirtualItem[] {
   const isAgentRunning = isAgentDisplayActive(agentDisplayState);
   const resolvedHooks = hooks ?? EMPTY_HOOKS;
@@ -633,6 +643,7 @@ export function buildVolatileItems(
 
   return [
     narrativeFlowItem(toolCalls, resolvedHooks, approvals ?? EMPTY_APPROVALS, notices ?? EMPTY_NOTICES, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning && !holdingSignals?.stopPending, agentStartTime, committedAssistantBody),
+    ...liveVisualItems(visuals),
     liveResponseItem(liveText, currentTurn, agentDisplayState, responseTextIsStreaming),
     agentDisplayState?.phase === "cancelled" ? undefined : narrativeIndicatorItem({ toolCalls, isAgentRunning, startTime: agentStartTime, thoughts: resolvedThoughtSegments, answering: liveText.length > 0, holdingSignals }),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
@@ -640,6 +651,11 @@ export function buildVolatileItems(
 
 function narrativeFlowItem(toolCalls: readonly ToolCall[], hooks: readonly HookExecution[], approvals: readonly ApprovalReceipt[], notices: readonly TurnNotice[], thoughts: readonly ThoughtSegment[], streamingText: string, liveText: string, isAgentRunning: boolean, startTime: number | undefined, committedAssistantBody: string | undefined): ChatVirtualItem | undefined {
   return isAgentRunning || [toolCalls, thoughts, approvals, notices].some((rows) => rows.length > 0) ? { key: "narrative-flow", type: "narrative-flow", toolCalls, hooks, approvals, notices, thoughtSegments: thoughts, streamingText: liveText.length > 0 ? "" : streamingText, isAgentRunning, startTime, committedAssistantBody } : undefined;
+}
+
+/** Keyed by message id like the settled row, so the visual's frame survives the turn settling. */
+function liveVisualItems(visuals: readonly Message[] = EMPTY_NOTICE_MESSAGES): ChatVirtualItem[] {
+  return visuals.map((visual) => ({ key: visual.id, type: "message", message: visual }));
 }
 
 function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIdentity | undefined, agentDisplayState: AgentDisplayState | undefined, textIsStreaming?: boolean): ChatVirtualItem | undefined {
@@ -852,23 +868,48 @@ function dedupeVolatileItems(stableItems: readonly ChatVirtualItem[], volatileIt
  * A plan-questions message takes the narrative only once its own work fold precedes it.
  * The fold exists only after that turn settles, so a later turn's narrative still appends below the questions.
  */
-function isAssistantInsertionPoint(stableItems: readonly ChatVirtualItem[], index: number): boolean {
+function isAssistantInsertionPoint(stableItems: readonly ChatVirtualItem[], index: number, replyStart: number): boolean {
   const item = stableItems[index];
   if (item?.type !== "message" || item.message.role !== "assistant") return false;
   if (!isPlanQuestionsMessage(item.message.content)) return true;
-  const previous = stableItems[index - 1];
+  const previous = stableItems[replyStart - 1];
   return previous?.type === "work-fold" && previous.messageId === item.message.id;
 }
 
+function isVisualItem(item: ChatVirtualItem | undefined): boolean {
+  return item?.type === "message" && item.message.role === "system" && Boolean(item.message.visual);
+}
+
+/**
+ * A settled answer's visuals sit between its fold and the answer. The live turn goes above them,
+ * because a work fold claims its live rows only when they directly follow it.
+ */
+function replyStartIndex(stableItems: readonly ChatVirtualItem[], assistantIndex: number): number {
+  let index = assistantIndex;
+  while (isVisualItem(stableItems[index - 1])) index -= 1;
+  return index;
+}
+
 function isNarrativeHeadItem(item: ChatVirtualItem): boolean {
-  return item.type === "narrative-flow" || (item.type === "message" && item.message.role === "assistant" && isAgentDisplayActive(item.agentDisplayState));
+  // A live visual belongs to the reply, so it sits above the saved answer with the rest of the live turn.
+  if (item.type === "narrative-flow" || isVisualItem(item)) return true;
+  return item.type === "message" && item.message.role === "assistant" && isAgentDisplayActive(item.agentDisplayState);
 }
 
 function spliceNarrativeItems(stableItems: readonly ChatVirtualItem[], volatileItems: readonly ChatVirtualItem[], assistantIndex: number): ChatVirtualItem[] | undefined {
   const assistantItem = stableItems[assistantIndex];
-  if (!assistantItem || !isAssistantInsertionPoint(stableItems, assistantIndex)) return undefined;
+  const replyStart = replyStartIndex(stableItems, assistantIndex);
+  if (!assistantItem || !isAssistantInsertionPoint(stableItems, assistantIndex, replyStart)) return undefined;
   const headItems = volatileItems.filter(isNarrativeHeadItem);
   const indicatorItems = volatileItems.filter((item) => item.type === "narrative-indicator");
   const tailItems = volatileItems.filter((item) => !isNarrativeHeadItem(item) && item.type !== "narrative-indicator");
-  return [...stableItems.slice(0, assistantIndex), ...headItems, assistantItem, ...indicatorItems, ...stableItems.slice(assistantIndex + 1), ...tailItems];
+  return [
+    ...stableItems.slice(0, replyStart),
+    ...headItems,
+    ...stableItems.slice(replyStart, assistantIndex),
+    assistantItem,
+    ...indicatorItems,
+    ...stableItems.slice(assistantIndex + 1),
+    ...tailItems,
+  ];
 }
