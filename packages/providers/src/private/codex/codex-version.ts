@@ -25,11 +25,10 @@ const versionCache = new Map<string, { result: ReturnType<typeof checkCodexVersi
 let currentCliPath: string | null = null;
 
 /**
- * The cached version of the CLI in use, or null before its check succeeds. Never spawns,
- * so capability declarations can read it synchronously.
+ * The cached version for the given path, defaulting to the CLI in use. Never spawns.
  */
-export function currentCodexVersion(): string | null {
-  const cached = currentCliPath === null ? undefined : versionCache.get(currentCliPath)?.result;
+export function currentCodexVersion(cliPath = currentCliPath): string | null {
+  const cached = cliPath === null ? undefined : versionCache.get(cliPath)?.result;
   return cached?.ok ? cached.version : null;
 }
 

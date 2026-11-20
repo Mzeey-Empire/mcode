@@ -235,7 +235,7 @@ export interface IAgentProvider {
   stopSession(sessionId: string): void | Promise<void>;
 
   /** Stop one task owned by an existing provider session. */
-  stopBackgroundTask?(sessionId: string, taskId: string): Promise<"stopped" | "not-running">;
+  stopBackgroundTask?(sessionId: string, taskId: string): Promise<"stopped" | "not-running" | "settling">;
 
   /** Tear down all sessions and release resources. */
   shutdown(): void | Promise<void>;

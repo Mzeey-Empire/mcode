@@ -17,6 +17,12 @@ END`;
 const COMMAND_KIND = `json_extract((${COMMAND_RECORD}), '$.background_kind') = 'command'`;
 const RUNNING_COMMAND = `${COMMAND_KIND} AND json_extract((${COMMAND_RECORD}), '$.status') = 'running'`;
 
+function runningCommandWithTask(record: string): string {
+  return `json_extract(${record}, '$.status') = 'running'
+    AND COALESCE(json_extract(${record}, '$.background_kind'), 'command') = 'command'
+    AND NULLIF(json_extract(${record}, '$.background_task_id'), '') IS NOT NULL`;
+}
+
 const sqliteBoolean = z.union([z.literal(0), z.literal(1)]).transform((value) => value === 1);
 const commandRow = BackgroundCommandSchema().extend({ awaited: sqliteBoolean });
 const runningLaunch = z.object({ taskId: z.string().nullable(), executionId: z.string(), held: sqliteBoolean });
@@ -33,7 +39,8 @@ export function backgroundCommandWriteHandlers(db: Database): ReadonlyMap<string
     INSERT OR IGNORE INTO background_command_awaits (thread_id, tool_call_id, awaited_at)
     SELECT item.thread_id, ?, ? FROM canonical_agent_items item
     JOIN threads thread ON thread.id = item.thread_id
-    WHERE item.id = ? AND item.thread_id = ? AND thread.deleted_at IS NULL AND ${RUNNING_COMMAND}
+    WHERE item.id = ? AND item.thread_id = ? AND thread.deleted_at IS NULL
+      AND ((${RUNNING_COMMAND}) OR (${runningCommandWithTask(`(${COMMAND_RECORD})`)}))
   `);
   const clear = db.query("DELETE FROM background_command_awaits WHERE thread_id = ? AND tool_call_id = ?");
   const update = (input: z.output<typeof setAwaitedOperation.input>) => {
@@ -63,6 +70,11 @@ export class BackgroundCommandStore {
 
   /** Return visible commands newest first, optionally limited to running ones. */
   list(threadId: string, filter?: { running?: true }): BackgroundCommand[] {
+    const kind = "json_extract(record, '$.background_kind') = 'command'";
+    return this.read(threadId, filter?.running ? `${kind} AND json_extract(record, '$.status') = 'running'` : kind);
+  }
+
+  private read(threadId: string, condition: string): BackgroundCommand[] {
     const rows = this.db.query(`
       SELECT json_extract(record, '$.id') AS toolCallId,
         NULLIF(json_extract(record, '$.background_task_id'), '') AS taskId,
@@ -77,8 +89,7 @@ export class BackgroundCommandStore {
       ) command
       LEFT JOIN background_command_awaits awaits ON awaits.thread_id = command.thread_id
         AND awaits.tool_call_id = json_extract(record, '$.id')
-      WHERE json_extract(record, '$.background_kind') = 'command'
-        ${filter?.running ? "AND json_extract(record, '$.status') = 'running'" : ""}
+      WHERE ${condition}
       ORDER BY startedAt DESC, toolCallId
     `).all(threadId);
     return rows.map((row) => commandRow.parse(row));
@@ -87,10 +98,13 @@ export class BackgroundCommandStore {
   /** Prefer a provider task id to a tool call id, and never look outside the thread. */
   resolve(threadId: string, ids: readonly string[]): { matched: BackgroundCommand[]; unmatched: string[] } {
     const commands = this.list(threadId);
+    const launches = this.read(threadId, runningCommandWithTask("record"));
     const matched: BackgroundCommand[] = [];
     const unmatched: string[] = [];
     for (const id of ids) {
-      const command = commands.find((candidate) => candidate.taskId === id) ?? commands.find((candidate) => candidate.toolCallId === id);
+      const command = launches.find((candidate) => candidate.taskId === id)
+        ?? commands.find((candidate) => candidate.taskId === id)
+        ?? commands.find((candidate) => candidate.toolCallId === id);
       if (command) matched.push(command);
       else unmatched.push(id);
     }

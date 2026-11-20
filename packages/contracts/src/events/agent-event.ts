@@ -111,6 +111,8 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       toolInput: z.record(z.unknown()),
       /** An explicit update for this invocation; omission retains the usual running default. */
       status: ToolExecutionStatusSchema.optional(),
+      /** Native task id known before the command is held across a turn boundary. */
+      backgroundTaskId: z.string().min(1).max(256).optional(),
       phase: ToolCallPhaseSchema.exclude(["denied"]).optional(),
       parentToolCallId: z.string().optional(),
       subagentPresentation: SubagentPresentationSchema().optional(),

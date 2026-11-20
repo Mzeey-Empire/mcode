@@ -12,6 +12,7 @@ import * as NodeEvents from "node:events";
 import type * as NodeStream from "node:stream";
 import * as NodePath from "node:path";
 import which from "which";
+import { z } from "zod";
 import { resolveSubagentDisplayName } from "@mcode/contracts/models/tool-call-record";
 import { type TurnFailureKind } from "@mcode/contracts/compat/agent-model";
 import { type TurnSteerOutcome } from "@mcode/contracts/providers/interfaces";
@@ -505,6 +506,7 @@ const STDERR_TAIL_MAX_LINES = 50;
 const STDERR_TAIL_MAX_BYTES = 16 * 1024;
 /** Maximum code points retained for protocol identifiers in diagnostics. */
 const MAX_PROTOCOL_IDENTIFIER_LENGTH = 256;
+const backgroundTerminalTerminateResponse = z.object({ terminated: z.boolean() });
 
 /** Bounds an untrusted protocol identifier before retaining it in diagnostics. */
 /** Codex's messages for a steer whose turn already ended or was replaced (`turn_processor.rs`). */
@@ -1447,6 +1449,21 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       "account/rateLimits/read",
       {},
       10000,
+    );
+  }
+
+  /** Stops a running terminal on the currently attached native thread. */
+  async terminateBackgroundTerminal(processId: string, onTerminated: () => void): Promise<boolean> {
+    if (!this._isAlive || !this.rpc || !this._threadId) return false;
+    return this.rpc.sendRequest(
+      "thread/backgroundTerminals/terminate",
+      { threadId: this._threadId, processId },
+      1_000,
+      (result) => {
+        const { terminated } = backgroundTerminalTerminateResponse.parse(result);
+        if (terminated) onTerminated();
+        return terminated;
+      },
     );
   }
 

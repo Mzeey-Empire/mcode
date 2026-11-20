@@ -2079,6 +2079,46 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
     return { commands, source, attention, settlement };
   }
 
+  it("marks a running Codex command by native task id before it backgrounds, then waits after turn end", async () => {
+    const { commands, attention } = backgroundCommands();
+    await send(1, start("codex"));
+    const observe = (ordinal: number, type: AgentEvent["type"], fields: Record<string, unknown>) => send(ordinal, {
+      kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", ordinal - 1, type, fields)],
+    });
+    await observe(2, "toolUse", { toolCallId: "build", toolName: "command_execution", toolInput: { command: "bun run build" } });
+    await observe(3, "toolUse", { toolCallId: "build", toolName: "command_execution", toolInput: { command: "bun run build" }, backgroundTaskId: "101" });
+    await observe(4, "toolUse", { toolCallId: "lint", toolName: "CustomRunner", toolInput: { command: "bun run lint" }, backgroundTaskId: "102" });
+    await observe(5, "toolUse", { toolCallId: "read", toolName: "Agent", toolInput: { prompt: "Read package.json" } });
+    await observe(6, "toolBackgrounded", { toolCallId: "read", kind: "subagent", label: "Read package.json", taskId: "103" });
+    const authority = new McodeSessionAuthority();
+    const { token } = authority.attach({ providerId: "codex", sessionId: "mcode-live-thread", threadId: execution.threadId, threadControl: false });
+    const session = authority.resolve(token);
+    if (!session) throw new Error("Expected an authenticated session");
+    const toolkit = createBackgroundToolkit(commands, (threadId) => progress.waitForSaved(threadId));
+    const tool = toolkit.bind(session)?.tools.find(({ name }) => name === "background_wait");
+    if (!tool) throw new Error("Expected background_wait for Codex");
+    const call = { toolCallId: "mcp-call", signal: new AbortController().signal };
+    const result = await tool.call({ taskIds: ["101", "102", "103", "build"] }, call);
+    expect(result.structuredContent).toEqual({ matched: [
+      { taskId: "101", label: "bun run build", status: "running", awaited: true },
+      { taskId: "102", label: expect.any(String), status: "running", awaited: true },
+    ], unmatched: ["103", "build"] });
+    expect(commands.list(execution.threadId)).toEqual([]);
+    expect(attention.get(execution.threadId)?.descendants).toBe("none");
+    await observe(7, "toolResult", { toolCallId: "lint", output: "Clean", isError: false });
+    await observe(8, "toolBackgrounded", { toolCallId: "build", kind: "command", label: "bun run build", taskId: "101" });
+    const end = await send(9, { kind: "event", phase: "running", nativeCursor: null, events: [draft("codex", 8, "turnComplete")],
+      terminalInput: { ...execution, providerId: "codex", providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" } },
+    });
+    expect(end.result.kind).toBe("accepted");
+    await progress.waitForSaved(execution.threadId);
+    await send(9, { kind: "release" });
+    expect(commands.list(execution.threadId)).toMatchObject([{ taskId: "101", status: "running", awaited: true }]);
+    expect(attention.get(execution.threadId)?.descendants).toBe("running");
+    const settled = await tool.call({ taskIds: ["102"] }, call);
+    expect(settled.structuredContent).toEqual({ matched: [], unmatched: ["102"] });
+  });
+
   it("marks only running commands in the authenticated thread and reports settled and unknown ids", async () => {
     const other = { threadId: "other-thread", turnId: "other-turn", executionId: "00000000-0000-4000-8000-000000000567" };
     insertThread(other.threadId);

@@ -142,12 +142,14 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
    * @param method - The RPC method name.
    * @param params - The parameters to send with the request.
    * @param timeoutMs - Milliseconds before the request is rejected. Defaults to 20 000.
+   * @param mapResult - Optional result decoder, run in wire order before later notifications are dispatched.
    * @returns A promise that resolves with the response result or rejects on error or timeout.
    */
   sendRequest<TParams, TResult>(
     method: string,
     params: TParams,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    mapResult?: (value: unknown) => TResult,
   ): Promise<TResult> {
     if (this.disposed) {
       return Promise.reject(new CodexTransportError("RPC client is disposed"));
@@ -162,7 +164,14 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
         reject(new CodexTransportError(`Timed out waiting for ${method} (${timeoutMs}ms)`));
       }, timeoutMs);
 
-      this.pending.set(id, { resolve, reject, timer });
+      const resolveResult = mapResult ? (value: unknown) => {
+        try {
+          resolve(mapResult(value));
+        } catch (error) {
+          reject(error);
+        }
+      } : resolve;
+      this.pending.set(id, { resolve: resolveResult, reject, timer });
       this.stdin.write(message, (err) => {
         if (err) {
           clearTimeout(timer);

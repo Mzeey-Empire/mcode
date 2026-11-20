@@ -167,6 +167,7 @@ export class CodexEventMapper {
   private turnTokenBaseline: Pick<CodexTokenUsage["total"], "totalTokens" | "cachedInputTokens" | "outputTokens"> | undefined;
   /** Per-item streaming command output buffers, keyed by itemId. */
   private readonly commandOutputBuffers = new Map<string, BoundedToolOutputBuffer>();
+  private readonly runningCommands = new Map<string, { nativeTurnId: string; taskId: string; label: string }>();
   /** Start-time ToolUse signatures, so completion enrichment only emits when details changed. */
   private readonly startedToolUseSignatures = new Map<string, string>();
   /**
@@ -259,6 +260,7 @@ export class CodexEventMapper {
     threadId: string,
     mainCodexThreadId?: string,
     private readonly onPendingMutationStart?: (event: CodexPendingFileMutationStart) => void,
+    private readonly supportsBackgroundCommands = false,
   ) {
     this.threadId = threadId;
     this.mainCodexThreadId = mainCodexThreadId;
@@ -1438,18 +1440,18 @@ export class CodexEventMapper {
     item: CompletedItem,
     toolCallId: string,
     notification?: CodexNotification,
-  ): CodexMappedEvent | undefined {
-    const builders: Partial<Record<CompletedItem["type"], () => CodexMappedEvent>> = {
+  ): Extract<CodexMappedEvent, { type: "toolUse" }> | undefined {
+    const builders = {
       function_call: () => this.toolUse(toolCallId, typeof item.name === "string" ? item.name : "function", this.parseToolArguments(item.arguments), notification),
       commandExecution: () => this.toolUse(toolCallId, "command_execution", this.commandToolInput(item), notification),
       fileChange: () => this.toolUse(toolCallId, "file_change", this.fileChangeToolInput(item), notification),
       mcpToolCall: () => this.toolUse(toolCallId, this.mcpToolName(item), this.parseToolArguments(item.arguments), notification),
       dynamicToolCall: () => this.toolUse(toolCallId, item.name ?? "dynamic_tool", this.parseToolArguments(item.arguments), notification),
     };
-    return dispatchNativeHandler<CodexMappedEvent>(builders, item.type);
+    return dispatchNativeHandler<Extract<CodexMappedEvent, { type: "toolUse" }>>(builders, item.type);
   }
 
-  private toolUse(toolCallId: string, toolName: string, toolInput: Record<string, unknown>, notification?: CodexNotification): CodexMappedEvent {
+  private toolUse(toolCallId: string, toolName: string, toolInput: Record<string, unknown>, notification?: CodexNotification): Extract<CodexMappedEvent, { type: "toolUse" }> {
     const parentToolCallId = this.nestingParentToolCallId(notification);
     return { type: AgentEventType.ToolUse, threadId: this.threadId, toolCallId, toolName, toolInput, ...(parentToolCallId ? { parentToolCallId } : {}) };
   }
@@ -2000,10 +2002,20 @@ export class CodexEventMapper {
     const lifecycleStart = this.startLifecycleItem(item?.type, itemId);
     if (lifecycleStart) return [...boundaryEvents, ...lifecycleStart];
     if (!item || !itemId || !TOOL_LIKE_ITEM_TYPES.has(item.type) || item.type === "webSearch") return this.logMainItemStarted(notification.method, item?.type, boundaryEvents);
+    const taskId = this.rememberRunningCommand(itemId, notification);
     const toolUse = this.buildToolUseEvent(item, itemId, notification);
     if (!toolUse) return this.logMainItemStarted(notification.method, item.type, boundaryEvents);
     this.startedToolUseSignatures.set(itemId, this.toolUseSignature(toolUse));
+    if (taskId) toolUse.backgroundTaskId = taskId;
     return [...boundaryEvents, toolUse];
+  }
+
+  private rememberRunningCommand(itemId: string, notification: CodexNotification): string | undefined {
+    if (!this.supportsBackgroundCommands || notification.unrecognized || notification.method !== "item/started") return undefined;
+    const { item, turnId } = notification.params;
+    if (item.type !== "commandExecution" || item.status !== "inProgress" || !item.processId || !turnId) return undefined;
+    this.runningCommands.set(itemId, { nativeTurnId: turnId, taskId: item.processId, label: item.command?.trim().slice(0, 500) || "Command" });
+    return item.processId;
   }
 
   private startLifecycleItem(itemType: string | undefined, itemId: string | undefined): CodexMappedEvent[] | undefined {
@@ -2111,6 +2123,7 @@ export class CodexEventMapper {
   private mapMainItemCompleted(notification: CodexNotification): CodexMappedEvent[] {
     const item = (notification.params as { item?: CompletedItem }).item;
     const itemId = typeof item?.id === "string" ? item.id : undefined;
+    if (itemId && item?.type === "commandExecution") this.runningCommands.delete(itemId);
     const boundaryEvents = this.shouldDrainAssistantBeforeCompletion(item, itemId) ? this.drainAssistantBoundaryBeforeItem(itemId) : [];
     logger.debug("Codex item/completed", { type: item?.type });
     return [...boundaryEvents, ...(item ? this.mapItemCompleted(item, notification) : this.malformedNotification())];
@@ -2127,10 +2140,20 @@ export class CodexEventMapper {
   private mapMainTurnCompleted(notification: CodexNotification): CodexMappedEvent[] {
     const turn = (notification.params as { turn?: { status?: string; error?: { message?: string; codexErrorInfo?: unknown }; usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number } } }).turn;
     logger.debug("Codex turn/completed", { status: turn?.status });
-    const compactionEnd = this.closeOpenCompactions();
-    if (turn?.status === "failed") return [...compactionEnd, ...this.mapFailedMainTurn(turn)];
-    if (turn?.status === "interrupted") return [...compactionEnd, ...this.finishInterruptedMainTurn()];
-    return [...compactionEnd, ...this.finishCompletedMainTurn(turn?.usage)];
+    const prelude = [...this.closeOpenCompactions(), ...this.backgroundRunningCommands(this.nativeTurnId(notification))];
+    if (turn?.status === "failed") return [...prelude, ...this.mapFailedMainTurn(turn)];
+    if (turn?.status === "interrupted") return [...prelude, ...this.finishInterruptedMainTurn()];
+    return [...prelude, ...this.finishCompletedMainTurn(turn?.usage)];
+  }
+
+  private backgroundRunningCommands(nativeTurnId: string | undefined): CodexMappedEvent[] {
+    const events: CodexMappedEvent[] = [];
+    for (const [toolCallId, command] of this.runningCommands) {
+      if (command.nativeTurnId !== nativeTurnId) continue;
+      events.push({ type: AgentEventType.ToolBackgrounded, threadId: this.threadId, toolCallId,
+        kind: "command", taskId: command.taskId, label: command.label });
+    }
+    return events;
   }
 
   private recordAccountRateLimits(params: unknown): CodexMappedEvent[] {
@@ -2258,6 +2281,7 @@ export class CodexEventMapper {
     this.reasoningPartByItem.clear();
     this.planUpdateSeq = 0;
     this.commandOutputBuffers.clear();
+    this.runningCommands.clear();
     this.startedToolUseSignatures.clear();
     this.collabScopeStack = [];
     this.collabToolUseFromStartIds.clear();

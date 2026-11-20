@@ -80,6 +80,7 @@ export interface StagedNarrationSegment {
 /** Tool-use event shape consumed by {@link NarrativeTurnState.bufferToolCall}. */
 export interface BufferToolCallEvent {
   status?: Extract<AgentEvent, { type: "toolUse" }>["status"];
+  backgroundTaskId?: string;
   phase?: Extract<AgentEvent, { type: "toolUse" }>["phase"];
   toolCallId: string;
   toolName: string;
@@ -551,6 +552,7 @@ export class NarrativeTurnState {
     parentToolCallId: string | undefined,
   ): string | undefined {
     const shouldMergeDuplicate = this.shouldMergeDuplicateToolCall(existing, event);
+    if (existing.status === "running" && event.backgroundTaskId !== undefined) existing.backgroundTaskId = event.backgroundTaskId;
     if ((event.status || event.phase) && isToolCallActive(existing.status)) {
       if (event.status === "running" && !event.phase && existing.phase) existing.startedAt = new Date().toISOString();
       existing.phase = event.phase;
@@ -682,6 +684,7 @@ export class NarrativeTurnState {
       inputSummary: "",
       outputSummary: "",
       status: event.status ?? "running",
+      backgroundTaskId: event.backgroundTaskId,
       phase: event.phase,
       startedAt: new Date().toISOString(),
       sortOrder,
@@ -748,7 +751,7 @@ export class NarrativeTurnState {
     toolCall.background = true;
     toolCall.backgroundKind = kind;
     toolCall.backgroundLabel = label;
-    toolCall.backgroundTaskId = taskId;
+    toolCall.backgroundTaskId = taskId ?? toolCall.backgroundTaskId;
     this.recordRecoveryChange(this.toolCallRecoveryItem(toolCall));
   }
 
