@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GitCommitParams, GitCommitResult } from "@mcode/contracts/git-commit";
 import type { ReviewFileChange } from "@mcode/contracts/models/review-comparison";
+import { createMockGitReviewState } from "@mcode/contracts/testing";
 
 import { RpcError } from "@/transport/ws-transport";
 import { mockTransport } from "@/__tests__/mocks/transport";
@@ -32,13 +33,11 @@ function change(path: string, overrides: Partial<ReviewFileChange> = {}): Review
 }
 
 function gitState(branch: string | null) {
-  return {
-    isGitRepo: true as const,
+  return createMockGitReviewState({
     head: HEAD,
     branch,
     uncommitted: { staged: 0, unstaged: 3, untracked: 1 },
-    commitsAhead: null,
-  };
+  });
 }
 
 function arrange(files: ReviewFileChange[], branch: string | null = "feat/x") {

@@ -6,6 +6,7 @@ import type { BranchComparison, GitSearchCommitsParams, GitSearchCommitsResult }
 import type { GitCommit } from "@mcode/contracts/models/git-commit";
 import type { ReviewComparison, ReviewComparisonResult, ReviewFileChange, ReviewState } from "@mcode/contracts/models/review-comparison";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
+import { gitExitCode, gitFailureOutput } from "./execution/git-failure.js";
 import type { GitExecutor } from "./execution/index.js";
 import { GitRepositoryService } from "./git-repository-service.js";
 import { gitListError } from "./git-list-error.js";
@@ -273,11 +274,16 @@ export class GitComparisonService {
   async readReviewState(workspaceId: string, repoPath?: string, savedBaseBranch?: string | null): Promise<ReviewState> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
     const { stdout } = await this.gitExecutor.exec(
-      ["-C", cwd, "status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"],
+      ["-C", cwd, "status", "--porcelain=v2", "--branch", "--ahead-behind", "-z", "--untracked-files=normal"],
       { timeout: 10_000, env: { GIT_OPTIONAL_LOCKS: "0" } },
     );
-    const status = parseReviewStatus(stdout);
-    if (!status.head) return { isGitRepo: true, ...status, commitsAhead: null, branchDefault: { unavailable: "unborn" } };
+    const { upstream, upstreamAhead, ...status } = parseReviewStatus(stdout);
+    if (!status.head) {
+      return { isGitRepo: true, ...status, published: null, commitsAhead: null, branchDefault: { unavailable: "unborn" } };
+    }
+    const published = status.branch && upstream === `origin/${status.branch}`
+      ? upstreamAhead
+      : await this.readPublished(cwd, status.branch);
     const commitsAhead = await this.resolveForkBase(cwd, savedBaseBranch).then(async (base) => {
       if (!base) return null;
       const { stdout } = await this.gitExecutor.exec(["-C", cwd, "rev-list", "--count", `${base}..HEAD`], { timeout: 10_000 });
@@ -287,7 +293,25 @@ export class GitComparisonService {
     const branchDefault = selection.isComparisonAvailable && selection.base && selection.compare
       ? { compare: selection.compare, base: selection.base }
       : { unavailable: "no-base" as const };
-    return { isGitRepo: true, ...status, commitsAhead, branchDefault };
+    return { isGitRepo: true, ...status, published, commitsAhead, branchDefault };
+  }
+
+  private async readPublished(cwd: string, branch: string | null): Promise<{ ahead: number } | null> {
+    if (!branch) return null;
+    const range = `refs/remotes/origin/${branch}..HEAD`;
+    try {
+      const { stdout } = await this.gitExecutor.exec(
+        ["-C", cwd, "rev-list", "--count", range, "--"],
+        { timeout: 10_000, env: { LC_ALL: "C" } },
+      );
+      return { ahead: Number(stdout.trim()) };
+    } catch (error) {
+      // Match the line, not the whole output: GIT_TRACE and similar settings add lines around it.
+      const missingRef = `fatal: bad revision '${range}'`;
+      const lines = gitFailureOutput(error).split("\n").map((line) => line.trim());
+      if (gitExitCode(error) === 128 && lines.includes(missingRef)) return null;
+      throw error;
+    }
   }
 
   /** Resolve qualified operands for the checkout's default Branch comparison. */
@@ -706,15 +730,25 @@ function parsePerFileNumstat(stdout: string): Map<string, { additions: number | 
   return stats;
 }
 
-function reviewStatusHeader(records: readonly string[], prefix: string, absent: string): string | null {
-  const value = records.find((record) => record.startsWith(prefix))?.slice(prefix.length);
-  return !value || value === absent ? null : value;
+function reviewStatusHeader(records: readonly string[], prefix: string, absent?: string): string | null {
+  for (const record of records) {
+    // A rename's original path can resemble a header, so stop before file entries.
+    if (!record.startsWith("# ")) break;
+    if (record.startsWith(prefix)) {
+      const value = record.slice(prefix.length);
+      return !value || value === absent ? null : value;
+    }
+  }
+  return null;
 }
 
-function parseReviewStatus(stdout: string): Pick<Extract<ReviewState, { isGitRepo: true }>, "head" | "branch" | "uncommitted"> {
+function parseReviewStatus(stdout: string) {
   const records = stdout.split("\0");
   const head = reviewStatusHeader(records, "# branch.oid ", "(initial)");
   const branch = reviewStatusHeader(records, "# branch.head ", "(detached)");
+  const upstream = reviewStatusHeader(records, "# branch.upstream ");
+  const upstreamCounts = reviewStatusHeader(records, "# branch.ab ")?.match(/^\+(\d+) -\d+$/);
+  const upstreamAhead = upstreamCounts ? { ahead: Number(upstreamCounts[1]) } : null;
   const uncommitted = { staged: 0, unstaged: 0, untracked: 0 };
   for (let index = 0; index < records.length; index++) {
     const record = records[index] ?? "";
@@ -725,7 +759,7 @@ function parseReviewStatus(stdout: string): Pick<Extract<ReviewState, { isGitRep
       if (record.startsWith("2 ")) index++;
     }
   }
-  return { head, branch, uncommitted };
+  return { head, branch, uncommitted, upstream, upstreamAhead };
 }
 
 function selectBranchComparison(context: BranchComparisonContext): BranchComparisonSelection {

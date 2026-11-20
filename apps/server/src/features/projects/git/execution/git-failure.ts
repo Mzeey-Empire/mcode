@@ -24,6 +24,22 @@ export function gitWasKilled(error: unknown): boolean {
   return readFailure(error).killed === true;
 }
 
+/**
+ * Git surrounds a push failure with destination and summary lines. Prefer all nonempty remote
+ * messages, then the rejected ref, then git's own error, then the first output line.
+ */
+export function gitPushFailureReason(output: string): string {
+  const lines = output.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  const remote = lines
+    .filter((line) => line.startsWith("remote:") && line.length > "remote:".length)
+    .map((line) => line.slice("remote:".length).trim());
+  if (remote.length > 0) return remote.join("\n");
+  return lines.find((line) => line.startsWith("! ["))
+    ?? lines.find((line) => /^(fatal|error):/.test(line))
+    ?? lines[0]
+    ?? "Push failed";
+}
+
 /** Everything git printed before it failed, stdout first, for classification and display. */
 export function gitFailureOutput(error: unknown): string {
   const { stdout, stderr } = readFailure(error);

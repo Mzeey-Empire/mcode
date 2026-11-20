@@ -86,9 +86,10 @@ describe("GitPushService", () => {
     expectedHeadRepositoryUrl: "https://github.com/contributor/mcode",
   };
 
-  function createPushService(options: { upstream?: boolean; review?: boolean } = {}) {
+  function createPushService(options: { upstream?: boolean; review?: boolean; pushError?: Error } = {}) {
     const mock = createMockGitExecutor();
     mock.execFn.mockImplementation(async (args) => {
+      if (args[2] === "push" && options.pushError) throw options.pushError;
       if (args.includes("--symbolic-full-name") && !options.upstream) {
         throw Object.assign(new Error("no upstream configured"), { code: 128 });
       }
@@ -98,7 +99,7 @@ describe("GitPushService", () => {
     const scheduleBumpAfterPush = vi.fn();
     const service = new GitPushService(
       mock.executor,
-      { push: vi.fn(), getCurrentBranchAt: vi.fn() },
+      new GitRepositoryService({ findById: vi.fn() }, mock.executor),
       { pushPullRequestReviewBranch },
       {
         resolvePushTarget: () => options.review
@@ -114,6 +115,20 @@ describe("GitPushService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(validateBranchName).mockImplementation(() => undefined);
+  });
+
+  it("reports a timed-out branch push without the command or local path", async () => {
+    const pushError = Object.assign(
+      new Error("Command failed: git -C /repo push --set-upstream origin main"),
+      { killed: true },
+    );
+    const { service } = createPushService({ pushError });
+
+    await expect(service.pushCheckedOutBranch({
+      workspaceId: "workspace-1",
+      workspacePath: "/repo",
+      branch: "main",
+    })).rejects.toHaveProperty("message", "Push timed out after 60s");
   });
 
   it("pushes the captured SHA to the captured branch without force, then sets a missing upstream", async () => {

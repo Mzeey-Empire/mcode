@@ -3,9 +3,9 @@ import { usePullRequestReviewLink } from "@/features/pull-requests";
 import { useThreadGitActions } from "@/hooks/useThreadGitActions";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
-import { type Thread } from "@/transport";
+import { getTransport, type Thread } from "@/transport";
 import type { ChecksStatus } from "@mcode/contracts/github";
-import { createContext, useCallback, useContext, useMemo } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import {
   CreateThreadBranchDialog,
   useThreadOverviewBranchCreation,
@@ -51,6 +51,66 @@ function hasUncommittedChanges(state: ReviewState | null): boolean | null {
   return staged + unstaged + untracked > 0;
 }
 
+/** A branch with no published ref counts its commits ahead of base as unpushed. */
+function hasUnpushedCommits(state: ReviewState | null): boolean | null {
+  if (!state?.isGitRepo) return null;
+  if (state.published) return state.published.ahead > 0;
+  // The server sends null when it cannot count against base; that is unknown, not zero.
+  if (state.commitsAhead === null) return null;
+  return state.commitsAhead.count > 0;
+}
+
+/**
+ * Progress of the git row's Push. `landed` lasts until the row stops offering Push, so the row can
+ * move on to the next step under the pointer that just pushed.
+ */
+export type GitPushState =
+  | { kind: "idle" }
+  | { kind: "pushing" }
+  | { kind: "landed" }
+  | { kind: "failed"; message: string };
+
+const IDLE_PUSH: GitPushState = { kind: "idle" };
+
+/** Lives with the Overview state rather than the row so a push started before the card closes still reports when it reopens. */
+function useGitPush(thread: Thread) {
+  const [push, setPush] = useState<{ threadId: string; state: GitPushState }>({ threadId: thread.id, state: IDLE_PUSH });
+  const [refresh, setRefresh] = useState(0);
+  // A push that lands after the user switched threads must not report on the new thread.
+  const threadIdRef = useRef(thread.id);
+  threadIdRef.current = thread.id;
+  const gitPush = push.threadId === thread.id ? push.state : IDLE_PUSH;
+  const pushBranch = useCallback(async () => {
+    if (gitPush.kind === "pushing") return;
+    const threadId = thread.id;
+    setPush({ threadId, state: { kind: "pushing" } });
+    try {
+      await getTransport().push(thread.workspace_id, thread.branch, threadId);
+      if (threadIdRef.current !== threadId) return;
+      setPush({ threadId, state: { kind: "landed" } });
+      setRefresh((count) => count + 1);
+    } catch (err) {
+      if (threadIdRef.current !== threadId) return;
+      setPush({ threadId, state: { kind: "failed", message: err instanceof Error ? err.message : String(err) } });
+    }
+  }, [gitPush.kind, thread.branch, thread.id, thread.workspace_id]);
+  const clearFinishedPush = useCallback(() => {
+    setPush((current) => current.state.kind === "pushing" ? current : { threadId: current.threadId, state: IDLE_PUSH });
+  }, []);
+  return { gitPush, pushBranch, clearFinishedPush, refresh };
+}
+
+/** Counts the card's openings, derived during render so a reopen re-probes without an extra pass. */
+function useOpenings(open: boolean): number {
+  const [seen, setSeen] = useState({ open, openings: 0 });
+  if (seen.open !== open) {
+    const next = { open, openings: open ? seen.openings + 1 : seen.openings };
+    setSeen(next);
+    return next.openings;
+  }
+  return seen.openings;
+}
+
 /** Keeps shared Git and dialog state alive while the card is hidden. */
 export function useOverviewState(
   thread: Thread,
@@ -72,14 +132,18 @@ export function useOverviewState(
   } = useThreadGitActions(thread);
   const reviewLink = usePullRequestReviewLink(thread.id, open);
   const effectivePr = useMemo(() => getEffectiveThreadOverviewPr(pr, reviewLink), [pr, reviewLink]);
-  // Only a named-branch worktree's git row reads uncommitted changes, and each probe spawns several git processes.
-  const { state: reviewState } = useReviewState(prable ? thread.workspace_id : null, thread.id);
+  const { gitPush, pushBranch, clearFinishedPush, refresh } = useGitPush(thread);
+  const openings = useOpenings(open);
+  // Only a named-branch worktree's git row reads uncommitted changes, and each probe spawns several
+  // git processes. A landed push or a reopened card re-probes, since a push from elsewhere can move just the published ref.
+  const { state: reviewState } = useReviewState(prable ? thread.workspace_id : null, thread.id, refresh + openings);
   const gitRow = useMemo(() => planGitRow({
     mode: thread.mode,
     checkoutState: thread.checkout_state,
     hasPullRequest: effectivePr !== null,
     hasUncommittedChanges: hasUncommittedChanges(reviewState),
     hasCommitsAhead,
+    hasUnpushedCommits: hasUnpushedCommits(reviewState),
   }), [effectivePr, hasCommitsAhead, reviewState, thread.checkout_state, thread.mode]);
   const createPrBranch = branchCreation.branch ?? thread.branch;
   const createBranchBaseBranch = thread.base_branch ?? thread.branch;
@@ -100,7 +164,7 @@ export function useOverviewState(
     open, branchCreation, prable, effectivePr, hasCommitsAhead,
     checks, openPrDetail, dirPath, createPrOpen, setCreatePrOpen,
     handleCommit, handleOpenPr, gitRow, createPrBranch,
-    createBranchBaseBranch, openProjectSettings, ciDot,
+    createBranchBaseBranch, openProjectSettings, ciDot, gitPush, pushBranch, clearFinishedPush,
   };
 }
 

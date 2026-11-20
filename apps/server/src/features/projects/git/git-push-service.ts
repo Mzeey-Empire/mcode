@@ -8,7 +8,7 @@ import { CiWatcherService } from "../../pull-requests/status/ci-watcher.js";
 import { ReviewWorktreeService } from "../../pull-requests/reviews/review-worktree-service.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { CommitPushDestination } from "./commits/commit-request.js";
-import { gitExitCode } from "./execution/git-failure.js";
+import { gitExitCode, gitFailureOutput, gitPushFailureReason, gitWasKilled } from "./execution/git-failure.js";
 import type { GitExecutor } from "./execution/types.js";
 import { GitRepositoryService } from "./git-repository-service.js";
 import { PullRequestReviewGitService } from "./pull-request-review-git-service.js";
@@ -44,7 +44,7 @@ export class GitPushService {
   constructor(
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
     @inject(GitRepositoryService)
-    private readonly gitRepository: Pick<GitRepositoryService, "push" | "getCurrentBranchAt">,
+    private readonly gitRepository: Pick<GitRepositoryService, "getCurrentBranchAt">,
     @inject(PullRequestReviewGitService)
     private readonly pullRequestReviews: Pick<PullRequestReviewGitService, "pushPullRequestReviewBranch">,
     @inject(ReviewWorktreeService)
@@ -54,23 +54,31 @@ export class GitPushService {
     @inject("ThreadRepo") private readonly threadRepo: Pick<ThreadRepo, "findById">,
   ) {}
 
-  /** Push the checked-out branch, using a linked Review task's persisted target when there is one. */
+  /** Push the checked-out branch to its own name on origin or a linked Review task's persisted target. */
   async pushCheckedOutBranch(request: CheckedOutBranchPush): Promise<void> {
     const resolution = request.threadId
       ? this.reviewWorktrees.resolvePushTarget(request.threadId)
       : { kind: "standard" as const };
     if (resolution.kind === "invalid_review") throw invalidReviewLink();
-    if (resolution.kind === "review") {
-      const target = this.matchReviewTarget(resolution.target, request.workspaceId, request.branch);
-      await this.assertReviewCheckout(target);
-      await this.pullRequestReviews.pushPullRequestReviewBranch(
-        target.worktreePath,
-        target.pushRemote,
-        target.pushRef,
-        target.expectedHeadRepositoryUrl,
-      );
-    } else {
-      await this.gitRepository.push(request.workspacePath, request.branch);
+    try {
+      if (resolution.kind === "review") {
+        const target = this.matchReviewTarget(resolution.target, request.workspaceId, request.branch);
+        await this.assertReviewCheckout(target);
+        await this.pullRequestReviews.pushPullRequestReviewBranch(
+          target.worktreePath,
+          target.pushRemote,
+          target.pushRef,
+          target.expectedHeadRepositoryUrl,
+        );
+      } else {
+        await this.pushStandard(request.workspacePath, `refs/heads/${request.branch}`, {
+          kind: "standard",
+          remote: "origin",
+          branch: request.branch,
+        });
+      }
+    } catch (error) {
+      throw toPushFailure(error);
     }
     this.scheduleBumps(request.workspaceId, request.branch);
   }
@@ -112,19 +120,25 @@ export class GitPushService {
       this.scheduleBumps(request.workspaceId, destination.localBranch);
       return;
     }
-    await this.pushStandardCommit(request.repoPath, request.sha, destination);
+    await this.pushStandard(request.repoPath, request.sha, destination);
     this.scheduleBumps(request.workspaceId, destination.branch);
   }
 
-  private async pushStandardCommit(
+  /**
+   * Push `source` to the destination branch and keep an upstream that still resolves. A worktree
+   * branch started from origin/main tracks it, and Review compares against the upstream, so moving
+   * tracking to the pushed branch would empty the branch's default Review comparison. An upstream
+   * whose tracking ref is gone counts as missing and is replaced.
+   */
+  private async pushStandard(
     repoPath: string,
-    sha: string,
+    source: string,
     destination: Extract<CommitPushDestination, { kind: "standard" }>,
   ): Promise<void> {
     if (!REMOTE_NAME.test(destination.remote)) throw new Error("Invalid push remote.");
     validateBranchName(destination.branch);
     await this.gitExecutor.exec(
-      ["-C", repoPath, "push", destination.remote, `${sha}:refs/heads/${destination.branch}`],
+      ["-C", repoPath, "push", destination.remote, `${source}:refs/heads/${destination.branch}`],
       { timeout: PUSH_TIMEOUT_MS },
     );
     await this.setUpstreamIfMissing(repoPath, destination.remote, destination.branch);
@@ -182,4 +196,17 @@ export class GitPushService {
 
 function invalidReviewLink(): Error {
   return new Error("The Review task link changed. Reload the task before pushing.");
+}
+
+/**
+ * A git failure's message starts with the full command line, local paths included, which the
+ * client would show as the reason. Errors git did not raise already read as reasons and pass through.
+ */
+function toPushFailure(error: unknown): unknown {
+  const killed = gitWasKilled(error);
+  if (!killed && gitExitCode(error) === null) return error;
+  const output = gitFailureOutput(error);
+  logger.warn("Push failed", { detail: output });
+  const reason = killed ? `Push timed out after ${PUSH_TIMEOUT_MS / 1_000}s` : gitPushFailureReason(output);
+  return new Error(reason, { cause: error });
 }
