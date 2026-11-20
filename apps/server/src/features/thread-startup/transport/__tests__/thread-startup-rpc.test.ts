@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentStopResult } from "@mcode/contracts/models/turn-runtime";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { ThreadStartup } from "@mcode/contracts/thread-startup";
+import { createMockThreadStartup } from "@mcode/contracts/testing";
 import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts/models/workspace-environment";
 import { routeMessage, type RouterDeps } from "../../../../application/transport/ws-router.js";
 import { createOwnedTestDatabase } from "../../../projects/testing/owned-test-database.js";
@@ -12,19 +13,9 @@ import { StartupAgentPhaseObserver } from "../../startup-agent-phase-observer.js
 import { routeThreadStartupRpc } from "../thread-startup-rpc.js";
 import { ThreadStartupFetchDecisions } from "../../thread-startup-fetch-decisions.js";
 
-const startup: ThreadStartup = {
+const startup = createMockThreadStartup({
   startupId: "00000000-0000-4000-8000-000000000001",
-  workspaceId: "workspace-1",
-  kind: "direct",
-  state: "pending",
-  phase: "thread",
-  steps: [{ phase: "thread", state: "pending" }, { phase: "agent", state: "pending" }],
-  transcript: [],
-  cancellation: "none",
-  revision: 1,
-  createdAt: "2026-09-02T10:00:00.000Z",
-  updatedAt: "2026-09-02T10:00:00.000Z",
-};
+});
 
 const stoppedSetup: WorkspaceEnvironmentAutomaticSetupSnapshot = {
   gate: "blocked", attempt: null, queuedTurns: [],
@@ -79,6 +70,37 @@ const intentCases = [
 const agentKinds = ["direct", "managed-worktree", "attached-worktree", "pull-request-review"] as const;
 
 describe("thread startup RPC", () => {
+  it("rejects malformed acknowledgement params before writing and routes a valid acknowledgement", async () => {
+    const { service, deps } = await harness("direct", "agent");
+    const error = { code: "AGENT_FAILED", message: "Agent failed", retryable: true };
+    const previous = await service.fail(startup.startupId, error);
+    await service.retryAgent(startup.startupId);
+    const failed = await service.fail(startup.startupId, error);
+    const acknowledge = (params: unknown) => routeMessage(JSON.stringify({
+      id: "acknowledge",
+      method: "thread.startup.acknowledgeFailure",
+      params,
+    }), deps as RouterDeps);
+
+    expect(await acknowledge({ startupId: startup.startupId, revision: previous.revision }))
+      .toEqual({ id: "acknowledge", result: failed });
+    expect(service.get(startup.startupId)).toEqual(failed);
+    for (const params of [
+      { startupId: "invalid", revision: failed.revision },
+      { startupId: startup.startupId, revision: failed.revision, extra: true },
+      { startupId: startup.startupId },
+    ]) {
+      expect(await acknowledge(params)).toMatchObject({ id: "acknowledge", error: { code: "INVALID_PARAMS" } });
+      expect(service.get(startup.startupId)).toEqual(failed);
+    }
+    const response = await acknowledge({ startupId: startup.startupId, revision: failed.revision });
+    expect(response).toMatchObject({
+      id: "acknowledge",
+      result: { startupId: startup.startupId, state: "failed", revision: failed.revision + 1, failureSeenAt: expect.any(String) },
+    });
+    expect(response).toEqual({ id: "acknowledge", result: service.get(startup.startupId) });
+  });
+
   it.each(["thread", "fetch", "setup", "agent"] as const)("rejects resolution during running %s", async (phase) => {
     const { deps } = await harness("managed-worktree", phase);
     expect(() => routeThreadStartupRpc("thread.startup.resolve", { startupId: startup.startupId, action: "retry" }, deps))

@@ -43,6 +43,7 @@ const at = (seconds: number) => new Date(Date.parse(T0) + seconds * 1_000).toISO
 function startup(overrides: Partial<ThreadStartup> = {}): ThreadStartup {
   return {
     startupId,
+    failureSeenAt: null,
     workspaceId: "workspace-1",
     kind: "managed-worktree",
     state: "running",

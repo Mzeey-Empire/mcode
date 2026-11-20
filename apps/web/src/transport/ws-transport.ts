@@ -1167,6 +1167,8 @@ export function createWsTransport(
       rpc<ThreadStartup>("thread.startup.resolve", { startupId, action }),
     retryThreadStartupAgent: (startupId) =>
       rpc<ThreadStartup>("thread.startup.retryAgent", { startupId }),
+    acknowledgeStartupFailure: (startupId, revision) =>
+      rpc<ThreadStartup | null>("thread.startup.acknowledgeFailure", { startupId, revision }),
     createAndSendMessage: (input: CreateAndSendInput) => {
       return input.startupId
         ? createAndSendWithReconnect(input)

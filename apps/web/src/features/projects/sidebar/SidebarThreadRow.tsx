@@ -14,13 +14,13 @@ import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 import { STATUS_LABEL_TEXT_CLASS, StatusMark } from "@/components/ui/status-mark";
 import { THREAD_STATUS_LOOK, threadRowLook, threadTitleTone, useThreadRowState, type ThreadRowLook, type ThreadStatusLook, type ThreadTitleTone } from "@/features/thread-attention/thread-row-presentation";
 import type { ThreadRowState } from "@/features/thread-attention/thread-row-state";
+import { startupHolds, useThreadActivity } from "@/features/thread-attention/thread-activity";
 import { isPrable } from "@/lib/is-prable";
 import { resolveThreadCheckoutLabel } from "@/lib/checkout-label";
 import { useRelativeTime } from "@/lib/time";
 import { reactProfilingEnabled } from "@/performance/ReactPerformanceProfiler";
 import { cn } from "@/lib/utils";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
-import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { draftHasNoSendableContent, useComposerDraftStore } from "@/stores/composerDraftStore";
 import type { Thread, Workspace } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
@@ -86,19 +86,20 @@ function ThreadRow({ thread, workspace, depth, treeLine, showProject, ctx }: { t
   const isEditing = ctx.inlineEdit?.threadId === thread.id;
   const handlers = useThreadRowHandlers(ctx, thread.workspace_id, workspace?.path ?? "");
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
-  const isRunning = useThreadStore((s) => isThreadExecuting(thread.id, s));
-  const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
+  const activity = useThreadActivity(thread.id, { preparing: thread.clientPreparing === true, createFailed: thread.clientError != null });
+  const isRunning = activity.turnRunning;
+  const startupHeld = startupHolds(activity);
   const rowState = useThreadRowState(thread.id, thread.clientPreparing === true, thread.clientError != null);
   const completion = useCompletionStore((s) => s.entries.get(thread.id));
   const hasDraft = useDraftTagShown(thread.id, isActive);
   const closedScope = useSidebarUiStore(selectClosedScope);
-  const presentation = createThreadRowPresentation(thread, rowState, ctx, { startupPending, isActive, closedScope }, completion);
+  const presentation = createThreadRowPresentation(thread, rowState, ctx, { startupHeld, isActive, closedScope }, completion);
   const lifecycle = useThreadLifecycleActions({
     thread,
     isEditing,
     isRunning,
     awaitingApproval: rowState.kind === "needs-you" && rowState.label === "Approval required",
-    startupPending,
+    startupHeld,
     lifecycleKind: presentation.lifecycleKind,
     cleanupBlocked: presentation.cleanupBlocked,
     onReopenThread: ctx.onReopenThread,
@@ -209,7 +210,7 @@ function createThreadRowPresentation(
   thread: WorkspaceThread,
   rowState: ThreadRowState,
   ctx: Pick<SidebarRowContext, "worktreesLoadedFor" | "validWorktreePaths" | "availableProviders">,
-  { startupPending, isActive, closedScope }: { startupPending: boolean; isActive: boolean; closedScope: boolean },
+  { startupHeld, isActive, closedScope }: { startupHeld: boolean; isActive: boolean; closedScope: boolean },
   completion: CompletionEntry | undefined,
 ): ThreadRowPresentation {
   const isUserCompleted = thread.user_completed_at !== null;
@@ -218,7 +219,7 @@ function createThreadRowPresentation(
     titleTone: threadTitleTone(rowState, isActive),
     isStaleWorktree: hasStaleThreadWorktree(thread, ctx.worktreesLoadedFor, ctx.validWorktreePaths),
     ...threadProviderPresentation(thread.provider, ctx.availableProviders),
-    scaffoldDim: thread.clientPreparing || thread.clientError || startupPending ? "opacity-[0.72]" : false,
+    scaffoldDim: thread.clientError || startupHeld ? "opacity-[0.72]" : false,
     closedRow: closedScope,
     cleanupBlocked: isUserCompleted && thread.cleanup_state === "blocked",
     completing: completion !== undefined && completion.phase !== "failed",
@@ -256,7 +257,7 @@ function useThreadLifecycleActions({
   isEditing,
   isRunning,
   awaitingApproval,
-  startupPending,
+  startupHeld,
   lifecycleKind,
   cleanupBlocked,
   onReopenThread,
@@ -266,7 +267,7 @@ function useThreadLifecycleActions({
   isEditing: boolean;
   isRunning: boolean;
   awaitingApproval: boolean;
-  startupPending: boolean;
+  startupHeld: boolean;
   lifecycleKind: ThreadLifecycleKind;
   cleanupBlocked: boolean;
 }): ThreadRowLifecycleActions {
@@ -277,7 +278,7 @@ function useThreadLifecycleActions({
   const lifecycleUnavailable = lifecycleBlockedReason(thread, {
     running: isRunning,
     awaitingApproval,
-    startupPending,
+    startupHolds: startupHeld,
     lifecyclePending: isLifecyclePending,
     renaming: isEditing,
   }) !== null;
@@ -820,9 +821,15 @@ function ThreadRowLookStatus({ look, iconOnly = false }: { look: ThreadStatusLoo
   return (
     <>
       <StatusMark state={look.state} label={look.label} icon={look.icon} />
-      <ThreadRowCaption aria-hidden className={cn("font-medium", STATUS_LABEL_TEXT_CLASS[look.state])}>{look.label}</ThreadRowCaption>
+      <StatusDetailTrigger detail={look.detail}>
+        <ThreadRowCaption aria-hidden className={cn("font-medium", STATUS_LABEL_TEXT_CLASS[look.state])}>{look.label}</ThreadRowCaption>
+      </StatusDetailTrigger>
     </>
   );
+}
+
+function StatusDetailTrigger({ detail, children }: { detail: string | undefined; children: React.ReactElement }) {
+  return detail ? <SidebarLabelTrigger label={detail}>{children}</SidebarLabelTrigger> : children;
 }
 
 function hasStandingCaption(presentation: ThreadRowPresentation, lifecycle: ThreadRowLifecycleActions): boolean {

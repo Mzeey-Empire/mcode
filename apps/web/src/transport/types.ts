@@ -351,6 +351,8 @@ export interface McodeTransport {
   resolveThreadStartup(startupId: string, action: ThreadStartupResolveInput["action"]): Promise<ThreadStartup>;
   /** Sends a startup's saved first message again after its agent failed before taking it; setup does not rerun. */
   retryThreadStartupAgent(startupId: string): Promise<ThreadStartup>;
+  /** Records that the user saw one revision of a failed or interrupted startup. */
+  acknowledgeStartupFailure(startupId: string, revision: number): Promise<ThreadStartup | null>;
   createAndSendMessage(input: CreateAndSendInput): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<AgentStopResult>;
   /** Retry retained saving work without starting another provider execution. */

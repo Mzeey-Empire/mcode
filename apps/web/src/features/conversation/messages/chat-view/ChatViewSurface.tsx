@@ -25,7 +25,7 @@ import { newThreadOverviewScope, threadOverviewScope, useOverviewPresentation } 
 import { useElementWidth } from "@/hooks/useElementWidth";
 import type { ViewportInsets } from "@/components/ui/virtual-viewport";
 import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
-import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStartupSetupTerminal, startupDecision, useFirstSendMotion, useStartingThread, useStartupAgentRetry, useThreadStartup } from "@/features/thread-startup";
+import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStartupSetupTerminal, startupDecision, useAcknowledgeStartupFailure, useFirstSendMotion, useStartingThread, useStartupAgentRetry, useThreadStartup } from "@/features/thread-startup";
 import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
 import type { PendingStartup } from "@/features/projects/state/workspaceStore";
@@ -205,6 +205,7 @@ function ThreadStartupTrail({ thread, startup, pendingStartup }: {
   const threadId = startup?.threadId;
   // A dismissed startup keeps its trail as history but no longer asks for a decision.
   const dismissed = useThreadStartupStore((s) => startup ? s.dismissedStartupIds.has(startup.startupId) : false);
+  useAcknowledgeStartupFailure(thread.id, startup);
   return (
     <StartupStepsTrail
       startup={startup}

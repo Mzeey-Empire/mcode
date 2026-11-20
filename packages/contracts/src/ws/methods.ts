@@ -170,6 +170,7 @@ import {
   PullRequestMergeResultSchema,
 } from "../pull-requests.js";
 import {
+  ThreadStartupAcknowledgeFailureInputSchema,
   ThreadStartupCancelInputSchema,
   ThreadStartupResolveInputSchema,
   ThreadStartupGetInputSchema,
@@ -1123,6 +1124,11 @@ export const WS_METHODS = lazySchema(() => ({
   "thread.startup.retryAgent": {
     params: ThreadStartupRetryAgentInputSchema(),
     result: ThreadStartupSchema(),
+  },
+  /** Record that the user saw a failed or interrupted startup. */
+  "thread.startup.acknowledgeFailure": {
+    params: ThreadStartupAcknowledgeFailureInputSchema(),
+    result: ThreadStartupSchema().nullable(),
   },
   /** Create one external thread-control pairing and return its credential once. */
   "threadControl.pairing.create": {

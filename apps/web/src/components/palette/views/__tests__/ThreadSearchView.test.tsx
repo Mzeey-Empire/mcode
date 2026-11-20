@@ -77,6 +77,7 @@ import { statusGlyph } from "@/features/thread-attention/__tests__/status-glyph"
 function setupStartup(threadId: string, setup: ThreadStartup["steps"][number]["state"], block?: ThreadStartup["block"]): ThreadStartup {
   return {
     startupId: `startup-${threadId}`,
+    failureSeenAt: null,
     workspaceId: "ws-1",
     threadId,
     kind: "managed-worktree",

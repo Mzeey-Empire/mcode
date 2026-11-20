@@ -35,6 +35,8 @@ export const threadStartupStateWriteOperations = {
   resume: transition("threadStartup.resume", z.tuple([id, clock])),
   skip: transition("threadStartup.skip", z.tuple([z.tuple([z.string(), ThreadStartupPhaseSchema, ThreadStartupStepDetailSchema().optional()]), clock])),
   fail: transition("threadStartup.fail", z.tuple([z.tuple([z.string(), ThreadStartupErrorSchema(), ThreadStartupStepDetailSchema().optional()]), clock])),
+  acknowledgeFailure: databaseWriteOperation("threadStartup.acknowledgeFailure",
+    z.tuple([z.tuple([z.string(), z.number().int().positive()]), clock]), committed.extend({ startup: snapshot.nullable() })),
   retryAgent: transition("threadStartup.retryAgent", z.tuple([id, clock])),
   cancel: transition("threadStartup.cancel", z.tuple([id, clock])),
   markCancelled: transition("threadStartup.markCancelled", z.tuple([id, clock])),
@@ -47,10 +49,10 @@ export function threadStartupWriteHandlers(db: Database): ReadonlyMap<string, (i
   const store = new ThreadStartupStore(db);
   const state = (timestamp: string) => new ThreadStartupStateStore(store, () => new Date(timestamp), new ThreadStore(db));
   const operations = threadStartupStateWriteOperations;
-  const mutate = (startupId: string, action: () => ThreadStartup): ThreadStartupCommittedTransition => {
+  const mutate = <Startup extends ThreadStartup | null>(startupId: string, action: () => Startup) => {
     const previous = store.findById(startupId);
     const startup = action();
-    return { startup, changed: previous?.revision !== startup.revision };
+    return { startup, changed: previous?.revision !== startup?.revision };
   };
   return new Map([
     [threadStartupWriteOperations.insert.name, databaseWriteHandler(threadStartupWriteOperations.insert, (input) => store.insert(...input))],
@@ -66,6 +68,7 @@ export function threadStartupWriteHandlers(db: Database): ReadonlyMap<string, (i
     [operations.resume.name, databaseWriteHandler(operations.resume, (input) => mutate(input[0][0], () => state(input[1]).resume(...input[0])))],
     [operations.skip.name, databaseWriteHandler(operations.skip, (input) => mutate(input[0][0], () => state(input[1]).skip(...input[0])))],
     [operations.fail.name, databaseWriteHandler(operations.fail, (input) => mutate(input[0][0], () => state(input[1]).fail(...input[0])))],
+    [operations.acknowledgeFailure.name, databaseWriteHandler(operations.acknowledgeFailure, (input) => mutate(input[0][0], () => state(input[1]).acknowledgeFailure(...input[0])))],
     [operations.retryAgent.name, databaseWriteHandler(operations.retryAgent, (input) => mutate(input[0][0], () => state(input[1]).retryAgent(...input[0])))],
     [operations.cancel.name, databaseWriteHandler(operations.cancel, (input) => mutate(input[0][0], () => state(input[1]).cancel(...input[0])))],
     [operations.markCancelled.name, databaseWriteHandler(operations.markCancelled, (input) => mutate(input[0][0], () => state(input[1]).markCancelled(...input[0])))],

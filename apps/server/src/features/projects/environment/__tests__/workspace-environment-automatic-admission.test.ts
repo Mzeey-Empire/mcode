@@ -927,6 +927,36 @@ describe("startup action gate admission and recovery", () => {
     expect(startups.findByThreadId(threadId)?.steps[2].detail).toMatchObject({ phase: "setup", skipReason: "user-skipped", actions: [{ actionId: "setup", outcome: "running" }] });
   });
 
+  it("clears a seen setup interruption when Retry runs Setup again", async () => {
+    let startups!: ThreadStartupService;
+    const startupId = "00000000-0000-4000-8000-0000000000ac";
+    const threadId = "00000000-0000-4000-8000-0000000000a2";
+    const { service, start } = await automaticHarness({
+      threadIds: [threadId],
+      threadStartups: (database, writer) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database, writer), writer, () => new Date());
+        return startups;
+      },
+    });
+    await startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, threadId);
+    await startups.advance(startupId, "worktree");
+    await startups.advance(startupId, "setup");
+    await service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+    await startups.interruptNonterminalOnStartup();
+    await service.reconcileAutomaticSetup();
+    const interrupted = startups.get(startupId);
+    if (!interrupted) throw new Error("Expected the interrupted startup");
+    await startups.acknowledgeFailure(startupId, interrupted.revision);
+    expect(startups.findByThreadId(threadId)?.failureSeenAt).not.toBeNull();
+
+    await service.retryAutomaticSetup({ threadId });
+
+    await eventually(() => expect(startups.findByThreadId(threadId)).toMatchObject({ state: "running", failureSeenAt: null }));
+  });
+
   async function failedAgentStartup() {
     let startups!: ThreadStartupService;
     const startupId = "00000000-0000-4000-8000-0000000000bb";

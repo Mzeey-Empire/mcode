@@ -137,6 +137,16 @@ function verbsFor(kind: ThreadStartupKind, step: ThreadStartupStep & { phase: Tr
   }
 }
 
+const RUNNING_VERBS_BY_PHASE: Record<TrailPhase, StepVerbs> = { fetch: FETCH, worktree: CREATE_WORKTREE, setup: SETUP, agent: AGENT };
+
+/**
+ * The trail's running label for a startup phase, for surfaces that know the phase but not the step.
+ * Without the step's detail a worktree reads as created, which is the common case.
+ */
+export function startupPhaseRunningLabel(phase: ThreadStartupPhase | null): string {
+  return phase === null || phase === "thread" ? "Preparing thread" : RUNNING_VERBS_BY_PHASE[phase].running;
+}
+
 /** Maps one step to its visible label from the phase, state and detail. */
 export function startupStepLabel(kind: ThreadStartupKind, step: ThreadStartupStep & { phase: TrailPhase }): string {
   const verbs = verbsFor(kind, step);

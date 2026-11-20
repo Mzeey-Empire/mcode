@@ -33,6 +33,26 @@ function input(
 }
 
 describe("ThreadStartupStateStore", () => {
+  it("clears an acknowledged agent failure on retry and leaves a second failure unseen", () => {
+    const { db, service } = createHarness();
+    try {
+      service.start(input());
+      service.advance(firstStartupId, "thread");
+      service.advance(firstStartupId, "agent");
+      const error = { code: "AGENT_FAILED", message: "Agent failed", retryable: true };
+      const failed = service.fail(firstStartupId, error);
+      expect(service.acknowledgeFailure(firstStartupId, failed.revision)).toMatchObject({
+        state: "failed", failureSeenAt: expect.any(String),
+      });
+
+      expect(service.retryAgent(firstStartupId)).toMatchObject({ state: "running", failureSeenAt: null });
+      service.fail(firstStartupId, error);
+      expect(service.get(firstStartupId)).toMatchObject({ state: "failed", failureSeenAt: null });
+    } finally {
+      db.close();
+    }
+  });
+
   it("times every managed step and persists details without resetting a running step", () => {
     let time = "2026-10-08T10:00:00.000Z";
     const { db, service } = createHarness(() => new Date(time));

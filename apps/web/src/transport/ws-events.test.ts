@@ -288,6 +288,7 @@ describe("ws-events thread.startup.updated", () => {
   it("ignores an out-of-order startup revision", () => {
     const current: ThreadStartup = {
       startupId: "00000000-0000-4000-8000-000000000001",
+      failureSeenAt: null,
       workspaceId: "ws-1",
       kind: "direct",
       state: "running",

@@ -25,7 +25,8 @@ beforeEach(() => {
 import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStartupStore } from "../state/thread-startup-store";
-import { useStartupCancel, useStartupAgentRetry, useStartupFetchDecision } from "../useStartupActions";
+import { useAcknowledgeStartupFailure, useStartupCancel, useStartupAgentRetry, useStartupFetchDecision } from "../useStartupActions";
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 
 const startupId = "00000000-0000-4000-8000-000000000001";
 const T0 = "2026-09-02T12:00:00.000Z";
@@ -33,6 +34,7 @@ const T0 = "2026-09-02T12:00:00.000Z";
 function startup(overrides: Partial<ThreadStartup> = {}): ThreadStartup {
   return {
     startupId,
+    failureSeenAt: null,
     workspaceId: "workspace-1",
     kind: "managed-worktree",
     state: "running",
@@ -206,5 +208,35 @@ describe("useStartupAgentRetry", () => {
     seedTurns(...turns);
     const { result } = renderHook(() => useStartupAgentRetry(agentFailed(kind), "thread-1"));
     expect(result.current).toBeUndefined();
+  });
+});
+
+describe("useAcknowledgeStartupFailure", () => {
+  const acknowledge = vi.mocked(mockTransport.acknowledgeStartupFailure);
+  beforeEach(() => {
+    acknowledge.mockReset().mockResolvedValue(null);
+    threadAttentionStore.setState({ onScreenThreadId: null });
+  });
+
+  it("marks an unseen failed startup seen once while its thread is on screen", () => {
+    threadAttentionStore.setState({ onScreenThreadId: "thread-1" });
+    const failed = startup({ state: "failed", phase: "agent", revision: 3 });
+    const { rerender } = renderHook(({ record }) => useAcknowledgeStartupFailure("thread-1", record), { initialProps: { record: failed } });
+    rerender({ record: { ...failed } });
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+    expect(acknowledge).toHaveBeenCalledWith(startupId, 3);
+    rerender({ record: { ...failed, revision: 5 } });
+    expect(acknowledge).toHaveBeenNthCalledWith(2, startupId, 5);
+  });
+
+  it("does not mark it seen from a window where the thread is not on screen", () => {
+    renderHook(() => useAcknowledgeStartupFailure("thread-1", startup({ state: "failed", phase: "agent" })));
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+
+  it("does not mark a seen failure again", () => {
+    threadAttentionStore.setState({ onScreenThreadId: "thread-1" });
+    renderHook(() => useAcknowledgeStartupFailure("thread-1", startup({ state: "interrupted", phase: "worktree", failureSeenAt: T0 })));
+    expect(acknowledge).not.toHaveBeenCalled();
   });
 });

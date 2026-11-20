@@ -106,6 +106,36 @@ describe("successful database migration recovery", () => {
     process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = NodePath.join(process.cwd(), "drizzle");
   });
 
+  it("keeps old startup failures seen when upgrading through 0110", () => {
+    const current = NodePath.join(process.cwd(), "drizzle");
+    const previous = NodePath.join(directory, "drizzle-through-0109");
+    copyMigrationsThrough(current, previous, "0109_demonic_devos");
+    process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = previous;
+    const old = openDatabase({ dbPath: databasePath });
+    const updatedAt = "2026-09-02T12:00:00.000Z";
+    try {
+      old.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES (?, ?, ?, ?)")
+        .run("workspace-1", "Fixture", "/fixture", "{}");
+      const insert = old.prepare(`INSERT INTO thread_startups
+        (startup_id, workspace_id, kind, state, phase, steps_json, transcript_json, revision, updated_at)
+        VALUES (?, 'workspace-1', 'direct', ?, 'agent', '[]', '[]', 1, ?)`);
+      for (const state of ["failed", "interrupted", "running"]) insert.run(state, state, updatedAt);
+    } finally {
+      old.close(true);
+    }
+    process.env.MCODE_DRIZZLE_MIGRATIONS_DIR = current;
+    const upgraded = openDatabase({ dbPath: databasePath });
+    try {
+      expect(upgraded.query("SELECT state, failure_seen_at FROM thread_startups ORDER BY state").all()).toEqual([
+        { state: "failed", failure_seen_at: updatedAt },
+        { state: "interrupted", failure_seen_at: updatedAt },
+        { state: "running", failure_seen_at: null },
+      ]);
+    } finally {
+      upgraded.close(true);
+    }
+  });
+
   it("reports whether bootstrap applied migrations", () => {
     const first: DatabaseLaunchObservations = { migrated: false, marks: [] };
     openDatabase({ dbPath: databasePath, launchTelemetry: first }).close(true);

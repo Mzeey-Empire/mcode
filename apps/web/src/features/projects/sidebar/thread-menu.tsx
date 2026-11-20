@@ -12,10 +12,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { ContextMenuItem } from "@/components/ui/context-menu";
 import { isDetachedCheckout } from "@/lib/checkout-label";
+import { startupHolds, useThreadActivity } from "@/features/thread-attention/thread-activity";
 import { useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting } from "@/stores/threadStore";
 import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import type { Thread } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
@@ -173,8 +174,7 @@ function ThreadMenuContent({ target, actions, leadingItems = NO_ITEMS, ...placem
 }
 
 function CloseThreadItem({ thread, renaming }: { thread: WorkspaceThread; renaming: boolean }) {
-  const running = useThreadStore((s) => isThreadExecuting(thread.id, s));
-  const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
+  const activity = useThreadActivity(thread.id, { preparing: thread.clientPreparing === true, createFailed: thread.clientError != null });
   const lifecyclePending = useRowLifecycleStore((s) => s.pendingLifecycle.has(thread.id));
   const closing = useCompletionStore((s) => s.entries.has(thread.id));
   const rowState = useThreadRowState(thread.id, thread.clientPreparing === true, thread.clientError != null);
@@ -182,7 +182,7 @@ function CloseThreadItem({ thread, renaming }: { thread: WorkspaceThread; renami
   return (
     <DropdownMenuItem
       label="Close thread"
-      disabledReason={closeBlockedReason(thread, { running, awaitingApproval, startupPending, lifecyclePending, renaming, closing })}
+      disabledReason={closeBlockedReason(thread, { running: activity.turnRunning, awaitingApproval, startupHolds: startupHolds(activity), lifecyclePending, renaming, closing })}
       onClick={() => closeThread(thread.id)}
     />
   );

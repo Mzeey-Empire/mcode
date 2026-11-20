@@ -1,11 +1,15 @@
 import type { Database } from "bun:sqlite";
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import { logger } from "@mcode/shared";
 import { ThreadStartupSchema, type ThreadStartup } from "@mcode/contracts/thread-startup";
 import { threadStartups } from "../../../runtime/persistence/sqlite/schema.js";
 
 type ThreadStartupRow = typeof threadStartups.$inferSelect;
+
+const liveStartup = inArray(threadStartups.state, ["pending", "running", "blocked"]);
+const newestFirst = [desc(threadStartups.updatedAt), desc(threadStartups.startupId)];
+const threadStartupOrder = [asc(sql`CASE WHEN ${liveStartup} THEN 0 ELSE 1 END`), ...newestFirst];
 
 /** SQLite repository for server-owned thread startup lifecycle snapshots. */
 export class ThreadStartupStore {
@@ -31,6 +35,7 @@ export class ThreadStartupStore {
       threadId: startup.threadId ?? null,
       errorJson: startup.error ? JSON.stringify(startup.error) : null,
       blockJson: startup.block ? JSON.stringify(startup.block) : null,
+      failureSeenAt: startup.failureSeenAt,
       createdAt: startup.createdAt,
       updatedAt: startup.updatedAt,
     }).run();
@@ -61,15 +66,37 @@ export class ThreadStartupStore {
     return row ? rowToStartup(row) : null;
   }
 
-  /** Return a bounded reverse-chronological list for one workspace. */
+  /** Return recent startups and older startups needed to recover workspace rows. */
   listByWorkspace(workspaceId: string, limit = 100): ThreadStartup[] {
     const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
-    const rows = this.orm
-      .select()
+    const workspace = eq(threadStartups.workspaceId, workspaceId);
+    const recent = this.orm
+      .select({ startupId: threadStartups.startupId })
       .from(threadStartups)
-      .where(eq(threadStartups.workspaceId, workspaceId))
-      .orderBy(desc(threadStartups.updatedAt), desc(threadStartups.startupId))
-      .limit(boundedLimit)
+      .where(workspace)
+      .orderBy(...newestFirst)
+      .limit(boundedLimit);
+    const ranked = this.orm.$with("ranked_startups").as(this.orm.select({
+      startupId: threadStartups.startupId,
+      state: threadStartups.state,
+      phase: threadStartups.phase,
+      failureSeenAt: threadStartups.failureSeenAt,
+      rank: sql<number>`row_number() over (
+        partition by ${threadStartups.threadId} order by ${sql.join(threadStartupOrder, sql`, `)}
+      )`.as("thread_rank"),
+    }).from(threadStartups).where(and(workspace, isNotNull(threadStartups.threadId))));
+    const recoverableFailures = this.orm.select({ startupId: ranked.startupId }).from(ranked).where(and(
+      eq(ranked.rank, 1),
+      inArray(ranked.state, ["failed", "interrupted"]),
+      or(isNull(ranked.failureSeenAt), and(eq(ranked.state, "interrupted"), eq(ranked.phase, "setup"))),
+    ));
+    const rows = this.orm.with(ranked).select().from(threadStartups)
+      .where(and(workspace, or(
+        inArray(threadStartups.startupId, recent),
+        liveStartup,
+        inArray(threadStartups.startupId, recoverableFailures),
+      )))
+      .orderBy(...newestFirst)
       .all();
     return rows.map(rowToStartup);
   }
@@ -109,11 +136,7 @@ export class ThreadStartupStore {
       .select()
       .from(threadStartups)
       .where(eq(threadStartups.threadId, threadId))
-      .orderBy(
-        asc(sql`CASE WHEN ${threadStartups.state} IN ('pending', 'running', 'blocked') THEN 0 ELSE 1 END`),
-        desc(threadStartups.updatedAt),
-        desc(threadStartups.startupId),
-      )
+      .orderBy(...threadStartupOrder)
       .limit(1)
       .get();
     return row ? rowToStartup(row) : null;
@@ -133,6 +156,7 @@ export class ThreadStartupStore {
         threadId: startup.threadId ?? null,
         errorJson: startup.error ? JSON.stringify(startup.error) : null,
         blockJson: startup.block ? JSON.stringify(startup.block) : null,
+        failureSeenAt: startup.failureSeenAt,
         updatedAt: startup.updatedAt,
       })
       .where(eq(threadStartups.startupId, startup.startupId))
@@ -171,6 +195,7 @@ function rowToStartup(row: ThreadStartupRow): ThreadStartup {
     ...(row.threadId ? { threadId: row.threadId } : {}),
     ...(row.errorJson ? { error: JSON.parse(row.errorJson) } : {}),
     ...(row.blockJson ? { block: JSON.parse(row.blockJson) } : {}),
+    failureSeenAt: row.failureSeenAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   });

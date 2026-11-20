@@ -499,6 +499,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     };
     useThreadStartupStore.getState().apply({
       startupId,
+      failureSeenAt: null,
       workspaceId: thread.workspace_id,
       kind: "managed-worktree",
       state: "blocked",
@@ -828,6 +829,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const other = { ...makeThread({ id: "thread-other", title: "Other thread", mode: "worktree", worktree_managed: true }), clientPreparing: true };
     act(() => useThreadStartupStore.getState().apply({
       startupId,
+      failureSeenAt: null,
       workspaceId: placeholder.workspace_id,
       kind: "managed-worktree",
       state: "completed",
@@ -891,6 +893,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const thread = { ...makeThread({ id: "thread-cancelled-echo", title: "Prepare checkout", mode: "worktree", worktree_managed: true }), clientPreparing: true };
     act(() => useThreadStartupStore.getState().apply({
       startupId,
+      failureSeenAt: null,
       workspaceId: thread.workspace_id,
       kind: "managed-worktree",
       state: "cancelled",
@@ -935,6 +938,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const pendingStartup = { startupId, context: "new-worktree" as const, queuedMessage: "Build the feature" };
     act(() => useThreadStartupStore.getState().apply({
       startupId,
+      failureSeenAt: null,
       workspaceId: persisted.workspace_id,
       kind: "managed-worktree",
       state: "running",
@@ -986,6 +990,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
     act(() => useThreadStartupStore.getState().apply({
       startupId,
+      failureSeenAt: null,
       workspaceId: persisted.workspace_id,
       kind: "managed-worktree",
       state: "completed",
@@ -1031,6 +1036,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const restoredThread = makeThread({ id: "thread-restored", title: "Restored startup" });
     const runningStartup = {
       startupId,
+      failureSeenAt: null,
       workspaceId: restoredThread.workspace_id,
       kind: "direct" as const,
       state: "running" as const,
@@ -1075,6 +1081,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const restoredThread = makeThread({ id: "thread-restoring", title: "Restoring startup", status: "active" });
     const restoredStartup = {
       startupId,
+      failureSeenAt: null,
       workspaceId: restoredThread.workspace_id,
       kind: "direct" as const,
       state: "running" as const,
@@ -1136,6 +1143,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     };
     useThreadStartupStore.getState().apply({
       startupId: cancelledStartupId,
+      failureSeenAt: null,
       workspaceId: startupThread.workspace_id,
       kind: "managed-worktree",
       state: "cancelled",
@@ -1198,6 +1206,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     useThreadStartupStore.getState().apply({
       startupId: "00000000-0000-4000-8000-000000000027",
+      failureSeenAt: null,
       workspaceId: thread.workspace_id,
       kind: "managed-worktree",
       state: "interrupted",
@@ -1240,6 +1249,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const thread = makeThread({ id: "thread-reloaded-cancel", title: "Build the feature", mode: "worktree", worktree_managed: true, base_branch: "main" });
     useThreadStartupStore.getState().apply({
       startupId: "00000000-0000-4000-8000-000000000028",
+      failureSeenAt: null,
       workspaceId: thread.workspace_id,
       kind: "managed-worktree",
       state: "cancelled",
@@ -1286,6 +1296,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     useThreadStartupStore.getState().apply({
       startupId: "00000000-0000-4000-8000-000000000029",
+      failureSeenAt: null,
       workspaceId: thread.workspace_id,
       kind: "managed-worktree",
       state: "interrupted",
@@ -1357,6 +1368,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     const startup = {
       startupId: "00000000-0000-4000-8000-000000000028",
+      failureSeenAt: null,
       workspaceId: thread.workspace_id,
       kind,
       state: "failed",
@@ -1403,6 +1415,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const startupThread = makeThread({ id: "thread-2", title: "Thread 2" });
     useThreadStartupStore.getState().apply({
       startupId: "00000000-0000-4000-8000-000000000002",
+      failureSeenAt: null,
       workspaceId: startupThread.workspace_id,
       kind: "direct",
       state: "blocked",
@@ -1435,6 +1448,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const startupThread = makeThread({ id: "thread-2", title: "Thread 2" });
     useThreadStartupStore.getState().apply({
       startupId: "00000000-0000-4000-8000-000000000003",
+      failureSeenAt: null,
       workspaceId: startupThread.workspace_id,
       kind: "direct",
       state: "completed",

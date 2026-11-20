@@ -137,6 +137,7 @@ describe("placeholderTrailRows", () => {
 describe("startupDecision", () => {
   const record = (overrides: Partial<ThreadStartup>): ThreadStartup => ({
     startupId: "startup-1",
+    failureSeenAt: null,
     workspaceId: "workspace-1",
     kind: "managed-worktree",
     state: "blocked",

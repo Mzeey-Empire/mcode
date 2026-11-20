@@ -8,6 +8,7 @@ import {
   type ThreadRowFacts,
   type ThreadRowState,
 } from "../thread-row-state";
+import type { StartupActivity } from "../thread-activity";
 
 const AT = "2026-10-10T10:00:00.000Z";
 
@@ -36,9 +37,22 @@ function attention({
   });
 }
 
-function facts(overrides: Partial<ThreadRowFacts>): ThreadRowFacts {
-  return { attention: undefined, running: false, setup: null, onScreen: false, createFailed: false, ...overrides };
+interface FactOverrides {
+  attention?: ThreadAttention;
+  onScreen?: boolean;
+  running?: boolean;
+  startup?: StartupActivity;
 }
+
+function facts({ attention, onScreen = false, running = false, startup = { kind: "none" } }: FactOverrides): ThreadRowFacts {
+  return { activity: { startup, turnRunning: running }, attention, onScreen };
+}
+
+const SETTING_UP: StartupActivity = { kind: "setting-up", phase: "setup" };
+const SETUP_APPROVAL: StartupActivity = { kind: "needs-you", decision: "setup-approval" };
+const SETUP_FAILED: StartupActivity = { kind: "needs-you", decision: "setup-failed" };
+const FETCH_FAILED: StartupActivity = { kind: "needs-you", decision: "fetch-failed" };
+const STARTUP_FAILED: StartupActivity = { kind: "failed" };
 
 const QUIET: ThreadRowState = { kind: "quiet" };
 const RUNNING: ThreadRowState = { kind: "running" };
@@ -49,6 +63,8 @@ const answers: ThreadRowState = { kind: "needs-you", label: "Answers required" }
 const plan: ThreadRowState = { kind: "needs-you", label: "Plan ready" };
 const interrupted: ThreadRowState = { kind: "needs-you", label: "Interrupted" };
 const setupFailed: ThreadRowState = { kind: "needs-you", label: "Setup failed" };
+const fetchFailed: ThreadRowState = { kind: "needs-you", label: "Fetch failed" };
+const SETTING_UP_ROW: ThreadRowState = { kind: "setting-up", phase: "setup" };
 
 describe("deriveThreadRowState", () => {
   it.each([
@@ -72,16 +88,23 @@ describe("deriveThreadRowState", () => {
   it.each<[string, ThreadRowFacts, ThreadRowState]>([
     ["no facts is quiet", facts({}), QUIET],
     ["running turn", facts({ running: true }), RUNNING],
-    ["setup running", facts({ setup: "running" }), RUNNING],
+    ["setup running", facts({ startup: SETTING_UP }), SETTING_UP_ROW],
+    ["setting up over a running turn", facts({ running: true, startup: SETTING_UP }), SETTING_UP_ROW],
+    ["fetch failed", facts({ startup: FETCH_FAILED }), fetchFailed],
+    ["fetch failed over a running turn", facts({ running: true, startup: FETCH_FAILED }), fetchFailed],
+    ["plan ready over fetch failed", facts({ startup: FETCH_FAILED, attention: attention({ waiting: "plan" }) }), plan],
+    ["unseen startup failure is failed even on screen", facts({ onScreen: true, startup: STARTUP_FAILED }), FAILED],
+    ["running turn over a failed startup", facts({ running: true, startup: STARTUP_FAILED }), RUNNING],
+    ["plan ready over a failed startup", facts({ startup: STARTUP_FAILED, attention: attention({ waiting: "plan" }) }), plan],
     ["approval while running", facts({ running: true, attention: attention({ waiting: "approval" }) }), approval],
-    ["setup approval while running", facts({ running: true, setup: "awaiting-approval" }), approval],
+    ["setup approval while running", facts({ running: true, startup: SETUP_APPROVAL }), approval],
     ["questions while running", facts({ running: true, attention: attention({ waiting: "questions" }) }), answers],
     ["approval over questions", facts({ attention: attention({ waiting: "approval" }) }), approval],
     ["running over plan ready", facts({ running: true, attention: attention({ waiting: "plan" }) }), RUNNING],
     ["plan ready over unseen finished", facts({ attention: attention({ waiting: "plan", outcome: "completed" }) }), plan],
-    ["plan ready over setup failed", facts({ setup: "failed", attention: attention({ waiting: "plan" }) }), plan],
-    ["setup failed over a startup still marked running", facts({ running: true, setup: "failed" }), setupFailed],
-    ["setup failed over unseen failed", facts({ setup: "failed", attention: attention({ outcome: "errored" }) }), setupFailed],
+    ["plan ready over setup failed", facts({ startup: SETUP_FAILED, attention: attention({ waiting: "plan" }) }), plan],
+    ["setup failed over a startup still marked running", facts({ running: true, startup: SETUP_FAILED }), setupFailed],
+    ["setup failed over unseen failed", facts({ startup: SETUP_FAILED, attention: attention({ outcome: "errored" }) }), setupFailed],
     ["approval stays while on screen", facts({ onScreen: true, attention: attention({ waiting: "approval" }) }), approval],
     ["running over unseen finished", facts({ running: true, attention: attention({ outcome: "completed" }) }), RUNNING],
     ["unseen completed is finished", facts({ attention: attention({ outcome: "completed" }) }), FINISHED],
@@ -100,7 +123,7 @@ describe("deriveThreadRowState", () => {
     ["delegating over unseen failed", facts({ attention: attention({ outcome: "errored", delegating: true }) }), RUNNING],
     ["unseen interrupted over delegating", facts({ attention: attention({ outcome: "interrupted", delegating: true }) }), interrupted],
     ["plan ready over delegating", facts({ attention: attention({ waiting: "plan", outcome: "completed", delegating: true }) }), plan],
-    ["failed create over running and approval", facts({ createFailed: true, running: true, attention: attention({ waiting: "approval" }) }), FAILED],
+    ["failed create over an unseen finished turn", facts({ startup: STARTUP_FAILED, attention: attention({ outcome: "completed" }) }), FAILED],
     ["background subagent after a seen completed turn is running", facts({ attention: attention({ outcome: "completed", seen: 8, background: true }) }), RUNNING],
     ["background subagent over unseen finished", facts({ attention: attention({ outcome: "completed", background: true }) }), RUNNING],
     ["approval over background subagent", facts({ attention: attention({ waiting: "approval", outcome: "completed", background: true }) }), approval],
@@ -116,6 +139,8 @@ describe("rollUpThreadRowStates", () => {
   it.each<[string, ThreadRowState[], ThreadRowState]>([
     ["empty project is quiet", [], QUIET],
     ["needs you over running", [RUNNING, interrupted, FAILED], interrupted],
+    ["needs you over setting up", [SETTING_UP_ROW, fetchFailed], fetchFailed],
+    ["setting up over running", [RUNNING, SETTING_UP_ROW, FAILED], SETTING_UP_ROW],
     ["running over failed", [FINISHED, FAILED, RUNNING], RUNNING],
     ["failed over finished", [FINISHED, FAILED, QUIET], FAILED],
     ["finished over quiet", [QUIET, FINISHED], FINISHED],

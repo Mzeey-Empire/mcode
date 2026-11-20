@@ -181,6 +181,8 @@ export interface ThreadStartup {
   threadId?: string;
   error?: ThreadStartupError;
   block?: ThreadStartupBlock;
+  /** When the user saw this startup's failure. Null while unseen or outside failed and interrupted states. */
+  failureSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -201,6 +203,7 @@ export const ThreadStartupSchema: () => z.ZodType<ThreadStartup> = lazySchema(()
     threadId: z.string().uuid().optional(),
     error: ThreadStartupErrorSchema().optional(),
     block: ThreadStartupBlockSchema().optional(),
+    failureSeenAt: z.string().datetime().nullable(),
     createdAt: z.string().datetime({ offset: true }),
     updatedAt: z.string().datetime({ offset: true }),
   }).strict().superRefine(validateThreadStartup) as z.ZodType<ThreadStartup>,
@@ -227,6 +230,13 @@ export const ThreadStartupGetInputSchema = lazySchema(() =>
 /** Request for one startup snapshot. */
 export type ThreadStartupGetInput = z.infer<ReturnType<typeof ThreadStartupGetInputSchema>>;
 
+/** Acknowledge the revision of the startup failure shown to the user. */
+export const ThreadStartupAcknowledgeFailureInputSchema = lazySchema(() =>
+  ThreadStartupGetInputSchema().extend({ revision: z.number().int().positive() }),
+);
+/** The startup failure revision shown to the user. */
+export type ThreadStartupAcknowledgeFailureInput = z.infer<ReturnType<typeof ThreadStartupAcknowledgeFailureInputSchema>>;
+
 /** Request for startup snapshots in one workspace. */
 export const ThreadStartupListInputSchema = lazySchema(() =>
   z.object({ workspaceId: z.string().trim().min(1).max(128) }).strict(),
@@ -234,11 +244,11 @@ export const ThreadStartupListInputSchema = lazySchema(() =>
 /** Request for startup snapshots in one workspace. */
 export type ThreadStartupListInput = z.infer<ReturnType<typeof ThreadStartupListInputSchema>>;
 
-/** Result for the bounded workspace startup list. */
+/** Recent startups and older startups needed for workspace recovery. */
 export const ThreadStartupListResultSchema = lazySchema(() =>
-  z.object({ records: z.array(ThreadStartupSchema()).max(100) }).strict(),
+  z.object({ records: z.array(ThreadStartupSchema()) }).strict(),
 );
-/** Result for the bounded workspace startup list. */
+/** Recent startups and older startups needed for workspace recovery. */
 export type ThreadStartupListResult = z.infer<ReturnType<typeof ThreadStartupListResultSchema>>;
 
 /** Request to record cancellation intent for one startup. */

@@ -58,10 +58,10 @@ describe("useRolledUpThreadRowState", () => {
     expect(result.current.kind).toBe("quiet");
   });
 
-  it("ranks running above failed", () => {
+  it("ranks a preparing thread's setting up above failed", () => {
     threadAttentionStore.setState({ byThreadId: { b: attention("b", endedTurn("errored")) } });
     const { result } = renderHook(() => useRolledUpThreadRowState([{ id: "a", clientPreparing: true }, { id: "b" }]));
-    expect(result.current.kind).toBe("running");
+    expect(result.current.kind).toBe("setting-up");
   });
 
   it("shows failed, not running, for a thread whose creation failed", () => {

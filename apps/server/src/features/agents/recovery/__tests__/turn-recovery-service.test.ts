@@ -219,7 +219,7 @@ describe("TurnRecoveryService", () => {
     });
 
     async function addStartup(state: ThreadStartup["state"]): Promise<void> {
-      await startupRepo.insert({ startupId: "00000000-0000-4000-8000-000000000020",
+      await startupRepo.insert({ startupId: "00000000-0000-4000-8000-000000000020", failureSeenAt: null,
         workspaceId: "workspace-recovery", threadId: THREAD_ID, kind: "direct", state,
         phase: state === "completed" ? "agent" : "thread",
         steps: [

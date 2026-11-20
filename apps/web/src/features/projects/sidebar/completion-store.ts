@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Thread } from "@mcode/contracts/models/thread";
 import { getTransport } from "@/transport";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
+import { readThreadActivity, startupHolds } from "@/features/thread-attention/thread-activity";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
 import { HOLD_MS, transitionCompletion, type CompletionEntry, type CompletionEvent } from "./completion-machine";
@@ -119,7 +120,8 @@ export const useCompletionStore = create<CompletionStore>((set, get) => {
 export interface CloseFacts {
   readonly running: boolean;
   readonly awaitingApproval: boolean;
-  readonly startupPending: boolean;
+  /** The thread's startup holds it, from {@link startupHolds}. */
+  readonly startupHolds: boolean;
   readonly lifecyclePending: boolean;
   readonly renaming: boolean;
 }
@@ -128,7 +130,7 @@ export interface CloseFacts {
 export function lifecycleBlockedReason(thread: Pick<WorkspaceThread, "clientPreparing" | "clientError">, facts: CloseFacts): string | null {
   if (facts.running) return "Running";
   if (facts.awaitingApproval) return "Approval required";
-  if (facts.startupPending || thread.clientPreparing) return "Starting";
+  if (facts.startupHolds) return "Starting";
   if (thread.clientError) return "Failed to start";
   if (facts.lifecyclePending) return "Updating";
   if (facts.renaming) return "Renaming";
@@ -153,5 +155,5 @@ export function closeBlockedReason(
 export function lifecycleActionBlocked(threadId: string): boolean {
   return useRowLifecycleStore.getState().pendingLifecycle.has(threadId)
     || useCompletionStore.getState().entries.get(threadId)?.phase === "holding"
-    || useWorkspaceStore.getState().pendingStartupByThreadId[threadId] !== undefined;
+    || startupHolds(readThreadActivity(threadId));
 }
