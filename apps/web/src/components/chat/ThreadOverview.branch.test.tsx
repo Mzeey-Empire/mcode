@@ -46,7 +46,6 @@ vi.mock("./CreatePrDialog", async () =>
 
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useDiffStore } from "@/stores/diffStore";
-import { canStartBranchlessCreatePr } from "@/features/thread-overview/branch-creation";
 import { mockWorkspaceState } from "./__tests__/thread-overview-mocks";
 import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-overview-harness";
 import { ThreadOverview } from "./ThreadOverview";
@@ -56,20 +55,15 @@ describe("ThreadOverview branch create and commit", () => {
     resetThreadOverviewState();
   });
 
-  it("classifies only branchless worktrees as branch-name Create PR candidates", () => {
-    expect(canStartBranchlessCreatePr(branchlessThread())).toBe(true);
-    expect(canStartBranchlessCreatePr(branchlessThread({ checkout_state: "named" }))).toBe(false);
-    expect(canStartBranchlessCreatePr(branchlessThread({ mode: "direct" }))).toBe(false);
-  });
-
-  it("opens the Commit sheet on Review from the branchless worktree row", async () => {
+  it("opens the Commit sheet on Review from the branchless worktree's git menu", async () => {
     const user = userEvent.setup();
     const thread = branchlessThread({ branch: "release", base_branch: "release" });
     mockWorkspaceState.threads = [thread];
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 
     await user.click(screen.getByTestId("thread-overview-local"));
-    await user.click(await screen.findByTestId("workspace-menu-commit"));
+    await user.click(await screen.findByRole("button", { name: "More git actions" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Commit…" }));
 
     const diff = useDiffStore.getState();
     expect(diff.commitSheetScopeId).toBe("thread-1");
@@ -88,7 +82,6 @@ describe("ThreadOverview branch create and commit", () => {
     await user.click(screen.getByTestId("thread-overview-local"));
     expect(screen.getByTestId("workspace-menu-branch")).toHaveTextContent("detached from release");
     expect(screen.queryByTestId("workspace-menu-create-pr")).not.toBeInTheDocument();
-    expect(screen.getByTestId("workspace-menu-commit")).toBeEnabled();
 
     fireEvent.click(screen.getByTestId("thread-overview-create-branch"));
     expect(screen.getByRole("heading", { name: "Work here" })).toBeInTheDocument();
