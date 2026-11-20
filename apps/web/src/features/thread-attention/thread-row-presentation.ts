@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, CirclePause, ListChecks, MessageCircleQuestion, ShieldAlert, type LucideIcon } from "lucide-react";
+import { CircleAlert, CircleCheck, CirclePause, Layers, ListChecks, MessageCircleQuestion, ShieldAlert, type LucideIcon } from "lucide-react";
 import type { StatusMarkState } from "@/components/ui/status-mark";
 import { startupPhaseRunningLabel } from "@/features/thread-startup/startup-step-copy";
 import { threadAttentionStore } from "./thread-attention-store";
@@ -6,7 +6,7 @@ import { readThreadActivity, useThreadActivity } from "./thread-activity";
 import { deriveThreadRowState, type NeedsYouLabel, type ThreadRowState } from "./thread-row-state";
 
 /** Every label a thread's status corner can show; "Closed" is the brief state while a close is in flight. */
-export type ThreadStatusLabel = NeedsYouLabel | "Setting up" | "Running" | "Failed" | "Finished" | "Closed";
+export type ThreadStatusLabel = NeedsYouLabel | "Setting up" | "Running" | "Waiting" | "Failed" | "Finished" | "Closed";
 
 /** How a status renders: the mark's state (which sets the colour role), its icon, and the label set beside it. */
 export interface ThreadStatusLook {
@@ -25,7 +25,8 @@ const look = (label: ThreadStatusLabel, state: StatusMarkState, icon?: LucideIco
 /**
  * One entry per label, so rows, roll-ups and the palette cannot disagree on a status's look.
  * "Setup failed" and "Fetch failed" ask the user to decide, but they are failures, so they read as
- * one. Setting up and Running keep the mark's spinner, so they have no icon.
+ * one. Setting up, Running and Waiting keep the mark's spinner, so they have no icon; Waiting's
+ * subagents are still working, so it is busy the same way.
  */
 export const THREAD_STATUS_LOOK: Record<ThreadStatusLabel, ThreadStatusLook> = {
   "Approval required": look("Approval required", "attention", ShieldAlert),
@@ -34,8 +35,10 @@ export const THREAD_STATUS_LOOK: Record<ThreadStatusLabel, ThreadStatusLook> = {
   Interrupted: look("Interrupted", "attention", CirclePause),
   "Setup failed": look("Setup failed", "error", CircleAlert),
   "Fetch failed": look("Fetch failed", "error", CircleAlert),
+  "Subagent needs you": look("Subagent needs you", "attention", Layers),
   "Setting up": look("Setting up", "running"),
   Running: look("Running", "running"),
+  Waiting: look("Waiting", "running"),
   Failed: look("Failed", "error", CircleAlert),
   Finished: look("Finished", "success", CircleCheck),
   Closed: look("Closed", "success", CircleCheck),
@@ -50,6 +53,8 @@ export function threadRowLook(state: ThreadRowState): ThreadRowLook {
       return { ...THREAD_STATUS_LOOK["Setting up"], detail: startupPhaseRunningLabel(state.phase) };
     case "running":
       return THREAD_STATUS_LOOK.Running;
+    case "waiting":
+      return THREAD_STATUS_LOOK.Waiting;
     case "failed":
       return THREAD_STATUS_LOOK.Failed;
     case "finished":

@@ -260,6 +260,16 @@ export class CanonicalAgentBoundary {
     return this.reader.loadSubagentRoster(...args);
   }
 
+  /** Read unended canonical children for attention without loading their display details. */
+  loadLiveSubagentChildren(parentId: string): ReturnType<CanonicalAgentStore["loadLiveSubagentChildren"]> {
+    return this.reader.loadLiveSubagentChildren(parentId);
+  }
+
+  /** Find parents of unended canonical children. */
+  liveSubagentParentIds(): string[] {
+    return this.reader.liveSubagentParentIds();
+  }
+
   /** Project the saved roster's metadata rules from accepted family records without storage. */
   projectAcceptedSubagentRoster(...args: Parameters<CanonicalAgentStore["projectAcceptedSubagentRoster"]>): ReturnType<CanonicalAgentStore["projectAcceptedSubagentRoster"]> {
     return this.reader.projectAcceptedSubagentRoster(...args);

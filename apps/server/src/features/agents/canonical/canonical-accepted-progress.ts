@@ -1,4 +1,4 @@
-import { type CanonicalChildRosterRequest } from "./canonical-child-roster.js";
+import { observesChildActivity, type CanonicalChildActivity, type CanonicalChildRosterRequest } from "./canonical-child-roster.js";
 import * as NodeCrypto from "node:crypto";
 import { logger } from "@mcode/shared";
 import { diag } from "@mcode/shared/diagnostics";
@@ -169,7 +169,7 @@ export type RendererProgressCursor = AgentProgressPosition & { readonly ownerThr
 /** One bounded live owner retains accepted progress after its execution worker releases. */
 export class CanonicalAcceptedProgress {
   private onPlanPhaseChanged: ((threadId: string) => void) | undefined;
-  private rosterChangeListener: ((threadId: string, revision: number) => void) | undefined;
+  private rosterChangeListener: ((threadId: string, revision: number, activityChanged: boolean) => void) | undefined;
 
   /** Refresh planning attention after the saved state becomes visible to readers. */
   bindPlanPhaseChanged(listener: (threadId: string) => void): void {
@@ -177,7 +177,7 @@ export class CanonicalAcceptedProgress {
   }
 
   /** Observe accepted canonical roster revisions without coupling projections to reads. */
-  onSubagentRosterChange(listener: (threadId: string, revision: number) => void): void {
+  onSubagentRosterChange(listener: NonNullable<CanonicalAcceptedProgress["rosterChangeListener"]>): void {
     this.rosterChangeListener = listener;
   }
 
@@ -565,6 +565,37 @@ export class CanonicalAcceptedProgress {
   loadSubagentRoster(request: CanonicalChildRosterRequest) {
     const thread = this.threads.get(request.owningParentThreadId);
     return thread ? this.canonical.projectAcceptedSubagentRoster(request, thread.state) : this.canonical.loadSubagentRoster(request);
+  }
+
+  /** Include retained child status while its family save is pending. */
+  loadLiveSubagentChildren(parentId: string): CanonicalChildActivity[] | undefined {
+    const owner = this.threads.get(parentId);
+    if (!owner) return undefined;
+    const latestTurns = new Map<string, AgentModelState["turns"][string]>();
+    for (const turn of Object.values(owner.state.turns)) {
+      const latest = latestTurns.get(turn.threadId);
+      if (!latest || (turn.updatedAt.localeCompare(latest.updatedAt) || turn.id.localeCompare(latest.id)) > 0) {
+        latestTurns.set(turn.threadId, turn);
+      }
+    }
+    return Object.values(owner.state.threads).flatMap((child) => {
+      if (child.id === parentId || (child.owningParentThreadId ?? child.parentThreadId) !== parentId) return [];
+      const turn = latestTurns.get(child.id);
+      if (turn?.endedAt) return [];
+      if (!turn && ["Closed", "Unavailable"].includes(child.activityState)) return [];
+      return [{ id: child.id, activityState: child.activityState, latestTurnStatus: turn?.status ?? null, endedAt: null }];
+    });
+  }
+
+  /** Cover retained canonical families even before the first child row is saved. */
+  liveSubagentParentIds(): string[] {
+    return [...this.threads.keys()].filter((parentId) => (this.loadLiveSubagentChildren(parentId)?.length ?? 0) > 0);
+  }
+
+  /** Resolve the roster owner even while the child is only in accepted state. */
+  subagentOwningParent(childId: string): string | null {
+    const owner = this.ownerThreadId(childId);
+    return owner === childId ? null : owner;
   }
 
   /** Resolve the exact child native turn from this parent's accepted family. */
@@ -1639,12 +1670,14 @@ export class CanonicalAcceptedProgress {
   }
 
   private publishFamily(frame: CanonicalAgentProgressFrame): void {
-    const state = this.threads.get(frame.threadId)?.state;
-    for (const thread of Object.values(state?.threads ?? {})) {
-      this.rosterChangeListener?.(thread.id, thread.rosterRevision);
+    const thread = this.threads.get(frame.threadId);
+    if (thread) {
+      const activityChanged = frame.phase === "accepted" && frame.events.some(observesChildActivity);
+      for (const member of Object.values(thread.state.threads)) {
+        this.rosterChangeListener?.(member.id, member.rosterRevision, activityChanged && member.id === frame.threadId);
+      }
     }
     broadcast("agent.canonical", frame);
-    const thread = this.threads.get(frame.threadId);
     const childIds = thread ? this.familyTargets(frame.threadId, thread) : [];
     diag.emit("push.canonical", { th: frame.threadId }, () => describeCanonicalPush(frame, childIds.length));
     if (!thread) return;

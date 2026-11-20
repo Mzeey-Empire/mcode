@@ -4,6 +4,7 @@ import type { Database } from "bun:sqlite";
 import type { AgentItem, CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
+import { createMockApproval } from "@mcode/contracts/testing";
 import { openAgentStorageTestDatabase, agentStorageTestWriter, closeAgentStorageTestDatabases } from "../../__tests__/agent-storage-fixture.js";
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -16,6 +17,9 @@ import { SubagentRosterService } from "../../collaboration/subagent-roster-servi
 import { subagentStatusFrom } from "../../collaboration/subagent-roster-projection.js";
 import type { SubagentLifecycleDurability } from "../../collaboration/subagent-lifecycle-durability.js";
 import type { CanonicalChildRow } from "../../canonical/canonical-child-roster.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
+import { CanonicalAgentWriterClient } from "../../canonical/canonical-agent-writer-client.js";
+import { threadDescendantsSource } from "../../../thread-control/attention/thread-descendants.js";
 import * as push from "../../../../application/transport/push.js";
 
 const NOW = "2026-10-10T10:00:00.000Z";
@@ -36,6 +40,8 @@ function harness(provider: ProviderId = "claude", reporting = SUBAGENT_REPORTING
   const children: CanonicalChildRow[] = [];
   const durability: SubagentLifecycleDurability = {
     loadSubagentRoster: () => ({ owningParentThreadId: "parent", rosterRevision: 0, active: children, done: [] }),
+    loadLiveSubagentChildren: () => children,
+    liveSubagentParentIds: () => [],
     loadSubagentStopTarget: () => null,
     loadActiveSubagentStopTargets: () => [],
     interruptSubagentTurns: async () => undefined,
@@ -47,7 +53,7 @@ function harness(provider: ProviderId = "claude", reporting = SUBAGENT_REPORTING
     toolCallId: id, messageId, toolName: "Agent", displayName: "Inspect", inputSummary: "Inspect the build",
     outputSummary: "", status: "running", startedAt: NOW, sortOrder: 0, ...options,
   });
-  return { db, narrative, service, children, call, durability };
+  return { db, narrative, service, children, call, durability, writer };
 }
 
 function child(sourceItemId?: string): CanonicalChildRow {
@@ -62,6 +68,67 @@ function child(sourceItemId?: string): CanonicalChildRow {
 afterEach(async () => { vi.useRealTimers(); vi.restoreAllMocks(); await closeAgentStorageTestDatabases(); });
 
 describe("SubagentRosterService", () => {
+  it("shows a live canonical child as needing input until its approval resolves", () => {
+    const { service, children } = harness();
+    children.push(child());
+    const pending = [createMockApproval({ threadId: "child-1" })];
+    service.bindPendingInput({ listPendingApprovals: () => pending }, { listPendingByThread: () => [] });
+    expect(service.loadRoster(request).entries.map(({ status }) => status)).toEqual(["needs-you"]);
+    expect(service.loadLiveStatuses("parent")).toEqual(["needs-you"]);
+    pending.pop();
+    expect(service.loadRoster(request).entries.map(({ status }) => status)).toEqual(["running"]);
+    expect(service.loadLiveStatuses("parent")).toEqual(["running"]);
+  });
+
+  it("loads live canonical children beyond the roster limit without loading finished children", () => {
+    const { db, narrative, writer } = harness();
+    const canonical = new CanonicalAgentBoundary(db, writer, new CanonicalAgentWriterClient(writer), () => {});
+    const service = new SubagentRosterService(canonical, new ProviderRegistry([]), narrative, db);
+    db.query(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, root_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES ('parent', 'workspace', 'parent', 'claude', 'Idle', ?, ?)`).run(NOW, NOW);
+    const insertThread = db.query(`INSERT INTO threads
+      (id, workspace_id, title, branch, provider, created_at, updated_at)
+      VALUES (?, 'workspace', 'Child', 'main', 'claude', ?, ?)`);
+    const insertChild = db.query(`INSERT INTO canonical_agent_threads
+      (id, workspace_id, parent_thread_id, root_thread_id, owning_parent_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, 'workspace', 'parent', 'parent', 'parent', 'claude', ?, ?, ?)`);
+    const finish = db.query(`INSERT INTO canonical_agent_turns
+      (id, thread_id, execution_id, status, trigger_json, permission_mode, ended_at, created_at, updated_at)
+      VALUES (?, ?, ?, 'Completed', '{}', 'full', ?, ?, ?)`);
+    db.transaction(() => {
+      for (let index = 0; index < 300; index++) {
+        const id = `finished-${index}`;
+        insertThread.run(id, NOW, NOW);
+        insertChild.run(id, "Idle", NOW, NOW);
+        finish.run(id, id, id, NOW, NOW, NOW);
+      }
+      insertThread.run("running", NOW, NOW);
+      insertChild.run("running", "Active", NOW, NOW);
+    })();
+    expect(service.loadLiveStatuses("parent")).toEqual(["running"]);
+    expect(service.liveParentCandidates()).toEqual(new Set(["parent"]));
+    db.transaction(() => {
+      for (let index = 0; index < 257; index++) {
+        const id = `active-${index}`;
+        insertThread.run(id, NOW, NOW);
+        insertChild.run(id, "Active", NOW, NOW);
+      }
+    })();
+    expect(service.loadLiveStatuses("parent")).toEqual(Array.from({ length: 258 }, () => "running"));
+  });
+
+  it("counts background Agent work reported by the workload, while a foreground call stays in its turn", () => {
+    const { db, call, service } = harness();
+    message(db, "message", "claude");
+    call("foreground", "message");
+    expect(service.loadRoster(request).entries.map(({ status }) => status)).toEqual(["running"]);
+    expect(service.loadLiveStatuses("parent")).toEqual([]);
+    const source = threadDescendantsSource(service, { backgroundSubagentThreadIds: () => new Set(["background-parent"]) });
+    expect(source.descendants("parent")).toBe("none");
+    expect(source.descendants("background-parent")).toBe("running");
+    expect(source.candidates()).toEqual(new Set(["background-parent"]));
+  });
   it("projects one Copilot row with child steps and its task summary", () => {
     const { db, call, service } = harness("copilot");
     message(db, "message", "copilot");
@@ -281,6 +348,8 @@ describe("SubagentRosterService", () => {
         sourceToolCallId: null, childThreadId: null, sourceMessageId: null, parentEntryId: null,
       }],
       stopForUser: async () => false,
+      liveRosterStatuses: () => ["needs-you"],
+      coordinatorsWithUnfinishedTasks: () => new Set(["parent"]),
       onRosterChanged: () => () => {},
     });
 
@@ -366,25 +435,27 @@ describe("SubagentRosterService", () => {
     const { db, call, service, durability } = harness();
     message(db, "message", "claude");
     call("root", "message");
-    let canonicalChanged: ((threadId: string, revision: number) => void) | undefined;
+    let canonicalChanged: ((threadId: string, revision: number, activityChanged: boolean) => void) | undefined;
     service.bindAcceptedProgress({
       ...durability,
       finishSubagentTurn: async () => ({ status: "Interrupted" }),
       interruptSubagentTurns: () => true,
+      subagentOwningParent: () => null,
       onSubagentRosterChange: (listener) => { canonicalChanged = listener; },
     });
     const broadcast = vi.spyOn(push, "broadcast");
     vi.useFakeTimers();
-    canonicalChanged?.("parent", 0);
+    canonicalChanged?.("parent", 0, false);
     service.toolChanged("parent", "root");
-    canonicalChanged?.("parent", 1);
-    canonicalChanged?.("parent", 1);
-    expect(service.loadRoster(request).revision).toBe(2);
+    canonicalChanged?.("parent", 1, false);
+    canonicalChanged?.("parent", 1, false);
+    canonicalChanged?.("parent", 1, true);
+    expect(service.loadRoster(request).revision).toBe(3);
     vi.advanceTimersByTime(249);
     expect(broadcast).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(broadcast.mock.calls).toEqual([["subagents.changed", {
-      threadId: "parent", epoch: service.loadRoster(request).epoch, revision: 2,
+      threadId: "parent", epoch: service.loadRoster(request).epoch, revision: 3,
     }]]);
     vi.advanceTimersByTime(1000);
     expect(broadcast).toHaveBeenCalledTimes(1);

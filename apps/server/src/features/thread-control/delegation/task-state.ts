@@ -6,6 +6,7 @@ import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 export interface TaskFacts {
   turn?: Pick<AgentTurn, "status"> | null;
   startup?: (Pick<ThreadStartup, "state" | "phase"> & { error?: { message: string } }) | null;
+  startupFailureReported?: boolean;
   approval?: string | null;
   summary?: string;
   error?: string;
@@ -18,7 +19,7 @@ export interface TaskFacts {
 /** Derive current task state without freezing resumable terminal outcomes. */
 export function deriveTaskState(facts: TaskFacts): TaskState {
   if (facts.turn) return turnState(facts, facts.turn.status);
-  const startup = startupState(facts.startup);
+  const startup = startupState(facts.startup, facts.startupFailureReported);
   if (startup) return startup;
   const approval = approvalState(facts.approval);
   if (approval) return approval;
@@ -26,15 +27,21 @@ export function deriveTaskState(facts: TaskFacts): TaskState {
   return { status: "finished", outcome: "failed", error: "not started; call delegate_task again with the same clientRequestId" };
 }
 
-function startupState(startup: TaskFacts["startup"]): TaskState | null {
+function startupState(startup: TaskFacts["startup"], failureReported?: boolean): TaskState | null {
   if (!startup) return null;
-  if (startup.state === "blocked" && startup.phase === "setup") return { status: "waiting", reason: "setup_blocked" };
+  if (startup.phase === "setup" && setupAwaitsRetry(startup.state, failureReported)) {
+    return { status: "waiting", reason: "setup_blocked" };
+  }
   if (startup.state === "failed" || startup.state === "interrupted") {
     return { status: "finished", outcome: "failed", ...(startup.error ? { error: startup.error.message.slice(0, 8_000) } : {}) };
   }
   if (startup.state === "cancelled") return { status: "finished", outcome: "cancelled" };
   if (startup.state !== "completed") return { status: "working", phase: "preparing" };
   return null;
+}
+
+function setupAwaitsRetry(state: ThreadStartup["state"], failureReported?: boolean): boolean {
+  return state === "blocked" || (state === "interrupted" && !failureReported);
 }
 
 function approvalState(approval: TaskFacts["approval"]): TaskState | null {

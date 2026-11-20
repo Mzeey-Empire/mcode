@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AgentItemIdSchema, AgentThreadActivityStateSchema, AgentThreadIdSchema, AgentTurnStatusSchema, CanonicalTimestampSchema, ProviderIdentitySchema } from "@mcode/contracts/compat/agent-model";
+import { AgentItemIdSchema, AgentThreadActivityStateSchema, AgentThreadIdSchema, AgentTurnStatusSchema, CanonicalTimestampSchema, ProviderIdentitySchema, type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 import { CANONICAL_SUBAGENT_ROSTER_MAX_CHILDREN, CANONICAL_SUBAGENT_LINEAGE_MAX_DEPTH, CANONICAL_SUBAGENT_TASK_MAX_LENGTH, CanonicalSubagentTerminalOutcomeSchema } from "@mcode/contracts/models/canonical-subagent-roster";
@@ -59,5 +59,14 @@ export const CanonicalChildRosterSchema = lazySchema(() =>
 export type CanonicalChildRosterRequest = z.infer<ReturnType<typeof CanonicalChildRosterRequestSchema>>;
 /** Internal canonical child projection. */
 export type CanonicalChildRow = z.infer<ReturnType<typeof CanonicalChildRowSchema>>;
+/** The canonical roster facts needed to project a child's status without loading its steps. */
+export type CanonicalChildActivity = Pick<CanonicalChildRow, "id" | "activityState" | "latestTurnStatus" | "endedAt">;
+
+/** Family observations can change a child's status without incrementing its owner's roster revision. */
+export function observesChildActivity({ payload }: Pick<CanonicalAgentEventEnvelope, "payload">): boolean {
+  return payload.type === "collaboration.observed" && payload.changes.some((change) =>
+    change.kind === "turn-started" || change.kind === "turn-terminal"
+    || (change.kind === "thread-recorded" && change.thread.parentThreadId !== undefined));
+}
 /** Internal canonical child set. */
 export type CanonicalChildRoster = z.infer<ReturnType<typeof CanonicalChildRosterSchema>>;

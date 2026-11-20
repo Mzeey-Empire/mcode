@@ -70,7 +70,7 @@ describe("thread event toasts", () => {
 
   it("holds a Coordinator's Finished toast until its delegated tasks end, then toasts once", () => {
     stop = startThreadEventDetector();
-    push({ ...turn("a", 4), hasUnfinishedDelegatedTasks: true });
+    push({ ...turn("a", 4), descendants: "running" });
     expect(toasts()).toEqual([]);
     push(turn("a", 4));
     expect(toasts()).toEqual([finishedA]);

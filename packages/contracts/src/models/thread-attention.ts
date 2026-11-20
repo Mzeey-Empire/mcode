@@ -1,11 +1,17 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { TurnOutcomeSchema } from "./turn-outcome.js";
+import { isLiveSubagentStatus, type SubagentStatus } from "./subagent-roster.js";
 
 /** Live reasons a thread needs user input, in precedence order. */
 export const ThreadWaitingKindSchema = z.enum(["approval", "questions", "plan"]);
 /** A live reason a thread needs user input. */
 export type ThreadWaitingKind = z.infer<typeof ThreadWaitingKindSchema>;
+
+/** Subagents and delegated tasks that outlive this thread's own turn. `needs-you` means one is blocked on the user. */
+export const ThreadDescendantsSchema = z.enum(["none", "running", "needs-you"]);
+/** Work that outlives this thread's turn. `needs-you` means one descendant is blocked on the user. */
+export type ThreadDescendants = z.infer<typeof ThreadDescendantsSchema>;
 
 /** Highest settled message acknowledged by a client and the server time it advanced. */
 export const SeenMarkSchema = lazySchema(() => z.object({
@@ -32,10 +38,7 @@ export const ThreadAttentionSchema = lazySchema(() => z.object({
     changedFileCount: z.number().int().nonnegative().nullable(),
   }).nullable(),
   seen: SeenMarkSchema(),
-  /** True while any task this thread delegated is unfinished, so the thread reads as running after its own turn ends. */
-  hasUnfinishedDelegatedTasks: z.boolean(),
-  /** True while a subagent this thread started in the background still runs after its parent turn ended. */
-  hasRunningBackgroundSubagents: z.boolean(),
+  descendants: ThreadDescendantsSchema,
   /**
    * The thread's newest planned-restart failure notice, when it is newer than the last settled turn and that turn
    * did not error. Derived on each read and never stored, so a failure that left no turn still alerts.
@@ -50,9 +53,14 @@ export function isTurnSeen(turnSequence: number, seenSequence: number | null | u
   return seenSequence !== null && seenSequence !== undefined && seenSequence >= turnSequence;
 }
 
-/** Whether work this thread started, delegated tasks or background subagents, still runs after its own turn. */
-export function threadHasRunningDescendants(attention: ThreadAttention): boolean {
-  return attention.hasUnfinishedDelegatedTasks || attention.hasRunningBackgroundSubagents;
+/** Fold live roster statuses into the attention state of the owning thread. */
+export function foldDescendants(statuses: Iterable<SubagentStatus>): ThreadDescendants {
+  let descendants: ThreadDescendants = "none";
+  for (const status of statuses) {
+    if (status === "needs-you") return "needs-you";
+    if (isLiveSubagentStatus(status)) descendants = "running";
+  }
+  return descendants;
 }
 
 /** Whether a planned-restart failure is newer than what the user has seen. */
@@ -63,7 +71,7 @@ export function hasUnseenRestartFailure(attention: ThreadAttention): boolean {
 /** Whether attention prevents a thread from becoming quiet or completing automatically. */
 export function threadAttentionNeedsUser(attention: ThreadAttention | null | undefined): boolean {
   if (!attention) return false;
-  if (attention.waiting || threadHasRunningDescendants(attention)) return true;
+  if (attention.waiting || attention.descendants !== "none") return true;
   if (hasUnseenRestartFailure(attention)) return true;
   const turn = attention.lastTurn;
   return turn !== null && turn.outcome !== "cancelled" && !isTurnSeen(turn.sequence, attention.seen.sequence);

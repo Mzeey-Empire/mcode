@@ -224,7 +224,8 @@ export function startThreadEventDetector(): () => void {
     !unseenRestart || announcedRestarts.has(`${threadId}:restart:${facts.restart}`) || (loaded.has(threadId) && !thread);
 
   const turnSettled = (threadId: string, { state, onScreen }: Sighting, snapshot: boolean): boolean =>
-    onScreen || snapshot || (loaded.has(threadId) && state.kind !== "running");
+    // A Coordinator waiting on its subagents has not finished yet, so its turn is not news until they end.
+    onScreen || snapshot || (loaded.has(threadId) && state.kind !== "running" && state.kind !== "waiting");
 
   const factsToAccount = (threadId: string, sighting: Sighting, snapshot: boolean): ThreadFacts => {
     const { facts } = sighting;

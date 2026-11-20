@@ -36,7 +36,7 @@ export function createMockThreadPullRequest(overrides: Partial<ThreadPullRequest
 export function createMockThreadAttention(overrides: Partial<ThreadAttention> = {}): ThreadAttention {
   return {
     threadId: "thread-1", waiting: null, lastTurn: null, seen: { sequence: null, at: null },
-    hasUnfinishedDelegatedTasks: false, hasRunningBackgroundSubagents: false, restartFailure: null, ...overrides,
+    descendants: "none", restartFailure: null, ...overrides,
   };
 }
 

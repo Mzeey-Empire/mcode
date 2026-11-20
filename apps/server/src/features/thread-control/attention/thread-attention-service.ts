@@ -1,21 +1,16 @@
 import type { Database } from "bun:sqlite";
-import { hasUnseenRestartFailure, isTurnSeen, RestartFailureSchema, ThreadAttentionSchema, threadHasRunningDescendants, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import { hasUnseenRestartFailure, isTurnSeen, RestartFailureSchema, ThreadAttentionSchema, type ThreadAttention, type ThreadDescendants, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import { restartFailureNoticeSql } from "./restart-failure-notice-sql.js";
 import { type CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { threadWriteOperations } from "../persistence/thread-write-operations.js";
 import type { DelegatedTaskService } from "../delegation/delegated-task-service.js";
-import type { AgentWorkload } from "../../agents/workload/agent-workload.js";
+import type { ThreadDescendantsSource } from "./thread-descendants.js";
 
 /** Supplies live waits on their owning threads, with the earliest request time. */
 export interface ThreadWaitingSource {
   readonly kind: ThreadWaitingKind;
   listWaiting(): ReadonlyMap<string, string>;
-}
-
-/** Supplies Coordinators whose delegated tasks are currently working or waiting. */
-export interface ThreadDelegationSource {
-  coordinatorsWithUnfinishedTasks(coordinatorThreadId?: string): ReadonlySet<string>;
 }
 
 const waitingPrecedence: readonly ThreadWaitingKind[] = ["approval", "questions", "plan"];
@@ -57,8 +52,7 @@ export class ThreadAttentionService {
     private readonly db: Database,
     private readonly writer: ApplicationDatabaseWriter,
     sources: readonly ThreadWaitingSource[],
-    private readonly delegations: ThreadDelegationSource,
-    private readonly subagents: Pick<AgentWorkload, "backgroundSubagentThreadIds">,
+    private readonly descendants: ThreadDescendantsSource,
     private readonly publish: (attention: ThreadAttention) => void,
   ) {
     this.sources = waitingPrecedence.flatMap((kind) => sources.filter((source) => source.kind === kind));
@@ -74,18 +68,16 @@ export class ThreadAttentionService {
   get(threadId: string): ThreadAttention | null {
     const row = this.db.query<AttentionRow, [string]>(`${attentionSelect} AND t.id = ?`).get(threadId);
     if (!row) return null;
-    return this.fromRow(row, this.waiting(), this.delegations.coordinatorsWithUnfinishedTasks(threadId).has(threadId),
-      this.subagents.backgroundSubagentThreadIds());
+    return this.fromRow(row, this.waiting(), this.descendants.descendants(threadId));
   }
 
-  /** Hydrate live threads with a wait, delegated work, a background subagent, or an unseen settled turn. */
+  /** Hydrate live threads with a wait, live descendants, or an unseen settled turn. */
   listInteresting(): ThreadAttention[] {
     const waiting = this.waiting();
-    const coordinators = this.delegations.coordinatorsWithUnfinishedTasks();
-    const withSubagents = this.subagents.backgroundSubagentThreadIds();
+    const parents = this.descendants.candidates();
     return this.db.query<AttentionRow, []>(attentionSelect).all()
-      .map((row) => this.fromRow(row, waiting, coordinators.has(row.threadId), withSubagents))
-      .filter((attention) => attention.waiting !== null || threadHasRunningDescendants(attention) || hasUnseenRestartFailure(attention)
+      .map((row) => this.fromRow(row, waiting, parents.has(row.threadId) ? this.descendants.descendants(row.threadId) : "none"))
+      .filter((attention) => attention.waiting !== null || attention.descendants !== "none" || hasUnseenRestartFailure(attention)
         || attention.lastTurn !== null && !isTurnSeen(attention.lastTurn.sequence, attention.seen.sequence));
   }
 
@@ -118,13 +110,11 @@ export class ThreadAttentionService {
   }
 
   private fromRow(
-    row: AttentionRow, waiting: ReturnType<ThreadAttentionService["waiting"]>, hasUnfinishedDelegatedTasks: boolean,
-    withSubagents: ReadonlySet<string>,
+    row: AttentionRow, waiting: ReturnType<ThreadAttentionService["waiting"]>, descendants: ThreadDescendants,
   ): ThreadAttention {
     return ThreadAttentionSchema().parse({
       threadId: row.threadId, waiting: waiting.get(row.threadId) ?? null,
-      hasUnfinishedDelegatedTasks,
-      hasRunningBackgroundSubagents: withSubagents.has(row.threadId),
+      descendants,
       lastTurn: row.outcome === null || row.sequence === null ? null : {
         outcome: row.outcome, endedAt: row.endedAt, sequence: row.sequence, changedFileCount: row.changedFileCount,
       },
@@ -163,10 +153,3 @@ export function invalidateAttentionOnSettledTurns(
   });
 }
 
-/** Background subagents start and finish outside their parent's turn, so no settled turn event refreshes the parent's attention. */
-export function invalidateAttentionOnSubagentChange(
-  attention: Pick<ThreadAttentionService, "invalidate">,
-  workload: Pick<AgentWorkload, "onSubagentChange">,
-): () => void {
-  return workload.onSubagentChange((threadId) => attention.invalidate(threadId));
-}

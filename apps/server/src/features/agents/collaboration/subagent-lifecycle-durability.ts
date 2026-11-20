@@ -1,4 +1,4 @@
-import { type CanonicalChildRoster, type CanonicalChildRosterRequest } from "../canonical/canonical-child-roster.js";
+import { type CanonicalChildActivity, type CanonicalChildRoster, type CanonicalChildRosterRequest } from "../canonical/canonical-child-roster.js";
 import type { CanonicalSubagentStopRequest } from "@mcode/contracts/models/canonical-subagent-roster";
 
 /** Injection token for durable sub-agent lifecycle state. */
@@ -15,6 +15,8 @@ export interface SubagentStopTarget {
 /** Narrow durable state needed by sub-agent roster and stop operations. */
 export interface SubagentLifecycleDurability {
   loadSubagentRoster(request: CanonicalChildRosterRequest): CanonicalChildRoster;
+  loadLiveSubagentChildren(parentId: string): CanonicalChildActivity[];
+  liveSubagentParentIds(): string[];
   loadSubagentStopTarget(request: CanonicalSubagentStopRequest): SubagentStopTarget | null;
   loadActiveSubagentStopTargets(owningParentThreadId: string): SubagentStopTarget[];
   interruptSubagentTurns(childThreadIds: readonly string[], reason: string): Promise<void>;

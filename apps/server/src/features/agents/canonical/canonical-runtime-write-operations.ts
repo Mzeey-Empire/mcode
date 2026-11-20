@@ -39,7 +39,8 @@ export const canonicalRuntimeWriteOperations = {
   }), CanonicalRuntimeCommitResultSchema),
   reopenUnmaterializedTerminalCheckpoint: runtimeOperation("canonical.reopenUnmaterializedTerminalCheckpoint", z.tuple([identity]), z.boolean()),
   recordNativeCursor: runtimeOperation("canonical.recordNativeCursor", z.tuple([identity, ProviderIdentitySchema]), z.boolean()),
-  interruptSavedFamilyChildren: runtimeOperation("canonical.interruptSavedFamilyChildren", z.tuple([z.string()]), z.array(identity)),
+  interruptSavedFamilyChildren: runtimeOperation("canonical.interruptSavedFamilyChildren",
+    z.tuple([z.string(), z.enum(["running", "turnless"])]), z.array(identity)),
   interruptSubagentTurns: runtimeOperation("canonical.interruptSubagentTurns", z.tuple([z.array(identity), z.string()]), z.literal(true)),
   finishSubagentTurn: runtimeOperation("canonical.finishSubagentTurn", childFinish.extend({ outcome: z.literal("interrupted"), error: z.string() }), AgentTurnSchema),
   recordCollaborationAction: runtimeOperation("canonical.recordCollaborationAction", z.object({

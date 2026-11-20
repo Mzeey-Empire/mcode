@@ -2169,6 +2169,28 @@ describe("CanonicalAgentStore", () => {
     expect(targets.every((target) => target.latestTurn?.status === "Running")).toBe(true);
   });
 
+  it("closes every saved turnless child when there is more than one recovery batch", () => {
+    startCanonicalParent(sink, db);
+    const insertThread = db.prepare(`
+      INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at)
+      VALUES (?, 'workspace-1', ?, 'main', 'codex', ?, ?)
+    `);
+    const insertChild = db.prepare(`
+      INSERT INTO canonical_agent_threads (id, workspace_id, parent_thread_id, root_thread_id,
+        owning_parent_thread_id, provider_id, activity_state, created_at, updated_at)
+      VALUES (?, 'workspace-1', ?, ?, ?, 'codex', 'Idle', ?, ?)
+    `);
+    const ids = Array.from({ length: MAX_TURN_RECOVERIES + 1 }, (_, index) => `saved-child-${index}`);
+    for (const id of ids) {
+      insertThread.run(id, id, NOW, NOW);
+      insertChild.run(id, THREAD_ID, THREAD_ID, THREAD_ID, NOW, NOW);
+    }
+
+    expect(new Set(sink.interruptSavedFamilyChildren("Server restarted", "turnless"))).toEqual(new Set(ids));
+    expect(sink.loadLiveSubagentChildren(THREAD_ID)).toEqual([]);
+    expect(sink.interruptSavedFamilyChildren("Server restarted", "turnless")).toEqual([]);
+  });
+
   it("retains a newer active descendant when older done rows exceed the roster bound", () => {
     startCanonicalParent(sink, db);
     const insertThread = db.prepare(`

@@ -1,4 +1,4 @@
-import { CanonicalChildRosterRequestSchema, CanonicalChildRosterSchema, type CanonicalChildRoster, type CanonicalChildRosterRequest, type CanonicalChildRow } from "./canonical-child-roster.js";
+import { CanonicalChildRosterRequestSchema, CanonicalChildRosterSchema, type CanonicalChildActivity, type CanonicalChildRoster, type CanonicalChildRosterRequest, type CanonicalChildRow } from "./canonical-child-roster.js";
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
 import { PlanStore as PlanRepo } from "../planning/persistence/plan-store.js";
@@ -89,6 +89,18 @@ import { z } from "zod";
 
 const CANONICAL_EXECUTION_DIAGNOSTIC_INDEX_CAPACITY = 128;
 const CANONICAL_DIAGNOSTIC_EXPORT_EVENT_CAPACITY = 1_024;
+const liveSubagentChildrenFrom = `
+  FROM canonical_agent_threads child
+  JOIN threads ON threads.id = child.id
+  LEFT JOIN canonical_agent_turns latest ON latest.id = (
+    SELECT turn.id FROM canonical_agent_turns turn
+    WHERE turn.thread_id = child.id
+    ORDER BY turn.updated_at DESC, turn.id DESC LIMIT 1
+  )
+  WHERE child.parent_thread_id IS NOT NULL AND threads.deleted_at IS NULL AND latest.ended_at IS NULL
+    AND (latest.id IS NOT NULL OR child.activity_state IN ('Idle', 'Starting', 'Active'))
+`;
+const subagentOwnerSql = "COALESCE(child.owning_parent_thread_id, child.parent_thread_id)";
 
 /** Operation id of the row where the canonical writer keeps an execution's semantic head. */
 export const EXECUTION_HEAD_OPERATION_ID = "semantic:head";
@@ -1365,6 +1377,21 @@ export class CanonicalAgentStore {
     return this.projectSubagentRoster(parsedRequest, parent, rows);
   }
 
+  /** Read a parent's unended canonical children without the display limit or item details. */
+  loadLiveSubagentChildren(parentId: string): CanonicalChildActivity[] {
+    return this.db.query<CanonicalChildActivity, [string]>(`
+      SELECT child.id, child.activity_state AS activityState, latest.status AS latestTurnStatus, latest.ended_at AS endedAt
+      ${liveSubagentChildrenFrom} AND ${subagentOwnerSql} = ?
+    `).all(parentId);
+  }
+
+  /** Find the owning parents that may still have live canonical children. */
+  liveSubagentParentIds(): string[] {
+    return this.db.query<{ id: string }, []>(`
+      SELECT DISTINCT ${subagentOwnerSql} AS id ${liveSubagentChildrenFrom}
+    `).all().map(({ id }) => id);
+  }
+
   private emptySubagentRoster(owningParentThreadId: string, rosterRevision: number): CanonicalChildRoster {
     return CanonicalChildRosterSchema().parse({
       owningParentThreadId,
@@ -1396,8 +1423,9 @@ export class CanonicalAgentStore {
     return this.projectRosterLookup(parsed, parent, lookup);
   }
 
-  /** Saved family children have no independent ingest checkpoint; restart interrupts them through their parent stream. */
-  interruptSavedFamilyChildren(reason: string): string[] {
+  /** Recover family children that cannot outlive the provider that created them. */
+  interruptSavedFamilyChildren(reason: string, kind: "running" | "turnless"): string[] {
+    if (kind === "turnless") return this.closeSavedTurnlessChildren();
     const rows = this.orm.select().from(canonicalAgentTurns)
       .innerJoin(canonicalAgentThreads, eq(canonicalAgentThreads.id, canonicalAgentTurns.threadId))
       .where(and(eq(canonicalAgentTurns.status, "Running"), isNotNull(canonicalAgentThreads.parentThreadId)))
@@ -1412,6 +1440,32 @@ export class CanonicalAgentStore {
       interrupted.push(child.id);
     }
     return interrupted;
+  }
+
+  private closeSavedTurnlessChildren(): string[] {
+    const candidates = this.orm.select({ child: canonicalAgentThreads }).from(canonicalAgentThreads)
+      .innerJoin(threads, eq(threads.id, canonicalAgentThreads.id))
+      .where(and(isNotNull(canonicalAgentThreads.parentThreadId), isNull(threads.deletedAt),
+        inArray(canonicalAgentThreads.activityState, ["Idle", "Starting", "Active"]),
+        sql`NOT EXISTS (SELECT 1 FROM canonical_agent_turns WHERE thread_id = ${canonicalAgentThreads.id})`))
+      .limit(MAX_TURN_RECOVERIES);
+    const closed: string[] = [];
+    for (let rows = candidates.all(); rows.length > 0; rows = candidates.all()) {
+      for (const { child } of rows) {
+        this.closeTurnlessChild(this.threadFromRow(child));
+        closed.push(child.id);
+      }
+    }
+    return closed;
+  }
+
+  private closeTurnlessChild(child: AgentThread): void {
+    const executionId = syntheticThreadExecutionId(child.id);
+    this.commit({ threadId: child.id, turnId: "", executionId, phase: "recovery", persistCheckpoint: false, events: [{
+      eventId: `family-recovery:turnless:${child.id}`, routing: { threadId: child.id, executionId },
+      sourceProviderId: child.providerId, sourceIdentities: [],
+      payload: { type: "thread.recorded", thread: { ...child, activityState: "Closed", updatedAt: new Date().toISOString() } },
+    }] });
   }
 
   private interruptSavedChild(ownerId: string, childId: string, reason: string): void {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createMockThreadAttention } from "@mcode/contracts/testing";
-import { threadAttentionNeedsUser, type ThreadAttention, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
+import { threadAttentionNeedsUser, type ThreadAttention, type ThreadDescendants, type ThreadWaitingKind } from "@mcode/contracts/models/thread-attention";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import {
   deriveThreadRowState,
@@ -17,23 +17,20 @@ function attention({
   outcome = null,
   turnSequence = 8,
   seen = null,
-  delegating = false,
-  background = false,
+  descendants = "none",
 }: {
   waiting?: ThreadWaitingKind | null;
   outcome?: TurnOutcome | null;
   turnSequence?: number;
   seen?: number | null;
-  delegating?: boolean;
-  background?: boolean;
+  descendants?: ThreadDescendants;
 }): ThreadAttention {
   return createMockThreadAttention({
     threadId: "a",
     waiting: waiting ? { kind: waiting, since: AT } : null,
     lastTurn: outcome ? { outcome, endedAt: AT, sequence: turnSequence, changedFileCount: null } : null,
     seen: { sequence: seen, at: seen === null ? null : AT },
-    hasUnfinishedDelegatedTasks: delegating,
-    hasRunningBackgroundSubagents: background,
+    descendants,
   });
 }
 
@@ -58,6 +55,8 @@ const QUIET: ThreadRowState = { kind: "quiet" };
 const RUNNING: ThreadRowState = { kind: "running" };
 const FAILED: ThreadRowState = { kind: "failed" };
 const FINISHED: ThreadRowState = { kind: "finished" };
+const WAITING: ThreadRowState = { kind: "waiting" };
+const subagent: ThreadRowState = { kind: "needs-you", label: "Subagent needs you" };
 const approval: ThreadRowState = { kind: "needs-you", label: "Approval required" };
 const answers: ThreadRowState = { kind: "needs-you", label: "Answers required" };
 const plan: ThreadRowState = { kind: "needs-you", label: "Plan ready" };
@@ -79,8 +78,8 @@ describe("deriveThreadRowState", () => {
     attention({ outcome: "interrupted" }),
     attention({ outcome: "interrupted", seen: 8 }),
     attention({ outcome: "cancelled" }),
-    attention({ delegating: true }),
-    attention({ outcome: "completed", seen: 8, background: true }),
+    attention({ descendants: "running" }),
+    attention({ outcome: "completed", seen: 8, descendants: "needs-you" }),
   ])("agrees with the shared quiet rule for %j", (input) => {
     expect(deriveThreadRowState(facts({ attention: input })).kind === "quiet")
       .toBe(!threadAttentionNeedsUser(input));
@@ -118,18 +117,28 @@ describe("deriveThreadRowState", () => {
     ["seen before the turn is unseen", facts({ attention: attention({ outcome: "completed", seen: 7 }) }), FINISHED],
     ["seen zero before turn zero is seen", facts({ attention: attention({ outcome: "completed", turnSequence: 0, seen: 0 }) }), QUIET],
     ["never seen turn zero is unseen", facts({ attention: attention({ outcome: "completed", turnSequence: 0 }) }), FINISHED],
-    ["delegating with no last turn is running", facts({ attention: attention({ delegating: true }) }), RUNNING],
-    ["delegating over unseen finished", facts({ attention: attention({ outcome: "completed", delegating: true }) }), RUNNING],
-    ["delegating over unseen failed", facts({ attention: attention({ outcome: "errored", delegating: true }) }), RUNNING],
-    ["unseen interrupted over delegating", facts({ attention: attention({ outcome: "interrupted", delegating: true }) }), interrupted],
-    ["plan ready over delegating", facts({ attention: attention({ waiting: "plan", outcome: "completed", delegating: true }) }), plan],
+    ["waiting with no last turn", facts({ attention: attention({ descendants: "running" }) }), WAITING],
+    ["waiting over unseen finished", facts({ attention: attention({ outcome: "completed", descendants: "running" }) }), WAITING],
+    ["unseen errored over waiting", facts({ attention: attention({ outcome: "errored", descendants: "running" }) }), FAILED],
+    ["unseen interrupted over waiting", facts({ attention: attention({ outcome: "interrupted", descendants: "running" }) }), interrupted],
+    ["unseen startup failure over waiting", facts({ startup: STARTUP_FAILED, attention: attention({ descendants: "running" }) }), FAILED],
+    ["plan ready over waiting", facts({ attention: attention({ waiting: "plan", outcome: "completed", descendants: "running" }) }), plan],
+    ["own running over waiting", facts({ running: true, attention: attention({ descendants: "running" }) }), RUNNING],
+    ["setting up over waiting", facts({ startup: SETTING_UP, attention: attention({ descendants: "running" }) }), SETTING_UP_ROW],
+    ["waiting shows on screen", facts({ onScreen: true, attention: attention({ outcome: "completed", descendants: "running" }) }), WAITING],
     ["failed create over an unseen finished turn", facts({ startup: STARTUP_FAILED, attention: attention({ outcome: "completed" }) }), FAILED],
-    ["background subagent after a seen completed turn is running", facts({ attention: attention({ outcome: "completed", seen: 8, background: true }) }), RUNNING],
-    ["background subagent over unseen finished", facts({ attention: attention({ outcome: "completed", background: true }) }), RUNNING],
-    ["approval over background subagent", facts({ attention: attention({ waiting: "approval", outcome: "completed", background: true }) }), approval],
-    ["questions over background subagent", facts({ attention: attention({ waiting: "questions", outcome: "completed", background: true }) }), answers],
-    ["unseen interrupted over background subagent", facts({ attention: attention({ outcome: "interrupted", background: true }) }), interrupted],
-    ["delegating stays running while on screen", facts({ onScreen: true, attention: attention({ outcome: "completed", delegating: true }) }), RUNNING],
+    ["subagent needs you after a seen completed turn", facts({ attention: attention({ outcome: "completed", seen: 8, descendants: "needs-you" }) }), subagent],
+    ["subagent needs you over unseen finished", facts({ attention: attention({ outcome: "completed", descendants: "needs-you" }) }), subagent],
+    ["subagent needs you over unseen interrupted", facts({ attention: attention({ outcome: "interrupted", descendants: "needs-you" }) }), subagent],
+    ["subagent needs you over setting up", facts({ startup: SETTING_UP, attention: attention({ descendants: "needs-you" }) }), subagent],
+    ["subagent needs you over running", facts({ running: true, attention: attention({ descendants: "needs-you" }) }), subagent],
+    ["subagent needs you over plan ready", facts({ attention: attention({ waiting: "plan", descendants: "needs-you" }) }), subagent],
+    ["subagent needs you shows on screen", facts({ onScreen: true, attention: attention({ descendants: "needs-you" }) }), subagent],
+    ["setup failed over subagent needs you", facts({ startup: SETUP_FAILED, attention: attention({ descendants: "needs-you" }) }), setupFailed],
+    ["approval over subagent needs you", facts({ attention: attention({ waiting: "approval", outcome: "completed", descendants: "needs-you" }) }), approval],
+    ["questions over subagent needs you", facts({ attention: attention({ waiting: "questions", outcome: "completed", descendants: "needs-you" }) }), answers],
+    ["a child failure leaves a seen parent quiet", facts({ attention: attention({ outcome: "completed", seen: 8 }) }), QUIET],
+    ["a child failure leaves an unseen parent finished", facts({ attention: attention({ outcome: "completed" }) }), FINISHED],
   ])("%s", (_name, input, expected) => {
     expect(deriveThreadRowState(input)).toEqual(expected);
   });
@@ -140,8 +149,12 @@ describe("rollUpThreadRowStates", () => {
     ["empty project is quiet", [], QUIET],
     ["needs you over running", [RUNNING, interrupted, FAILED], interrupted],
     ["needs you over setting up", [SETTING_UP_ROW, fetchFailed], fetchFailed],
-    ["setting up over running", [RUNNING, SETTING_UP_ROW, FAILED], SETTING_UP_ROW],
-    ["running over failed", [FINISHED, FAILED, RUNNING], RUNNING],
+    ["setting up over running", [RUNNING, SETTING_UP_ROW, FINISHED], SETTING_UP_ROW],
+    ["failed over setting up", [SETTING_UP_ROW, FAILED], FAILED],
+    ["failed over running", [FINISHED, RUNNING, FAILED], FAILED],
+    ["needs you over failed", [FAILED, subagent], subagent],
+    ["running over waiting", [WAITING, RUNNING], RUNNING],
+    ["waiting over finished", [FINISHED, WAITING, QUIET], WAITING],
     ["failed over finished", [FINISHED, FAILED, QUIET], FAILED],
     ["finished over quiet", [QUIET, FINISHED], FINISHED],
     ["first needs-you wins a tie", [approval, plan], approval],
@@ -149,12 +162,12 @@ describe("rollUpThreadRowStates", () => {
     expect(rollUpThreadRowStates(states)).toEqual(expected);
   });
 
-  it("rolls a collapsed project up to running when one thread is delegating", () => {
+  it("rolls a collapsed project up to waiting when one thread only waits on subagents", () => {
     const states = [
       deriveThreadRowState(facts({ attention: attention({ outcome: "completed", seen: 8 }) })),
-      deriveThreadRowState(facts({ attention: attention({ outcome: "completed", delegating: true }) })),
+      deriveThreadRowState(facts({ attention: attention({ outcome: "completed", descendants: "running" }) })),
       deriveThreadRowState(facts({ attention: attention({ outcome: "errored", seen: 8 }) })),
     ];
-    expect(rollUpThreadRowStates(states)).toEqual(RUNNING);
+    expect(rollUpThreadRowStates(states)).toEqual(WAITING);
   });
 });
