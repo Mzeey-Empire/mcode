@@ -99,6 +99,18 @@ export class PlannedRestart {
     return this.stoppedAt !== undefined && this.interruptedByThisStop(threadId, turnId, this.stoppedAt);
   }
 
+  /** Turns a started process still owes a resume: each pending resume's interrupted turn and its native attempt. */
+  pendingResumeTurnIds(): ReadonlySet<string> {
+    const turnIds = new Set<string>();
+    for (const [threadId, action] of this.pending) {
+      if (action.kind !== "resume") continue;
+      turnIds.add(action.turn.turnId);
+      const attempt = this.attempts.get(threadId);
+      if (attempt) turnIds.add(attempt);
+    }
+    return turnIds;
+  }
+
   private interruptedByThisStop(threadId: string, turnId: string, stoppedAt: string): boolean {
     const turn = this.canonical.loadTurn(turnId);
     return turn?.threadId === threadId && turn.status === "Interrupted" && turn.ending?.outcome === "interrupted"

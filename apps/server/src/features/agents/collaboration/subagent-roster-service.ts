@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { SubagentRosterSchema, isDelegateTaskToolName, type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest, type SubagentRosterRequest } from "@mcode/contracts/models/subagent-roster";
+import { SubagentRosterSchema, isDelegateTaskToolName, isLiveSubagentStatus, type SubagentRoster, type SubagentRosterEntry, type SubagentDetail, type SubagentDetailRequest, type SubagentRosterRequest } from "@mcode/contracts/models/subagent-roster";
 import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { SUBAGENT_REPORTING, isChildTurnCancellable, type IAgentProvider, type IProviderRegistry, type ProviderId } from "@mcode/contracts/providers/interfaces";
 import { type CanonicalSubagentStopRequest, type CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
@@ -69,7 +69,7 @@ export class SubagentRosterService {
     const entries = this.projectEntries(parentId, [...canonical.active, ...canonical.done]);
     for (const entry of this.delegatedTasks?.rosterEntries(parentId) ?? []) entries.set(entry.id, entry);
     const ordered = [...entries.values()].sort((left, right) =>
-      Number(right.status === "running") - Number(left.status === "running")
+      Number(isLiveSubagentStatus(right.status)) - Number(isLiveSubagentStatus(left.status))
       || right.startedAt.localeCompare(left.startedAt) || left.id.localeCompare(right.id));
     return SubagentRosterSchema().parse({
       owningParentThreadId: parentId, epoch: this.epoch, revision: this.revisions.get(parentId) ?? 0,
@@ -189,7 +189,8 @@ export class SubagentRosterService {
 
   private canonicalEntry(parentId: string, row: CanonicalChildRow, narrative: SubagentRosterEntry | undefined,
     id: string, sourceToolCallId: string | null, children: readonly CanonicalChildRow[]): SubagentRosterEntry {
-    const status = subagentStatusFrom(row.latestTurnStatus ?? row.activityState);
+    const awaitingFirstTurn = row.latestTurnStatus === null && row.endedAt === null && row.activityState === "Idle";
+    const status = awaitingFirstTurn ? "running" : subagentStatusFrom(row.latestTurnStatus ?? row.activityState);
     return {
       ...canonicalEntryMetadata(row, narrative),
       id, provider: row.provider, status, tier: "transcript",

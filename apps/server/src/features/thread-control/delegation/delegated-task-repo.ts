@@ -24,7 +24,9 @@ export class DelegatedTaskRepo {
   /** Read the coordinator's roster receipts. */
   listByCoordinator(coordinatorThreadId: string) { return this.reader.listByCoordinator(coordinatorThreadId); }
   /** Read receipts without durable terminal evidence for attention derivation. */
-  listUnfinishedCandidates(coordinatorThreadId?: string) { return this.reader.listUnfinishedCandidates(coordinatorThreadId); }
+  listUnfinishedCandidates(coordinatorThreadId?: string, resumingTurnIds?: ReadonlySet<string>) {
+    return this.reader.listUnfinishedCandidates(coordinatorThreadId, resumingTurnIds);
+  }
   /** Read exact source identities in creator-turn order. */
   sourceCalls(coordinatorThreadId: string, creatorTurnId: string) { return this.reader.sourceCalls(coordinatorThreadId, creatorTurnId); }
   /** Enumerate receipts for wake recovery. */
