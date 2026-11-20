@@ -23,9 +23,9 @@ function entry(id = "agent-1", overrides: Partial<SubagentRosterEntry> = {}): Su
 }
 
 function seed(entries: SubagentRosterEntry[], revision = 1, epoch = "chips-boot"): void {
-  useSubagentRosterStore.setState({ rosters: new Map([["parent", {
+  useSubagentRosterStore.setState({ loads: new Map([["parent", { kind: "ready", roster: {
     owningParentThreadId: "parent", epoch, revision, entries, truncated: false,
-  }]]), errors: new Set() });
+  } }]]) });
 }
 
 function activity(call: ToolCall): SubagentActivity {
@@ -61,7 +61,7 @@ describe("SubagentRow authoritative roster", () => {
   });
 
   it.each([
-    ["running", "working"], ["done", "finished"],
+    ["running", "working"], ["finished", "finished"],
     ["failed", "failed"], ["stopped", "stopped"],
   ] as const)("shows %s as %s inside the chip", (status, word) => {
     seed([entry("agent-1", { status })]);
@@ -84,7 +84,7 @@ describe("SubagentRow authoritative roster", () => {
     seed([entry("agent-1", { status: "running" })], 4, "epoch-a");
     mount();
     expect(screen.getByRole("status")).toHaveTextContent("working");
-    act(() => seed([entry("agent-1", { status: "done" })], 1, "epoch-b"));
+    act(() => seed([entry("agent-1", { status: "finished" })], 1, "epoch-b"));
     expect(screen.getByRole("status")).toHaveTextContent("finished");
   });
 
@@ -107,7 +107,7 @@ describe("SubagentRow authoritative roster", () => {
   });
 
   it("opens a finished entry with the finished target", () => {
-    seed([entry("agent-1", { provider: "cursor", tier: "meta", status: "done" })]);
+    seed([entry("agent-1", { provider: "cursor", tier: "meta", status: "finished" })]);
     const onSelect = mount();
     fireEvent.click(screen.getByRole("button", { name: "Open Read detection module subagent details" }));
     expect(onSelect.mock.calls).toEqual([["call:agent-1", "finished"]]);
@@ -148,7 +148,7 @@ describe("SubagentRow authoritative roster", () => {
     seed([
       entry("one", { title: "First" }), entry("two", { title: "Second" }),
       entry("three", { title: "Third" }), entry("four", { title: "Fourth" }),
-      entry("five", { title: "Fifth", status: "done" }),
+      entry("five", { title: "Fifth", status: "finished" }),
     ]);
     const onOpen = mountParallel(["one", "two", "three", "four", "five"].map((id) => agent(id)));
     expect(screen.getByRole("button", { name: "Open First subagent details" })).toBeInTheDocument();
@@ -163,7 +163,7 @@ describe("SubagentRow authoritative roster", () => {
   it("drops the plus sign from finished when nothing remaining is working", () => {
     seed([
       entry("one", { title: "First" }), entry("two", { title: "Second" }),
-      entry("three", { title: "Third", status: "stopped" }), entry("four", { title: "Fourth", status: "done" }),
+      entry("three", { title: "Third", status: "stopped" }), entry("four", { title: "Fourth", status: "finished" }),
     ]);
     const onOpen = mountParallel(["one", "two", "three", "four"].map((id) => agent(id)));
     fireEvent.click(screen.getByRole("button", { name: "Open full Subagents roster, +2 finished" }));

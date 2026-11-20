@@ -13,7 +13,10 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
 
 function SubagentsPanelContent({ threadId }: { readonly threadId: string }) {
   const roster = useSubagentRoster(threadId);
-  const error = useSubagentRosterStore((state) => state.errors.has(threadId));
+  const error = useSubagentRosterStore((state) => {
+    const kind = state.loads.get(threadId)?.kind;
+    return kind === "failed" || kind === "stale";
+  });
   const refresh = () => useSubagentRosterStore.getState().refresh(threadId);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const stopRow = async (row: SubagentRosterEntry) => {

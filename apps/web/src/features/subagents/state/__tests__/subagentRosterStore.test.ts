@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { pushEmitter } from "@/transport";
 import { useConnectionStore } from "@/stores/connectionStore";
-import { useSubagentRosterStore } from "../subagentRosterStore";
+import { rosterOf, useSubagentRosterStore } from "../subagentRosterStore";
 
 const transport = {
   loadSubagentRoster: vi.mocked(mockTransport.loadSubagentRoster),
@@ -33,7 +33,7 @@ function roster(revision: number, epoch = "boot-1", entries = [entry()]): Subage
 describe("subagentRosterStore", () => {
   beforeEach(() => {
     transport.loadSubagentRoster.mockReset();
-    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+    useSubagentRosterStore.setState({ loads: new Map() });
     useConnectionStore.setState({ status: "connected" });
   });
 
@@ -49,7 +49,7 @@ describe("subagentRosterStore", () => {
     pushEmitter.emit("subagents.changed", { threadId: "parent", epoch: "boot-1", revision: 2 });
     await store.refresh("parent");
     expect(store.entryForToolCall("parent", "spawn-1")).toEqual(entry({ childThreadId: "child-1", tier: "transcript", canStop: true }));
-    expect(useSubagentRosterStore.getState().rosters.get("parent")?.revision).toBe(2);
+    expect(rosterOf(useSubagentRosterStore.getState().loads.get("parent"))?.revision).toBe(2);
   });
 
   it("refreshes on reconnect and accepts revision reset in a new boot", async () => {
@@ -59,7 +59,7 @@ describe("subagentRosterStore", () => {
     useConnectionStore.setState({ status: "connected" });
     await useSubagentRosterStore.getState().refresh("parent");
     expect(transport.loadSubagentRoster.mock.calls).toEqual([["parent"], ["parent"]]);
-    expect(useSubagentRosterStore.getState().rosters.get("parent")).toEqual(roster(0, "boot-2"));
+    expect(rosterOf(useSubagentRosterStore.getState().loads.get("parent"))).toEqual(roster(0, "boot-2"));
     expect(useSubagentRosterStore.getState().entryForToolCall("parent", "spawn-1")?.id).toBe("call:spawn-1");
     pushEmitter.emit("subagents.changed", { threadId: "parent", epoch: "boot-1", revision: 99 });
     expect(transport.loadSubagentRoster).toHaveBeenCalledTimes(2);
@@ -70,11 +70,22 @@ describe("subagentRosterStore", () => {
       .mockRejectedValueOnce(new Error("Disconnected")).mockResolvedValueOnce(roster(2, "errors-boot"));
     await useSubagentRosterStore.getState().ensure("parent");
     await useSubagentRosterStore.getState().refresh("parent");
-    expect(useSubagentRosterStore.getState().rosters.get("parent")).toEqual(roster(1, "errors-boot"));
-    expect(useSubagentRosterStore.getState().errors.has("parent")).toBe(true);
+    expect(useSubagentRosterStore.getState().loads.get("parent")).toEqual({ kind: "stale", roster: roster(1, "errors-boot") });
     await useSubagentRosterStore.getState().refresh("parent");
-    expect(useSubagentRosterStore.getState().errors.has("parent")).toBe(false);
-    expect(useSubagentRosterStore.getState().rosters.get("parent")?.revision).toBe(2);
+    expect(useSubagentRosterStore.getState().loads.get("parent")).toEqual({ kind: "ready", roster: roster(2, "errors-boot") });
+  });
+
+  it("fails a first load, recovers on push, and goes stale on a later failure", async () => {
+    transport.loadSubagentRoster.mockRejectedValueOnce(new Error("Disconnected"))
+      .mockResolvedValueOnce(roster(1, "load-boot")).mockRejectedValueOnce(new Error("Disconnected"));
+    await useSubagentRosterStore.getState().ensure("parent");
+    expect(useSubagentRosterStore.getState().loads.get("parent")).toEqual({ kind: "failed" });
+    pushEmitter.emit("subagents.changed", { threadId: "parent", epoch: "load-boot", revision: 1 });
+    expect(useSubagentRosterStore.getState().loads.get("parent")).toEqual({ kind: "loading" });
+    await useSubagentRosterStore.getState().refresh("parent");
+    expect(useSubagentRosterStore.getState().loads.get("parent")).toEqual({ kind: "ready", roster: roster(1, "load-boot") });
+    await useSubagentRosterStore.getState().refresh("parent");
+    expect(useSubagentRosterStore.getState().loads.get("parent")).toEqual({ kind: "stale", roster: roster(1, "load-boot") });
   });
 
   it("does not lose an invalidation arriving during a fetch", async () => {
@@ -86,6 +97,6 @@ describe("subagentRosterStore", () => {
     finish?.(roster(3, "race-boot"));
     await pending;
     expect(transport.loadSubagentRoster).toHaveBeenCalledTimes(2);
-    expect(useSubagentRosterStore.getState().rosters.get("parent")?.revision).toBe(4);
+    expect(rosterOf(useSubagentRosterStore.getState().loads.get("parent"))?.revision).toBe(4);
   });
 });

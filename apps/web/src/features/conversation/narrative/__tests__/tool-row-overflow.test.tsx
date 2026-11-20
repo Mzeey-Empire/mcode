@@ -437,13 +437,13 @@ function taskCall(toolName: string, id = "tc-task-1"): ToolCall {
 }
 
 function seedTaskRoster(title: string): void {
-  useSubagentRosterStore.setState({ rosters: new Map([["parent", {
+  useSubagentRosterStore.setState({ loads: new Map([["parent", { kind: "ready", roster: {
     owningParentThreadId: "parent", epoch: "boot", revision: 1, truncated: false,
     entries: [{ id: "task:task-123", provider: "codex", title, prompt: null, subagentType: null, model: null,
       reasoningEffort: null, stepCount: 0, status: "running", startedAt: "2026-10-10T10:00:00.000Z",
       endedAt: null, tier: "transcript", canStop: true, sourceToolCallId: null, childThreadId: "child",
       sourceMessageId: null, parentEntryId: null }],
-  }]]), errors: new Set() });
+  } }]]) });
 }
 
 describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP task tools named %s*", (prefix) => {
@@ -480,14 +480,14 @@ describe.each(MCODE_MCP_SPELLINGS)("Mcode MCP task tools named %s*", (prefix) =>
   });
 
   it("shows no raw task id when the roster has no title for it", () => {
-    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+    useSubagentRosterStore.setState({ loads: new Map() });
     render(<ToolSummaryLine group={{ calls: [taskCall(`${prefix}task_cancel`)] }} />);
     expect(screen.getByText("Cancel task")).toBeInTheDocument();
     expect(screen.queryByText(/task-123|taskId/)).not.toBeInTheDocument();
   });
 
   it("leaves the label unclipped when the roster has no title for it", () => {
-    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+    useSubagentRosterStore.setState({ loads: new Map() });
     render(<ToolSummaryLine group={{ calls: [taskCall(`${prefix}task_cancel`)] }} />);
     expect(screen.getByText("Cancel task")).not.toHaveClass("max-w-[60%]");
   });

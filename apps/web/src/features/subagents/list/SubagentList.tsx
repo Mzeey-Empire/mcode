@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
-import { Check, Layers } from "lucide-react";
-import { isLiveSubagentStatus, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
+import { Layers } from "lucide-react";
+import { compareRosterEntries, isLiveSubagentStatus, type SubagentRoster, type SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { type CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
 import { Button, IconButton } from "@/components/ui/button";
 import { PanelHeaderSlot, PanelTitle } from "@/components/panels/shell/PanelHeader";
@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
 import { subagentStatusLabel } from "../subagent-status";
+import { SubagentStatusMark } from "../SubagentStatusMark";
 import { elapsed, useNow } from "../live-duration";
 import { subagentKind } from "../subagent-kind";
 
@@ -22,14 +23,10 @@ export interface SubagentListProps {
   readonly onStop: (row: SubagentRosterEntry) => Promise<CanonicalSubagentStopResult>;
 }
 
-function byNewestStart(a: SubagentRosterEntry, b: SubagentRosterEntry): number {
-  return Date.parse(b.startedAt) - Date.parse(a.startedAt);
-}
-
-/** Running rows first, then finished rows, each newest first. */
+/** Live rows first, then finished rows, each in the shared roster order. */
 function partitionRows(entries: readonly SubagentRosterEntry[]) {
-  const running = entries.filter((row) => isLiveSubagentStatus(row.status)).sort(byNewestStart);
-  const finished = entries.filter((row) => !isLiveSubagentStatus(row.status)).sort(byNewestStart);
+  const running = entries.filter((row) => isLiveSubagentStatus(row.status)).sort(compareRosterEntries);
+  const finished = entries.filter((row) => !isLiveSubagentStatus(row.status)).sort(compareRosterEntries);
   return { running, finished };
 }
 
@@ -40,26 +37,24 @@ function rowMeta(row: SubagentRosterEntry): string {
 function StatusTrail({ row, now }: { readonly row: SubagentRosterEntry; readonly now: number }) {
   const duration = elapsed(row, now);
   const time = duration && <span className="font-mono text-xs">{duration}</span>;
+  const mark = <SubagentStatusMark status={row.status} />;
   switch (row.status) {
     case "running":
-      return <span className="flex items-center gap-1.5 text-ink"><span aria-hidden className="size-[7px] rounded-full bg-success" />{time}</span>;
-    case "waiting":
+      return <span className="flex items-center gap-1.5 text-ink">{mark}{time}</span>;
+    case "setting-up":
+    case "needs-you":
       return <span className="flex items-center gap-1.5 text-ink">
-        <span aria-hidden className="size-[7px] rounded-full bg-warning" />
-        <span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}
+        {mark}<span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}
       </span>;
-    case "done":
+    case "finished":
+    case "stopped":
       return <span className="flex items-center gap-1.5 text-muted">
-        <Check size={12} aria-hidden />
-        <span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}
+        {mark}<span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}
       </span>;
     case "failed":
       return <span className="flex items-center gap-1.5 text-muted">
-        <span aria-hidden className="size-[7px] rounded-full bg-error" />
-        <span className="text-xs font-medium text-error">{subagentStatusLabel(row.status)}</span>{time}
+        {mark}<span className="text-xs font-medium text-error">{subagentStatusLabel(row.status)}</span>{time}
       </span>;
-    case "stopped":
-      return <span className="flex items-center gap-1.5 text-muted"><span className="text-xs font-medium">{subagentStatusLabel(row.status)}</span>{time}</span>;
   }
 }
 

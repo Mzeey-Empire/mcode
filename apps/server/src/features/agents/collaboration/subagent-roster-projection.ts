@@ -36,16 +36,16 @@ export function rosterToolCall(record: ToolCallRecord, provider: string | null, 
 export function subagentStatusFrom(status: string | null, parentStopped = false): SubagentStatus {
   // Unrecognized persisted outcomes must not keep the active count stuck forever.
   const normalized = NORMALIZED_STATUS.get(status?.toLowerCase() ?? "") ?? "failed";
-  return parentStopped && normalized !== "done" ? "stopped" : normalized;
+  return parentStopped && normalized !== "finished" ? "stopped" : normalized;
 }
 
 const NORMALIZED_STATUS = new Map<string, SubagentStatus>([
   ["running", "running"], ["active", "running"],
   ["pending", "running"], ["starting", "running"],
   // An idle child with an end time has no work left to report.
-  ["idle", "done"], ["closed", "stopped"], ["unavailable", "failed"],
+  ["idle", "finished"], ["closed", "stopped"], ["unavailable", "failed"],
   ["cancelled", "stopped"], ["interrupted", "stopped"], ["stopped", "stopped"],
-  ["completed", "done"], ["done", "done"], ["success", "done"],
+  ["completed", "finished"], ["done", "finished"], ["success", "finished"],
   ["errored", "failed"], ["error", "failed"], ["failed", "failed"],
 ]);
 

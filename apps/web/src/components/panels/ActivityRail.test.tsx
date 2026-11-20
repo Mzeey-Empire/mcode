@@ -526,7 +526,7 @@ describe("ActivityRail subagent tabs", () => {
       <ActivityRail
         tabInstances={[rightPanelToolInstance("subagents"), subagentTabInstance("call:explore"), rightPanelToolInstance("terminal")]}
         activeTabId={rightPanelSingletonId("terminal")}
-        subagentEntries={[subagent("done")]}
+        subagentEntries={[subagent("finished")]}
         scope="thread"
         changesCount={0}
         changesFresh={false}
@@ -552,7 +552,7 @@ describe("ActivityRail subagent tabs", () => {
   it("drops the running dot once the subagent finishes", () => {
     const { rerender } = render(subagentRail("running"));
     expect(screen.getByTestId("rail-subagent-running")).toBeInTheDocument();
-    rerender(subagentRail("done"));
+    rerender(subagentRail("finished"));
     expect(screen.queryByTestId("rail-subagent-running")).toBeNull();
     expect(screen.getByRole("tab", { name: "Explore the rail" })).toBeInTheDocument();
   });

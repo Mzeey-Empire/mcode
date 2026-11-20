@@ -127,7 +127,7 @@ export function resetThreadOverviewState(): void {
   invalidateBranchTargets("ws-1");
   mockOpenSubagentsPanel.mockReset();
   mockThreadRecords.clear();
-  useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+  useSubagentRosterStore.setState({ loads: new Map() });
   useBrowserAutomationStore.setState({
     liveTargets: new Map(),
     lifecycleTabs: new Map(),

@@ -69,7 +69,7 @@ describe("SubagentRosterService", () => {
     call("read", "message", { toolName: "Read", parentToolCallId: "task", status: "completed", sortOrder: 1 });
     call("grep", "message", { toolName: "Grep", parentToolCallId: "task", status: "completed", sortOrder: 2 });
     expect(service.loadRoster(request).entries.map((row) => [row.id, row.provider, row.tier, row.stepCount, row.status, row.prompt, row.subagentType])).toEqual([
-      ["call:task", "copilot", "steps", 2, "done", "Inspect the implementation", "explore"],
+      ["call:task", "copilot", "steps", 2, "finished", "Inspect the implementation", "explore"],
     ]);
     const detail = service.loadDetail({ ...request, entryId: "call:task" });
     expect(detail.steps.map((step) => [step.toolCallId, step.status])).toEqual([["read", "done"], ["grep", "done"]]);
@@ -168,7 +168,7 @@ describe("SubagentRosterService", () => {
     service.turnFinished("parent");
     expect(service["stoppedCalls"].size).toBe(0);
     expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([
-      ["call:saved", "done"], ["call:unsaved", "stopped"],
+      ["call:unsaved", "stopped"], ["call:saved", "finished"],
     ]);
   });
 
@@ -197,12 +197,12 @@ describe("SubagentRosterService", () => {
     expect(service.loadRoster(request).entries.map((row) => row.id)).toEqual(["call:one", "call:two", "child:child-1"]);
   });
 
-  it("lists a new idle canonical child as running before its first turn", () => {
+  it("lists a new idle canonical child as setting up before its first turn", () => {
     const { children, service } = harness();
     children.push({ ...child(), activityState: "Idle", latestTurnStatus: null, endedAt: null });
 
     expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([
-      ["child:child-1", "running"],
+      ["child:child-1", "setting-up"],
     ]);
   });
 
@@ -263,21 +263,20 @@ describe("SubagentRosterService", () => {
     call("active", "active-message");
     await service.stopDescendants("parent");
     expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([
-      ["call:active", "stopped"], ["call:cancelled", "stopped"], ["call:finished", "done"],
+      ["call:active", "stopped"], ["call:cancelled", "stopped"], ["call:finished", "finished"],
     ]);
   });
 
-  it("keeps running and waiting entries ahead of finished entries at the 256 cap", () => {
+  it("keeps a needs-you entry ahead of 300 newer finished entries at the 256 cap", () => {
     const { db, call, service } = harness();
     message(db, "message", "claude");
-    for (let index = 0; index < 257; index++) call(String(index), "message", {
-      startedAt: new Date(Date.parse(NOW) + index * 1000).toISOString(),
-      status: index === 0 ? "running" : "completed",
+    for (let index = 0; index < 300; index++) call(String(index), "message", {
+      startedAt: new Date(Date.parse(NOW) + index * 1000).toISOString(), status: "completed",
     });
     service.bindDelegatedTasks({
       rosterEntries: () => [{
-        id: "task:waiting", provider: "codex", title: "Inspect", prompt: null, subagentType: null,
-        model: null, reasoningEffort: null, stepCount: 0, status: "waiting",
+        id: "task:needs-you", provider: "codex", title: "Inspect", prompt: null, subagentType: null,
+        model: null, reasoningEffort: null, stepCount: 0, status: "needs-you",
         startedAt: "2026-10-10T09:59:00.000Z", endedAt: null, tier: "meta", canStop: true,
         sourceToolCallId: null, childThreadId: null, sourceMessageId: null, parentEntryId: null,
       }],
@@ -287,8 +286,7 @@ describe("SubagentRosterService", () => {
 
     const roster = service.loadRoster(request);
     expect(roster.entries).toHaveLength(256);
-    expect(roster.entries.slice(0, 4).map((row) => row.id)).toEqual(["call:0", "task:waiting", "call:256", "call:255"]);
-    expect(roster.entries.at(-1)?.id).toBe("call:3");
+    expect(roster.entries.slice(0, 3).map((row) => row.id)).toEqual(["task:needs-you", "call:299", "call:298"]);
     expect(roster.truncated).toBe(true);
   });
 
@@ -401,7 +399,7 @@ describe("SubagentRosterService", () => {
       ["call:marker", "running", "steps"],
     ]);
     db.prepare("UPDATE tool_call_records SET status = 'completed', output_summary = 'Found the cause', completed_at = '2026-10-10T10:00:03.000Z' WHERE id = 'lifecycle'").run();
-    expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([["call:marker", "done"]]);
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([["call:marker", "finished"]]);
     expect(service.loadDetail({ ...request, entryId: "call:marker" }).summary).toBe("Found the cause");
   });
 
@@ -441,24 +439,24 @@ describe("SubagentRosterService", () => {
     call("root", "message", { status: "completed", outputSummary: "Recovered successfully", completedAt: "2026-10-10T10:00:05.000Z" });
     call("nested", "message", { parentToolCallId: "root", status: "failed", sortOrder: 1,
       startedAt: "2026-10-10T10:00:01.000Z", completedAt: "2026-10-10T10:00:03.000Z", outputSummary: "Attempt failed" });
-    expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([["call:root", "done"]]);
+    expect(service.loadRoster(request).entries.map((row) => [row.id, row.status])).toEqual([["call:root", "finished"]]);
     expect(service.loadDetail({ ...request, entryId: "call:root" }).summary).toBe("Recovered successfully");
   });
 });
 
 describe("subagentStatusFrom", () => {
   it.each([
-    ["Running", "running"], ["Completed", "done"], ["Errored", "failed"],
+    ["Running", "running"], ["Completed", "finished"], ["Errored", "failed"],
     ["Cancelled", "stopped"], ["Interrupted", "stopped"], ["cancelled", "stopped"],
-    ["completed", "done"], ["failed", "failed"],
+    ["completed", "finished"], ["failed", "failed"],
     ["Active", "running"], ["legacy-status", "failed"], [null, "failed"],
     ["Pending", "running"], ["Starting", "running"],
-    ["Idle", "done"], ["Closed", "stopped"], ["Unavailable", "failed"],
+    ["Idle", "finished"], ["Closed", "stopped"], ["Unavailable", "failed"],
     ["constructor", "failed"], ["__proto__", "failed"],
   ])("normalizes %s to %s", (input, expected) => expect(subagentStatusFrom(input)).toBe(expected));
   it("normalizes parent cancellation without changing an already successful result", () => {
     expect(subagentStatusFrom("running", true)).toBe("stopped");
     expect(subagentStatusFrom("failed", true)).toBe("stopped");
-    expect(subagentStatusFrom("completed", true)).toBe("done");
+    expect(subagentStatusFrom("completed", true)).toBe("finished");
   });
 });

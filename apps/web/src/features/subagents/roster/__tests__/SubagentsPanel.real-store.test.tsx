@@ -38,7 +38,7 @@ function roster(entries: SubagentRosterEntry[], revision = 1): SubagentRoster {
 
 describe("SubagentsPanel real roster store", () => {
   beforeEach(() => {
-    useSubagentRosterStore.setState({ rosters: new Map(), errors: new Set() });
+    useSubagentRosterStore.setState({ loads: new Map() });
     useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {} });
     useWorkspaceStore.setState({ activeWorkspaceId: "workspace-1", activeThreadId: "thread-1" });
     useThreadStore.setState({ currentThreadId: "thread-1", records: new Map() });
@@ -56,7 +56,7 @@ describe("SubagentsPanel real roster store", () => {
   it("renders both Claude calls and updates them on push without a polling interval", async () => {
     const interval = vi.spyOn(window, "setInterval");
     transport.loadSubagentRoster.mockResolvedValueOnce(roster([row("Inspect UI"), row("Inspect API")]))
-      .mockResolvedValueOnce(roster([row("Inspect UI", "done"), row("Inspect API", "done")], 2));
+      .mockResolvedValueOnce(roster([row("Inspect UI", "finished"), row("Inspect API", "finished")], 2));
     await act(async () => { render(<SubagentsPanel threadId="thread-1" />); });
     expect(screen.getAllByTestId("subagent-active-row")).toHaveLength(2);
     expect(interval.mock.calls.map(([, ms]) => ms)).toEqual([1_000]);
@@ -81,14 +81,14 @@ describe("SubagentsPanel real roster store", () => {
 
   it("offers Retry after an error and retains the last good rows", async () => {
     transport.loadSubagentRoster.mockResolvedValueOnce(roster([row("Inspect UI")]))
-      .mockRejectedValueOnce(new Error("Disconnected")).mockResolvedValueOnce(roster([row("Inspect UI", "done")], 2));
+      .mockRejectedValueOnce(new Error("Disconnected")).mockResolvedValueOnce(roster([row("Inspect UI", "finished")], 2));
     render(<SubagentsPanel threadId="thread-1" />);
     await screen.findByRole("button", { name: "Open Inspect UI details, Running" });
     await act(async () => { await useSubagentRosterStore.getState().refresh("thread-1"); });
     expect(screen.getByRole("alert")).toHaveTextContent("Couldn't load subagents");
     expect(screen.getByTestId("subagent-active-row")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await screen.findByRole("button", { name: "Open Inspect UI details, Done" });
+    await screen.findByRole("button", { name: "Open Inspect UI details, Finished" });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
