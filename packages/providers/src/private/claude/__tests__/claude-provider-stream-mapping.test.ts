@@ -322,6 +322,40 @@ describe("ClaudeProvider stream mapping", () => {
     expect(events.at(-1)?.event).toMatchObject({ type: AgentEventType.Ended, turnExecutionId: "execution" });
   });
 
+  it("steers a two-skill message as a noted prompt plus the native command block", async () => {
+    const stream = steeredStream([
+      { type: "result", subtype: "success", is_error: false, terminal_reason: "aborted_streaming",
+        user_message_uuids: ["first-prompt"], usage: {}, modelUsage: {} },
+      { type: "system", subtype: "status", user_message_uuids: [STEER_ID] },
+      { type: "result", subtype: "success", is_error: false, terminal_reason: "completed",
+        user_message_uuids: [STEER_ID], usage: {}, modelUsage: {} },
+    ]);
+    mockQuery.mockImplementation(stream.factory);
+    const userOnlySkill = (name: string) => ({ name, description: name, kind: "skill" as const, source: "user" as const,
+      providers: ["claude"], path: `/skills/${name}/SKILL.md`, userInvocationOnly: true });
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject(), undefined, undefined, undefined, undefined,
+      [userOnlySkill("to-spec"), userOnlySkill("to-tickets")]);
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    const sessionId = "mcode-steer-skills";
+
+    const ended = send(provider, sessionId, events);
+    await stream.awaitingSteer;
+    const outcome = await provider.steerTurn({ sessionId, threadId: "steer-skills", turnExecutionId: "execution",
+      steerId: STEER_ID, message: "Run /to-spec and /to-tickets" });
+    await ended;
+
+    expect(outcome).toEqual({ outcome: "accepted" });
+    expect(await stream.steered).toMatchObject({
+      message: { content: [
+        { type: "text", text: "Run /to-spec [The user invoked this skill. Follow the instructions at: /skills/to-spec/SKILL.md] and /to-tickets" },
+        { type: "text", text: "/to-tickets" },
+      ] },
+      priority: "now",
+      uuid: STEER_ID,
+    });
+  });
+
   it("records tools still open when a stop tears down the session", async () => {
     recordingDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-stop-diag-"));
     diag.configure({ dir: recordingDir, enabled: true });

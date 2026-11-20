@@ -30,7 +30,11 @@ function fixture() {
   const host = fixtureHost();
   host.processes.attach = vi.fn();
   host.processes.terminateTree = vi.fn(async () => undefined);
-  const provider = createClaudeProvider({ host, configuration: { cliPath: process.execPath, idleSessionTtlMs: 600_000 } });
+  const provider = createClaudeProvider({
+    host,
+    configuration: { cliPath: process.execPath, idleSessionTtlMs: 600_000 },
+    claude: { skills: { list: async () => [] } },
+  });
   owned.push(provider);
   return { provider, child, host };
 }

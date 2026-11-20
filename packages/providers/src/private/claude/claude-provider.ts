@@ -56,7 +56,8 @@ import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
 import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
 import { CompositeUsageSource } from "./usage/composite-usage-source.js";
 import { SessionRuntime } from "../session-runtime.js";
-import type { ProviderFactoryConfiguration } from "../../factory-types.js";
+import type { ClaudeProviderPorts, ProviderFactoryConfiguration } from "../../factory-types.js";
+import { planClaudeSkillDispatch, type ClaudeSkillTarget } from "./claude-skill-dispatch.js";
 import {
   buildMcodeInstructionSections,
   NO_MCODE_TOOLKITS,
@@ -401,13 +402,14 @@ async function planMutationDenial(session: Pick<ClaudeSessionState, "planRoots" 
   return "Plan mode is read-only. Describe the change in the plan instead.";
 }
 
-/** Convert a plain string message into an SDKUserMessage. */
-function toUserMessage(text: string, sessionId: string): SDKUserMessage {
+type ClaudeTextContent = string | { type: "text"; text: string }[];
+
+function toUserMessage(content: SDKUserMessage["message"]["content"], sessionId: string): SDKUserMessage {
   return {
     type: "user" as const,
     message: {
       role: "user" as const,
-      content: text,
+      content,
     },
     parent_tool_use_id: null,
     session_id: sessionId,
@@ -723,6 +725,7 @@ export class ClaudeProvider
   constructor(
     private readonly host: ProviderHostPorts,
     private readonly configuration: ProviderFactoryConfiguration,
+    private readonly claudePorts: ClaudeProviderPorts,
   ) {
     super();
     this.canonicalEventPublisher = new ClaudeCanonicalEventPublisher(this.host.events, (routing, error) => {
@@ -1148,14 +1151,33 @@ export class ClaudeProvider
     return { scope: pendingBrowserAccess.scope, leaseExpired };
   }
 
+  private async buildPromptText(message: string, cwd: string): Promise<ClaudeTextContent> {
+    if (!message.includes("/")) return message;
+
+    const skills = new Map<string, ClaudeSkillTarget>();
+    for (const skill of await this.claudePorts.skills.list(cwd, "claude")) {
+      if (!skill.path) continue;
+      skills.set(skill.name, { path: skill.path, userInvocationOnly: skill.userInvocationOnly === true });
+    }
+    const dispatch = planClaudeSkillDispatch(message, skills);
+    if (!dispatch) return message;
+
+    const blocks: Exclude<ClaudeTextContent, string> = [];
+    if (dispatch.leadingText !== undefined) blocks.push({ type: "text", text: dispatch.leadingText });
+    blocks.push({ type: "text", text: dispatch.commandText });
+    return blocks;
+  }
+
   private async createClaudePrompt(
     message: string,
     attachments: AttachmentMeta[] | undefined,
     sessionId: string,
+    cwd: string,
   ): Promise<SDKUserMessage> {
+    const content = await this.buildPromptText(message, cwd);
     if (attachments?.length)
-      return await this.buildMultimodalMessage(message, attachments, sessionId);
-    return toUserMessage(message, sessionId);
+      return await this.buildMultimodalMessage(content, attachments, sessionId);
+    return toUserMessage(content, sessionId);
   }
 
   private createClaudeTurnContext(
@@ -1692,6 +1714,7 @@ export class ClaudeProvider
       message,
       attachments,
       sessionId,
+      resolvedCwd,
     );
 
     const context = this.createClaudeTurnContext(
@@ -2621,7 +2644,7 @@ export class ClaudeProvider
 
   /** Build a multimodal SDKUserMessage from text and attachments. */
   private async buildMultimodalMessage(
-    message: string,
+    content: ClaudeTextContent,
     attachments: AttachmentMeta[],
     sessionId: string,
   ): Promise<SDKUserMessage> {
@@ -2674,20 +2697,13 @@ export class ClaudeProvider
       }
     }
 
-    if (message.trim().length > 0) {
-      contentBlocks.push({ type: "text", text: message });
+    if (typeof content !== "string") {
+      contentBlocks.push(...content);
+    } else if (content.trim().length > 0) {
+      contentBlocks.push({ type: "text", text: content });
     }
 
-    return {
-      type: "user" as const,
-      message: {
-        role: "user" as const,
-        content:
-          contentBlocks as unknown as SDKUserMessage["message"]["content"],
-      },
-      parent_tool_use_id: null,
-      session_id: sessionId,
-    };
+    return toUserMessage(contentBlocks as unknown as SDKUserMessage["message"]["content"], sessionId);
   }
 
   /** Return whether native Claude Code `/goal` has been proven for this session. */
@@ -2897,16 +2913,22 @@ export class ClaudeProvider
     if (refusal) return finish(refusal);
     const steerId = input.steerId;
     if (!isSdkMessageUuid(steerId)) return finish({ outcome: "rejected", reason: "provider", detail: "Steer id is not a UUID." });
-    const answered = new Promise<boolean>((settle) => stream.steersAwaitingTurn.set(steerId, settle));
+    let answered: Promise<boolean>;
     let queued: QueuedRead;
     try {
-      queued = session.pushAndAwaitRead({ ...toUserMessage(input.message, input.sessionId), priority: "now", uuid: steerId });
+      const content = await this.buildPromptText(input.message, session.cwd);
+      const refusalAfterSkillLookup = this.runtime.get(input.sessionId) === session
+        ? claudeSteerRefusal(stream, input.turnExecutionId)
+        : CLAUDE_STEER_TURN_GONE;
+      if (refusalAfterSkillLookup) return finish(refusalAfterSkillLookup);
+      answered = new Promise<boolean>((settle) => stream.steersAwaitingTurn.set(steerId, settle));
+      queued = session.pushAndAwaitRead({ ...toUserMessage(content, input.sessionId), priority: "now", uuid: steerId });
       diag.emit("claude.turn", { th: stream.threadId }, () => ({
         step: "steer-queued", steer: steerId, openTools: [...session.pendingToolUses],
       }));
     } catch (error) {
       stream.steersAwaitingTurn.delete(steerId);
-      return finish({ outcome: "rejected", reason: "provider", detail: error instanceof Error ? error.message : String(error) });
+      return finish({ outcome: "rejected", reason: "provider", detail: sideChannelErrorMessage(error) });
     }
     const outcome = await awaitSteerAnswer(queued, answered);
     if (outcome.outcome === "rejected") stream.steersAwaitingTurn.delete(steerId);

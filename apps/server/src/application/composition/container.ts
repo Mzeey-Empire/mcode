@@ -262,6 +262,7 @@ export async function setupContainer(mcodeDir: string, options: { createDatabase
       idleSessionTtlMs: 10 * 60 * 1_000,
     },
     host: container.resolve("ProviderHostPorts"),
+    claude: { skills: container.resolve(SkillService) },
   });
 
   const codexProvider = registerCodexProvider(container, {

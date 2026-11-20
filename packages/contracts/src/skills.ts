@@ -21,6 +21,8 @@ export const SkillInfoSchema = lazySchema(() =>
     providers: z.array(z.string()).default([]),
     nativeName: z.string().optional(),
     path: z.string().optional(),
+    /** True when frontmatter sets `disable-model-invocation: true`, so only the user can start the skill. */
+    userInvocationOnly: z.boolean().optional(),
   }),
 );
 /** Metadata for a discovered skill or command. */

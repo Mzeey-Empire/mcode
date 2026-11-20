@@ -20,7 +20,7 @@ function namedFixtureFile(fileName: string): string {
 export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistration[] = [
   {
     providerId: "claude",
-    factory: createClaudeProvider,
+    factory: (input) => createClaudeProvider({ ...input, claude: { skills: { list: async () => [] } } }),
     requiredProfiles: ["core", "build", "plan", "completion", "goals", "permissions", "usage", "session-eviction", "orchestration", "browser-access", "thread-control", "turn-steer", "session-resume"],
     fixtureFiles: [fixtureFile("claude"), namedFixtureFile("claude-native.synthetic.json"), namedFixtureFile("claude-startup-error.captured.json")],
     requiredFixtureProvenance: ["captured", "synthetic"],

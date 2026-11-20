@@ -43,7 +43,7 @@ function createInput(): ProviderFactoryInput {
       idleSessionTtlMs: 600_000,
     },
     host: createHostPorts(),
-
+    claude: { skills: { list: async () => [] } },
     codex: {
       settings: { get: vi.fn(async () => ({ cliPath: "codex" })) },
       attachments: { persistGeneratedImageFromPath: vi.fn() },
