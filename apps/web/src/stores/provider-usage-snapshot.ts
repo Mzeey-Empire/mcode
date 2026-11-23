@@ -2,29 +2,26 @@ import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
 
 const USAGE_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 
-function metricValues(usage: ProviderUsageInfo): Array<number | string | undefined> {
-  return [
-    usage.sessionCostUsd,
-    usage.serviceTier,
-    usage.numTurns,
-    usage.durationMs,
-  ];
-}
+/** Session fields the wire type carries but which are never account-wide. */
+type SessionField = "sessionCostUsd" | "serviceTier" | "numTurns" | "durationMs";
 
-/** Returns whether a provider usage snapshot contains quota or session data. */
-export function hasProviderUsageData(usage: ProviderUsageInfo | undefined): boolean {
-  if (!usage) return false;
-  return usage.quotaCategories.length > 0 || metricValues(usage).some((value) => value !== undefined);
-}
+/**
+ * Account-wide usage for one provider. Omitting the session fields keeps one thread's session cost
+ * out of the shared snapshot at the type level.
+ */
+export type ProviderQuotaUsage = Omit<ProviderUsageInfo, SessionField>;
 
-function isFreshUsageSnapshot(usage: ProviderUsageInfo | undefined, now: number): boolean {
-  if (!usage?.fetchedAt) return hasProviderUsageData(usage);
-  const fetchedAt = Date.parse(usage.fetchedAt);
-  return Number.isFinite(fetchedAt) && now - fetchedAt <= USAGE_STALE_TTL_MS;
-}
+/** One thread's own session metrics for one provider, taken only from that thread's quotaUpdate events. */
+export type ThreadSessionUsage = Pick<ProviderUsageInfo, SessionField>;
 
-/** Selects only provider-wide quota data from one usage snapshot. */
-export function providerQuotaSnapshot(usage: ProviderUsageInfo): ProviderUsageInfo {
+/** A thread's session metrics keyed by provider id. */
+export type ThreadSessionUsageByProvider = Readonly<Partial<Record<string, ThreadSessionUsage>>>;
+
+/**
+ * Strips session fields from a wire payload. Picks fields explicitly because structural typing would
+ * let a wider object, with the provider-wide session cost, through a type annotation.
+ */
+export function toProviderQuotaUsage(usage: ProviderUsageInfo): ProviderQuotaUsage {
   return {
     providerId: usage.providerId,
     quotaCategories: usage.quotaCategories,
@@ -36,56 +33,69 @@ export function providerQuotaSnapshot(usage: ProviderUsageInfo): ProviderUsageIn
   };
 }
 
-function resolveUsageStatus(incoming: ProviderUsageInfo): NonNullable<ProviderUsageInfo["usageStatus"]> {
-  return incoming.usageStatus ?? (incoming.quotaCategories.length === 0 ? "unavailable" : "ready");
-}
-
-function staleSnapshot(
-  existing: ProviderUsageInfo,
-  incoming: ProviderUsageInfo,
-  now: number,
-): ProviderUsageInfo {
+/** The snapshot a failed `getProviderUsage` call contributes. */
+export function failedUsage(providerId: string, now: number): ProviderQuotaUsage {
   return {
-    ...existing,
-    providerId: existing.providerId,
-    quotaCategories: existing.quotaCategories,
-    usageStatus: "stale",
-    failedAt: incoming.failedAt ?? new Date(now).toISOString(),
-    diagnostic: incoming.diagnostic,
+    providerId,
+    quotaCategories: [],
+    usageStatus: "unavailable",
+    failedAt: new Date(now).toISOString(),
+    diagnostic: "Usage refresh failed",
   };
 }
 
-function unavailableSnapshot(
-  existing: ProviderUsageInfo | undefined,
-  incoming: ProviderUsageInfo,
-  status: "unavailable" | "unsupported",
-  now: number,
-): ProviderUsageInfo {
-  if (existing && hasProviderUsageData(existing) && isFreshUsageSnapshot(existing, now)) {
-    return staleSnapshot(existing, incoming, now);
-  }
-  return { ...incoming, usageStatus: status };
+/** Returns whether any capped quota window has less than a fifth left. */
+export function hasLowQuotaCategory(usage: ProviderQuotaUsage | undefined): boolean {
+  return usage?.quotaCategories.some((c) => !c.isUnlimited && c.remainingPercent < 0.2) ?? false;
 }
 
-function emptySnapshot(incoming: ProviderUsageInfo, now: number): ProviderUsageInfo {
+function hasQuota(usage: ProviderQuotaUsage | undefined): usage is ProviderQuotaUsage {
+  return (usage?.quotaCategories.length ?? 0) > 0;
+}
+
+function isFreshUsageSnapshot(usage: ProviderQuotaUsage, now: number): boolean {
+  if (!usage.fetchedAt) return true;
+  const fetchedAt = Date.parse(usage.fetchedAt);
+  return Number.isFinite(fetchedAt) && now - fetchedAt <= USAGE_STALE_TTL_MS;
+}
+
+function resolveUsageStatus(incoming: ProviderQuotaUsage): NonNullable<ProviderQuotaUsage["usageStatus"]> {
+  return incoming.usageStatus ?? (incoming.quotaCategories.length === 0 ? "unavailable" : "ready");
+}
+
+function unavailableSnapshot(
+  existing: ProviderQuotaUsage | undefined,
+  incoming: ProviderQuotaUsage,
+  status: "unavailable" | "unsupported",
+  now: number,
+): ProviderQuotaUsage {
+  if (hasQuota(existing) && isFreshUsageSnapshot(existing, now)) {
+    return {
+      ...existing,
+      usageStatus: "stale",
+      failedAt: incoming.failedAt ?? new Date(now).toISOString(),
+      diagnostic: incoming.diagnostic,
+    };
+  }
+  // A failed fetch says nothing about how the account is billed, so the known mode survives it.
+  return { ...incoming, billingMode: incoming.billingMode ?? existing?.billingMode, usageStatus: status };
+}
+
+function emptySnapshot(incoming: ProviderQuotaUsage, now: number): ProviderQuotaUsage {
   return {
     providerId: incoming.providerId,
     quotaCategories: [],
     billingMode: incoming.billingMode,
-    sessionCostUsd: incoming.sessionCostUsd,
-    serviceTier: incoming.serviceTier,
-    numTurns: incoming.numTurns,
-    durationMs: incoming.durationMs,
     usageStatus: "ready-empty",
     fetchedAt: incoming.fetchedAt ?? new Date(now).toISOString(),
   };
 }
 
 function readySnapshot(
-  existing: ProviderUsageInfo | undefined,
-  incoming: ProviderUsageInfo,
+  existing: ProviderQuotaUsage | undefined,
+  incoming: ProviderQuotaUsage,
   now: number,
-): ProviderUsageInfo {
+): ProviderQuotaUsage {
   const hasQuotaCategories = incoming.quotaCategories.length > 0;
   return {
     ...existing,
@@ -98,12 +108,15 @@ function readySnapshot(
   };
 }
 
-/** Merges incoming provider quota data with a prior last-known-good snapshot. */
+/**
+ * Merges an observation into the last snapshot. A failure keeps known-good quota as "stale" for 24 h,
+ * a successful payload clears failedAt and diagnostic, and an explicit ready-empty clears the buckets.
+ */
 export function mergeProviderUsageSnapshot(
-  existing: ProviderUsageInfo | undefined,
-  incoming: ProviderUsageInfo,
+  existing: ProviderQuotaUsage | undefined,
+  incoming: ProviderQuotaUsage,
   now = Date.now(),
-): ProviderUsageInfo {
+): ProviderQuotaUsage {
   const status = resolveUsageStatus(incoming);
   if (status === "unavailable" || status === "unsupported") {
     return unavailableSnapshot(existing, incoming, status, now);
@@ -112,36 +125,24 @@ export function mergeProviderUsageSnapshot(
   return readySnapshot(existing, incoming, now);
 }
 
-function threadMetrics(existing: ProviderUsageInfo | undefined): Partial<ProviderUsageInfo> {
-  if (!existing) return {};
-  return {
-    sessionCostUsd: existing.sessionCostUsd,
-    serviceTier: existing.serviceTier,
-    numTurns: existing.numTurns,
-    durationMs: existing.durationMs,
-  };
+function definedSessionFields(event: Partial<ThreadSessionUsage>): Partial<ThreadSessionUsage> {
+  const fields: Partial<ThreadSessionUsage> = {};
+  if (event.sessionCostUsd !== undefined) fields.sessionCostUsd = event.sessionCostUsd;
+  if (event.serviceTier !== undefined) fields.serviceTier = event.serviceTier;
+  if (event.numTurns !== undefined) fields.numTurns = event.numTurns;
+  if (event.durationMs !== undefined) fields.durationMs = event.durationMs;
+  return fields;
 }
 
-function providerBase(
-  existing: ProviderUsageInfo | undefined,
-  providerSnapshot: ProviderUsageInfo | undefined,
-): ProviderUsageInfo | undefined {
-  return providerSnapshot && hasProviderUsageData(providerSnapshot) ? providerSnapshot : existing;
-}
-
-/** Merges provider-wide quota data with metrics that remain specific to one thread. */
-export function mergeThreadUsageSnapshot(
-  existing: ProviderUsageInfo | undefined,
-  providerSnapshot: ProviderUsageInfo | undefined,
-  incoming: ProviderUsageInfo,
-  now = Date.now(),
-): ProviderUsageInfo {
-  return {
-    ...mergeProviderUsageSnapshot(providerBase(existing, providerSnapshot), providerQuotaSnapshot(incoming), now),
-    ...threadMetrics(existing),
-    sessionCostUsd: incoming.sessionCostUsd ?? existing?.sessionCostUsd,
-    serviceTier: incoming.serviceTier ?? existing?.serviceTier,
-    numTurns: incoming.numTurns ?? existing?.numTurns,
-    durationMs: incoming.durationMs ?? existing?.durationMs,
-  };
+/**
+ * Applies the defined session fields of one event over the thread's previous metrics for that provider.
+ * Returns `previous` itself when the event carries none, so the thread record stays unchanged.
+ */
+export function mergeSessionUsage(
+  previous: ThreadSessionUsageByProvider,
+  event: { providerId: string } & Partial<ThreadSessionUsage>,
+): ThreadSessionUsageByProvider {
+  const fields = definedSessionFields(event);
+  if (Object.keys(fields).length === 0) return previous;
+  return { ...previous, [event.providerId]: { ...previous[event.providerId], ...fields } };
 }

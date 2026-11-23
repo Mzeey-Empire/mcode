@@ -1,11 +1,12 @@
 // apps/web/src/components/chat/UsagePopover.tsx
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
-import { useThreadStore } from "../../stores/threadStore";
 import { useThreadRecord } from "../../stores/thread-selectors";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
+import type { ProviderQuotaUsage } from "@/stores/provider-usage-snapshot";
+import { useProviderUsage } from "@/stores/providerUsageStore";
 import type { ThreadContextUsage } from "@/stores/thread-record";
-import { useEffect, useRef, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { formatUsageResetText } from "@/lib/usage-reset-format";
 
 interface UsagePopoverProps {
@@ -88,7 +89,7 @@ function UsageProviderHeader({
   providerId: string;
   model: string | null | undefined;
   contextEntry: ThreadContextUsage | undefined;
-  usageStatus: ProviderUsageInfo["usageStatus"] | undefined;
+  usageStatus: ProviderQuotaUsage["usageStatus"] | undefined;
 }) {
   return (
     <div className="flex items-center justify-between">
@@ -108,7 +109,7 @@ function UsageProviderHeader({
   );
 }
 
-function UsageQuotaSection({ usageInfo }: { usageInfo: ProviderUsageInfo | undefined }) {
+function UsageQuotaSection({ usageInfo }: { usageInfo: ProviderQuotaUsage | undefined }) {
   const categories = usageInfo?.quotaCategories ?? [];
   if (categories.length === 0) {
     const unavailableMessage = usageInfo?.usageStatus === "unsupported"
@@ -127,7 +128,7 @@ function UsageQuotaSection({ usageInfo }: { usageInfo: ProviderUsageInfo | undef
   );
 }
 
-function UsageRefreshStatus({ usageInfo }: { usageInfo: ProviderUsageInfo | undefined }) {
+function UsageRefreshStatus({ usageInfo }: { usageInfo: ProviderQuotaUsage | undefined }) {
   const status = usageInfo?.usageStatus;
   if (!usageInfo || (status !== "stale" && status !== "unavailable")) return null;
   const detail = status === "stale"
@@ -186,18 +187,20 @@ function LastTurnUsage({ contextEntry }: { contextEntry: ThreadContextUsage | un
   );
 }
 
+/** Mounts only while the popover is open, so opening it is what starts watching the provider's usage. */
 function UsagePopoverDetails({
+  threadId,
   providerId,
   model,
   contextEntry,
-  usageInfo,
 }: {
+  threadId: string | undefined;
   providerId: string;
   model: string | null | undefined;
   contextEntry: ThreadContextUsage | undefined;
-  usageInfo: ProviderUsageInfo | undefined;
 }) {
-  const sessionCost = usageInfo?.sessionCostUsd;
+  const usageInfo = useProviderUsage(providerId);
+  const sessionCost = useThreadRecord(threadId, (r) => r.sessionUsageByProvider[providerId]?.sessionCostUsd);
   return (
     <div className="space-y-3 p-3">
       <UsageProviderHeader providerId={providerId} model={model} contextEntry={contextEntry} usageStatus={usageInfo?.usageStatus} />
@@ -220,30 +223,14 @@ export function UsagePopover({ threadId, children, onOpenChange, side = "top", a
   const contextEntry = useThreadRecord(threadId, (r) => r.context);
   const activeThread = useWorkspaceStore((s) => s.threads.find((t) => t.id === threadId));
   const providerId = activeThread?.provider ?? "claude";
-  const usageInfo = useThreadRecord(threadId, (r) => r.usageByProvider[providerId]);
-  const fetchProviderUsage = useThreadStore((s) => s.fetchProviderUsage);
-  const hasFetched = useRef(false);
-
-  const handleOpenChange = (open: boolean) => {
-    if (open && !hasFetched.current && threadId) {
-      hasFetched.current = true;
-      fetchProviderUsage(threadId, providerId);
-    }
-    onOpenChange?.(open);
-  };
-
-  // Reset fetch flag when thread or provider changes
-  useEffect(() => {
-    hasFetched.current = false;
-  }, [threadId, providerId]);
 
   return (
-    <Popover onOpenChange={handleOpenChange}>
+    <Popover onOpenChange={onOpenChange}>
       <PopoverTrigger render={<span style={{ display: "contents" }} />}>
         {children}
       </PopoverTrigger>
       <PopoverContent side={side} align={align} sideOffset={8} className="w-72 p-0">
-        <UsagePopoverDetails providerId={providerId} model={activeThread?.model} contextEntry={contextEntry} usageInfo={usageInfo} />
+        <UsagePopoverDetails threadId={threadId} providerId={providerId} model={activeThread?.model} contextEntry={contextEntry} />
       </PopoverContent>
     </Popover>
   );

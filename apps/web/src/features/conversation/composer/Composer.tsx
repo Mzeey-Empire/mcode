@@ -1,6 +1,8 @@
 import { useRef, useCallback, useEffect, useMemo } from "react";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { isThreadStopPending } from "@/stores/thread-lifecycle";
+import { hasLowQuotaCategory } from "@/stores/provider-usage-snapshot";
+import { useProviderUsage } from "@/stores/providerUsageStore";
 import { useThreadRecord } from "../state";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import type { Thread } from "@/transport";
@@ -425,8 +427,7 @@ export function Composer({
   resetPendingGoal(activeGoal, goalPending, setGoalPending);
 
   const activeProviderId = activeThread?.provider ?? "claude";
-  const usageInfo = useThreadRecord(threadId, (r) => r.usageByProvider[activeProviderId]);
-  const hasLowQuota = usageInfo?.quotaCategories.some((c) => !c.isUnlimited && c.remainingPercent < 0.2) ?? false;
+  const hasLowQuota = useProviderUsage(activeProviderId, hasLowQuotaCategory);
 
   const fileAutocomplete = useFileAutocomplete({
     workspaceId,

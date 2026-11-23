@@ -5,7 +5,7 @@ import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import type { OrchestrationMode } from "@mcode/contracts/models/enums";
 import type { FastModeStatus } from "@mcode/contracts/models/fast-mode";
 import type { PlanQuestion, PlanAnswer } from "@mcode/contracts/models/plan-questions";
-import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { ThreadSessionUsageByProvider } from "./provider-usage-snapshot";
 import type { GoalState } from "@mcode/contracts/models/goal";
 import type { TurnFileEffectSummary } from "@mcode/contracts/models/file-effect";
 import type { TurnRuntimePhase, TurnSavingStatus } from "@mcode/contracts/models/turn-runtime";
@@ -33,9 +33,6 @@ export interface ThreadSettings {
   defaultOpenInApp?: string | null;
 }
 
-
-/** Per-thread token/usage snapshot for one provider (keys are providerId). */
-export type ThreadUsageByProvider = Record<string, ProviderUsageInfo>;
 
 /** Narrative cache for loaded messages on this thread. Keys are messageId. */
 export type ThreadNarrativeByMessage = Record<
@@ -151,7 +148,8 @@ export interface ThreadRecord {
 
   settings: ThreadSettings;
   context?: ThreadContextUsage;
-  usageByProvider: ThreadUsageByProvider;
+  /** This thread's own session metrics per provider; account-wide quota lives in providerUsageStore. */
+  sessionUsageByProvider: ThreadSessionUsageByProvider;
   goal?: GoalState | null;
 
   lastFallback?: { requestedModel: string; actualModel: string };
@@ -253,7 +251,7 @@ export function createEmptyThreadRecord(): ThreadRecord {
     isCompacting: false,
 
     settings: { ...DEFAULT_THREAD_SETTINGS },
-    usageByProvider: {},
+    sessionUsageByProvider: {},
     goal: null,
 
     planQuestions: null,

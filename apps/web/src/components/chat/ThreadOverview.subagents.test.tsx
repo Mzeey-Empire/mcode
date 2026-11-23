@@ -44,9 +44,9 @@ vi.mock("./CreatePrDialog", async () =>
   (await import("./__tests__/thread-overview-mocks")).mockCreatePrDialogModule(),
 );
 
-import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { resetProviderUsageForTests, seedProviderUsageForTests } from "@/stores/providerUsageStore";
 import { useSubagentRosterStore } from "@/features/subagents/state/subagentRosterStore";
-import { mockOpenSubagentsPanel, mockThreadRecords } from "./__tests__/thread-overview-mocks";
+import { mockOpenSubagentsPanel } from "./__tests__/thread-overview-mocks";
 import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-overview-harness";
 import { ThreadOverview } from "./ThreadOverview";
 
@@ -66,6 +66,7 @@ function seedSubagentRoster(threadId: string, entries: SubagentRosterEntry[]): v
 describe("ThreadOverview subagents", () => {
   beforeEach(() => {
     resetThreadOverviewState();
+    resetProviderUsageForTests();
   });
 
   it("shows a loaded sub-agent summary only when present and opens its panel", () => {
@@ -92,16 +93,7 @@ describe("ThreadOverview subagents", () => {
   it("renders the sub-agent summary in Activity, above the Usage summary", () => {
     const thread = branchlessThread();
     seedSubagentRoster(thread.id, [rosterEntry("agent-1", { provider: "claude", status: "running" })]);
-    mockThreadRecords.set(thread.id, {
-      ...createEmptyThreadRecord(),
-      usageByProvider: {
-        claude: {
-          providerId: "claude",
-          quotaCategories: [],
-          usageStatus: "ready-empty",
-        },
-      },
-    });
+    seedProviderUsageForTests({ providerId: "claude", quotaCategories: [], usageStatus: "ready-empty" });
 
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
 

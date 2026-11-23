@@ -1,6 +1,9 @@
 import { useThreadRecord } from "@/stores/thread-selectors";
+import { useOverviewContext } from "@/features/thread-overview/overview-state";
+import type { ProviderQuotaUsage, ThreadSessionUsage } from "@/stores/provider-usage-snapshot";
+import { useProviderUsage } from "@/stores/providerUsageStore";
 import { type Thread } from "@/transport";
-import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 import { useMemo } from "react";
 
 /** Shared usageCategoryShortLabel used by the overview entries. */
@@ -32,10 +35,11 @@ function usageCategoryPriority(category: QuotaCategory): number {
  * Returns the session's cost as an amount, such as "$1.23", only for provider-proven API-key billing.
  */
 export function formatThreadOverviewSessionCostAmount(
-  usageInfo: ProviderUsageInfo | undefined,
+  usage: ProviderQuotaUsage | undefined,
+  session: ThreadSessionUsage | undefined,
 ): string | null {
-  if (usageInfo?.billingMode !== "api_key") return null;
-  const sessionCostUsd = usageInfo.sessionCostUsd;
+  if (usage?.billingMode !== "api_key") return null;
+  const sessionCostUsd = session?.sessionCostUsd;
   if (typeof sessionCostUsd !== "number" || !Number.isFinite(sessionCostUsd)) return null;
   return `$${sessionCostUsd.toFixed(2)}`;
 }
@@ -44,9 +48,10 @@ export function formatThreadOverviewSessionCostAmount(
  * Returns the Overview session-cost label only for provider-proven API-key billing.
  */
 export function formatThreadOverviewSessionCost(
-  usageInfo: ProviderUsageInfo | undefined,
+  usage: ProviderQuotaUsage | undefined,
+  session: ThreadSessionUsage | undefined,
 ): string | null {
-  const amount = formatThreadOverviewSessionCostAmount(usageInfo);
+  const amount = formatThreadOverviewSessionCostAmount(usage, session);
   return amount ? `${amount} session` : null;
 }
 
@@ -54,7 +59,7 @@ export function formatThreadOverviewSessionCost(
  * Returns capped quota categories in priority order for the Overview Usage panel.
  */
 export function getThreadOverviewUsageCategories(
-  usageInfo: ProviderUsageInfo | undefined,
+  usageInfo: ProviderQuotaUsage | undefined,
   providerId = usageInfo?.providerId,
 ): QuotaCategory[] {
   if (providerId === "cursor") return [];
@@ -72,12 +77,13 @@ export function getThreadOverviewUsageCategories(
  * Formats provider quota limits for compact Overview labels.
  */
 export function formatThreadOverviewUsage(
-  usageInfo: ProviderUsageInfo | undefined,
+  usageInfo: ProviderQuotaUsage | undefined,
+  session: ThreadSessionUsage | undefined,
   providerId = usageInfo?.providerId,
 ): string | null {
   if (providerId === "cursor") return null;
   const categories = getThreadOverviewUsageCategories(usageInfo, providerId);
-  const costSummary = formatThreadOverviewSessionCost(usageInfo);
+  const costSummary = formatThreadOverviewSessionCost(usageInfo, session);
 
   const quotaSummary = categories.length > 0
     ? categories
@@ -100,23 +106,28 @@ export function formatThreadOverviewUsage(
   return [quotaSummary, costSummary, statusSummary].filter(Boolean).join(", ") || null;
 }
 
-/** Usage summary and quota bars for the usage row. */
+/**
+ * Usage summary and quota bars for the usage row. Watches the provider's usage only while the
+ * Overview is open, so a closed Overview keeps nothing fresh.
+ */
 export function useOverviewUsage(thread: Thread) {
-  const usageInfo = useThreadRecord(
+  const { open } = useOverviewContext();
+  const usageInfo = useProviderUsage(open ? thread.provider : undefined);
+  const session = useThreadRecord(
     thread.id,
-    (record) => record.usageByProvider[thread.provider],
+    (record) => record.sessionUsageByProvider[thread.provider],
   );
   const usageCategories = useMemo(
     () => getThreadOverviewUsageCategories(usageInfo, thread.provider).slice(0, 2),
     [thread.provider, usageInfo],
   );
   const usageSummary = useMemo(
-    () => formatThreadOverviewUsage(usageInfo, thread.provider),
-    [thread.provider, usageInfo],
+    () => formatThreadOverviewUsage(usageInfo, session, thread.provider),
+    [thread.provider, usageInfo, session],
   );
   const sessionCost = useMemo(
-    () => formatThreadOverviewSessionCostAmount(usageInfo),
-    [usageInfo],
+    () => formatThreadOverviewSessionCostAmount(usageInfo, session),
+    [usageInfo, session],
   );
   return { usageInfo, usageCategories, usageSummary, sessionCost };
 }

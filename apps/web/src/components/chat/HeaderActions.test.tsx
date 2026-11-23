@@ -1,3 +1,6 @@
+// Imported first so the store binds the mocked transport: the real transport imports the thread
+// store, which imports this store, while the mock factory is still loading the original module.
+import { resetProviderUsageForTests, seedProviderUsageForTests } from "@/stores/providerUsageStore";
 import { createMockGitReviewState, createMockMessage, createMockThread } from "@mcode/contracts/testing";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -218,9 +221,11 @@ const CLAUDE_USAGE: ProviderUsageInfo = {
 };
 
 function seedThreadUsage(threadId: string, usage: ProviderUsageInfo) {
+  const { sessionCostUsd, ...quota } = usage;
+  seedProviderUsageForTests(quota);
   useThreadStore.setState((state) => ({
     records: patchThreadRecord(new Map(state.records), threadId, {
-      usageByProvider: { [usage.providerId]: usage },
+      sessionUsageByProvider: { [usage.providerId]: { sessionCostUsd } },
     }),
   }));
 }
@@ -261,6 +266,7 @@ function renderHeaderActions(thread: Thread = makeThread()) {
 }
 
 beforeEach(() => {
+  resetProviderUsageForTests();
   mockGetProviderUsage.mockReset();
   mockGetProviderUsage.mockImplementation(() => new Promise(() => {}));
   mockGetRightPanel.mockReset().mockReturnValue(createRightPanelState({ visible: false, width: 380, widthSource: "auto" }));
@@ -789,7 +795,7 @@ describe("formatThreadOverviewUsage", () => {
             isUnlimited: false,
           },
         ],
-      }),
+      }, undefined),
     ).toBe("Premium usage 25%");
   });
 
@@ -797,7 +803,6 @@ describe("formatThreadOverviewUsage", () => {
     expect(
       formatThreadOverviewUsage({
         providerId: "claude",
-        sessionCostUsd: 12.34,
         quotaCategories: [
           {
             label: "Weekly limit",
@@ -814,7 +819,7 @@ describe("formatThreadOverviewUsage", () => {
             isUnlimited: false,
           },
         ],
-      }),
+      }, { sessionCostUsd: 12.34 }),
     ).toBe("5-hour 42%, weekly 18%");
   });
 
@@ -840,6 +845,7 @@ describe("formatThreadOverviewUsage", () => {
             },
           ],
         },
+        undefined,
         "cursor",
       ),
     ).toBeNull();
@@ -849,7 +855,6 @@ describe("formatThreadOverviewUsage", () => {
     expect(
       formatThreadOverviewUsage({
         providerId: "claude",
-        sessionCostUsd: 1,
         quotaCategories: [
           {
             label: "Pay-as-you-go",
@@ -859,48 +864,29 @@ describe("formatThreadOverviewUsage", () => {
             isUnlimited: true,
           },
         ],
-      }),
+      }, { sessionCostUsd: 1 }),
     ).toBeNull();
-    expect(formatThreadOverviewUsage(undefined)).toBeNull();
+    expect(formatThreadOverviewUsage(undefined, undefined)).toBeNull();
   });
 
   it("renders session cost only for API-key billing mode", () => {
+    const session = { sessionCostUsd: 12.34 };
     expect(
-      formatThreadOverviewSessionCost({
-        providerId: "claude",
-        billingMode: "api_key",
-        quotaCategories: [],
-        sessionCostUsd: 12.34,
-      }),
+      formatThreadOverviewSessionCost({ providerId: "claude", billingMode: "api_key", quotaCategories: [] }, session),
     ).toBe("$12.34 session");
     expect(
-      formatThreadOverviewUsage({
-        providerId: "claude",
-        billingMode: "api_key",
-        quotaCategories: [],
-        sessionCostUsd: 12.34,
-      }),
+      formatThreadOverviewUsage({ providerId: "claude", billingMode: "api_key", quotaCategories: [] }, session),
     ).toBe("$12.34 session");
     expect(
-      formatThreadOverviewUsage({
-        providerId: "claude",
-        billingMode: "plan",
-        quotaCategories: [],
-        sessionCostUsd: 12.34,
-      }),
+      formatThreadOverviewUsage({ providerId: "claude", billingMode: "plan", quotaCategories: [] }, session),
     ).toBeNull();
     expect(
-      formatThreadOverviewUsage({
-        providerId: "claude",
-        billingMode: "unknown",
-        quotaCategories: [],
-        sessionCostUsd: 12.34,
-      }),
+      formatThreadOverviewUsage({ providerId: "claude", billingMode: "unknown", quotaCategories: [] }, session),
     ).toBeNull();
   });
 
   it("does not fabricate Codex quota before provider quota data arrives", () => {
-    expect(formatThreadOverviewUsage(undefined, "codex")).toBeNull();
+    expect(formatThreadOverviewUsage(undefined, undefined, "codex")).toBeNull();
   });
 });
 
