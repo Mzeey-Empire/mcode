@@ -31,8 +31,8 @@ export function useElementWidth<T extends HTMLElement>(
     // when the element is already laid out at mount time. Done unconditionally
     // so environments without ResizeObserver (older test runners, SSR
     // hydration) still get a valid initial measurement.
-    let committed = el.getBoundingClientRect().width;
-    setWidth(committed);
+    let lastScheduledWidth = el.getBoundingClientRect().width;
+    setWidth(lastScheduledWidth);
 
     if (typeof ResizeObserver === "undefined") return;
 
@@ -59,17 +59,17 @@ export function useElementWidth<T extends HTMLElement>(
       // render here lands in the frame that laid out the new width. Callers
       // pass a breakpoint only for an element whose own width does not depend
       // on that render, so it cannot re-trigger this observer in a loop.
-      if (breakpoint !== undefined && (committed >= breakpoint) !== (next >= breakpoint)) {
+      if (breakpoint !== undefined && (lastScheduledWidth >= breakpoint) !== (next >= breakpoint)) {
         if (rafId !== null) cancelAnimationFrame(rafId);
         rafId = null;
-        committed = next;
+        lastScheduledWidth = next;
         flushSync(() => setWidth(next));
         return;
       }
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        committed = pending;
+        lastScheduledWidth = pending;
         setWidth(pending);
       });
     });

@@ -12,12 +12,19 @@ let reportCanvasWidth: (width: number) => void = () => {
 
 // jsdom has no layout, so the observer is driven by hand the way the browser drives it: once per
 // frame, after layout and before paint.
-class ManualResizeObserver {
+class ManualResizeObserver implements ResizeObserver {
   constructor(private readonly callback: ResizeObserverCallback) {}
-  observe() {
+  observe(target: Element) {
     reportCanvasWidth = (width) => {
-      const entry = { contentBoxSize: [{ inlineSize: width, blockSize: 800 }] } as unknown as ResizeObserverEntry;
-      this.callback([entry], this as unknown as ResizeObserver);
+      const size: ResizeObserverSize = { inlineSize: width, blockSize: 800 };
+      const entry: ResizeObserverEntry = {
+        target,
+        contentRect: new DOMRect(0, 0, width, 800),
+        contentBoxSize: [size],
+        borderBoxSize: [size],
+        devicePixelContentBoxSize: [size],
+      };
+      this.callback([entry], this);
     };
   }
   unobserve() {}
@@ -47,9 +54,12 @@ describe("useCanvasOverview", () => {
     render(<Canvas />);
     expect(screen.getByTestId("canvas").dataset.presentation).toBe("docked");
 
-    act(() => reportCanvasWidth(OVERVIEW_DOCK_MIN_CANVAS - 1));
-
-    expect(screen.getByTestId("canvas").dataset.presentation).toBe("hidden");
+    // act() flushes React when its callback returns, so asserting inside it proves the observer
+    // callback itself committed, before the browser could paint.
+    act(() => {
+      reportCanvasWidth(OVERVIEW_DOCK_MIN_CANVAS - 1);
+      expect(screen.getByTestId("canvas").dataset.presentation).toBe("hidden");
+    });
   });
 
   it("docks in the frame the canvas widens past the dock threshold", () => {
@@ -57,9 +67,10 @@ describe("useCanvasOverview", () => {
     render(<Canvas />);
     expect(screen.getByTestId("canvas").dataset.presentation).toBe("hidden");
 
-    act(() => reportCanvasWidth(OVERVIEW_DOCK_MIN_CANVAS));
-
-    expect(screen.getByTestId("canvas").dataset.presentation).toBe("docked");
+    act(() => {
+      reportCanvasWidth(OVERVIEW_DOCK_MIN_CANVAS);
+      expect(screen.getByTestId("canvas").dataset.presentation).toBe("docked");
+    });
   });
 
   it("reports a width change that stays on one side of the threshold on the next frame", () => {
