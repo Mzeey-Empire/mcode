@@ -40,7 +40,6 @@ function clampedPercent(category: QuotaCategory): number {
   return Math.min(Math.max(usageCategoryPercent(category), 0), 100);
 }
 
-/** The hover card for one limit: percent used, when it resets, and how little is left when low. */
 function UsageCategoryTooltipBody({ category }: { category: QuotaCategory }) {
   const resetText = formatUsageResetText(category.resetDate);
   return (
@@ -56,7 +55,6 @@ function UsageCategoryTooltipBody({ category }: { category: QuotaCategory }) {
   );
 }
 
-/** The section's one tooltip root, shared by every limit line. */
 function UsageTooltipRoot({ handle }: { handle: TooltipHandle<QuotaCategory> }) {
   return (
     <Tooltip handle={handle}>
@@ -69,10 +67,6 @@ function UsageTooltipRoot({ handle }: { handle: TooltipHandle<QuotaCategory> }) 
   );
 }
 
-/**
- * A limit on one line: its short name, a meter and the percent used. The reset time and how much is
- * left wait in the line's tooltip; at a glance only how close the limit is matters.
- */
 function UsageCategory({ category, tooltip }: { category: QuotaCategory; tooltip: TooltipHandle<QuotaCategory> }) {
   const percent = clampedPercent(category);
   const rounded = Math.round(percent);

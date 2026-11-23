@@ -6,7 +6,6 @@ import { type Thread } from "@/transport";
 import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 import { useMemo } from "react";
 
-/** A weekly limit scoped to one model, such as Claude's "Weekly limit · Fable". */
 const MODEL_WEEKLY_LIMIT = /^weekly limit · (.+)$/i;
 
 /** Shared usageCategoryShortLabel used by the overview entries. */

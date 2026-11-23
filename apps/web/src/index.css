@@ -152,7 +152,6 @@
   --file-reference: oklch(48% 0.080 205);
   --success: var(--sage-600);
   --error: var(--clay-700);
-  /* Off the lamp's hue, as in dark, so the Don't ask key beside an amber Send never read as more Sends. */
   --warning: oklch(46% 0.100 92);
   --info: var(--blue-700);
   /* Status label text sits on the hover and selected row fills too, so light mode needs a darker
@@ -221,7 +220,6 @@
   --file-reference: oklch(80% 0.070 205);
   --success: var(--sage-400);
   --error: var(--clay-400);
-  /* Brass, off the lamp's hue, so the key icon beside an amber Send never reads as another Send. */
   --warning: oklch(82% 0.110 92);
   --info: var(--blue-400);
   --status-label-attention: var(--primary);

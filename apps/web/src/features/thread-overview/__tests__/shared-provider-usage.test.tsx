@@ -87,7 +87,6 @@ function limit(label: string, usedPercent: number): QuotaCategory {
   return { ...fiveHour(usedPercent), label };
 }
 
-/** Claude's real response shape: an account-wide weekly limit beside a model-scoped one. */
 function claudeLimits(): ProviderUsageInfo {
   return claudeUsage(0, {
     quotaCategories: [limit("Weekly limit", 88), limit("Weekly limit · Fable", 0), limit("5-hour limit", 12)],
