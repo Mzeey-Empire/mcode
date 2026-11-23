@@ -1,6 +1,6 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import React from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../Composer";
@@ -100,8 +100,11 @@ function seedStartingThread() {
   });
 }
 
-function renderStarting(onCancel: (() => void) | undefined) {
-  return render(<Composer threadId="thread-1" workspaceId="ws-1" startingThread={{ onCancel }} />);
+/** Renders, then lets the reads the composer starts on mount resolve inside act(). */
+async function renderStarting(onCancel: (() => void) | undefined): Promise<ReturnType<typeof render>> {
+  const view = render(<Composer threadId="thread-1" workspaceId="ws-1" startingThread={{ onCancel }} />);
+  await act(async () => {});
+  return view;
 }
 
 describe("Composer while the thread is starting", () => {
@@ -122,8 +125,8 @@ describe("Composer while the thread is starting", () => {
     seedStartingThread();
   });
 
-  it("makes the editor inert and swaps Send for Stop", () => {
-    renderStarting(vi.fn());
+  it("makes the editor inert and swaps Send for Stop", async () => {
+    await renderStarting(vi.fn());
 
     const editor = screen.getByLabelText("Message Mcode");
     expect(editor).toBeDisabled();
@@ -134,7 +137,7 @@ describe("Composer while the thread is starting", () => {
 
   it("cancels the startup from Stop without sending a message", async () => {
     const onCancel = vi.fn();
-    renderStarting(onCancel);
+    await renderStarting(onCancel);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("Message Mcode"), "Build this{Enter}");
@@ -145,24 +148,24 @@ describe("Composer while the thread is starting", () => {
     expect(mockTransport.createAndSendMessage).not.toHaveBeenCalled();
   });
 
-  it("disables Stop once cancellation is requested", () => {
-    renderStarting(undefined);
+  it("disables Stop once cancellation is requested", async () => {
+    await renderStarting(undefined);
 
     expect(screen.getByLabelText("Cancel startup")).toBeDisabled();
   });
 
-  it("cancels the startup on Esc", () => {
+  it("cancels the startup on Esc", async () => {
     const onCancel = vi.fn();
-    renderStarting(onCancel);
+    await renderStarting(onCancel);
 
     fireEvent.keyDown(document.body, { key: "Escape" });
 
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("leaves Esc to an open picker", () => {
+  it("leaves Esc to an open picker", async () => {
     const onCancel = vi.fn();
-    renderStarting(onCancel);
+    await renderStarting(onCancel);
     render(<div role="dialog" aria-label="Choose model and provider" />);
 
     fireEvent.keyDown(document.body, { key: "Escape" });
@@ -170,21 +173,21 @@ describe("Composer while the thread is starting", () => {
     expect(onCancel).not.toHaveBeenCalled();
   });
 
-  it("shows one Stop when the first turn runs with a restored draft", () => {
+  it("shows one Stop when the first turn runs with a restored draft", async () => {
     resetThreadStoreForTests({ runningThreadIds: new Set(["thread-1"]) });
     useComposerDraftStore.setState({
       drafts: { "thread-1": { input: "Leftover", attachments: [], modelId: "", reasoning: "medium" } },
       pendingPrefill: null,
     });
-    renderStarting(vi.fn());
+    await renderStarting(vi.fn());
 
     expect(screen.getByLabelText("Cancel startup")).toBeEnabled();
     expect(screen.queryByLabelText("Stop agent")).not.toBeInTheDocument();
   });
 
-  it("ignores Esc while focus is outside the thread view", () => {
+  it("ignores Esc while focus is outside the thread view", async () => {
     const onCancel = vi.fn();
-    renderStarting(onCancel);
+    await renderStarting(onCancel);
     render(<input aria-label="Sidebar search" />);
     const outside = screen.getByLabelText("Sidebar search");
     outside.focus();
