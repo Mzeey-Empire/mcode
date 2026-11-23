@@ -96,7 +96,7 @@ export interface ThreadHydratorDeps {
   ) => void;
   getWorkspaceThread: (threadId: string) => HydratorWorkspaceThread | undefined;
   flushPendingTextDeltas: () => void;
-  loadNarrativeForMessage: (messageId: string, threadId: string, options?: { continue?: boolean; revalidate?: boolean }) => Promise<void>;
+  loadNarrativeForMessage: (messageId: string, threadId: string, options?: { continue?: boolean }) => Promise<void>;
   getTasksForThread: (threadId: string) => readonly TaskItem[];
   setTasksForThread: (threadId: string, tasks: readonly TaskItem[]) => void;
   addPlanForThread: (threadId: string, plan: PlanVersion) => void;
