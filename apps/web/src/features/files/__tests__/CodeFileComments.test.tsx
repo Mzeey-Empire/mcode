@@ -83,7 +83,11 @@ afterEach(() => {
 async function openLine(line: number) {
   useFilesTabsStore.getState().openFile(THREAD, PATH);
   renderTool();
-  fireEvent.click(await screen.findByRole("button", { name: `Comment on line ${line}` }));
+  const button = await screen.findByRole("button", { name: `Comment on line ${line}` });
+  // The editor reports its initial content a tick after it mounts; let that land inside act().
+  await act(async () => {
+    fireEvent.click(button);
+  });
 }
 
 describe("Files line comments", () => {

@@ -95,7 +95,8 @@ describe("FilesTool layout", () => {
     useFilesTabsStore.getState().setTreeOpen(WORKSPACE, false);
     renderTool();
     await screen.findByTestId("code-file-view");
-    act(() => useFilesTabsStore.getState().closeFile(WORKSPACE, "src/a.ts"));
+    // The tree's file icons resolve asynchronously once it mounts.
+    await act(async () => useFilesTabsStore.getState().closeFile(WORKSPACE, "src/a.ts"));
     expect(screen.getByTestId("files-tree-body")).toBeTruthy();
   });
 });
@@ -175,7 +176,10 @@ describe("FilesTool freshness", () => {
 });
 
 describe("FilesTool header", () => {
-  afterEach(() => useWorkspaceStore.setState({ workspaces: [] }));
+  afterEach(() => {
+    cleanup();
+    useWorkspaceStore.setState({ workspaces: [] });
+  });
 
   it("names the checkout the tree lists, with or without a file showing", async () => {
     useWorkspaceStore.setState({ workspaces: [createMockWorkspace({ id: WORKSPACE, path: "/repos/fixture-repo" })] });
@@ -224,7 +228,10 @@ describe("FilesTool Go to file", () => {
     const input = await screen.findByRole("textbox", { name: "Go to file" });
     await waitFor(() => expect(screen.getAllByRole("option").length).toBeGreaterThan(0));
     fireEvent.change(input, { target: { value: "b.ts" } });
-    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    // Opening a file starts its read; act() lets it land before the checks.
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    });
 
     const scope = getFilesScope(WORKSPACE);
     expect(scope.openPaths).toEqual(["src/a.ts", "src/b.ts"]);
@@ -241,7 +248,9 @@ describe("FilesTool Go to file", () => {
     const input = await screen.findByRole("textbox", { name: "Go to file" });
     await waitFor(() => expect(screen.getAllByRole("option").length).toBeGreaterThan(0));
     fireEvent.change(input, { target: { value: "b.ts" } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
     expect(getFilesScope(WORKSPACE).activePath).toBe("src/b.ts");
   });
 });
@@ -256,7 +265,10 @@ describe("FilesTool markdown", () => {
     renderTool();
     await waitFor(() => expect(screen.getByTestId("files-docked-tree")).toBeTruthy());
     // The first render pays for the lazy react-markdown import, which can exceed the 1s default on a cold cache.
-    fireEvent.click(await screen.findByRole("link", { name: "b" }, { timeout: 5000 }));
+    const link = await screen.findByRole("link", { name: "b" }, { timeout: 5000 });
+    await act(async () => {
+      fireEvent.click(link);
+    });
     const scope = getFilesScope(WORKSPACE);
     expect(scope.openPaths).toEqual(["README.md", "src/b.ts"]);
     expect(scope.activePath).toBe("src/b.ts");
