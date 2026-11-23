@@ -30,12 +30,15 @@ import { ProviderModelInfoSchema } from "../providers/models.js";
 import { WorkspaceEnvironmentActionRunSchema, WorkspaceEnvironmentLoopbackUrlSchema } from "../models/workspace-environment.js";
 import { ThreadStartupSchema } from "../thread-startup.js";
 import { LegacyTerminalChannels } from "./terminal-legacy.js";
+import { VisualPreviewRequestSchema } from "./visual-preview.js";
 
 /** Maximum canonical semantic events published in one durable batch. */
 export const CANONICAL_AGENT_EVENT_BATCH_MAX = 256;
 
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
+  /** Directs an offscreen HTML render to a connected desktop host. */
+  "visualPreview.request": VisualPreviewRequestSchema(),
   "thread.resumeScheduled": ThreadResumeScheduledSchema(),
   "thread.attention": ThreadAttentionSchema(),
   "backgroundCommand.changed": z.object({ threadId: z.string().min(1).max(256) }).strict(),

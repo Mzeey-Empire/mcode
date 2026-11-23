@@ -51,6 +51,7 @@ import {
 } from "./hardware-acceleration.js";
 import type { ApplicationWindowProvider } from "../features/application-updates/state/update-status.js";
 import { setupSpellcheck } from "./spellcheck.js";
+import { registerVisualPreviewHandlers } from "../features/visual-preview/index.js";
 import {
   registerPreviewBrowserHandlers,
   disposeBrowserAutomationForWindow,
@@ -509,6 +510,7 @@ function registerIpcHandlers(): void {
   });
 
   registerPreviewBrowserHandlers(hostRuntime.platform);
+  registerVisualPreviewHandlers();
 }
 
 // ---------------------------------------------------------------------------

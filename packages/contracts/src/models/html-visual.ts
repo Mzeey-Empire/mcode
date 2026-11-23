@@ -16,6 +16,12 @@ export const HTML_VISUAL_MAX_TITLE_LENGTH = 200;
 export const HTML_VISUAL_SYSTEM_SUBTYPE = "mcode.visual";
 /** Default maximum frame height when the agent omits a height. */
 export const HTML_VISUAL_DEFAULT_HEIGHT = 720;
+/** Narrowest preview viewport in CSS pixels. */
+export const HTML_VISUAL_PREVIEW_MIN_WIDTH = 240;
+/** Widest preview viewport in CSS pixels. */
+export const HTML_VISUAL_PREVIEW_MAX_WIDTH = 1600;
+/** Default preview viewport in CSS pixels, matching the desktop reading rail. */
+export const HTML_VISUAL_PREVIEW_DEFAULT_WIDTH = 760;
 
 /**
  * App design tokens injected into every visual's `:root` as CSS custom properties.

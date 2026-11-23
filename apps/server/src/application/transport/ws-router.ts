@@ -233,6 +233,7 @@ export interface RouterDeps {
   runtime: Pick<HostRuntime, "platform">;
   /** Routes browser operations to renderer hosts when visible-browser automation is enabled. */
   browserAutomationBroker?: BrowserAutomationBroker;
+  desktopHtmlPreviewRenderer?: import("../../features/mcode-mcp/toolkits/html-preview-renderer.js").DesktopHtmlPreviewRenderer;
   /** Resolves trusted browser-host identity and workspace scope from an authenticated connection. */
   resolveBrowserAutomationHostAuthorization: (
     request: NodeHTTP.IncomingMessage,
@@ -690,6 +691,15 @@ const ROUTE_FAMILIES = [
       context.client,
       context.browserAutomationAuthorization,
     )),
+  createRouteFamily((method) => method === "visualPreview.host.register", (_method, _params, deps, context) => {
+    if (!context.client || !deps.desktopHtmlPreviewRenderer) throw new Error("HTML preview host registration is unavailable.");
+    deps.desktopHtmlPreviewRenderer.registerHost(context.client, context.browserAutomationAuthorization);
+    return {};
+  }),
+  createRouteFamily((method) => method === "visualPreview.host.respond", (_method, params, deps, context) => {
+    if (!context.client || !deps.desktopHtmlPreviewRenderer) throw new Error("HTML preview host response is unavailable.");
+    deps.desktopHtmlPreviewRenderer.respond(context.client, params);
+  }),
   createRouteFamily(isThreadControlRpcMethod, (method, params, deps) =>
     routeThreadControlRpc(method, params, deps)),
   createRouteFamily(isThreadStartupRpcMethod, (method, params, deps) =>

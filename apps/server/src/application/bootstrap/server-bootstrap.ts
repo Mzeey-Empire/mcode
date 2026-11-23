@@ -8,7 +8,7 @@ import { launchTelemetry } from "../../runtime/diagnostics/launch-telemetry.js";
 import { runStartupOrExit, startupFailureTarget } from "./startup-failure.js";
 import { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { createWsServer } from "../transport/ws-server.js";
-import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sessionCount } from "../transport/push.js";
+import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sendToClient, sessionCount } from "../transport/push.js";
 import { PortPush } from "../transport/port-push.js";
 import { resolveServerBuildStage } from "../transport/application-rpc.js";
 import { appDisplayName } from "@mcode/contracts/build-stage";
@@ -143,6 +143,7 @@ import { PlanQuestionService } from "../../features/agents/planning/plan-questio
 import { BackgroundToolSettlementEffect } from "../../features/agents/turns/background-tool-settlement-effect.js";
 import { BackgroundCommandStore } from "../../features/agents/background/background-command-store.js";
 import { createBackgroundToolkit } from "../../features/mcode-mcp/toolkits/background-toolkit.js";
+import { DesktopHtmlPreviewRenderer } from "../../features/mcode-mcp/toolkits/html-preview-renderer.js";
 import { SessionOccupancyRegistry } from "../../features/session-occupancy/session-occupancy-registry.js";
 import { AgentWorkloadService } from "../../features/agents/workload/agent-workload.js";
 import { PlanRepo } from "../../features/agents/planning/persistence/plan-repo.js";
@@ -348,6 +349,7 @@ const browserAutomationTelemetry = new BrowserAutomationTelemetry({
   sink: (event) => logger.info("Browser automation lifecycle", event),
 });
 const browserAutomationBroker = new BrowserAutomationBroker({ telemetry: browserAutomationTelemetry });
+const desktopHtmlPreviewRenderer = new DesktopHtmlPreviewRenderer(sendToClient);
 const browserToolkit = new BrowserToolkit({
   lease: browserAutomationSessionLease,
   broker: browserAutomationBroker,
@@ -412,6 +414,7 @@ const mcodeMcpServer = new McodeMcpServer({
     }),
     createVisualsToolkit({
       authority: container.resolve(McodeSessionAuthority),
+      preview: desktopHtmlPreviewRenderer,
       visuals: {
         acceptTurnVisual: (request) => {
           const progress = workerOwnedTurnRuntime.progress;
@@ -1048,6 +1051,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   threadDeletionTeardownService,
   threadCompletionService,
   browserAutomationBroker,
+  desktopHtmlPreviewRenderer,
   mcodeMcpServer,
   reliabilityHarness,
   authToken: AUTH_TOKEN,

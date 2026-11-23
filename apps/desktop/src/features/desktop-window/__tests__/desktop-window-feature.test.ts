@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const desktopWindowFeatureTest = vi.hoisted(() => {
   type Listener = (...args: any[]) => unknown;
+  type WindowOptions = { backgroundColor?: string; webPreferences?: { offscreen?: boolean } };
   type FakeWindow = {
     id: number;
     webContents: {
+      mainFrame: object;
       on: ReturnType<typeof vi.fn>;
       once: ReturnType<typeof vi.fn>;
       setWindowOpenHandler: ReturnType<typeof vi.fn>;
@@ -23,7 +25,7 @@ const desktopWindowFeatureTest = vi.hoisted(() => {
     loadFile: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
     setBackgroundColor: ReturnType<typeof vi.fn>;
-    options: { backgroundColor?: string };
+    options: WindowOptions;
     emit: (event: string, ...args: unknown[]) => void;
   };
 
@@ -32,7 +34,7 @@ const desktopWindowFeatureTest = vi.hoisted(() => {
   const ipcListeners = new Map<string, Listener>();
   let nextWindowId = 1;
 
-  const createWindow = (options: { backgroundColor?: string }): FakeWindow => {
+  const createWindow = (options: WindowOptions): FakeWindow => {
     const listeners = new Map<string, Listener[]>();
     const addListener = (event: string, listener: Listener) => {
       const entries = listeners.get(event) ?? [];
@@ -40,6 +42,7 @@ const desktopWindowFeatureTest = vi.hoisted(() => {
       listeners.set(event, entries);
     };
     const webContents = {
+      mainFrame: {},
       on: vi.fn((event: string, listener: Listener) => addListener(event, listener)),
       once: vi.fn((event: string, listener: Listener) => addListener(event, listener)),
       setWindowOpenHandler: vi.fn(),
@@ -57,9 +60,13 @@ const desktopWindowFeatureTest = vi.hoisted(() => {
       show: vi.fn(),
       setMenuBarVisibility: vi.fn(),
       isDestroyed: vi.fn(() => false),
-      loadURL: vi.fn(),
+      loadURL: vi.fn(() => options.webPreferences?.offscreen ? new Promise<void>(() => {}) : undefined),
       loadFile: vi.fn(),
-      close: vi.fn(),
+      close: vi.fn(() => {
+        const index = windows.indexOf(window);
+        if (index !== -1) windows.splice(index, 1);
+        window.emit("closed");
+      }),
       setBackgroundColor: vi.fn(),
       options,
       emit: (event: string, ...args: unknown[]) => {
@@ -75,7 +82,7 @@ const desktopWindowFeatureTest = vi.hoisted(() => {
     static getFocusedWindow = vi.fn(() => null);
     static fromWebContents = vi.fn(() => windows[0] ?? null);
 
-    constructor(options: { backgroundColor?: string }) {
+    constructor(options: WindowOptions) {
       return createWindow(options);
     }
   }
@@ -134,6 +141,12 @@ vi.mock("electron", () => ({
   shell: desktopWindowFeatureTest.shell,
   nativeTheme: desktopWindowFeatureTest.nativeTheme,
   ipcMain: desktopWindowFeatureTest.ipcMain,
+  session: { fromPartition: () => ({
+    webRequest: { onBeforeRequest: vi.fn() },
+    setPermissionRequestHandler: vi.fn(),
+    setPermissionCheckHandler: vi.fn(),
+    on: vi.fn(),
+  }) },
   Notification: class { static isSupported = () => false; },
 }));
 
@@ -143,6 +156,7 @@ import * as NodePath from "node:path";
 
 import { logger } from "@mcode/shared";
 
+import { registerVisualPreviewHandlers } from "../../visual-preview/index.js";
 import { createDesktopWindowFeature } from "../index.js";
 
 let themeHintPath = "";
@@ -316,5 +330,35 @@ describe("Desktop Window feature entry point", () => {
     window.emit("closed");
 
     expect(feature.getMainWindow()).toBeNull();
+  });
+
+  it("recreates with only a preview open and cancels all of the closed owner's previews", async () => {
+    desktopWindowFeatureTest.reset();
+    const feature = createDesktopWindowFeature(dependencies());
+    feature.createWindow();
+    registerVisualPreviewHandlers();
+    const { windows, handlers } = desktopWindowFeatureTest;
+    const owner = windows[0]!;
+    const handler = handlers.get("visual-preview:render")!;
+    const event = { sender: owner.webContents, senderFrame: owner.webContents.mainFrame };
+    const request = {
+      requestId: "8ab6eb1f-97a8-4813-b3cf-37a89670b485",
+      frameDocument: "<p>Chart</p>", width: 420, maxHeight: 2000, deadlineMs: 15_000,
+    };
+    const active = handler(event, request);
+    const queued = handler(event, request);
+    await Promise.resolve();
+    expect(windows).toHaveLength(2);
+    const preview = windows[1];
+
+    owner.close();
+    expect(windows).toEqual([preview]);
+    const recreated = feature.recreateWindowIfNeeded();
+    expect(recreated?.id).toBe(3);
+    expect(feature.getMainWindow()).toBe(recreated);
+
+    const closed = { kind: "failed", reason: "error", message: "The desktop window closed." };
+    await expect(Promise.all([active, queued])).resolves.toEqual([closed, closed]);
+    expect(windows).toEqual([recreated]);
   });
 });

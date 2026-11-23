@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+import { HTML_VISUAL_THEME_TOKENS } from "@mcode/contracts/models/html-visual";
+import { HTML_VISUAL_DEFAULT_THEMES } from "@mcode/shared/html-visual-document";
 import { READING_RAIL_WIDTH } from "@/lib/composer-layout";
 import paperExport from "../design-tokens.paper.json";
 
@@ -129,6 +131,13 @@ const DEVIATIONS: Readonly<Record<Theme, Readonly<Record<string, string>>>> = {
 };
 
 describe("design tokens match the Paper export", () => {
+  it.each(["light", "dark"] as const)("keeps the %s HTML preview tokens in sync with the app", (appearance) => {
+    const scope = new Map([...theme, ...themes[appearance]]);
+    for (const token of HTML_VISUAL_THEME_TOKENS) {
+      expect(HTML_VISUAL_DEFAULT_THEMES[appearance].tokens[token], token).toBe(code(scope, token));
+    }
+  });
+
   it("maps every Paper colour role", () => {
     const paperRoles = [...paperTokens.keys()]
       .map((name) => /^--color-light-(.+)$/.exec(name)?.[1])

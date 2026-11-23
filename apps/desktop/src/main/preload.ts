@@ -7,6 +7,7 @@
 
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 import type { RendererLaunchMark } from "@mcode/contracts/launch-telemetry";
+import type { VisualPreviewOutcome, VisualPreviewRequest } from "@mcode/contracts/ws/visual-preview";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
 import type { BrowserHistory } from "@mcode/contracts/models/browser-preview";
@@ -29,6 +30,9 @@ ipcRenderer.on("window:full-screen", (_event, fullScreen: unknown) => {
 });
 
 contextBridge.exposeInMainWorld("desktopBridge", {
+  renderVisualPreview(request: VisualPreviewRequest): Promise<VisualPreviewOutcome> {
+    return ipcRenderer.invoke("visual-preview:render", request);
+  },
   reportLaunchMark(name: RendererLaunchMark, at: number): void { ipcRenderer.send("launch-mark", name, at); },
   /** Tell the main process the theme preference, for the window background. */
   reportWindowTheme(theme: Theme): void { ipcRenderer.send("window:theme", theme); },

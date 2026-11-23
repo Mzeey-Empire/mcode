@@ -1,6 +1,7 @@
 import type { RendererLaunchMark } from "@mcode/contracts/launch-telemetry";
 import type { AttachmentMeta, OpenInApp } from "./types";
 import type { BrowserAutomationControllerState, BrowserAutomationHostDispatch, BrowserAutomationHostDispatchTarget, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import type { VisualPreviewOutcome, VisualPreviewRequest } from "@mcode/contracts/ws/visual-preview";
 import type { BrowserHistory, McodeBrowserCapture } from "@mcode/contracts/models/browser-preview";
 import type { BrowserCertificateState } from "@mcode/contracts/models/browser-certificate";
 import type { BrowserPerfCounters, BrowserTabSet } from "@mcode/contracts/models/browser-tab";
@@ -441,6 +442,8 @@ interface SpellcheckBridge {
  * (file dialogs, clipboard, editor launching, etc.).
  */
 interface DesktopBridge {
+  /** Render an inline visual in an isolated hidden Electron window. */
+  renderVisualPreview?(request: VisualPreviewRequest): Promise<VisualPreviewOutcome>;
   /** Platform facts, full-screen state, and allowlisted native window actions. */
   window: {
     readonly platform:

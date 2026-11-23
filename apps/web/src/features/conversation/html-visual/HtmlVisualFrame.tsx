@@ -1,7 +1,8 @@
 import { HTML_VISUAL_MIN_HEIGHT, type HtmlVisual } from "@mcode/contracts/models/html-visual";
+import { buildHtmlVisualDocument, HTML_VISUAL_THEME_MESSAGE, htmlVisualFrameHeight, readHtmlVisualHeight } from "@mcode/shared/html-visual-document";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppearance } from "@/hooks/useTheme";
-import { buildHtmlVisualDocument, HTML_VISUAL_THEME_MESSAGE, readHtmlVisualHeight, readHtmlVisualTheme } from "./html-visual-document";
+import { readHtmlVisualTheme } from "./html-visual-document";
 
 // A settling reply swaps its Markdown subtree and remounts an inline frame; starting at the last height keeps the reply below from jumping.
 const measuredHeights = new WeakMap<HtmlVisual, number>();
@@ -30,7 +31,7 @@ export function HtmlVisualFrame({ visual }: { readonly visual: HtmlVisual }) {
       if (event.source === null || event.source !== frameRef.current?.contentWindow) return;
       const contentHeight = readHtmlVisualHeight(event.data);
       if (contentHeight === null) return;
-      const measured = Math.min(visual.maxHeight, Math.max(HTML_VISUAL_MIN_HEIGHT, Math.ceil(contentHeight)));
+      const measured = htmlVisualFrameHeight(contentHeight, visual.maxHeight);
       measuredHeights.set(visual, measured);
       setHeight(measured);
     };
