@@ -11,7 +11,6 @@ import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { NarrativeDetailCursor, NarrativeEntry } from "@mcode/contracts/models/narrative-entry";
 import type { OrchestrationMode } from "@mcode/contracts/models/enums";
 import type { PlanQuestion, PlanAnswer } from "@mcode/contracts/models/plan-questions";
-import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
 import type { GoalLookupResult } from "@mcode/contracts/models/goal";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
@@ -132,13 +131,8 @@ import {
   projectAssistantMessageBoundary,
   projectToolProgress,
 } from "./thread-store/narrative-projection";
-import {
-  hasProviderUsageData,
-  mergeProviderUsageSnapshot,
-  mergeThreadUsageSnapshot,
-  providerQuotaSnapshot,
-} from "./thread-store/usage";
-export { mergeProviderUsageSnapshot } from "./thread-store/usage";
+import { mergeSessionUsage } from "./provider-usage-snapshot";
+import { observeQuotaUpdate } from "./providerUsageStore";
 
 import { endedWithoutCompleting, getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 import { createFramePacer } from "./frame-pacer";
@@ -570,9 +564,6 @@ interface ThreadState {
   setThreadSettings: (threadId: string, settings: Partial<ThreadSettings>) => Promise<boolean>;
   /** Merge partial settings that the server already persisted, without another RPC. */
   applyPersistedThreadSettings: (threadId: string, settings: Partial<ThreadSettings>) => void;
-
-  /** Fetch and refresh provider usage info from the server for the given thread and provider. */
-  fetchProviderUsage: (threadId: string, providerId: string) => Promise<void>;
   /** Cache a successful thread Recap generation result for the current app session. */
   recordThreadRecapGeneration: (input: {
     threadId: string;
@@ -718,7 +709,6 @@ function mergeNarrativeEntries(
     approvals: ordered(approvals.values()),
   };
 }
-const providerUsageSnapshots = new Map<string, ProviderUsageInfo>();
 
 function clearDequeueTimer(threadId: string) {
   const timer = dequeueTimers.get(threadId);
@@ -2892,36 +2882,13 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return true;
   };
 
-  const updateUsageSnapshot = (threadId: string, providerId: string, incoming: ProviderUsageInfo): void => {
-    const providerSnapshot = mergeProviderUsageSnapshot(
-      providerUsageSnapshots.get(providerId),
-      providerQuotaSnapshot(incoming),
-    );
-    providerUsageSnapshots.set(providerId, providerSnapshot);
-    patchRec(threadId, (record) => ({
-      usageByProvider: {
-        ...record.usageByProvider,
-        [providerId]: mergeThreadUsageSnapshot(record.usageByProvider[providerId], providerSnapshot, incoming),
-      },
-    }));
-  };
-
   const handleQuotaUpdate = (event: Extract<AgentEvent, { type: "quotaUpdate" }>): void => {
     if (!event.providerId) return;
-    const categories = Array.isArray(event.categories) ? event.categories : [];
-    const incoming: ProviderUsageInfo = {
-      providerId: event.providerId,
-      quotaCategories: categories,
-      billingMode: event.billingMode,
-      sessionCostUsd: event.sessionCostUsd,
-      serviceTier: event.serviceTier,
-      numTurns: event.numTurns,
-      durationMs: event.durationMs,
-      usageStatus: categories.length > 0 ? "ready" : "ready-empty",
-      fetchedAt: new Date().toISOString(),
-    };
-    updateUsageSnapshot(event.threadId, event.providerId, incoming);
-    void get().fetchProviderUsage(event.threadId, event.providerId);
+    patchRec(event.threadId, (record) => {
+      const sessionUsageByProvider = mergeSessionUsage(record.sessionUsageByProvider, event);
+      return sessionUsageByProvider === record.sessionUsageByProvider ? {} : { sessionUsageByProvider };
+    });
+    observeQuotaUpdate(event);
   };
 
   const handleContextEstimate = (event: Extract<AgentEvent, { type: "contextEstimate" }>): void => {
@@ -4600,48 +4567,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         }),
       };
     });
-  },
-
-  /**
-   * Fetch provider usage from the server and merge it into usageByProvider.
-   * Silently ignores errors so the popover shows stale or empty state rather than crashing.
-   */
-  fetchProviderUsage: async (threadId, providerId) => {
-    try {
-      const usage = await getTransport().getProviderUsage(providerId);
-      const providerSnapshot = mergeProviderUsageSnapshot(
-        providerUsageSnapshots.get(providerId),
-        providerQuotaSnapshot(usage),
-      );
-      providerUsageSnapshots.set(providerId, providerSnapshot);
-      patchRec(threadId, (rec) => ({
-        usageByProvider: {
-          ...rec.usageByProvider,
-          [providerId]: mergeThreadUsageSnapshot(rec.usageByProvider[providerId], providerSnapshot, usage),
-        },
-      }));
-    } catch {
-      const usage: ProviderUsageInfo = {
-        providerId,
-        quotaCategories: [],
-        usageStatus: "unavailable",
-        failedAt: new Date().toISOString(),
-        diagnostic: "Usage refresh failed",
-      };
-      const previousProviderSnapshot = providerUsageSnapshots.get(providerId);
-      const providerSnapshot = mergeProviderUsageSnapshot(
-        previousProviderSnapshot,
-        usage,
-      );
-      providerUsageSnapshots.set(providerId, providerSnapshot);
-      if (!hasProviderUsageData(providerSnapshot)) return;
-      patchRec(threadId, (rec) => ({
-        usageByProvider: {
-          ...rec.usageByProvider,
-          [providerId]: mergeThreadUsageSnapshot(rec.usageByProvider[providerId], providerSnapshot, usage),
-        },
-      }));
-    }
   },
 
   recordThreadRecapGeneration: ({

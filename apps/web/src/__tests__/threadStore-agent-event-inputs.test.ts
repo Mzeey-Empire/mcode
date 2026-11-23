@@ -1,3 +1,10 @@
+// Imported first so the store binds the mocked transport: the real transport imports the thread
+// store, which imports this store, while the mock factory is still loading the original module.
+import {
+  resetProviderUsageForTests,
+  seedProviderUsageForTests,
+  useProviderUsage,
+} from "@/stores/providerUsageStore";
 import { createMockThread } from "@mcode/contracts/testing";
 // @vitest-environment jsdom
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
@@ -7,6 +14,7 @@ import { useTaskStore } from "@/stores/taskStore";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
+import { renderHook } from "@testing-library/react";
 import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
@@ -40,6 +48,7 @@ describe("thread store agent-event input boundaries", () => {
   });
 
   afterEach(() => {
+    resetProviderUsageForTests();
     vi.useRealTimers();
   });
 
@@ -100,14 +109,20 @@ describe("thread store agent-event input boundaries", () => {
     })).not.toThrow();
     expect(useThreadStore.getState().records.get(THREAD_ID)?.hooks[0]?.fullOutput).toEqual([]);
 
+    const shownQuota = [
+      { label: "5-hour limit", used: 30, total: 100, remainingPercent: 0.7, isUnlimited: false },
+    ];
+    seedProviderUsageForTests({ providerId: "claude", quotaCategories: shownQuota, usageStatus: "ready" });
+    vi.mocked(mockTransport.getProviderUsage).mockClear().mockReturnValue(new Promise(() => {}));
     expect(() => dispatch({
       type: "quotaUpdate",
       threadId: THREAD_ID,
       providerId: "claude",
       categories: { unexpected: true },
     })).not.toThrow();
-    expect(useThreadStore.getState().records.get(THREAD_ID)?.usageByProvider.claude?.quotaCategories)
-      .toEqual([]);
+    const { result } = renderHook(() => useProviderUsage("claude"));
+    expect(result.current?.quotaCategories).toEqual(shownQuota);
+    expect(mockTransport.getProviderUsage).toHaveBeenCalledWith("claude");
   });
 
   it("normalizes malformed tool results before task correlation and completion", () => {

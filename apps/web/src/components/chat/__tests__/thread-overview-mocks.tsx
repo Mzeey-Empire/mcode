@@ -66,7 +66,7 @@ export function mockDiffStoreModule(actual: typeof import("@/stores/diffStore"))
 export function mockThreadStoreModule() {
   return {
     useThreadStore: vi.fn((selector: (state: unknown) => unknown) =>
-      selector({ records: mockThreadRecords, runningThreadIds: new Set<string>(), fetchProviderUsage: vi.fn() }),
+      selector({ records: mockThreadRecords, runningThreadIds: new Set<string>() }),
     ),
   };
 }

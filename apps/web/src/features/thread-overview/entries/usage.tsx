@@ -1,12 +1,10 @@
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
-import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { useOverviewUsage } from "@/features/thread-overview/use-overview-usage";
 import { formatUsageResetText } from "@/lib/usage-reset-format";
 import { cn } from "@/lib/utils";
-import { useThreadStore } from "@/stores/threadStore";
 import { type Thread } from "@/transport";
 import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
-import { useEffect, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 import {
   usageCategoryPercent,
@@ -113,13 +111,7 @@ function ThreadOverviewUsage({
 }
 
 function UsageEntry({ thread }: { thread: Thread }) {
-  const { open } = useOverviewContext();
   const { usageInfo, usageCategories, usageSummary, sessionCost } = useOverviewUsage(thread);
-  const fetchProviderUsage = useThreadStore((state) => state.fetchProviderUsage);
-  useEffect(() => {
-    if (!open) return;
-    void fetchProviderUsage(thread.id, thread.provider);
-  }, [fetchProviderUsage, open, thread.id, thread.provider]);
   return (<ThreadOverviewWhen when={usageSummary !== null}>
     <ThreadOverviewUsage
       categories={usageCategories}
