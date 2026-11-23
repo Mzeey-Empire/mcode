@@ -720,9 +720,10 @@ describe("popup state machine", () => {
     }
   });
 
-  it("is 'closed' before any trigger", () => {
+  it("is 'closed' before any trigger", async () => {
     const ref = makeAnchor();
     const { result } = renderHook(() => useSlashCommand({ anchorRef: ref }));
+    await act(async () => {});
     expect(result.current.state.kind).toBe("closed");
   });
 
