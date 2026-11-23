@@ -3,12 +3,20 @@
  * CI bumps that follow a push.
  */
 import { inject, injectable } from "tsyringe";
+import type { GitPushFailureKind } from "@mcode/contracts/models/git-push";
 import { logger, validateBranchName } from "@mcode/shared";
 import { CiWatcherService } from "../../pull-requests/status/ci-watcher.js";
 import { ReviewWorktreeService } from "../../pull-requests/reviews/review-worktree-service.js";
 import type { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import type { CommitPushDestination } from "./commits/commit-request.js";
-import { gitExitCode, gitFailureOutput, gitPushFailureReason, gitWasKilled } from "./execution/git-failure.js";
+import {
+  gitExitCode,
+  gitFailureOutput,
+  gitPushFailureDetail,
+  gitPushFailureKind,
+  gitPushFailureReason,
+  gitWasKilled,
+} from "./execution/git-failure.js";
 import type { GitExecutor } from "./execution/types.js";
 import { GitRepositoryService } from "./git-repository-service.js";
 import { PullRequestReviewGitService } from "./pull-request-review-git-service.js";
@@ -36,6 +44,20 @@ export interface CommitPush {
   repoPath: string;
   sha: string;
   destination: CommitPushDestination;
+}
+
+/** A checked-out branch push failure with a reason and detail for the client. */
+export class GitPushError extends Error {
+  readonly code = "GIT_PUSH_FAILED";
+
+  constructor(
+    message: string,
+    readonly kind: GitPushFailureKind,
+    readonly detail: string,
+    cause: unknown,
+  ) {
+    super(message, { cause });
+  }
 }
 
 /** Pushes branches and commit SHAs to standard or Review task targets without force. */
@@ -207,6 +229,12 @@ function toPushFailure(error: unknown): unknown {
   if (!killed && gitExitCode(error) === null) return error;
   const output = gitFailureOutput(error);
   logger.warn("Push failed", { detail: output });
-  const reason = killed ? `Push timed out after ${PUSH_TIMEOUT_MS / 1_000}s` : gitPushFailureReason(output);
-  return new Error(reason, { cause: error });
+  if (killed) {
+    const message = `Push timed out after ${PUSH_TIMEOUT_MS / 1_000}s`;
+    return new GitPushError(message, "timed-out", message, error);
+  }
+  const message = gitPushFailureReason(output);
+  const kind = gitPushFailureKind(output);
+  const detail = gitPushFailureDetail(output) || message;
+  return new GitPushError(message, kind, detail, error);
 }

@@ -1,4 +1,5 @@
 /** Readers for the error a rejected `GitExecutor.exec` call carries. */
+import type { GitPushFailureKind } from "@mcode/contracts/models/git-push";
 import { z } from "zod";
 
 const GitFailureSchema = z.object({
@@ -38,6 +39,31 @@ export function gitPushFailureReason(output: string): string {
     ?? lines.find((line) => /^(fatal|error):/.test(line))
     ?? lines[0]
     ?? "Push failed";
+}
+
+/** Classify the first refused ref using Git's fixed rejection reason. */
+export function gitPushFailureKind(output: string): GitPushFailureKind {
+  const rejectedRef = output.split("\n").map((line) => line.trim()).find((line) => line.startsWith("! ["));
+  const reason = rejectedRef?.match(/\s\((.*)\)$/)?.[1];
+  if (!rejectedRef || !reason) return "other";
+  if (rejectedRef.startsWith("! [remote rejected]") && reason.includes("hook declined")) return "hook-declined";
+  if (rejectedRef.startsWith("! [rejected]") && (reason === "fetch first" || reason === "non-fast-forward")) {
+    return "remote-ahead";
+  }
+  return "other";
+}
+
+/** Keep Git's refusal lines while removing destination summaries and URL credentials. */
+export function gitPushFailureDetail(output: string): string {
+  const detail: string[] = [];
+  for (const rawLine of output.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "remote:" || line.startsWith("error: failed to push some refs to ")) continue;
+    if (line.startsWith("remote:") || line.startsWith("! [") || line.startsWith("fatal:") || line.startsWith("error:")) {
+      detail.push(line.replace(/:\/\/[^/@\s]*@/g, "://"));
+    }
+  }
+  return detail.join("\n");
 }
 
 /** Everything git printed before it failed, stdout first, for classification and display. */

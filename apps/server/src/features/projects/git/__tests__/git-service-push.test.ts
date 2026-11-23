@@ -128,7 +128,7 @@ describe("GitPushService", () => {
       workspaceId: "workspace-1",
       workspacePath: "/repo",
       branch: "main",
-    })).rejects.toHaveProperty("message", "Push timed out after 60s");
+    })).rejects.toMatchObject({ message: "Push timed out after 60s", kind: "timed-out" });
   });
 
   it("pushes the captured SHA to the captured branch without force, then sets a missing upstream", async () => {

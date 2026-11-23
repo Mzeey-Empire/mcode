@@ -12,6 +12,7 @@ import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { logger } from "@mcode/shared";
 import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 import { mapRouteError, routeMessage, type RouterDeps } from "../ws-router.js";
+import { GitPushError } from "../../../features/projects/git/git-push-service.js";
 import { ProviderDisabledError } from "../../../features/providers/availability/provider-availability-errors.js";
 import { DraftImageMissingError } from "../../../features/attachments/storage/draft-image-missing-error.js";
 import { ThreadSaveBlockedError } from "../../../features/agents/canonical/accepted-save-failure.js";
@@ -1943,5 +1944,26 @@ describe("mapRouteError for refused turn admission", () => {
     const response = mapRouteError(request, new ProviderDisabledError("codex"));
 
     expect(response.error).toMatchObject({ code: "PROVIDER_DISABLED", data: { providerId: "codex" } });
+  });
+});
+
+describe("mapRouteError for git.push", () => {
+  it("sends the push failure kind and detail with the short reason", () => {
+    const request = { id: "push-request", method: "git.push", params: {} };
+    const error = new GitPushError(
+      "Branch is frozen",
+      "hook-declined",
+      "remote: Branch is frozen",
+      new Error("git exited with code 1"),
+    );
+
+    expect(mapRouteError(request, error)).toEqual({
+      id: "push-request",
+      error: {
+        code: "GIT_PUSH_FAILED",
+        message: "Branch is frozen",
+        data: { kind: "hook-declined", detail: "remote: Branch is frozen" },
+      },
+    });
   });
 });
