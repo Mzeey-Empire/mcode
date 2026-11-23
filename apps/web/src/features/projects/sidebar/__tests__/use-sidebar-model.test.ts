@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { act, renderHook } from "@testing-library/react";
+import { act, renderHook, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
@@ -21,6 +21,8 @@ describe("useSidebarModel boundary timer", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting state so the resets do not re-render a live tree outside act().
+    cleanup();
     vi.useRealTimers();
     useWorkspaceStore.setState({ workspaces: [], threads: [] });
   });
@@ -56,6 +58,8 @@ describe("useSidebarModel change cause", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting state so the resets do not re-render a live tree outside act().
+    cleanup();
     vi.useRealTimers();
     useWorkspaceStore.setState({ workspaces: [], threads: [] });
   });

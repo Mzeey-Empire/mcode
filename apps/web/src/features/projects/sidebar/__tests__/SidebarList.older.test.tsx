@@ -1,6 +1,6 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 
@@ -64,6 +64,8 @@ describe("SidebarList Older section", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting state so the resets do not re-render a live tree outside act().
+    cleanup();
     vi.useRealTimers();
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });
