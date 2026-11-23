@@ -118,14 +118,12 @@ if (typeof window !== "undefined") {
   });
 }
 
-const ACT_WARNING_LIMIT = 200;
 let actWarningCount = 0;
 const originalConsoleError = console.error;
 console.error = function (this: Console, ...args: unknown[]) {
   const first = args[0];
   if (typeof first === "string" && first.includes("not wrapped in act(")) {
     actWarningCount += 1;
-    if (actWarningCount > ACT_WARNING_LIMIT) return;
   }
   originalConsoleError.apply(this, args);
 };
@@ -137,11 +135,12 @@ beforeEach(() => {
 // Vitest runs afterEach hooks in reverse registration order, so this runs after the
 // test file's hooks and Testing Library's cleanup and counts the warnings they cause.
 afterEach(() => {
-  if (actWarningCount > ACT_WARNING_LIMIT) {
+  if (actWarningCount > 0) {
     throw new Error(
-      `This test printed ${actWarningCount} React act() warnings, more than the limit of ${ACT_WARNING_LIMIT}. ` +
-        "A component kept updating outside act(), often because the test flushed fake timers while the component was still mounted. " +
-        "Call cleanup() before flushing timers, or wrap the update in act().",
+      `This test printed ${actWarningCount} React act() warning(s). ` +
+        "A component updated outside act(), often because the test did not await an async update, or flushed fake timers while the component was still mounted. " +
+        "Await the update with findBy* or waitFor, " +
+        "call cleanup() before flushing timers, or wrap the update in act().",
     );
   }
 });
