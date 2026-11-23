@@ -182,15 +182,15 @@ export class TurnRecoveryService {
   /**
    * Continue the latest interrupted turn as a new attempt, optionally on another model. The provider's own session
    * is tried first when it can be resumed; when the provider reports that session gone, a fresh session seeded with
-   * the conversation takes over. A provider other than the thread's goes through the provider switch, which carries
-   * the history to the new provider itself.
+   * the conversation takes over. A provider other than the thread's goes through the provider switch, which seeds
+   * the new provider with its own budgeted handoff.
    */
   async resumeTurn(input: TurnResumeParams, dispatch: TurnDispatch, context?: RestartContext): Promise<TurnResumeResult> {
     const interrupted = this.requireRecoverableTurn(input, "Interrupted");
     const restart = context ?? (interrupted.ending?.outcome === "interrupted" && interrupted.ending.cause === "app_closed"
       ? {} : null);
     if (input.provider && input.provider !== interrupted.thread.provider) {
-      return this.resumeOnOtherProvider(interrupted, { ...input, provider: input.provider }, continuationPrompt(restart), dispatch);
+      return this.resumeOnOtherProvider(interrupted, input.provider, input.model, continuationPrompt(restart), dispatch);
     }
     const target = { ...interrupted, thread: { ...interrupted.thread, model: input.model ?? interrupted.thread.model } };
     return this.continueTurn(target, dispatch, this.limitedBeforeOutput(target), continuationPrompt(restart), true,
@@ -199,7 +199,8 @@ export class TurnRecoveryService {
 
   private async resumeOnOtherProvider(
     interrupted: RecoverableTurn,
-    { provider, model }: TurnResumeParams & { provider: NonNullable<TurnResumeParams["provider"]> },
+    provider: NonNullable<TurnResumeParams["provider"]>,
+    model: string | undefined,
     prompt: string,
     dispatch: TurnDispatch,
   ): Promise<TurnResumeResult> {
@@ -208,7 +209,8 @@ export class TurnRecoveryService {
       ...this.continuationCommand(interrupted, interrupted.executionId, prompt),
       provider,
       ...(model ? { model } : {}),
-      // A fresh target session gets the full history and skips the switch's resume fallback, which retries on the old provider.
+      // Seed a fresh session instead of resuming an earlier one on the target: a gone session there would send this
+      // hidden continue through the switch's errored-turn retry.
       forceFreshSession: true,
     }, dispatch);
     return { turnId, mode: "seeded-session" };
