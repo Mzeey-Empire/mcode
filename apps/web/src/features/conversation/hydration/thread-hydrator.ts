@@ -255,22 +255,58 @@ function mergeSessionNotices(
   return { ...preferred, sessionNotices: coalesceSessionNotices(secondary, preferred) };
 }
 
-/** Merge transcript and session diagnostics using their separate freshness evidence. */
+/**
+ * A fetched tail speaks for the server rows from its oldest row to its newest, or from the
+ * start when nothing older exists. A resident server row in that range that the tail lacks
+ * was removed or replaced. Rows outside it stay: a forced refresh fetches only two rows, and
+ * a row saved after the page was read sits above its newest row. Live rows the server has
+ * not saved carry no `serverSequence` and stay until it saves them.
+ */
+function residentRowsOutsideFetchedTail(
+  resident: ConversationCacheState,
+  tail: ConversationCacheState,
+): ConversationCacheState {
+  const newest = tail.messages.at(-1)?.sequence;
+  if (newest === undefined) return resident;
+  const oldest = tail.hasMoreMessages ? (tail.messages[0]?.sequence ?? newest) : Number.NEGATIVE_INFINITY;
+  const tailIds = new Set(tail.messages.map((message) => message.id));
+  const messages = resident.messages.filter(({ id, serverSequence }) =>
+    serverSequence === undefined || serverSequence < oldest || serverSequence > newest || tailIds.has(id));
+  return messages.length === resident.messages.length ? resident : { ...resident, messages };
+}
+
+function residentStateToMerge(
+  resident: ThreadRecord,
+  cached: ConversationCacheState,
+  fetchedTail: boolean,
+): { state: ConversationCacheState; replacedByCached: boolean } {
+  const projected = projectConversationCacheState(resident);
+  if (!fetchedTail) return { state: projected, replacedByCached: cachedConversationIsNewer(projected, cached) };
+  const state = residentRowsOutsideFetchedTail(projected, cached);
+  return { state, replacedByCached: state.messages.length === 0 };
+}
+
+/**
+ * Merge transcript and session diagnostics using their separate freshness evidence.
+ * `fetchedTail` marks `cached` as a page just read from the server's tail: its copy of a
+ * row wins, and it removes only the resident rows it covers.
+ */
 function mergeResidentConversationCacheState(
   resident: ThreadRecord,
   cached: ConversationCacheState,
-  options: { preferResidentMessages?: boolean; preferResidentNotices?: boolean } = {},
+  options: { fetchedTail?: boolean; preferResidentNotices?: boolean } = {},
 ): ConversationCacheState {
-  const residentCacheState = projectConversationCacheState(resident);
+  const fetchedTail = options.fetchedTail === true;
+  const { state: residentCacheState, replacedByCached } = residentStateToMerge(resident, cached, fetchedTail);
   const noticeState = mergeSessionNotices(resident, cached, options.preferResidentNotices);
-  if (cachedConversationIsNewer(residentCacheState, cached)) {
+  if (replacedByCached) {
     const fileEvidence = mergeConversationFileEvidence(residentCacheState, cached);
     // A pending page can land after the resolved push, so its paths come from the merged evidence.
     const persistedFilesChanged = withRecordedEvidencePaths(cached.persistedFilesChanged, { fileEvidence, serverMessageIds: cached.serverMessageIds });
     return { ...cached, ...noticeState, fileEvidence, persistedFilesChanged,
       latestTurnWithChanges: findLatestTurnWithChanges(cached.messages, persistedFilesChanged) };
   }
-  const messages = mergedConversationMessages(cached, residentCacheState, options.preferResidentMessages ?? true);
+  const messages = mergedConversationMessages(cached, residentCacheState, !fetchedTail);
   const retainedMessageIds = new Set(messages.map((message) => message.id));
   const metadata = mergedConversationMetadata(cached, residentCacheState, retainedMessageIds);
 
@@ -503,7 +539,7 @@ export class ThreadHydrator {
           narrativeByMessage: page.narrativeByMessage,
         });
         const conversation = mergeResidentConversationCacheState(current, fetchedConversation, {
-          preferResidentMessages: false,
+          fetchedTail: true,
           preferResidentNotices: hasNoticeCollectionChanged(current, noticeCollectionSnapshot(currentBeforeLoad)),
         });
         const { settledFileEffectSummary, ...conversationFields } = conversation;
@@ -1374,7 +1410,7 @@ export class ThreadHydrator {
       const current = getThreadRecord(state.records, threadId);
       const fetchedConversation = projectConversationCacheState({ ...createEmptyThreadRecord(), ...patch, narrativeByMessage: page.narrativeByMessage });
       const conversation = mergeResidentConversationCacheState(current, fetchedConversation, {
-        preferResidentMessages: false,
+        fetchedTail: true,
         preferResidentNotices: hasNoticeCollectionChanged(current, context.noticeState),
       });
       const { settledFileEffectSummary, ...conversationFields } = conversation;
