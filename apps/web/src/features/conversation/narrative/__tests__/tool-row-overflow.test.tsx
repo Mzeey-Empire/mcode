@@ -1,7 +1,7 @@
 /**
  * Regression tests for long shell-command layout in narrative tool rows.
  */
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect } from "vitest";
 import { ActiveToolRow } from "../ActiveToolRow";
@@ -18,6 +18,13 @@ export const LONG_SHELL_COMMAND =
   'cd "C:\\Users\\cjnwo\\.mcode\\worktrees\\mcode\\feat-cursor-sub-agents-71ba0f21" && git add apps/web/src/features/conversation/narrative/SubagentRow.tsx';
 
 const COLUMN_CLASS = "w-[480px] min-w-0 max-w-full overflow-hidden";
+
+/** Opens a shell row inside act(), so its output scroll area's mount-time measurement lands there. */
+async function openShellPanel(row: HTMLElement): Promise<void> {
+  await act(async () => {
+    fireEvent.click(row);
+  });
+}
 
 function makeBashCall(overrides: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -127,7 +134,7 @@ describe("narrative tool row layout classes", () => {
       expect(tooltip).toHaveTextContent(LONG_SHELL_COMMAND);
     });
 
-    fireEvent.click(child);
+    await openShellPanel(child);
 
     expect(screen.getByRole("region", { name: "Shell output" })).toBeTruthy();
     expect(screen.getByText("Shell")).toBeTruthy();
@@ -135,17 +142,18 @@ describe("narrative tool row layout classes", () => {
     expect(screen.getByText("command output")).toBeTruthy();
   });
 
-  it("keeps a lone shell transcript open across a virtual row remount", () => {
+  it("keeps a lone shell transcript open across a virtual row remount", async () => {
     const group: ToolGroup = {
       calls: [makeBashCall({ id: "tc-1", isComplete: true, output: "command output" })],
     };
     let open = false;
     const virtualExpansion = { get open() { return open; }, onToggle: () => { open = !open; } };
     const first = render(<ToolSummaryLine group={group} virtualExpansion={virtualExpansion} />);
-    fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
+    await openShellPanel(screen.getByRole("button", { name: /Ran command/ }));
     first.unmount();
 
     render(<ToolSummaryLine group={group} virtualExpansion={virtualExpansion} />);
+    await act(async () => {});
 
     expect(screen.getByRole("button", { name: /Ran command/ })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("command output")).toBeVisible();
@@ -312,7 +320,7 @@ describe("narrative tool row layout classes", () => {
     expect(command).not.toContain('{"command"');
   });
 
-  it("ToolSummaryLine shows truncation metadata for bounded output", () => {
+  it("ToolSummaryLine shows truncation metadata for bounded output", async () => {
     const group: ToolGroup = {
       calls: [
         makeBashCall({
@@ -332,14 +340,14 @@ describe("narrative tool row layout classes", () => {
       </div>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
+    await openShellPanel(screen.getByRole("button", { name: /Ran command/ }));
 
     const notice = screen.getByText(/Output truncated/);
     expect(notice.textContent).toContain("300 KB total");
     expect(notice.textContent).toContain("full output saved");
   });
 
-  it("shows a shell exit code status badge inside the expanded panel", () => {
+  it("shows a shell exit code status badge inside the expanded panel", async () => {
     const group: ToolGroup = {
       calls: [
         makeBashCall({
@@ -358,7 +366,7 @@ describe("narrative tool row layout classes", () => {
 
     const child = screen.getByRole("button", { name: /Ran command/ });
     expect(child).toHaveTextContent(/failed$/);
-    fireEvent.click(child);
+    await openShellPanel(child);
 
     const panel = screen.getByRole("region", { name: "Shell output" });
     const exitCode = screen.getByText("exit code 1");
