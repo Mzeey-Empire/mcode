@@ -10,7 +10,7 @@ import { useTaskStore, type TaskItem } from "@/stores/taskStore";
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import type { PlanVersion } from "@mcode/contracts/models/plan";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,13 @@ async function flushTimers(ms: number) {
   });
 }
 
+/** Renders the overview, then lets the reads it starts on mount (remote, review state) resolve inside act(). */
+async function renderOverview(): Promise<ReturnType<typeof render>> {
+  const view = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+  await act(async () => {});
+  return view;
+}
+
 function planVersion(version: number): PlanVersion {
   return {
     id: `plan-${version}`, threadId: thread.id, messageId: `message-${version}`, version,
@@ -98,13 +105,14 @@ describe("overview Changes, Tasks and Usage rows", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
   });
 
   it("shows live file effects while a turn runs and sends no change RPC for file writes", async () => {
     setRunning(true);
     setLiveFileEffects(12, 9);
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
 
     for (let write = 0; write < 5; write += 1) {
       act(() => useDiffStore.getState().bumpDiffRevision(thread.id));
@@ -122,7 +130,7 @@ describe("overview Changes, Tasks and Usage rows", () => {
   it("resolves the change summary once after the turn settles, despite a burst of file events", async () => {
     setRunning(true);
     setLiveFileEffects(12, 9);
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
     await flushTimers(500);
 
     act(() => setRunning(false));
@@ -142,7 +150,7 @@ describe("overview Changes, Tasks and Usage rows", () => {
     useDiffStore.setState({ snapshotsByThread: {} });
     vi.mocked(mockTransport.listSnapshots).mockResolvedValue([]);
     setRunning(true);
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
     await flushTimers(500);
 
     act(() => setRunning(false));
@@ -157,7 +165,7 @@ describe("overview Changes, Tasks and Usage rows", () => {
       comparison: { files: [], additions: 0, deletions: 0 },
     });
     vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState());
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
     await flushTimers(1_000);
 
     expect(mockTransport.getReviewComparison).toHaveBeenCalled();
@@ -168,7 +176,7 @@ describe("overview Changes, Tasks and Usage rows", () => {
     let resolveComparison: (value: ReturnType<typeof readyComparison>) => void = () => {};
     vi.mocked(mockTransport.getReviewComparison).mockReturnValue(new Promise((resolve) => { resolveComparison = resolve; }));
     setRunning(true);
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
     await flushTimers(100);
 
     act(() => setRunning(false));
@@ -189,7 +197,7 @@ describe("overview Changes, Tasks and Usage rows", () => {
         deletions: 0,
       },
     });
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
     await flushTimers(1_000);
 
     expect(screen.getByTestId("workspace-menu-changes")).toHaveAttribute("aria-label", "Changes, 1 file");
@@ -218,21 +226,21 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(commits).toBe(settledCommits);
   });
 
-  it("shows no Tasks row for a thread with tasks", () => {
+  it("shows no Tasks row for a thread with tasks", async () => {
     useTaskStore.getState().setTasks(thread.id, [task("1", "pending"), task("2", "completed")], null);
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
 
     expect(screen.queryByText("Tasks")).not.toBeInTheDocument();
     expect(screen.queryByText("1/2")).not.toBeInTheDocument();
   });
 
-  it("shows the plan row only with a version and opens the Plan tab in place of the docked card", () => {
-    const { unmount } = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+  it("shows the plan row only with a version and opens the Plan tab in place of the docked card", async () => {
+    const { unmount } = await renderOverview();
     expect(screen.queryByTestId("thread-overview-plan")).not.toBeInTheDocument();
     unmount();
 
     usePlanStore.setState({ plansByThread: { [thread.id]: [planVersion(1), planVersion(2)] } });
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
     const row = screen.getByTestId("thread-overview-plan");
     expect(row).toHaveTextContent("Tidy thread actions menu");
     expect(row).toHaveTextContent("v2");
@@ -246,9 +254,9 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(screen.queryByTestId("thread-overview-plan")).not.toBeInTheDocument();
   });
 
-  it("renders a backticked plan title as inline code", () => {
+  it("renders a backticked plan title as inline code", async () => {
     usePlanStore.setState({ plansByThread: { [thread.id]: [{ ...planVersion(1), title: "Add `mod10`" }] } });
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
 
     const row = screen.getByTestId("thread-overview-plan");
     expect(row).toHaveTextContent("Add mod10");
@@ -256,28 +264,28 @@ describe("overview Changes, Tasks and Usage rows", () => {
     expect(row).toHaveAccessibleName("Open plan Add mod10, version 1");
   });
 
-  it("shows the Implement turn's task progress on an accepted plan row", () => {
+  it("shows the Implement turn's task progress on an accepted plan row", async () => {
     const accepted = { ...planVersion(2), status: "accepted" as const, acceptedMessageId: "accepted-message" };
     usePlanStore.setState({ plansByThread: { [thread.id]: [accepted] } });
     useTaskStore.getState().setTasks(thread.id, [task("1", "completed"), task("2", "in_progress")], "other-message");
-    const { unmount } = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    const { unmount } = await renderOverview();
     expect(screen.getByTestId("thread-overview-plan")).toHaveTextContent("v2");
     unmount();
 
     useTaskStore.getState().setTasks(thread.id, [task("1", "completed"), task("2", "in_progress")], "accepted-message");
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
 
     expect(screen.getByTestId("thread-overview-plan")).toHaveTextContent("1/2");
     expect(screen.getByTestId("thread-overview-plan"))
       .toHaveAccessibleName("Open plan Tidy thread actions menu, version 2, 1 of 2 tasks done");
   });
 
-  it("keeps the implemented plan's progress on the row after a newer draft supersedes it", () => {
+  it("keeps the implemented plan's progress on the row after a newer draft supersedes it", async () => {
     const accepted = { ...planVersion(2), status: "accepted" as const, acceptedMessageId: "accepted-message" };
     const newer = { ...planVersion(3), status: "draft" as const, title: "Next plan" };
     usePlanStore.setState({ plansByThread: { [thread.id]: [accepted, newer] } });
     useTaskStore.getState().setTasks(thread.id, [task("1", "completed"), task("2", "in_progress")], "accepted-message");
-    render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await renderOverview();
 
     const row = screen.getByTestId("thread-overview-plan");
     expect(row).toHaveTextContent("Tidy thread actions menu");
