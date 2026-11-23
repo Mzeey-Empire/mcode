@@ -12,7 +12,11 @@ function isSecretKey(key: string): boolean {
 /** Secret redaction shared by every diagnostics channel. */
 export function redactDiagnostic(value: string): string {
   const withoutBearer = value.replace(/\bBearer\s+[^\s,;}]+/gi, "Bearer [redacted]");
-  const withoutAssignments = withoutBearer.replace(
+  // A header's credential follows its scheme word (`Basic`, `token`), so the whole value to end of line goes.
+  const withoutAuthHeaders = withoutBearer.replace(/\b((?:proxy-)?authorization)\s*:[^\r\n]*/gi, "$1: [redacted]");
+  // Git and package tools echo remote URLs, and their userinfo can hold a password or token.
+  const withoutUrlCredentials = withoutAuthHeaders.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[redacted]@");
+  const withoutAssignments = withoutUrlCredentials.replace(
     /\b(token|api[_-]?key|secret|password|authorization)\s*[:=]\s*["']?[^\s,;}"']+/gi,
     "$1=[redacted]",
   );

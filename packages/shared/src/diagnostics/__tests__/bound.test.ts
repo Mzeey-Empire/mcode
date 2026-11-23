@@ -34,4 +34,27 @@ describe("boundPayload", () => {
     for (const secret of secrets) expect(bounded).not.toContain(secret);
     expect(bounded).toContain("spawn failed with [redacted]");
   });
+
+  it("redacts the credential of an Authorization header in any scheme", () => {
+    const stderr = [
+      "> GET /info/refs HTTP/1.1",
+      "> Authorization: Basic dXNlcjpodW50ZXIy",
+      "> Proxy-Authorization: token plainProxySecret",
+      "< HTTP/1.1 401",
+    ].join("\n");
+    const bounded = String(boundPayload(stderr));
+
+    expect(bounded).not.toContain("dXNlcjpodW50ZXIy");
+    expect(bounded).not.toContain("plainProxySecret");
+    expect(bounded).toContain("< HTTP/1.1 401");
+  });
+
+  it("redacts credentials embedded in a URL", () => {
+    const bounded = String(boundPayload(
+      "fatal: unable to access 'https://deploy:hunter2pass@git.example.com/org/repo.git/': 403",
+    ));
+
+    expect(bounded).not.toContain("hunter2pass");
+    expect(bounded).toContain("https://[redacted]@git.example.com/org/repo.git/");
+  });
 });
