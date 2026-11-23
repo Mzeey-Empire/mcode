@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SidebarResizeSeam } from "../SidebarResizeSeam";
 import { useSidebarWidthStore } from "../sidebarWidthStore";
@@ -19,6 +19,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   useSidebarWidthStore.getState().resetWidth();
 });
 
