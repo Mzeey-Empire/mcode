@@ -185,6 +185,8 @@ vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => ({
 }));
 
 afterEach(() => {
+  // Unmount before resetting state so the resets do not re-render a live tree outside act().
+  cleanup();
   sortableMockState.transform = null;
   sortableMockState.isDragging = false;
 });
@@ -448,14 +450,15 @@ describe("ProjectSidebar thread interactions", () => {
     render(<ProjectSidebar />);
     const completedScope = screen.getByRole("radio", { name: /^Closed/ });
     expect(completedScope).toHaveAttribute("aria-checked", "false");
-    completedScope.focus();
+    act(() => completedScope.focus());
     expect(completedScope).toHaveFocus();
     fireEvent.click(completedScope);
 
     const action = screen.getByRole("button", { name: "Restore My Thread" });
-    action.focus();
+    act(() => action.focus());
     expect(action).toHaveFocus();
     fireEvent.click(action);
+    await act(async () => {});
 
     expect(reopenThread).toHaveBeenCalledWith("thread-1");
   });
@@ -618,7 +621,7 @@ describe("ProjectSidebar thread interactions", () => {
     selectCompletedScope();
 
     expect(screen.getByRole("button", { name: "Restore Completed work" })).toBeInTheDocument();
-    screen.getByRole("button", { name: /^Completed work/i }).focus();
+    act(() => screen.getByRole("button", { name: /^Completed work/i }).focus());
     const preview = await screen.findByTestId("thread-preview-thread-1");
     expect(preview).toHaveTextContent("Closed");
     const exactDeadline = new Intl.DateTimeFormat(undefined, {
@@ -641,7 +644,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
     selectCompletedScope();
-    screen.getByRole("button", { name: /^Kept work/i }).focus();
+    act(() => screen.getByRole("button", { name: /^Kept work/i }).focus());
 
     expect(await screen.findByTestId("thread-preview-thread-1")).toHaveTextContent(
       "· automatic deletion disabled",
@@ -663,7 +666,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     render(<ProjectSidebar />);
     selectCompletedScope();
-    screen.getByRole("button", { name: /^Dirty work/i }).focus();
+    act(() => screen.getByRole("button", { name: /^Dirty work/i }).focus());
 
     const preview = await screen.findByTestId("thread-preview-thread-1");
     expect(preview).toHaveTextContent(
@@ -697,11 +700,11 @@ describe("ProjectSidebar thread interactions", () => {
     expect(screen.getByRole("button", { name: "Restore Blocked work" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Retry cleanup for Blocked work" }));
-    await Promise.resolve();
+    await act(async () => {});
     expect(retryThreadCleanup).toHaveBeenCalledWith("thread-1");
 
     fireEvent.click(screen.getByRole("button", { name: "Restore Blocked work" }));
-    await Promise.resolve();
+    await act(async () => {});
     expect(reopenThread).toHaveBeenCalledWith("thread-1");
     vi.useFakeTimers();
   });
@@ -730,14 +733,14 @@ describe("ProjectSidebar thread interactions", () => {
     }
   });
 
-  it("keeps expanded threads mounted when a project drag starts", () => {
+  it("keeps expanded threads mounted when a project drag starts", async () => {
     useSidebarUiStore.setState({ expandedProjects: new Set(["ws-1"]) });
     setupStoreMocks();
 
     render(<ProjectSidebar />);
     expect(screen.getByRole("button", { name: /^My Thread/i })).toBeVisible();
     const projectRow = screen.getByTestId("project-row-ws-1");
-    projectRow.focus();
+    act(() => projectRow.focus());
     // KeyboardSensor activates on event.code, not key.
     fireEvent.keyDown(projectRow, { code: "Space" });
     expect(document.body).toHaveStyle({ cursor: "grabbing" });
@@ -756,6 +759,8 @@ describe("ProjectSidebar thread interactions", () => {
     });
     fireEvent.keyDown(document, { code: "Space" });
     expect(document.body).not.toHaveStyle({ cursor: "grabbing" });
+    // The drop animation resolves on a promise; let it finish inside act().
+    await act(async () => {});
   });
 
   it("applies only translation while a project is dragged", () => {
@@ -839,7 +844,7 @@ describe("ProjectSidebar thread interactions", () => {
       name: `Open project ${projectName}`,
     });
     act(() => {
-      projectButton.focus();
+      act(() => projectButton.focus());
       vi.advanceTimersByTime(1_000);
     });
 
@@ -1071,7 +1076,7 @@ describe("ProjectSidebar thread interactions", () => {
 
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "Unsaved thread title" } });
-    input.focus();
+    act(() => input.focus());
     await act(async () => {
       fireEvent.pointerDown(threadRow);
       fireEvent.blur(input, { relatedTarget: threadRow });
@@ -1139,7 +1144,7 @@ describe("ProjectSidebar thread interactions", () => {
     const threadButton = screen.getByRole("button", { name: /^My Thread/i });
 
     // Focus and press Enter on the thread row.
-    threadButton.focus();
+    act(() => threadButton.focus());
     fireEvent.keyDown(threadButton, { key: "Enter" });
 
     // Navigation must fire immediately (no timer advance needed).
@@ -1241,7 +1246,7 @@ describe("ProjectSidebar thread interactions", () => {
     expect(screen.getByTestId("thread-title")).toHaveTextContent("My Thread");
   });
 
-  it("swallows the click that fires when a drag ends", () => {
+  it("swallows the click that fires when a drag ends", async () => {
     setupStoreMocks();
     render(<ProjectSidebar />);
     const projectRow = screen.getByTestId("project-row-ws-1");
@@ -1252,7 +1257,7 @@ describe("ProjectSidebar thread interactions", () => {
         { name: /^My Thread/i },
       );
 
-    projectRow.focus();
+    act(() => projectRow.focus());
     fireEvent.keyDown(projectRow, { code: "Space" });
     expect(document.body).toHaveStyle({ cursor: "grabbing" });
     act(() => {
@@ -1270,6 +1275,8 @@ describe("ProjectSidebar thread interactions", () => {
     });
     fireEvent.click(projectRow);
     expect(threadRow()).toBeNull();
+    // The drop animation resolves on a promise; let it finish inside act().
+    await act(async () => {});
   });
 });
 
@@ -1343,6 +1350,8 @@ describe("ProjectSidebar action-required indicator", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting state so the resets do not re-render a live tree outside act().
+    cleanup();
     // Restore the default empty-state implementation so this override does not
     // leak into other describes when test order shifts.
     vi.mocked(useWorkspaceStore).mockImplementation(((
@@ -1728,6 +1737,8 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting state so the resets do not re-render a live tree outside act().
+    cleanup();
     vi.clearAllMocks();
     window.localStorage.clear();
   });
@@ -1832,7 +1843,7 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
       }),
     );
 
-    screen.getByRole("button", { name: /^Branchless Thread/i }).focus();
+    act(() => screen.getByRole("button", { name: /^Branchless Thread/i }).focus());
 
     const preview = await screen.findByTestId(
       "thread-preview-thread-branchless",
