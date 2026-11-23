@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
 import { mergeProviderUsageSnapshot, type ProviderQuotaUsage } from "./provider-usage-snapshot";
@@ -52,6 +52,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   resetProviderUsageForTests();
   vi.useRealTimers();
 });

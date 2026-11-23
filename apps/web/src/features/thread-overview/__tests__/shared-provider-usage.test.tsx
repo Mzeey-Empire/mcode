@@ -1,5 +1,5 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
@@ -178,6 +178,7 @@ describe("shared provider usage across threads", () => {
   });
 
   afterEach(() => {
+    cleanup();
     resetProviderUsageForTests();
     vi.useRealTimers();
     setVisibility("visible");

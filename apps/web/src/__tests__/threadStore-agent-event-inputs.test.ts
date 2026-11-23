@@ -14,7 +14,7 @@ import { useTaskStore } from "@/stores/taskStore";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
-import { renderHook } from "@testing-library/react";
+import { cleanup, renderHook } from "@testing-library/react";
 import { mockTransport } from "./mocks/transport";
 
 vi.mock("@/transport", async () => ({
@@ -48,6 +48,7 @@ describe("thread store agent-event input boundaries", () => {
   });
 
   afterEach(() => {
+    cleanup();
     resetProviderUsageForTests();
     vi.useRealTimers();
   });
