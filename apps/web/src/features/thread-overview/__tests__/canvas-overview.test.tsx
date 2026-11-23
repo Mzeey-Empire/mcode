@@ -47,7 +47,6 @@ describe("useCanvasOverview", () => {
     render(<Canvas />);
     expect(screen.getByTestId("canvas").dataset.presentation).toBe("docked");
 
-    // No animation frame runs between the observer report and the assertion: this is the frame being painted.
     act(() => reportCanvasWidth(OVERVIEW_DOCK_MIN_CANVAS - 1));
 
     expect(screen.getByTestId("canvas").dataset.presentation).toBe("hidden");
