@@ -1643,6 +1643,137 @@ describe("ThreadHydrator", () => {
     expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
   });
 
+  describe("a refreshed tail page merged into resident sub-agent rows", () => {
+    function serverRow(threadId: string, sequence: number, overrides: Partial<Message> = {}): Message {
+      return { ...createMockMessage({ id: `${threadId}-${sequence}`, thread_id: threadId, sequence, ...overrides }), serverSequence: sequence };
+    }
+
+    function subagentTurn(threadId: string): { rows: Message[]; narrativeByMessage: ThreadRecord["narrativeByMessage"]; anchorId: string } {
+      const older = [1, 2, 3, 4].map((sequence) => serverRow(threadId, sequence, { role: sequence % 2 === 0 ? "assistant" : "user" }));
+      const delegatingReply = serverRow(threadId, 5, { role: "assistant", content: "Delegated the review to Claude." });
+      const wakeUp = serverRow(threadId, 6, {
+        role: "user",
+        content: "Delegated task finished.",
+        systemNotice: {
+          kind: "delegated-task",
+          presentation: "timeline",
+          delegatedTasks: [{ taskId: "task-1", threadId: "child", title: "Review", providerId: "claude", status: "completed" }],
+        },
+      });
+      const narrativeByMessage = { [delegatingReply.id]: { tools: [], hooks: [], approvals: [], thoughts: [{
+        id: `${delegatingReply.id}-thought`, message_id: delegatingReply.id, text: "sub-agent reasoning",
+        started_at: delegatingReply.timestamp, ended_at: null, sort_order: 0,
+      }] } };
+      return { rows: [...older, delegatingReply, wakeUp], narrativeByMessage, anchorId: wakeUp.id };
+    }
+
+    function tailPage(messages: Message[], hasMore = true): ConversationPage {
+      return { messages: messages.map(({ serverSequence: _server, ...message }) => message), hasMore, narrativeByMessage: {} };
+    }
+
+    it("keeps a running thread's sub-agent rows when a newer two-row tail page commits", async () => {
+      const turn = subagentTurn(THREAD_A);
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, {
+          ...makeCachedRecord(turn.rows),
+          hasMoreMessages: true,
+          narrativeByMessage: turn.narrativeByMessage,
+          streaming: "still working",
+        }]]),
+      });
+      const newer = [serverRow(THREAD_A, 7, { role: "user" }), serverRow(THREAD_A, 8, { role: "assistant" })];
+      vi.mocked(mockTransport.loadConversationPage).mockResolvedValue(tailPage(newer));
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      expect(record?.messages.map((message) => message.id)).toEqual([...turn.rows, ...newer].map((message) => message.id));
+      expect(record?.messages.some((message) => message.id === turn.anchorId)).toBe(true);
+      expect(record?.narrativeByMessage).toMatchObject(turn.narrativeByMessage);
+      expect(record?.oldestLoadedSequence).toBe(1);
+      expect(record?.streaming).toBe("still working");
+    });
+
+    it("keeps a displayed sub-agent transcript's rows when its refresh returns a newer tail", async () => {
+      hydrator = createStoreHydrator((threadId) => threadId === "child");
+      const turn = subagentTurn("child");
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set(["child"]),
+        records: new Map([["child", { ...makeCachedRecord(turn.rows), hasMoreMessages: true, narrativeByMessage: turn.narrativeByMessage }]]),
+      });
+      const newer = [serverRow("child", 7), serverRow("child", 8)];
+      vi.mocked(mockTransport.loadConversationPage).mockResolvedValue(tailPage(newer));
+
+      await hydrator.hydrateResident("child", { generation: 1, force: true, isCurrent: () => true });
+
+      expect(useThreadStore.getState().records.get("child")?.messages.map((message) => message.id))
+        .toEqual([...turn.rows, ...newer].map((message) => message.id));
+    });
+
+    it("drops resident rows inside the page's range that the server removed or replaced", async () => {
+      const turn = subagentTurn(THREAD_A);
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, { ...makeCachedRecord(turn.rows), hasMoreMessages: true, narrativeByMessage: turn.narrativeByMessage }]]),
+      });
+      const [, , , fourth] = turn.rows;
+      const replacement = serverRow(THREAD_A, 7, { id: "replacement", role: "assistant" });
+      vi.mocked(mockTransport.loadConversationPage).mockResolvedValue(tailPage([fourth!, replacement]));
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      expect(record?.messages.map((message) => message.id))
+        .toEqual([`${THREAD_A}-1`, `${THREAD_A}-2`, `${THREAD_A}-3`, `${THREAD_A}-4`, "replacement"]);
+      expect(record?.narrativeByMessage[`${THREAD_A}-5`]).toBeUndefined();
+    });
+
+    it("drops resident server rows a complete page no longer holds", async () => {
+      const turn = subagentTurn(THREAD_A);
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(turn.rows)]]),
+      });
+      const kept = turn.rows.slice(4);
+      vi.mocked(mockTransport.loadConversationPage).mockResolvedValue(tailPage(kept, false));
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      expect(useThreadStore.getState().records.get(THREAD_A)?.messages.map((message) => message.id))
+        .toEqual(kept.map((message) => message.id));
+    });
+
+    it("keeps a row that settled after the page was read and live rows the server has not saved", async () => {
+      hydrator = createStoreHydrator((threadId) => threadId === "child");
+      const turn = subagentTurn("child");
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set(["child"]),
+        records: new Map([["child", { ...makeCachedRecord(turn.rows), hasMoreMessages: true }]]),
+      });
+      let resolvePage!: (page: ConversationPage) => void;
+      vi.mocked(mockTransport.loadConversationPage).mockImplementation(() => new Promise((resolve) => { resolvePage = resolve; }));
+      const refresh = hydrator.hydrateResident("child", { generation: 1, force: true, isCurrent: () => true });
+      await vi.waitFor(() => expect(mockTransport.loadConversationPage).toHaveBeenCalled());
+      const settled = serverRow("child", 7);
+      const live = createMockMessage({ id: "live-local", thread_id: "child", sequence: 8 });
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, "child", (record) => ({ messages: [...record.messages, settled, live] })),
+      }));
+
+      resolvePage(tailPage(turn.rows.slice(4)));
+      await refresh;
+
+      expect(useThreadStore.getState().records.get("child")?.messages.map((message) => message.id))
+        .toEqual([...turn.rows, settled, live].map((message) => message.id));
+    });
+  });
+
   it("force refreshes authoritatively after an in-flight background prefetch", async () => {
     const resident = createMockMessage({
       id: "resident-message",
