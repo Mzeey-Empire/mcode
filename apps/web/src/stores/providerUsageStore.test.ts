@@ -196,4 +196,18 @@ describe("usage refresh timer", () => {
     expect(callsFor("cursor")).toBe(1);
     expect(callsFor("claude")).toBe(4);
   });
+
+  it("refreshes on every tick when each answer is stamped after its request was sent", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-11-23T10:00:00.000Z") });
+    getProviderUsage.mockImplementation(async (providerId: string) => ({
+      providerId,
+      quotaCategories: [fiveHour(30)],
+      usageStatus: "ready",
+      fetchedAt: new Date(Date.now() + 1_000).toISOString(),
+    }));
+    renderHook(() => useProviderUsage("claude"));
+    await act(async () => vi.advanceTimersByTimeAsync(15 * 60_000));
+
+    expect(getProviderUsage).toHaveBeenCalledTimes(4);
+  });
 });

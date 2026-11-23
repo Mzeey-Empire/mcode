@@ -136,7 +136,9 @@ function tick(): void {
     // The timer keeps shown limits current. A provider with none is left to opens and quotaUpdate
     // events: for Codex an empty server cache makes every getUsage launch a throwaway app-server.
     const status = byProvider[providerId]?.usageStatus;
-    if (status === "ready" || status === "stale") void refresh(providerId, WATCH_INTERVAL_MS);
+    // The freshness floor, not the interval: a snapshot stamped just after the last tick is a little
+    // under one interval old at this tick, and would otherwise wait a second interval.
+    if (status === "ready" || status === "stale") void refresh(providerId, FRESH_FOR_MS);
   }
 }
 
