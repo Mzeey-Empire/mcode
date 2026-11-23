@@ -16,6 +16,7 @@
     "./browser-partition": "./src/browser-preview/browser-partition.ts",
     "./browser-control": "./src/browser-preview/browser-control.ts",
     "./browser-page-identity": "./src/browser-preview/page-identity.ts",
+    "./html-visual-document": "./src/html-visual/html-visual-document.ts",
     "./plan-fence": "./src/plan-fence-parser.ts",
     "./turn-admission": "./src/turn-admission/index.ts",
     "./planned-restart": "./src/planned-restart/index.ts"

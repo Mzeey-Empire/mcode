@@ -8,7 +8,7 @@ import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
 import { HtmlVisualFrame } from "../HtmlVisualFrame";
-import { buildHtmlVisualDocument } from "../html-visual-document";
+import { buildHtmlVisualDocument } from "@mcode/shared/html-visual-document";
 
 const visual: HtmlVisual = { title: "Latency by provider", html: "<!doctype html><p>chart</p>", maxHeight: 480 };
 const root = document.documentElement;
