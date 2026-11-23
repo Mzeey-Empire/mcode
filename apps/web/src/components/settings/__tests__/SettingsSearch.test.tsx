@@ -142,6 +142,7 @@ describe("Settings search", () => {
     const result = (await screen.findByRole("button", { name: /^Go to Thinking in Threads/ })).closest("div")?.parentElement as HTMLElement;
     expect(within(result).queryByRole("switch")).not.toBeInTheDocument();
     fireEvent.click(within(result).getByRole("button", { name: /^Go to Thinking/ }));
+    await act(async () => {});
     expect(document.querySelector("[data-search-hit]")).toHaveAttribute("data-setting-id", "threads.model");
   });
 
@@ -150,6 +151,7 @@ describe("Settings search", () => {
     renderSettings();
     search("reasoning");
     fireEvent.click(await screen.findByRole("button", { name: /^Go to Reasoning effort in Threads/ }));
+    await act(async () => {});
     const marked = document.querySelector("[data-search-hit]");
     expect(marked).toBe(screen.getByRole("button", { name: /^Model:/ }));
     expect(marked).toHaveFocus();

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // vi.hoisted ensures these refs are available inside the vi.mock factory below.
@@ -77,9 +77,11 @@ describe("Threads page model controls", () => {
     vi.clearAllMocks();
   });
 
-  it("groups model controls into new-thread defaults and the model for small tasks", () => {
+  it("groups model controls into new-thread defaults and the model for small tasks", async () => {
     renderWithModel("claude", "claude-opus-4-7");
     render(<ThreadsSection />);
+    // The defaults capsule reads the model catalog on mount; let it settle.
+    await act(async () => {});
 
     for (const name of [
       "New threads start with",
