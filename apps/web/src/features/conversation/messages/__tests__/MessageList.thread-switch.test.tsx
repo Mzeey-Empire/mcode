@@ -1,5 +1,5 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import { render, act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { render, act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { StrictMode, useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createAgentModelState, type AgentItem, type AgentTurn } from "@mcode/contracts/compat/agent-model";
@@ -237,6 +237,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount first: clearing the selection below would update mounted selected-text controls.
+  cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -715,17 +717,21 @@ describe("MessageList thread switch", () => {
     selection.removeAllRanges();
     selection.addRange(range);
 
-    fireEvent.mouseUp(content, { button: 0, clientX: 24, clientY: 24 });
-    fireEvent.click(content, { button: 0, clientX: 24, clientY: 24 });
+    await act(async () => {
+      fireEvent.mouseUp(content, { button: 0, clientX: 24, clientY: 24 });
+      fireEvent.click(content, { button: 0, clientX: 24, clientY: 24 });
+    });
 
     const addComment = getByRole("button", { name: "Add comment" });
     expect(queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
     expect(fireEvent.contextMenu(content, { button: 2, clientX: 24, clientY: 24 })).toBe(true);
 
-    fireEvent.click(addComment);
+    await act(async () => {
+      fireEvent.click(addComment);
+    });
     expect(getByRole("dialog", { name: "Comment on selected text" })).toBeInTheDocument();
     const noteInput = getByRole("textbox", { name: "Comment note" });
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(noteInput).toHaveFocus();
     });
     expect(queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument();
@@ -751,14 +757,20 @@ describe("MessageList thread switch", () => {
     selection.removeAllRanges();
     selection.addRange(range);
 
-    fireEvent.mouseUp(content, { button: 0, clientX: 24, clientY: 24 });
-    fireEvent.click(getByRole("button", { name: "Add comment" }));
+    await act(async () => {
+      fireEvent.mouseUp(content, { button: 0, clientX: 24, clientY: 24 });
+    });
+    await act(async () => {
+      fireEvent.click(getByRole("button", { name: "Add comment" }));
+    });
     expect(getByRole("dialog", { name: "Comment on selected text" })).toBeInTheDocument();
 
     content.textContent = "Changed canonical content";
-    fireEvent.scroll(viewport);
+    await act(async () => {
+      fireEvent.scroll(viewport);
+    });
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(queryByRole("dialog", { name: "Comment on selected text" })).not.toBeInTheDocument();
     });
   });
@@ -819,12 +831,14 @@ describe("MessageList thread switch", () => {
       selection.removeAllRanges();
       selection.addRange(range);
 
-      fireEvent.mouseUp(content, { button: 0, clientX: 900, clientY: 700 });
+      await act(async () => {
+        fireEvent.mouseUp(content, { button: 0, clientX: 900, clientY: 700 });
+      });
 
       const action = getByRole("button", { name: "Add comment" });
       const actionPositioner = action.closest('[data-slot="popover-content"]')?.parentElement;
       expect(actionPositioner).toBeTruthy();
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(actionPositioner).toHaveStyle({
           "--anchor-width": "160px",
           "--anchor-height": "40px",
@@ -833,7 +847,7 @@ describe("MessageList thread switch", () => {
       expect(document.querySelector('[data-slot="popover-trigger"]')).toBeNull();
       // The virtual list observes the viewport too, so pick the tracker's observer by what it watches.
       const tracksSelection = (observer: ResizeObserverMock) => observer.observed.has(viewport) && observer.observed.has(content);
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(resizeObservers.some(tracksSelection)).toBe(true);
       });
       const viewportObserver = resizeObservers.find(tracksSelection)!;
@@ -841,8 +855,10 @@ describe("MessageList thread switch", () => {
       expect(actionPositioner).toHaveStyle({ transform: "translate(120px, 188px)" });
 
       selectedRangeRect = new DOMRect(120, 100, 96, 20);
-      fireEvent.scroll(viewport);
-      await vi.waitFor(() => {
+      await act(async () => {
+        fireEvent.scroll(viewport);
+      });
+      await waitFor(() => {
         expect(actionPositioner).toHaveStyle({ transform: "translate(120px, 128px)" });
       });
 
@@ -850,11 +866,13 @@ describe("MessageList thread switch", () => {
       act(() => {
         viewportObserver.trigger();
       });
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(actionPositioner).toHaveStyle({ transform: "translate(120px, 108px)" });
       });
 
-      fireEvent.click(action);
+      await act(async () => {
+        fireEvent.click(action);
+      });
       selection.removeAllRanges();
       const editor = getByRole("dialog", { name: "Comment on selected text" });
       const editorPositioner = editor.closest('[data-slot="popover-content"]')?.parentElement;
@@ -864,7 +882,7 @@ describe("MessageList thread switch", () => {
       act(() => {
         editorObserver!.trigger();
       });
-      await vi.waitFor(() => {
+      await waitFor(() => {
         expect(editorPositioner).toHaveStyle({
           "--anchor-width": "328px",
           "--anchor-height": "46px",
@@ -872,14 +890,18 @@ describe("MessageList thread switch", () => {
       });
 
       selectedRangeRect = new DOMRect(120, 840, 128, 20);
-      fireEvent.scroll(viewport);
-      await vi.waitFor(() => {
+      await act(async () => {
+        fireEvent.scroll(viewport);
+      });
+      await waitFor(() => {
         expect(editorPositioner).toHaveStyle({ transform: "translate(8px, 746px)" });
       });
 
       selectedRangeRect = new DOMRect(160, 220, 128, 20);
-      fireEvent.scroll(viewport);
-      await vi.waitFor(() => {
+      await act(async () => {
+        fireEvent.scroll(viewport);
+      });
+      await waitFor(() => {
         expect(editorPositioner).toHaveStyle({ transform: "translate(160px, 248px)" });
       });
     } finally {
@@ -917,7 +939,7 @@ describe("MessageList thread switch", () => {
 
     rerender(<MessageList displayThreadId="thread-B" onSelectedTextComment={vi.fn()} />);
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument();
     });
   });
@@ -976,7 +998,7 @@ describe("MessageList thread switch", () => {
     expect(getByRole("button", { name: "Add comment" })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument();
     });
   });
@@ -1043,20 +1065,26 @@ describe("MessageList thread switch", () => {
     selection.removeAllRanges();
     selection.addRange(range);
 
-    fireEvent.mouseUp(content, { button: 0, clientX: 24, clientY: 24 });
+    await act(async () => {
+      fireEvent.mouseUp(content, { button: 0, clientX: 24, clientY: 24 });
+    });
     const action = getByRole("button", { name: "Add comment" });
     const actionPopup = action.closest('[data-slot="popover-content"]');
-    fireEvent.click(action);
+    await act(async () => {
+      fireEvent.click(action);
+    });
 
     const noteInput = getByRole("textbox", { name: "Comment note" });
     expect(noteInput.closest('[data-slot="popover-content"]')).not.toBe(actionPopup);
-    await vi.waitFor(() => expect(noteInput).toHaveFocus());
-    fireEvent.keyDown(noteInput, { key: "Escape" });
+    await waitFor(() => expect(noteInput).toHaveFocus());
+    await act(async () => {
+      fireEvent.keyDown(noteInput, { key: "Escape" });
+    });
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(queryByRole("dialog", { name: "Comment on selected text" })).not.toBeInTheDocument();
     });
-    await vi.waitFor(() => expect(getByRole("button", { name: "Add comment" })).toHaveFocus());
+    await waitFor(() => expect(getByRole("button", { name: "Add comment" })).toHaveFocus());
   });
 
   it("does not open the selected-text menu for cross-message or ineligible selections", () => {
