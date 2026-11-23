@@ -520,8 +520,12 @@ interface ThreadState {
   /** Clear the active goal through the app RPC and update cached thread state. */
   clearThreadGoal: (threadId: string) => Promise<GoalLookupResult>;
 
-  /** Fetch one bounded persisted-detail window for a rendered assistant message. */
-  loadNarrativeForMessage: (messageId: string, threadId?: string, options?: { continue?: boolean }) => Promise<void>;
+  /**
+   * Fetch one bounded persisted-detail window for a rendered assistant message. `continue` reads
+   * the window after the loaded one; `revalidate` rereads the first window over detail the
+   * message already shows.
+   */
+  loadNarrativeForMessage: (messageId: string, threadId?: string, options?: { continue?: boolean; revalidate?: boolean }) => Promise<void>;
   /** Return whether a complete narrative payload has been loaded for a message. */
   isNarrativeLoaded: (threadId: string, messageId: string) => boolean;
   /** Drop the cached narrative for a message and revoke any pending detail window. */
@@ -707,6 +711,30 @@ function mergeNarrativeEntries(
     thoughts: ordered(thoughts.values()),
     hooks: ordered(hooks.values()),
     approvals: ordered(approvals.values()),
+  };
+}
+
+/**
+ * A detail record a live event wrote while a load was in flight is newer than the loaded copy,
+ * so it wins. Store writes replace records, so identity tells which ones changed. The load still
+ * adds and updates the records the live event left alone.
+ */
+function keepRecordsWrittenDuringLoad(
+  loaded: NarrativeBatch,
+  atStart: NarrativeBatch | undefined,
+  current: NarrativeBatch | undefined,
+): NarrativeBatch {
+  if (current === undefined || current === atStart) return loaded;
+  const overlay = <T extends { id: string }>(records: T[], now: readonly T[], before: readonly T[] | undefined): T[] => {
+    const prior = new Map(before?.map((record) => [record.id, record]));
+    const written = new Map(now.filter((record) => prior.get(record.id) !== record).map((record) => [record.id, record]));
+    return written.size === 0 ? records : records.map((record) => written.get(record.id) ?? record);
+  };
+  return {
+    tools: overlay(loaded.tools, current.tools, atStart?.tools),
+    thoughts: overlay(loaded.thoughts, current.thoughts, atStart?.thoughts),
+    hooks: overlay(loaded.hooks, current.hooks, atStart?.hooks),
+    approvals: overlay(loaded.approvals, current.approvals, atStart?.approvals),
   };
 }
 
@@ -905,7 +933,8 @@ function canonicalProgressNeedsProjection(previous: AgentModelState, update: Can
   return update.replica.state !== previous || update.publications.length > 0;
 }
 
-function shouldSkipNarrativeLoad(cacheKey: string, hasDetail: boolean, options?: { continue?: boolean }): boolean {
+function shouldSkipNarrativeLoad(cacheKey: string, hasDetail: boolean, options?: { continue?: boolean; revalidate?: boolean }): boolean {
+  if (options?.revalidate) return false;
   return hasDetail && !options?.continue || narrativeLoaded.has(cacheKey) && hasDetail;
 }
 
@@ -1527,7 +1556,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     getWorkspaceThread: (threadId) =>
       useWorkspaceStore.getState().threads.find((t) => t.id === threadId),
     flushPendingTextDeltas,
-    loadNarrativeForMessage: (messageId, threadId) => get().loadNarrativeForMessage(messageId, threadId),
+    loadNarrativeForMessage: (messageId, threadId, options) => get().loadNarrativeForMessage(messageId, threadId, options),
     reconcilePlanQuestions: (threadId, revision, pending) => get().reconcilePlanQuestions(threadId, revision, pending),
     getPlanQuestionsRevision: (threadId) => getThreadRecord(get().records, threadId).planQuestionsRevision,
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
@@ -4450,10 +4479,12 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if (!currentId) return;
     const context = resolveNarrativeLoadContext(get().records, currentId, messageId);
     if (!context) return;
-    const { cacheKey, message, generation, detailAfter, hasDetail } = context;
+    const { cacheKey, message, generation, hasDetail } = context;
     if (shouldSkipNarrativeLoad(cacheKey, hasDetail, options)) return;
     const existing = narrativeInflight.get(cacheKey);
     if (existing) return existing;
+    const detailAfter = options?.revalidate ? undefined : context.detailAfter;
+    const detailAtStart = get().records.get(currentId)?.narrativeByMessage[messageId];
     const p = getTransport()
       .loadTurn(currentId, {
         limit: 1,
@@ -4467,7 +4498,8 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         if (!isCurrentNarrativeGeneration(cacheKey, generation)) return;
         const current = narrativeRecordWithMessage(get().records, currentId, messageId);
         if (!current) return;
-        const merged = mergeNarrativeEntries(current.narrativeByMessage[messageId], entries);
+        const currentDetail = current.narrativeByMessage[messageId];
+        const merged = keepRecordsWrittenDuringLoad(mergeNarrativeEntries(currentDetail, entries), detailAtStart, currentDetail);
         if (measureConversationValue(merged) > CONVERSATION_NARRATIVE_BYTES) {
           // Keep the already-rendered window intact. The cursor stays put so a
           // later visible lease cannot silently skip detail that did not fit.

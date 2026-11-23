@@ -100,8 +100,8 @@ function createStoreHydrator(isDisplayConversationVisible = (_threadId: string) 
     getWorkspaceThread: (threadId) =>
       useWorkspaceStore.getState().threads.find((t) => t.id === threadId),
     flushPendingTextDeltas: () => {},
-    loadNarrativeForMessage: (messageId, threadId) =>
-      useThreadStore.getState().loadNarrativeForMessage(messageId, threadId),
+    loadNarrativeForMessage: (messageId, threadId, options) =>
+      useThreadStore.getState().loadNarrativeForMessage(messageId, threadId, options),
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
     setTasksForThread: (threadId, tasks) => useTaskStore.getState().setTasks(threadId, tasks),
     addPlanForThread: (threadId, plan) => usePlanStore.getState().addPlan(threadId, plan),
@@ -1713,6 +1713,22 @@ describe("ThreadHydrator", () => {
       return deferred;
     }
 
+    /** Hold each `turn.load` until the test settles it with the server's narrative for that row. */
+    function deferNarrativeLoads(): { requested: () => number[]; settle: (message: Message, narrative: ReturnType<typeof thought>) => void } {
+      const pending = new Map<number, (entries: Awaited<ReturnType<typeof mockTransport.loadTurn>>) => void>();
+      vi.mocked(mockTransport.loadTurn).mockImplementation((_threadId, request) =>
+        new Promise((resolve) => { pending.set((request?.before ?? 0) - 1, resolve); }));
+      return {
+        requested: () => [...pending.keys()],
+        settle: (message, narrative) => pending.get(message.sequence)?.(narrative.thoughts.map((record) =>
+          ({ kind: "narrationSegment" as const, sequence: message.sequence, sortOrder: record.sort_order, record }))),
+      };
+    }
+
+    function narrativeOf(threadId: string, message: Message): ThreadRecord["narrativeByMessage"][string] {
+      return useThreadStore.getState().records.get(threadId)?.narrativeByMessage[message.id];
+    }
+
     function ids(threadId: string): string[] | undefined {
       return useThreadStore.getState().records.get(threadId)?.messages.map((message) => message.id);
     }
@@ -1960,6 +1976,98 @@ describe("ThreadHydrator", () => {
       await refresh;
 
       expect(ids("child")).toEqual([...turn.rows, settled, live].map((message) => message.id));
+    });
+
+    it("drops resident rows below the page it read when the resident window has a hole inside that page", async () => {
+      const history = sequences(1, 131).map((sequence) => serverRow(THREAD_A, sequence));
+      // Rows 31 to 129 were missed; row 130 arrived live after them.
+      const resident = [...history.slice(0, 30), history[129]!];
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, history);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      // The tail and the page below it cover rows 32 to 131; row 31 is still missing, so rows 1 to 30 leave.
+      expect(record?.messages.map((message) => message.sequence)).toEqual(sequences(32, 131));
+      // Scrolling up asks for the rows below the oldest loaded row.
+      expect(record?.oldestLoadedSequence).toBe(32);
+      expect(record?.hasMoreMessages).toBe(true);
+    });
+
+    it("keeps every resident row in place when the read below the tail fails", async () => {
+      const resident = sequences(1, 150).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, [...resident, serverRow(THREAD_A, 151), serverRow(THREAD_A, 152)]);
+      vi.mocked(mockTransport.loadOlderConversationPage).mockRejectedValueOnce(new Error("socket closed"));
+      const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+      onTestFinished(() => debug.mockRestore());
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      // The tail (151, 152) does not reach the resident rows, so committing it would leave a hole below it.
+      expect(useThreadStore.getState().records.get(THREAD_A)?.messages).toEqual(resident);
+    });
+
+    it("shows a refreshed row's resident narrative until its reload lands, and a live write during the reload wins", async () => {
+      const turn = subagentTurn(THREAD_A);
+      const [, , , fourth, fifth] = turn.rows;
+      if (fourth?.role !== "assistant" || fifth?.role !== "assistant") throw new Error("the turn needs two assistant rows");
+      const resident = { [fourth.id]: thought(fourth, "tool running"), [fifth.id]: thought(fifth, "tool running") };
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        records: new Map([[THREAD_A, { ...makeCachedRecord(turn.rows), hasMoreMessages: true, narrativeByMessage: resident }]]),
+      });
+      // The rows' text, tool counts and outcomes are unchanged; only their narrative settled on the server.
+      serveHistory(THREAD_A, [...turn.rows, serverRow(THREAD_A, 7)]);
+      const reloads = deferNarrativeLoads();
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+      await vi.waitFor(() => expect(reloads.requested()).toEqual(expect.arrayContaining([fourth.sequence, fifth.sequence])));
+
+      expect(narrativeOf(THREAD_A, fourth)).toEqual(resident[fourth.id]);
+      expect(narrativeOf(THREAD_A, fifth)).toEqual(resident[fifth.id]);
+      const live = thought(fifth, "written live during the reload");
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, THREAD_A, (record) => ({
+          narrativeByMessage: { ...record.narrativeByMessage, [fifth.id]: live },
+        })),
+      }));
+      reloads.settle(fourth, thought(fourth, "tool settled"));
+      reloads.settle(fifth, thought(fifth, "tool settled"));
+
+      await vi.waitFor(() => expect(narrativeOf(THREAD_A, fourth)).toEqual(thought(fourth, "tool settled")));
+      expect(narrativeOf(THREAD_A, fifth)).toEqual(live);
+    });
+
+    it("drops a resident notice below the page it read when the page holds its replacement", async () => {
+      const restartKey = "planned-restart:update";
+      const notice = (sequence: number, content: string) => serverRow(THREAD_A, sequence, {
+        role: "system", content,
+        systemNotice: { kind: "warning", presentation: "timeline", noticeKey: restartKey },
+      });
+      const resident = sequences(1, 150).map((sequence) => sequence === 3 ? notice(3, "Restarting for an update.") : serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      const replacement = notice(151, "Restarted.");
+      serveHistory(THREAD_A, [...resident.filter((row) => row.sequence !== 3), replacement]);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const notices = useThreadStore.getState().records.get(THREAD_A)?.messages
+        .filter((message) => message.systemNotice?.noticeKey === restartKey);
+      expect(notices?.map((message) => message.id)).toEqual([replacement.id]);
     });
   });
 

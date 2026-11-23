@@ -289,39 +289,64 @@ function metadataFromKeptRows<T>(
 }
 
 /**
- * Pages carry no narrative; it loads on demand. A refreshed row whose text, tool count and
- * outcome match the resident copy has the same narrative, so it keeps the resident detail
- * instead of blanking and reloading it. A changed row drops it, and the visible-tail prefetch
- * reloads it.
+ * True when the resident rows older than the page join it with no row missing between them.
+ * `serverSequence` cannot prove adjacency: hidden rows (internal rows, session and routine
+ * notices) take sequence numbers pages skip, and deleted notices leave gaps, so rows a page
+ * shows side by side can be any distance apart. Row identity can: the resident window must
+ * hold every row the page shows from its oldest up to the newest resident row inside it. A
+ * resident window gets a hole only where live events were missed, and the rows after a missed
+ * span are newer than it, so a hole reaching into the page shows as a page row the window
+ * lacks. A missed span ending exactly at the page's oldest row is the one case this cannot see.
  */
-function rowsWithUnchangedNarrative(
-  fetchedRows: ConversationCacheState["messages"],
-  resident: ConversationCacheState["messages"],
-): Set<string> {
-  const residentById = new Map(resident.map((message) => [message.id, message]));
-  return new Set(fetchedRows.filter((row) => {
-    const residentRow = residentById.get(row.id);
-    return residentRow !== undefined && residentRow.content === row.content
-      && (residentRow.tool_call_count ?? 0) === (row.tool_call_count ?? 0)
-      && (residentRow.outcome ?? null) === (row.outcome ?? null);
-  }).map((row) => row.id));
+function pageConnectsToResidentRows(resident: ConversationCacheState["messages"], fetched: ConversationCacheState): boolean {
+  const residentSequences = new Set(resident.flatMap(({ serverSequence }) => serverSequence === undefined ? [] : [serverSequence]));
+  const residentInPage = fetched.messages.filter(({ sequence }) => residentSequences.has(sequence));
+  const newestResidentInPage = residentInPage.at(-1)?.sequence;
+  return newestResidentInPage !== undefined
+    && fetched.messages.every(({ sequence }) => sequence > newestResidentInPage || residentSequences.has(sequence));
 }
 
-/**
- * Resident server rows older than this sequence stay through the merge. When the page reaches
- * into the resident window, no rows are missing between them, so the rows below the page stay
- * where the user may be reading. They may be stale if the server deleted them while the client
- * was away; main accepted that too, and scrolling or a later full load corrects it. When the
- * page does not reach the window, rows are missing between them, so the rows below leave and
- * reload on scroll.
- */
-function residentRowsKeptBelow(resident: ConversationCacheState["messages"], fetched: ConversationCacheState): number {
-  const oldest = fetched.messages[0]?.sequence;
-  const newest = fetched.messages.at(-1)?.sequence;
-  if (!fetched.hasMoreMessages || oldest === undefined || newest === undefined) return Number.NEGATIVE_INFINITY;
-  const overlaps = resident.some(({ serverSequence }) =>
-    serverSequence !== undefined && serverSequence >= oldest && serverSequence <= newest);
-  return overlaps ? oldest : Number.NEGATIVE_INFINITY;
+/** The store replaces a timeline notice by its key, so only the newest row per key stays. */
+function withoutReplacedNotices(messages: ConversationCacheState["messages"]): ConversationCacheState["messages"] {
+  const newestByKey = new Map<string, string>();
+  for (const { id, systemNotice } of messages) {
+    if (systemNotice?.noticeKey !== undefined) newestByKey.set(systemNotice.noticeKey, id);
+  }
+  return messages.filter(({ id, systemNotice }) =>
+    systemNotice?.noticeKey === undefined || newestByKey.get(systemNotice.noticeKey) === id);
+}
+
+/** The rows {@link mergeFetchedServerWindow} keeps, in order, and where each came from. */
+function mergedWindowRows(
+  resident: ConversationCacheState["messages"],
+  fetched: ConversationCacheState,
+  changed: ReadonlySet<string>,
+  connects: boolean,
+): { messages: ConversationCacheState["messages"]; fetchedRowIds: Set<string>; keptOlderRows: boolean } {
+  // An empty page with no older history means the server holds no rows at all.
+  const newestCovered = fetched.messages.at(-1)?.sequence
+    ?? (fetched.hasMoreMessages ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
+  const keptBelow = connects ? (fetched.messages[0]?.sequence ?? Number.NEGATIVE_INFINITY) : Number.NEGATIVE_INFINITY;
+  const fetchedRows = fetched.messages.filter((message) => !changed.has(message.id));
+  const fetchedIds = new Set(fetched.messages.map((message) => message.id));
+  const residentRows = resident.filter(({ id, serverSequence }) =>
+    changed.has(id) || (!fetchedIds.has(id)
+      && (serverSequence === undefined || serverSequence > newestCovered || serverSequence < keptBelow)));
+  const messages = withoutReplacedNotices([...fetchedRows, ...residentRows]
+    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id)));
+  return {
+    messages,
+    fetchedRowIds: new Set(fetchedRows.map((message) => message.id)),
+    keptOlderRows: messages.some(({ serverSequence }) => serverSequence !== undefined && serverSequence < keptBelow),
+  };
+}
+
+/** Options for {@link mergeFetchedServerWindow}. */
+interface FetchedServerWindowOptions {
+  snapshot: ResidentSnapshot;
+  preferResidentNotices: boolean;
+  /** The read below the tail failed, so the page may not reach the resident rows below it. */
+  residentRowsBelowUnread: boolean;
 }
 
 /**
@@ -329,30 +354,26 @@ function residentRowsKeptBelow(resident: ConversationCacheState["messages"], fet
  * had older rows (see {@link ThreadHydrator.extendTailOverResidentRows}). The page speaks for
  * every server row from its oldest to its newest: a resident server row there that it lacks
  * was removed or replaced. Resident server rows older than the page stay only when the page
- * overlaps them (see {@link residentRowsKeptBelow}). Rows newer than the page were saved after
- * it was read and stay, as do live rows the server has not saved (no `serverSequence`) and rows
- * that changed after the fetch began, which the page may predate.
+ * joins them (see {@link pageConnectsToResidentRows}); otherwise rows are missing between them,
+ * so they leave and reload on scroll. Rows newer than the page were saved after it was read and
+ * stay, as do live rows the server has not saved (no `serverSequence`) and rows that changed
+ * after the fetch began, which the page may predate. A refreshed row keeps its resident
+ * narrative when the page carries none, and the hydrator revalidates the visible ones.
  */
 function mergeFetchedServerWindow(
   resident: ThreadRecord,
   fetched: ConversationCacheState,
-  options: { snapshot: ResidentSnapshot; preferResidentNotices: boolean },
+  options: FetchedServerWindowOptions,
 ): ConversationCacheState {
   const residentState = projectConversationCacheState(resident);
-  const changed = rowsChangedSince(resident, options.snapshot);
-  // An empty page with no older history means the server holds no rows at all.
-  const newestCovered = fetched.messages.at(-1)?.sequence
-    ?? (fetched.hasMoreMessages ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
-  const keptBelow = residentRowsKeptBelow(residentState.messages, fetched);
-  const fetchedRows = fetched.messages.filter((message) => !changed.has(message.id));
-  const fetchedRowIds = new Set(fetchedRows.map((message) => message.id));
-  const fetchedIds = new Set(fetched.messages.map((message) => message.id));
-  const residentRows = residentState.messages.filter(({ id, serverSequence }) =>
-    changed.has(id) || (!fetchedIds.has(id)
-      && (serverSequence === undefined || serverSequence > newestCovered || serverSequence < keptBelow)));
-  const keptOlderRows = residentRows.some(({ serverSequence }) => serverSequence !== undefined && serverSequence < keptBelow);
-  const messages = [...fetchedRows, ...residentRows]
-    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
+  const connects = fetched.hasMoreMessages && pageConnectsToResidentRows(residentState.messages, fetched);
+  // Committing a tail that does not reach the rows below it would drop them or leave a hole, so
+  // the resident transcript stays as it is until a refresh whose read below the tail succeeds.
+  if (options.residentRowsBelowUnread && !connects) {
+    return { ...residentState, ...mergeSessionNotices(resident, fetched, options.preferResidentNotices) };
+  }
+  const { messages, fetchedRowIds, keptOlderRows } = mergedWindowRows(
+    residentState.messages, fetched, rowsChangedSince(resident, options.snapshot), connects);
   const retainedIds = new Set(messages.map((message) => message.id));
   const pick = <T>(select: (state: ConversationCacheState) => Record<string, T>, residentFallback?: ReadonlySet<string>) =>
     metadataFromKeptRows(select(fetched), select(residentState), messages, fetchedRowIds, residentFallback);
@@ -373,7 +394,7 @@ function mergeFetchedServerWindow(
     persistedToolCallCounts: pick((state) => state.persistedToolCallCounts),
     persistedFilesChanged,
     serverMessageIds,
-    narrativeByMessage: pick((state) => state.narrativeByMessage, rowsWithUnchangedNarrative(fetchedRows, residentState.messages)),
+    narrativeByMessage: pick((state) => state.narrativeByMessage, fetchedRowIds),
     answeredPlanMessageIds: new Set([...fetched.answeredPlanMessageIds, ...residentState.answeredPlanMessageIds].filter((id) => retainedIds.has(id))),
     // Response keys are client turn identity the server never sends, and an id keeps its turn.
     assistantResponseKeys: pick((state) => state.assistantResponseKeys, fetchedRowIds),
@@ -381,6 +402,39 @@ function mergeFetchedServerWindow(
     latestTurnWithChanges: findLatestTurnWithChanges(messages, persistedFilesChanged),
     lastHydratedAt: residentState.lastHydratedAt,
   };
+}
+
+/** Rows a page refreshed without carrying their narrative, so they kept the resident copy. */
+function rowsWithoutPageNarrative(page: ConversationPage | undefined): Set<string> {
+  if (!page) return new Set();
+  return new Set(page.messages.filter(({ id }) => !page.narrativeByMessage[id]).map(({ id }) => id));
+}
+
+/** Narrative loads for the visible tail: rows without detail load it, refreshed rows reload it. */
+function tailNarrativeLoads(
+  record: ThreadRecord,
+  revalidate: ReadonlySet<string>,
+): Array<{ messageId: string; revalidate: boolean }> {
+  return record.messages.slice(-NARRATIVE_PREFETCH_TAIL_MESSAGES)
+    .filter((message) => message.role === "assistant" && !message.is_internal)
+    .map((message) => ({ messageId: message.id, revalidate: record.narrativeByMessage[message.id] != null }))
+    .filter((load) => !load.revalidate || revalidate.has(load.messageId));
+}
+
+/** True when an older page answers the request it was read for. */
+function olderPageAnswers(older: ConversationOlderPage, request: ConversationOlderPageIdentity): boolean {
+  const { identity } = older;
+  return identity.threadId === request.threadId
+    && identity.cursor.beforeSequence === request.cursor.beforeSequence
+    && identity.generation === request.generation
+    && identity.conversationRevision === request.conversationRevision;
+}
+
+/** A refreshed tail, joined with the page below it when that read was needed and succeeded. */
+interface CoveringPage {
+  page: ConversationPage;
+  /** The read below the tail was needed and failed, so the page may not reach the resident rows. */
+  residentRowsBelowUnread: boolean;
 }
 
 /** Join an older page read just below a tail page into one page covering both. */
@@ -615,7 +669,7 @@ export class ThreadHydrator {
 
     try {
       const tail = await this.transport().loadConversationPage(threadId, MESSAGE_FETCH_SIZE);
-      const page = await this.extendTailOverResidentRows(threadId, tail);
+      const { page, residentRowsBelowUnread } = await this.extendTailOverResidentRows(threadId, tail);
       const stateAtCommit = this.deps.getState();
       const currentAtCommit = getThreadRecord(stateAtCommit.records, threadId);
       if (
@@ -646,6 +700,7 @@ export class ThreadHydrator {
         const conversation = mergeFetchedServerWindow(current, fetchedConversation, {
           snapshot: residentSnapshot(currentBeforeLoad),
           preferResidentNotices: hasNoticeCollectionChanged(current, noticeCollectionSnapshot(currentBeforeLoad)),
+          residentRowsBelowUnread,
         });
         const { settledFileEffectSummary, ...conversationFields } = conversation;
         return {
@@ -665,7 +720,7 @@ export class ThreadHydrator {
       const committed = this.deps.getState().records.get(threadId);
       if (committed && opts.isCurrent()) {
         this.synchronizeConversation(threadId);
-        this.prefetchVisibleNarrative(threadId);
+        this.prefetchVisibleNarrative(threadId, page);
       }
     } catch (error) {
       if (!opts.isCurrent()) return;
@@ -805,8 +860,12 @@ export class ThreadHydrator {
    * pops its reasoning/tool rows in above it once the visible-row fetch lands.
    * Running threads are skipped: their newest turn's detail is still being
    * persisted and the volatile timeline already covers it.
+   *
+   * A row in `refreshed` that the page carried no narrative for kept its resident detail through
+   * the merge, and that detail may be stale: a background tool can settle after its turn ends
+   * without changing the row. It stays on screen while it reloads, so the transcript never blanks.
    */
-  private prefetchVisibleNarrative(threadId: string): void {
+  private prefetchVisibleNarrative(threadId: string, refreshed?: ConversationPage): void {
     const state = this.deps.getState();
     const isDisplayed =
       state.currentThreadId === threadId
@@ -814,10 +873,10 @@ export class ThreadHydrator {
     if (!isDisplayed || state.runningThreadIds.has(threadId)) return;
     const record = state.records.get(threadId);
     if (!record) return;
-    for (const message of record.messages.slice(-NARRATIVE_PREFETCH_TAIL_MESSAGES)) {
-      if (message.role !== "assistant" || message.is_internal) continue;
-      if (record.narrativeByMessage[message.id]) continue;
-      void this.deps.loadNarrativeForMessage(message.id, threadId);
+    for (const { messageId, revalidate } of tailNarrativeLoads(record, rowsWithoutPageNarrative(refreshed))) {
+      void (revalidate
+        ? this.deps.loadNarrativeForMessage(messageId, threadId, { revalidate })
+        : this.deps.loadNarrativeForMessage(messageId, threadId));
     }
   }
 
@@ -1418,13 +1477,14 @@ export class ThreadHydrator {
     const context = this.startFetchCommit(threadId, commitOpts);
     try {
       const tailLoaded = await this.loadActiveConversation(threadId, commitOpts);
-      const loaded = { ...tailLoaded, page: await this.extendTailOverResidentRows(threadId, tailLoaded.page) };
+      const covering = await this.extendTailOverResidentRows(threadId, tailLoaded.page);
+      const loaded = { ...tailLoaded, page: covering.page };
       if (!this.fetchedPageCanCommit(threadId, context)) return this.settleDiscardedFetch(threadId, context);
-      this.commitFetchedConversation(threadId, loaded.page, context);
+      this.commitFetchedConversation(threadId, covering, context);
       recordThreadCommit(threadId, "network-fetch");
       // Fires concurrently with the tail followup so detail lands as close to
       // first paint as the transport allows.
-      this.prefetchVisibleNarrative(threadId);
+      this.prefetchVisibleNarrative(threadId, loaded.page);
       this.scheduleFetchedConversationAuxiliaries(threadId, opts, context.epoch);
       const tailFollowupInvalidated = loaded.usedTail && await this.hydrateTailNarrative(threadId, context);
       this.cacheFetchedConversation(threadId, context, tailFollowupInvalidated);
@@ -1510,7 +1570,7 @@ export class ThreadHydrator {
     });
   }
 
-  private commitFetchedConversation(threadId: string, page: ConversationPage, context: FetchCommitContext): void {
+  private commitFetchedConversation(threadId: string, { page, residentRowsBelowUnread }: CoveringPage, context: FetchCommitContext): void {
     const patch = snapshotBuilder.build({ messages: page.messages, sessionNotices: page.sessionNotices, hasMore: page.hasMore, answeredPlanMessageIds: page.answeredPlanMessageIds, turnFileEvidence: page.turnFileEvidence });
     this.deps.setState((state: ThreadHydratorWriteState) => {
       const current = getThreadRecord(state.records, threadId);
@@ -1518,6 +1578,7 @@ export class ThreadHydrator {
       const conversation = mergeFetchedServerWindow(current, fetchedConversation, {
         snapshot: context,
         preferResidentNotices: hasNoticeCollectionChanged(current, context.noticeState),
+        residentRowsBelowUnread,
       });
       const { settledFileEffectSummary, ...conversationFields } = conversation;
       return {
@@ -1681,12 +1742,12 @@ export class ThreadHydrator {
    * covers them. The read is one page; when it does not reach the resident rows, they leave and
    * reload on scroll.
    */
-  private async extendTailOverResidentRows(threadId: string, tail: ConversationPage): Promise<ConversationPage> {
+  private async extendTailOverResidentRows(threadId: string, tail: ConversationPage): Promise<CoveringPage> {
     const tailOldest = tail.messages[0]?.sequence;
-    if (!tail.hasMore || tailOldest === undefined) return tail;
+    if (!tail.hasMore || tailOldest === undefined) return { page: tail, residentRowsBelowUnread: false };
     const record = getThreadRecord(this.deps.getState().records, threadId);
     const hasResidentRowsBelow = record.messages.some(({ serverSequence }) => serverSequence !== undefined && serverSequence < tailOldest);
-    if (!hasResidentRowsBelow) return tail;
+    if (!hasResidentRowsBelow) return { page: tail, residentRowsBelowUnread: false };
     const request = {
       threadId,
       cursor: { version: 1 as const, beforeSequence: tailOldest },
@@ -1696,19 +1757,10 @@ export class ThreadHydrator {
       limit: HISTORY_PREFETCH_SIZE,
       maxBytes: CONVERSATION_OLDER_PAGE_MAX_BYTES,
     };
-    let older: ConversationOlderPage;
-    try {
-      older = await this.transport().loadOlderConversationPage(request);
-    } catch {
-      // Without the read the tail cannot vouch for the rows below it, so they leave and reload on scroll.
-      return tail;
-    }
-    const identity = older.identity;
-    const matches = identity.threadId === request.threadId
-      && identity.cursor.beforeSequence === request.cursor.beforeSequence
-      && identity.generation === request.generation
-      && identity.conversationRevision === request.conversationRevision;
-    return matches ? joinOlderPage(older, tail) : tail;
+    const older = await this.transport().loadOlderConversationPage(request).catch(() => null);
+    if (older && olderPageAnswers(older, request)) return { page: joinOlderPage(older, tail), residentRowsBelowUnread: false };
+    console.debug("[threadHydration] Read below the refreshed tail of thread %s failed; resident rows below it stay unless the tail reaches them.", threadId);
+    return { page: tail, residentRowsBelowUnread: true };
   }
 
   /** Cache the older history window without attaching it to live React state. */
