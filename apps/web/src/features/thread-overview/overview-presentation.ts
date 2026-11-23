@@ -66,13 +66,14 @@ export interface CanvasOverview {
 
 /**
  * Measures the chat canvas element and resolves its Overview, so the canvas padding, the header
- * button, and the card all read one width.
+ * button, and the card all read one width. A width that crosses the dock threshold commits in the
+ * frame it is laid out, so no frame paints a docked card's reserve in a canvas too narrow for it.
  */
 export function useCanvasOverview(
   canvasRef: RefObject<HTMLElement | null>,
   scope: OverviewScope | null,
   observeKey?: unknown,
 ): CanvasOverview {
-  const canvasWidth = useElementWidth(canvasRef, observeKey);
+  const canvasWidth = useElementWidth(canvasRef, observeKey, OVERVIEW_DOCK_MIN_CANVAS);
   return { canvasWidth, overview: useOverviewPresentation(scope, canvasWidth) };
 }
