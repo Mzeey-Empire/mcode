@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { LexicalEditor } from "lexical";
 import type { MessageMention } from "@mcode/contracts/models/mention";
@@ -23,12 +24,19 @@ const comment: SelectedTextComment = {
   mentions: [],
 };
 
-function renderSavedEditor() {
+/** Renders, then lets the note editor report its initial content inside act(); it does so a tick after mount. */
+async function renderSettled(ui: ReactElement): Promise<ReturnType<typeof render>> {
+  const view = render(ui);
+  await act(async () => {});
+  return view;
+}
+
+async function renderSavedEditor() {
   const onSave = vi.fn();
   const onDelete = vi.fn();
   const onClose = vi.fn();
   const onAnnouncement = vi.fn();
-  const view = render(
+  const view = await renderSettled(
     <SelectedTextCommentEditor
       source={source}
       comment={comment}
@@ -41,12 +49,12 @@ function renderSavedEditor() {
   return { ...view, onSave, onDelete, onClose, onAnnouncement };
 }
 
-function renderNewEditor() {
+async function renderNewEditor() {
   const editorRef: { current: LexicalEditor | null } = { current: null };
   const onSave = vi.fn();
   const onClose = vi.fn();
   const onAnnouncement = vi.fn();
-  const view = render(
+  const view = await renderSettled(
     <SelectedTextCommentEditor
       source={source}
       editorRef={editorRef}
@@ -65,8 +73,8 @@ function focusOrder(container: HTMLElement): string[] {
 }
 
 describe("SelectedTextCommentEditor", () => {
-  it("saves an existing comment without rendering the selected text in the editor", () => {
-    const { container, onAnnouncement, onClose, onSave } = renderSavedEditor();
+  it("saves an existing comment without rendering the selected text in the editor", async () => {
+    const { container, onAnnouncement, onClose, onSave } = await renderSavedEditor();
 
     expect(focusOrder(container)).toEqual([
       "Comment note",
@@ -84,8 +92,8 @@ describe("SelectedTextCommentEditor", () => {
     expect(onClose).toHaveBeenCalledWith();
   });
 
-  it("limits the note to the shell's available height so its own scrollbar remains usable", () => {
-    render(
+  it("limits the note to the shell's available height so its own scrollbar remains usable", async () => {
+    await renderSettled(
       <SelectedTextCommentEditor
         source={source}
         maxHeight={46}
@@ -103,7 +111,7 @@ describe("SelectedTextCommentEditor", () => {
   });
 
   it("saves a new multiline comment with its typed slash and mention metadata", async () => {
-    const { container, editorRef, onAnnouncement, onClose, onSave } = renderNewEditor();
+    const { container, editorRef, onAnnouncement, onClose, onSave } = await renderNewEditor();
     const mentions: MessageMention[] = [
       {
         id: "command:skill:review",
@@ -148,14 +156,14 @@ describe("SelectedTextCommentEditor", () => {
       kind: "file",
       label: "src/app.ts",
       path: "src/app.ts",
-      range: { start: 0, end: 10 },
+      range: { start: 0, end: 11 },
     }];
-    render(
+    await renderSettled(
       <SelectedTextCommentEditor
         source={source}
         draft={{
           source,
-          note: "Restored unsaved note",
+          note: "@src/app.ts restored unsaved note",
           mentions: restoredMentions,
           escapeWarned: false,
           outsideWarned: true,
@@ -175,13 +183,13 @@ describe("SelectedTextCommentEditor", () => {
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       displayNumber: 3,
-      note: "Restored unsaved note",
+      note: "@src/app.ts restored unsaved note",
       mentions: restoredMentions,
     }));
   });
 
   it("requires independent dirty confirmations and resets them when the draft changes", async () => {
-    const { editorRef, onAnnouncement, onClose } = renderNewEditor();
+    const { editorRef, onAnnouncement, onClose } = await renderNewEditor();
     await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
     await act(async () => {
       writeComposerContent(editorRef.current!, "First draft");
@@ -207,7 +215,7 @@ describe("SelectedTextCommentEditor", () => {
   });
 
   it("closes a dirty editor from its close button without arming discard confirmation", async () => {
-    const { editorRef, onAnnouncement, onClose } = renderNewEditor();
+    const { editorRef, onAnnouncement, onClose } = await renderNewEditor();
     await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
     await act(async () => {
       writeComposerContent(editorRef.current!, "Dirty note");
@@ -220,8 +228,8 @@ describe("SelectedTextCommentEditor", () => {
     expect(screen.getByRole("dialog", { name: "Comment on selected text" })).not.toHaveAttribute("data-shaking");
   });
 
-  it("deletes a saved comment with its required announcement", () => {
-    const { onAnnouncement, onClose, onDelete, onSave } = renderSavedEditor();
+  it("deletes a saved comment with its required announcement", async () => {
+    const { onAnnouncement, onClose, onDelete, onSave } = await renderSavedEditor();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete comment" }));
 
