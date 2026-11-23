@@ -1,6 +1,6 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { createRef } from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRoster, SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
 import { pushEmitter } from "@/transport";
@@ -129,7 +129,7 @@ describe("SubagentList in the Subagents panel", () => {
     transport.stopCanonicalSubagent.mockResolvedValue({ childThreadId: "child-worker", status: "interrupted" });
     render(<SubagentsPanel threadId="parent" />);
     const stop = await screen.findByRole("button", { name: "Stop worker" });
-    stop.focus();
+    act(() => stop.focus());
 
     fireEvent.click(stop);
 
@@ -157,17 +157,24 @@ describe("SubagentList in the Subagents panel", () => {
 });
 
 describe("SubagentList live time", () => {
-  afterEach(() => { vi.useRealTimers(); });
+  afterEach(() => {
+    // Unmount before resetting state so the resets do not re-render a live tree outside act().
+    cleanup();
+    vi.useRealTimers();
+  });
 
-  function renderList(entries: SubagentRosterEntry[]) {
-    return render(<SubagentList roster={roster(entries)} error={false} viewportRef={createRef()}
+  /** Renders, then lets the scroll area's post-mount measurement settle inside act(). */
+  async function renderList(entries: SubagentRosterEntry[]) {
+    const view = render(<SubagentList roster={roster(entries)} error={false} viewportRef={createRef()}
       onRetry={vi.fn()} onSelect={vi.fn()} onStop={vi.fn()} />);
+    await act(async () => {});
+    return view;
   }
 
-  it("ticks a running row every second and shows a finished row's fixed duration", () => {
+  it("ticks a running row every second and shows a finished row's fixed duration", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(START + 48_000);
-    renderList([entry("live"), entry("finished", { status: "finished", endedAt: at(3780) })]);
+    await renderList([entry("live"), entry("finished", { status: "finished", endedAt: at(3780) })]);
 
     expect(screen.getByRole("button", { name: "Open live details, Running" })).toHaveTextContent("48s");
     expect(screen.getByRole("button", { name: "Open finished details, Finished" })).toHaveTextContent("1h 3m");
@@ -175,26 +182,26 @@ describe("SubagentList live time", () => {
     expect(screen.getByRole("button", { name: "Open live details, Running" })).toHaveTextContent("1m 12s");
   });
 
-  it("shows no duration for a finished row without an end time while another row ticks", () => {
+  it("shows no duration for a finished row without an end time while another row ticks", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(START + 48_000);
-    renderList([entry("live"), entry("stopped", { status: "stopped", endedAt: null })]);
+    await renderList([entry("live"), entry("stopped", { status: "stopped", endedAt: null })]);
 
     act(() => { vi.advanceTimersByTime(5_000); });
 
     expect(screen.getByRole("button", { name: "Open stopped details, Stopped" })).toHaveTextContent(/^stoppedStopped$/);
   });
 
-  it("counts one step in the singular and more in the plural", () => {
-    renderList([entry("one", { stepCount: 1 }), entry("three", { stepCount: 3 })]);
+  it("counts one step in the singular and more in the plural", async () => {
+    await renderList([entry("one", { stepCount: 1 }), entry("three", { stepCount: 3 })]);
 
     expect(screen.getByRole("button", { name: "Open one details, Running" })).toHaveTextContent(/1 step(?!s)/);
     expect(screen.getByRole("button", { name: "Open three details, Running" })).toHaveTextContent("3 steps");
   });
 
-  it("schedules no timer when nothing is running", () => {
+  it("schedules no timer when nothing is running", async () => {
     const interval = vi.spyOn(window, "setInterval");
-    renderList([entry("finished", { status: "failed", endedAt: at(9) })]);
+    await renderList([entry("finished", { status: "failed", endedAt: at(9) })]);
 
     expect(screen.getByRole("button", { name: "Open finished details, Failed" })).toHaveTextContent("Failed9s");
     expect(interval).not.toHaveBeenCalled();
