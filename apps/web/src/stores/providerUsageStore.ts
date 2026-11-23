@@ -25,6 +25,8 @@ interface UsageRequest {
 
 const inFlight = new Map<string, UsageRequest>();
 const watchers = new Map<string, number>();
+/** Providers whose last request threw in the client, so the timer retries them unlike server-reported states. */
+const clientFailed = new Set<string>();
 let ticker: ReturnType<typeof setInterval> | undefined;
 let tickerStarted = false;
 
@@ -69,6 +71,7 @@ export function observeQuotaUpdate(event: Extract<AgentEvent, { type: "quotaUpda
     });
     return;
   }
+  if (event.billingMode !== undefined) keepBillingMode(providerId, event.billingMode);
   if (!pending) void refresh(providerId, 0);
 }
 
@@ -76,6 +79,7 @@ export function observeQuotaUpdate(event: Extract<AgentEvent, { type: "quotaUpda
 export function resetProviderUsageForTests(): void {
   inFlight.clear();
   watchers.clear();
+  clientFailed.clear();
   stopTicker();
   useProviderUsageStore.setState({ byProvider: {} });
 }
@@ -134,7 +138,7 @@ function tick(): void {
     // Poll only quota there is to show: a Codex cache miss can start a temporary `codex app-server`
     // to read limits, which a timer would repeat all day for accounts without them.
     const status = byProvider[providerId]?.usageStatus;
-    if (status === "ready" || status === "stale") void refresh(providerId, MIN_REFRESH_AGE_MS);
+    if (status === "ready" || status === "stale" || clientFailed.has(providerId)) void refresh(providerId, MIN_REFRESH_AGE_MS);
   }
 }
 
@@ -150,9 +154,11 @@ async function refresh(providerId: string, maxAgeMs: number): Promise<void> {
   const request: UsageRequest = { superseded: false };
   inFlight.set(providerId, request);
   let incoming: ProviderQuotaUsage;
+  let failed = false;
   try {
     incoming = toProviderQuotaUsage(await getTransport().getProviderUsage(providerId));
   } catch {
+    failed = true;
     incoming = failedUsage(providerId, Date.now());
   }
   if (inFlight.get(providerId) !== request) return;
@@ -161,7 +167,17 @@ async function refresh(providerId: string, maxAgeMs: number): Promise<void> {
     void refresh(providerId, 0);
     return;
   }
+  if (failed) clientFailed.add(providerId);
+  else clientFailed.delete(providerId);
   apply(providerId, incoming);
+}
+
+/** Records the billing mode without stamps, so it neither looks fresh nor blocks the next refresh. */
+function keepBillingMode(providerId: string, billingMode: NonNullable<ProviderQuotaUsage["billingMode"]>): void {
+  useProviderUsageStore.setState((state) => {
+    const current = state.byProvider[providerId] ?? { providerId, quotaCategories: [] };
+    return { byProvider: { ...state.byProvider, [providerId]: { ...current, billingMode } } };
+  });
 }
 
 function apply(providerId: string, incoming: ProviderQuotaUsage): void {

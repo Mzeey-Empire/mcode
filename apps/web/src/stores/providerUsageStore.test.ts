@@ -177,11 +177,11 @@ describe("superseded usage requests", () => {
 });
 
 describe("usage refresh timer", () => {
-  it("does not tick a provider without quota categories, but ticks one with them", async () => {
+  it("does not tick a provider the server reported without quota, but ticks one with quota", async () => {
     vi.useFakeTimers({ now: Date.parse("2026-11-23T10:00:00.000Z") });
     getProviderUsage.mockImplementation(async (providerId: string) => {
       if (providerId === "codex") return { providerId, quotaCategories: [], usageStatus: "ready-empty", fetchedAt: new Date().toISOString() };
-      if (providerId === "cursor") throw new Error("offline");
+      if (providerId === "cursor") return { providerId, quotaCategories: [], usageStatus: "unavailable", failedAt: new Date().toISOString() };
       return { providerId, quotaCategories: [fiveHour(30)], usageStatus: "ready", fetchedAt: new Date().toISOString() };
     });
     renderHook(() => {
@@ -195,6 +195,25 @@ describe("usage refresh timer", () => {
     expect(callsFor("codex")).toBe(1);
     expect(callsFor("cursor")).toBe(1);
     expect(callsFor("claude")).toBe(4);
+  });
+
+  it("retries a request that failed on the client at the next tick", async () => {
+    vi.useFakeTimers({ now: Date.parse("2026-11-23T10:00:00.000Z") });
+    getProviderUsage.mockRejectedValueOnce(new Error("offline")).mockImplementation(async (providerId: string) => ({
+      providerId,
+      quotaCategories: [fiveHour(30)],
+      usageStatus: "ready",
+      fetchedAt: new Date().toISOString(),
+    }));
+    const { result } = renderHook(() => useProviderUsage("claude"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(result.current?.usageStatus).toBe("unavailable");
+
+    await act(async () => vi.advanceTimersByTimeAsync(5 * 60_000));
+
+    expect(getProviderUsage).toHaveBeenCalledTimes(2);
+    expect(usedPercentOf(result.current)).toBe(30);
+    expect(result.current?.usageStatus).toBe("ready");
   });
 
   it("refreshes on every tick when each answer is stamped after its request was sent", async () => {

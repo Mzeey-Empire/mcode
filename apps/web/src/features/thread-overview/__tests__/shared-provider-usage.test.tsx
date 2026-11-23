@@ -204,6 +204,17 @@ describe("shared provider usage across threads", () => {
     expect(overviewOf(THREAD_B.id).queryByText("Session cost")).not.toBeInTheDocument();
   });
 
+  it("shows a Claude turn end's session cost when its refresh fails before any succeeds", async () => {
+    getProviderUsage.mockRejectedValue(new Error("offline"));
+    claudeTurnEnd(THREAD_A.id, { billingMode: "api_key", sessionCostUsd: 0.42 });
+    await flush();
+
+    render(<OverviewUsage thread={THREAD_A} />);
+    await flush();
+
+    expect(overviewOf(THREAD_A.id).getByText("$0.42")).toBeInTheDocument();
+  });
+
   it("keeps quota on screen while a Claude turn end refreshes it", async () => {
     seedProviderUsageForTests({ providerId: "claude", quotaCategories: [fiveHour(12)], usageStatus: "ready", fetchedAt: new Date().toISOString() });
     const pending = deferred<ProviderUsageInfo>();
