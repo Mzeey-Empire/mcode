@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createMockThreadPullRequest } from "@mcode/contracts/testing";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,6 +60,7 @@ describe("ThreadOverview branch create and commit", () => {
     const thread = branchlessThread({ branch: "release", base_branch: "release" });
     mockWorkspaceState.threads = [thread];
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     await user.click(screen.getByTestId("thread-overview-local"));
     await user.click(await screen.findByRole("button", { name: "More git actions" }));
@@ -75,6 +76,7 @@ describe("ThreadOverview branch create and commit", () => {
     const thread = branchlessThread({ branch: "release", base_branch: "release" });
     mockWorkspaceState.threads = [thread];
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     await user.click(screen.getByTestId("thread-overview-local"));
     expect(await screen.findByTestId("thread-overview-local-branch")).toHaveTextContent("detached from release");
@@ -105,8 +107,9 @@ describe("ThreadOverview branch create and commit", () => {
     expect(screen.queryByTestId("create-pr-dialog")).not.toBeInTheDocument();
   });
 
-  it("states where a detached worktree's HEAD sits before offering to create a branch", () => {
+  it("states where a detached worktree's HEAD sits before offering to create a branch", async () => {
     render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     const branchRow = screen.getByTestId("workspace-menu-branch");
     const createRow = screen.getByTestId("thread-overview-create-branch");
@@ -118,6 +121,7 @@ describe("ThreadOverview branch create and commit", () => {
   it("leaves branch creation to the card row when the picker opens on a detached worktree", async () => {
     const user = userEvent.setup();
     render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+    await act(async () => {});
     await user.click(screen.getByTestId("workspace-menu-branch"));
 
     const picker = await screen.findByTestId("thread-overview-branch-popover");
@@ -128,6 +132,7 @@ describe("ThreadOverview branch create and commit", () => {
   it("lists a detached worktree's checkout under the card's label, not as a HEAD branch", async () => {
     const user = userEvent.setup();
     render(<ThreadOverview thread={branchlessThread({ head_sha: "3f9a1c2" })} threadPaneWidth={1400} />);
+    await act(async () => {});
     await user.click(screen.getByTestId("workspace-menu-branch"));
 
     const picker = await screen.findByTestId("thread-overview-branch-popover");
@@ -152,6 +157,7 @@ describe("ThreadOverview branch create and commit", () => {
       other: { aggregate: "no_checks", runs: [], fetchedAt: 2 },
     };
     render(<ThreadOverview thread={mockWorkspaceState.threads[0]} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     fireEvent.click(screen.getByTestId("thread-overview-create-branch"));
     fireEvent.change(screen.getByLabelText("Branch name"), {
@@ -178,6 +184,7 @@ describe("ThreadOverview branch create and commit", () => {
   it("keeps the branch creation dialog open when branch creation fails", async () => {
     vi.mocked(mockTransport.createBranch).mockRejectedValueOnce(new Error("branch exists"));
     render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     fireEvent.click(screen.getByTestId("thread-overview-create-branch"));
     fireEvent.change(screen.getByLabelText("Branch name"), {

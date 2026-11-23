@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTransport } from "@/__tests__/mocks/transport";
@@ -57,6 +57,7 @@ describe("ThreadOverview docking", () => {
   it("docks the card open beside a canvas with room, and closes it from the button", async () => {
     const user = userEvent.setup();
     render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
@@ -66,8 +67,9 @@ describe("ThreadOverview docking", () => {
     expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
   });
 
-  it("docks only from the minimum canvas width", () => {
+  it("docks only from the minimum canvas width", async () => {
     const overview = render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={896} />);
+    await act(async () => {});
     expect(screen.getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
 
     overview.rerender(<ThreadOverview thread={branchlessThread()} threadPaneWidth={895} />);
@@ -75,9 +77,10 @@ describe("ThreadOverview docking", () => {
     expect(screen.getByTestId("header-overview-toggle")).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("gives way to the right panel and docks again when it closes", () => {
+  it("gives way to the right panel and docks again when it closes", async () => {
     const thread = branchlessThread();
     const overview = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     mockGetRightPanelVisible.mockReturnValue(true);
     overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={1000} />);
@@ -86,6 +89,7 @@ describe("ThreadOverview docking", () => {
 
     mockGetRightPanelVisible.mockReturnValue(false);
     overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
     expect(screen.getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
   });
 
@@ -93,12 +97,14 @@ describe("ThreadOverview docking", () => {
     const user = userEvent.setup();
     const thread = branchlessThread();
     const overview = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
     await user.click(screen.getByTestId("header-overview-toggle"));
 
     mockGetRightPanelVisible.mockReturnValue(true);
     overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={1000} />);
     mockGetRightPanelVisible.mockReturnValue(false);
     overview.rerender(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument();
   });
@@ -106,6 +112,7 @@ describe("ThreadOverview docking", () => {
   it("shows a requested Overview as an overlay where the card cannot dock", async () => {
     useOverviewStore.getState().requestOpen("thread-1");
     render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={800} />);
+    await act(async () => {});
 
     expect(await screen.findByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "overlay");
     expect(useOverviewStore.getState().requestedSubject).toBeNull();

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { LexicalEditor } from "lexical";
 import { describe, expect, it, vi } from "vitest";
 import { writeComposerContent } from "@/features/conversation/composer/draft/composer-editor-content";
@@ -24,11 +24,11 @@ describe("ComposerEditor", () => {
       />,
     );
 
-    await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
     await act(async () => {
       writeComposerContent(editorRef.current!, "First line\nSecond line");
     });
-    await vi.waitFor(() => expect(onChange).toHaveBeenLastCalledWith("First line\nSecond line", []));
+    await waitFor(() => expect(onChange).toHaveBeenLastCalledWith("First line\nSecond line", []));
 
     const editor = screen.getByRole("textbox", { name: "Comment note" });
     fireEvent.keyDown(editor, { key: "Enter" });
@@ -58,7 +58,7 @@ describe("ComposerEditor", () => {
       />,
     );
 
-    await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+    await waitFor(() => expect(editorRef.current).not.toBeNull());
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Comment note" }), {
       key: "Enter",
       ctrlKey: true,
@@ -109,7 +109,7 @@ describe("ComposerEditor", () => {
 
     it("returns focus to the editor when it is enabled again, as after a new thread starts", async () => {
       const { editorRef, setDisabled } = renderComposer(false);
-      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      await waitFor(() => expect(editorRef.current).not.toBeNull());
       const editor = screen.getByRole("textbox", { name: "Composer" });
       act(() => editor.focus());
 
@@ -118,24 +118,24 @@ describe("ComposerEditor", () => {
       expect(document.activeElement).toBe(document.body);
       setDisabled(false);
 
-      await vi.waitFor(() => expect(document.activeElement).toBe(editor));
+      await waitFor(() => expect(document.activeElement).toBe(editor));
     });
 
     it("gives focus to the composer that replaces a focused one once it is enabled", async () => {
       const { editorRef, setDisabled, replace } = renderComposer(false);
-      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      await waitFor(() => expect(editorRef.current).not.toBeNull());
       act(() => screen.getByRole("textbox", { name: "Composer" }).focus());
 
       replace(true);
       expect(document.activeElement).toBe(document.body);
       setDisabled(false);
 
-      await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Composer" })));
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Composer" })));
     });
 
     it("stays unfocused when the user pressed elsewhere while the editor was disabled", async () => {
       const { editorRef, setDisabled } = renderComposer(false);
-      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      await waitFor(() => expect(editorRef.current).not.toBeNull());
       act(() => screen.getByRole("textbox", { name: "Composer" }).focus());
 
       setDisabled(true);
@@ -149,7 +149,7 @@ describe("ComposerEditor", () => {
 
     it("leaves focus where the user moved it while the editor was disabled", async () => {
       const { editorRef, setDisabled } = renderComposer(false);
-      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      await waitFor(() => expect(editorRef.current).not.toBeNull());
       act(() => screen.getByRole("textbox", { name: "Composer" }).focus());
 
       setDisabled(true);
@@ -164,7 +164,7 @@ describe("ComposerEditor", () => {
 
     it("does not take focus on enable when the editor did not have it", async () => {
       const { editorRef, setDisabled } = renderComposer(true);
-      await vi.waitFor(() => expect(editorRef.current).not.toBeNull());
+      await waitFor(() => expect(editorRef.current).not.toBeNull());
 
       setDisabled(false);
 
