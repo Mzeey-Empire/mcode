@@ -1,5 +1,5 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentTurn } from "@mcode/contracts/compat/agent-model";
 import type { Message } from "@mcode/contracts/models/message";
@@ -73,7 +73,10 @@ function timelineOrder(items: ReturnType<typeof useMessageListItems>["items"]) {
   });
 }
 
-afterEach(() => resetThreadStoreForTests());
+afterEach(() => {
+  cleanup();
+  resetThreadStoreForTests();
+});
 
 describe("one lifecycle for the current turn", () => {
   it("closes a tool-free provider continuation with its wall time and zero steps", () => {
