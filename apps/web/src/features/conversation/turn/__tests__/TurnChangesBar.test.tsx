@@ -1,5 +1,5 @@
 import { createMockThread } from "@mcode/contracts/testing";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DiffStats } from "@mcode/contracts/models/diff-stats";
@@ -128,7 +128,7 @@ describe("TurnChangesBar", () => {
     useThreadStore.setState({ runningThreadIds: new Set() });
   });
 
-  it("lists recorded effects by folder with kinds, counts, and later edits", () => {
+  it("lists recorded effects by folder with kinds, counts, and later edits", async () => {
     seedSnapshots([
       withEffects([
         effect("apps/web/src/chat/Bar.tsx", { additions: 12, deletions: 3 }),
@@ -141,6 +141,8 @@ describe("TurnChangesBar", () => {
     ]);
 
     renderBar();
+    // The bar loads snapshots on mount; let that read land inside act().
+    await act(async () => {});
 
     expect(header()).toHaveTextContent("Changed 4 files+45−45");
     expect(transport.getSnapshotDiffStats).not.toHaveBeenCalled();
@@ -152,7 +154,7 @@ describe("TurnChangesBar", () => {
     expect(row("apps/web/src/old.ts")).toHaveTextContent("old.tsdeleted−40");
   });
 
-  it("shows Binary in the count lane and blank lanes for uncounted files", () => {
+  it("shows Binary in the count lane and blank lanes for uncounted files", async () => {
     seedSnapshots([
       withEffects([
         effect("assets/menu-preview.png", { kind: "added", binary: true, additions: null, deletions: null }),
@@ -161,15 +163,19 @@ describe("TurnChangesBar", () => {
     ]);
 
     renderBar();
+    // The bar loads snapshots on mount; let that read land inside act().
+    await act(async () => {});
 
     expect(row("assets/menu-preview.png")).toHaveTextContent(/^menu-preview\.pngnewBinary$/);
     expect(row("assets/notes.md")).toHaveTextContent(/^notes\.md$/);
   });
 
-  it("starts an older turn collapsed to one summary row", () => {
+  it("starts an older turn collapsed to one summary row", async () => {
     seedSnapshots([withEffects([effect("src/a.ts", { additions: 5, deletions: 0 })])]);
 
     renderBar({ isLatestTurn: false });
+    // The bar loads snapshots on mount; let that read land inside act().
+    await act(async () => {});
 
     expect(screen.getByRole("button", { expanded: false, name: /^Changed/ })).toHaveTextContent("Changed 1 file+5");
     expect(screen.queryByRole("button", { name: "Review src/a.ts" })).not.toBeInTheDocument();
@@ -197,10 +203,12 @@ describe("TurnChangesBar", () => {
     expect(useDiffStore.getState().selectedTurnByThread["thread-1"]).toBe("msg-1");
   });
 
-  it("hides the collapse-all control when the list has no folders", () => {
+  it("hides the collapse-all control when the list has no folders", async () => {
     seedSnapshots([withEffects([effect("src/a.ts"), effect("src/b.ts")])]);
 
     renderBar();
+    // The bar loads snapshots on mount; let that read land inside act().
+    await act(async () => {});
 
     expect(screen.queryByRole("button", { name: /all folders/ })).not.toBeInTheDocument();
   });
