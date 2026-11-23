@@ -23,6 +23,8 @@ Use one persistent Playwright connection to an agent-owned Electron process. Lau
    bun .agents/skills/electorn-live-testing/scripts/start-electron.mjs
    ```
 
+   This Electron window does not use the server in `.dev/ports.json`. Its desktop process starts a private server on a port from 19500 to 19600, with its own database under the session's `.dev` runtime folder, and every load and reload reaches that server. Data you create through the `ports.json` API does not appear in the window. Read the window's server with `await page.evaluate(async () => (await window.desktopBridge.getServerUrl()).url)`, and never print the token in that URL.
+
 5. Add the absolute `.dev/playwright-scratch/node_modules` directory with `mcp__node_repl__js_add_node_module_dir`.
 6. Import Playwright and the session helper in `mcp__node_repl__js`. Use top-level `var` names because the kernel preserves bindings:
 

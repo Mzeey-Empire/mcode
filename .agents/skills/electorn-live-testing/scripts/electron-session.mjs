@@ -23,11 +23,18 @@ export async function connectElectronSession({
   const record = readSessionRecord(sessionFile, root);
   const ports = readRuntimePorts(root, record.appUrlPrefix);
   const connection = await connectToElectron(playwright, record, ports);
-  if (!allowViewportEmulation) {
-    for (const page of connection.context.pages()) blockViewportEmulation(page);
-    connection.context.on("page", blockViewportEmulation);
+  let page;
+  try {
+    if (!allowViewportEmulation) {
+      for (const candidate of connection.context.pages()) blockViewportEmulation(candidate);
+      connection.context.on("page", blockViewportEmulation);
+    }
+    page = await waitForAppPage(connection.context, record.appUrlPrefix);
+  } catch (error) {
+    // An open CDP connection keeps the calling step script alive after the error.
+    await connection.browser.close();
+    throw error;
   }
-  const page = await waitForAppPage(connection.context, record.appUrlPrefix);
   return {
     appUrl: ports?.appUrl ?? null,
     ...connection,
@@ -100,13 +107,18 @@ async function connectToElectron(playwright, record, ports) {
   }
 
   if (ports && record.appUrlPrefix.startsWith(ports.appUrl)) {
-    await context.addCookies([
-      {
-        name: ports.seedLogin.cookieName,
-        value: ports.seedLogin.token,
-        url: ports.appUrl,
-      },
-    ]);
+    try {
+      await context.addCookies([
+        {
+          name: ports.seedLogin.cookieName,
+          value: ports.seedLogin.token,
+          url: ports.appUrl,
+        },
+      ]);
+    } catch (error) {
+      await browser.close();
+      throw error;
+    }
   }
   return {
     browser,

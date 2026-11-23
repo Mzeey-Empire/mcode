@@ -129,6 +129,27 @@ test("connects to a signed-in worktree app page without reloading it", async () 
   expect(fixture.reloadCount()).toBe(0);
 });
 
+test("closes the CDP connection when connecting fails after it opened", async () => {
+  const fixture = createWorktreeAppFixture();
+  let closeCount = 0;
+  const context = {
+    addCookies: async () => { throw new Error("Target closed"); },
+    on: () => {},
+    pages: () => [fixture.page],
+  };
+  const playwright = {
+    chromium: {
+      connectOverCDP: async () => ({
+        contexts: () => [context],
+        close: async () => { closeCount += 1; },
+      }),
+    },
+  };
+
+  await expect(connectElectronSession({ ...fixture.options, playwright })).rejects.toThrow("Target closed");
+  expect(closeCount).toBe(1);
+});
+
 test("reacquires the replacement app page after an aborted reload", async () => {
   const originalPage = {
     isClosed: () => true,
