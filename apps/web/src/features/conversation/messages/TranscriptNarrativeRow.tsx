@@ -107,7 +107,8 @@ export function TranscriptNarrativeRow({ row, threadId, expanded, callExpanded =
       <>
         {loader}
         {/* An open running shell skips its exit collapse, because its completed row takes over the same open output. */}
-        <AnimatedCollapsible open={row.transition !== "exiting" || callExpanded} className={row.transition === "entering" ? "starting:grid-rows-[0fr]" : undefined}>
+        {/* A running row fades in at full height: growing it open would slide over the row below, whose position the viewport corrects a frame late. */}
+        <AnimatedCollapsible open={row.transition !== "exiting" || callExpanded} className={row.transition === "entering" ? "transition-[grid-template-rows,opacity] starting:opacity-0" : undefined}>
           <ActiveToolRow toolCall={row.item.toolCall} expansion={callExpansion} />
         </AnimatedCollapsible>
       </>
