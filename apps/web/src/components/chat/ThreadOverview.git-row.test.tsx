@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
-import { createMockThreadPullRequest } from "@mcode/contracts/testing";
+import { createMockGitReviewState, createMockThreadPullRequest } from "@mcode/contracts/testing";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,20 +56,18 @@ vi.mock("./CreatePrDialog", async () =>
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useDiffStore } from "@/stores/diffStore";
+import { threadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import type { Thread } from "@/transport";
 import { mockWorkspaceState } from "./__tests__/thread-overview-mocks";
 import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-overview-harness";
 import { ThreadOverview } from "./ThreadOverview";
 
 function reviewUncommitted(count: number) {
-  vi.mocked(mockTransport.getReviewState).mockResolvedValue({
-    isGitRepo: true,
-    head: "abc123",
+  vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({
     branch: "feat/x",
+    published: { ahead: 0 },
     uncommitted: { staged: 0, unstaged: count, untracked: 0 },
-    commitsAhead: null,
-    branchDefault: { unavailable: "no-base" },
-  });
+  }));
 }
 
 function namedThread(overrides: Partial<Thread> = {}): Thread {
@@ -178,5 +176,118 @@ describe("ThreadOverview git row", () => {
 
     await user.unhover(screen.getByTestId("thread-overview-git"));
     expect(await screen.findByRole("button", { name: "Create PR…" })).toBeInTheDocument();
+  });
+  describe("Push", () => {
+    function reviewBranch(overrides: Parameters<typeof createMockGitReviewState>[0]) {
+      vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({ branch: "feat/x", ...overrides }));
+    }
+
+    it("leads a clean branch with unpushed commits with Push and offers Create PR…", async () => {
+      const user = userEvent.setup();
+      reviewBranch({ published: { ahead: 2 } });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+
+      expect(await screen.findByTestId("workspace-menu-push")).toHaveTextContent("Push");
+      await user.click(screen.getByRole("button", { name: "More git actions" }));
+      expect(await screen.findByRole("menuitem", { name: "Create PR…" })).toBeInTheDocument();
+    });
+
+    it("counts commits ahead of base as unpushed on an unpublished branch", async () => {
+      reviewBranch({ commitsAhead: { count: 1, base: "main" } });
+      renderOverview(namedThread());
+      expect(await screen.findByRole("button", { name: "Push" })).toBeInTheDocument();
+    });
+
+    it("treats an uncountable base as unknown and hides the row on a never-pushed branch", async () => {
+      reviewBranch({ published: null, commitsAhead: null });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+      await settleReview();
+      expect(screen.queryByTestId("thread-overview-git")).not.toBeInTheDocument();
+    });
+
+    it("re-reads a push made outside the row when the card reopens", async () => {
+      reviewBranch({ published: { ahead: 1 } });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+      expect(await screen.findByTestId("workspace-menu-push")).toBeInTheDocument();
+
+      const key = threadOverviewKey("thread-1");
+      act(() => useOverviewStore.getState().toggle(key, true));
+      expect(screen.queryByTestId("thread-overview-git")).not.toBeInTheDocument();
+      reviewBranch({ published: { ahead: 0 } });
+      act(() => useOverviewStore.getState().toggle(key, true));
+
+      expect(await screen.findByRole("button", { name: "Create PR…" })).toBeInTheDocument();
+      expect(screen.queryByTestId("workspace-menu-push")).not.toBeInTheDocument();
+    });
+
+    it("lists Push after Commit and push… on a dirty branch with unpushed commits", async () => {
+      const user = userEvent.setup();
+      reviewBranch({ published: { ahead: 1 }, uncommitted: { staged: 0, unstaged: 2, untracked: 0 } });
+      renderOverview(namedThread());
+
+      expect(await screen.findByTestId("workspace-menu-commit")).toHaveTextContent("Commit…");
+      await user.click(screen.getByRole("button", { name: "More git actions" }));
+      const menu = await screen.findByRole("menu");
+      expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Commit and push…", "Push"]);
+    });
+
+    it.each([
+      ["dirty", 2],
+      ["clean", 0],
+    ])("offers no Push on a %s branch that is up to date on origin", async (_state, unstaged) => {
+      const user = userEvent.setup();
+      reviewBranch({ published: { ahead: 0 }, uncommitted: { staged: 0, unstaged, untracked: 0 } });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      renderOverview(namedThread());
+      await settleReview();
+
+      expect(screen.queryByTestId("workspace-menu-push")).not.toBeInTheDocument();
+      const menuButton = screen.queryByRole("button", { name: "More git actions" });
+      if (menuButton) {
+        await user.click(menuButton);
+        await screen.findByRole("menu");
+        expect(screen.queryByRole("menuitem", { name: "Push" })).not.toBeInTheDocument();
+      }
+    });
+
+    it("pushes, shows progress, then moves to Create PR… once the push lands", async () => {
+      const user = userEvent.setup();
+      let land!: (value: { success: boolean }) => void;
+      vi.mocked(mockTransport.push).mockReturnValueOnce(new Promise((resolve) => { land = resolve; }));
+      reviewBranch({ published: { ahead: 1 } });
+      vi.mocked(useHasCommitsAhead).mockReturnValue(true);
+      const thread = namedThread();
+      const { rerender } = renderOverview(thread);
+
+      await user.click(await screen.findByTestId("workspace-menu-push"));
+      expect(mockTransport.push).toHaveBeenCalledWith("ws-1", "feat/x", "thread-1");
+      expect(screen.getByTestId("workspace-menu-push")).toHaveAttribute("aria-busy", "true");
+
+      reviewBranch({ published: { ahead: 0 } });
+      await act(async () => land({ success: true }));
+      expect(await screen.findByRole("button", { name: "Create PR…" })).toBeInTheDocument();
+
+      const probes = vi.mocked(mockTransport.getReviewState).mock.calls.length;
+      reviewBranch({ uncommitted: { staged: 0, unstaged: 1, untracked: 0 }, published: { ahead: 0 } });
+      act(() => useDiffStore.getState().bumpDiffRevision("thread-1"));
+      rerender(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+      await waitFor(() => expect(vi.mocked(mockTransport.getReviewState).mock.calls.length).toBeGreaterThan(probes));
+      await act(async () => {});
+      expect(screen.getByTestId("thread-overview-git")).toHaveTextContent("Create PR…");
+    });
+
+    it("shows a failed push's reason in place and keeps Push", async () => {
+      const user = userEvent.setup();
+      vi.mocked(mockTransport.push).mockRejectedValueOnce(new Error("rejected: non-fast-forward"));
+      reviewBranch({ published: { ahead: 1 } });
+      renderOverview(namedThread());
+
+      await user.click(await screen.findByRole("button", { name: "Push" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("rejected: non-fast-forward");
+      expect(screen.getByTestId("workspace-menu-push")).toHaveTextContent("Push");
+    });
   });
 });

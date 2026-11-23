@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMockGitReviewState } from "@mcode/contracts/testing";
 
 vi.mock("@/transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/transport")>()),
@@ -144,11 +145,10 @@ describe("ThreadOverview changes and branches", () => {
   });
 
   it("uses the state probe's detached comparison when the worktree is clean", async () => {
-    vi.mocked(mockTransport.getReviewState).mockResolvedValue({
-      isGitRepo: true, head: "abc123", branch: null,
-      uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
+    vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({
+      branch: null,
       commitsAhead: { count: 1, base: "main" }, branchDefault: { base: "main", compare: "HEAD" },
-    });
+    }));
     vi.mocked(mockTransport.getReviewComparison)
       .mockResolvedValueOnce({ status: "ready", comparison: { files: [], additions: 0, deletions: 0 } })
       .mockResolvedValue({ status: "ready", comparison: { files: [{ path: "existing.md", previousPath: null, changeType: "modified", binary: false, additions: 3, deletions: 1, untracked: false }], additions: 3, deletions: 1 } });

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMockGitReviewState } from "@mcode/contracts/testing";
 
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useDiffStore } from "@/stores/diffStore";
@@ -16,14 +17,11 @@ function arrangeDirtyCheckout() {
     status: "ready",
     comparison: { files: [], additions: 0, deletions: 0 },
   });
-  vi.mocked(mockTransport.getReviewState).mockResolvedValue({
-    isGitRepo: true,
-    head: "a".repeat(40),
+  vi.mocked(mockTransport.getReviewState).mockResolvedValue(createMockGitReviewState({
     branch: "feat/x",
     uncommitted: { staged: 0, unstaged: 2, untracked: 0 },
-    commitsAhead: null,
     branchDefault: { base: "main", compare: "feat/x" },
-  });
+  }));
 }
 
 afterEach(() => {

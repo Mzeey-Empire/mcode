@@ -6,6 +6,7 @@ import type { ThreadPullRequest } from "./models/thread-pull-request.js";
 import type { ThreadAttention } from "./models/thread-attention.js";
 import type { ThreadStartup } from "./thread-startup.js";
 import type { BackgroundCommand } from "./models/tool-call-record.js";
+import type { ReviewState } from "./models/review-comparison.js";
 
 const DEFAULT_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 
@@ -24,6 +25,22 @@ export function createMockThreadStartup(overrides: Partial<ThreadStartup> = {}):
     failureSeenAt: null,
     createdAt: DEFAULT_TIMESTAMP,
     updatedAt: DEFAULT_TIMESTAMP,
+    ...overrides,
+  };
+}
+
+/** Build Review state for a clean Git checkout with no published branch or comparison base. */
+export function createMockGitReviewState(
+  overrides?: Partial<Extract<ReviewState, { isGitRepo: true }>>,
+): Extract<ReviewState, { isGitRepo: true }> {
+  return {
+    isGitRepo: true,
+    head: "a".repeat(40),
+    branch: "main",
+    uncommitted: { staged: 0, unstaged: 0, untracked: 0 },
+    commitsAhead: null,
+    published: null,
+    branchDefault: { unavailable: "no-base" },
     ...overrides,
   };
 }
