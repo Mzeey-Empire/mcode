@@ -39,6 +39,17 @@ function forwardRendererConsoleErrors(window: BrowserWindow): void {
   });
 }
 
+// A dead renderer leaves a blank window and no page to ask, so the main
+// process log is the only place its reason and exit code survive.
+function logRendererProcessGone(window: BrowserWindow): void {
+  window.webContents.on("render-process-gone", (_event, details) => {
+    logger.error(`Renderer process gone: ${details.reason} (exit code ${details.exitCode})`, {
+      reason: details.reason,
+      exitCode: details.exitCode,
+    });
+  });
+}
+
 /** Per-window Preview, Spellcheck, and Server Runtime operations. */
 export interface DesktopWindowLifecycleHooks {
   /** Record the first native ready-to-show event for this launch. */
@@ -134,6 +145,7 @@ export function createWindow(
   // The page loads with <title>Mcode</title>; without this it would replace the stage label.
   window.on("page-title-updated", (event) => event.preventDefault());
   forwardRendererConsoleErrors(window);
+  logRendererProcessGone(window);
   forwardFullScreenState(window);
 
   window.once("closed", () => {
