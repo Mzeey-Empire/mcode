@@ -33,6 +33,7 @@ import { notifyCommittedCanonicalEvents } from "../../canonical/committed-canoni
 import { chooseResumePath, continuationPrompt } from "../turn-resume.js";
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-model";
 import type { PreviewAnnotationBundle } from "@mcode/contracts/models/browser-preview";
+import type { ProviderId } from "@mcode/contracts/models/settings";
 import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 
 const NOW = "2026-08-10T09:00:00.000Z";
@@ -109,6 +110,7 @@ describe("TurnRecoveryService", () => {
     let handoffDir: string;
     // Codex's inline ceiling (14000) is tighter than this declared cap, so the ceiling is what bounds a seeded input.
     let inputCap = 100_000;
+    let claudeInputCap = 100_000;
 
     beforeEach(() => {
       vi.stubEnv("MCODE_DATA_DIR", NodePath.dirname(db.filename));
@@ -116,6 +118,7 @@ describe("TurnRecoveryService", () => {
       handoffDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "recovery-handoff-"));
       handoffs = HandoffStorage.forTesting({ mcodeDirFn: () => handoffDir });
       inputCap = 100_000;
+      claudeInputCap = 100_000;
       service = new TurnRecoveryService(runtimeSink, threadRepo, attachments, defaultCheckpoints, startupRepo,
         messageRepo, providerRegistry(true), new ToolCallRecordRepo(db, agentStorageTestWriter(db)), handoffs);
     });
@@ -132,7 +135,16 @@ describe("TurnRecoveryService", () => {
           { name: "session-resume", support: supportsSessionResume ? "supported" : "unsupported" },
         ] },
       };
-      return { resolve: () => provider, resolveAll: () => [provider], shutdown: async () => {} };
+      const claude = {
+        id: "claude" as const,
+        get maxInputCharactersPerTurn() { return claudeInputCap; },
+        descriptor: provider.descriptor,
+      };
+      return {
+        resolve: (id: ProviderId) => id === "claude" ? claude : provider,
+        resolveAll: () => [provider, claude],
+        shutdown: async () => {},
+      };
     }
 
     function failTurn(turnId = TURN_ID): void {
@@ -175,10 +187,17 @@ describe("TurnRecoveryService", () => {
         thread: { id: THREAD_ID, workspaceId: "workspace-recovery", providerId: "codex", createdAt: NOW },
         turnId: command.sourceTurnId, executionId: NodeCrypto.randomUUID(),
         permissionMode: "supervised", providerIdentities: [], retryOfExecutionId: command.retryOfExecutionId,
-        projectUserMessage: () => new MessageStore(db).create(THREAD_ID, "user", command.content,
-          messageRepo.listByThread(THREAD_ID, 100).messages.length + 1, persisted.stored,
-          command.replyToMessageId, command.quotedText, undefined, command.internalUserMessage,
-          command.mentions, command.previewAnnotations),
+        projectUserMessage: () => {
+          if (command.persistedUserMessage) {
+            const existing = messageRepo.findByIdInThread(THREAD_ID, command.persistedUserMessage.id);
+            if (!existing) throw new Error("Reused test message missing");
+            return existing;
+          }
+          return new MessageStore(db).create(THREAD_ID, "user", command.content,
+            messageRepo.listByThread(THREAD_ID, 100).messages.length + 1, persisted.stored,
+            command.replyToMessageId, command.quotedText, undefined, command.internalUserMessage,
+            command.mentions, command.previewAnnotations);
+        },
       });
     }
 
@@ -820,6 +839,59 @@ describe("TurnRecoveryService", () => {
         expect(commands[0]!.providerWireOverride).toBeUndefined();
         expect(commands[0]!.resumeRequired).toBeUndefined();
         expect(await handoffs.readLatestHandoffAudit(THREAD_ID)).toBeNull();
+      });
+
+      it("rejects a switch before dispatch when the interrupted request does not fit the target", async () => {
+        claudeInputCap = 1_000;
+        db.prepare("UPDATE messages SET content = ? WHERE thread_id = ?").run("x".repeat(2_000), THREAD_ID);
+        limitTurn("partial-answer");
+        const dispatch = vi.fn(admit);
+
+        await expect(service.resumeTurn({ threadId: THREAD_ID, turnId: TURN_ID, provider: "claude" }, dispatch))
+          .rejects.toMatchObject({
+            name: "TurnRecoveryError",
+            code: "handoff_budget_exhausted",
+            message: expect.stringContaining("claude"),
+          });
+        expect(dispatch).not.toHaveBeenCalled();
+        expect(sink.loadCheckpoint(EXECUTION_ID)?.phase).toBe("interrupted");
+      });
+
+      it("switches a turn limited before output by resending its request and attachment from the original row", async () => {
+        const original = sink.loadUserMessage(TURN_ID);
+        if (!original) throw new Error("Accepted test message missing");
+        const storedDir = NodePath.join(NodePath.dirname(db.filename), "attachments", THREAD_ID);
+        NodeFS.mkdirSync(storedDir, { recursive: true });
+        NodeFS.writeFileSync(NodePath.join(storedDir, "source-file.txt"), "original bytes");
+        const stored = [{ id: "source-file", name: "input.txt", mimeType: "text/plain", sizeBytes: 14 }];
+        db.prepare("UPDATE messages SET attachments = ? WHERE id = ?").run(JSON.stringify(stored), original.id);
+        db.prepare("UPDATE canonical_agent_items SET payload_json = json_set(payload_json, '$.message', json(?)) WHERE turn_id = ? AND kind = 'message'")
+          .run(JSON.stringify({ ...original, attachments: stored }), TURN_ID);
+        limitTurn("none");
+        const commands: SendMessageCommand[] = [];
+
+        const result = await service.resumeTurn(
+          { threadId: THREAD_ID, turnId: TURN_ID, provider: "claude", model: "claude-opus-4-6" },
+          async (command) => {
+            commands.push(command);
+            await admit(command);
+          },
+        );
+
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({
+          provider: "claude", model: "claude-opus-4-6", content: "repeat only when asked",
+          forceFreshSession: true, retryOfExecutionId: EXECUTION_ID, attachments: [],
+          persistedUserMessage: {
+            id: original.id, sequence: original.sequence, attachments: stored,
+            persistedAttachments: [{ id: "source-file", name: "input.txt", mimeType: "text/plain" }],
+          },
+        });
+        const attachment = commands[0]?.persistedUserMessage?.persistedAttachments[0];
+        if (!attachment) throw new Error("Dispatched attachment missing");
+        expect(NodeFS.readFileSync(attachment.sourcePath, "utf8")).toBe("original bytes");
+        expect(sink.loadTurn(result.turnId)).toMatchObject({ status: "Running", attemptOf: TURN_ID });
+        expect(messageRepo.listByThread(THREAD_ID, 100).messages.map((message) => message.id)).toEqual([original.id]);
       });
 
       it("keeps the same-provider resume when the requested provider is the thread's", async () => {

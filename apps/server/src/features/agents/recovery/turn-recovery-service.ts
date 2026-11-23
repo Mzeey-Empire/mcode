@@ -167,13 +167,9 @@ export class TurnRecoveryService {
       return { turnId: (await this.continueTurn({ ...target, thread }, dispatch, false,
         continuationPrompt(null), true)).turnId };
     }
-    const reuse = options.reuseUserMessage === true;
-    const stored = target.message.attachments ?? [];
-    const attachments = this.attachmentService.prepareRetryAttachments(target.thread.id, stored, { keepIds: reuse });
     const turnId = NodeCrypto.randomUUID();
     await this.dispatchAttempt(turnId, {
-      ...this.retryCommand(target.thread, target.message, attachments, target.executionId),
-      ...(reuse ? reusedUserMessage(target.message, stored, attachments) : {}),
+      ...this.retryCommand(target, options.reuseUserMessage),
       model: input.model ?? this.optionalValue(target.thread.model),
     }, dispatch);
     return { turnId };
@@ -204,15 +200,23 @@ export class TurnRecoveryService {
     prompt: string,
     dispatch: TurnDispatch,
   ): Promise<TurnResumeResult> {
-    const turnId = NodeCrypto.randomUUID();
-    await this.dispatchAttempt(turnId, {
-      ...this.continuationCommand(interrupted, interrupted.executionId, prompt),
+    const attempt = this.limitedBeforeOutput(interrupted)
+      ? this.retryCommand(interrupted, true)
+      : this.continuationCommand(interrupted, interrupted.executionId, prompt);
+    const command = {
+      ...attempt,
       provider,
       ...(model ? { model } : {}),
       // Seed a fresh session instead of resuming an earlier one on the target: a gone session there would send this
       // hidden continue through the switch's errored-turn retry.
       forceFreshSession: true,
-    }, dispatch);
+    };
+    const throughSequence = command.persistedUserMessage
+      ? command.persistedUserMessage.sequence - 1
+      : this.messages.getLatestSequenceIncludingInternal(interrupted.thread.id);
+    this.seededResumeHandoff(interrupted, command, throughSequence);
+    const turnId = NodeCrypto.randomUUID();
+    await this.dispatchAttempt(turnId, command, dispatch);
     return { turnId, mode: "seeded-session" };
   }
 
@@ -242,8 +246,8 @@ export class TurnRecoveryService {
   }
 
   /**
-   * A usage limit can reject the turn before the provider records the prompt, so a native session would only see
-   * the bare continuation. A seeded session already replays the prompt; only the native path must send it again.
+   * A usage limit can reject the turn before the provider records the prompt. A native resume or provider switch
+   * then sends the original input again.
    */
   private limitedBeforeOutput(target: RecoverableTurn): boolean {
     if (target.ending?.outcome !== "interrupted" || target.ending.cause !== "usage_limit") return false;
@@ -290,7 +294,7 @@ export class TurnRecoveryService {
     const released = new Promise<void>((resolve) => { releaseRuntime = resolve; });
     try {
       await this.dispatchAttempt(turnId, {
-        ...(resendPrompt ? this.promptResendCommand(target) : this.continuationCommand(target, retry ? target.executionId : undefined, prompt)),
+        ...(resendPrompt ? this.retryCommand(target) : this.continuationCommand(target, retry ? target.executionId : undefined, prompt)),
         resumeRequired: true,
         onRuntimeReleased: releaseRuntime,
       }, dispatch);
@@ -353,10 +357,11 @@ export class TurnRecoveryService {
     prompt: string,
   ): Promise<string> {
     // Built before dispatch so a history that cannot fit fails the resume instead of sending a truncated message.
-    const handoff = this.seededResumeHandoff(target, prompt);
+    const command = this.continuationCommand(target, retryOfExecutionId, prompt);
+    const handoff = this.seededResumeHandoff(target, command, target.historyThroughSequence ?? target.message.sequence);
     const turnId = NodeCrypto.randomUUID();
     await this.dispatchAttempt(turnId, {
-      ...this.continuationCommand(target, retryOfExecutionId, prompt),
+      ...command,
       forceFreshSession: true,
       providerWireOverride: `${handoff.preamble}${prompt}`,
     }, dispatch);
@@ -364,36 +369,37 @@ export class TurnRecoveryService {
     return turnId;
   }
 
-  /**
-   * The thread's history up to the interrupted turn's prompt, budgeted for the fresh session that replaces the lost
-   * one. Only this path seeds history: a retry on the thread's own session already has it, and a provider switch
-   * builds its own handoff for the command it sends.
-   */
-  private seededResumeHandoff(target: RecoverableTurn, prompt: string): FencedHandoff {
+  /** Validate the fresh session's handoff before admission. Provider switches build their own handoff at dispatch. */
+  private seededResumeHandoff(target: RecoverableTurn, command: SendMessageCommand, throughSequence: number): FencedHandoff {
     const { thread } = target;
-    const providerId = ProviderIdSchema.parse(thread.provider);
+    const fromProvider = ProviderIdSchema.parse(thread.provider);
+    const toProvider = command.provider ?? fromProvider;
     const rows = loadHandoffMessages({ messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId: thread.id });
+    const attachments = (command.persistedUserMessage?.persistedAttachments ?? []).map((attachment) => ({
+      kind: attachment.mimeType.startsWith("image/") ? "image" as const : "file" as const,
+    }));
     try {
       const handoff = buildFencedHandoff({
-        kind: "recovery",
+        kind: toProvider === fromProvider ? "recovery" : "switch",
         threadId: thread.id,
-        fromProvider: providerId,
-        toProvider: providerId,
+        fromProvider,
+        toProvider,
         rows,
         afterSequence: 0,
-        throughSequence: target.historyThroughSequence ?? target.message.sequence,
+        throughSequence,
         contextWindow: thread.context_window ?? null,
-        inputCharacterCap: targetInputCharacterCap(this.providers.resolve(providerId)),
-        userText: prompt,
-        attachments: [],
+        inputCharacterCap: targetInputCharacterCap(this.providers.resolve(toProvider)),
+        userText: command.content,
+        attachments,
       });
-      requireTaskInHandoff(handoff, rows, target.message);
+      // A reused user row is sent as the new input, so it is intentionally outside the history window.
+      if (!command.persistedUserMessage) requireTaskInHandoff(handoff, rows, target.message);
       return handoff;
     } catch (error) {
       if (!(error instanceof HandoffBudgetExhaustedError)) throw error;
       throw new TurnRecoveryError(
         error.code,
-        `The conversation cannot be replayed into a fresh session within its context window. ${error.message}`,
+        `The conversation cannot be replayed into a fresh ${toProvider} session within its context window. ${error.message}`,
         { cause: error },
       );
     }
@@ -471,12 +477,10 @@ export class TurnRecoveryService {
     }
   }
 
-  private retryCommand(
-    thread: Thread,
-    message: Message,
-    attachments: ReturnType<AttachmentService["prepareRetryAttachments"]>,
-    executionId: string,
-  ): SendMessageCommand {
+  private retryCommand(target: RecoverableTurn, reuse = false): SendMessageCommand {
+    const { thread, message, executionId } = target;
+    const stored = message.attachments ?? [];
+    const attachments = this.attachmentService.prepareRetryAttachments(thread.id, stored, { keepIds: reuse });
     return {
       ...threadContinuationSettings(thread),
       content: message.content,
@@ -486,6 +490,7 @@ export class TurnRecoveryService {
       mentions: this.optionalValue(message.mentions),
       previewAnnotations: this.retryAnnotations(message, attachments),
       retryOfExecutionId: executionId,
+      ...(reuse ? reusedUserMessage(message, stored, attachments) : {}),
     };
   }
 
@@ -498,11 +503,6 @@ export class TurnRecoveryService {
       if (!attachment) throw new Error(`Stored page snapshot not found: ${page.snapshot.id}`);
       return { ...page, snapshot: { ...page.snapshot, id: attachment.id, sourcePath: attachment.sourcePath } };
     }) };
-  }
-
-  private promptResendCommand(target: RecoverableTurn): SendMessageCommand {
-    const attachments = this.attachmentService.prepareRetryAttachments(target.thread.id, target.message.attachments ?? []);
-    return this.retryCommand(target.thread, target.message, attachments, target.executionId);
   }
 
   private continuationCommand(target: RecoverableTurn, retryOfExecutionId: string | undefined, prompt: string): SendMessageCommand {
