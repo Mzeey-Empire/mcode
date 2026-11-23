@@ -119,7 +119,7 @@ function isEntryPoint() {
 
 if (isEntryPoint()) {
   const options = parseCaptureArguments(process.argv.slice(2));
-  const session = await connectElectronSession({ playwright: loadPlaywright(), repoRoot: REPO_ROOT, reload: false });
+  const session = await connectElectronSession({ playwright: loadPlaywright(), repoRoot: REPO_ROOT });
   try {
     const outPath = await capture(session.page, options);
     console.log(JSON.stringify({ outPath, usageFixture: options.usageFixtureProviderId !== null }));

@@ -6,16 +6,15 @@ const SESSION_FILE_NAME = "electron-live-testing.json";
 /**
  * Connects Playwright to the Electron process owned by start-electron.mjs.
  *
- * The first connection reloads the app so it signs in with the seeded login cookie. Pass
- * `reload: false` to reconnect from a later step script without losing the app's state.
- * Only a disposable session with its own session file, such as the perf workers, may pass
- * `allowViewportEmulation: true`.
+ * Connecting never reloads the app, so every connection finds the page as the last step left
+ * it. The Electron app signs in with the token in the server URL the desktop process gives it,
+ * not with the seeded login cookie, so the cookie needs no reload. Only a disposable session
+ * with its own session file, such as the perf workers, may pass `allowViewportEmulation: true`.
  */
 export async function connectElectronSession({
   playwright,
   repoRoot,
   sessionFileName = SESSION_FILE_NAME,
-  reload = true,
   allowViewportEmulation = false,
 }) {
   validateConnectionArguments(playwright, repoRoot, sessionFileName, allowViewportEmulation);
@@ -29,11 +28,10 @@ export async function connectElectronSession({
     connection.context.on("page", blockViewportEmulation);
   }
   const page = await waitForAppPage(connection.context, record.appUrlPrefix);
-  const livePage = reload ? await reloadElectronAppPage(connection.context, page, record.appUrlPrefix) : page;
   return {
     appUrl: ports?.appUrl ?? null,
     ...connection,
-    page: livePage,
+    page,
     pid: record.pid,
     repoRoot: root,
     sessionFile,
