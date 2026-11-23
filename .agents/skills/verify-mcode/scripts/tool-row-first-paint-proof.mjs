@@ -27,6 +27,8 @@ import { connectElectronSession, disconnectElectronSession } from "../../elector
 const DESKTOP_RUNTIME = ".dev/electron-agent-runtime/runtime";
 const MAX_MOVE_PX = 1;
 const SETTLE_MS = 1200;
+const MIN_USABLE_SAMPLES = 10;
+const SETTLE_COVERAGE_SLACK_MS = 100;
 const RUNNING_MARKER = "fixture first paint hold";
 
 /** Reloads the app and expands the workspace thread list until the thread shows, then opens it. */
@@ -94,12 +96,8 @@ async function stopSampler(page) {
  * ignores tail-follow scrolling, which moves every row together.
  */
 function measure(frames, isTarget, isLastOfTarget = isTarget) {
-  const first = frames.findIndex((frame) => frame.rows.some(isTarget));
-  if (first < 0) throw new Error("The new tool row never painted while the sampler ran");
-  if (first === 0) throw new Error("The new tool row was already on screen when sampling began");
-  const firstRows = frames[first].rows;
-  const following = firstRows[firstRows.findIndex(isLastOfTarget) + 1];
-  if (!following) throw new Error("No row painted below the new tool row on its first frame");
+  const first = firstPaintIndex(frames, isTarget);
+  const following = rowBelowTarget(frames[first].rows, isLastOfTarget);
   const offsetAt = (frame) => {
     const target = frame.rows.find(isTarget);
     const below = frame.rows.find((row) => row.key === following.key);
@@ -117,7 +115,31 @@ function measure(frames, isTarget, isLastOfTarget = isTarget) {
     const target = frame.rows.find(isTarget);
     trail.push({ t: frame.t - frames[first].t, targetHeight: target.height, offset: Math.round(offset * 10) / 10, move });
   }
+  assertSettleCoverage(trail);
   return { followingKey: following.key, firstOffset: Math.round(firstOffset * 10) / 10, maxMove, trail };
+}
+
+function firstPaintIndex(frames, isTarget) {
+  const first = frames.findIndex((frame) => frame.rows.some(isTarget));
+  if (first < 0) throw new Error("The new tool row never painted while the sampler ran");
+  if (first === 0) throw new Error("The new tool row was already on screen when sampling began");
+  return first;
+}
+
+function rowBelowTarget(rows, isLastOfTarget) {
+  const lastOfTarget = rows.findIndex(isLastOfTarget);
+  if (lastOfTarget < 0) throw new Error("The new tool row's last row was not painted on its first frame");
+  const following = rows[lastOfTarget + 1];
+  if (!following) throw new Error("No row painted below the new tool row on its first frame");
+  return following;
+}
+
+/** A pass needs both rows measured through the whole settle window, or a vanished row reads as still. */
+function assertSettleCoverage(trail) {
+  const lastT = trail.at(-1)?.t ?? 0;
+  if (trail.length < MIN_USABLE_SAMPLES || lastT < SETTLE_MS - SETTLE_COVERAGE_SLACK_MS) {
+    throw new Error(`Only ${trail.length} usable samples, the last at ${lastT} ms of ${SETTLE_MS} ms`);
+  }
 }
 
 function compactTrail(trail) {
