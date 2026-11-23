@@ -137,8 +137,8 @@ import {
   mergeProviderUsageSnapshot,
   mergeThreadUsageSnapshot,
   providerQuotaSnapshot,
-} from "./thread-store/usage";
-export { mergeProviderUsageSnapshot } from "./thread-store/usage";
+} from "./provider-usage-snapshot";
+export { mergeProviderUsageSnapshot } from "./provider-usage-snapshot";
 
 import { endedWithoutCompleting, getCanonicalRuntimePhase, getCanonicalRuntimeTurn, getThreadRuntimePhase, isThreadRuntimeActive, phaseForTurnStatus } from "./thread-lifecycle";
 import { createFramePacer } from "./frame-pacer";
