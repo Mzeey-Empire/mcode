@@ -1,5 +1,5 @@
 import type { PullRequestFile } from "@mcode/contracts/pull-requests";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PullRequestFileTree } from "../PullRequestFileTree";
@@ -30,6 +30,13 @@ vi.mock("@tanstack/react-virtual", () => ({
   },
 }));
 
+/** Renders, then lets the work the tree starts on mount settle inside act(). */
+async function renderSettled(ui: React.ReactElement): Promise<ReturnType<typeof render>> {
+  const view = render(ui);
+  await act(async () => {});
+  return view;
+}
+
 function file(
   path: string,
   index: number,
@@ -56,7 +63,7 @@ describe("PullRequestFileTree", () => {
 
   it("uses one roving tree focus and Enter activates a file", async () => {
     const onActivate = vi.fn();
-    render(
+    await renderSettled(
       <PullRequestFileTree
         files={[file("a.ts", 1), file("b.ts", 2)]}
         activePath="a.ts"
@@ -68,7 +75,7 @@ describe("PullRequestFileTree", () => {
     expect(first).toHaveAttribute("tabindex", "0");
     expect(second).toHaveAttribute("tabindex", "-1");
 
-    first.focus();
+    act(() => first.focus());
     await userEvent.keyboard("{ArrowDown}{Enter}");
 
     expect(second).toHaveFocus();
@@ -77,7 +84,7 @@ describe("PullRequestFileTree", () => {
 
   it("renders full worktree paths without pull request status metadata", async () => {
     const onActivate = vi.fn();
-    render(
+    await renderSettled(
       <PullRequestFileTree
         filePaths={["apps/web/App.tsx", "packages/contracts/index.ts"]}
         activePath={null}
@@ -87,7 +94,7 @@ describe("PullRequestFileTree", () => {
     );
 
     const app = screen.getByRole("treeitem", { name: "apps/web/App.tsx" });
-    app.focus();
+    act(() => app.focus());
     await userEvent.keyboard("{Enter}");
 
     expect(onActivate).toHaveBeenCalledWith("apps/web/App.tsx");
@@ -95,7 +102,7 @@ describe("PullRequestFileTree", () => {
   });
 
   it("expands and collapses directories with Right and Left", async () => {
-    render(
+    await renderSettled(
       <PullRequestFileTree
         files={[file("apps/web/App.tsx", 1)]}
         activePath={null}
@@ -106,7 +113,7 @@ describe("PullRequestFileTree", () => {
     expect(
       screen.getByRole("treeitem", { name: "Modified apps/web/App.tsx" }),
     ).toBeInTheDocument();
-    apps.focus();
+    act(() => apps.focus());
     await userEvent.keyboard("{ArrowLeft}");
     expect(
       screen.queryByRole("treeitem", { name: "Modified apps/web/App.tsx" }),
@@ -126,7 +133,7 @@ describe("PullRequestFileTree", () => {
       .spyOn(HTMLElement.prototype, "clientWidth", "get")
       .mockReturnValue(80);
     try {
-      render(
+      await renderSettled(
         <PullRequestFileTree
           files={[
             file(
@@ -151,8 +158,8 @@ describe("PullRequestFileTree", () => {
     }
   });
 
-  it("uses a file icon while retaining the change type indicator", () => {
-    render(
+  it("uses a file icon while retaining the change type indicator", async () => {
+    await renderSettled(
       <PullRequestFileTree
         files={[file("App.tsx", 1)]}
         activePath={null}
@@ -167,8 +174,8 @@ describe("PullRequestFileTree", () => {
     ).toHaveTextContent("M");
   });
 
-  it("shows Review rename and binary metadata without line counts", () => {
-    render(
+  it("shows Review rename and binary metadata without line counts", async () => {
+    await renderSettled(
       <PullRequestFileTree
         reviewFiles={[{
           path: "src/new.ts",
@@ -194,7 +201,7 @@ describe("PullRequestFileTree", () => {
   });
 
   it("expands folders on first render", async () => {
-    render(
+    await renderSettled(
       <PullRequestFileTree
         files={[file("apps/web/App.tsx", 1)]}
         activePath={null}
@@ -206,8 +213,8 @@ describe("PullRequestFileTree", () => {
     expect(folder).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("marks added and deleted files with their change type and line counts", () => {
-    render(
+  it("marks added and deleted files with their change type and line counts", async () => {
+    await renderSettled(
       <PullRequestFileTree
         files={[file("added.ts", 1, "added"), file("deleted.ts", 2, "deleted")]}
         activePath={null}
@@ -226,7 +233,7 @@ describe("PullRequestFileTree", () => {
   });
 
   it("expands newly loaded directories without reopening user-collapsed ones", async () => {
-    const view = render(
+    const view = await renderSettled(
       <PullRequestFileTree
         files={[file("apps/web/App.tsx", 1)]}
         activePath={null}
@@ -234,7 +241,7 @@ describe("PullRequestFileTree", () => {
       />,
     );
     const apps = await screen.findByRole("treeitem", { name: "apps/web" });
-    apps.focus();
+    act(() => apps.focus());
     await userEvent.keyboard("{ArrowLeft}");
 
     view.rerender(
@@ -253,11 +260,11 @@ describe("PullRequestFileTree", () => {
     ).toBeInTheDocument();
   });
 
-  it("mounts a bounded row window for a large flat Change stack", () => {
+  it("mounts a bounded row window for a large flat Change stack", async () => {
     const files = Array.from({ length: 80 }, (_, index) =>
       file(`file-${index}.ts`, index + 1),
     );
-    render(
+    await renderSettled(
       <PullRequestFileTree
         files={files}
         activePath={null}
@@ -280,7 +287,7 @@ describe("PullRequestFileTree", () => {
     const files = Array.from({ length: 80 }, (_, index) =>
       file(`file-${index}.ts`, index + 1),
     );
-    render(
+    await renderSettled(
       <PullRequestFileTree
         files={files}
         activePath="file-79.ts"
@@ -292,7 +299,7 @@ describe("PullRequestFileTree", () => {
       name: "Pull request changed files",
     });
     expect(tree).toHaveAttribute("tabindex", "0");
-    tree.focus();
+    act(() => tree.focus());
     await waitFor(() =>
       expect(
         screen.getByRole("treeitem", { name: "Modified file-0.ts" }),

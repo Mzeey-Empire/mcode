@@ -1,6 +1,7 @@
 import type { PullRequestCapabilitiesResult, PullRequestDetail, PullRequestGetResult, PullRequestIdentity, PullRequestSummary } from "@mcode/contracts/pull-requests";
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -190,6 +191,7 @@ describe("PullRequestDetailPane", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -329,7 +331,7 @@ describe("PullRequestDetailPane", () => {
     expect(summaryTab).toHaveAttribute("aria-selected", "true");
     expect(summaryTab).toHaveAttribute("tabindex", "0");
 
-    summaryTab.focus();
+    act(() => summaryTab.focus());
     fireEvent.keyDown(summaryTab, { key: "ArrowRight" });
     expect(timelineTab).toHaveFocus();
     expect(timelineTab).toHaveAttribute("aria-selected", "true");
@@ -338,6 +340,8 @@ describe("PullRequestDetailPane", () => {
     fireEvent.keyDown(timelineTab, { key: "Home" });
     expect(summaryTab).toHaveFocus();
     expect(summaryTab).toHaveAttribute("aria-selected", "true");
+    // Returning to Summary mounts its panel again; let its updates settle inside act().
+    await act(async () => {});
   });
 
   it("places page tabs before Summary content and exposes an icon-only browser action", async () => {
@@ -456,7 +460,7 @@ describe("PullRequestDetailPane", () => {
       });
     });
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(getCommand("pullRequests.reviewChangeStack")).toBeDefined();
     });
 
@@ -524,8 +528,10 @@ describe("PullRequestDetailPane", () => {
         .mock.calls.filter(([request]) => request.resource === "detail");
     expect(detailCalls()).toHaveLength(1);
     const receiptKey = getPullRequestMutationLaneKey(identity, "comment");
-    usePullRequestMutationStore.setState({
-      lanes: { [receiptKey]: outcomeUnknownLane() },
+    act(() => {
+      usePullRequestMutationStore.setState({
+        lanes: { [receiptKey]: outcomeUnknownLane() },
+      });
     });
 
     await act(async () => {
@@ -572,7 +578,7 @@ describe("PullRequestDetailPane", () => {
     await screen.findByText("Read-only detail body");
     const receiptKey = getPullRequestMutationLaneKey(identity, "comment");
     const receipt = outcomeUnknownLane();
-    usePullRequestMutationStore.setState({ lanes: { [receiptKey]: receipt } });
+    act(() => usePullRequestMutationStore.setState({ lanes: { [receiptKey]: receipt } }));
     const clickRefresh = async (): Promise<void> => {
       await userEvent.click(
         screen.getByRole("button", { name: "Pull request actions" }),
@@ -583,7 +589,7 @@ describe("PullRequestDetailPane", () => {
     };
 
     await clickRefresh();
-    await vi.waitFor(() =>
+    await waitFor(() =>
       expect(
         get.mock.calls.filter(([request]) => request.resource === "detail"),
       ).toHaveLength(2),
@@ -593,7 +599,7 @@ describe("PullRequestDetailPane", () => {
     );
 
     await clickRefresh();
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(
         get.mock.calls.filter(([request]) => request.resource === "detail"),
       ).toHaveLength(3);

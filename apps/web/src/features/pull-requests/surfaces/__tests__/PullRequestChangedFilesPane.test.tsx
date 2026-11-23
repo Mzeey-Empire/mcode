@@ -1,5 +1,5 @@
 import type { PullRequestFile } from "@mcode/contracts/pull-requests";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { PullRequestChangedFilesPane } from "../PullRequestChangedFilesPane";
@@ -16,9 +16,16 @@ const file: PullRequestFile = {
   patchStatus: "available",
 };
 
+/** Renders, then lets the scroll area's mount measurement settle inside act(). */
+async function renderSettled(ui: React.ReactElement): Promise<ReturnType<typeof render>> {
+  const view = render(ui);
+  await act(async () => {});
+  return view;
+}
+
 describe("PullRequestChangedFilesPane", () => {
-  it("keeps file controls and the tree inside one navigator", () => {
-    render(
+  it("keeps file controls and the tree inside one navigator", async () => {
+    await renderSettled(
       <PullRequestChangedFilesPane
         files={[file]}
         activePath={file.path}
@@ -41,7 +48,7 @@ describe("PullRequestChangedFilesPane", () => {
 
   it("owns debounced search without a second filter control", async () => {
     const onQueryChange = vi.fn();
-    render(
+    await renderSettled(
       <PullRequestChangedFilesPane
         files={[file]}
         activePath={file.path}

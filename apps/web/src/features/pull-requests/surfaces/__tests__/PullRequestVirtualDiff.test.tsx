@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   PullRequestDiffFileRow,
@@ -246,7 +246,7 @@ describe("PullRequestVirtualDiff", () => {
       '[data-line-key="pr-c:test:0:1:left:remove"]',
     );
     expect(first).not.toBeNull();
-    first?.focus();
+    act(() => first?.focus());
     fireEvent.keyDown(first!, { key: "j" });
 
     expect(document.activeElement).toHaveAttribute(
@@ -262,7 +262,7 @@ describe("PullRequestVirtualDiff", () => {
     const first = document.querySelector<HTMLElement>(
       '[data-line-key="pr-c:test:0:1:left:remove"]',
     );
-    first?.focus();
+    act(() => first?.focus());
     fireEvent.keyDown(first!, { key: "ArrowUp" });
 
     expect(document.activeElement).toBe(screen.getByText("src/a.ts").closest("button"));
@@ -275,7 +275,7 @@ describe("PullRequestVirtualDiff", () => {
 
     const viewport = screen.getByTestId("diff-viewport");
     await waitFor(() => expect(viewport).toHaveAttribute("tabindex", "0"));
-    viewport.focus();
+    act(() => viewport.focus());
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByText("src/a.ts").closest("button")),
     );
@@ -311,7 +311,7 @@ describe("PullRequestVirtualDiff", () => {
     const first = document.querySelector<HTMLElement>(
       '[data-line-key="pr-c:test:0:1:left:remove"]',
     );
-    first?.focus();
+    act(() => first?.focus());
     fireEvent.keyDown(first!, { key: "c" });
 
     expect(onCreateDraft).toHaveBeenCalledWith(
