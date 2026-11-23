@@ -1,6 +1,6 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 import { pushEmitter } from "@/transport/ws-transport";
@@ -99,6 +99,8 @@ describe("SidebarList order", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
+    cleanup();
     stopPushListeners();
     vi.useRealTimers();
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
@@ -145,7 +147,7 @@ describe("SidebarList order", () => {
     render(<Harness />);
     const row = within(document.querySelector<HTMLElement>("[data-thread-id='second']")!).getByRole("button", { name: /^Title second/ });
 
-    row.focus();
+    act(() => row.focus());
     fireEvent.keyDown(row, { key: "Enter" });
 
     expect(setActiveThread).toHaveBeenCalledWith("second");
@@ -214,6 +216,8 @@ describe("SidebarList Threads view", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
+    cleanup();
     vi.useRealTimers();
     localStorage.clear();
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
@@ -265,6 +269,8 @@ describe("SidebarList frozen order", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
+    cleanup();
     stopPushListeners();
     vi.useRealTimers();
     useSidebarUiStore.setState({ frozen: null });

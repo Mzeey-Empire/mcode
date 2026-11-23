@@ -1,6 +1,6 @@
 import { createMockThread, createMockThreadAttention, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
@@ -70,6 +70,8 @@ describe("SidebarList thread menu", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
+    cleanup();
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
     useThreadStore.setState({ runningThreadIds: new Set() });
     useCompletionStore.setState({ entries: new Map(), hoveredThreadId: null, undoLineThreadId: null });
