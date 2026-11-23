@@ -1,4 +1,4 @@
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PanelHeaderSlotScope } from "@/components/panels/shell/PanelHeader";
@@ -433,6 +433,7 @@ describe("useBrowserControl", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     useBrowserAutomationStore.getState().releaseThreadTargets(scope[0], scope[1]);
     useBrowserAutomationStore.setState({ activeRequests: new Map(), actingTargets: new Set() });

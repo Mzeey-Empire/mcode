@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { usePreviewAnnotationStore } from "../../state/previewAnnotationStore";
 import { usePreviewTabsStore } from "../../state/previewTabsStore";
@@ -18,8 +18,10 @@ const SCOPE = "thread-tile";
 const store = () => usePreviewAnnotationStore.getState();
 const firstNote = () => store().getThreadAnnotations(SCOPE)[0]!;
 
-function renderTile(onRemoveAll: () => void = vi.fn(), threadId: string | undefined = SCOPE) {
+/** Renders the tile, then lets the thumbnail image read it starts on mount settle inside act(). */
+async function renderTile(onRemoveAll: () => void = vi.fn(), threadId: string | undefined = SCOPE): Promise<void> {
   render(<BrowserNotesTile scopeId={SCOPE} workspaceId="workspace-1" threadId={threadId} onRemoveAll={onRemoveAll} />);
+  await act(async () => {});
 }
 
 async function openHoverCard() {
@@ -44,7 +46,7 @@ describe("BrowserNotesTile", () => {
   it("shows the page's drawn image as the tile thumbnail", async () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product");
 
-    renderTile();
+    await renderTile();
 
     await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe("blob:page"));
     expect(mockRead).toHaveBeenCalledWith(SCOPE, store().pages[SCOPE]![PRODUCT_PAGE]!.snapshot);
@@ -53,7 +55,7 @@ describe("BrowserNotesTile", () => {
   it("shows the thumbnail before a thread exists, reading the images staged under the scope", async () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product");
 
-    renderTile(vi.fn(), undefined);
+    await renderTile(vi.fn(), undefined);
 
     await waitFor(() => expect(document.querySelector("img")?.getAttribute("src")).toBe("blob:page"));
     expect(mockRead).toHaveBeenCalledWith(SCOPE, store().pages[SCOPE]![PRODUCT_PAGE]!.snapshot);
@@ -62,7 +64,7 @@ describe("BrowserNotesTile", () => {
   it("falls back to the clean screenshot while the page waits for a redraw", async () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { snapshot: false });
 
-    renderTile();
+    await renderTile();
 
     await waitFor(() => expect(document.querySelector("img")).not.toBeNull());
     expect(mockRead).toHaveBeenCalledWith(SCOPE, store().pages[SCOPE]![PRODUCT_PAGE]!.clean!.image);
@@ -72,7 +74,7 @@ describe("BrowserNotesTile", () => {
     mockRead.mockResolvedValue(null);
     seedPage(SCOPE, PRODUCT_PAGE, "Product");
 
-    renderTile();
+    await renderTile();
 
     expect(await screen.findByText("Retake")).toBeInTheDocument();
     expect(document.querySelector("img")).toBeNull();
@@ -83,7 +85,7 @@ describe("BrowserNotesTile", () => {
     seedPage(SCOPE, BILLING_PAGE, "Billing");
     const productImage = store().pages[SCOPE]![PRODUCT_PAGE]!.snapshot;
     mockRead.mockImplementation(async (_scope: string, image: unknown) => (image === productImage ? null : new Uint8Array([1])));
-    renderTile();
+    await renderTile();
 
     const card = await openHoverCard();
 
@@ -91,26 +93,26 @@ describe("BrowserNotesTile", () => {
     expect(within(within(card).getByText("Product").parentElement!).getByText("Retake")).toBeInTheDocument();
   });
 
-  it("renders nothing without Browser notes", () => {
-    renderTile();
+  it("renders nothing without Browser notes", async () => {
+    await renderTile();
 
     expect(screen.queryByTestId("browser-notes-tile")).not.toBeInTheDocument();
   });
 
-  it("labels a single page by name and note count", () => {
+  it("labels a single page by name and note count", async () => {
     seedPage(SCOPE, BILLING_PAGE, "Billing");
 
-    renderTile();
+    await renderTile();
 
     expect(screen.getByText("Billing · 1 note")).toBeInTheDocument();
   });
 
-  it("labels several pages by total notes and page count", () => {
+  it("labels several pages by total notes and page count", async () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product");
     seedPage(SCOPE, PRODUCT_PAGE, "Product");
     seedPage(SCOPE, BILLING_PAGE, "Billing");
 
-    renderTile();
+    await renderTile();
 
     expect(screen.getByText("3 notes · 2 pages")).toBeInTheDocument();
   });
@@ -119,7 +121,7 @@ describe("BrowserNotesTile", () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Product one" });
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Product two" });
     seedPage(SCOPE, BILLING_PAGE, "Billing", { note: "Billing one" });
-    renderTile();
+    await renderTile();
 
     const card = await openHoverCard();
 
@@ -134,7 +136,7 @@ describe("BrowserNotesTile", () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Product one" });
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Product two" });
     const first = firstNote();
-    renderTile();
+    await renderTile();
     await openHoverCard();
 
     await userEvent.click(screen.getByRole("button", { name: "Remove note 1 on Product" }));
@@ -149,7 +151,7 @@ describe("BrowserNotesTile", () => {
   it("removing the last row clears the queued-bundle fallback like the tile remove does", async () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Only note" });
     const onRemoveAll = vi.fn();
-    renderTile(onRemoveAll);
+    await renderTile(onRemoveAll);
     await openHoverCard();
 
     await userEvent.click(screen.getByRole("button", { name: "Remove note 1 on Product" }));
@@ -161,7 +163,7 @@ describe("BrowserNotesTile", () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "One" });
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Two" });
     const onRemoveAll = vi.fn();
-    renderTile(onRemoveAll);
+    await renderTile(onRemoveAll);
     await openHoverCard();
 
     await userEvent.click(screen.getByRole("button", { name: "Remove note 1 on Product" }));
@@ -171,7 +173,7 @@ describe("BrowserNotesTile", () => {
 
   it("opens the notes card when the tile takes keyboard focus", async () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product", { note: "Keyboard note" });
-    renderTile();
+    await renderTile();
 
     await userEvent.tab();
 
@@ -188,7 +190,7 @@ describe("BrowserNotesTile", () => {
     usePreviewTabsStore.setState({
       openPage: vi.fn(async () => { order.push("open"); return "tab-1"; }),
     });
-    renderTile();
+    await renderTile();
     await openHoverCard();
 
     await userEvent.click(screen.getByTestId("browser-note-row"));
@@ -208,7 +210,7 @@ describe("BrowserNotesTile", () => {
     Object.assign(window, { desktopBridge: { preview: { design: { revealNote } } } });
     const openPage = vi.fn(async () => null);
     usePreviewTabsStore.setState({ openPage });
-    renderTile();
+    await renderTile();
     await openHoverCard();
 
     await userEvent.click(screen.getByTestId("browser-note-row"));
@@ -226,7 +228,7 @@ describe("BrowserNotesTile", () => {
       lineContent: "return <App />;",
     }, { note: "Handle the loading state", mentions: [] });
     seedPage(SCOPE, PRODUCT_PAGE, "Product");
-    renderTile(() => clearVisibleBrowserNotes(SCOPE));
+    await renderTile(() => clearVisibleBrowserNotes(SCOPE));
 
     await userEvent.click(screen.getByRole("button", { name: "Remove Product · 1 note" }));
 
@@ -239,7 +241,7 @@ describe("BrowserNotesTile", () => {
   it("calls onRemoveAll from the tile remove button", async () => {
     seedPage(SCOPE, PRODUCT_PAGE, "Product");
     const onRemoveAll = vi.fn();
-    renderTile(onRemoveAll);
+    await renderTile(onRemoveAll);
 
     await userEvent.click(screen.getByRole("button", { name: "Remove Product · 1 note" }));
 

@@ -1,6 +1,6 @@
 import { createMockThread } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement, ReactNode } from "react";
 import { BROWSER_AUTOMATION_CONTRACT_VERSION, BrowserAutomationResponseSchema, type BrowserAutomationControllerState, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
@@ -420,6 +420,8 @@ describe("visible Browser conformance observer", () => {
   });
 
   afterEach(() => {
+
+    cleanup();
     browserTargetRegistry.clear();
     useBrowserAutomationStore.getState().unregisterTarget(WORKSPACE_ID, THREAD_ID, TAB_ID);
   });

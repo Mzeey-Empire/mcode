@@ -58,7 +58,7 @@ describe("BrowserViewportCanvas", () => {
     })));
   });
 
-  it("uses pointer capture and coalesces drag requests through the same coordinator", () => {
+  it("uses pointer capture and coalesces drag requests through the same coordinator", async () => {
     const { apply, coordinator } = setup();
     render(
       <BrowserViewportCanvas
@@ -96,6 +96,8 @@ describe("BrowserViewportCanvas", () => {
       requested: { width: 1_000, height: 600 },
     }));
     expect(apply.mock.calls.length).toBeGreaterThan(0);
+    // The host applies the coalesced resize asynchronously; let its result land inside act().
+    await act(async () => {});
   });
 
   it("clears the dragged edge when the canvas unmounts mid-drag", () => {
