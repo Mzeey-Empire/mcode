@@ -9,6 +9,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { SplitButton } from "@/components/ui/split-button";
 import { isRequestInFlight, useCommitSheet, type CommitSheetModel } from "@/hooks/useCommitSheet";
 import { useReviewState } from "@/hooks/useReviewState";
+import { useDiffStore } from "@/stores/diffStore";
 import { useUncommittedFiles, type UncommittedFiles } from "@/hooks/useUncommittedFiles";
 import { cn } from "@/lib/utils";
 import { CommitFileList } from "./CommitFileList";
@@ -45,6 +46,7 @@ export function CommitSheet({ workspaceId, threadId, scopeId, activePath, onClos
     files,
     onDone: onClose,
   });
+  const push = useDiffStore((store) => store.commitSheetPush);
   const sheet = useRef<HTMLElement>(null);
   useEffect(() => sheet.current?.focus(), []);
 
@@ -73,7 +75,7 @@ export function CommitSheet({ workspaceId, threadId, scopeId, activePath, onClos
         onRegenerate={model.regenerate}
       />
       <CommitOutcomeNotice submission={submission} onRetry={model.retry} />
-      <SheetFooter model={model} branchless={reviewState?.branch === null} />
+      <SheetFooter model={model} branchless={reviewState?.branch === null} push={push} />
     </section>
   );
 }
@@ -128,8 +130,18 @@ function SheetHeader({
   );
 }
 
-function SheetFooter({ model, branchless }: { readonly model: CommitSheetModel; readonly branchless: boolean }) {
+function SheetFooter({
+  model,
+  branchless,
+  push,
+}: {
+  readonly model: CommitSheetModel;
+  readonly branchless: boolean;
+  readonly push: boolean;
+}) {
   const { submission } = model;
+  const leadWithPush = push && !branchless;
+  const count = model.selected.length;
   return (
     <div className="flex items-center justify-end gap-3">
       {submission.kind === "pushing" ? (
@@ -142,17 +154,21 @@ function SheetFooter({ model, branchless }: { readonly model: CommitSheetModel; 
         variant="default"
         disabled={!model.canCommit}
         loading={submission.kind === "committing"}
-        onClick={() => model.submit(false)}
+        onClick={() => model.submit(leadWithPush)}
         menuLabel="More commit actions"
         menu={
-          <DropdownMenuItem
-            label="Commit and push"
-            disabledReason={branchless ? "Create a branch to push" : null}
-            onClick={() => model.submit(true)}
-          />
+          leadWithPush ? (
+            <DropdownMenuItem label="Commit" onClick={() => model.submit(false)} />
+          ) : (
+            <DropdownMenuItem
+              label="Commit and push"
+              disabledReason={branchless ? "Create a branch to push" : null}
+              onClick={() => model.submit(true)}
+            />
+          )
         }
       >
-        {commitLabel(model.selected.length)}
+        {leadWithPush ? commitAndPushLabel(count) : commitLabel(count)}
       </SplitButton>
     </div>
   );
@@ -160,6 +176,10 @@ function SheetFooter({ model, branchless }: { readonly model: CommitSheetModel; 
 
 function commitLabel(count: number): string {
   return count === 1 ? "Commit 1 file" : `Commit ${count} files`;
+}
+
+function commitAndPushLabel(count: number): string {
+  return count === 1 ? "Commit and push 1 file" : `Commit and push ${count} files`;
 }
 
 function useReviewStateAcrossRefresh(workspaceId: string, threadId: string | null): GitReviewState | null {

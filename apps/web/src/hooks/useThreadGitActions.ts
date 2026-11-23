@@ -72,11 +72,11 @@ export function useThreadGitActions(thread: Thread) {
   );
 
   const { id: threadId, workspace_id: workspaceId } = thread;
-  const handleCommit = useCallback(() => {
+  const handleCommit = useCallback((options?: { push?: boolean }) => {
     const diff = useDiffStore.getState();
     showRightPanelAdaptive(workspaceId, threadId);
     diff.setRightPanelTab(workspaceId, threadId, "changes");
-    diff.setCommitSheetScopeId(threadId);
+    diff.setCommitSheetScopeId(threadId, options);
   }, [workspaceId, threadId]);
 
   const handleOpenPr = useCallback(

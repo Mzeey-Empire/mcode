@@ -3,8 +3,7 @@ import { BackgroundCommandsEntryBlock } from "./entries/background-commands";
 import { BranchEntryBlock, BranchEntryState } from "./entries/branch";
 import { BrowserEntryBlock, BrowserEntryState } from "./entries/browser";
 import { ChangesEntryBlock, ChangesEntryState } from "./entries/changes";
-import { CommitEntryBlock } from "./entries/commit";
-import { CreateBranchEntryBlock } from "./entries/create-branch";
+import { GitEntryBlock } from "./entries/git";
 import { LocalEntryBlock, LocalEntryState } from "./entries/local";
 import { PlanEntryBlock } from "./entries/plan";
 import { TargetBranchEntryBlock, TargetWorkspaceEntryBlock } from "./entries/new-thread-target";
@@ -48,9 +47,8 @@ export const OVERVIEW_ENTRIES: readonly OverviewEntry[] = [
   // A new thread's rows take the slots of the thread rows they become: where it runs, then the branch.
   { id: "target.workspace", section: "lane", order: 50, subjects: ["new-thread"], Entry: TargetWorkspaceEntryBlock },
   { id: "target.branch", section: "lane", order: 70, subjects: ["new-thread"], Entry: TargetBranchEntryBlock },
-  { id: "create-branch", section: "lane", order: 75, subjects: ["thread"], Entry: CreateBranchEntryBlock },
+  { id: "git", section: "lane", order: 75, subjects: ["thread"], Entry: GitEntryBlock },
   { id: "branch", section: "lane", order: 70, subjects: ["thread"], Entry: BranchEntryBlock, State: BranchEntryState },
-  { id: "commit", section: "lane", order: 80, subjects: ["thread"], Entry: CommitEntryBlock },
   { id: "terminals", section: "terminals", order: 85, subjects: ["thread"], Entry: OverviewTerminalsSection },
   { id: "usage", section: "usage", order: 90, subjects: ["thread"], Entry: UsageEntryBlock },
   { id: "subagents", section: "activity", order: 100, subjects: ["thread"], Entry: SubagentsEntryBlock },

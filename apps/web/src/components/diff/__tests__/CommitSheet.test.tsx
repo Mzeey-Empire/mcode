@@ -95,6 +95,7 @@ beforeEach(() => {
     model: { provider: "claude", id: "haiku", name: "Haiku 5.5" },
   } as never);
   useConnectionStore.setState({ status: "connected" });
+  useDiffStore.getState().setCommitSheetScopeId(null);
 });
 
 afterEach(() => {
@@ -319,6 +320,31 @@ describe("CommitSheet outcomes", () => {
     expect(sentRequests()).toHaveLength(3);
     expect(new Set(sentRequests().map((params) => params.requestId)).size).toBe(1);
     expect(sentRequests()[0]?.push).toBe(true);
+  });
+
+  it("commits and pushes from the main button when opened to push, and commits alone from its menu", async () => {
+    arrange([change("a.ts")]);
+    useDiffStore.getState().setCommitSheetScopeId("thread-1", { push: true });
+    renderSheet();
+    await screen.findByTestId("commit-file-list");
+    const main = await screen.findByRole("button", { name: "Commit and push 1 file" });
+    await waitFor(() => expect(main).toBeEnabled());
+
+    fireEvent.click(main);
+    await waitFor(() => expect(sentRequests()).toHaveLength(1));
+    expect(sentRequests()[0]?.push).toBe(true);
+  });
+
+  it("commits without pushing from the menu of a sheet opened to push", async () => {
+    arrange([change("a.ts")]);
+    useDiffStore.getState().setCommitSheetScopeId("thread-1", { push: true });
+    renderSheet();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Commit and push 1 file" })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "More commit actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Commit" }));
+    await waitFor(() => expect(sentRequests()).toHaveLength(1));
+    expect(sentRequests()[0]?.push).toBe(false);
   });
 
   it("reports a server error once instead of resending the request", async () => {
