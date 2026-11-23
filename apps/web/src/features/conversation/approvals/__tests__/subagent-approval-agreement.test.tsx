@@ -1,5 +1,5 @@
 import { createMockApproval, createMockThreadAttention } from "@mcode/contracts/testing";
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
@@ -57,6 +57,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   resetThreadStoreForTests();
   useSubagentRosterStore.setState({ loads: new Map() });
   threadAttentionStore.setState({ byThreadId: {} });

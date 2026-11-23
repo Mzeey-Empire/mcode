@@ -1,6 +1,6 @@
 import { createMockMessage } from "@mcode/contracts/testing";
 import type { HtmlVisual } from "@mcode/contracts/models/html-visual";
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/features/conversation/messages/MessageBubble";
@@ -27,6 +27,8 @@ function postFrom(source: Window, data: unknown) {
 
 beforeEach(() => root.style.setProperty("--ink", "rgb(20, 20, 20)"));
 afterEach(() => {
+  // Unmount first: frames follow the html class, so resetting it would update a mounted frame.
+  cleanup();
   root.classList.remove("dark");
   root.style.removeProperty("--ink");
 });
@@ -40,15 +42,16 @@ describe("HtmlVisualFrame", () => {
   it("sends the new token values to the page when the app switches to dark mode", async () => {
     const { frame, contentWindow } = renderFrame();
     // The frame also posts the theme on load, so let that pass before switching modes.
-    await new Promise((resolve) => frame.addEventListener("load", resolve, { once: true }));
+    await act(() => new Promise((resolve) => frame.addEventListener("load", resolve, { once: true })));
     const postMessage = vi.spyOn(contentWindow, "postMessage");
 
-    act(() => {
+    // Async act, so the theme observer's callback runs inside it.
+    await act(async () => {
       root.style.setProperty("--ink", "rgb(240, 240, 240)");
       root.classList.add("dark");
     });
 
-    return vi.waitFor(() => expect(postMessage).toHaveBeenCalledWith(
+    await waitFor(() => expect(postMessage).toHaveBeenCalledWith(
       { type: "mcode:visual-theme", theme: expect.objectContaining({ colorScheme: "dark", tokens: expect.objectContaining({ "--ink": "rgb(240, 240, 240)" }) }) },
       "*",
     ));
@@ -110,7 +113,10 @@ describe("visual marker in a reply", () => {
   // Keep the lazy renderer's cold load outside the find* wait, which a loaded runner can outlast.
   beforeAll(() => import("@/components/chat/MarkdownContent"));
   beforeEach(() => resetThreadStoreForTests({ records: new Map([["thread-1", { ...createEmptyThreadRecord(), messages: [published] }]]) }));
-  afterEach(() => resetThreadStoreForTests());
+  afterEach(() => {
+    cleanup();
+    resetThreadStoreForTests();
+  });
 
   function renderReply(markerId: string) {
     const reply = createMockMessage({ id: "answer", thread_id: "thread-1", role: "assistant", content: `Before\n\n![Latency](visual:${markerId})\n\nAfter` });
