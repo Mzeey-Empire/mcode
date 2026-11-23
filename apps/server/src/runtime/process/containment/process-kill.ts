@@ -9,6 +9,7 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
 import { logger } from "@mcode/shared";
+import { ProcessCommandError } from "@mcode/shared/node/process-command-error";
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 
@@ -60,12 +61,14 @@ export interface KillProcessTreeDeps {
  * already exited (e.g. the cleanup pass after pty.kill()).
  */
 function isProcessGoneError(err: unknown): boolean {
-  const e = err as NodeJS.ErrnoException & { code?: string | number; stderr?: string };
+  const cause: unknown = err instanceof ProcessCommandError ? err.cause : err;
+  if (typeof cause !== "object" || cause === null) return false;
+  const code = "code" in cause ? cause.code : undefined;
   // Unix: ESRCH = no such process
-  if (e.code === "ESRCH") return true;
+  if (code === "ESRCH") return true;
   // Windows: taskkill exits with code 128 when the PID is not found
-  if (typeof e.code === "number" && e.code === 128) return true;
-  if (typeof e.stderr === "string" && /not found/i.test(e.stderr)) return true;
+  if (code === 128) return true;
+  if ("stderr" in cause && typeof cause.stderr === "string" && /not found/i.test(cause.stderr)) return true;
   return false;
 }
 
@@ -260,6 +263,7 @@ async function killUnixProcessGroup(
     logger.warn("killProcessTree: unexpected error killing process tree", {
       pid,
       error: error instanceof Error ? error.message : String(error),
+      ...ProcessCommandError.logFields(error),
     });
     throw error;
   }
@@ -298,6 +302,7 @@ async function verifyUnixTermination(
       pid,
       capturedProcessCount: identities.length,
       error: error instanceof Error ? error.message : String(error),
+      ...ProcessCommandError.logFields(error),
     });
     throw error;
   }
@@ -337,6 +342,19 @@ interface WindowsKillContext {
   readonly isProcessAlive: (pid: number) => boolean;
 }
 
+async function runWindowsProcessCommand(
+  execute: typeof execFile,
+  command: string,
+  args: string[],
+  options?: { maxBuffer: number },
+): Promise<{ stdout: string; stderr: string }> {
+  try {
+    return await execute(command, args, { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true, ...options });
+  } catch (error) {
+    throw ProcessCommandError.fromExecFileError(error);
+  }
+}
+
 async function killWindowsProcessTree(
   pid: number,
   context: WindowsKillContext,
@@ -361,7 +379,7 @@ async function killWindowsProcessTreeRoot(
 ): Promise<void> {
   if (!root || !(await windowsIdentityStillRunning(root, context))) return;
   try {
-    await context.execFile("taskkill", ["/T", "/F", "/PID", String(pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true });
+    await runWindowsProcessCommand(context.execFile, "taskkill", ["/T", "/F", "/PID", String(pid)]);
   } catch (error) {
     // A root that exits after the snapshot but before taskkill reaches it fails with "There is no
     // running instance of the task" rather than "not found". Survivor checks still verify the tree.
@@ -370,7 +388,9 @@ async function killWindowsProcessTreeRoot(
       return;
     }
     logger.warn("killProcessTree: unexpected error killing process tree", {
-      pid, error: error instanceof Error ? error.message : String(error),
+      pid,
+      error: error instanceof Error ? error.message : String(error),
+      ...ProcessCommandError.logFields(error),
     });
     throw error;
   }
@@ -388,7 +408,7 @@ async function killWindowsSurvivors(
   const survivors = await classifyMatchingWindowsProcesses(captured, context);
   for (const identity of [...survivors].sort((left, right) => right.depth - left.depth)) {
     try {
-      await context.execFile("taskkill", ["/F", "/PID", String(identity.pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true });
+      await runWindowsProcessCommand(context.execFile, "taskkill", ["/F", "/PID", String(identity.pid)]);
       signaled.push(identity);
     } catch (error) {
       if (!isProcessGoneError(error)) throw error;
@@ -484,7 +504,8 @@ function indexWindowsSnapshot(
 async function readWindowsProcessSnapshot(
   ef: typeof execFile,
 ): Promise<WindowsProcessSnapshotEntry[]> {
-  const { stdout } = await ef(
+  const { stdout } = await runWindowsProcessCommand(
+    ef,
     "powershell.exe",
     [
       "-NoLogo",
@@ -493,11 +514,7 @@ async function readWindowsProcessSnapshot(
       "-Command",
       POWERSHELL_PROCESS_SNAPSHOT_SCRIPT,
     ],
-    {
-      timeout: TASKKILL_TIMEOUT_MS,
-      maxBuffer: PROCESS_ENUMERATION_MAX_BUFFER,
-      windowsHide: true,
-    },
+    { maxBuffer: PROCESS_ENUMERATION_MAX_BUFFER },
   );
   return parseWindowsProcessSnapshot(stdout);
 }
@@ -763,7 +780,8 @@ async function listDirectChildrenWith(
   ef: typeof execFile,
 ): Promise<Array<{ name: string; pid: number }>> {
   if (platform === "win32") {
-    const { stdout } = await ef(
+    const { stdout } = await runWindowsProcessCommand(
+      ef,
       "powershell.exe",
       [
         "-NoLogo",
@@ -773,11 +791,7 @@ async function listDirectChildrenWith(
         POWERSHELL_CHILD_PROCESS_SCRIPT,
         String(pid),
       ],
-      {
-        timeout: TASKKILL_TIMEOUT_MS,
-        maxBuffer: PROCESS_ENUMERATION_MAX_BUFFER,
-        windowsHide: true,
-      },
+      { maxBuffer: PROCESS_ENUMERATION_MAX_BUFFER },
     );
     return parsePowerShellProcesses(stdout);
   }

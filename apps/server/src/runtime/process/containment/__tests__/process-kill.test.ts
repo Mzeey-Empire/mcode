@@ -282,6 +282,53 @@ describe("killProcessTree", () => {
     expect(processKill).not.toHaveBeenCalledWith(5678, "SIGKILL");
   });
 
+  it("surfaces diagnostics when the Windows process snapshot command fails", async () => {
+    const cause = Object.assign(new Error("Windows process snapshot failed"), {
+      code: 1,
+      signal: null,
+      killed: false,
+      stderr: "Get-CimInstance : Access denied",
+    });
+    mockExecFile.mockRejectedValue(cause);
+
+    await expect(killProcessTree(1234, {
+      platform: "win32",
+      execFile: mockExecFile,
+    })).rejects.toMatchObject({
+      cause,
+      message: "Windows process snapshot failed",
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      stderrExcerpt: "Get-CimInstance : Access denied",
+    });
+  });
+
+  it("surfaces and logs bounded stderr when taskkill times out", async () => {
+    mockExecFile.mockRejectedValue(Object.assign(new Error("taskkill timed out"), {
+      code: null,
+      signal: "SIGTERM",
+      killed: true,
+      stderr: Buffer.from("x".repeat(3_000)),
+    }));
+    const diagnostics = {
+      exitCode: null,
+      signal: "SIGTERM",
+      timedOut: true,
+      stderrExcerpt: expect.stringMatching(/^x{2037}\[truncated\]$/),
+    };
+
+    await expect(killProcessTree(1234, {
+      platform: "win32",
+      execFile: mockExecFile,
+      getWindowsProcessSnapshot: async () => ROOT_SNAPSHOT,
+    })).rejects.toMatchObject(diagnostics);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "killProcessTree: unexpected error killing process tree",
+      { pid: 1234, error: "taskkill timed out", ...diagnostics },
+    );
+  });
+
   it("does not taskkill a Windows root after the captured root is replaced", async () => {
     mockExecFile.mockResolvedValue({ stdout: "", stderr: "" });
     const snapshot = vi.fn()
