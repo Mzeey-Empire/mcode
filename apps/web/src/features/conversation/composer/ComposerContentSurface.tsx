@@ -110,7 +110,6 @@ interface ComposerContentSurfaceProps {
       readonly contextWindow?: number;
       readonly totalProcessedTokens?: number;
     };
-    readonly hasLowQuota: boolean;
     readonly providerNoticeTrigger?: ReactNode;
   };
   readonly actions: {
@@ -423,7 +422,6 @@ function ComposerContextUsage({
       tokensIn={context.lastTokensIn ?? model.activeThread?.last_context_tokens ?? 0}
       contextWindow={contextWindow}
       totalProcessedTokens={context.totalProcessedTokens}
-      hasLowQuota={model.hasLowQuota}
     />
   );
 }

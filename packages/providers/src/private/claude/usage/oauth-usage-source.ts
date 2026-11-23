@@ -4,9 +4,17 @@ import type { AnthropicOauthToken, IUsageSource } from "@mcode/shared/usage";
 const ENDPOINT = "https://api.anthropic.com/api/oauth/usage";
 const BETA_HEADER = "oauth-2025-04-20";
 
+interface RawUsageLimit {
+  kind?: string | null;
+  percent?: number | null;
+  resets_at?: string | null;
+  scope?: { model?: { display_name?: string | null } | null } | null;
+}
+
 interface RawUsageResponse {
   five_hour?: { utilization: number; resets_at: string };
   seven_day?: { utilization: number; resets_at: string };
+  limits?: (RawUsageLimit | null)[] | null;
   extra_usage?: { used_cents: number; utilization: number };
 }
 
@@ -114,6 +122,12 @@ function mapToCategories(body: RawUsageResponse): QuotaCategory[] {
       resetDate: body.seven_day.resets_at,
     });
   }
+  if (Array.isArray(body.limits)) {
+    for (const limit of body.limits) {
+      const category = mapScopedWeeklyLimit(limit);
+      if (category) categories.push(category);
+    }
+  }
   if (body.extra_usage && body.extra_usage.used_cents > 0) {
     categories.push({
       label: "Pay-as-you-go",
@@ -124,6 +138,25 @@ function mapToCategories(body: RawUsageResponse): QuotaCategory[] {
     });
   }
   return categories;
+}
+
+function mapScopedWeeklyLimit(limit: RawUsageLimit | null): QuotaCategory | undefined {
+  if (limit?.kind !== "weekly_scoped") return;
+
+  const displayName = limit.scope?.model?.display_name;
+  const percent = limit.percent;
+  if (typeof displayName !== "string" || displayName.length === 0) return;
+  if (typeof percent !== "number" || !Number.isFinite(percent)) return;
+
+  const resetDate = limit.resets_at;
+  return {
+    label: `Weekly limit · ${displayName}`,
+    used: percent,
+    total: 100,
+    isUnlimited: false,
+    remainingPercent: clampPercent((100 - percent) / 100),
+    ...(typeof resetDate === "string" ? { resetDate } : {}),
+  };
 }
 
 /**

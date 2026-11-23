@@ -47,6 +47,104 @@ describe("AnthropicOAuthUsageSource", () => {
     ]);
   });
 
+  it("appends Fable's weekly limit even when inactive and unused", async () => {
+    readToken.mockResolvedValue({ accessToken: "tok", expiresAt: Date.now() + 60_000 });
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      okResponse({
+        five_hour: null,
+        seven_day: { utilization: 88, resets_at: "2026-11-23T21:00:00.598977+00:00" },
+        limits: [
+          {
+            kind: "weekly_all",
+            percent: 88,
+            resets_at: "2026-11-23T21:00:00.598977+00:00",
+            scope: null,
+            is_active: true,
+          },
+          {
+            kind: "weekly_scoped",
+            percent: 0,
+            resets_at: "2026-11-23T21:00:00+00:00",
+            scope: { model: { id: null, display_name: "Fable" }, surface: null },
+            is_active: false,
+          },
+        ],
+      }),
+    );
+
+    const result = await new AnthropicOAuthUsageSource(readToken).fetch();
+
+    expect(result).toEqual([
+      {
+        label: "Weekly limit",
+        used: 88,
+        total: 100,
+        isUnlimited: false,
+        remainingPercent: 0.12,
+        resetDate: "2026-11-23T21:00:00.598977+00:00",
+      },
+      {
+        label: "Weekly limit · Fable",
+        used: 0,
+        total: 100,
+        isUnlimited: false,
+        remainingPercent: 1,
+        resetDate: "2026-11-23T21:00:00+00:00",
+      },
+    ]);
+  });
+
+  it("skips invalid limits while preserving the other quota categories", async () => {
+    const invalidLimits = [
+      null,
+      { kind: "weekly_all", percent: 99, scope: { model: { display_name: "Fable" } } },
+      { kind: "weekly_scoped", percent: 45, scope: { model: null, surface: "test" } },
+      { kind: "weekly_scoped", percent: "15", scope: { model: { display_name: "Fable" } } },
+    ];
+    const sevenDay = { utilization: 25, resets_at: "2026-11-23T21:00:00+00:00" };
+    const weeklyCategory = {
+      label: "Weekly limit",
+      used: 25,
+      total: 100,
+      isUnlimited: false,
+      remainingPercent: 0.75,
+      resetDate: "2026-11-23T21:00:00+00:00",
+    };
+    readToken.mockResolvedValue({ accessToken: "tok", expiresAt: Date.now() + 60_000 });
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(okResponse({ seven_day: sevenDay, limits: invalidLimits }))
+      .mockResolvedValueOnce(
+        okResponse({
+          seven_day: sevenDay,
+          limits: [
+            ...invalidLimits,
+            { kind: "weekly_scoped", percent: 125, scope: { model: { display_name: "Opus" } } },
+          ],
+          extra_usage: { used_cents: 250, utilization: 0 },
+        }),
+      );
+    const source = new AnthropicOAuthUsageSource(readToken);
+
+    expect(await source.fetch()).toEqual([weeklyCategory]);
+    expect(await source.fetch()).toEqual([
+      weeklyCategory,
+      {
+        label: "Weekly limit · Opus",
+        used: 125,
+        total: 100,
+        isUnlimited: false,
+        remainingPercent: 0,
+      },
+      {
+        label: "Pay-as-you-go",
+        used: 2.5,
+        total: null,
+        isUnlimited: true,
+        remainingPercent: 1,
+      },
+    ]);
+  });
+
   it("appends a Pay-as-you-go row when used_cents > 0", async () => {
     readToken.mockResolvedValue({ accessToken: "tok", expiresAt: Date.now() + 60_000 });
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(

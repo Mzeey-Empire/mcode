@@ -6,29 +6,38 @@ import { type Thread } from "@/transport";
 import type { QuotaCategory } from "@mcode/contracts/providers/usage";
 import { useMemo } from "react";
 
+const MODEL_WEEKLY_LIMIT = /^weekly limit · (.+)$/i;
+
 /** Shared usageCategoryShortLabel used by the overview entries. */
 export function usageCategoryShortLabel(label: string): string {
   const normalized = label.trim();
   if (/^5[- ]hour/i.test(normalized)) return "5-hour";
+  const modelWeekly = MODEL_WEEKLY_LIMIT.exec(normalized);
+  if (modelWeekly) return `weekly · ${modelWeekly[1]}`;
   if (/^weekly/i.test(normalized)) return "weekly";
   if (/^api/i.test(normalized)) return "API";
   if (/auto|composer/i.test(normalized)) return "Auto";
   return normalized;
 }
 
-/** Shared usageCategoryPercent used by the overview entries. */
+/** Percent of a limit used, kept within 0 to 100 so every surface shows the same figure. */
 export function usageCategoryPercent(category: QuotaCategory): number {
-  if (typeof category.used === "number" && typeof category.total === "number" && category.total > 0) {
-    return (category.used / category.total) * 100;
-  }
-  return (1 - category.remainingPercent) * 100;
+  const percent = typeof category.used === "number" && typeof category.total === "number" && category.total > 0
+    ? (category.used / category.total) * 100
+    : (1 - category.remainingPercent) * 100;
+  return Math.min(Math.max(percent, 0), 100);
 }
 
 function usageCategoryPriority(category: QuotaCategory): number {
   const label = category.label.trim();
   if (/^5[- ]hour/i.test(label)) return 0;
+  if (MODEL_WEEKLY_LIMIT.test(label)) return 2;
   if (/^weekly/i.test(label)) return 1;
-  return 2;
+  return 3;
+}
+
+function modelWeeklyOrder(a: QuotaCategory, b: QuotaCategory): number {
+  return usageCategoryPriority(a) === 2 ? a.label.localeCompare(b.label) : 0;
 }
 
 /**
@@ -68,6 +77,7 @@ export function getThreadOverviewUsageCategories(
       .filter((category) => !category.isUnlimited)
       .sort((a, b) => (
         usageCategoryPriority(a) - usageCategoryPriority(b)
+        || modelWeeklyOrder(a, b)
         || usageCategoryPercent(b) - usageCategoryPercent(a)
       )) ?? []
   );
@@ -87,7 +97,6 @@ export function formatThreadOverviewUsage(
 
   const quotaSummary = categories.length > 0
     ? categories
-      .slice(0, 2)
       .map((category) => {
         const percent = Math.round(usageCategoryPercent(category));
         return `${usageCategoryShortLabel(category.label)} ${percent}%`;
@@ -118,7 +127,7 @@ export function useOverviewUsage(thread: Thread) {
     (record) => record.sessionUsageByProvider[thread.provider],
   );
   const usageCategories = useMemo(
-    () => getThreadOverviewUsageCategories(usageInfo, thread.provider).slice(0, 2),
+    () => getThreadOverviewUsageCategories(usageInfo, thread.provider),
     [thread.provider, usageInfo],
   );
   const usageSummary = useMemo(
