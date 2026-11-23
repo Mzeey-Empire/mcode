@@ -107,7 +107,8 @@ function GitSplitRow({ plan, run, onMenuOpenChange, loading }: {
 
 const PUSH_FAILURE_REASON: Record<GitPushFailureKind, string | null> = {
   "hook-declined": "rejected by hook",
-  "remote-ahead": "origin has newer commits",
+  // A Review task pushes to the pull request's fork, so the remote is not always origin.
+  "remote-ahead": "remote has newer commits",
   "timed-out": "timed out",
   other: null,
 };

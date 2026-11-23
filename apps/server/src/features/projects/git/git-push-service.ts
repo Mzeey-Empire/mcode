@@ -16,6 +16,7 @@ import {
   gitPushFailureKind,
   gitPushFailureReason,
   gitWasKilled,
+  redactGitUrlCredentials,
 } from "./execution/git-failure.js";
 import type { GitExecutor } from "./execution/types.js";
 import { GitRepositoryService } from "./git-repository-service.js";
@@ -235,6 +236,6 @@ function toPushFailure(error: unknown): unknown {
   }
   const message = gitPushFailureReason(output);
   const kind = gitPushFailureKind(output);
-  const detail = gitPushFailureDetail(output) || message;
+  const detail = gitPushFailureDetail(output) || redactGitUrlCredentials(message);
   return new GitPushError(message, kind, detail, error);
 }

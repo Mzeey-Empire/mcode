@@ -53,6 +53,16 @@ export function gitPushFailureKind(output: string): GitPushFailureKind {
   return "other";
 }
 
+/**
+ * Drop the parts of every URL in `text` that can hold a credential: the user info and the query,
+ * where hosts put tokens such as `?access_token=`. The user can copy this text, so it must hold none.
+ */
+export function redactGitUrlCredentials(text: string): string {
+  return text
+    .replace(/:\/\/[^/@\s]*@/g, "://")
+    .replace(/(:\/\/[^\s'"?]*)\?[^\s'"]*/g, "$1");
+}
+
 /** Keep Git's refusal lines while removing destination summaries and URL credentials. */
 export function gitPushFailureDetail(output: string): string {
   const detail: string[] = [];
@@ -60,7 +70,7 @@ export function gitPushFailureDetail(output: string): string {
     const line = rawLine.trim();
     if (line === "remote:" || line.startsWith("error: failed to push some refs to ")) continue;
     if (line.startsWith("remote:") || line.startsWith("! [") || line.startsWith("fatal:") || line.startsWith("error:")) {
-      detail.push(line.replace(/:\/\/[^/@\s]*@/g, "://"));
+      detail.push(redactGitUrlCredentials(line));
     }
   }
   return detail.join("\n");

@@ -9,4 +9,10 @@ describe("gitPushFailureDetail", () => {
       "fatal: unable to access 'https://github.com/o/r.git/': Authentication failed",
     );
   });
+
+  it("removes a token a host put in the URL's query", () => {
+    const output = "fatal: unable to access 'https://git.example.com/o/r.git?access_token=tok': 403";
+
+    expect(gitPushFailureDetail(output)).toBe("fatal: unable to access 'https://git.example.com/o/r.git': 403");
+  });
 });
