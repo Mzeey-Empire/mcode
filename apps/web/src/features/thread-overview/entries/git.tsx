@@ -1,12 +1,16 @@
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
+import { sidePlacement } from "@/components/ui/side-placement";
 import { SplitButton } from "@/components/ui/split-button";
 import type { GitRowPlan, GitStep } from "@/features/thread-overview/git-next-step";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { cn } from "@/lib/utils";
-import { ArrowUp, ArrowUpFromLine, GitBranchPlus, GitCommitHorizontal, GitPullRequest, type LucideIcon } from "lucide-react";
-import { useEffect, useState, type FocusEvent } from "react";
+import type { GitPushFailure, GitPushFailureKind } from "@mcode/contracts/models/git-push";
+import { ArrowUp, ArrowUpFromLine, ChevronDown, GitBranchPlus, GitCommitHorizontal, GitPullRequest, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState, type FocusEvent } from "react";
 import {
   OVERVIEW_ROW_CLASS,
   OVERVIEW_SPLIT_CHEVRON_CLASS,
@@ -101,11 +105,64 @@ function GitSplitRow({ plan, run, onMenuOpenChange, loading }: {
   );
 }
 
-function GitPushError({ message }: { message: string }) {
-  // A remote hook's message spans several lines, and the server joins them with newlines.
+const PUSH_FAILURE_REASON: Record<GitPushFailureKind, string | null> = {
+  "hook-declined": "rejected by hook",
+  "remote-ahead": "origin has newer commits",
+  "timed-out": "timed out",
+  other: null,
+};
+
+/**
+ * A refused push as one status line under the row, built like the PR row's CI line, with git's own
+ * lines in a popover beside the card. The row above keeps Push, so trying again stays one click.
+ */
+function GitPushFailureLine({ failure }: { failure: GitPushFailure["data"] }) {
+  const [open, setOpen] = useState(false);
+  const lineRef = useRef<HTMLDivElement | null>(null);
+  const reason = PUSH_FAILURE_REASON[failure.kind];
+  // The line's own button toggles the popover, so a press on it is not an outside press.
+  const handleOpenChange = (nextOpen: boolean, details: PopoverRootChangeEventDetails) => {
+    const target = details.event?.target;
+    if (details.reason === "outside-press" && target instanceof Node && lineRef.current?.contains(target)) return;
+    setOpen(nextOpen);
+  };
   return (
-    <div role="alert" data-testid="thread-overview-git-error" className="whitespace-pre-line px-3 pb-1 text-caption text-error">
-      {message}
+    <div ref={lineRef} role="alert" data-testid="thread-overview-git-error">
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="compact"
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          onClick={() => setOpen((current) => !current)}
+          className="flex h-7 w-full justify-between gap-3 border-transparent bg-transparent px-3 text-left text-muted hover:bg-hover/40 hover:text-ink dark:hover:bg-hover/40"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span aria-hidden className="size-5 shrink-0" />
+            <span className="text-fade text-caption">
+              <span className="text-status-label-error">Push failed</span>
+              {reason ? ` · ${reason}` : null}
+            </span>
+          </span>
+          <ChevronDown aria-hidden className={cn("-mr-0.5 shrink-0 text-muted transition-transform duration-150", open && "rotate-180")} />
+        </Button>
+        <PopoverContent
+          {...sidePlacement(lineRef)}
+          role="dialog"
+          aria-label="Git output"
+          data-testid="thread-overview-git-error-detail"
+          className="w-[356px] p-0"
+        >
+          <div className="flex h-row-compact items-center justify-between gap-2 pl-3.5 pr-1.5 text-caption text-muted">
+            <span>Git output</span>
+            <CopyButton text={failure.detail} label="Copy git output" />
+          </div>
+          <pre className="mx-3.5 mb-3.5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-hover/50 p-2 font-mono text-caption text-ink">
+            {failure.detail}
+          </pre>
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -150,7 +207,7 @@ function GitEntry() {
           <GitStepContent step={plan.main} />
         </Button>
       )}
-      {gitPush.kind === "failed" ? <GitPushError message={gitPush.message} /> : null}
+      {gitPush.kind === "failed" ? <GitPushFailureLine failure={gitPush.failure} /> : null}
     </div>
   );
 }

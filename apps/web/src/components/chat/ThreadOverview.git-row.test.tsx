@@ -58,6 +58,7 @@ import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useDiffStore } from "@/stores/diffStore";
 import { threadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import type { Thread } from "@/transport";
+import { RpcError } from "@/transport/ws-transport";
 import { mockWorkspaceState } from "./__tests__/thread-overview-mocks";
 import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-overview-harness";
 import { ThreadOverview } from "./ThreadOverview";
@@ -279,15 +280,38 @@ describe("ThreadOverview git row", () => {
       expect(screen.getByTestId("thread-overview-git")).toHaveTextContent("Create PR…");
     });
 
-    it("shows a failed push's reason in place and keeps Push", async () => {
+    it("names why a push was refused under the row, keeps Push, and opens git's lines", async () => {
       const user = userEvent.setup();
-      vi.mocked(mockTransport.push).mockRejectedValueOnce(new Error("rejected: non-fast-forward"));
+      const detail = "remote: branch is frozen\n! [remote rejected] feat/x -> feat/x (pre-receive hook declined)";
+      vi.mocked(mockTransport.push).mockRejectedValueOnce(
+        new RpcError("branch is frozen", "GIT_PUSH_FAILED", { kind: "hook-declined", detail }),
+      );
       reviewBranch({ published: { ahead: 1 } });
       renderOverview(namedThread());
 
       await user.click(await screen.findByRole("button", { name: "Push" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("rejected: non-fast-forward");
+      const line = await screen.findByRole("alert");
+      expect(line).toHaveTextContent("Push failed · rejected by hook");
       expect(screen.getByTestId("workspace-menu-push")).toHaveTextContent("Push");
+
+      await user.click(within(line).getByRole("button"));
+      expect(await screen.findByRole("dialog", { name: "Git output" })).toHaveTextContent(
+        "! [remote rejected] feat/x -> feat/x (pre-receive hook declined)",
+      );
+    });
+
+    it("shows an unclassified failure as Push failed with its message as git's lines", async () => {
+      const user = userEvent.setup();
+      vi.mocked(mockTransport.push).mockRejectedValueOnce(new Error("Could not resolve host: github.com"));
+      reviewBranch({ published: { ahead: 1 } });
+      renderOverview(namedThread());
+
+      await user.click(await screen.findByRole("button", { name: "Push" }));
+      const line = await screen.findByRole("alert");
+      expect(line).toHaveTextContent(/^Push failed$/);
+
+      await user.click(within(line).getByRole("button"));
+      expect(await screen.findByRole("dialog", { name: "Git output" })).toHaveTextContent("Could not resolve host: github.com");
     });
   });
 });
