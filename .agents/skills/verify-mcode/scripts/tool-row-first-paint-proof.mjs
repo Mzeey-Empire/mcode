@@ -29,6 +29,8 @@ const MAX_MOVE_PX = 1;
 const SETTLE_MS = 1200;
 const MIN_USABLE_SAMPLES = 10;
 const SETTLE_COVERAGE_SLACK_MS = 100;
+// About six frames at 60 Hz: a longer hole could hide a move that reverses before the next sample.
+const MAX_SAMPLE_GAP_MS = 100;
 const RUNNING_MARKER = "fixture first paint hold";
 
 /** Reloads the app and expands the workspace thread list until the thread shows, then opens it. */
@@ -139,6 +141,10 @@ function assertSettleCoverage(trail) {
   const lastT = trail.at(-1)?.t ?? 0;
   if (trail.length < MIN_USABLE_SAMPLES || lastT < SETTLE_MS - SETTLE_COVERAGE_SLACK_MS) {
     throw new Error(`Only ${trail.length} usable samples, the last at ${lastT} ms of ${SETTLE_MS} ms`);
+  }
+  const gapIndex = trail.findIndex((step, index) => index > 0 && step.t - trail[index - 1].t > MAX_SAMPLE_GAP_MS);
+  if (gapIndex > 0) {
+    throw new Error(`No usable sample between ${trail[gapIndex - 1].t} ms and ${trail[gapIndex].t} ms`);
   }
 }
 
