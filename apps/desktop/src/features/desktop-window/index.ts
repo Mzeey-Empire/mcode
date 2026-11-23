@@ -3,6 +3,7 @@ import { BrowserWindow, ipcMain, nativeTheme, type BrowserWindow as BrowserWindo
 import { ThemeSchema, type Theme } from "@mcode/contracts/models/settings";
 import { logger } from "@mcode/shared";
 
+import { isVisualPreviewWindow } from "../visual-preview/index.js";
 import {
   attachCloseGuard,
   type CloseGuardDependencies,
@@ -117,7 +118,7 @@ export function createDesktopWindowFeature(
     getMainWindow: () => mainWindow,
     createWindow: create,
     recreateWindowIfNeeded: () => {
-      if (BrowserWindow.getAllWindows().length > 0) return null;
+      if (BrowserWindow.getAllWindows().some((window) => !isVisualPreviewWindow(window))) return null;
       return create();
     },
   };

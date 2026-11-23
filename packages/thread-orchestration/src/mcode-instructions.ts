@@ -91,7 +91,8 @@ const BROWSER_BLOCK = [
 
 const VISUALS_BLOCK = [
   "Mcode Visuals",
-  "- When a chart, table, diagram, or mockup says more than prose would, build it as a self-contained HTML page, check it carefully, and publish it with html_render before you write your reply.",
+  "- When a chart, table, diagram, or mockup says more than prose would, build it as a self-contained HTML page. Check it with html_preview, fix any errors it shows, and publish it with html_render before you write your reply.",
+  "- Leave html_render's height at its default unless html_preview reports a contentHeight above it. Then pass height 2000. The frame shrinks to fit.",
   "- For several visuals, or one that belongs at a point in your explanation, pass placement \"inline\" and put the marker html_render returns on its own line at that point in your reply.",
   "- Do not restate the page's contents in the reply.",
 ].join("\n");

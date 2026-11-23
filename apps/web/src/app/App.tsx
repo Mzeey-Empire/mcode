@@ -1,3 +1,4 @@
+import { startVisualPreviewHost } from "@/features/conversation/html-visual/visual-preview-host";
 import {
   useCallback,
   useEffect,
@@ -268,6 +269,7 @@ function AppLayout(props: AppLayoutProps) {
   // The toast lane applies the canvas-width half of the dock rule once it measures the canvas.
   const overviewReserved = activeThreadId !== null && !overviewClosed && !rightPanelVisible;
   const chatVisible = !props.settingsOpen && !props.showPullRequests && !props.showNewThreadCanvas;
+  useEffect(startVisualPreviewHost, []);
   return (
     <TerminalPoolSlotProvider>
       <TooltipProvider delay={400}>

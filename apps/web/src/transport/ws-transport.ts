@@ -39,6 +39,7 @@ import type { CreateAndSendResult, SendMessageInput, CreateAndSendInput } from "
 import type { ThreadStartup, ThreadStartupListResult } from "@mcode/contracts/thread-startup";
 import type { PullRequestCapabilitiesRequest, PullRequestCapabilitiesResult, PullRequestListRequest, PullRequestListResult, PullRequestGetRequest, PullRequestGetResult, PullRequestTimelineRequest, PullRequestTimelineResult, PullRequestFilesRequest, PullRequestFilesResult, PullRequestPatchRequest, PullRequestPatchResult, PullRequestCancelRequest, PullRequestCancelResult, PullRequestCreateReviewTaskRequest, PullRequestCreateReviewTaskResult, PullRequestReviewLinkRequest, PullRequestReviewLinkResult, PullRequestPostCommentRequest, PullRequestPostCommentResult, PullRequestSubmitReviewRequest, PullRequestSubmitReviewResult, PullRequestSetReadinessRequest, PullRequestSetReadinessResult, PullRequestCloseRequest, PullRequestCloseResult, PullRequestMergeRequest, PullRequestMergeResult } from "@mcode/contracts/pull-requests";
 import type { BrowserAutomationHostRegistration, BrowserAutomationHostDispatchTarget, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import type { VisualPreviewResponse } from "@mcode/contracts/ws/visual-preview";
 import type { TerminalBackendCapabilities } from "@mcode/contracts/models/terminal-backend";
 import type { TerminalDiagnosticsBundle } from "@mcode/contracts/models/terminal-diagnostics";
 import type { TerminalCustomProfile, TerminalProfileReference } from "@mcode/contracts/models/terminal";
@@ -962,6 +963,8 @@ export function createWsTransport(
 
   return {
     waitForConnection,
+    registerVisualPreviewHost: () => rpc<void>("visualPreview.host.register", {}),
+    respondToVisualPreview: (response: VisualPreviewResponse) => rpc<void>("visualPreview.host.respond", response),
     registerBrowserAutomationHost: (registration: BrowserAutomationHostRegistration) =>
       rpc<{ generation: number; desktopInstanceId: string }>(
         "browserAutomation.host.register",

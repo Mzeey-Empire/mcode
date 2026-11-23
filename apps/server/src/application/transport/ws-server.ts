@@ -276,6 +276,7 @@ export function createWsServer(deps: WsServerDeps): {
       diag.emit("ws.connection", {}, () => ({ step: "closed", conn, code }));
       logger.info("WebSocket client disconnected");
       deps.browserAutomationBroker?.disconnect(ws);
+      deps.desktopHtmlPreviewRenderer?.disconnect(ws);
       deps.terminalService.disconnectClient(ws);
       removeClient(ws);
     });
@@ -283,6 +284,7 @@ export function createWsServer(deps: WsServerDeps): {
     ws.on("error", (err) => {
       logger.error("WebSocket error", { error: err.message });
       deps.browserAutomationBroker?.disconnect(ws);
+      deps.desktopHtmlPreviewRenderer?.disconnect(ws);
       deps.terminalService.disconnectClient(ws);
       removeClient(ws);
     });

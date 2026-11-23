@@ -48,6 +48,7 @@ import type { SubagentRoster, SubagentDetail } from "@mcode/contracts/models/sub
 import type { CanonicalSubagentStopResult } from "@mcode/contracts/models/canonical-subagent-roster";
 import type { GoalLookupResult } from "@mcode/contracts/models/goal";
 import type { BrowserAutomationHostRegistration, BrowserAutomationHostDispatchTarget, BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
+import type { VisualPreviewResponse } from "@mcode/contracts/ws/visual-preview";
 import type { PullRequestCapabilitiesRequest, PullRequestCapabilitiesResult, PullRequestListRequest, PullRequestListResult, PullRequestGetRequest, PullRequestGetResult, PullRequestTimelineRequest, PullRequestTimelineResult, PullRequestFilesRequest, PullRequestFilesResult, PullRequestPatchRequest, PullRequestPatchResult, PullRequestCancelRequest, PullRequestCancelResult, PullRequestCreateReviewTaskRequest, PullRequestCreateReviewTaskResult, PullRequestReviewLinkRequest, PullRequestReviewLinkResult, PullRequestPostCommentRequest, PullRequestPostCommentResult, PullRequestSubmitReviewRequest, PullRequestSubmitReviewResult, PullRequestSetReadinessRequest, PullRequestSetReadinessResult, PullRequestCloseRequest, PullRequestCloseResult, PullRequestMergeRequest, PullRequestMergeResult } from "@mcode/contracts/pull-requests";
 import type { AgentStopResult } from "@mcode/contracts/models/turn-runtime";
 import type { TerminalBackendCapabilities } from "@mcode/contracts/models/terminal-backend";
@@ -189,6 +190,10 @@ export interface DiffReadOptions {
 
 /** Transport interface consumed by the web app to communicate with the backend. */
 export interface McodeTransport {
+  /** Register this connection to receive hidden desktop render requests. */
+  registerVisualPreviewHost(): Promise<void>;
+  /** Return the outcome of a render directed to this connection. */
+  respondToVisualPreview(response: VisualPreviewResponse): Promise<void>;
   /** Register this renderer connection as an authorized visible-browser host. */
   registerBrowserAutomationHost(
     registration: BrowserAutomationHostRegistration,

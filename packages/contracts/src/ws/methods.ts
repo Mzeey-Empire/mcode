@@ -114,6 +114,7 @@ import {
   ProviderIdSchema,
 } from "../models/settings.js";
 import { lazySchema } from "../utils/lazySchema.js";
+import { VisualPreviewResponseSchema } from "./visual-preview.js";
 import { TerminalBackendCapabilitiesSchema } from "../models/terminal-backend.js";
 import { LegacyTerminalMethods } from "./terminal-legacy.js";
 import { TERMINAL_V1_METHODS, type TerminalV1MethodName } from "./terminal.js";
@@ -642,6 +643,10 @@ const threadResultSchema: () => z.ZodType<import("../models/thread.js").Thread, 
 
 /** All WebSocket methods with runtime-validating parameter and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
+  /** Registers this connection as a desktop HTML preview host. */
+  "visualPreview.host.register": { params: z.object({}).strict(), result: z.object({}).strict() },
+  /** Completes one preview that was directed to this host. */
+  "visualPreview.host.respond": { params: VisualPreviewResponseSchema(), result: z.void() },
   /** Registers this WebSocket as a visible-browser automation host. */
   "browserAutomation.host.register": {
     params: z.object({ registration: BrowserAutomationHostRegistrationSchema() }).strict(),
