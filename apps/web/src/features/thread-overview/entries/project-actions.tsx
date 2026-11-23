@@ -4,7 +4,13 @@ import { ActionMenuGlyph } from "@/features/projects/actions/ActionRunMenu";
 import { ThreadActionRunMenu, useThreadActionRunHandlers } from "@/features/projects/actions/ThreadActionRunMenu";
 import { useProjectActions } from "@/features/projects/actions/useProjectActions";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
-import { OVERVIEW_ROW_CLASS, OverviewRowIcon, ThreadOverviewTooltipButton } from "@/features/thread-overview/overview-row";
+import {
+  OVERVIEW_ROW_CLASS,
+  OVERVIEW_SPLIT_CHEVRON_CLASS,
+  OVERVIEW_SPLIT_MAIN_CLASS,
+  OverviewRowIcon,
+  ThreadOverviewTooltipButton,
+} from "@/features/thread-overview/overview-row";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
@@ -34,14 +40,6 @@ export function primaryProjectAction(
   }
   return latest?.action ?? actions[0] ?? null;
 }
-
-/**
- * 38px wide so the centred chevron ends 11px from the row's edge, where the other rows' chevrons
- * end. It takes its own fill while the row is hovered so the second target reads as separate,
- * including under the pointer, where the ghost button's own hover fill would match the row's.
- */
-const CHEVRON_SEGMENT_CLASS =
-  "w-[3.8rem] rounded-l-none hover:bg-selected group-hover/action-row:bg-selected group-focus-within/action-row:bg-selected aria-expanded:bg-selected";
 
 /** What a live Action's row says at rest; its click opens the Action's terminal. */
 const LIVE_STATUS_LABEL = { running: "Running", "awaiting-approval": "Approval required" } as const;
@@ -94,7 +92,7 @@ function ProjectActionMain({ action, run, capReason, onRun, onOpen }: {
       aria-label={status ? `Open ${action.name}, ${LIVE_STATUS_LABEL[status].toLowerCase()}` : `Run ${action.name}`}
       disabled={blocked}
       onClick={() => (status ? onOpen(action.id) : onRun(action.id))}
-      className={cn(OVERVIEW_ROW_CLASS, "group/action min-w-0 flex-1 justify-start pr-2 hover:bg-transparent")}
+      className={cn(OVERVIEW_ROW_CLASS, OVERVIEW_SPLIT_MAIN_CLASS, "group/action min-w-0 flex-1 justify-start pr-2")}
     >
       <OverviewRowIcon>
         <ActionMenuGlyph action={action} status={status} />
@@ -146,7 +144,7 @@ function ProjectActionsRow({ thread }: { readonly thread: Thread }) {
   return (
     <div
       data-testid="thread-overview-project-actions"
-      className="group/action-row flex rounded-control hover:bg-hover focus-within:bg-hover has-[[aria-expanded=true]]:bg-hover"
+      className="flex rounded-control"
     >
       <ProjectActionMain
         action={primary}
@@ -158,7 +156,7 @@ function ProjectActionsRow({ thread }: { readonly thread: Thread }) {
       <ThreadActionRunMenu
         {...menuProps}
         trigger={
-          <Button variant="ghost" size="icon-compact" type="button" aria-label="Project actions" className={CHEVRON_SEGMENT_CLASS}>
+          <Button variant="ghost" size="icon-compact" type="button" aria-label="Project actions" className={OVERVIEW_SPLIT_CHEVRON_CLASS}>
             <ChevronDown aria-hidden />
           </Button>
         }

@@ -12,6 +12,22 @@ export const OVERVIEW_ROW_CLASS =
   "group h-row-compact w-full gap-2 px-3 text-left text-body-small transition-[background-color,color] duration-150 ease-out";
 
 /**
+ * The main part of a split Overview row, such as Project Actions. Split rows take no row-level tint:
+ * each part takes the standard row hover tint on hover and on keyboard focus, so only the part under
+ * the pointer or focus lights up. Per-part tints also hold in light mode, where `--hover` is opaque
+ * and a part tint stacked on a row tint could not show a second step.
+ */
+export const OVERVIEW_SPLIT_MAIN_CLASS = "rounded-r-none hover:bg-hover focus-visible:bg-hover";
+
+/**
+ * The chevron part of a split Overview row; see {@link OVERVIEW_SPLIT_MAIN_CLASS} for the tint rule.
+ * It keeps the tint while its menu is open. 38px wide so the centred chevron ends 11px from the row's
+ * edge, where the other rows' chevrons end.
+ */
+export const OVERVIEW_SPLIT_CHEVRON_CLASS =
+  "w-[3.8rem] rounded-l-none hover:bg-hover focus-visible:bg-hover aria-expanded:bg-hover";
+
+/**
  * An inline recovery action, such as Retry after a failed load. Ink alone sits under 3:1 against the
  * muted sentence around it, so the underline shows at rest rather than only on hover.
  */
