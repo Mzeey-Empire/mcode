@@ -62,7 +62,7 @@ These tickets carried the "needs decision" flag. All are now decided; S08-04 sti
 |---|---|---|
 | E1 | Should a fatal failure still offer Retry? | Yes. |
 | E2 | After Retry or Resume, repeat the prompt or show a compact marker? | **User, 2026-10-08:** neither. The new attempt replaces the failed or interrupted one in the transcript: the message shows once, then the latest attempt. Records are kept. Review treats the attempts as one turn. |
-| E3 | Switch model can only offer the same provider's models. Keep, hide, or build provider switching first? | Keep, limited to the same provider. |
+| E3 | Which providers should Switch model offer? | Every provider. A pick on another provider switches the thread and resumes the turn there (issue #2235). |
 | E4 | A scheduled "Retry at" while Mcode was closed: fire on next launch? | Only if 15 minutes overdue or less. |
 | E5 | Retire the "N turns were interrupted · Retry all" banner after a restart? | Yes; per-thread Resume and the sidebar replace it. |
 | E6 | Keep refilling the composer when Stop lands before the provider starts? | **User, 2026-10-08:** no. Delete the refill; the quiet "Stopped before {Provider} started" ending is the only result. |

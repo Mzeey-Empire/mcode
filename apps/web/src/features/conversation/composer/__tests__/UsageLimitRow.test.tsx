@@ -24,6 +24,7 @@ vi.mock("@/components/chat/ModelSelector", () => ({
     <div data-testid="model-selector" data-provider-scope={providerScope?.kind}>
       {trigger}
       <button type="button" onClick={() => onSelect("gpt-5.5", "codex")}>Pick gpt-5.5</button>
+      <button type="button" onClick={() => onSelect("claude-opus-4-6", "claude")}>Pick claude-opus-4-6</button>
     </div>
   ),
 }));
@@ -126,10 +127,32 @@ describe("UsageLimitRow", () => {
     const user = userEvent.setup();
     render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
 
-    expect(screen.getByTestId("model-selector")).toHaveAttribute("data-provider-scope", "selected-only");
+    expect(screen.getByTestId("model-selector")).toHaveAttribute("data-provider-scope", "switchable");
     await user.click(screen.getByRole("button", { name: "Pick gpt-5.5" }));
 
-    expect(mockTransport.resumeInterruptedTurn).toHaveBeenCalledWith({ threadId: THREAD, turnId: TURN, model: "gpt-5.5" });
+    expect(mockTransport.resumeInterruptedTurn).toHaveBeenCalledWith({ threadId: THREAD, turnId: TURN, model: "gpt-5.5", provider: "codex" });
+  });
+
+  it("switches provider and resumes when the user picks another provider's model", async () => {
+    const user = userEvent.setup();
+    render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
+
+    await user.click(screen.getByRole("button", { name: "Pick claude-opus-4-6" }));
+
+    expect(mockTransport.resumeInterruptedTurn).toHaveBeenCalledWith({
+      threadId: THREAD, turnId: TURN, model: "claude-opus-4-6", provider: "claude",
+    });
+  });
+
+  it("keeps the notice with the error when the switch fails", async () => {
+    const user = userEvent.setup();
+    vi.mocked(mockTransport.resumeInterruptedTurn).mockRejectedValueOnce(new Error("Claude is not signed in"));
+    render(<ComposerTray threadId={THREAD} running={false} queue={null} />);
+
+    await user.click(screen.getByRole("button", { name: "Pick claude-opus-4-6" }));
+
+    expect(await within(row()).findByRole("alert")).toHaveTextContent("Claude is not signed in");
+    expect(within(row()).getByText("Codex usage limit reached")).toBeInTheDocument();
   });
 
   it("shows the server's refusal in the row", async () => {

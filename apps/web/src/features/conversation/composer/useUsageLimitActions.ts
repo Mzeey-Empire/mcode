@@ -1,12 +1,13 @@
 import { useCallback } from "react";
+import type { ProviderId } from "@mcode/contracts/providers/interfaces";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getTransport } from "@/transport";
 import { useTurnActionRequest } from "../turn-ending/useTurnActionRequest";
 
 /** What the usage-limit row can do with the stopped turn. */
 export interface UsageLimitActions {
-  /** Resume now, optionally on another model of the same provider. */
-  resume: (model?: string) => void;
+  /** Resume now, optionally on another model; a provider other than the thread's switches the thread to it. */
+  resume: (model?: string, provider?: ProviderId) => void;
   /** Schedule a resume at `at`; a time already past resumes now instead. */
   resumeAt: (at: string) => void;
   /** Cancel the thread's scheduled resume. */
@@ -20,7 +21,9 @@ export function useUsageLimitActions(threadId: string, turnId: string): UsageLim
   // One request state, so a refusal clears on whichever action the user tries next.
   const { run, pending, error } = useTurnActionRequest();
   const resume = useCallback(
-    (model?: string) => run(() => getTransport().resumeInterruptedTurn({ threadId, turnId, ...(model ? { model } : {}) })),
+    (model?: string, provider?: ProviderId) => run(() => getTransport().resumeInterruptedTurn({
+      threadId, turnId, ...(model ? { model } : {}), ...(provider ? { provider } : {}),
+    })),
     [run, threadId, turnId],
   );
   const resumeAt = useCallback((at: string) => {

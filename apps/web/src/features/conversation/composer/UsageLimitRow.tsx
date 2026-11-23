@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AlarmClock, CirclePause } from "lucide-react";
+import { ProviderIdSchema } from "@mcode/contracts/models/settings";
 import { ModelSelector } from "@/components/chat/ModelSelector";
-import type { PickerProviderScope } from "@/components/chat/ModelPickerPanel";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadRecord } from "@/stores/thread-selectors";
@@ -58,8 +58,6 @@ interface LimitContentProps {
   now: number;
 }
 
-const SELECTED_PROVIDER_ONLY: PickerProviderScope = { kind: "selected-only" };
-
 function LimitContent({ threadId, state, actions, now }: LimitContentProps) {
   const thread = useWorkspaceStore((store) => store.threads.find((candidate) => candidate.id === threadId));
   const resetsAt = state.resetsAt && Date.parse(state.resetsAt) > now ? state.resetsAt : undefined;
@@ -76,9 +74,8 @@ function LimitContent({ threadId, state, actions, now }: LimitContentProps) {
         <ModelSelector
           selectedModelId={thread.model ?? ""}
           selectedProviderId={thread.provider}
-          onSelect={(modelId) => actions.resume(modelId)}
-          // A resume continues on the thread's provider, so only the model can change.
-          providerScope={SELECTED_PROVIDER_ONLY}
+          onSelect={(modelId, providerId) => actions.resume(modelId, ProviderIdSchema.parse(providerId))}
+          providerScope={{ kind: "switchable", threadProviderId: thread.provider }}
           trigger={(
             <Button variant="ghost" aria-label="Switch model" disabled={actions.pending} className={GHOST_CLASS}>
               <span className="@max-[440px]:hidden">Switch model</span>

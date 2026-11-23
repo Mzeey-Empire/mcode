@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { AgentTurnIdSchema } from "../compat/agent-model.js";
+import { ProviderIdSchema } from "./settings.js";
 
 /** One explicitly scheduled resume of a usage-limited attempt. */
 export const ScheduledTurnResumeSchema = lazySchema(() => z.object({
@@ -44,11 +45,15 @@ export const TurnRetryResultSchema = lazySchema(() => z.object({
 /** Identity returned after retry admission succeeds. */
 export type TurnRetryResult = z.infer<ReturnType<typeof TurnRetryResultSchema>>;
 
-/** Resume the latest interrupted attempt as a new attempt of the same turn, optionally switching its model. */
+/**
+ * Resume the latest interrupted attempt as a new attempt of the same turn, optionally switching its model or
+ * provider. A provider other than the thread's switches the thread to it.
+ */
 export const TurnResumeParamsSchema = lazySchema(() => z.object({
   threadId: z.string().min(1).max(256),
   turnId: AgentTurnIdSchema,
   model: z.string().trim().min(1).max(256).optional(),
+  provider: ProviderIdSchema.optional(),
 }).strict());
 /** Input for resuming an interrupted attempt. */
 export type TurnResumeParams = z.infer<ReturnType<typeof TurnResumeParamsSchema>>;
