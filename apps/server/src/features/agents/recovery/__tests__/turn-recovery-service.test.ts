@@ -803,6 +803,38 @@ describe("TurnRecoveryService", () => {
         expect(commands[0]).toMatchObject({ model: "gpt-5.5", content: RESUME_CONTINUATION_PROMPT });
       });
 
+      it("resumes on another provider through the switch path", async () => {
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        const result = await service.resumeTurn(
+          { threadId: THREAD_ID, turnId: TURN_ID, provider: "claude", model: "claude-opus-4-6" },
+          async (command) => {
+            commands.push(command);
+            await admit(command);
+          },
+        );
+        expect(result.mode).toBe("seeded-session");
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ provider: "claude", model: "claude-opus-4-6", content: RESUME_CONTINUATION_PROMPT,
+          internalUserMessage: true, forceFreshSession: true, retryOfExecutionId: EXECUTION_ID });
+        expect(commands[0]!.providerWireOverride).toBeUndefined();
+        expect(commands[0]!.resumeRequired).toBeUndefined();
+        expect(await handoffs.readLatestHandoffAudit(THREAD_ID)).toBeNull();
+      });
+
+      it("keeps the same-provider resume when the requested provider is the thread's", async () => {
+        interruptTurn();
+        const commands: SendMessageCommand[] = [];
+        const result = await service.resumeTurn({ threadId: THREAD_ID, turnId: TURN_ID, provider: "codex" }, async (command) => {
+          commands.push(command);
+          await admit(command);
+        });
+        expect(result.mode).toBe("seeded-session");
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({ provider: "codex", forceFreshSession: true });
+        expect(commands[0]!.providerWireOverride?.endsWith(RESUME_CONTINUATION_PROMPT)).toBe(true);
+      });
+
       it("re-sends the original prompt when a usage limit stopped the turn before any output", async () => {
         withNativeSession();
         limitTurn("none");

@@ -182,15 +182,36 @@ export class TurnRecoveryService {
   /**
    * Continue the latest interrupted turn as a new attempt, optionally on another model. The provider's own session
    * is tried first when it can be resumed; when the provider reports that session gone, a fresh session seeded with
-   * the conversation takes over.
+   * the conversation takes over. A provider other than the thread's goes through the provider switch, which carries
+   * the history to the new provider itself.
    */
   async resumeTurn(input: TurnResumeParams, dispatch: TurnDispatch, context?: RestartContext): Promise<TurnResumeResult> {
     const interrupted = this.requireRecoverableTurn(input, "Interrupted");
-    const target = { ...interrupted, thread: { ...interrupted.thread, model: input.model ?? interrupted.thread.model } };
-    const restart = context ?? (target.ending?.outcome === "interrupted" && target.ending.cause === "app_closed"
+    const restart = context ?? (interrupted.ending?.outcome === "interrupted" && interrupted.ending.cause === "app_closed"
       ? {} : null);
+    if (input.provider && input.provider !== interrupted.thread.provider) {
+      return this.resumeOnOtherProvider(interrupted, { ...input, provider: input.provider }, continuationPrompt(restart), dispatch);
+    }
+    const target = { ...interrupted, thread: { ...interrupted.thread, model: input.model ?? interrupted.thread.model } };
     return this.continueTurn(target, dispatch, this.limitedBeforeOutput(target), continuationPrompt(restart), true,
       context?.onLateFailure);
+  }
+
+  private async resumeOnOtherProvider(
+    interrupted: RecoverableTurn,
+    { provider, model }: TurnResumeParams & { provider: NonNullable<TurnResumeParams["provider"]> },
+    prompt: string,
+    dispatch: TurnDispatch,
+  ): Promise<TurnResumeResult> {
+    const turnId = NodeCrypto.randomUUID();
+    await this.dispatchAttempt(turnId, {
+      ...this.continuationCommand(interrupted, interrupted.executionId, prompt),
+      provider,
+      ...(model ? { model } : {}),
+      // A fresh target session gets the full history and skips the switch's resume fallback, which retries on the old provider.
+      forceFreshSession: true,
+    }, dispatch);
+    return { turnId, mode: "seeded-session" };
   }
 
   /** Start a hidden continuation for a finished parent without retrying its execution. */
