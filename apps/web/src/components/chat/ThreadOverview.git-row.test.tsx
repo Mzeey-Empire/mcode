@@ -280,7 +280,7 @@ describe("ThreadOverview git row", () => {
       expect(screen.getByTestId("thread-overview-git")).toHaveTextContent("Create PR…");
     });
 
-    it("names why a push was refused under the row, keeps Push, and opens git's lines", async () => {
+    it("marks a refused push on the Push row itself and shows git's lines on hover", async () => {
       const user = userEvent.setup();
       const detail = "remote: branch is frozen\n! [remote rejected] feat/x -> feat/x (pre-receive hook declined)";
       vi.mocked(mockTransport.push).mockRejectedValueOnce(
@@ -290,27 +290,50 @@ describe("ThreadOverview git row", () => {
       renderOverview(namedThread());
 
       await user.click(await screen.findByRole("button", { name: "Push" }));
-      const line = await screen.findByRole("alert");
-      expect(line).toHaveTextContent("Push failed · rejected by hook");
-      expect(screen.getByTestId("workspace-menu-push")).toHaveTextContent("Push");
+      expect(await screen.findByRole("status")).toHaveTextContent("Push failed · rejected by hook");
+      const push = screen.getByRole("button", { name: "Push" });
+      expect(push).toHaveTextContent("Failed");
 
-      await user.click(within(line).getByRole("button"));
-      expect(await screen.findByRole("dialog", { name: "Git output" })).toHaveTextContent(
-        "! [remote rejected] feat/x -> feat/x (pre-receive hook declined)",
-      );
+      await user.unhover(push);
+      await user.hover(push);
+      const card = await screen.findByRole("dialog", { name: "Git output" });
+      expect(card).toHaveTextContent("Push failed · rejected by hook");
+      expect(card).toHaveTextContent("! [remote rejected] feat/x -> feat/x (pre-receive hook declined)");
     });
 
-    it("shows an unclassified failure as Push failed with its message as git's lines", async () => {
+    it("retries on a second press of Push without the press opening git's lines", async () => {
+      const user = userEvent.setup();
+      let refuseRetry!: (error: Error) => void;
+      vi.mocked(mockTransport.push)
+        .mockRejectedValueOnce(new Error("Could not resolve host: github.com"))
+        .mockReturnValueOnce(new Promise((_resolve, reject) => { refuseRetry = reject; }));
+      reviewBranch({ published: { ahead: 1 } });
+      renderOverview(namedThread());
+
+      await user.click(await screen.findByRole("button", { name: "Push" }));
+      await screen.findByText("Failed");
+      const pushes = vi.mocked(mockTransport.push).mock.calls.length;
+      await user.click(screen.getByRole("button", { name: "Push" }));
+      expect(mockTransport.push).toHaveBeenCalledTimes(pushes + 1);
+
+      await act(async () => refuseRetry(new Error("Could not resolve host: github.com")));
+      await screen.findByText("Failed");
+      // The resting pointer may have opened the card before the retry; it stays mounted while it fades out.
+      const card = screen.queryByRole("dialog", { name: "Git output" });
+      expect(card?.hasAttribute("data-open") ?? false).toBe(false);
+    });
+
+    it("opens an unclassified failure's message from the keyboard", async () => {
       const user = userEvent.setup();
       vi.mocked(mockTransport.push).mockRejectedValueOnce(new Error("Could not resolve host: github.com"));
       reviewBranch({ published: { ahead: 1 } });
       renderOverview(namedThread());
 
       await user.click(await screen.findByRole("button", { name: "Push" }));
-      const line = await screen.findByRole("alert");
-      expect(line).toHaveTextContent(/^Push failed$/);
+      expect(await screen.findByRole("status")).toHaveTextContent(/^Push failed$/);
+      act(() => screen.getByRole("button", { name: "Push" }).blur());
+      act(() => screen.getByRole("button", { name: "Push" }).focus());
 
-      await user.click(within(line).getByRole("button"));
       expect(await screen.findByRole("dialog", { name: "Git output" })).toHaveTextContent("Could not resolve host: github.com");
     });
   });
