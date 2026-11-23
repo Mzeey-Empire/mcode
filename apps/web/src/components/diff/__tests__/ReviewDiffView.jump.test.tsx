@@ -1,5 +1,5 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { forwardRef, useImperativeHandle } from "react";
 import { ReviewDiffView } from "@/components/diff/ReviewDiffView";
@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ReviewDiffView jump", () => {
-  it("scrolls to the jump target, names it the active file, and settles the request", () => {
+  it("scrolls to the jump target, names it the active file, and settles the request", async () => {
     const reports: string[] = [];
     const onJumpSettled = vi.fn();
 
@@ -67,6 +67,8 @@ describe("ReviewDiffView jump", () => {
         />
       </ReviewActiveFileContext.Provider>,
     );
+    // The jump lands in an update after mount; let it settle inside act().
+    await act(async () => {});
 
     expect(scrollTo).toHaveBeenCalledWith({ type: "item", id: "b.ts", align: "start", offset: -8 });
     expect(reports.at(-1)).toBe("b.ts");

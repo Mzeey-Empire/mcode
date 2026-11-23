@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewTurn } from "@mcode/contracts/models/review-comparison";
@@ -130,11 +130,11 @@ describe("TurnPicker", () => {
     const { rerender } = render(<TurnPicker threadId="thread-1" />);
     expect(screen.getByText("Resolving")).toBeInTheDocument();
 
-    useDiffStore.setState({ reviewTurnsErrorByThread: { "thread-1": "boom" } });
+    act(() => useDiffStore.setState({ reviewTurnsErrorByThread: { "thread-1": "boom" } }));
     rerender(<TurnPicker threadId="thread-1" />);
     expect(screen.getByText("Turns unavailable")).toBeInTheDocument();
 
-    seedTurns([]);
+    act(() => seedTurns([]));
     rerender(<TurnPicker threadId="thread-1" />);
     expect(screen.getByText("No turns yet")).toBeInTheDocument();
     expect(selection()).toBeUndefined();
