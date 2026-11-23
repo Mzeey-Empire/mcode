@@ -14,6 +14,7 @@ import { WS_METHODS, type WsMethodName } from "@mcode/contracts/ws/methods";
 import { WebSocketRequestSchema, type WebSocketRequest, type WebSocketResponse } from "@mcode/contracts/ws/protocol";
 import { type IProviderRegistry } from "@mcode/contracts/providers/interfaces";
 import { workspaceEnvironmentValidationIssues } from "@mcode/contracts/models/workspace-environment";
+import type { GitPushFailure } from "@mcode/contracts/models/git-push";
 import { logger } from "@mcode/shared";
 import { recordRequest } from "./request-diagnostics.js";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
@@ -44,7 +45,7 @@ import type {
   ProjectActionService,
 } from "../../features/projects/index.js";
 import { WorkspaceEnvironmentServiceError } from "../../features/projects/environment/workspace-environment-errors.js";
-import type { GitPushService } from "../../features/projects/git/git-push-service.js";
+import { GitPushError, type GitPushService } from "../../features/projects/git/git-push-service.js";
 import type { GitCommitService } from "../../features/projects/git/commits/git-commit-service.js";
 import type { CommitMessageGenerator } from "../../features/projects/git/commits/commit-message-generator.js";
 import {
@@ -521,6 +522,13 @@ function domainRouteError(id: string, error: unknown, message: string): WebSocke
   }
   if (error instanceof DraftImageMissingError) {
     return { id, error: { code: error.code, message, data: { stagingId: error.stagingId } } };
+  }
+  if (error instanceof GitPushError) {
+    const failure = {
+      code: error.code,
+      data: { kind: error.kind, detail: error.detail },
+    } satisfies GitPushFailure;
+    return { id, error: { ...failure, message } };
   }
   return steerRouteError(id, error, message);
 }

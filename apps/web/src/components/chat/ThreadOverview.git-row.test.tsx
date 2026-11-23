@@ -58,6 +58,7 @@ import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useDiffStore } from "@/stores/diffStore";
 import { threadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
 import type { Thread } from "@/transport";
+import { RpcError } from "@/transport/ws-transport";
 import { mockWorkspaceState } from "./__tests__/thread-overview-mocks";
 import { branchlessThread, resetThreadOverviewState } from "./__tests__/thread-overview-harness";
 import { ThreadOverview } from "./ThreadOverview";
@@ -279,15 +280,61 @@ describe("ThreadOverview git row", () => {
       expect(screen.getByTestId("thread-overview-git")).toHaveTextContent("Create PR…");
     });
 
-    it("shows a failed push's reason in place and keeps Push", async () => {
+    it("marks a refused push on the Push row itself and shows git's lines on hover", async () => {
       const user = userEvent.setup();
-      vi.mocked(mockTransport.push).mockRejectedValueOnce(new Error("rejected: non-fast-forward"));
+      const detail = "remote: branch is frozen\n! [remote rejected] feat/x -> feat/x (pre-receive hook declined)";
+      vi.mocked(mockTransport.push).mockRejectedValueOnce(
+        new RpcError("branch is frozen", "GIT_PUSH_FAILED", { kind: "hook-declined", detail }),
+      );
       reviewBranch({ published: { ahead: 1 } });
       renderOverview(namedThread());
 
       await user.click(await screen.findByRole("button", { name: "Push" }));
-      expect(await screen.findByRole("alert")).toHaveTextContent("rejected: non-fast-forward");
-      expect(screen.getByTestId("workspace-menu-push")).toHaveTextContent("Push");
+      expect(await screen.findByRole("status")).toHaveTextContent("Push failed · rejected by hook");
+      const push = screen.getByRole("button", { name: "Push" });
+      expect(push).toHaveTextContent("Failed");
+
+      await user.unhover(push);
+      await user.hover(push);
+      const card = await screen.findByRole("dialog", { name: "Git output" });
+      expect(card).toHaveTextContent("Push failed · rejected by hook");
+      expect(card).toHaveTextContent("! [remote rejected] feat/x -> feat/x (pre-receive hook declined)");
+    });
+
+    it("retries on a second press of Push without the press opening git's lines", async () => {
+      const user = userEvent.setup();
+      let refuseRetry!: (error: Error) => void;
+      vi.mocked(mockTransport.push)
+        .mockRejectedValueOnce(new Error("Could not resolve host: github.com"))
+        .mockReturnValueOnce(new Promise((_resolve, reject) => { refuseRetry = reject; }));
+      reviewBranch({ published: { ahead: 1 } });
+      renderOverview(namedThread());
+
+      await user.click(await screen.findByRole("button", { name: "Push" }));
+      await screen.findByText("Failed");
+      const pushes = vi.mocked(mockTransport.push).mock.calls.length;
+      await user.click(screen.getByRole("button", { name: "Push" }));
+      expect(mockTransport.push).toHaveBeenCalledTimes(pushes + 1);
+
+      await act(async () => refuseRetry(new Error("Could not resolve host: github.com")));
+      await screen.findByText("Failed");
+      // The resting pointer may have opened the card before the retry; it stays mounted while it fades out.
+      const card = screen.queryByRole("dialog", { name: "Git output" });
+      expect(card?.hasAttribute("data-open") ?? false).toBe(false);
+    });
+
+    it("opens an unclassified failure's message from the keyboard", async () => {
+      const user = userEvent.setup();
+      vi.mocked(mockTransport.push).mockRejectedValueOnce(new Error("Could not resolve host: github.com"));
+      reviewBranch({ published: { ahead: 1 } });
+      renderOverview(namedThread());
+
+      await user.click(await screen.findByRole("button", { name: "Push" }));
+      expect(await screen.findByRole("status")).toHaveTextContent(/^Push failed$/);
+      act(() => screen.getByRole("button", { name: "Push" }).blur());
+      act(() => screen.getByRole("button", { name: "Push" }).focus());
+
+      expect(await screen.findByRole("dialog", { name: "Git output" })).toHaveTextContent("Could not resolve host: github.com");
     });
   });
 });

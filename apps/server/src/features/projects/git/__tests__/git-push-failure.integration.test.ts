@@ -6,7 +6,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/owned-test-database.js";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
-import { GitPushService } from "../git-push-service.js";
+import { GitPushError, GitPushService } from "../git-push-service.js";
 import { GitRepositoryService } from "../git-repository-service.js";
 import { RealGitExecutor } from "../execution/real-git-executor.js";
 
@@ -85,9 +85,17 @@ describe("git.push", { timeout: 30_000 }, () => {
       { mode: 0o755 },
     );
 
-    await expect(push()).rejects.toHaveProperty(
+    const result = push();
+    await expect(result).rejects.toHaveProperty(
       "message",
       "Running release checks\nbranch is frozen for release review",
+    );
+    await expect(result).rejects.toBeInstanceOf(GitPushError);
+    await expect(result).rejects.toHaveProperty("kind", "hook-declined");
+    // Git prints the remote as a local path with either slash style, so an exact match is what rules it out.
+    await expect(result).rejects.toHaveProperty(
+      "detail",
+      "remote: Running release checks\nremote: branch is frozen for release review\n! [remote rejected] main -> main (pre-receive hook declined)",
     );
   });
 
@@ -100,6 +108,8 @@ describe("git.push", { timeout: 30_000 }, () => {
     git(other, "push", "origin", "main");
     git(cwd, "commit", "--allow-empty", "-m", "here");
 
-    await expect(push()).rejects.toThrow(/^! \[rejected\] +main -> main/);
+    const result = push();
+    await expect(result).rejects.toThrow(/^! \[rejected\] +main -> main/);
+    await expect(result).rejects.toHaveProperty("kind", "remote-ahead");
   });
 });

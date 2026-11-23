@@ -1,12 +1,16 @@
 import { Button } from "@/components/ui/button";
+import { CopyButton } from "@/components/ui/copy-button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
+import { sidePlacement } from "@/components/ui/side-placement";
 import { SplitButton } from "@/components/ui/split-button";
 import type { GitRowPlan, GitStep } from "@/features/thread-overview/git-next-step";
 import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
 import { cn } from "@/lib/utils";
+import type { GitPushFailure, GitPushFailureKind } from "@mcode/contracts/models/git-push";
 import { ArrowUp, ArrowUpFromLine, GitBranchPlus, GitCommitHorizontal, GitPullRequest, type LucideIcon } from "lucide-react";
-import { useEffect, useState, type FocusEvent } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type ReactElement, type ReactNode, type RefObject } from "react";
 import {
   OVERVIEW_ROW_CLASS,
   OVERVIEW_SPLIT_CHEVRON_CLASS,
@@ -71,11 +75,15 @@ function GitStepContent({ step }: { step: GitStep }) {
   </>);
 }
 
-function GitSplitRow({ plan, run, onMenuOpenChange, loading }: {
+function GitSplitRow({ plan, run, onMenuOpenChange, loading, actionRender, children }: {
   plan: GitRowPlan;
   loading: boolean;
   run: (step: GitStep) => void;
   onMenuOpenChange: (open: boolean) => void;
+  /** Renders the main action as another element, such as the trigger of the failure card. */
+  actionRender: ReactElement | undefined;
+  /** Trailing content after the step's label. */
+  children: ReactNode;
 }) {
   return (
     <SplitButton
@@ -89,6 +97,7 @@ function GitSplitRow({ plan, run, onMenuOpenChange, loading }: {
       actionProps={{
         "data-testid": GIT_STEP_PRESENTATION[plan.main].testId,
         className: cn(OVERVIEW_ROW_CLASS, OVERVIEW_SPLIT_MAIN_CLASS, "min-w-0 flex-1 justify-start"),
+        render: actionRender,
       }}
       menuTriggerProps={{ className: OVERVIEW_SPLIT_CHEVRON_CLASS }}
       menu={plan.alternates.map((step) => {
@@ -97,16 +106,91 @@ function GitSplitRow({ plan, run, onMenuOpenChange, loading }: {
       })}
     >
       <GitStepContent step={plan.main} />
+      {children}
     </SplitButton>
   );
 }
 
-function GitPushError({ message }: { message: string }) {
-  // A remote hook's message spans several lines, and the server joins them with newlines.
+const PUSH_FAILURE_REASON: Record<GitPushFailureKind, string | null> = {
+  "hook-declined": "rejected by hook",
+  // A Review task pushes to the pull request's fork, so the remote is not always origin.
+  "remote-ahead": "remote has newer commits",
+  "timed-out": "timed out",
+  other: null,
+};
+
+const FAILURE_CARD_HOVER_DELAY_MS = 300;
+
+function pushFailureSummary(failure: GitPushFailure["data"]): string {
+  const reason = PUSH_FAILURE_REASON[failure.kind];
+  return reason ? `Push failed · ${reason}` : "Push failed";
+}
+
+/**
+ * Opens git's output when the pointer rests on, or focus lands on, the row's main action. The
+ * action's click still runs it, so trying again stays one click.
+ */
+function useFailureCard(failure: GitPushFailure["data"] | null) {
+  const [open, setOpen] = useState(false);
+  // Escape hands focus back to the trigger; that focus must not reopen the card.
+  const escaped = useRef(false);
+  const onOpenChange = (next: boolean, details: PopoverRootChangeEventDetails) => {
+    escaped.current = details.reason === "escape-key";
+    setOpen(next);
+  };
+  const trigger = failure ? (
+    <PopoverTrigger
+      openOnHover
+      delay={FAILURE_CARD_HOVER_DELAY_MS}
+      closeDelay={150}
+      onFocus={() => {
+        if (!escaped.current) setOpen(true);
+        escaped.current = false;
+      }}
+      onBlur={() => {
+        escaped.current = false;
+      }}
+    />
+  ) : undefined;
+  // A retry closes the card while its exit fade runs. The card keeps the last failure until then:
+  // removing the content mid-fade leaves Base UI waiting on an animation that never ends, and the
+  // next failure's card mounts stuck in that fade.
+  const [shown, setShown] = useState(failure);
+  if (failure !== null && failure !== shown) setShown(failure);
+  return { open: failure !== null && open, onOpenChange, trigger, shown };
+}
+
+/** The quiet marker at the row's end; the card holds the reason and git's lines. */
+function PushFailedHint({ step }: { step: GitStep }) {
   return (
-    <div role="alert" data-testid="thread-overview-git-error" className="whitespace-pre-line px-3 pb-1 text-caption text-error">
-      {message}
-    </div>
+    <span aria-hidden className="ml-auto shrink-0 text-caption text-status-label-error">
+      {step === "push" ? "Failed" : "Push failed"}
+    </span>
+  );
+}
+
+function GitPushFailureCard({ failure, anchor }: { failure: GitPushFailure["data"]; anchor: RefObject<HTMLDivElement | null> }) {
+  const reason = PUSH_FAILURE_REASON[failure.kind];
+  return (
+    <PopoverContent
+      {...sidePlacement(anchor)}
+      initialFocus={false}
+      role="dialog"
+      aria-label="Git output"
+      data-testid="thread-overview-git-error-detail"
+      className="w-[356px] p-0"
+    >
+      <div className="flex h-row-compact items-center justify-between gap-2 pl-3.5 pr-1.5 text-caption text-muted">
+        <span className="text-fade min-w-0">
+          <span className="text-status-label-error">Push failed</span>
+          {reason ? ` · ${reason}` : null}
+        </span>
+        <CopyButton text={failure.detail} label="Copy git output" />
+      </div>
+      <pre className="mx-3.5 mb-3.5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-hover/50 p-2 font-mono text-caption text-ink">
+        {failure.detail}
+      </pre>
+    </PopoverContent>
   );
 }
 
@@ -126,31 +210,42 @@ function useSettlePush(gitRow: GitRowPlan | null) {
 function GitEntry() {
   const { gitRow, gitPush } = useOverviewContext();
   const { held, wrapperProps, setMenuOpen } = useRowHold();
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const failure = gitPush.kind === "failed" ? gitPush.failure : null;
+  const failureCard = useFailureCard(failure);
   const pushing = gitPush.kind === "pushing";
   useSettlePush(gitRow);
   // A push in flight holds the row so its Push cannot swap away. Once it lands, the pointer that
   // pushed no longer holds the row: the user's own action finished, so the next step shows at once.
-  const plan = useHeldPlan(gitRow, pushing || (held && gitPush.kind !== "landed"));
+  const plan = useHeldPlan(gitRow, pushing || ((held || failureCard.open) && gitPush.kind !== "landed"));
   const run = useRunGitStep();
   if (!plan) return null;
+  const hint = failure ? <PushFailedHint step={plan.main} /> : null;
   return (
-    <div data-testid="thread-overview-git" {...wrapperProps}>
-      {plan.alternates.length > 0 ? (
-        <GitSplitRow plan={plan} run={run} onMenuOpenChange={setMenuOpen} loading={pushing} />
-      ) : (
-        <Button
-          variant="ghost"
-          size="compact"
-          type="button"
-          loading={pushing}
-          data-testid={GIT_STEP_PRESENTATION[plan.main].testId}
-          onClick={() => run(plan.main)}
-          className={cn(OVERVIEW_ROW_CLASS, "justify-start text-ink")}
-        >
-          <GitStepContent step={plan.main} />
-        </Button>
-      )}
-      {gitPush.kind === "failed" ? <GitPushError message={gitPush.message} /> : null}
+    <div ref={rowRef} data-testid="thread-overview-git" {...wrapperProps}>
+      <Popover open={failureCard.open} onOpenChange={failureCard.onOpenChange}>
+        {plan.alternates.length > 0 ? (
+          <GitSplitRow plan={plan} run={run} onMenuOpenChange={setMenuOpen} loading={pushing} actionRender={failureCard.trigger}>
+            {hint}
+          </GitSplitRow>
+        ) : (
+          <Button
+            variant="ghost"
+            size="compact"
+            type="button"
+            loading={pushing}
+            render={failureCard.trigger}
+            data-testid={GIT_STEP_PRESENTATION[plan.main].testId}
+            onClick={() => run(plan.main)}
+            className={cn(OVERVIEW_ROW_CLASS, "justify-start text-ink")}
+          >
+            <GitStepContent step={plan.main} />
+            {hint}
+          </Button>
+        )}
+        {failureCard.shown ? <GitPushFailureCard failure={failureCard.shown} anchor={rowRef} /> : null}
+      </Popover>
+      <span role="status" className="sr-only">{failure ? pushFailureSummary(failure) : ""}</span>
     </div>
   );
 }

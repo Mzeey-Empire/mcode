@@ -3,8 +3,9 @@ import { usePullRequestReviewLink } from "@/features/pull-requests";
 import { useThreadGitActions } from "@/hooks/useThreadGitActions";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useDiffStore } from "@/stores/diffStore";
-import { getTransport, type Thread } from "@/transport";
+import { getTransport, RpcError, type Thread } from "@/transport";
 import type { ChecksStatus } from "@mcode/contracts/github";
+import { GitPushFailureSchema, type GitPushFailure } from "@mcode/contracts/models/git-push";
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import {
   CreateThreadBranchDialog,
@@ -68,9 +69,18 @@ export type GitPushState =
   | { kind: "idle" }
   | { kind: "pushing" }
   | { kind: "landed" }
-  | { kind: "failed"; message: string };
+  | { kind: "failed"; failure: GitPushFailure["data"] };
 
 const IDLE_PUSH: GitPushState = { kind: "idle" };
+
+/** An older server, or a failure git did not raise, sends no kind; its message stands in for git's lines. */
+function readPushFailure(err: unknown): GitPushFailure["data"] {
+  if (err instanceof RpcError) {
+    const parsed = GitPushFailureSchema().safeParse({ code: err.code, data: err.data });
+    if (parsed.success) return parsed.data.data;
+  }
+  return { kind: "other", detail: err instanceof Error ? err.message : String(err) };
+}
 
 /** Lives with the Overview state rather than the row so a push started before the card closes still reports when it reopens. */
 function useGitPush(thread: Thread) {
@@ -91,7 +101,7 @@ function useGitPush(thread: Thread) {
       setRefresh((count) => count + 1);
     } catch (err) {
       if (threadIdRef.current !== threadId) return;
-      setPush({ threadId, state: { kind: "failed", message: err instanceof Error ? err.message : String(err) } });
+      setPush({ threadId, state: { kind: "failed", failure: readPushFailure(err) } });
     }
   }, [gitPush.kind, thread.branch, thread.id, thread.workspace_id]);
   const clearFinishedPush = useCallback(() => {
