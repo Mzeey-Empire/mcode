@@ -1,5 +1,5 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
@@ -175,7 +175,7 @@ describe("TerminalSection", () => {
     expect(profileRowOf("PowerShell")).toHaveTextContent("In use");
     expect(profileRowOf("Command Prompt")).not.toHaveTextContent("In use");
 
-    setDefaultProfile("certified:cmd");
+    act(() => setDefaultProfile("certified:cmd"));
     rerender(<TerminalSection />);
     expect(defaultProfile).toHaveTextContent(/^Command Prompt$/);
     expect(profileRowOf("PowerShell")).not.toHaveTextContent("In use");
