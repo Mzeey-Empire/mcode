@@ -11,7 +11,6 @@ const call: ToolCall = {
   output: "hello", isError: false, isComplete: false,
 };
 
-/** Opens a shell row inside act(), so its output scroll area's mount-time measurement lands there. */
 async function openShellPanel(toggle: HTMLElement): Promise<void> {
   await act(async () => {
     fireEvent.click(toggle);

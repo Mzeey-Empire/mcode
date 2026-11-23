@@ -96,7 +96,6 @@ describe("BrowserViewportCanvas", () => {
       requested: { width: 1_000, height: 600 },
     }));
     expect(apply.mock.calls.length).toBeGreaterThan(0);
-    // The host applies the coalesced resize asynchronously; let its result land inside act().
     await act(async () => {});
   });
 

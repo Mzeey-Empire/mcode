@@ -45,7 +45,6 @@ describe("ActionIcon", () => {
     render(<ActionIcon iconId="from-a-newer-build" command="cargo test" />);
 
     expect(screen.getByTestId("action-icon")).toHaveAttribute("data-icon-id", "rust");
-    // The CDN image swaps in after mount; wait for it so the swap lands inside the test.
     await waitFor(() => expect(screen.getByTestId("action-icon").querySelector("img")).not.toBeNull());
   });
 

@@ -25,7 +25,6 @@ afterEach(() => {
   cleanup();
 });
 
-/** Renders, then lets the bubble's lazy chunks finish loading inside act(). */
 async function renderSettled(ui: ReactElement): Promise<ReturnType<typeof render>> {
   const view = render(ui);
   await act(async () => {});

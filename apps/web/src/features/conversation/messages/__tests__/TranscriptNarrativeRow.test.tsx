@@ -63,7 +63,6 @@ function Transcript({ items }: { items: readonly TranscriptNarrativeItem[] }) {
   );
 }
 
-/** An open shell's output scroll area measures itself after mount; let that land inside act(). */
 async function settleScrollAreas(): Promise<void> {
   await act(async () => {});
 }

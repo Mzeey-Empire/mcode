@@ -139,7 +139,6 @@ describe("PullRequestIssueCommentComposer", () => {
     await user.type(textarea, "Keyboard comment");
     fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
     expect(postComment).toHaveBeenCalledOnce();
-    // Let the accepted post finish updating the composer inside act().
     await act(async () => {});
   });
 

@@ -100,7 +100,6 @@ function seedStartingThread() {
   });
 }
 
-/** Renders, then lets the reads the composer starts on mount resolve inside act(). */
 async function renderStarting(onCancel: (() => void) | undefined): Promise<ReturnType<typeof render>> {
   const view = render(<Composer threadId="thread-1" workspaceId="ws-1" startingThread={{ onCancel }} />);
   await act(async () => {});

@@ -18,7 +18,6 @@ const SCOPE = "thread-tile";
 const store = () => usePreviewAnnotationStore.getState();
 const firstNote = () => store().getThreadAnnotations(SCOPE)[0]!;
 
-/** Renders the tile, then lets the thumbnail image read it starts on mount settle inside act(). */
 async function renderTile(onRemoveAll: () => void = vi.fn(), threadId: string | undefined = SCOPE): Promise<void> {
   render(<BrowserNotesTile scopeId={SCOPE} workspaceId="workspace-1" threadId={threadId} onRemoveAll={onRemoveAll} />);
   await act(async () => {});

@@ -24,7 +24,6 @@ const comment: SelectedTextComment = {
   mentions: [],
 };
 
-/** Renders, then lets the note editor report its initial content inside act(); it does so a tick after mount. */
 async function renderSettled(ui: ReactElement): Promise<ReturnType<typeof render>> {
   const view = render(ui);
   await act(async () => {});

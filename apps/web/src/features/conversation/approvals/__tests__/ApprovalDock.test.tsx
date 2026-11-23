@@ -109,7 +109,6 @@ describe("ApprovalDock keys", () => {
     expect(respondToApproval).not.toHaveBeenCalled();
 
     await act(() => vi.advanceTimersByTimeAsync(1));
-    // The click starts the reply; act() lets the dock settle once the reply resolves.
     await act(async () => {
       fireEvent.click(allow);
     });

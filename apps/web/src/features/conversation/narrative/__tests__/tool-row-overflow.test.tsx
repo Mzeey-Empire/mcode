@@ -19,7 +19,6 @@ export const LONG_SHELL_COMMAND =
 
 const COLUMN_CLASS = "w-[480px] min-w-0 max-w-full overflow-hidden";
 
-/** Opens a shell row inside act(), so its output scroll area's mount-time measurement lands there. */
 async function openShellPanel(row: HTMLElement): Promise<void> {
   await act(async () => {
     fireEvent.click(row);

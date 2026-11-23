@@ -44,7 +44,6 @@ async function renderEditor(annotation?: DraftDiffComment) {
       onClose={onClose}
     />,
   );
-  // Lexical registers its editor and placeholder after mount; let them settle inside act().
   await act(async () => {});
   return { editorRef, onClose, view };
 }

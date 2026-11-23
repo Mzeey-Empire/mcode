@@ -158,12 +158,10 @@ describe("SubagentList in the Subagents panel", () => {
 
 describe("SubagentList live time", () => {
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     vi.useRealTimers();
   });
 
-  /** Renders, then lets the scroll area's post-mount measurement settle inside act(). */
   async function renderList(entries: SubagentRosterEntry[]) {
     const view = render(<SubagentList roster={roster(entries)} error={false} viewportRef={createRef()}
       onRetry={vi.fn()} onSelect={vi.fn()} onStop={vi.fn()} />);

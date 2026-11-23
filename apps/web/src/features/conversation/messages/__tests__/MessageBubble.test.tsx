@@ -99,7 +99,6 @@ describe("hidden plan messages", () => {
     const { container, rerender } = render(<MessageBubble message={message} />);
     expect(container.textContent).toContain("Plan v1 is in the Plan tab.");
     rerender(<MessageBubble message={{ ...message, id: "another-response" }} />);
-    // The response body renders through a lazy Markdown chunk; let it load inside act().
     await act(async () => {});
     expect(container.textContent).not.toContain("Plan v1 is in the Plan tab.");
   });
@@ -578,7 +577,6 @@ describe("MessageBubble user messages", () => {
         `http://127.0.0.1:19400/attachments/${threadId}/sent-image.png`,
       );
     } finally {
-      // The bubble is still mounted and follows the transport URL.
       act(() => clearAttachmentTransportWsUrlCache());
     }
   });
@@ -693,7 +691,6 @@ describe("MessageBubble user messages", () => {
       await user.click(tile);
       expect(getByTestId("mock-lightbox")).toHaveAttribute("data-active-src", httpSrc);
     } finally {
-      // The tile is still mounted and follows the transport URL.
       act(() => clearAttachmentTransportWsUrlCache());
     }
   });

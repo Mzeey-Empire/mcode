@@ -30,7 +30,6 @@ vi.mock("@tanstack/react-virtual", () => ({
   },
 }));
 
-/** Renders, then lets the work the tree starts on mount settle inside act(). */
 async function renderSettled(ui: React.ReactElement): Promise<ReturnType<typeof render>> {
   const view = render(ui);
   await act(async () => {});

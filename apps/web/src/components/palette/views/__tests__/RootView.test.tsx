@@ -37,7 +37,6 @@ import { RootView } from "../RootView";
 
 describe("RootView", () => {
   afterEach(() => {
-    // Unmount before clearing the registry so the clear does not re-render a live tree outside act().
     cleanup();
     clearCommands();
   });

@@ -59,7 +59,6 @@ function setConfirmOnKill(value: ConfirmOnKill): void {
   });
 }
 
-/** Renders the tool, then lets the reads it starts on mount settle inside act(). */
 async function renderTool(): Promise<ReturnType<typeof render>> {
   const view = render(<TerminalTabContent workspaceId="workspace-1" threadId="thread-1" scopeId="thread-1" />);
   await act(async () => {});

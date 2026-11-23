@@ -110,10 +110,6 @@ vi.mock("@/components/ui/scroll-area", () => ({
 await import("@/features/pull-requests");
 await import("@/components/panels/RightPanel");
 
-/**
- * Renders the app, then lets the reads it starts on mount (such as terminal capabilities)
- * resolve inside act(), so their state updates do not land after the test.
- */
 async function renderApp(): Promise<ReturnType<typeof render>> {
   const view = render(<App />);
   await act(async () => {});
@@ -122,7 +118,6 @@ async function renderApp(): Promise<ReturnType<typeof render>> {
 
 describe("App", () => {
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();

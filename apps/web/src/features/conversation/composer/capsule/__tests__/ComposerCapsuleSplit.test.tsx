@@ -155,7 +155,6 @@ describe("ComposerCapsuleSplit", () => {
     await act(async () => {});
     fireEvent.change(within(picker).getByPlaceholderText("Search models"), { target: { value: "Haiku" } });
     const haiku = within(picker).getAllByRole("option", { name: /\bHaiku\b/ })[0];
-    // The pick's follow-up picker updates resolve asynchronously; let them land inside act().
     await act(async () => {
       fireEvent.click(haiku);
     });

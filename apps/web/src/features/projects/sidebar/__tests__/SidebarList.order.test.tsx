@@ -99,7 +99,6 @@ describe("SidebarList order", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
     cleanup();
     stopPushListeners();
     vi.useRealTimers();
@@ -216,7 +215,6 @@ describe("SidebarList Threads view", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
     cleanup();
     vi.useRealTimers();
     localStorage.clear();
@@ -269,7 +267,6 @@ describe("SidebarList frozen order", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
     cleanup();
     stopPushListeners();
     vi.useRealTimers();

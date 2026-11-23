@@ -185,7 +185,6 @@ vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => ({
 }));
 
 afterEach(() => {
-  // Unmount before resetting state so the resets do not re-render a live tree outside act().
   cleanup();
   sortableMockState.transform = null;
   sortableMockState.isDragging = false;
@@ -759,7 +758,6 @@ describe("ProjectSidebar thread interactions", () => {
     });
     fireEvent.keyDown(document, { code: "Space" });
     expect(document.body).not.toHaveStyle({ cursor: "grabbing" });
-    // The drop animation resolves on a promise; let it finish inside act().
     await act(async () => {});
   });
 
@@ -1275,7 +1273,6 @@ describe("ProjectSidebar thread interactions", () => {
     });
     fireEvent.click(projectRow);
     expect(threadRow()).toBeNull();
-    // The drop animation resolves on a promise; let it finish inside act().
     await act(async () => {});
   });
 });
@@ -1350,7 +1347,6 @@ describe("ProjectSidebar action-required indicator", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     // Restore the default empty-state implementation so this override does not
     // leak into other describes when test order shifts.
@@ -1737,7 +1733,6 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     vi.clearAllMocks();
     window.localStorage.clear();

@@ -26,7 +26,6 @@ function SettingsHarness() {
   );
 }
 
-/** Renders settings, then lets the reads the open page starts on mount settle inside act(). */
 async function renderHarness(): Promise<void> {
   render(<SettingsHarness />);
   await act(async () => {});

@@ -340,7 +340,6 @@ describe("PullRequestDetailPane", () => {
     fireEvent.keyDown(timelineTab, { key: "Home" });
     expect(summaryTab).toHaveFocus();
     expect(summaryTab).toHaveAttribute("aria-selected", "true");
-    // Returning to Summary mounts its panel again; let its updates settle inside act().
     await act(async () => {});
   });
 

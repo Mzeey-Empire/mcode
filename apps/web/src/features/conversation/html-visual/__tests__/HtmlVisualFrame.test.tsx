@@ -27,7 +27,6 @@ function postFrom(source: Window, data: unknown) {
 
 beforeEach(() => root.style.setProperty("--ink", "rgb(20, 20, 20)"));
 afterEach(() => {
-  // Unmount first: frames follow the html class, so resetting it would update a mounted frame.
   cleanup();
   root.classList.remove("dark");
   root.style.removeProperty("--ink");
@@ -45,7 +44,6 @@ describe("HtmlVisualFrame", () => {
     await act(() => new Promise((resolve) => frame.addEventListener("load", resolve, { once: true })));
     const postMessage = vi.spyOn(contentWindow, "postMessage");
 
-    // Async act, so the theme observer's callback runs inside it.
     await act(async () => {
       root.style.setProperty("--ink", "rgb(240, 240, 240)");
       root.classList.add("dark");

@@ -195,7 +195,6 @@ import {
   useBrowserAutomationStore,
 } from "@/features/preview";
 
-/** Renders the panel, then lets the reads it starts on mount settle inside act(). */
 async function renderPanel(): Promise<ReturnType<typeof render>> {
   const view = render(<RightPanel />);
   await act(async () => {});
@@ -212,7 +211,6 @@ describe("RightPanel", () => {
     vi.mocked(createTerminalForScope).mockClear();
     previewPanelRender.mockReset();
     previewTabsBridge.list.mockReset();
-    // The host lists whatever tab set the test seeded, as the real bridge would.
     previewTabsBridge.list.mockImplementation(async () => ({ ok: true, data: previewTabSet.current }));
     previewTabsBridge.updatedListener.current = null;
     previewTabsBridge.onUpdated.mockReset();

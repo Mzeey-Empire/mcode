@@ -124,7 +124,6 @@ describe("StartupStepsTrail", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
     cleanup();
     vi.useRealTimers();
     for (const mock of Object.values(startupTransport)) mock.mockReset();

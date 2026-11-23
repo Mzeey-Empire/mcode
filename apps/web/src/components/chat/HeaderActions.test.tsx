@@ -261,10 +261,6 @@ function mockReviewUncommitted(count: number) {
   }));
 }
 
-/**
- * Renders, then lets the reads the header starts on mount (project actions, review state,
- * repository, PR link) resolve inside act(), so their updates do not land after the test.
- */
 async function renderHeaderActions(thread: Thread = makeThread()): Promise<ReturnType<typeof render>> {
   const view = render(<HeaderActions thread={thread} threadPaneWidth={1400} />);
   await act(async () => {});

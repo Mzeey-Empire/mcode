@@ -70,7 +70,6 @@ describe("SidebarList thread menu", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
     cleanup();
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
     useThreadStore.setState({ runningThreadIds: new Set() });

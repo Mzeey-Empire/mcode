@@ -85,7 +85,6 @@ function installHistory(history: BrowserHistory) {
   return bridge;
 }
 
-/** Renders the page, then lets the run and history reads it starts on mount settle inside act(). */
 async function renderPage(onOpen = vi.fn(), threadId = THREAD_ID): Promise<typeof onOpen> {
   render(<BrowserNewPage threadId={threadId} browserWorkspaceId={WORKSPACE_ID} onOpen={onOpen} />);
   await act(async () => {});

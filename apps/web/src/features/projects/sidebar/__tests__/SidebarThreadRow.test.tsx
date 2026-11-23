@@ -160,7 +160,6 @@ describe("SidebarThreadRow", () => {
     }
 
     afterEach(() => {
-      // Unmount before resetting state so the resets do not re-render a live tree outside act().
       cleanup();
       useThreadStore.setState({ runningThreadIds: new Set() });
       act(() => threadAttentionStore.getState().apply({ ...finished("t1"), lastTurn: null }));
@@ -814,7 +813,6 @@ describe("SidebarThreadRow", () => {
     }
 
     afterEach(() => {
-      // Unmount before resetting state so the resets do not re-render a live tree outside act().
       cleanup();
       useComposerDraftStore.setState({ drafts: {} });
       useThreadDraftStore.setState({ drafts: {} });

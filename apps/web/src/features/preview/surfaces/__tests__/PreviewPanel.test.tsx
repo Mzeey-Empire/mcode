@@ -134,10 +134,6 @@ import { browserSurfaceHost } from "../BrowserSurfaceHostRoot";
 import { pushEmitter } from "@/transport/ws-transport";
 import { createFileEvidenceEvent } from "@/stores/thread-store/file-evidence-test-builder";
 
-/**
- * Renders, then lets the reads the panel starts on mount (certificate state, provider
- * catalog) resolve inside act(), so their state updates do not land after the test.
- */
 async function renderSettled(ui: React.ReactElement): Promise<ReturnType<typeof render>> {
   const view = render(ui);
   await act(async () => {});
@@ -331,7 +327,6 @@ describe("PreviewPanel: unavailable state", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
     cleanup();
     browserSurfaceHost.disposeAll();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -783,7 +778,6 @@ describe("PreviewPanel: full panel state", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
     cleanup();
     browserSurfaceHost.disposeAll();
     vi.unstubAllGlobals();

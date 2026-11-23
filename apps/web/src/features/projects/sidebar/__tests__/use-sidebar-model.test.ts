@@ -21,7 +21,6 @@ describe("useSidebarModel boundary timer", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     vi.useRealTimers();
     useWorkspaceStore.setState({ workspaces: [], threads: [] });
@@ -58,7 +57,6 @@ describe("useSidebarModel change cause", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     vi.useRealTimers();
     useWorkspaceStore.setState({ workspaces: [], threads: [] });

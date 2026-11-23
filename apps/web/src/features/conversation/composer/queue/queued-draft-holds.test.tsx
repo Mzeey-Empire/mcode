@@ -101,7 +101,6 @@ async function queueSend() {
   return { entry: queued()[0]!, composer };
 }
 
-/** Ends the run and sends the next queued message, inside act() because the composer hook is still mounted. */
 async function drainNext(): Promise<void> {
   await act(async () => {
     useThreadStore.setState({ runningThreadIds: new Set() });

@@ -67,7 +67,6 @@ describe("ReviewDiffView jump", () => {
         />
       </ReviewActiveFileContext.Provider>,
     );
-    // The jump lands in an update after mount; let it settle inside act().
     await act(async () => {});
 
     expect(scrollTo).toHaveBeenCalledWith({ type: "item", id: "b.ts", align: "start", offset: -8 });

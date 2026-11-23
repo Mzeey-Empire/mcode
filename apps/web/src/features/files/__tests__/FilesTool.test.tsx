@@ -95,7 +95,6 @@ describe("FilesTool layout", () => {
     useFilesTabsStore.getState().setTreeOpen(WORKSPACE, false);
     renderTool();
     await screen.findByTestId("code-file-view");
-    // The tree's file icons resolve asynchronously once it mounts.
     await act(async () => useFilesTabsStore.getState().closeFile(WORKSPACE, "src/a.ts"));
     expect(screen.getByTestId("files-tree-body")).toBeTruthy();
   });
@@ -228,7 +227,6 @@ describe("FilesTool Go to file", () => {
     const input = await screen.findByRole("textbox", { name: "Go to file" });
     await waitFor(() => expect(screen.getAllByRole("option").length).toBeGreaterThan(0));
     fireEvent.change(input, { target: { value: "b.ts" } });
-    // Opening a file starts its read; act() lets it land before the checks.
     await act(async () => {
       fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
     });

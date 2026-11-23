@@ -61,7 +61,6 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
 });
 
-/** Renders the page, then lets the model list read it starts on mount settle inside act(). */
 async function renderSection(): Promise<ReturnType<typeof render>> {
   const view = render(<ThreadsSection />);
   await act(async () => {});

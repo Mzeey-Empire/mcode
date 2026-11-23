@@ -82,7 +82,6 @@ describe("HoverGlide", () => {
   }
 
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     vi.restoreAllMocks();
     document.body.replaceChildren();
@@ -168,7 +167,6 @@ describe("SidebarList hover highlight", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });

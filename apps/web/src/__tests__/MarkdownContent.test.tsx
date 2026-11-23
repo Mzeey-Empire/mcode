@@ -61,7 +61,6 @@ describe("MarkdownContent link handling", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     delete (window as unknown as Record<string, unknown>).desktopBridge;
     vi.unstubAllGlobals();
@@ -213,7 +212,6 @@ describe("MarkdownContent workspace preview navigation", () => {
   });
 
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     vi.useRealTimers();
     delete (window as unknown as Record<string, unknown>).desktopBridge;
@@ -640,7 +638,6 @@ describe("MarkdownContent parse reuse", () => {
 
 describe("MarkdownContent inline code double-click", () => {
   afterEach(() => {
-    // Unmount before resetting state so the resets do not re-render a live tree outside act().
     cleanup();
     window.getSelection()?.removeAllRanges();
   });

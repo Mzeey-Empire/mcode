@@ -43,13 +43,11 @@ function serve(statuses: ProviderStatus[]) {
   vi.mocked(mockTransport.listProviderStatus).mockResolvedValue(statuses);
 }
 
-/** Renders the bell, then lets the status read it starts on mount settle inside act(). */
 async function renderBell(): Promise<void> {
   render(<ProvidersBell />);
   await act(async () => {});
 }
 
-/** Opens the popover and lets the re-check it starts settle inside act(). */
 async function openBell(): Promise<HTMLElement> {
   fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
   const popover = await screen.findByTestId("providers-popover");

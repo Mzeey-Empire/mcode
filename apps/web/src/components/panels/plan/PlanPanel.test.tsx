@@ -136,7 +136,6 @@ describe("PlanPanel", () => {
     }));
 
     render(<PlanPanel threadId={THREAD} />);
-    // The comment layer restores the note's editor after mount; let it settle.
     await act(async () => {});
 
     expect(usePlanStore.getState().activeVersionByThread[THREAD]).toBe(1);

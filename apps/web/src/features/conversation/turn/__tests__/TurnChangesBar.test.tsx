@@ -141,7 +141,6 @@ describe("TurnChangesBar", () => {
     ]);
 
     renderBar();
-    // The bar loads snapshots on mount; let that read land inside act().
     await act(async () => {});
 
     expect(header()).toHaveTextContent("Changed 4 files+45−45");
@@ -163,7 +162,6 @@ describe("TurnChangesBar", () => {
     ]);
 
     renderBar();
-    // The bar loads snapshots on mount; let that read land inside act().
     await act(async () => {});
 
     expect(row("assets/menu-preview.png")).toHaveTextContent(/^menu-preview\.pngnewBinary$/);
@@ -174,7 +172,6 @@ describe("TurnChangesBar", () => {
     seedSnapshots([withEffects([effect("src/a.ts", { additions: 5, deletions: 0 })])]);
 
     renderBar({ isLatestTurn: false });
-    // The bar loads snapshots on mount; let that read land inside act().
     await act(async () => {});
 
     expect(screen.getByRole("button", { expanded: false, name: /^Changed/ })).toHaveTextContent("Changed 1 file+5");
@@ -207,7 +204,6 @@ describe("TurnChangesBar", () => {
     seedSnapshots([withEffects([effect("src/a.ts"), effect("src/b.ts")])]);
 
     renderBar();
-    // The bar loads snapshots on mount; let that read land inside act().
     await act(async () => {});
 
     expect(screen.queryByRole("button", { name: /all folders/ })).not.toBeInTheDocument();

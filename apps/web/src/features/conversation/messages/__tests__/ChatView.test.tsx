@@ -340,14 +340,12 @@ function enableAtomicSubscriptionTransport() {
 }
 
 /** Simulate a residency lease transition through its external-store contract. */
-/** Renders ChatView, then lets the subscribe and startup reads it starts on mount resolve inside act(). */
 async function renderChatView(): Promise<ReturnType<typeof render>> {
   const view = render(<ChatView />);
   await act(async () => {});
   return view;
 }
 
-/** Rerenders ChatView inside act() and lets the reads a thread switch starts resolve there too. */
 async function settleRerender(rerender: ReturnType<typeof render>["rerender"]): Promise<void> {
   await act(async () => {
     rerender(<ChatView />);
@@ -356,7 +354,6 @@ async function settleRerender(rerender: ReturnType<typeof render>["rerender"]): 
 
 function setDisplayedThreadIds(threadIds: readonly string[]) {
   chatViewDisplayLeaseIdsRef.current = threadIds;
-  // A mounted ChatView re-reads its leases when notified.
   act(() => {
     for (const listener of chatViewDisplayLeaseListeners) listener();
   });
@@ -797,7 +794,6 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       },
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1" });
-    // The server still reports the startup as running once ChatView's startup lookup resolves.
     chatViewTransportMock.getThreadStartup.mockResolvedValue({
       startupId: "00000000-0000-4000-8000-000000000001",
       failureSeenAt: null,

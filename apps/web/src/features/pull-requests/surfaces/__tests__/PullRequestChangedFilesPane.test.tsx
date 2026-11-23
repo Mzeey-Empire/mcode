@@ -16,7 +16,6 @@ const file: PullRequestFile = {
   patchStatus: "available",
 };
 
-/** Renders, then lets the scroll area's mount measurement settle inside act(). */
 async function renderSettled(ui: React.ReactElement): Promise<ReturnType<typeof render>> {
   const view = render(ui);
   await act(async () => {});

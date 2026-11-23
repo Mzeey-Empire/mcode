@@ -56,7 +56,6 @@ async function flushTimers(ms: number) {
   });
 }
 
-/** Renders the overview, then lets the reads it starts on mount (remote, review state) resolve inside act(). */
 async function renderOverview(): Promise<ReturnType<typeof render>> {
   const view = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
   await act(async () => {});

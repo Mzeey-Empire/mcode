@@ -22,7 +22,6 @@ function mockLoadedEntries() {
   vi.mocked(mockTransport.getRemoteUrl).mockResolvedValue({ label: "example/repo", webUrl: "https://github.com/example/repo" });
 }
 
-/** Lets the reads an opened overview card starts on mount (remote, review state) resolve inside act(). */
 async function settleMountReads(): Promise<void> {
   await act(async () => {});
 }

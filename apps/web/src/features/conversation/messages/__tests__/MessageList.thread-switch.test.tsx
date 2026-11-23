@@ -237,7 +237,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  // Unmount first: clearing the selection below would update mounted selected-text controls.
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();

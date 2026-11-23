@@ -80,7 +80,6 @@ describe("Threads page model controls", () => {
   it("groups model controls into new-thread defaults and the model for small tasks", async () => {
     renderWithModel("claude", "claude-opus-4-7");
     render(<ThreadsSection />);
-    // The defaults capsule reads the model catalog on mount; let it settle.
     await act(async () => {});
 
     for (const name of [
