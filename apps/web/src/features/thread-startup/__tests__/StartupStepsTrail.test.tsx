@@ -1,7 +1,7 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
 import type { ThreadStartup, ThreadStartupAction, ThreadStartupStep } from "@mcode/contracts/thread-startup";
 import type { WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -124,6 +124,8 @@ describe("StartupStepsTrail", () => {
   });
 
   afterEach(() => {
+    // Unmount before resetting stores so the resets do not re-render a live tree outside act().
+    cleanup();
     vi.useRealTimers();
     for (const mock of Object.values(startupTransport)) mock.mockReset();
     useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {} });
