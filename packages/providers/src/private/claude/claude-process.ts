@@ -98,8 +98,7 @@ export class ClaudeOwnedProcess {
         this.processes.set(pid, child);
         logger.error("Claude owned process retirement failed", {
           pid,
-          error: String(error),
-          ...ProcessCommandError.logFields(error),
+          ...(ProcessCommandError.logFields(error) ?? { error: String(error) }),
         });
       },
     );

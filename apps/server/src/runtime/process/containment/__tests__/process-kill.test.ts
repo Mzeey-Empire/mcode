@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { assert, describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockExecFile } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
@@ -305,28 +305,42 @@ describe("killProcessTree", () => {
   });
 
   it("surfaces and logs bounded stderr when taskkill times out", async () => {
-    mockExecFile.mockRejectedValue(Object.assign(new Error("taskkill timed out"), {
+    const stderr = `Access denied\nAuthorization: Bearer sk-test-SENTINEL123456\n${"界".repeat(900)}\nSTDERR_TAIL`;
+    const message = `Command failed: taskkill /T /F /PID 1234\n${stderr}`;
+    mockExecFile.mockRejectedValue(Object.assign(new Error(message), {
       code: null,
       signal: "SIGTERM",
       killed: true,
-      stderr: Buffer.from("x".repeat(3_000)),
+      stderr: Buffer.from(stderr),
     }));
     const diagnostics = {
       exitCode: null,
       signal: "SIGTERM",
       timedOut: true,
-      stderrExcerpt: expect.stringMatching(/^x{2037}\[truncated\]$/),
     };
 
     await expect(killProcessTree(1234, {
       platform: "win32",
       execFile: mockExecFile,
       getWindowsProcessSnapshot: async () => ROOT_SNAPSHOT,
-    })).rejects.toMatchObject(diagnostics);
-    expect(logger.warn).toHaveBeenCalledWith(
-      "killProcessTree: unexpected error killing process tree",
-      { pid: 1234, error: "taskkill timed out", ...diagnostics },
-    );
+    })).rejects.toMatchObject({ message, ...diagnostics });
+    const warn = vi.mocked(logger.warn);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect.soft(logged.includes("SENTINEL123456"), "log contains a secret").toBe(false);
+    expect.soft(logged.includes("STDERR_TAIL"), "log contains the stderr tail").toBe(false);
+    const call: readonly unknown[] = warn.mock.lastCall ?? [];
+    expect(call[0]).toBe("killProcessTree: unexpected error killing process tree");
+    const record = call[1];
+    assert(typeof record === "object" && record !== null && "stderrExcerpt" in record);
+    assert(typeof record.stderrExcerpt === "string");
+    expect.soft(Buffer.byteLength(record.stderrExcerpt)).toBeLessThanOrEqual(2_048);
+    expect(record).toMatchObject({
+      pid: 1234,
+      error: expect.stringMatching(/^Command failed:/),
+      ...diagnostics,
+    });
+    expect(record.stderrExcerpt.startsWith("Access denied")).toBe(true);
+    expect.soft(record.stderrExcerpt.endsWith("[truncated]")).toBe(true);
   });
 
   it("does not taskkill a Windows root after the captured root is replaced", async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -14,13 +14,15 @@ import { ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contrac
 
 describe("ClaudeOwnedProcess diagnostics", () => {
   it.each([false, true])("logs process command diagnostics on retirement failure (wrapped: %s)", async (wrapped) => {
-    const commandError = ProcessCommandError.fromExecFileError(Object.assign(new Error("taskkill failed"), {
+    const stderr = `Access denied\nAuthorization: Bearer sk-test-SENTINEL123456\n${"x".repeat(3_000)}\nSTDERR_TAIL`;
+    const message = `Command failed: powershell.exe -Command "Write-Error 'token=summary-SENTINEL123456'"\n${stderr}`;
+    const commandError = ProcessCommandError.fromExecFileError(Object.assign(new Error(message), {
       code: 5,
       signal: null,
       killed: false,
-      stderr: "Access denied",
+      stderr,
     }));
-    const failure = wrapped ? new Error("termination failed", { cause: commandError }) : commandError;
+    const failure = wrapped ? new Error(`termination failed: ${message}`, { cause: commandError }) : commandError;
     const logError = vi.spyOn(logger, "error").mockImplementation(() => logger);
     const owned = new ClaudeOwnedProcess({
       attach: () => undefined,
@@ -35,14 +37,24 @@ describe("ClaudeOwnedProcess diagnostics", () => {
         env: process.env,
       });
       await expect(owned.retire()).rejects.toBe(failure);
-      expect(logError).toHaveBeenCalledWith("Claude owned process retirement failed", {
+      expect(commandError.message).toBe(message);
+      const logged = JSON.stringify(logError.mock.calls);
+      expect.soft(logged.includes("SENTINEL123456"), "log contains a secret").toBe(false);
+      expect.soft(logged.includes("STDERR_TAIL"), "log contains the stderr tail").toBe(false);
+      const call: readonly unknown[] = logError.mock.lastCall ?? [];
+      expect(call[0]).toBe("Claude owned process retirement failed");
+      const record = call[1];
+      expect(record).toMatchObject({
         pid: child.pid,
-        error: wrapped ? "Error: termination failed" : "Error: taskkill failed",
+        error: expect.stringMatching(/^Command failed:/),
         exitCode: 5,
         signal: null,
         timedOut: false,
-        stderrExcerpt: "Access denied",
+        stderrExcerpt: expect.stringMatching(/^Access denied/),
       });
+      assert(typeof record === "object" && record !== null && "stderrExcerpt" in record);
+      assert(typeof record.stderrExcerpt === "string");
+      expect(Buffer.byteLength(record.stderrExcerpt)).toBeLessThanOrEqual(2_048);
     } finally {
       logError.mockRestore();
       if (child && child.exitCode === null && child.signalCode == null) {

@@ -263,7 +263,6 @@ async function killUnixProcessGroup(
     logger.warn("killProcessTree: unexpected error killing process tree", {
       pid,
       error: error instanceof Error ? error.message : String(error),
-      ...ProcessCommandError.logFields(error),
     });
     throw error;
   }
@@ -302,7 +301,6 @@ async function verifyUnixTermination(
       pid,
       capturedProcessCount: identities.length,
       error: error instanceof Error ? error.message : String(error),
-      ...ProcessCommandError.logFields(error),
     });
     throw error;
   }
@@ -389,8 +387,7 @@ async function killWindowsProcessTreeRoot(
     }
     logger.warn("killProcessTree: unexpected error killing process tree", {
       pid,
-      error: error instanceof Error ? error.message : String(error),
-      ...ProcessCommandError.logFields(error),
+      ...(ProcessCommandError.logFields(error) ?? { error: error instanceof Error ? error.message : String(error) }),
     });
     throw error;
   }
