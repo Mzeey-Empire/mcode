@@ -2,22 +2,21 @@ import type { OverviewSubject } from "@/features/thread-overview/overview-subjec
 import { useOverviewUsage } from "@/features/thread-overview/use-overview-usage";
 import { formatUsageResetText } from "@/lib/usage-reset-format";
 import { cn } from "@/lib/utils";
+import { isLowQuotaCategory } from "@/stores/provider-usage-snapshot";
 import { type Thread } from "@/transport";
-import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
-import type { ReactNode } from "react";
+import { createTooltipHandle, Tooltip, TooltipContent, TooltipTrigger, type TooltipHandle } from "@/components/ui/tooltip";
+import type { QuotaCategory } from "@mcode/contracts/providers/usage";
+import { useState, type ReactNode } from "react";
 import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 import {
   usageCategoryPercent,
   usageCategoryShortLabel,
 } from "@/features/thread-overview/use-overview-usage";
 
-const USAGE_WARNING_PERCENT = 90;
-
 interface ThreadOverviewUsageProps {
   categories: QuotaCategory[];
   summary: string;
   sessionCost: string | null;
-  usageStatus?: ProviderUsageInfo["usageStatus"];
 }
 
 /**
@@ -37,21 +36,60 @@ function sentenceCase(label: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+function clampedPercent(category: QuotaCategory): number {
+  return Math.min(Math.max(usageCategoryPercent(category), 0), 100);
+}
+
+/** The hover card for one limit: percent used, when it resets, and how little is left when low. */
+function UsageCategoryTooltipBody({ category }: { category: QuotaCategory }) {
+  const resetText = formatUsageResetText(category.resetDate);
+  return (
+    <div className="flex flex-col items-start gap-0.5 tabular-nums">
+      <span className="font-medium">
+        {sentenceCase(usageCategoryShortLabel(category.label))}: {Math.round(clampedPercent(category))}% used
+      </span>
+      {resetText ? <span className="text-muted">{resetText}</span> : null}
+      {isLowQuotaCategory(category) ? (
+        <span className="text-warning">Low quota: {Math.round(category.remainingPercent * 100)}% left</span>
+      ) : null}
+    </div>
+  );
+}
+
+/** The section's one tooltip root, shared by every limit line. */
+function UsageTooltipRoot({ handle }: { handle: TooltipHandle<QuotaCategory> }) {
+  return (
+    <Tooltip handle={handle}>
+      {({ payload }) => (payload ? (
+        <TooltipContent side="top" align="start">
+          <UsageCategoryTooltipBody category={payload} />
+        </TooltipContent>
+      ) : null)}
+    </Tooltip>
+  );
+}
+
 /**
- * A limit on one line: its short name, a meter and the percent used. The reset time is left to the
- * meter's accessible name; at a glance only how close the limit is matters.
+ * A limit on one line: its short name, a meter and the percent used. The reset time and how much is
+ * left wait in the line's tooltip; at a glance only how close the limit is matters.
  */
-function UsageCategory({ category, stale }: { category: QuotaCategory; stale: boolean }) {
-  const percent = Math.min(Math.max(usageCategoryPercent(category), 0), 100);
+function UsageCategory({ category, tooltip }: { category: QuotaCategory; tooltip: TooltipHandle<QuotaCategory> }) {
+  const percent = clampedPercent(category);
   const rounded = Math.round(percent);
-  const isNearLimit = percent >= USAGE_WARNING_PERCENT;
+  const isNearLimit = isLowQuotaCategory(category);
   const resetText = formatUsageResetText(category.resetDate);
   const shortLabel = usageCategoryShortLabel(category.label);
   const progressDescription = resetText
     ? `${shortLabel} usage ${rounded} percent. ${resetText}`
     : `${shortLabel} usage ${rounded} percent`;
   return (
-    <UsageLine name={stale ? `${sentenceCase(shortLabel)} · stale` : sentenceCase(shortLabel)}>
+    <TooltipTrigger handle={tooltip} payload={category} render={
+      <div
+        tabIndex={0}
+        className="col-span-full grid h-row-compact grid-cols-subgrid items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      />
+    }>
+      <span className="text-fade text-muted">{sentenceCase(shortLabel)}</span>
       <div
         role="progressbar"
         aria-label={progressDescription}
@@ -75,7 +113,7 @@ function UsageCategory({ category, stale }: { category: QuotaCategory; stale: bo
       >
         {rounded}%
       </span>
-    </UsageLine>
+    </TooltipTrigger>
   );
 }
 
@@ -83,8 +121,8 @@ function ThreadOverviewUsage({
   categories,
   summary,
   sessionCost,
-  usageStatus,
 }: ThreadOverviewUsageProps) {
+  const [tooltip] = useState(() => createTooltipHandle<QuotaCategory>());
   return (
     // The lines share one set of columns: names sized to the longest, then each meter fills the
     // rest so every percent ends on the card's right edge, where the Changes totals end. Usage has
@@ -95,8 +133,9 @@ function ThreadOverviewUsage({
       className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)_max-content] gap-x-3 px-3 text-body-small"
     >
       {categories.map((category) => (
-        <UsageCategory key={category.label} category={category} stale={usageStatus === "stale"} />
+        <UsageCategory key={category.label} category={category} tooltip={tooltip} />
       ))}
+      <UsageTooltipRoot handle={tooltip} />
       {sessionCost ? (
         <UsageLine name="Session cost">
           <span className="col-span-2 text-right tabular-nums text-ink">{sessionCost}</span>
@@ -111,13 +150,12 @@ function ThreadOverviewUsage({
 }
 
 function UsageEntry({ thread }: { thread: Thread }) {
-  const { usageInfo, usageCategories, usageSummary, sessionCost } = useOverviewUsage(thread);
+  const { usageCategories, usageSummary, sessionCost } = useOverviewUsage(thread);
   return (<ThreadOverviewWhen when={usageSummary !== null}>
     <ThreadOverviewUsage
       categories={usageCategories}
       summary={usageSummary ?? ""}
       sessionCost={sessionCost}
-      usageStatus={usageInfo?.usageStatus}
     />
   </ThreadOverviewWhen>);
 }

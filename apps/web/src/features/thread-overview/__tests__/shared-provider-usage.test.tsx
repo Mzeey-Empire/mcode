@@ -83,6 +83,17 @@ function fiveHour(usedPercent: number): QuotaCategory {
   };
 }
 
+function limit(label: string, usedPercent: number): QuotaCategory {
+  return { ...fiveHour(usedPercent), label };
+}
+
+/** Claude's real response shape: an account-wide weekly limit beside a model-scoped one. */
+function claudeLimits(): ProviderUsageInfo {
+  return claudeUsage(0, {
+    quotaCategories: [limit("Weekly limit", 88), limit("Weekly limit · Fable", 0), limit("5-hour limit", 12)],
+  });
+}
+
 function claudeUsage(usedPercent: number, extra: Partial<ProviderUsageInfo> = {}): ProviderUsageInfo {
   return {
     providerId: "claude",
@@ -173,18 +184,22 @@ describe("shared provider usage across threads", () => {
     setVisibility("visible");
   });
 
-  it("shows one refresh on thread A's Composer and thread B's Overview", async () => {
+  it("shows one refresh as the same low limit, in warning tone, on both threads' Overviews", async () => {
     getProviderUsage.mockResolvedValue(claudeUsage(85));
 
     render(
       <>
-        <Composer threadId={THREAD_A.id} workspaceId="ws-1" />
+        <OverviewUsage thread={THREAD_A} />
         <OverviewUsage thread={THREAD_B} />
       </>,
     );
 
-    expect(await screen.findByRole("img", { name: "Low provider quota" })).toBeInTheDocument();
-    expect(overviewOf(THREAD_B.id).getByTestId("thread-overview-usage-value")).toHaveTextContent("85%");
+    expect(await overviewOf(THREAD_B.id).findByText("85%")).toBeInTheDocument();
+    for (const threadId of [THREAD_A.id, THREAD_B.id]) {
+      const value = overviewOf(threadId).getByTestId("thread-overview-usage-value");
+      expect(value).toHaveTextContent("85%");
+      expect(value).toHaveClass("text-warning");
+    }
     expect(getProviderUsage).toHaveBeenCalledTimes(1);
   });
 
@@ -247,7 +262,7 @@ describe("shared provider usage across threads", () => {
     expect(getProviderUsage).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the last good quota on every thread, marked stale, when a refresh fails", async () => {
+  it("keeps the last good quota on every thread, unmarked, when a refresh fails", async () => {
     getProviderUsage
       .mockResolvedValueOnce(claudeUsage(40, { billingMode: "api_key" }))
       .mockRejectedValueOnce(new Error("offline"));
@@ -263,23 +278,66 @@ describe("shared provider usage across threads", () => {
     await flush();
 
     for (const threadId of [THREAD_A.id, THREAD_B.id]) {
-      expect(overviewOf(threadId).getByText("5-hour · stale")).toBeInTheDocument();
+      expect(overviewOf(threadId).getByText("5-hour")).toBeInTheDocument();
+      expect(overviewOf(threadId).queryByText(/stale/)).not.toBeInTheDocument();
       expect(overviewOf(threadId).getByTestId("thread-overview-usage-value")).toHaveTextContent("40%");
     }
     expect(overviewOf(THREAD_A.id).getByText("$0.42")).toBeInTheDocument();
   });
 
-  it("refreshes a mounted Composer every 5 minutes only while the window is visible", async () => {
+  it("lists every limit: 5-hour, then the account-wide weekly limit, then the model-scoped one", async () => {
+    getProviderUsage.mockResolvedValue(claudeLimits());
+    render(<OverviewUsage thread={THREAD_A} />);
+
+    expect(await overviewOf(THREAD_A.id).findByText("Weekly · Fable")).toBeInTheDocument();
+    const usage = overviewOf(THREAD_A.id).getByTestId("thread-overview-usage");
+    expect(usage).toHaveTextContent(/^5-hour\s*12%Weekly\s*88%Weekly · Fable\s*0%$/);
+  });
+
+  it("explains each limit on focus and names a low quota only on the low limit", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    getProviderUsage.mockResolvedValue(claudeLimits());
+    render(<OverviewUsage thread={THREAD_A} />);
+    const overview = overviewOf(THREAD_A.id);
+
+    const weekly = await overview.findByRole("progressbar", { name: /^weekly usage 88 percent/ });
+    act(() => weekly.parentElement?.focus());
+    const weeklyTip = await screen.findByText("Weekly: 88% used");
+    const weeklyCard = weeklyTip.parentElement!;
+    expect(within(weeklyCard).getByText(/^Resets in/)).toBeInTheDocument();
+    expect(within(weeklyCard).getByText("Low quota: 12% left")).toHaveClass("text-warning");
+
+    const fable = overview.getByRole("progressbar", { name: /^weekly · Fable usage 0 percent/ });
+    act(() => fable.parentElement?.focus());
+    const fableTip = await screen.findByText("Weekly · Fable: 0% used");
+    expect(within(fableTip.parentElement!).queryByText(/Low quota/)).not.toBeInTheDocument();
+  });
+
+  it("shows no Low quota label in the Composer while a limit is nearly spent", async () => {
+    getProviderUsage.mockResolvedValue(claudeUsage(85));
+    render(
+      <>
+        <Composer threadId={THREAD_A.id} workspaceId="ws-1" />
+        <OverviewUsage thread={THREAD_B} />
+      </>,
+    );
+
+    expect(await overviewOf(THREAD_B.id).findByText("85%")).toBeInTheDocument();
+    expect(screen.queryByText("Low quota")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /low provider quota/i })).not.toBeInTheDocument();
+  });
+
+  it("refreshes an open Overview every 5 minutes only while the window is visible", async () => {
     vi.useFakeTimers({ now: Date.parse("2026-11-23T10:00:00.000Z"), toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
     getProviderUsage.mockImplementation(async () => claudeUsage(85));
-    const view = render(<Composer threadId={THREAD_A.id} workspaceId="ws-1" />);
+    const view = render(<OverviewUsage thread={THREAD_A} />);
     await flush();
-    expect(screen.getByRole("img", { name: "Low provider quota" })).toBeInTheDocument();
+    expect(overviewOf(THREAD_A.id).getByTestId("thread-overview-usage-value")).toHaveTextContent("85%");
 
     getProviderUsage.mockImplementation(async () => claudeUsage(10));
     await act(async () => vi.advanceTimersByTimeAsync(5 * 60_000));
     expect(getProviderUsage).toHaveBeenCalledTimes(2);
-    expect(screen.queryByRole("img", { name: "Low provider quota" })).not.toBeInTheDocument();
+    expect(overviewOf(THREAD_A.id).getByTestId("thread-overview-usage-value")).toHaveTextContent("10%");
 
     act(() => setVisibility("hidden"));
     await act(async () => vi.advanceTimersByTimeAsync(15 * 60_000));

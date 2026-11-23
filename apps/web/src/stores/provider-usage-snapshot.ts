@@ -1,4 +1,4 @@
-import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
+import type { ProviderUsageInfo, QuotaCategory } from "@mcode/contracts/providers/usage";
 
 const USAGE_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -40,9 +40,9 @@ export function failedUsage(providerId: string, now: number): ProviderQuotaUsage
   };
 }
 
-/** Returns whether any capped quota window has less than a fifth left. */
-export function hasLowQuotaCategory(usage: ProviderQuotaUsage | undefined): boolean {
-  return usage?.quotaCategories.some((c) => !c.isUnlimited && c.remainingPercent < 0.2) ?? false;
+/** Returns whether a capped quota window has less than a fifth left. */
+export function isLowQuotaCategory(category: QuotaCategory): boolean {
+  return !category.isUnlimited && category.remainingPercent < 0.2;
 }
 
 function hasQuota(usage: ProviderQuotaUsage | undefined): usage is ProviderQuotaUsage {

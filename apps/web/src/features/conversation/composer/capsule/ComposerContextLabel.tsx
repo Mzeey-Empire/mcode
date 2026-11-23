@@ -10,8 +10,6 @@ interface ComposerContextLabelProps {
   readonly contextWindow: number | undefined;
   /** Tokens processed across compactions. */
   readonly totalProcessedTokens?: number;
-  /** A provider quota is nearly spent: the label shows even below 70% and names the low quota. */
-  readonly hasLowQuota: boolean;
 }
 
 const TONE_CLASS: Record<ContextLabel["tone"], { readonly text: string; readonly fill: string }> = {
@@ -37,10 +35,10 @@ function percentUsedOf(tokensIn: number, contextWindow: number | undefined): num
  * The capsule's context usage, shown from 70% as "72% context", or "72%" below the 680px capsule tier, behind a rule
  * that sets it off from the model part. Hover or focus opens the token breakdown card the old ring showed.
  */
-export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTokens, hasLowQuota }: ComposerContextLabelProps) {
+export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTokens }: ComposerContextLabelProps) {
   const percentUsed = percentUsedOf(tokensIn, contextWindow);
   const label = contextLabelFor(percentUsed);
-  if (!label || percentUsed === null || !contextWindow) return hasLowQuota ? <LowQuotaLabel /> : null;
+  if (!label || percentUsed === null || !contextWindow) return null;
 
   const tone = TONE_CLASS[label.tone];
   const summary = `${label.text} · ${abbreviateTokens(tokensIn)}/${abbreviateTokens(contextWindow)} context used`;
@@ -54,7 +52,7 @@ export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTo
             <span
               data-testid="composer-context-label"
               role="img"
-              aria-label={`Context window: ${summary}${hasLowQuota ? " · Low provider quota" : ""}`}
+              aria-label={`Context window: ${summary}`}
               tabIndex={0}
               className={cn(LABEL_CLASS, "tabular-nums", tone.text)}
             >
@@ -91,47 +89,7 @@ export function ComposerContextLabel({ tokensIn, contextWindow, totalProcessedTo
                 <span className="tabular-nums">{abbreviateTokens(totalProcessedTokens)} tokens</span>
               </div>
             )}
-            {hasLowQuota && <ProviderQuotaLine className="border-t border-border pt-2" />}
           </div>
-        </TooltipContent>
-      </Tooltip>
-    </>
-  );
-}
-
-function ProviderQuotaLine({ className }: { readonly className?: string }) {
-  return (
-    <div className={cn("flex justify-between gap-4", className)}>
-      <span>Provider quota</span>
-      <span className="font-medium text-warning">Low</span>
-    </div>
-  );
-}
-
-/**
- * Stands in for the context label while context use is below its warning level or unknown. The warning tone there
- * would belong to the quota, so a percentage beside it would read as quota left.
- */
-function LowQuotaLabel() {
-  return (
-    <>
-      <CapsuleDivider />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              data-testid="composer-context-label"
-              role="img"
-              aria-label="Low provider quota"
-              tabIndex={0}
-              className={cn(LABEL_CLASS, TONE_CLASS.warning.text)}
-            >
-              Low quota
-            </span>
-          }
-        />
-        <TooltipContent side="top" align="end" sideOffset={8} className="w-72 max-w-none p-3">
-          <ProviderQuotaLine />
         </TooltipContent>
       </Tooltip>
     </>

@@ -593,24 +593,24 @@ describe("HeaderActions - consolidated header", () => {
     expect(screen.queryByTestId("thread-overview-usage-popover")).not.toBeInTheDocument();
   });
 
-  it("keeps usage neutral below 90 percent and turns it amber, never red, from 90", () => {
+  it("keeps usage neutral with a fifth left and turns it amber, never red, below a fifth", () => {
     seedThreadUsage("thread-1", {
       providerId: "claude",
       usageStatus: "ready",
       quotaCategories: [
         {
           label: "5-hour limit",
-          used: 89,
+          used: 79,
           total: 100,
-          remainingPercent: 0.11,
+          remainingPercent: 0.21,
           resetDate: "2099-07-07T14:14:00.000Z",
           isUnlimited: false,
         },
         {
           label: "Weekly limit",
-          used: 100,
+          used: 81,
           total: 100,
-          remainingPercent: 0,
+          remainingPercent: 0.19,
           resetDate: "2099-07-07T14:14:00.000Z",
           isUnlimited: false,
         },
@@ -622,16 +622,17 @@ describe("HeaderActions - consolidated header", () => {
     const values = screen.getAllByTestId("thread-overview-usage-value");
     const bars = screen.getAllByRole("progressbar");
     const fills = bars.map((bar) => bar.firstElementChild);
-    expect(values[0]).toHaveTextContent("89%");
+    expect(values[0]).toHaveTextContent("79%");
     expect(bars[0]).not.toHaveAttribute("data-near-limit");
     expect(fills[0]).toHaveClass("bg-ink");
-    expect(values[1]).toHaveTextContent("100%");
+    expect(values[1]).toHaveTextContent("81%");
     expect(bars[1]).toHaveAttribute("data-near-limit", "true");
+    expect(values[1]).toHaveClass("text-warning");
     expect(fills[1]).toHaveClass("bg-warning");
     expect(screen.getByTestId("thread-overview-usage").innerHTML).not.toMatch(/destructive|primary|diff-add|diff-remove/);
   });
 
-  it("marks each limit stale on its own line when the provider's numbers are stale", () => {
+  it("shows a stale snapshot's last numbers without marking them stale", () => {
     seedThreadUsage("thread-1", {
       providerId: "claude",
       usageStatus: "stale",
@@ -649,7 +650,7 @@ describe("HeaderActions - consolidated header", () => {
 
     renderHeaderActions(makeThread({ worktree_path: "/repo/worktrees/feat-x" }));
 
-    expect(screen.getByTestId("thread-overview-usage")).toHaveTextContent(/^Weekly · stale\s*40%$/);
+    expect(screen.getByTestId("thread-overview-usage")).toHaveTextContent(/^Weekly\s*40%$/);
   });
 
   it("does not render Codex usage before provider quota data arrives", () => {
