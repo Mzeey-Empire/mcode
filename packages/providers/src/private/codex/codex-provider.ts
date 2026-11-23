@@ -49,7 +49,7 @@ import type { PlanAnswer, PlanQuestionHandler } from "@mcode/contracts/models/pl
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
-import { CodexEventMapper } from "./codex-event-mapper.js";
+import { CODEX_STREAMING_DELTA_METHODS, CodexEventMapper } from "./codex-event-mapper.js";
 import {
   CodexCanonicalEventPublisher,
   type CodexCanonicalEventRouting,
@@ -1736,7 +1736,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const nativeTurnId = nativeTurnIdFromParams(rawNotification.params);
     if (this.completeCodexBackgroundCommand(entry, notification)) return;
     // Reject old main-turn events before they can reset the shared mapper for a new dispatch.
-    if (mainNotification && !this.isCurrentCodexMainTurn(entry, nativeTurnId)) return;
+    // Discarding the save queue can resume the pipe with many deltas still buffered.
+    if (mainNotification && (!this.isCurrentCodexMainTurn(entry, nativeTurnId)
+      || this.isFencedCodexDelta(entry, notification, nativeTurnId))) return;
     this.updateApprovalFileChanges(context.sessionId, rawNotification, mainNotification);
     this.handleCodexUsageNotification(rawNotification, server, context.threadId);
     const replayThreadId = this.bindCodexTurnStarted(entry, rawNotification.method, mainNotification, nativeThreadId, nativeTurnId);
@@ -1768,6 +1770,17 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const knownExecutionId = entry.turnExecutionIdsByNativeTurn.get(nativeTurnId);
     return (!knownExecutionId || knownExecutionId === entry.currentTurnExecutionId)
       && this.matchesCurrentCodexAttempt(entry, nativeTurnId);
+  }
+
+  private isFencedCodexDelta(
+    entry: CodexSessionState | undefined,
+    notification: CodexNotification,
+    nativeTurnId: string | undefined,
+  ): boolean {
+    if (!entry || !CODEX_STREAMING_DELTA_METHODS.has(notification.method)) return false;
+    const executionId = this.codexNotificationExecutionId(entry, true, undefined, nativeTurnId);
+    const state = this.canonicalRoutingForExecution(entry.threadId, executionId);
+    return state?.kind === "fenced" && state.routing.executionId === executionId;
   }
 
   private matchesCurrentCodexAttempt(entry: CodexSessionState, nativeTurnId: string | undefined): boolean {
