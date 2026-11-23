@@ -1779,6 +1779,64 @@ describe("ThreadHydrator", () => {
       expect(record?.hasMoreMessages).toBe(false);
     });
 
+    function sequences(first: number, last: number): number[] {
+      return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+    }
+
+    it("keeps resident rows older than the page it read when that page overlaps them", async () => {
+      const resident = sequences(1, 150).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, resident);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      // The tail and the page below it cover rows 51 to 150; rows 1 to 50 sit above a reader scrolled up.
+      expect(record?.messages.map((message) => message.sequence)).toEqual(sequences(1, 150));
+      expect(record?.oldestLoadedSequence).toBe(1);
+      expect(record?.hasMoreMessages).toBe(false);
+    });
+
+    it("drops resident rows below the page it read when more rows were saved than one page holds", async () => {
+      const resident = sequences(1, 6).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, [...resident, ...sequences(7, 206).map((sequence) => serverRow(THREAD_A, sequence))]);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      expect(record?.messages.map((message) => message.sequence)).toEqual(sequences(107, 206));
+      expect(record?.oldestLoadedSequence).toBe(107);
+      expect(record?.hasMoreMessages).toBe(true);
+    });
+
+    it("warms the page below the oldest kept row after keeping rows older than the page it read", async () => {
+      const history = sequences(1, 250).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, { ...makeCachedRecord(history.slice(100)), hasMoreMessages: true }]]),
+      });
+      serveHistory(THREAD_A, history);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+      await vi.advanceTimersByTimeAsync(120);
+
+      expect(useThreadStore.getState().records.get(THREAD_A)?.oldestLoadedSequence).toBe(101);
+      const cursors = () => vi.mocked(mockTransport.loadOlderConversationPage).mock.calls.map(([request]) => request.cursor.beforeSequence);
+      await vi.waitFor(() => expect(cursors()).toContain(101));
+      // 249 is the read below the tail; 151 would re-read rows that stayed resident.
+      expect(cursors()).toEqual([249, 101]);
+    });
+
     it("drops resident rows inside the page's range that the server removed or replaced", async () => {
       const turn = subagentTurn(THREAD_A);
       resetThreadStoreForTests({

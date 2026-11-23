@@ -308,13 +308,30 @@ function rowsWithUnchangedNarrative(
 }
 
 /**
+ * Resident server rows older than this sequence stay through the merge. When the page reaches
+ * into the resident window, no rows are missing between them, so the rows below the page stay
+ * where the user may be reading. They may be stale if the server deleted them while the client
+ * was away; main accepted that too, and scrolling or a later full load corrects it. When the
+ * page does not reach the window, rows are missing between them, so the rows below leave and
+ * reload on scroll.
+ */
+function residentRowsKeptBelow(resident: ConversationCacheState["messages"], fetched: ConversationCacheState): number {
+  const oldest = fetched.messages[0]?.sequence;
+  const newest = fetched.messages.at(-1)?.sequence;
+  if (!fetched.hasMoreMessages || oldest === undefined || newest === undefined) return Number.NEGATIVE_INFINITY;
+  const overlaps = resident.some(({ serverSequence }) =>
+    serverSequence !== undefined && serverSequence >= oldest && serverSequence <= newest);
+  return overlaps ? oldest : Number.NEGATIVE_INFINITY;
+}
+
+/**
  * Merge a page read from the server's tail, extended down over the resident window when it
  * had older rows (see {@link ThreadHydrator.extendTailOverResidentRows}). The page speaks for
- * every server row up to its newest: a resident server row there that it lacks was removed or
- * replaced, and resident server rows older than the page leave so no hole sits between them;
- * scrolling up reloads them. Rows newer than the page were saved after it was read and stay,
- * as do live rows the server has not saved (no `serverSequence`) and rows that changed after
- * the fetch began, which the page may predate.
+ * every server row from its oldest to its newest: a resident server row there that it lacks
+ * was removed or replaced. Resident server rows older than the page stay only when the page
+ * overlaps them (see {@link residentRowsKeptBelow}). Rows newer than the page were saved after
+ * it was read and stay, as do live rows the server has not saved (no `serverSequence`) and rows
+ * that changed after the fetch began, which the page may predate.
  */
 function mergeFetchedServerWindow(
   resident: ThreadRecord,
@@ -326,11 +343,14 @@ function mergeFetchedServerWindow(
   // An empty page with no older history means the server holds no rows at all.
   const newestCovered = fetched.messages.at(-1)?.sequence
     ?? (fetched.hasMoreMessages ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
+  const keptBelow = residentRowsKeptBelow(residentState.messages, fetched);
   const fetchedRows = fetched.messages.filter((message) => !changed.has(message.id));
   const fetchedRowIds = new Set(fetchedRows.map((message) => message.id));
   const fetchedIds = new Set(fetched.messages.map((message) => message.id));
   const residentRows = residentState.messages.filter(({ id, serverSequence }) =>
-    changed.has(id) || (!fetchedIds.has(id) && (serverSequence === undefined || serverSequence > newestCovered)));
+    changed.has(id) || (!fetchedIds.has(id)
+      && (serverSequence === undefined || serverSequence > newestCovered || serverSequence < keptBelow)));
+  const keptOlderRows = residentRows.some(({ serverSequence }) => serverSequence !== undefined && serverSequence < keptBelow);
   const messages = [...fetchedRows, ...residentRows]
     .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
   const retainedIds = new Set(messages.map((message) => message.id));
@@ -346,7 +366,8 @@ function mergeFetchedServerWindow(
     messages,
     oldestLoadedSequence: messages[0]?.sequence ?? fetched.oldestLoadedSequence,
     newestLoadedSequence: messages.at(-1)?.sequence ?? fetched.newestLoadedSequence,
-    hasMoreMessages: fetched.hasMoreMessages,
+    // Scrolling up continues from the oldest kept row, so its side says whether more exist.
+    hasMoreMessages: keptOlderRows ? residentState.hasMoreMessages : fetched.hasMoreMessages,
     hasNewerMessages: fetched.hasNewerMessages || residentState.hasNewerMessages,
     fileEvidence,
     persistedToolCallCounts: pick((state) => state.persistedToolCallCounts),
@@ -1583,7 +1604,11 @@ export class ThreadHydrator {
     void loaded.goalLookup.then((goalLookup) => {
       if (goalLookup) this.applyGoalLookup(threadId, goalLookup, epoch);
     });
-    if (options?.prefetchEarlierHistory !== false) this.scheduleEarlierHistoryPrefetch(threadId, loaded.page);
+    // The merge can keep resident rows older than the page, and scrolling up asks for the page
+    // below the oldest kept row, so warm that page rather than the one below the fetched page.
+    if (options?.prefetchEarlierHistory !== false) {
+      this.scheduleEarlierHistoryPrefetch(threadId, getThreadRecord(this.deps.getState().records, threadId));
+    }
   }
 
   private failFetchCommit(threadId: string, error: unknown): void {
@@ -1653,7 +1678,8 @@ export class ThreadHydrator {
    * A refreshed tail holds only the newest rows, and sequences are sparse, so the tail alone cannot
    * say whether resident server rows below it are still current or whether rows are missing
    * between them. When such rows exist, read the page just below the tail so the committed page
-   * covers them. The read is one page; resident rows below it leave and reload on scroll.
+   * covers them. The read is one page; when it does not reach the resident rows, they leave and
+   * reload on scroll.
    */
   private async extendTailOverResidentRows(threadId: string, tail: ConversationPage): Promise<ConversationPage> {
     const tailOldest = tail.messages[0]?.sequence;
