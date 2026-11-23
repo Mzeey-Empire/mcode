@@ -8,6 +8,7 @@ import {
   screen,
   waitFor,
   within,
+  cleanup,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { App } from "../app/App";
@@ -109,8 +110,20 @@ vi.mock("@/components/ui/scroll-area", () => ({
 await import("@/features/pull-requests");
 await import("@/components/panels/RightPanel");
 
+/**
+ * Renders the app, then lets the reads it starts on mount (such as terminal capabilities)
+ * resolve inside act(), so their state updates do not land after the test.
+ */
+async function renderApp(): Promise<ReturnType<typeof render>> {
+  const view = render(<App />);
+  await act(async () => {});
+  return view;
+}
+
 describe("App", () => {
   afterEach(() => {
+    // Unmount before resetting state so the resets do not re-render a live tree outside act().
+    cleanup();
     vi.useRealTimers();
     vi.restoreAllMocks();
     useConnectionStore.setState({ status: "connecting" });
@@ -172,18 +185,18 @@ describe("App", () => {
     expect(within(screen.getByRole("main")).queryByRole("img", { name: "Mcode" })).toBeNull();
   });
 
-  it("renders the docked sidebar at the stored sidebar width", () => {
+  it("renders the docked sidebar at the stored sidebar width", async () => {
     useSidebarWidthStore.getState().setWidth(256);
 
-    render(<App />);
+    await renderApp();
 
     const dockedSidebar = screen.getByTestId("sidebar-docked");
     expect(dockedSidebar.firstElementChild?.firstElementChild).toHaveStyle({ width: "256px" });
-    useSidebarWidthStore.getState().resetWidth();
+    act(() => useSidebarWidthStore.getState().resetWidth());
   });
 
-  it("retains the collapsed docked sidebar without allowing interaction", () => {
-    render(<App />);
+  it("retains the collapsed docked sidebar without allowing interaction", async () => {
+    await renderApp();
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
 
@@ -257,10 +270,10 @@ describe("App", () => {
     return { perform, sendCommand: (command: string) => commandListener?.(command) };
   }
 
-  it("renders no title bar on desktop, only the shared header strip", () => {
+  it("renders no title bar on desktop, only the shared header strip", async () => {
     installDesktopWindow(false);
 
-    render(<App />);
+    await renderApp();
 
     const headers = [...document.querySelectorAll("header")];
     expect(headers.map((header) => header.dataset.testid ?? ("canvasHeader" in header.dataset ? "canvas" : "other"))).toEqual(["sidebar-header", "canvas"]);
@@ -271,8 +284,8 @@ describe("App", () => {
     expect(document.documentElement).toHaveAttribute("data-window-chrome", "caption-overlay");
   });
 
-  it("gives the canvas header the sidebar controls once the sidebar collapses", () => {
-    render(<App />);
+  it("gives the canvas header the sidebar controls once the sidebar collapses", async () => {
+    await renderApp();
 
     fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
 
@@ -282,10 +295,10 @@ describe("App", () => {
     expect(within(canvasHeader as HTMLElement).getByRole("button", { name: "Back" })).toBeInTheDocument();
   });
 
-  it("keeps the reconnect banner below the canvas header", () => {
+  it("keeps the reconnect banner below the canvas header", async () => {
     useConnectionStore.setState({ status: "reconnecting" });
 
-    render(<App />);
+    await renderApp();
 
     const canvasHeader = document.querySelector("[data-canvas-header]");
     const banner = screen.getByText("Reconnecting to server");
@@ -295,10 +308,10 @@ describe("App", () => {
     ).not.toBe(0);
   });
 
-  it("routes desktop menu commands through the command registry", () => {
+  it("routes desktop menu commands through the command registry", async () => {
     const { perform, sendCommand } = installDesktopWindow(false);
 
-    render(<App />);
+    await renderApp();
     act(() => sendCommand("window.zoomIn"));
     act(() => sendCommand("window.toggleFullScreen"));
 
@@ -319,21 +332,21 @@ describe("App", () => {
   it.each([
     [false, ["window.toggleFullScreen", "window.zoomIn", "window.zoomOut", "window.zoomReset"]],
     [true, ["window.reload", "window.toggleDevTools", "window.toggleFullScreen", "window.zoomIn", "window.zoomOut", "window.zoomReset"]],
-  ])("registers the window commands (development %s)", (isDevelopment, expected) => {
+  ])("registers the window commands (development %s)", async (isDevelopment, expected) => {
     installDesktopWindow(isDevelopment);
 
-    render(<App />);
+    await renderApp();
 
     const ids = getAllCommands().map((command) => command.id).filter((id) => id.startsWith("window.")).sort();
     expect(ids).toEqual(expected);
   });
 
-  it("registers no window commands for a partial feature bridge", () => {
+  it("registers no window commands for a partial feature bridge", async () => {
     (window as unknown as Record<string, unknown>).desktopBridge = {
       preview: {},
     };
 
-    render(<App />);
+    await renderApp();
 
     expect(getAllCommands().some((command) => command.id.startsWith("window."))).toBe(false);
     expect(document.documentElement).toHaveAttribute("data-window-chrome", "web");
