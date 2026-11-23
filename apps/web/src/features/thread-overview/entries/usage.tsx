@@ -36,16 +36,12 @@ function sentenceCase(label: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-function clampedPercent(category: QuotaCategory): number {
-  return Math.min(Math.max(usageCategoryPercent(category), 0), 100);
-}
-
 function UsageCategoryTooltipBody({ category }: { category: QuotaCategory }) {
   const resetText = formatUsageResetText(category.resetDate);
   return (
     <div className="flex flex-col items-start gap-0.5 tabular-nums">
       <span className="font-medium">
-        {sentenceCase(usageCategoryShortLabel(category.label))}: {Math.round(clampedPercent(category))}% used
+        {sentenceCase(usageCategoryShortLabel(category.label))}: {Math.round(usageCategoryPercent(category))}% used
       </span>
       {resetText ? <span className="text-muted">{resetText}</span> : null}
       {isLowQuotaCategory(category) ? (
@@ -68,7 +64,7 @@ function UsageTooltipRoot({ handle }: { handle: TooltipHandle<QuotaCategory> }) 
 }
 
 function UsageCategory({ category, tooltip }: { category: QuotaCategory; tooltip: TooltipHandle<QuotaCategory> }) {
-  const percent = clampedPercent(category);
+  const percent = usageCategoryPercent(category);
   const rounded = Math.round(percent);
   const isNearLimit = isLowQuotaCategory(category);
   const resetText = formatUsageResetText(category.resetDate);

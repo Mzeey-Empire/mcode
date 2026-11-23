@@ -20,12 +20,12 @@ export function usageCategoryShortLabel(label: string): string {
   return normalized;
 }
 
-/** Shared usageCategoryPercent used by the overview entries. */
+/** Percent of a limit used, kept within 0 to 100 so every surface shows the same figure. */
 export function usageCategoryPercent(category: QuotaCategory): number {
-  if (typeof category.used === "number" && typeof category.total === "number" && category.total > 0) {
-    return (category.used / category.total) * 100;
-  }
-  return (1 - category.remainingPercent) * 100;
+  const percent = typeof category.used === "number" && typeof category.total === "number" && category.total > 0
+    ? (category.used / category.total) * 100
+    : (1 - category.remainingPercent) * 100;
+  return Math.min(Math.max(percent, 0), 100);
 }
 
 function usageCategoryPriority(category: QuotaCategory): number {

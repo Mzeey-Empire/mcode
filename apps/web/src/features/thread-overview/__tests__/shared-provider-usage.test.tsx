@@ -197,7 +197,7 @@ describe("shared provider usage across threads", () => {
     for (const threadId of [THREAD_A.id, THREAD_B.id]) {
       const value = overviewOf(threadId).getByTestId("thread-overview-usage-value");
       expect(value).toHaveTextContent("85%");
-      expect(value).toHaveClass("text-warning");
+      expect(value).toHaveAttribute("data-near-limit");
     }
     expect(getProviderUsage).toHaveBeenCalledTimes(1);
   });
@@ -293,21 +293,34 @@ describe("shared provider usage across threads", () => {
     expect(usage).toHaveTextContent(/^5-hour\s*12%Weekly\s*88%Weekly · Fable\s*0%$/);
   });
 
-  it("explains each limit on focus and names a low quota only on the low limit", async () => {
+  it("announces a limit over 100 percent as the 100 percent its row shows", async () => {
+    getProviderUsage.mockResolvedValue(claudeUsage(0, { quotaCategories: [limit("Weekly limit · Opus", 125)] }));
+    render(<OverviewUsage thread={THREAD_A} />);
+
+    const value = await overviewOf(THREAD_A.id).findByTestId("thread-overview-usage-value");
+    expect(value).toHaveTextContent("100%");
+    expect(overviewOf(THREAD_A.id).getByTestId("thread-overview-usage")).toHaveAttribute(
+      "aria-label",
+      "Usage, weekly · Opus 100%",
+    );
+  });
+
+  it("explains each limit when tabbed to and names a low quota only on the low limit", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     getProviderUsage.mockResolvedValue(claudeLimits());
     render(<OverviewUsage thread={THREAD_A} />);
     const overview = overviewOf(THREAD_A.id);
+    await overview.findByText("Weekly · Fable");
 
-    const weekly = await overview.findByRole("progressbar", { name: /^weekly usage 88 percent/ });
-    act(() => weekly.parentElement?.focus());
+    await user.tab();
+    await user.tab();
     const weeklyTip = await screen.findByText("Weekly: 88% used");
     const weeklyCard = weeklyTip.parentElement!;
     expect(within(weeklyCard).getByText(/^Resets in/)).toBeInTheDocument();
-    expect(within(weeklyCard).getByText("Low quota: 12% left")).toHaveClass("text-warning");
+    expect(within(weeklyCard).getByText("Low quota: 12% left")).toBeInTheDocument();
 
-    const fable = overview.getByRole("progressbar", { name: /^weekly · Fable usage 0 percent/ });
-    act(() => fable.parentElement?.focus());
+    await user.tab();
     const fableTip = await screen.findByText("Weekly · Fable: 0% used");
     expect(within(fableTip.parentElement!).queryByText(/Low quota/)).not.toBeInTheDocument();
   });
