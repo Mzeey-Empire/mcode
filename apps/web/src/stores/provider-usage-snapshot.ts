@@ -2,13 +2,9 @@ import type { ProviderUsageInfo } from "@mcode/contracts/providers/usage";
 
 const USAGE_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Session fields the wire type carries but which are never account-wide. */
 type SessionField = "sessionCostUsd" | "serviceTier" | "numTurns" | "durationMs";
 
-/**
- * Account-wide usage for one provider. Omitting the session fields keeps one thread's session cost
- * out of the shared snapshot at the type level.
- */
+/** Account-wide usage for one provider. Per-thread metrics belong in `ThreadSessionUsage`. */
 export type ProviderQuotaUsage = Omit<ProviderUsageInfo, SessionField>;
 
 /** One thread's own session metrics for one provider, taken only from that thread's quotaUpdate events. */
@@ -18,8 +14,8 @@ export type ThreadSessionUsage = Pick<ProviderUsageInfo, SessionField>;
 export type ThreadSessionUsageByProvider = Readonly<Partial<Record<string, ThreadSessionUsage>>>;
 
 /**
- * Strips session fields from a wire payload. Picks fields explicitly because structural typing would
- * let a wider object, with the provider-wide session cost, through a type annotation.
+ * Copies the account-wide fields into a new object. A return type annotation alone would leave the
+ * provider-wide session cost on the runtime object.
  */
 export function toProviderQuotaUsage(usage: ProviderUsageInfo): ProviderQuotaUsage {
   return {
@@ -33,7 +29,7 @@ export function toProviderQuotaUsage(usage: ProviderUsageInfo): ProviderQuotaUsa
   };
 }
 
-/** The snapshot a failed `getProviderUsage` call contributes. */
+/** Creates an `unavailable` snapshot that failed at `now`. */
 export function failedUsage(providerId: string, now: number): ProviderQuotaUsage {
   return {
     providerId,
@@ -77,7 +73,6 @@ function unavailableSnapshot(
       diagnostic: incoming.diagnostic,
     };
   }
-  // A failed fetch says nothing about how the account is billed, so the known mode survives it.
   return { ...incoming, billingMode: incoming.billingMode ?? existing?.billingMode, usageStatus: status };
 }
 
@@ -109,8 +104,9 @@ function readySnapshot(
 }
 
 /**
- * Merges an observation into the last snapshot. A failure keeps known-good quota as "stale" for 24 h,
- * a successful payload clears failedAt and diagnostic, and an explicit ready-empty clears the buckets.
+ * Merges an observation into the last snapshot. An `unavailable` or `unsupported` observation keeps
+ * existing quota as `stale` if it was fetched within 24 hours or has no fetch time. A successful
+ * observation clears the failure details, and `ready-empty` also clears the quota.
  */
 export function mergeProviderUsageSnapshot(
   existing: ProviderQuotaUsage | undefined,

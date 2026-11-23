@@ -107,8 +107,8 @@ export function formatThreadOverviewUsage(
 }
 
 /**
- * Usage summary and quota bars for the usage row. Watches the provider's usage only while the
- * Overview is open, so a closed Overview keeps nothing fresh.
+ * Returns the thread's usage summary, quota bars, and session cost. The Overview watches the
+ * provider's account quota only while it is open.
  */
 export function useOverviewUsage(thread: Thread) {
   const { open } = useOverviewContext();

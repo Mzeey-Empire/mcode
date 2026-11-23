@@ -9,9 +9,9 @@ import {
   type ProviderQuotaUsage,
 } from "./provider-usage-snapshot";
 
-/** The server caches Claude usage for 90 s, so a fetch sooner than that returns the same bytes. */
-const FRESH_FOR_MS = 90_000;
-const WATCH_INTERVAL_MS = 5 * 60_000;
+/** Matches the server's 90 s Claude usage cache, which answers sooner requests from the same data. */
+const MIN_REFRESH_AGE_MS = 90_000;
+const POLL_INTERVAL_MS = 5 * 60_000;
 
 interface ProviderUsageState {
   byProvider: Readonly<Partial<Record<string, ProviderQuotaUsage>>>;
@@ -29,8 +29,8 @@ let ticker: ReturnType<typeof setInterval> | undefined;
 let tickerStarted = false;
 
 /**
- * Reads one provider's account-wide usage and keeps it fresh while mounted. Pass `undefined` to watch
- * nothing. Pass a module-level `select` returning a primitive to skip re-renders on unrelated refreshes.
+ * Reads and watches one provider's account-wide usage while mounted. Pass `undefined` to watch
+ * nothing. A `select` with a stable result avoids re-renders on unrelated refreshes.
  */
 export function useProviderUsage(providerId: string | undefined): ProviderQuotaUsage | undefined;
 export function useProviderUsage<T>(
@@ -49,17 +49,15 @@ export function useProviderUsage<T>(
 }
 
 /**
- * Routes a quotaUpdate to the provider snapshot. An event with categories (Codex) is a quota
- * observation and is applied directly. An event without categories is a signal, not an empty quota:
- * Claude invalidates its server cache just before emitting it, so the quota on screen stays and a
- * refresh runs now.
+ * Applies quota categories when the event carries them (Codex). An event without categories keeps the
+ * quota on screen and requests a refresh, because Claude sends it right after invalidating its server
+ * usage cache. A request already in flight may have read the server before the event, so its answer
+ * is discarded and one refresh runs after it settles.
  */
 export function observeQuotaUpdate(event: Extract<AgentEvent, { type: "quotaUpdate" }>): void {
   const providerId = event.providerId;
   const categories = Array.isArray(event.categories) ? event.categories : [];
   const pending = inFlight.get(providerId);
-  // The pending request may have read the server before this event, so its answer is older than the
-  // event. Discard it and run one trailing refresh once it settles.
   if (pending) pending.superseded = true;
   if (categories.length > 0) {
     apply(providerId, {
@@ -74,7 +72,7 @@ export function observeQuotaUpdate(event: Extract<AgentEvent, { type: "quotaUpda
   if (!pending) void refresh(providerId, 0);
 }
 
-/** Clears usage, in-flight requests, watchers, and the ticker between tests. */
+/** Resets usage and watchers between tests, stops polling, and drops answers to earlier requests. */
 export function resetProviderUsageForTests(): void {
   inFlight.clear();
   watchers.clear();
@@ -82,7 +80,7 @@ export function resetProviderUsageForTests(): void {
   useProviderUsageStore.setState({ byProvider: {} });
 }
 
-/** Seeds one provider's snapshot for render tests that are about formatting, not refreshing. */
+/** Sets one provider's snapshot for tests. Mounted watchers still follow the normal refresh rules. */
 export function seedProviderUsageForTests(usage: ProviderQuotaUsage): void {
   useProviderUsageStore.setState((state) => ({
     byProvider: { ...state.byProvider, [usage.providerId]: usage },
@@ -92,7 +90,7 @@ export function seedProviderUsageForTests(usage: ProviderQuotaUsage): void {
 function watch(providerId: string): () => void {
   watchers.set(providerId, (watchers.get(providerId) ?? 0) + 1);
   startTicker();
-  void refresh(providerId, FRESH_FOR_MS);
+  void refresh(providerId, MIN_REFRESH_AGE_MS);
   let released = false;
   return () => {
     if (released) return;
@@ -108,14 +106,14 @@ function onVisibilityChange(): void {
   clearTickerInterval();
   if (document.visibilityState !== "visible") return;
   tick();
-  ticker = setInterval(tick, WATCH_INTERVAL_MS);
+  ticker = setInterval(tick, POLL_INTERVAL_MS);
 }
 
 function startTicker(): void {
   if (tickerStarted) return;
   tickerStarted = true;
   document.addEventListener("visibilitychange", onVisibilityChange);
-  if (document.visibilityState === "visible") ticker = setInterval(tick, WATCH_INTERVAL_MS);
+  if (document.visibilityState === "visible") ticker = setInterval(tick, POLL_INTERVAL_MS);
 }
 
 function clearTickerInterval(): void {
@@ -133,12 +131,10 @@ function tick(): void {
   if (document.visibilityState !== "visible") return;
   const byProvider = useProviderUsageStore.getState().byProvider;
   for (const providerId of watchers.keys()) {
-    // The timer keeps shown limits current. A provider with none is left to opens and quotaUpdate
-    // events: for Codex an empty server cache makes every getUsage launch a throwaway app-server.
+    // Poll only quota there is to show: a Codex cache miss can start a temporary `codex app-server`
+    // to read limits, which a timer would repeat all day for accounts without them.
     const status = byProvider[providerId]?.usageStatus;
-    // The freshness floor, not the interval: a snapshot stamped just after the last tick is a little
-    // under one interval old at this tick, and would otherwise wait a second interval.
-    if (status === "ready" || status === "stale") void refresh(providerId, FRESH_FOR_MS);
+    if (status === "ready" || status === "stale") void refresh(providerId, MIN_REFRESH_AGE_MS);
   }
 }
 
@@ -159,7 +155,6 @@ async function refresh(providerId: string, maxAgeMs: number): Promise<void> {
   } catch {
     incoming = failedUsage(providerId, Date.now());
   }
-  // A test reset dropped this request; its answer belongs to no one.
   if (inFlight.get(providerId) !== request) return;
   inFlight.delete(providerId);
   if (request.superseded) {
