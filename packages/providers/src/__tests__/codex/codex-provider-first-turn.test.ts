@@ -200,10 +200,12 @@ describe("CodexProvider first turn on new session", () => {
   it.each([
     { choiceId: "allow", decision: "accept" },
     { choiceId: "deny", decision: "decline" },
-  ])("routes Ask me approvals through the canonical UI path and returns $decision", async ({ choiceId, decision }) => {
+  ])("updates Ask me command rows through the canonical UI path and returns $decision", async ({ choiceId, decision }) => {
     const provider = makeProvider();
     const approvals: ApprovalRequestEnvelope[] = [];
+    const events: ProviderRuntimeEvent[] = [];
     provider.on("approval_request", request => approvals.push(request));
+    provider.observeCanonicalEvents(event => events.push(event));
     try {
       await provider.sendTurn({
         turnId: "access-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
@@ -211,22 +213,68 @@ describe("CodexProvider first turn on new session", () => {
         providerOptions: {}, permissionMode: "supervised", approvalReviewMode: "manual",
       });
       await vi.waitFor(() => expect(sendTurnMock.mock.calls.length).toBe(1));
-      const handler = appServers[0]?.options.approvalHandler;
+      const server = appServers[0];
+      assert(server);
+      const handler = server.options.approvalHandler;
       assert(handler);
+      const nativeScope = { threadId: "sdk-thread-1", turnId: "turn-test-id" };
+      const command = { type: "commandExecution", id: "command-1", command: "echo approved" };
+      const notifyCommand = (method: string, item: Record<string, unknown>) => {
+        server.emit("notification", { method, params: { ...nativeScope, item } });
+      };
+      const commandEvents = () => events.map(({ event }) => event)
+        .filter(event => event.type === AgentEventType.ToolUse || event.type === AgentEventType.ToolResult);
+
+      notifyCommand("item/started", { ...command, status: "inProgress" });
+      await provider.flushCanonicalEvents();
+      expect(commandEvents()).toMatchObject([{ type: "toolUse", toolCallId: "command-1" }]);
+
+      const unmatched: CodexApprovalRequest = {
+        rpcId: 14, method: "item/commandExecution/requestApproval",
+        params: { ...nativeScope, itemId: "network-approval-1", command: command.command, cwd: process.cwd() },
+      };
+      const unmatchedResponse = handler(unmatched);
+      const unmatchedApproval = approvals.shift();
+      assert(unmatchedApproval);
+      const unmatchedDelivery = provider.resolveApproval(unmatchedApproval.requestId, { choiceId: "deny" });
+      expect(await unmatchedResponse).toEqual({ decision: "decline" });
+      unmatched.responseWritten?.(true);
+      expect(await unmatchedDelivery).toEqual({ status: "resolved" });
+      await provider.flushCanonicalEvents();
+      expect(commandEvents()).toHaveLength(1);
+
       const request: CodexApprovalRequest = {
         rpcId: 15, method: "item/commandExecution/requestApproval",
-        params: { command: "curl -I https://example.com", cwd: process.cwd(), threadId: "sdk-thread-1", turnId: "turn-test-id" },
+        params: { ...nativeScope, itemId: command.id, command: command.command, cwd: process.cwd() },
       };
       const response = handler(request);
       expect(approvals).toHaveLength(1);
       const approval = approvals[0];
       assert(approval);
-      expect(approval.body.subject).toMatchObject({ kind: "command", command: "curl -I https://example.com" });
+      expect(approval.body.subject).toMatchObject({ kind: "command", command: "echo approved" });
+      await provider.flushCanonicalEvents();
+      expect(commandEvents().slice(1)).toMatchObject([
+        { type: "toolUse", toolCallId: "command-1", status: "running", phase: "waiting" },
+      ]);
       const delivery = provider.resolveApproval(approval.requestId, { choiceId });
       expect(await response).toEqual({ decision });
       request.responseWritten?.(true);
       expect(await delivery).toEqual({ status: "resolved" });
       expect(provider.listPendingApprovals(threadId)).toEqual([]);
+      await provider.flushCanonicalEvents();
+      if (choiceId === "allow") {
+        expect(commandEvents().slice(2)).toMatchObject([{ type: "toolUse", toolCallId: "command-1", status: "running" }]);
+        expect(commandEvents().at(-1)).not.toHaveProperty("phase");
+        notifyCommand("item/completed", { ...command, status: "completed", exitCode: 0, aggregatedOutput: "approved\n" });
+        await provider.flushCanonicalEvents();
+        expect(commandEvents().slice(3)).toMatchObject([{ type: "toolResult", toolCallId: "command-1", isError: false, output: "approved\n" }]);
+      } else {
+        expect(commandEvents().slice(2)).toMatchObject([{ type: "toolResult", toolCallId: "command-1", denied: true, isError: false }]);
+        notifyCommand("item/started", { ...command, status: "inProgress" });
+        notifyCommand("item/completed", { ...command, status: "failed", exitCode: 1 });
+        await provider.flushCanonicalEvents();
+        expect(commandEvents()).toHaveLength(3);
+      }
     } finally {
       await provider.shutdown();
     }

@@ -3034,12 +3034,33 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
     const acknowledged = new Promise<boolean>((resolve) => { request.responseWritten = resolve; });
     return new Promise<unknown>((resolve) => {
-      this.pendingPermissions.set(requestId, {
+      const entry: PendingPermissionEntry = {
         routing: this.canonicalTurnRoutingsByThread.get(threadId)?.routing,
         sessionId, threadId, body, acknowledged, method: request.method, params: request.params, resolve,
-      });
+      };
+      this.pendingPermissions.set(requestId, entry);
+      this.publishCommandApproval(entry);
       this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
     });
+  }
+
+  private publishCommandApproval(entry: PendingPermissionEntry, allowed?: boolean): void {
+    if (entry.method !== "item/commandExecution/requestApproval" || !entry.routing) return;
+    const { itemId, threadId } = entry.params;
+    if (typeof itemId !== "string" || typeof threadId !== "string") return;
+    const { executionId, deliveryAttempt } = entry.routing;
+    const mapper = this.activeApprovalMapper(entry.sessionId, entry.routing);
+    if (!mapper) return;
+    const events = allowed === undefined
+      ? mapper.commandApprovalRequested(itemId, threadId)
+      : mapper.commandApprovalResolved(itemId, allowed, threadId);
+    for (const event of events) this.emitRuntimeEvent({ ...withTurnExecutionId(event, executionId), deliveryAttempt });
+  }
+
+  private activeApprovalMapper(sessionId: string, routing: CodexCanonicalEventRouting): CodexEventMapper | undefined {
+    const owner = this.canonicalRoutingForExecution(routing.threadId, routing.executionId);
+    if (owner?.routing !== routing || owner.kind !== "active") return undefined;
+    return this.runtime.get(sessionId)?.mapper;
   }
 
   private updateApprovalFileChanges(sessionId: string, notification: CodexNotification, mainNotification: boolean): void {
@@ -3078,6 +3099,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       return { status: "failed", message: "The answer did not reach Codex" };
     }
     if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
+    this.publishCommandApproval(entry, decision !== "deny");
     this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
     return { status: "resolved" };
   }
