@@ -6,7 +6,8 @@ import { isLowQuotaCategory } from "@/stores/provider-usage-snapshot";
 import { type Thread } from "@/transport";
 import { createTooltipHandle, Tooltip, TooltipContent, TooltipTrigger, type TooltipHandle } from "@/components/ui/tooltip";
 import type { QuotaCategory } from "@mcode/contracts/providers/usage";
-import { useState, type ReactNode } from "react";
+import { sidePlacement } from "@/components/ui/side-placement";
+import { useCallback, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ThreadOverviewWhen } from "@/features/thread-overview/overview-row";
 import {
   usageCategoryPercent,
@@ -51,11 +52,14 @@ function UsageCategoryTooltipBody({ category }: { category: QuotaCategory }) {
   );
 }
 
-function UsageTooltipRoot({ handle }: { handle: TooltipHandle<QuotaCategory> }) {
+function UsageTooltipRoot({ handle, activeRow }: {
+  handle: TooltipHandle<QuotaCategory>;
+  activeRow: RefObject<HTMLElement | null>;
+}) {
   return (
     <Tooltip handle={handle}>
       {({ payload }) => (payload ? (
-        <TooltipContent side="top" align="start">
+        <TooltipContent {...sidePlacement(activeRow)}>
           <UsageCategoryTooltipBody category={payload} />
         </TooltipContent>
       ) : null)}
@@ -63,7 +67,11 @@ function UsageTooltipRoot({ handle }: { handle: TooltipHandle<QuotaCategory> }) 
   );
 }
 
-function UsageCategory({ category, tooltip }: { category: QuotaCategory; tooltip: TooltipHandle<QuotaCategory> }) {
+function UsageCategory({ category, tooltip, onActive }: {
+  category: QuotaCategory;
+  tooltip: TooltipHandle<QuotaCategory>;
+  onActive: (row: HTMLElement) => void;
+}) {
   const percent = usageCategoryPercent(category);
   const rounded = Math.round(percent);
   const isNearLimit = isLowQuotaCategory(category);
@@ -76,6 +84,8 @@ function UsageCategory({ category, tooltip }: { category: QuotaCategory; tooltip
     <TooltipTrigger handle={tooltip} payload={category} render={
       <div
         tabIndex={0}
+        onPointerEnter={(event) => onActive(event.currentTarget)}
+        onFocus={(event) => onActive(event.currentTarget)}
         className="col-span-full grid h-row-compact grid-cols-subgrid items-center rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       />
     }>
@@ -113,6 +123,12 @@ function ThreadOverviewUsage({
   sessionCost,
 }: ThreadOverviewUsageProps) {
   const [tooltip] = useState(() => createTooltipHandle<QuotaCategory>());
+  // The shared tooltip opens beside the Overview like its menus do, level with the row the
+  // pointer or focus last reached, so it never covers the other limits.
+  const activeRow = useRef<HTMLElement | null>(null);
+  const setActiveRow = useCallback((row: HTMLElement) => {
+    activeRow.current = row;
+  }, []);
   return (
     // The lines share one set of columns: names sized to the longest, then each meter fills the
     // rest so every percent ends on the card's right edge, where the Changes totals end. Usage has
@@ -123,9 +139,9 @@ function ThreadOverviewUsage({
       className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)_max-content] gap-x-3 px-3 text-body-small"
     >
       {categories.map((category) => (
-        <UsageCategory key={category.label} category={category} tooltip={tooltip} />
+        <UsageCategory key={category.label} category={category} tooltip={tooltip} onActive={setActiveRow} />
       ))}
-      <UsageTooltipRoot handle={tooltip} />
+      <UsageTooltipRoot handle={tooltip} activeRow={activeRow} />
       {sessionCost ? (
         <UsageLine name="Session cost">
           <span className="col-span-2 text-right tabular-nums text-ink">{sessionCost}</span>
