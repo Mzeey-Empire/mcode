@@ -5,7 +5,7 @@ import { useApprovalStore } from "@/stores/approvalStore";
 
 import type { ApprovalRequest, ApprovalSubject } from "@mcode/contracts/models/approval";
 import { disposeHighlighter } from "@pierre/diffs";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -109,7 +109,10 @@ describe("ApprovalDock keys", () => {
     expect(respondToApproval).not.toHaveBeenCalled();
 
     await act(() => vi.advanceTimersByTimeAsync(1));
-    fireEvent.click(allow);
+    // The click starts the reply; act() lets the dock settle once the reply resolves.
+    await act(async () => {
+      fireEvent.click(allow);
+    });
     expect(respondToApproval).toHaveBeenCalledWith("req-1", { choiceId: "allow" });
   });
 
@@ -489,7 +492,7 @@ describe("ApprovalDock file edits", () => {
     addFileEdit([{ path: "src/a.ts", change: "edited", additions: 1, deletions: 1, patch: LONG_PATCH }]);
     render(<StrictMode><DockHarness /></StrictMode>);
 
-    await vi.waitFor(() => expect(renderedDiffText(screen.getByTestId("approval-patch-preview"))).toContain("next();"));
+    await waitFor(() => expect(renderedDiffText(screen.getByTestId("approval-patch-preview"))).toContain("next();"));
   });
 
   it("offers Open diff when a later hunk would not fit", () => {
