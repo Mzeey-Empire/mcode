@@ -126,7 +126,7 @@ describe("PlanPanel", () => {
     expect(screen.getByRole("textbox", { name: "Plan v1" })).toBeInTheDocument();
   });
 
-  it("reopens on the version an unfinished comment note was written on", () => {
+  it("reopens on the version an unfinished comment note was written on", async () => {
     const first = makePlan(1, { status: "superseded" });
     usePlanStore.setState({ plansByThread: { [THREAD]: [first, makePlan(2)] } });
     const anchor = { kind: "text", start: 2, end: 6, quote: "Plan", prefix: "", suffix: "", section: null } as const;
@@ -136,6 +136,8 @@ describe("PlanPanel", () => {
     }));
 
     render(<PlanPanel threadId={THREAD} />);
+    // The comment layer restores the note's editor after mount; let it settle.
+    await act(async () => {});
 
     expect(usePlanStore.getState().activeVersionByThread[THREAD]).toBe(1);
   });
