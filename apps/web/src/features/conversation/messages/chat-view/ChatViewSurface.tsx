@@ -21,8 +21,7 @@ import { useToastStore } from "@/stores/toastStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
-import { newThreadOverviewScope, threadOverviewScope, useOverviewPresentation } from "@/features/thread-overview/overview-presentation";
-import { useElementWidth } from "@/hooks/useElementWidth";
+import { newThreadOverviewScope, threadOverviewScope, useCanvasOverview } from "@/features/thread-overview/overview-presentation";
 import type { ViewportInsets } from "@/components/ui/virtual-viewport";
 import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
 import { StartupStepsTrail, editStartupMessage, editStartupSetupScript, openStartupSetupTerminal, startupDecision, useAcknowledgeStartupFailure, useFirstSendMotion, useStartingThread, useStartupAgentRetry, useThreadStartup } from "@/features/thread-startup";
@@ -244,11 +243,10 @@ function PreparingThreadSurface({
   const echoedStartup = useEchoedPendingStartup(thread, pendingStartup);
   const motion = useFirstSendMotion(thread.id);
   const paneRef = useRef<HTMLDivElement>(null);
-  const paneWidth = useElementWidth(paneRef, thread.id);
   // The thread has no durable Overview yet, so the card the user sent from stays docked, keeping its reserve
   // and the column width the same from the start column through to the running thread.
   const overviewScope = useMemo(() => newThreadOverviewScope(thread.workspace_id), [thread.workspace_id]);
-  const overview = useOverviewPresentation(overviewScope, paneWidth);
+  const { overview } = useCanvasOverview(paneRef, overviewScope, thread.id);
   const overviewDocked = overview.presentation === "docked";
   const overviewReserve = overviewDocked ? OVERVIEW_CANVAS_RESERVE_CSS : undefined;
   return (
@@ -709,8 +707,8 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps & { readonly startup: R
   const showConversationLoadError = (state.messageCount > 0 || state.isAgentRunning) && hasConversationLoadError(state);
   const showCliError = isVisibleCliError(state.sessionError, dismissedError);
   const paneRef = useRef<HTMLDivElement>(null);
-  const paneWidth = useElementWidth(paneRef, thread.id);
-  const overviewDocked = useOverviewPresentation(threadOverviewScope(thread), paneWidth).presentation === "docked";
+  const { canvasWidth: paneWidth, overview } = useCanvasOverview(paneRef, threadOverviewScope(thread), thread.id);
+  const overviewDocked = overview.presentation === "docked";
   const overviewReserve = overviewDocked ? OVERVIEW_CANVAS_RESERVE_CSS : undefined;
   const topChromeRef = useRef<HTMLDivElement>(null);
   const bottomChromeRef = useRef<HTMLDivElement>(null);

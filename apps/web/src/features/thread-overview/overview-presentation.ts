@@ -1,3 +1,5 @@
+import type { RefObject } from "react";
+import { useElementWidth } from "@/hooks/useElementWidth";
 import { OVERVIEW_DOCK_MIN_CANVAS } from "@/lib/composer-layout";
 import { useDiffStore } from "@/stores/diffStore";
 import {
@@ -54,4 +56,24 @@ export function useOverviewPresentation(scope: OverviewScope | null, canvasWidth
   if (!key) return { dockable: false, presentation: "hidden" };
   const dockable = canDockOverview(rightPanelVisible, canvasWidth);
   return { dockable, presentation: overviewPresentation({ closed, overlay, dockable }) };
+}
+
+/** A chat canvas's measured width and the Overview presentation that width resolves to. */
+export interface CanvasOverview {
+  canvasWidth: number;
+  overview: OverviewPresentationState;
+}
+
+/**
+ * Measures the chat canvas element and resolves its Overview, so the canvas padding, the header
+ * button, and the card all read one width. A width that crosses the dock threshold commits in the
+ * frame it is laid out, so no frame paints a docked card's reserve in a canvas too narrow for it.
+ */
+export function useCanvasOverview(
+  canvasRef: RefObject<HTMLElement | null>,
+  scope: OverviewScope | null,
+  observeKey?: unknown,
+): CanvasOverview {
+  const canvasWidth = useElementWidth(canvasRef, observeKey, OVERVIEW_DOCK_MIN_CANVAS);
+  return { canvasWidth, overview: useOverviewPresentation(scope, canvasWidth) };
 }

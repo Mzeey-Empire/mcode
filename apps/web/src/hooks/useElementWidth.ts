@@ -1,4 +1,5 @@
 import { useEffect, useState, type RefObject } from "react";
+import { flushSync } from "react-dom";
 
 /**
  * Tracks the rendered width (in CSS pixels) of the element referenced by
@@ -10,11 +11,15 @@ import { useEffect, useState, type RefObject } from "react";
  * resizes — viewport media queries can't see that.
  *
  * Updates are throttled with `requestAnimationFrame` so a flurry of resize
- * notifications collapses into one state update per frame.
+ * notifications collapses into one state update per frame. A width that
+ * crosses `breakpoint` instead commits before the current frame paints, for
+ * layout that switches mode at that width and must not paint the old mode at
+ * the new width.
  */
 export function useElementWidth<T extends HTMLElement>(
   ref: RefObject<T | null>,
   observeKey?: unknown,
+  breakpoint?: number,
 ): number {
   const [width, setWidth] = useState(0);
 
@@ -26,7 +31,8 @@ export function useElementWidth<T extends HTMLElement>(
     // when the element is already laid out at mount time. Done unconditionally
     // so environments without ResizeObserver (older test runners, SSR
     // hydration) still get a valid initial measurement.
-    setWidth(el.getBoundingClientRect().width);
+    let lastScheduledWidth = el.getBoundingClientRect().width;
+    setWidth(lastScheduledWidth);
 
     if (typeof ResizeObserver === "undefined") return;
 
@@ -49,9 +55,21 @@ export function useElementWidth<T extends HTMLElement>(
       }
 
       pending = next;
+      // Observer callbacks run after layout and before paint, so a synchronous
+      // render here lands in the frame that laid out the new width. Callers
+      // pass a breakpoint only for an element whose own width does not depend
+      // on that render, so it cannot re-trigger this observer in a loop.
+      if (breakpoint !== undefined && (lastScheduledWidth >= breakpoint) !== (next >= breakpoint)) {
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        rafId = null;
+        lastScheduledWidth = next;
+        flushSync(() => setWidth(next));
+        return;
+      }
       if (rafId !== null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
+        lastScheduledWidth = pending;
         setWidth(pending);
       });
     });
@@ -61,7 +79,7 @@ export function useElementWidth<T extends HTMLElement>(
       observer.disconnect();
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [ref, observeKey]);
+  }, [ref, observeKey, breakpoint]);
 
   return width;
 }
