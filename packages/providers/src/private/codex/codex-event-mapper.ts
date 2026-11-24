@@ -54,12 +54,17 @@ export interface CodexPendingFileMutationStart extends ProviderFileMutationStart
 /** Joins reasoning summary and content parts as markdown paragraphs, live and on completion alike. */
 const REASONING_PART_SEPARATOR = "\n\n";
 
+/** Streaming delta methods for the main Codex thread. */
+export const CODEX_STREAMING_DELTA_METHODS: ReadonlySet<string> = new Set([
+  "item/agentMessage/delta",
+  "item/commandExecution/outputDelta", "item/reasoning/textDelta",
+  "item/reasoning/summaryTextDelta", "item/plan/delta",
+]);
+
 /** Methods whose late content cannot change an already completed turn. */
 const TURN_CONTENT_METHODS = new Set([
-  "item/started", "item/completed", "item/agentMessage/delta",
-  "item/commandExecution/outputDelta", "item/reasoning/textDelta",
-  "item/reasoning/summaryTextDelta", "item/plan/delta", "turn/plan/updated",
-  "turn/completed", "error",
+  ...CODEX_STREAMING_DELTA_METHODS,
+  "item/started", "item/completed", "turn/plan/updated", "turn/completed", "error",
 ]);
 
 /** Item types with no transcript projection; main-route contextCompaction still maps to Compacting status (module-level to avoid per-call allocation). */

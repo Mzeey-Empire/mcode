@@ -1080,6 +1080,45 @@ describe("Codex provider lifecycle through native transport", () => {
     expect(turnEnds(events)).toEqual([]);
   });
 
+  it("skips mapping answer deltas held behind a user Stop", async () => {
+    const save = Promise.withResolvers<void>();
+    const { provider, child, starts, events } = createProvider({ submit: async (batch) => {
+      await save.promise;
+      return { commit: { outcome: "committed", conversationRevision: 1, rosterRevision: 0, acceptedThrough: 1,
+        durableThrough: 1, eventCount: batch.events.length }, delivery: { ingress: "queued" } };
+    } });
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    child.stdout.write(answerLine("before ").repeat(400));
+    await vi.waitFor(() => expect(child.stdout.isPaused()).toBe(true));
+    child.stdout.write(answerLine("held ").repeat(2_000));
+    child.interruptReply = (interrupt) => {
+      child.stdout.write(completionLine("interrupted") + JSON.stringify({ id: interrupt.id, result: {} }) + "\n");
+    };
+
+    const mapNotification = vi.spyOn(CodexEventMapper.prototype, "mapValidatedNotification");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const fenced = provider.fenceCanonicalTurnEvents({ threadId: request.threadId, turnId: request.turnId,
+        executionId: request.turnExecutionId, deliveryAttempt: 1 }, { discardQueued: true });
+      let stopped = false;
+      const stop = provider.stopSession(request.sessionId).then(() => { stopped = true; });
+      save.resolve();
+      await fenced;
+      await vi.waitFor(() => expect(stopped).toBe(true));
+      await stop;
+
+      const mappedDeltas = mapNotification.mock.calls.filter(([notification]) => notification?.method === "item/agentMessage/delta");
+      expect(mappedDeltas.length).toBe(0);
+      expect(turnTexts(events)).not.toContain("held ");
+      expect(turnEnds(events)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      mapNotification.mockRestore();
+      await provider.shutdown();
+    }
+  });
+
   it("publishes nothing past the Stop fence while a slow interrupt and teardown settle", async () => {
     const { provider, child, starts, events } = createProvider();
     await provider.sendTurn(request);
