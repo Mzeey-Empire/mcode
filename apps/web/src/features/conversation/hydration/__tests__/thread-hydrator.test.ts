@@ -100,8 +100,8 @@ function createStoreHydrator(isDisplayConversationVisible = (_threadId: string) 
     getWorkspaceThread: (threadId) =>
       useWorkspaceStore.getState().threads.find((t) => t.id === threadId),
     flushPendingTextDeltas: () => {},
-    loadNarrativeForMessage: (messageId, threadId) =>
-      useThreadStore.getState().loadNarrativeForMessage(messageId, threadId),
+    loadNarrativeForMessage: (messageId, threadId, options) =>
+      useThreadStore.getState().loadNarrativeForMessage(messageId, threadId, options),
     getTasksForThread: (threadId) => useTaskStore.getState().tasksByThread[threadId] ?? [],
     setTasksForThread: (threadId, tasks) => useTaskStore.getState().setTasks(threadId, tasks),
     addPlanForThread: (threadId, plan) => usePlanStore.getState().addPlan(threadId, plan),
@@ -1641,6 +1641,410 @@ describe("ThreadHydrator", () => {
     expect(getTestActiveMessages()).toEqual(([msgA, freshMessage]).map((message) => ({ ...message, serverSequence: message.sequence })));
     expect(getTestThreadStreaming(THREAD_A)).toBe("current activity");
     expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
+  });
+
+  describe("a refreshed tail page merged into resident sub-agent rows", () => {
+    function serverRow(threadId: string, sequence: number, overrides: Partial<Message> = {}): Message {
+      return { ...createMockMessage({ id: `${threadId}-${sequence}`, thread_id: threadId, sequence, ...overrides }), serverSequence: sequence };
+    }
+
+    function thought(message: Message, text: string): NonNullable<ThreadRecord["narrativeByMessage"][string]> {
+      return { tools: [], hooks: [], approvals: [], thoughts: [{
+        id: `${message.id}-thought`, message_id: message.id, text,
+        started_at: message.timestamp, ended_at: null, sort_order: 0,
+      }] };
+    }
+
+    function subagentTurn(threadId: string): { rows: Message[]; narrativeByMessage: ThreadRecord["narrativeByMessage"]; anchorId: string } {
+      const older = [1, 2, 3, 4].map((sequence) => serverRow(threadId, sequence, { role: sequence % 2 === 0 ? "assistant" : "user" }));
+      const delegatingReply = serverRow(threadId, 5, { role: "assistant", content: "Delegated the review to Claude." });
+      const wakeUp = serverRow(threadId, 6, {
+        role: "user",
+        content: "Delegated task finished.",
+        systemNotice: {
+          kind: "delegated-task",
+          presentation: "timeline",
+          delegatedTasks: [{ taskId: "task-1", threadId: "child", title: "Review", providerId: "claude", status: "completed" }],
+        },
+      });
+      const narrativeByMessage = { [delegatingReply.id]: thought(delegatingReply, "sub-agent reasoning") };
+      return { rows: [...older, delegatingReply, wakeUp], narrativeByMessage, anchorId: wakeUp.id };
+    }
+
+    function tailPage(messages: Message[], hasMore = true): ConversationPage {
+      return { messages: messages.map(({ serverSequence: _server, ...message }) => message), hasMore, narrativeByMessage: {} };
+    }
+
+    /** Serve tail and older pages from one saved history, as the server's sequence cursor does. */
+    function serveHistory(threadId: string, history: Message[], narrativeByMessage: ConversationPage["narrativeByMessage"] = {}): void {
+      const pageBefore = (limit: number, before?: number): ConversationPage => {
+        const eligible = history.filter((message) => before === undefined || message.sequence < before);
+        const rows = eligible.slice(Math.max(0, eligible.length - limit));
+        const ids = new Set(rows.map((message) => message.id));
+        return {
+          ...tailPage(rows, rows.length < eligible.length),
+          narrativeByMessage: Object.fromEntries(Object.entries(narrativeByMessage).filter(([id]) => ids.has(id))),
+        };
+      };
+      vi.mocked(mockTransport.loadConversationPage).mockImplementation(async (id, limit, before) =>
+        id === threadId ? pageBefore(limit, before) : tailPage([], false));
+      vi.mocked(mockTransport.loadOlderConversationPage).mockImplementation(async (request) => {
+        const page = pageBefore(request.limit, request.cursor.beforeSequence);
+        const oldest = page.messages[0];
+        return {
+          identity: {
+            threadId: request.threadId,
+            cursor: request.cursor,
+            direction: request.direction,
+            generation: request.generation,
+            conversationRevision: request.conversationRevision,
+          },
+          messages: page.messages,
+          hasMore: page.hasMore,
+          nextCursor: page.hasMore && oldest ? { version: 1, beforeSequence: oldest.sequence } : null,
+          narrativeByMessage: page.narrativeByMessage,
+        };
+      });
+    }
+
+    function deferNextTail(): { resolve: (page: ConversationPage) => void } {
+      const deferred: { resolve: (page: ConversationPage) => void } = { resolve: () => {} };
+      vi.mocked(mockTransport.loadConversationPage).mockImplementationOnce(() => new Promise((resolve) => { deferred.resolve = resolve; }));
+      return deferred;
+    }
+
+    function ids(threadId: string): string[] | undefined {
+      return useThreadStore.getState().records.get(threadId)?.messages.map((message) => message.id);
+    }
+
+    it("keeps a running thread's sub-agent rows and the rows above its anchor when a newer two-row tail page commits", async () => {
+      const turn = subagentTurn(THREAD_A);
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, {
+          ...makeCachedRecord(turn.rows),
+          hasMoreMessages: true,
+          narrativeByMessage: turn.narrativeByMessage,
+          streaming: "still working",
+        }]]),
+      });
+      const newer = [serverRow(THREAD_A, 7, { role: "user" }), serverRow(THREAD_A, 8, { role: "assistant" })];
+      serveHistory(THREAD_A, [...turn.rows, ...newer]);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      const messages = record?.messages ?? [];
+      expect(messages.map((message) => message.id)).toEqual([...turn.rows, ...newer].map((message) => message.id));
+      const anchorIndex = messages.findIndex((message) => message.id === turn.anchorId);
+      expect(anchorIndex).toBe(turn.rows.length - 1);
+      // A row removed or inserted above the anchor would move the reading position.
+      expect(messages.slice(0, anchorIndex + 1)).toEqual(turn.rows);
+      expect(record?.narrativeByMessage).toMatchObject(turn.narrativeByMessage);
+      expect(record?.oldestLoadedSequence).toBe(1);
+      expect(record?.streaming).toBe("still working");
+    });
+
+    it("keeps a displayed sub-agent transcript's rows when its refresh returns a newer tail", async () => {
+      hydrator = createStoreHydrator((threadId) => threadId === "child");
+      const turn = subagentTurn("child");
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set(["child"]),
+        records: new Map([["child", { ...makeCachedRecord(turn.rows), hasMoreMessages: true, narrativeByMessage: turn.narrativeByMessage }]]),
+      });
+      const newer = [serverRow("child", 7), serverRow("child", 8)];
+      serveHistory("child", [...turn.rows, ...newer]);
+
+      await hydrator.hydrateResident("child", { generation: 1, force: true, isCurrent: () => true });
+
+      expect(ids("child")).toEqual([...turn.rows, ...newer].map((message) => message.id));
+    });
+
+    it("loads the rows saved while the client was away instead of leaving a hole below the tail", async () => {
+      const turn = subagentTurn(THREAD_A);
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, { ...makeCachedRecord(turn.rows), hasMoreMessages: true }]]),
+      });
+      const savedWhileAway = Array.from({ length: 14 }, (_, index) => serverRow(THREAD_A, index + 7));
+      serveHistory(THREAD_A, [...turn.rows, ...savedWhileAway]);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      expect(record?.messages.map((message) => message.sequence)).toEqual(Array.from({ length: 20 }, (_, index) => index + 1));
+      expect(record?.hasMoreMessages).toBe(false);
+    });
+
+    function sequences(first: number, last: number): number[] {
+      return Array.from({ length: last - first + 1 }, (_, index) => first + index);
+    }
+
+    it("keeps resident rows older than the page it read when that page overlaps them", async () => {
+      const resident = sequences(1, 150).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, resident);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      // The tail and the page below it cover rows 51 to 150; rows 1 to 50 sit above a reader scrolled up.
+      expect(record?.messages.map((message) => message.sequence)).toEqual(sequences(1, 150));
+      expect(record?.oldestLoadedSequence).toBe(1);
+      expect(record?.hasMoreMessages).toBe(false);
+    });
+
+    it("drops resident rows below the page it read when more rows were saved than one page holds", async () => {
+      const resident = sequences(1, 6).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, [...resident, ...sequences(7, 206).map((sequence) => serverRow(THREAD_A, sequence))]);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      expect(record?.messages.map((message) => message.sequence)).toEqual(sequences(107, 206));
+      expect(record?.oldestLoadedSequence).toBe(107);
+      expect(record?.hasMoreMessages).toBe(true);
+    });
+
+    it("warms the page below the oldest kept row after keeping rows older than the page it read", async () => {
+      const history = sequences(1, 250).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, { ...makeCachedRecord(history.slice(100)), hasMoreMessages: true }]]),
+      });
+      serveHistory(THREAD_A, history);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+      await vi.advanceTimersByTimeAsync(120);
+
+      expect(useThreadStore.getState().records.get(THREAD_A)?.oldestLoadedSequence).toBe(101);
+      const cursors = () => vi.mocked(mockTransport.loadOlderConversationPage).mock.calls.map(([request]) => request.cursor.beforeSequence);
+      await vi.waitFor(() => expect(cursors()).toContain(101));
+      // 249 is the read below the tail; 151 would re-read rows that stayed resident.
+      expect(cursors()).toEqual([249, 101]);
+    });
+
+    it("drops resident rows inside the page's range that the server removed or replaced", async () => {
+      const turn = subagentTurn(THREAD_A);
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, { ...makeCachedRecord(turn.rows), hasMoreMessages: true, narrativeByMessage: turn.narrativeByMessage }]]),
+      });
+      const fourth = turn.rows[3];
+      expect(fourth?.sequence).toBe(4);
+      const replacement = serverRow(THREAD_A, 7, { id: "replacement", role: "assistant" });
+      serveHistory(THREAD_A, [...turn.rows.slice(0, 4), replacement]);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      expect(record?.messages.map((message) => message.id))
+        .toEqual([`${THREAD_A}-1`, `${THREAD_A}-2`, `${THREAD_A}-3`, `${THREAD_A}-4`, "replacement"]);
+      expect(record?.narrativeByMessage[`${THREAD_A}-5`]).toBeUndefined();
+    });
+
+    it("drops a resident row below the tail that the server replaced while the client was away", async () => {
+      const turn = subagentTurn(THREAD_A);
+      const restartNotice = serverRow(THREAD_A, 3, { role: "system", content: "Restarting for an update." });
+      const resident = turn.rows.map((row) => (row.sequence === 3 ? restartNotice : row));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, { ...makeCachedRecord(resident), hasMoreMessages: true }]]),
+      });
+      const restarted = serverRow(THREAD_A, 7, { id: "restart-finished", role: "system", content: "Restarted." });
+      serveHistory(THREAD_A, [...resident.filter((row) => row !== restartNotice), restarted, serverRow(THREAD_A, 8)]);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      expect(ids(THREAD_A)).toEqual([1, 2, 4, 5, 6].map((sequence) => `${THREAD_A}-${sequence}`).concat("restart-finished", `${THREAD_A}-8`));
+    });
+
+    it("drops resident server rows a complete page no longer holds", async () => {
+      const turn = subagentTurn(THREAD_A);
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(turn.rows)]]),
+      });
+      const kept = turn.rows.slice(4);
+      serveHistory(THREAD_A, kept);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      expect(ids(THREAD_A)).toEqual(kept.map((message) => message.id));
+    });
+
+    it("clears every resident server row when the server reports no rows at all", async () => {
+      const turn = subagentTurn(THREAD_A);
+      const live = createMockMessage({ id: "live-local", thread_id: THREAD_A, sequence: 7 });
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, { ...makeCachedRecord([...turn.rows, live]), hasMoreMessages: true }]]),
+      });
+      serveHistory(THREAD_A, []);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      expect(ids(THREAD_A)).toEqual(["live-local"]);
+    });
+
+    it("takes the server's narrative for a refreshed row but keeps narrative written during the fetch", async () => {
+      const turn = subagentTurn(THREAD_A);
+      const [, , , fourth, fifth] = turn.rows;
+      if (fourth?.role !== "assistant" || fifth?.role !== "assistant") throw new Error("the turn needs two assistant rows");
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, {
+          ...makeCachedRecord(turn.rows),
+          hasMoreMessages: true,
+          narrativeByMessage: { [fourth.id]: thought(fourth, "old fourth"), [fifth.id]: thought(fifth, "old fifth") },
+        }]]),
+      });
+      const served = { [fourth.id]: thought(fourth, "server fourth"), [fifth.id]: thought(fifth, "server fifth") };
+      const history = [...turn.rows, serverRow(THREAD_A, 7)];
+      serveHistory(THREAD_A, history, served);
+      const tail = deferNextTail();
+      const refresh = hydrator.hydrate(THREAD_A, "active", { force: true });
+      await vi.waitFor(() => expect(mockTransport.loadConversationPage).toHaveBeenCalled());
+      const written = thought(fourth, "written during the fetch");
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, THREAD_A, (record) => ({
+          narrativeByMessage: { ...record.narrativeByMessage, [fourth.id]: written },
+        })),
+      }));
+
+      tail.resolve(tailPage(history.slice(-2)));
+      await refresh;
+
+      const narrative = useThreadStore.getState().records.get(THREAD_A)?.narrativeByMessage;
+      expect(narrative?.[fourth.id]).toEqual(written);
+      expect(narrative?.[fifth.id]).toEqual(served[fifth.id]);
+    });
+
+    it("keeps a row that settled after the page was read and live rows the server has not saved", async () => {
+      hydrator = createStoreHydrator((threadId) => threadId === "child");
+      const turn = subagentTurn("child");
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set(["child"]),
+        records: new Map([["child", { ...makeCachedRecord(turn.rows), hasMoreMessages: true }]]),
+      });
+      serveHistory("child", turn.rows);
+      const tail = deferNextTail();
+      const refresh = hydrator.hydrateResident("child", { generation: 1, force: true, isCurrent: () => true });
+      await vi.waitFor(() => expect(mockTransport.loadConversationPage).toHaveBeenCalled());
+      const settled = serverRow("child", 7);
+      const live = createMockMessage({ id: "live-local", thread_id: "child", sequence: 8 });
+      useThreadStore.setState((state) => ({
+        records: patchThreadRecord(state.records, "child", (record) => ({ messages: [...record.messages, settled, live] })),
+      }));
+
+      tail.resolve(tailPage(turn.rows.slice(4)));
+      await refresh;
+
+      expect(ids("child")).toEqual([...turn.rows, settled, live].map((message) => message.id));
+    });
+
+    it("drops resident rows below the page it read when the resident window has a hole inside that page", async () => {
+      const history = sequences(1, 131).map((sequence) => serverRow(THREAD_A, sequence));
+      // Rows 31 to 129 were missed; row 130 arrived live after them.
+      const resident = [...history.slice(0, 30), history[129]!];
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, history);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const record = useThreadStore.getState().records.get(THREAD_A);
+      // The tail and the page below it cover rows 32 to 131; row 31 is still missing, so rows 1 to 30 leave.
+      expect(record?.messages.map((message) => message.sequence)).toEqual(sequences(32, 131));
+      // Scrolling up asks for the rows below the oldest loaded row.
+      expect(record?.oldestLoadedSequence).toBe(32);
+      expect(record?.hasMoreMessages).toBe(true);
+    });
+
+    it("keeps every resident row in place when the read below the tail fails", async () => {
+      const resident = sequences(1, 150).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, [...resident, serverRow(THREAD_A, 151), serverRow(THREAD_A, 152)]);
+      vi.mocked(mockTransport.loadOlderConversationPage).mockRejectedValueOnce(new Error("socket closed"));
+      const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+      onTestFinished(() => debug.mockRestore());
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      // The tail (151, 152) does not reach the resident rows, so committing it would leave a hole below it.
+      expect(useThreadStore.getState().records.get(THREAD_A)?.messages).toEqual(resident);
+    });
+
+    it.each([
+      { state: "running", running: true },
+      { state: "idle", running: false },
+    ])("fetches the missing tail on the next unforced load of a $state thread after the read below it failed", async ({ running }) => {
+      const resident = sequences(1, 150).map((sequence) => serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set(running ? [THREAD_A] : []),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      serveHistory(THREAD_A, [...resident, serverRow(THREAD_A, 151), serverRow(THREAD_A, 152)]);
+      vi.mocked(mockTransport.loadOlderConversationPage).mockRejectedValueOnce(new Error("socket closed"));
+      const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+      onTestFinished(() => debug.mockRestore());
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+      // Deferred auxiliary hydration runs and stamps the thread as freshly hydrated.
+      await vi.advanceTimersByTimeAsync(600);
+
+      await hydrator.hydrate(THREAD_A, "active");
+
+      expect(useThreadStore.getState().records.get(THREAD_A)?.messages.map((message) => message.sequence)).toEqual(sequences(1, 152));
+    });
+
+    it("drops a resident notice below the page it read when the page holds its replacement", async () => {
+      const restartKey = "planned-restart:update";
+      const notice = (sequence: number, content: string) => serverRow(THREAD_A, sequence, {
+        role: "system", content,
+        systemNotice: { kind: "warning", presentation: "timeline", noticeKey: restartKey },
+      });
+      const resident = sequences(1, 150).map((sequence) => sequence === 3 ? notice(3, "Restarting for an update.") : serverRow(THREAD_A, sequence));
+      resetThreadStoreForTests({
+        currentThreadId: THREAD_A,
+        runningThreadIds: new Set([THREAD_A]),
+        records: new Map([[THREAD_A, makeCachedRecord(resident)]]),
+      });
+      const replacement = notice(151, "Restarted.");
+      serveHistory(THREAD_A, [...resident.filter((row) => row.sequence !== 3), replacement]);
+
+      await hydrator.hydrate(THREAD_A, "active", { force: true });
+
+      const notices = useThreadStore.getState().records.get(THREAD_A)?.messages
+        .filter((message) => message.systemNotice?.noticeKey === restartKey);
+      expect(notices?.map((message) => message.id)).toEqual([replacement.id]);
+    });
   });
 
   it("force refreshes authoritatively after an in-flight background prefetch", async () => {
