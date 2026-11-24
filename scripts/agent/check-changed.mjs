@@ -240,16 +240,21 @@ function lintJob(lintFiles) {
   };
 }
 
-/** Agent script tests to run: changed test files, and the test named after each changed script. */
-export function agentTestFiles(files, exists) {
+/** Selects matching agent script tests and the full suite for any Electron harness change. */
+export function agentTestFiles(files, exists, listFiles = (dir) => listWorkspaceFiles(process.cwd(), dir)) {
   const tests = new Set();
   for (const file of files) {
     if (!file.endsWith(".mjs")) continue;
     const testName = `${NodePath.basename(file, ".mjs")}.test.mjs`;
     if (file.startsWith(AGENT_SCRIPTS_DIR)) {
       tests.add(file.endsWith(".test.mjs") ? file : `${AGENT_SCRIPTS_DIR}__tests__/${testName}`);
-    } else if (NodePath.posix.dirname(file) === ELECTRON_HARNESS_SCRIPTS_DIR) {
-      tests.add(file.endsWith(".test.mjs") ? file : `${ELECTRON_HARNESS_SCRIPTS_DIR}/${testName}`);
+    }
+  }
+  if (files.some((file) => NodePath.posix.dirname(file) === ELECTRON_HARNESS_SCRIPTS_DIR)) {
+    for (const file of listFiles(ELECTRON_HARNESS_SCRIPTS_DIR)) {
+      if (NodePath.posix.dirname(file) === ELECTRON_HARNESS_SCRIPTS_DIR && file.endsWith(".test.mjs")) {
+        tests.add(file);
+      }
     }
   }
   return [...tests].filter(exists).sort();
@@ -288,7 +293,7 @@ export function planChecks({
   ];
   const lintFiles = files.filter((file) => LINTABLE_FILE.test(file) && exists(file));
   if (lintFiles.length > 0) jobs.push(lintJob(lintFiles));
-  const agentTests = agentTestFiles(files, exists);
+  const agentTests = agentTestFiles(files, exists, listFiles);
   if (agentTests.length > 0) {
     jobs.push({ label: `agent script tests (${agentTests.length})`, cwd: ".", args: ["scripts/agent/test-scripts.mjs", ...agentTests] });
   }

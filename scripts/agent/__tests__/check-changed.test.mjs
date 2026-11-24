@@ -211,19 +211,20 @@ NodeTest.test("an agent script change runs its own test file, and a changed test
   ]);
 });
 
-NodeTest.test("harness changes select the sibling test or the changed test itself", () => {
+NodeTest.test("changing process-tree runs every Electron harness test", () => {
   const directory = ".agents/skills/electorn-live-testing/scripts";
-  const files = [
-    `${directory}/electron-session.mjs`,
+  const files = [`${directory}/process-tree.mjs`];
+  const tests = [
+    `${directory}/electron-session.test.mjs`,
     `${directory}/record-video.test.mjs`,
-    `${directory}/no-test.mjs`,
+    `${directory}/stop-electron.test.mjs`,
   ];
-  const tests = [`${directory}/electron-session.test.mjs`, `${directory}/record-video.test.mjs`];
 
   const plan = planChecks({
     files,
     workspaces: WORKSPACES,
     exists: (file) => files.includes(file) || tests.includes(file),
+    listFiles: (dir) => dir === directory ? [...files, ...tests] : [],
   });
 
   const agentTests = plan.jobs.find((job) => job.args[0] === "scripts/agent/test-scripts.mjs");
