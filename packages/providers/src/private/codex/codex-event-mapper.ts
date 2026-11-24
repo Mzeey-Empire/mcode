@@ -38,6 +38,7 @@ function assistantPhase(phase: unknown): CodexAssistantTextItem["phase"] {
 }
 
 type ToolResultAgentEvent = Extract<CodexMappedEvent, { type: typeof AgentEventType.ToolResult }>;
+type ToolUseAgentEvent = Extract<CodexMappedEvent, { type: typeof AgentEventType.ToolUse }>;
 type ChildNotificationContext = {
   childThreadId: string | undefined;
   parentCollaborationItemId: string | undefined;
@@ -168,6 +169,7 @@ export class CodexEventMapper {
   /** Per-item streaming command output buffers, keyed by itemId. */
   private readonly commandOutputBuffers = new Map<string, BoundedToolOutputBuffer>();
   private readonly runningCommands = new Map<string, { nativeTurnId: string; taskId: string; label: string }>();
+  private readonly commandCalls = new Map<string, { use: ToolUseAgentEvent; child?: ChildNotificationContext } | "denied">();
   /** Start-time ToolUse signatures, so completion enrichment only emits when details changed. */
   private readonly startedToolUseSignatures = new Map<string, string>();
   /**
@@ -373,6 +375,7 @@ export class CodexEventMapper {
     toolCallId: string;
     output: string | BoundedToolOutputBuffer | undefined;
     isError: boolean;
+    denied?: true;
     exitCode?: number;
     toolInput?: Record<string, unknown>;
     fallback?: string;
@@ -384,6 +387,7 @@ export class CodexEventMapper {
       toolCallId: args.toolCallId,
       output: bounded.output,
       isError: args.isError,
+      ...(args.denied ? { denied: true } : {}),
       ...(args.exitCode !== undefined ? { exitCode: args.exitCode } : {}),
       ...(bounded.outputTruncated
         ? {
@@ -762,9 +766,8 @@ export class CodexEventMapper {
 
   private mapChildToolStarted(item: CompletedItem, itemId: string, notification: CodexNotification, context: ChildNotificationContext): CodexMappedEvent[] {
     if (!TOOL_LIKE_ITEM_TYPES.has(item.type) || item.type === "webSearch") return this.consumeChildItemNotification(notification.method, item.type);
-    const toolUse = this.buildToolUseEvent(item, itemId, notification);
+    const toolUse = this.startedToolUse(item, itemId, notification, context);
     if (!toolUse) return this.consumeChildItemNotification(notification.method, item.type);
-    this.startedToolUseSignatures.set(itemId, this.toolUseSignature(toolUse));
     return this.withChildNotificationEvidence([toolUse], context, itemId, "started");
   }
 
@@ -2002,12 +2005,59 @@ export class CodexEventMapper {
     const lifecycleStart = this.startLifecycleItem(item?.type, itemId);
     if (lifecycleStart) return [...boundaryEvents, ...lifecycleStart];
     if (!item || !itemId || !TOOL_LIKE_ITEM_TYPES.has(item.type) || item.type === "webSearch") return this.logMainItemStarted(notification.method, item?.type, boundaryEvents);
-    const taskId = this.rememberRunningCommand(itemId, notification);
-    const toolUse = this.buildToolUseEvent(item, itemId, notification);
+    const toolUse = this.startedToolUse(item, itemId, notification);
     if (!toolUse) return this.logMainItemStarted(notification.method, item.type, boundaryEvents);
-    this.startedToolUseSignatures.set(itemId, this.toolUseSignature(toolUse));
+    const taskId = this.rememberRunningCommand(itemId, notification);
     if (taskId) toolUse.backgroundTaskId = taskId;
     return [...boundaryEvents, toolUse];
+  }
+
+  private startedToolUse(item: CompletedItem, itemId: string, notification: CodexNotification, child?: ChildNotificationContext): ToolUseAgentEvent | undefined {
+    const toolUse = this.buildToolUseEvent(item, itemId, notification);
+    if (!toolUse) return undefined;
+    if (item.type === "commandExecution") {
+      const key = this.commandKey(itemId, this.notificationThreadId(notification));
+      const existing = this.commandCalls.get(key);
+      if (existing === "denied" || existing?.use.phase === "waiting") return undefined;
+      this.commandCalls.set(key, { use: toolUse, child });
+    }
+    this.startedToolUseSignatures.set(itemId, this.toolUseSignature(toolUse));
+    return toolUse;
+  }
+
+  private commandKey(toolCallId: string, nativeThreadId: string | undefined): string {
+    return JSON.stringify([nativeThreadId, toolCallId]);
+  }
+
+  /** Marks a known native command as waiting for its approval. */
+  commandApprovalRequested(toolCallId: string, nativeThreadId: string): ProviderRuntimeEvent[] {
+    const call = this.commandCalls.get(this.commandKey(toolCallId, nativeThreadId));
+    // Network approvals carry their own ID and are intentionally left unbound.
+    if (!call || call === "denied" || call.use.phase === "waiting") return [];
+    call.use = { ...call.use, status: "running", phase: "waiting" };
+    return this.commandApprovalEvents(call.use, call.child, "approval-requested");
+  }
+
+  /** Starts command timing after approval or settles a denied command. */
+  commandApprovalResolved(toolCallId: string, allowed: boolean, nativeThreadId: string): ProviderRuntimeEvent[] {
+    const key = this.commandKey(toolCallId, nativeThreadId);
+    const call = this.commandCalls.get(key);
+    if (!call || call === "denied" || call.use.phase !== "waiting") return [];
+    if (allowed) {
+      const { phase: _phase, ...running } = call.use;
+      call.use = running;
+      return this.commandApprovalEvents(running, call.child, "approval-allowed");
+    }
+    this.commandCalls.set(key, "denied");
+    this.runningCommands.delete(toolCallId);
+    this.commandOutputBuffers.delete(toolCallId);
+    const result = this.toolResultEvent({ toolCallId, output: "Command denied before execution.", isError: false, denied: true });
+    return this.commandApprovalEvents(result, call.child, "approval-denied");
+  }
+
+  private commandApprovalEvents(event: ToolUseAgentEvent | ToolResultAgentEvent, child: ChildNotificationContext | undefined, eventKey: string): ProviderRuntimeEvent[] {
+    const events = child ? this.withChildNotificationEvidence([event], child, event.toolCallId, eventKey) : [event];
+    return events.map((mapped) => this.toRuntimeEvent(mapped));
   }
 
   private rememberRunningCommand(itemId: string, notification: CodexNotification): string | undefined {
@@ -2116,6 +2166,7 @@ export class CodexEventMapper {
 
   private mapCommandOutputDelta(notification: CodexNotification): CodexMappedEvent[] {
     const { itemId, delta } = notification.params as { itemId?: string; delta?: string };
+    if (itemId && this.commandCalls.get(this.commandKey(itemId, this.notificationThreadId(notification))) === "denied") return [];
     if (itemId && delta) this.commandOutputBuffer(itemId).append(delta);
     return this.drainPendingAssistantBoundary(false);
   }
@@ -2282,6 +2333,7 @@ export class CodexEventMapper {
     this.planUpdateSeq = 0;
     this.commandOutputBuffers.clear();
     this.runningCommands.clear();
+    this.commandCalls.clear();
     this.startedToolUseSignatures.clear();
     this.collabScopeStack = [];
     this.collabToolUseFromStartIds.clear();
@@ -2404,6 +2456,13 @@ export class CodexEventMapper {
     const toolCallId = item.id ?? `cmd-${NodeCrypto.randomUUID()}`;
     const bufferedOutput = this.takeCommandOutputBuffer(item, toolCallId);
     const fallback = this.commandCompletionOutput(item);
+    const key = this.commandKey(toolCallId, this.notificationThreadId(notification));
+    if (this.commandCalls.get(key) === "denied") return [];
+    if (item.status === "declined") {
+      this.commandCalls.set(key, "denied");
+      return this.completedToolEvents(item, toolCallId, notification, { isError: false, denied: true, output: bufferedOutput, fallback });
+    }
+    this.commandCalls.delete(key);
     const exitCode = typeof item.exitCode === "number" && Number.isInteger(item.exitCode) ? item.exitCode : undefined;
     return this.completedToolEvents(item, toolCallId, notification, { isError: item.status === "failed" || (exitCode !== undefined && exitCode !== 0), ...(exitCode !== undefined ? { exitCode } : {}), output: bufferedOutput, fallback });
   }
@@ -2457,7 +2516,7 @@ export class CodexEventMapper {
     item: CompletedItem,
     toolCallId: string,
     notification: CodexNotification,
-    result: { isError: boolean; output: string | BoundedToolOutputBuffer | undefined; fallback?: string; exitCode?: number },
+    result: { isError: boolean; denied?: true; output: string | BoundedToolOutputBuffer | undefined; fallback?: string; exitCode?: number },
   ): CodexMappedEvent[] {
     const toolUse = this.buildToolUseEvent(item, toolCallId, notification);
     const toolResult = this.toolResultEvent({ toolCallId, ...result });

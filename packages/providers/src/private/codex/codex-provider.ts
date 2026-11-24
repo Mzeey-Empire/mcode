@@ -346,6 +346,7 @@ interface PendingPermissionEntry {
   routing?: CodexCanonicalEventRouting;
   unanswerable?: boolean;
   replying?: boolean;
+  answerHandedOff?: true;
   /** A drain that skipped this entry mid-write; a failed write settles it with this reason. */
   deferredDrain?: "session_stopped" | "turn_ended";
   sessionId: string;
@@ -3034,12 +3035,33 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
     const acknowledged = new Promise<boolean>((resolve) => { request.responseWritten = resolve; });
     return new Promise<unknown>((resolve) => {
-      this.pendingPermissions.set(requestId, {
+      const entry: PendingPermissionEntry = {
         routing: this.canonicalTurnRoutingsByThread.get(threadId)?.routing,
         sessionId, threadId, body, acknowledged, method: request.method, params: request.params, resolve,
-      });
+      };
+      this.pendingPermissions.set(requestId, entry);
+      this.publishCommandApproval(entry);
       this.emit("approval_request", { requestId, threadId, body } satisfies ApprovalRequestEnvelope);
     });
+  }
+
+  private publishCommandApproval(entry: PendingPermissionEntry, allowed?: boolean): void {
+    if (entry.method !== "item/commandExecution/requestApproval" || !entry.routing) return;
+    const { itemId, threadId } = entry.params;
+    if (typeof itemId !== "string" || typeof threadId !== "string") return;
+    const { executionId, deliveryAttempt } = entry.routing;
+    const mapper = this.activeApprovalMapper(entry.sessionId, entry.routing);
+    if (!mapper) return;
+    const events = allowed === undefined
+      ? mapper.commandApprovalRequested(itemId, threadId)
+      : mapper.commandApprovalResolved(itemId, allowed, threadId);
+    for (const event of events) this.emitRuntimeEvent({ ...withTurnExecutionId(event, executionId), deliveryAttempt });
+  }
+
+  private activeApprovalMapper(sessionId: string, routing: CodexCanonicalEventRouting): CodexEventMapper | undefined {
+    const owner = this.canonicalRoutingForExecution(routing.threadId, routing.executionId);
+    if (owner?.routing !== routing || owner.kind !== "active") return undefined;
+    return this.runtime.get(sessionId)?.mapper;
   }
 
   private updateApprovalFileChanges(sessionId: string, notification: CodexNotification, mainNotification: boolean): void {
@@ -3059,32 +3081,44 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  /** Publish resolution only after the native response write completes. */
+  /** Publish the approval receipt only after the native response write completes. */
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
     if (!entry) return { status: "not_pending" };
     if ("autoDeny" in response) entry.unanswerable = true;
     if (entry.replying) return { status: "failed", message: "An answer is already being sent" };
+    if (entry.answerHandedOff) return { status: "failed", message: "The answer did not reach Codex" };
     const choice = approvalChoice(entry.body, response);
-    if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
+    const decision = this.nativeApprovalDecision(choice, response);
+    if (!decision) return { status: "failed", message: "The approval choice is unavailable" };
     entry.replying = true;
     this.runtime.recordUsage(entry.sessionId);
-    const decision = this.nativeApprovalDecision(choice, response);
+    const allowed = decision !== "deny";
+    // A fast command can complete before the response write is acknowledged.
+    if (allowed) this.publishCommandApproval(entry, true);
+    entry.answerHandedOff = true;
     entry.resolve(mapDecisionToCodexResponse(entry.method, decision, entry.params));
     if (!await entry.acknowledged) {
-      // Codex never got the answer, so a stop or turn end that skipped this write settles it now.
-      entry.replying = false;
-      if (entry.deferredDrain) this.drainPending((pending) => pending === entry, entry.deferredDrain);
+      this.restoreApprovalAfterWriteFailure(entry, allowed);
       return { status: "failed", message: "The answer did not reach Codex" };
     }
     if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
+    if (!allowed) this.publishCommandApproval(entry, false);
     this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
     return { status: "resolved" };
   }
 
-  private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] {
+  private restoreApprovalAfterWriteFailure(entry: PendingPermissionEntry, allowed: boolean): void {
+    // Codex never got the answer, so a stop or turn end that skipped this write settles it now.
+    entry.replying = false;
+    if (entry.deferredDrain) this.drainPending((pending) => pending === entry, entry.deferredDrain);
+    else if (allowed) this.publishCommandApproval(entry);
+  }
+
+  private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] | undefined {
     if ("autoDeny" in response || choice?.intent === "deny") return "deny";
-    return choice?.intent === "allow_scoped" ? "allow-session" : "allow";
+    if (!choice) return undefined;
+    return choice.intent === "allow_scoped" ? "allow-session" : "allow";
   }
 
   /** List stable routing envelopes, optionally filtered by owning thread. */
