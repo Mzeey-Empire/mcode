@@ -77,6 +77,8 @@ states. Remove the follow-up before completion so it cannot start another turn.
    Confirm that the last fixture turn shows 120 steps and an earlier turn shows three steps. Counts must not include other turns.
 5. Retain screenshots and RPC receipts under `.dev/verification/`. Report missing active, cold-cache, or provider coverage as gaps.
 
+To check that a new tool row paints at its final height, run `bun .agents/skills/verify-mcode/scripts/tool-row-first-paint-proof.mjs` with the owned Electron runtime up. It fails when the row below a running tool row, or below an opened group's children, moves more than 1 px after first paint.
+
 Focused checks live in `MessageList.thread-switch.test.tsx`, `transcript-viewport.test.ts`, and `virtual-items.test.ts`.
 These checks support the live proof; they do not replace it.
 

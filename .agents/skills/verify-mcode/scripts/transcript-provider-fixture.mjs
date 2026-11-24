@@ -42,7 +42,7 @@ if (args.command === "version") {
       const text = request.params?.input?.find((item) => item.type === "text")?.text ?? "";
       const long = text.includes("long narrative");
       reply(request.id, { turn: { id: turnId } });
-      void emitTurn(notify, threadId, turnId, long, text.includes("overlapping commands"), text.includes("activity label verification"), text.includes("shell card verification"), text.includes("mermaid streaming"), text.includes("table boundary")).finally(() => {
+      void emitTurn(notify, threadId, turnId, long, text.includes("overlapping commands"), text.includes("activity label verification"), text.includes("shell card verification"), text.includes("mermaid streaming"), text.includes("table boundary"), text.includes("tool row first paint")).finally(() => {
         running.delete(threadId);
       });
   }
@@ -57,13 +57,18 @@ function fixtureThreadId(request) {
     ? request.params.threadId : NodeCrypto.randomUUID();
 }
 
-async function emitTurn(notify, threadId, turnId, long, overlapping, activity, shellCards, mermaid, tableBoundary) {
+async function emitTurn(notify, threadId, turnId, long, overlapping, activity, shellCards, mermaid, tableBoundary, firstPaint) {
   await new Promise((resolve) => setTimeout(resolve, FIXTURE_TURN_DELAY_MS));
   const turn = (status) => ({ id: turnId, items: [], status, error: null });
   const base = { threadId, turnId };
   notify("turn/started", { threadId, turn: turn("inProgress") });
   if (mermaid) {
     await emitMermaidStream(notify, base);
+    notify("turn/completed", { threadId, turn: turn("completed") });
+    return;
+  }
+  if (firstPaint) {
+    await emitToolRowFirstPaint(notify, base, turnId);
     notify("turn/completed", { threadId, turn: turn("completed") });
     return;
   }
@@ -138,6 +143,32 @@ async function emitTableBoundary(notify, base, turnId) {
   notify("item/started", { ...base, item: command });
   await new Promise((resolve) => setTimeout(resolve, 14000));
   notify("item/completed", { ...base, item: { ...command, status: "completed", aggregatedOutput: "boundary done", exitCode: 0, durationMs: 1 } });
+  emitFinalAnswer(notify, base, turnId);
+}
+
+/**
+ * Mounts a running command, holds it on screen, then ends on completed commands that form a
+ * collapsed group. The first-paint check samples the row below the running command as it
+ * appears, and later the row below the group's children as the user opens it.
+ */
+async function emitToolRowFirstPaint(notify, base, turnId) {
+  const hold = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const commentary = (id, text) => {
+    notify("item/started", { ...base, item: { id, type: "agentMessage", text: "", phase: "commentary" } });
+    notify("item/agentMessage/delta", { ...base, itemId: id, delta: text });
+    notify("item/completed", { ...base, item: { id, type: "agentMessage", text, phase: "commentary", memoryCitation: null } });
+  };
+  commentary(`${turnId}-before`, "First paint check: the running command appears below this line.");
+  await hold(1500);
+  const running = { id: `${turnId}-running`, type: "commandExecution", command: "fixture first paint hold", cwd: ".", status: "inProgress" };
+  notify("item/started", { ...base, item: running });
+  await hold(4000);
+  notify("item/completed", { ...base, item: { ...running, status: "completed", aggregatedOutput: "held", exitCode: 0, durationMs: 4000 } });
+  for (let index = 0; index < 3; index += 1) {
+    const item = { id: `${turnId}-grouped-${index}`, type: "commandExecution", command: `fixture grouped command ${index + 1}`, cwd: ".", status: "inProgress" };
+    notify("item/started", { ...base, item });
+    notify("item/completed", { ...base, item: { ...item, status: "completed", aggregatedOutput: `grouped ${index + 1}`, exitCode: 0, durationMs: 1 } });
+  }
   emitFinalAnswer(notify, base, turnId);
 }
 

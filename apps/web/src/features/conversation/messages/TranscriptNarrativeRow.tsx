@@ -52,7 +52,8 @@ function ToolChildRow({ row, open, entering, expansion }: {
   expansion?: RowExpansion;
 }) {
   return (
-    <AnimatedCollapsible open={open} className={entering ? "starting:grid-rows-[0fr]" : undefined}>
+    // Like a running row, an opening group's children fade in at full height so the row below moves once.
+    <AnimatedCollapsible open={open} className={entering ? "transition-[grid-template-rows,opacity] starting:opacity-0" : undefined}>
       <ul className={`min-w-0 max-w-full pt-1 pl-6 ${row.index === row.count - 1 ? "pb-2" : ""}`} aria-label={`Tool call ${row.index + 1} of ${row.count}`}>
         {isBrowserNarrativeCall(row.toolCall)
           ? <BrowserActivityCall toolCall={row.toolCall} />
@@ -107,7 +108,8 @@ export function TranscriptNarrativeRow({ row, threadId, expanded, callExpanded =
       <>
         {loader}
         {/* An open running shell skips its exit collapse, because its completed row takes over the same open output. */}
-        <AnimatedCollapsible open={row.transition !== "exiting" || callExpanded} className={row.transition === "entering" ? "starting:grid-rows-[0fr]" : undefined}>
+        {/* A running row fades in at full height: growing it open would slide over the row below, whose position the viewport corrects a frame late. */}
+        <AnimatedCollapsible open={row.transition !== "exiting" || callExpanded} className={row.transition === "entering" ? "transition-[grid-template-rows,opacity] starting:opacity-0" : undefined}>
           <ActiveToolRow toolCall={row.item.toolCall} expansion={callExpansion} />
         </AnimatedCollapsible>
       </>
