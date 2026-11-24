@@ -15,7 +15,7 @@ Provisioning and lifecycle are separate commands:
 | `bun install` | Install dependencies before runtime setup. |
 | `bun run agent:setup` | Build a filtered copy of the local Mcode database at `.dev/db/app.sqlite`, create or validate the fixture repository, and build runtime bundles. Run it only when an artifact is absent or stale, with the runtime stopped. |
 | `bun run --shell system agent:up` | Start the server and web app in the background. Fails fast when setup artifacts are absent. Returns without readiness waits. |
-| `bun run --shell system agent:up --desktop` | Start the server, web app, and Electron in the background. Returns without readiness waits. |
+| `bun run --shell system agent:up --desktop` | Start the web app and Electron in the background. Electron starts the runtime's only server on `.dev/db/app.sqlite`. Returns without readiness waits. |
 | `bun run agent:ready` | Read `.dev/ports.json` and wait for every started runtime surface. |
 | `bun run --shell system agent:down` | Stop all owned server, web, and Electron components from either startup mode. |
 
@@ -41,7 +41,7 @@ Use `bun run --shell system` so Windows preserves the final startup contract. Ru
 
 ## Runtime contract and ownership
 
-Read `.dev/ports.json`. Do not derive ports. It contains `healthUrl`, `appUrl`, `logsDir`, `instanceToken`, `worktreeIdentity`, and `seedLogin`.
+Read `.dev/ports.json`. Do not derive ports. It contains `serverPort`, `healthUrl`, `appUrl`, `logsDir`, `instanceToken`, `worktreeIdentity`, and `seedLogin`. In desktop mode, `serverPort` and `healthUrl` are null until Electron's server publishes them. `agent:ready` waits for that update.
 
 Use `seedLogin.authHeader` or the `mcode-auth` cookie for HTTP and WebSocket access. Treat `seedLogin.token` and `instanceToken` as secrets. Do not log, copy, or expose them.
 
