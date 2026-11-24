@@ -211,6 +211,26 @@ NodeTest.test("an agent script change runs its own test file, and a changed test
   ]);
 });
 
+NodeTest.test("changing process-tree runs every Electron harness test", () => {
+  const directory = ".agents/skills/electorn-live-testing/scripts";
+  const files = [`${directory}/process-tree.mjs`];
+  const tests = [
+    `${directory}/electron-session.test.mjs`,
+    `${directory}/record-video.test.mjs`,
+    `${directory}/stop-electron.test.mjs`,
+  ];
+
+  const plan = planChecks({
+    files,
+    workspaces: WORKSPACES,
+    exists: (file) => files.includes(file) || tests.includes(file),
+    listFiles: (dir) => dir === directory ? [...files, ...tests] : [],
+  });
+
+  const agentTests = plan.jobs.find((job) => job.args[0] === "scripts/agent/test-scripts.mjs");
+  NodeAssertStrict.deepEqual(agentTests?.args.slice(1), tests);
+});
+
 NodeTest.test("a test summary line says when no test imports the change", () => {
   const job = { label: "test apps/web" };
 
