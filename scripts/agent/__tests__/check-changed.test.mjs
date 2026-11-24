@@ -211,6 +211,25 @@ NodeTest.test("an agent script change runs its own test file, and a changed test
   ]);
 });
 
+NodeTest.test("harness changes select the sibling test or the changed test itself", () => {
+  const directory = ".agents/skills/electorn-live-testing/scripts";
+  const files = [
+    `${directory}/electron-session.mjs`,
+    `${directory}/record-video.test.mjs`,
+    `${directory}/no-test.mjs`,
+  ];
+  const tests = [`${directory}/electron-session.test.mjs`, `${directory}/record-video.test.mjs`];
+
+  const plan = planChecks({
+    files,
+    workspaces: WORKSPACES,
+    exists: (file) => files.includes(file) || tests.includes(file),
+  });
+
+  const agentTests = plan.jobs.find((job) => job.args[0] === "scripts/agent/test-scripts.mjs");
+  NodeAssertStrict.deepEqual(agentTests?.args.slice(1), tests);
+});
+
 NodeTest.test("a test summary line says when no test imports the change", () => {
   const job = { label: "test apps/web" };
 
