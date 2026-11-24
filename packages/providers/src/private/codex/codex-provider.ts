@@ -346,6 +346,7 @@ interface PendingPermissionEntry {
   routing?: CodexCanonicalEventRouting;
   unanswerable?: boolean;
   replying?: boolean;
+  answerHandedOff?: true;
   /** A drain that skipped this entry mid-write; a failed write settles it with this reason. */
   deferredDrain?: "session_stopped" | "turn_ended";
   sessionId: string;
@@ -3086,14 +3087,16 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (!entry) return { status: "not_pending" };
     if ("autoDeny" in response) entry.unanswerable = true;
     if (entry.replying) return { status: "failed", message: "An answer is already being sent" };
+    if (entry.answerHandedOff) return { status: "failed", message: "The answer did not reach Codex" };
     const choice = approvalChoice(entry.body, response);
-    if (!choice && !("autoDeny" in response)) return { status: "failed", message: "The approval choice is unavailable" };
+    const decision = this.nativeApprovalDecision(choice, response);
+    if (!decision) return { status: "failed", message: "The approval choice is unavailable" };
     entry.replying = true;
     this.runtime.recordUsage(entry.sessionId);
-    const decision = this.nativeApprovalDecision(choice, response);
     const allowed = decision !== "deny";
     // A fast command can complete before the response write is acknowledged.
     if (allowed) this.publishCommandApproval(entry, true);
+    entry.answerHandedOff = true;
     entry.resolve(mapDecisionToCodexResponse(entry.method, decision, entry.params));
     if (!await entry.acknowledged) {
       this.restoreApprovalAfterWriteFailure(entry, allowed);
@@ -3112,9 +3115,10 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     else if (allowed) this.publishCommandApproval(entry);
   }
 
-  private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] {
+  private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] | undefined {
     if ("autoDeny" in response || choice?.intent === "deny") return "deny";
-    return choice?.intent === "allow_scoped" ? "allow-session" : "allow";
+    if (!choice) return undefined;
+    return choice.intent === "allow_scoped" ? "allow-session" : "allow";
   }
 
   /** List stable routing envelopes, optionally filtered by owning thread. */

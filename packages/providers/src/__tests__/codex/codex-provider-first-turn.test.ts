@@ -256,6 +256,49 @@ describe("CodexProvider first turn on new session", () => {
     }
   });
 
+  it("publishes no command events when approval is retried after a failed response write", async () => {
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.observeCanonicalEvents(event => events.push(event));
+    try {
+      await provider.sendTurn({
+        turnId: "access-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+        threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+        providerOptions: {}, permissionMode: "supervised", approvalReviewMode: "manual",
+      });
+      await vi.waitFor(() => expect(sendTurnMock.mock.calls.length).toBe(1));
+      const server = appServers[0];
+      assert(server?.options.approvalHandler);
+      const scope = { threadId: "sdk-thread-1", turnId: "turn-test-id" };
+      const item = { type: "commandExecution", id: "command-1", command: "echo approved", status: "inProgress" };
+      server.emit("notification", { method: "item/started", params: { ...scope, item } });
+      const request: CodexApprovalRequest = {
+        rpcId: 15, method: "item/commandExecution/requestApproval",
+        params: { ...scope, itemId: item.id, command: item.command, cwd: process.cwd() },
+      };
+      const response = server.options.approvalHandler(request);
+      const [approval] = provider.listPendingApprovals(threadId);
+      assert(approval);
+
+      const delivery = provider.resolveApproval(approval.requestId, { choiceId: "allow" });
+      expect(await response).toEqual({ decision: "accept" });
+      assert(request.responseWritten);
+      request.responseWritten(false);
+      expect(await delivery).toMatchObject({ status: "failed" });
+      await provider.flushCanonicalEvents();
+      const eventsBeforeRetry = events.length;
+
+      const retry = await provider.resolveApproval(approval.requestId, { choiceId: "allow" });
+      expect(retry).toMatchObject({ status: "failed" });
+      await provider.flushCanonicalEvents();
+      const retryCommandEvents = events.slice(eventsBeforeRetry).map(({ event }) => event)
+        .filter(event => (event.type === AgentEventType.ToolUse || event.type === AgentEventType.ToolResult) && event.toolCallId === item.id);
+      expect(retryCommandEvents).toEqual([]);
+    } finally {
+      await provider.shutdown();
+    }
+  });
+
   it.each([
     { choiceId: "allow", decision: "accept" },
     { choiceId: "deny", decision: "decline" },
