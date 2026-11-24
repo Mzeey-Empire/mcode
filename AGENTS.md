@@ -111,7 +111,7 @@ Mcode must feel snappy and look like one product. Where a rule can be checked, `
 
 - Run `bun install` before `bun run agent:setup`. Setup creates an empty `.dev/db/app.sqlite` when none exists, creates or validates `.dev/fixture-repo`, and builds runtime bundles. Run it only when those artifacts are absent or stale.
 - If `bun install`, `agent:setup`, or a checkout fails for lack of disk space, run `bun run agent:worktrees` in the background to list worktrees and the space removing them would free; sizing them can take minutes. Ask the user before you add `--remove`: it deletes ignored files such as `.dev` captures with each worktree.
-- Use `bun run --shell system agent:up` to start the server and web app in the background. Add `--desktop` for Electron. Then run `bun run agent:ready`. It reads `.dev/ports.json` and polls every started surface.
+- Use `bun run --shell system agent:up` to start the server and web app in the background. Add `--desktop` for Electron or `--server` for API-only work. Then run `bun run agent:ready`. It reads `.dev/ports.json` and polls every started surface.
 
   ```powershell
   # Windows PowerShell

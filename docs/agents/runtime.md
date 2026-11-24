@@ -14,12 +14,13 @@ Provisioning and lifecycle are separate commands:
 |---|---|
 | `bun install` | Install dependencies before runtime setup. |
 | `bun run agent:setup` | Build a filtered copy of the local Mcode database at `.dev/db/app.sqlite`, create or validate the fixture repository, and build runtime bundles. Run it only when an artifact is absent or stale, with the runtime stopped. |
-| `bun run --shell system agent:up` | Start the server and web app in the background. Fails fast when setup artifacts are absent. Returns without readiness waits. |
-| `bun run --shell system agent:up --desktop` | Start the web app and Electron in the background. Electron starts the runtime's only server on `.dev/db/app.sqlite`. Returns without readiness waits. |
-| `bun run agent:ready` | Read `.dev/ports.json` and wait for every started runtime surface. |
-| `bun run --shell system agent:down` | Stop all owned server, web, and Electron components from either startup mode. |
+| `bun run --shell system agent:up` | **Web mode.** Start the server and web app for browser testing. |
+| `bun run --shell system agent:up --desktop` | **Desktop mode.** Start the web app and Electron for Electron testing. Electron starts the runtime's only server. |
+| `bun run --shell system agent:up --server` | **Server mode.** Start only the server for API-only work. |
+| `bun run agent:ready` | Read `.dev/ports.json` and wait for the recorded mode's surfaces. |
+| `bun run --shell system agent:down` | Stop the owned runtime processes. Run this before switching modes. |
 
-Both startup commands spawn detached processes, write `.dev/ports.json`, print a redacted summary with endpoint URLs, worktree identity, and the contract path, and return. Use `--wait` only when a caller needs startup checks before it continues.
+Startup commands require the setup artifacts and launch detached processes. They write `.dev/ports.json` and print a redacted summary with the mode, started processes, endpoint URLs, worktree identity, and contract path. Use `--wait` only when a caller needs startup checks before it continues.
 
 ```powershell
 # Windows PowerShell
@@ -33,7 +34,7 @@ bun run --shell system agent:up
 bun run agent:ready
 ```
 
-`agent:ready` polls `healthUrl` and `appUrl` from the contract. When `.dev/electron-agent-runtime.json` exists, it also verifies the managed worktree app page through the loopback CDP endpoint. The ports file assigns endpoints. It does not prove readiness on its own.
+`agent:ready` polls `healthUrl` in every mode and `appUrl` in web and desktop modes. In desktop mode it also checks the managed CDP endpoint and Electron app page.
 
 Vite serves the web app from the working tree, but the server and the Electron main process run the bundles `agent:setup` built. `agent:setup` records the content of their sources in `.dev/build-stamp.json`, and `agent:ready` warns and names the files when any of them has changed since. The running server and desktop then lack those changes until you run `agent:down`, `agent:setup`, and `agent:up`.
 
@@ -41,7 +42,7 @@ Use `bun run --shell system` so Windows preserves the final startup contract. Ru
 
 ## Runtime contract and ownership
 
-Read `.dev/ports.json`. Do not derive ports. It contains `serverPort`, `healthUrl`, `appUrl`, `logsDir`, `instanceToken`, `worktreeIdentity`, and `seedLogin`. In desktop mode, `serverPort` and `healthUrl` are null until Electron's server publishes them. `agent:ready` waits for that update.
+Read `.dev/ports.json` for the recorded `mode`, ports, and URLs. In server mode, `webPort` and `appUrl` are null. In desktop mode, `serverPort` and `healthUrl` are null until Electron's server publishes them. `agent:ready` waits for that update.
 
 Use `seedLogin.authHeader` or the `mcode-auth` cookie for HTTP and WebSocket access. Treat `seedLogin.token` and `instanceToken` as secrets. Do not log, copy, or expose them.
 
