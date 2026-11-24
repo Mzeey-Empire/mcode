@@ -19,10 +19,11 @@ import {
   generateInstanceToken,
   getRuntimePaths,
   resolveRepoRoot,
+  waitForServerContract,
   writePortsFile,
 } from "./runtime-contract.mjs";
 import { stopPid } from "./runtime-processes.mjs";
-import { stopRecordedRuntimePids } from "./agent-down.mjs";
+import { requestRuntimeShutdown, stopRecordedRuntimePids } from "./agent-down.mjs";
 import { MANAGED_DESKTOP_SESSION_FILE, startManagedDesktop, stopManagedDesktop } from "./managed-desktop.mjs";
 import { isFixtureRepo } from "./fixture-repo.mjs";
 import { hasRuntimeDatabaseMarker, readRuntimeDatabaseSeed } from "./runtime-database.mjs";
@@ -76,7 +77,7 @@ export function setAgentUpTestHooks(hooks) {
 }
 
 /**
- * Starts the server and Vite web app for the current worktree.
+ * Starts Vite and the worktree server, with Electron owning the server in desktop mode.
  *
  * @param {string} [repoRoot]
  * @param {{ desktop?: boolean, wait?: boolean }} [options]
@@ -91,7 +92,7 @@ export async function agentUp(repoRoot = resolveRepoRoot(), { desktop = false, w
   const stopRuntimePids = agentUpTestHooks.stopRecordedRuntimePids ?? stopRecordedRuntimePids;
   await stopRuntimePids(repoRoot);
 
-  const runtime = await prepareRuntime(repoRoot);
+  const runtime = await prepareRuntime(repoRoot, desktop);
   const electronBin = requireElectronBinary();
   const bunBin = resolveBunBinary();
   return startProvisionedRuntime({ bunBin, desktop, electronBin, paths, repoRoot, runtime, wait });
@@ -107,9 +108,11 @@ async function startProvisionedRuntime({ bunBin, desktop, electronBin, paths, re
   const startedProcesses = [];
   const persistPid = agentUpTestHooks.writePid ?? writePid;
   try {
-    const server = await startRuntimeServer({ bunBin, electronBin, paths, repoRoot, runtime });
-    startedProcesses.push({ name: "server", pid: requireChildPid("server", server) });
-    startedProcesses.at(-1).pidFile = persistPid(paths, "server", server.pid);
+    if (!desktop) {
+      const server = await startRuntimeServer({ bunBin, electronBin, paths, repoRoot, runtime });
+      startedProcesses.push({ name: "server", pid: requireChildPid("server", server) });
+      startedProcesses.at(-1).pidFile = persistPid(paths, "server", server.pid);
+    }
     writePortsFile(runtime.contract, repoRoot);
 
     const web = await startRuntimeWeb({ bunBin, paths, repoRoot, runtime });
@@ -122,10 +125,14 @@ async function startProvisionedRuntime({ bunBin, desktop, electronBin, paths, re
       startedProcesses.at(-1).pidFile = persistPid(paths, "desktop", desktopProcess.pid);
     }
 
-    if (wait) await waitForRuntimeReadiness(runtime.contract, desktopProcess);
+    let contract = runtime.contract;
+    if (wait) {
+      contract = await waitForServerContract(repoRoot, contract);
+      await waitForRuntimeReadiness(contract, desktopProcess);
+    }
 
-    await writeRuntimeSummary(runtime.contract, repoRoot);
-    return runtime.contract;
+    await writeRuntimeSummary(contract, repoRoot);
+    return contract;
   } catch (error) {
     const cleanupError = await cleanupStartedProcesses(startedProcesses, repoRoot);
     if (cleanupError) {
@@ -145,7 +152,6 @@ function requireChildPid(name, child) {
 function assertManagedDesktopPathsSafe(paths) {
   const userDataDir = NodePath.join(paths.devDir, MANAGED_DESKTOP_SESSION_FILE.slice(0, -".json".length));
   assertRuntimeDirectorySafe(userDataDir, "managed desktop user-data directory", true);
-  assertRuntimeDirectorySafe(NodePath.join(userDataDir, "runtime"), "managed desktop runtime directory", true);
 }
 
 async function waitForRuntimeReadiness(contract, desktopProcess) {
@@ -194,7 +200,7 @@ async function waitForRuntimeDesktopPage(endpoint, appUrl) {
   return waitForPage(endpoint, appUrl);
 }
 
-async function prepareRuntime(repoRoot) {
+async function prepareRuntime(repoRoot, desktop) {
   const computeRuntimePorts = agentUpTestHooks.computeAvailablePorts ?? computeAvailablePorts;
   const { serverPort, webPort } = await computeRuntimePorts(repoRoot);
   const token = NodeCrypto.randomUUID();
@@ -207,7 +213,7 @@ async function prepareRuntime(repoRoot) {
     webPort,
     contract: buildPortsContract({
       repoRoot,
-      serverPort,
+      serverPort: desktop ? null : serverPort,
       webPort,
       instanceToken,
       worktreeIdentity: repoRoot,
@@ -418,20 +424,21 @@ function isManagedAppPage(target, expectedUrl) {
 async function cleanupStartedProcesses(processes, repoRoot) {
   const paths = getRuntimePaths(repoRoot);
   const cleanupErrors = [];
-  try {
-    assertRuntimeFileSafe(paths.portsFile, "runtime contract", true);
-    NodeFS.rmSync(paths.portsFile, { force: true });
-  } catch (error) {
-    cleanupErrors.push(error);
-  }
   const stopDesktop = agentUpTestHooks.stopManagedDesktop ?? stopManagedDesktop;
   const stopOwnedProcess = agentUpTestHooks.stopPid ?? stopPid;
   for (const processRecord of [...processes].reverse()) {
     try {
       await cleanupStartedProcess(processRecord, { paths, repoRoot, stopDesktop, stopOwnedProcess });
+      if (processRecord.name === "desktop") await requestRuntimeShutdown(repoRoot);
     } catch (error) {
       cleanupErrors.push(error);
     }
+  }
+  try {
+    assertRuntimeFileSafe(paths.portsFile, "runtime contract", true);
+    NodeFS.rmSync(paths.portsFile, { force: true });
+  } catch (error) {
+    cleanupErrors.push(error);
   }
   return cleanupErrors.length === 0 ? null : new AggregateError(cleanupErrors, "Agent runtime cleanup failed");
 }

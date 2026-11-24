@@ -6,6 +6,7 @@
 import { setupContainer } from "../composition/container.js";
 import { launchTelemetry } from "../../runtime/diagnostics/launch-telemetry.js";
 import { runStartupOrExit, startupFailureTarget } from "./startup-failure.js";
+import { publishServerEndpoint } from "./agent-runtime-contract.js";
 import { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
 import { createWsServer } from "../transport/ws-server.js";
 import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sendToClient, sessionCount } from "../transport/push.js";
@@ -1098,20 +1099,23 @@ function listen(port: number): void {
         worktreeIdentity: WORKTREE_IDENTITY ?? "shared-server",
       });
 
-      // Write lock file so other instances can discover this server
-      try {
-        const lockData = JSON.stringify({
-          port: listeningPort,
-          ...(!SINGLE_INSTANCE && { authToken: AUTH_TOKEN }),
-          pid: process.pid,
-          startedAt: new Date().toISOString(),
-          version: process.env.MCODE_VERSION ?? "0.0.0",
-          ipcPath,
-        });
-        NodeFS.writeFileSync(LOCK_FILE_PATH, lockData, { mode: 0o600 });
+      const { lockError, contractError } = publishServerEndpoint({
+        lockPath: LOCK_FILE_PATH,
+        contractPath: process.env.MCODE_AGENT_RUNTIME_CONTRACT,
+        port: listeningPort,
+        authToken: AUTH_TOKEN,
+        singleInstance: SINGLE_INSTANCE,
+        pid: process.pid,
+        version: process.env.MCODE_VERSION ?? "0.0.0",
+        ipcPath,
+      });
+      if (lockError === null) {
         logger.info("Server lock file written", { path: LOCK_FILE_PATH });
-      } catch (err) {
-        logger.warn("Failed to write server lock file", { error: String(err) });
+      } else {
+        logger.warn("Failed to write server lock file", { error: lockError });
+      }
+      if (contractError !== null) {
+        logger.warn("Failed to publish agent runtime endpoint", { error: contractError });
       }
     },
   });

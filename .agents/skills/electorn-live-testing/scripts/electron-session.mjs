@@ -1,5 +1,6 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import { MANAGED_DESKTOP_SESSION_FILE } from "../../../../scripts/agent/managed-desktop.mjs";
 
 const SESSION_FILE_NAME = "electron-live-testing.json";
 
@@ -14,12 +15,12 @@ const SESSION_FILE_NAME = "electron-live-testing.json";
 export async function connectElectronSession({
   playwright,
   repoRoot,
-  sessionFileName = SESSION_FILE_NAME,
+  sessionFileName,
   allowViewportEmulation = false,
 }) {
-  validateConnectionArguments(playwright, repoRoot, sessionFileName, allowViewportEmulation);
+  validateConnectionArguments(playwright, repoRoot, sessionFileName === undefined ? SESSION_FILE_NAME : sessionFileName, allowViewportEmulation);
   const root = NodePath.resolve(repoRoot);
-  const sessionFile = NodePath.join(root, ".dev", sessionFileName);
+  const sessionFile = resolveSessionFile(root, sessionFileName);
   const record = readSessionRecord(sessionFile, root);
   const ports = readRuntimePorts(root, record.appUrlPrefix);
   const connection = await connectToElectron(playwright, record, ports);
@@ -43,6 +44,15 @@ export async function connectElectronSession({
     repoRoot: root,
     sessionFile,
   };
+}
+
+function resolveSessionFile(root, sessionFileName) {
+  const devDir = NodePath.join(root, ".dev");
+  if (sessionFileName !== undefined) return NodePath.join(devDir, sessionFileName);
+  const managedSessionFile = NodePath.join(devDir, MANAGED_DESKTOP_SESSION_FILE);
+  return NodeFS.existsSync(managedSessionFile)
+    ? managedSessionFile
+    : NodePath.join(devDir, SESSION_FILE_NAME);
 }
 
 /** Reloads the worktree app and reacquires Electron's replacement page when navigation detaches the prior one. */
@@ -75,7 +85,7 @@ function validateConnectionArguments(playwright, repoRoot, sessionFileName, allo
   if (typeof allowViewportEmulation !== "boolean") {
     throw new Error("allowViewportEmulation must be a boolean");
   }
-  if (allowViewportEmulation && sessionFileName === SESSION_FILE_NAME) {
+  if (allowViewportEmulation && [SESSION_FILE_NAME, MANAGED_DESKTOP_SESSION_FILE].includes(sessionFileName)) {
     throw new Error("allowViewportEmulation needs a disposable Electron session with its own sessionFileName; the shared live-testing session must keep its real window size");
   }
 }

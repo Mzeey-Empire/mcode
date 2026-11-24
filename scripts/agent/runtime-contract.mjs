@@ -224,6 +224,20 @@ export function readPortsFile(repoRoot = resolveRepoRoot()) {
   return parsed;
 }
 
+/** Waits for Electron's server to publish its endpoint for this runtime. */
+export async function waitForServerContract(repoRoot, contract, timeoutMs = 30_000, intervalMs = 300) {
+  if (contract.serverPort !== null) return contract;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = readPortsFile(repoRoot);
+    if (current && current.instanceToken === contract.instanceToken && current.serverPort !== null) {
+      return current;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(intervalMs, deadline - Date.now())));
+  }
+  throw new Error("Electron's server has not named itself in .dev/ports.json. See .dev/logs/electron-live-testing.stderr.log.");
+}
+
 /**
  * Writes the runtime port assignment to `.dev/ports.json`.
  *
@@ -245,7 +259,7 @@ export function writePortsFile(ports, repoRoot = resolveRepoRoot()) {
 /**
  * Builds the machine-readable runtime contract consumed by agents.
  *
- * @param {{ repoRoot?: string, serverPort: number, webPort: number, instanceToken: string, worktreeIdentity?: string, seedLogin: AgentRuntimePorts["seedLogin"] }} input
+ * @param {{ repoRoot?: string, serverPort: number | null, webPort: number, instanceToken: string, worktreeIdentity?: string, seedLogin: AgentRuntimePorts["seedLogin"] }} input
  * @returns {AgentRuntimePorts}
  */
 export function buildPortsContract(input) {
@@ -256,7 +270,7 @@ export function buildPortsContract(input) {
     worktreeIdentity: input.worktreeIdentity ?? repoRoot,
     serverPort: input.serverPort,
     webPort: input.webPort,
-    healthUrl: `http://127.0.0.1:${input.serverPort}/health`,
+    healthUrl: input.serverPort === null ? null : `http://127.0.0.1:${input.serverPort}/health`,
     appUrl: `http://127.0.0.1:${input.webPort}`,
     seedLogin: input.seedLogin,
     logsDir: paths.logsDir,
@@ -298,6 +312,7 @@ function assertContractObject(value, message) {
 function validateRuntimePorts(ports) {
   for (const name of ["serverPort", "webPort"]) {
     const port = ports[name];
+    if (name === "serverPort" && port === null) continue;
     if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
       throw new Error(`Invalid ${name}: ${port}`);
     }
@@ -317,7 +332,8 @@ function assertNonBlankString(value, message) {
 }
 
 function validateRuntimeUrls(ports) {
-  if (ports.healthUrl !== `http://127.0.0.1:${ports.serverPort}/health`) {
+  const healthUrl = ports.serverPort === null ? null : `http://127.0.0.1:${ports.serverPort}/health`;
+  if (ports.healthUrl !== healthUrl) {
     throw new Error("ports.json healthUrl must match serverPort");
   }
   if (ports.appUrl !== `http://127.0.0.1:${ports.webPort}`) {
@@ -343,11 +359,11 @@ function validateSeedLogin(seedLogin) {
 
 /**
  * @typedef {{
- *   serverPort: number,
+ *   serverPort: number | null,
  *   webPort: number,
  *   instanceToken: string,
  *   worktreeIdentity: string,
- *   healthUrl: string,
+ *   healthUrl: string | null,
  *   appUrl: string,
  *   seedLogin: {
  *     email: "agent@seed.local",

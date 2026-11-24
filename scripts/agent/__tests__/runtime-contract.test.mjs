@@ -132,6 +132,37 @@ NodeTest.test("ports.json round trips validated runtime ports", () => {
   }
 });
 
+NodeTest.test("ports.json accepts a pending endpoint only as a pair of nulls", () => {
+  const repo = makeRepo({ gitignore: ".dev/\n" });
+  try {
+    const pending = buildPortsContract({
+      repoRoot: repo,
+      serverPort: null,
+      webPort: 41_112,
+      instanceToken: "instance-token-abc1234567890abc1234567890",
+      seedLogin: {
+        email: "agent@seed.local",
+        token: "seed-token",
+        authHeader: "Bearer seed-token",
+        cookieName: "mcode-auth",
+      },
+    });
+
+    writePortsFile(pending, repo);
+    const { serverPort, healthUrl } = readPortsFile(repo);
+    NodeAssertStrict.default.deepEqual({ serverPort, healthUrl }, { serverPort: null, healthUrl: null });
+    for (const endpoint of [
+      { serverPort: 41_111, healthUrl: null },
+      { serverPort: null, healthUrl: "http://127.0.0.1:41111/health" },
+      { serverPort: 41_111, healthUrl: "http://127.0.0.1:41112/health" },
+    ]) {
+      NodeAssertStrict.default.throws(() => writePortsFile({ ...pending, ...endpoint }, repo), /healthUrl/);
+    }
+  } finally {
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("instance tokens are generated with crypto randomness", () => {
   const first = generateInstanceToken();
   const second = generateInstanceToken();

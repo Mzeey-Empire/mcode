@@ -8,11 +8,12 @@ import { resolveElectronBinary } from "../runtime/launch-mechanics.mjs";
 const rootDir = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..", "..");
 const skillRoot = NodePath.join(rootDir, ".agents", "skills", "electorn-live-testing", "scripts");
 const DESKTOP_STOP_TIMEOUT_MS = 30_000;
+/** Records the Electron session started by agent:up --desktop. */
 export const MANAGED_DESKTOP_SESSION_FILE = "electron-agent-runtime.json";
 
 /** Starts the owned Electron desktop session for one managed runtime. */
 export function startManagedDesktop(repoRoot, electronBin = resolveElectronBinary(rootDir)) {
-  return runDesktopHelper("start-electron.mjs", "startElectron", repoRoot, electronBin, ", waitForDebugger: false");
+  return runDesktopHelper("start-electron.mjs", "startElectron", repoRoot, electronBin, ", waitForDebugger: false, useWorktreeServer: true");
 }
 
 /** Stops the owned Electron desktop session for one managed runtime. */

@@ -30,23 +30,33 @@ export async function agentDown(repoRoot = resolveRepoRoot(), options = {}) {
   assertRuntimeFileSafe(paths.portsFile, "runtime contract", true);
   assertRuntimeDirectorySafe(paths.pidsDir, "runtime PID directory", true);
   assertRuntimeFileSafe(NodePath.join(paths.devDir, MANAGED_DESKTOP_SESSION_FILE), "desktop session", true);
-  const contract = readPortsFileForShutdown(repoRoot);
-  const gracefulShutdownRequested = Boolean(contract?.seedLogin?.token);
-  if (contract?.seedLogin?.token) {
-    try {
-      await fetchWithTimeout(`http://127.0.0.1:${contract.serverPort}/shutdown`, {
-        method: "POST",
-        headers: { Authorization: contract.seedLogin.authHeader },
-      }, options.shutdownTimeoutMs ?? 5_000);
-    } catch {
-      // Fall through to PID-based cleanup; the server may already be stopped.
-    }
-  }
+  const gracefulShutdownRequested = !hasDesktopOwnedServer(paths.pidsDir)
+    && await requestRuntimeShutdown(repoRoot, options.shutdownTimeoutMs);
 
   await stopRecordedRuntimePids(repoRoot, {
     ...options,
     gracefulShutdownRequested,
   });
+}
+
+function hasDesktopOwnedServer(pidsDir) {
+  return NodeFS.existsSync(NodePath.join(pidsDir, "desktop.pid"))
+    && !NodeFS.existsSync(NodePath.join(pidsDir, "server.pid"));
+}
+
+/** Requests shutdown of the server named by the current worktree contract. */
+export async function requestRuntimeShutdown(repoRoot, timeoutMs = 5_000) {
+  const contract = readPortsFileForShutdown(repoRoot);
+  if (!contract?.healthUrl) return false;
+  try {
+    await fetchWithTimeout(`http://127.0.0.1:${contract.serverPort}/shutdown`, {
+      method: "POST",
+      headers: { Authorization: contract.seedLogin.authHeader },
+    }, timeoutMs);
+  } catch {
+    // The server may already have stopped with Electron.
+  }
+  return true;
 }
 
 /**
@@ -114,12 +124,17 @@ export async function stopRecordedRuntimePids(repoRoot = resolveRepoRoot(), opti
     .filter((name) => name.endsWith(".pid"))
     .sort()
     .reverse();
+  const desktopOwnsServer = hasDesktopOwnedServer(paths.pidsDir);
+  if (desktopOwnsServer) {
+    pidFiles.splice(pidFiles.indexOf("desktop.pid"), 1);
+    pidFiles.unshift("desktop.pid");
+  }
 
   for (const name of pidFiles) {
     const pidFile = NodePath.join(paths.pidsDir, name);
     assertRuntimeFileSafe(pidFile, "runtime PID file");
     try {
-      await stopRuntimePidFile(name, pidFile, repoRoot, options);
+      await stopRuntimePidFile(name, pidFile, repoRoot, options, desktopOwnsServer);
     } catch (error) {
       if (error?.code !== "ENOENT") {
         console.warn(`[agent:down] ${error instanceof Error ? error.message : String(error)}`);
@@ -128,12 +143,14 @@ export async function stopRecordedRuntimePids(repoRoot = resolveRepoRoot(), opti
   }
 }
 
-async function stopRuntimePidFile(name, pidFile, repoRoot, options) {
+async function stopRuntimePidFile(name, pidFile, repoRoot, options, desktopOwnsServer) {
   if (name === "server.pid") {
     return stopRecordedServerPidFile(pidFile, repoRoot, options);
   }
   if (name === "desktop.pid") {
-    return stopRecordedDesktopPidFile(pidFile, repoRoot, options);
+    await stopRecordedDesktopPidFile(pidFile, repoRoot, options);
+    if (desktopOwnsServer) await requestRuntimeShutdown(repoRoot, options.shutdownTimeoutMs);
+    return;
   }
   return stopRecordedPidFile(pidFile, { repoRoot, stop: options.stop });
 }

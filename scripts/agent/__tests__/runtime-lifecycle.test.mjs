@@ -71,6 +71,47 @@ NodeTest.test("agentDown posts shutdown with seedLogin.authHeader and cleans onl
   }
 });
 
+for (const serverPort of [19_504, null]) {
+  const name = serverPort === null
+    ? "agentDown stops Electron and skips shutdown while the contract is pending"
+    : "agentDown stops Electron before asking its server to shut down";
+  NodeTest.test(name, async () => {
+    const repo = makeRepo();
+    const { pidsDir } = getRuntimePaths(repo);
+    const originalFetch = globalThis.fetch;
+    const events = [];
+    globalThis.fetch = async (url, init) => {
+      events.push([init.method, url, init.headers.Authorization]);
+      return new Response(null, { status: 200 });
+    };
+    try {
+      writeGracefulRuntimeContract(repo, serverPort);
+      NodeFS.mkdirSync(pidsDir, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(pidsDir, "desktop.pid"), "999998\n");
+      NodeFS.writeFileSync(NodePath.join(pidsDir, "web.pid"), "999999\n");
+
+      await agentDown(repo, {
+        stopManagedDesktop: async () => {
+          events.push("stop Electron");
+          return { status: "stopped" };
+        },
+        stop: async () => { events.push("stop web"); },
+      });
+
+      const expected = ["stop Electron"];
+      if (serverPort !== null) {
+        expected.push(["POST", "http://127.0.0.1:19504/shutdown", "Bearer seed-token"]);
+      }
+      expected.push("stop web");
+      NodeAssertStrict.default.deepEqual(events, expected);
+      NodeAssertStrict.default.deepEqual(NodeFS.readdirSync(pidsDir), []);
+    } finally {
+      globalThis.fetch = originalFetch;
+      NodeFS.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+}
+
 NodeTest.test("agentDown falls back to PID cleanup when the shutdown request never settles", { timeout: 1_000 }, async () => {
   const repo = makeRepo();
   const originalFetch = globalThis.fetch;
@@ -482,7 +523,7 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
   const repo = makeRepo();
   const paths = getRuntimePaths(repo);
   const originalFetch = globalThis.fetch;
-  let desktopStarted = false;
+  let healthUrl;
   let desktopPageProbes = 0;
   const restoreHooks = setAgentUpTestHooks({
     stopRecordedRuntimePids: async () => {},
@@ -492,7 +533,7 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
     startManagedDesktop: (receivedRepo, electronBin) => {
       NodeAssertStrict.default.equal(receivedRepo, repo);
       NodeAssertStrict.default.equal(electronBin, process.execPath);
-      desktopStarted = true;
+      publishDesktopEndpoint(repo);
       return { endpoint: "http://127.0.0.1:43001", pid: 81_001 };
     },
   });
@@ -508,15 +549,17 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
         },
       ]));
     }
+    if (String(url).endsWith("/health")) healthUrl = url;
     return new Response("", { status: 200 });
   };
   process.argv.push("--quiet");
 
   try {
     provisionRuntime(repo);
-    await agentUp(repo, { desktop: true, wait: true });
+    const contract = await agentUp(repo, { desktop: true, wait: true });
 
-    NodeAssertStrict.default.equal(desktopStarted, true);
+    NodeAssertStrict.default.equal(healthUrl, "http://127.0.0.1:19504/health");
+    NodeAssertStrict.default.equal(contract.serverPort, 19_504);
     NodeAssertStrict.default.equal(desktopPageProbes, 3);
     NodeAssertStrict.default.equal(
       NodeFS.readFileSync(NodePath.join(paths.pidsDir, "desktop.pid"), "utf8"),
@@ -532,19 +575,34 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
 
 NodeTest.test("agentUp --desktop defaults to no CDP readiness wait", async () => {
   const repo = makeRepo();
+  const { pidsDir } = getRuntimePaths(repo);
   let pageWaited = false;
+  let launchContract;
+  const spawned = [];
   const restoreHooks = setAgentUpTestHooks({
     stopRecordedRuntimePids: async () => {},
     computeAvailablePorts: async () => ({ serverPort: 41_257, webPort: 41_258 }),
     getElectronBinary: () => process.execPath,
-    spawnLogged: () => ({ pid: 81_020 }),
-    startManagedDesktop: () => ({ endpoint: "http://127.0.0.1:43003", pid: 81_021 }),
+    spawnLogged: (_command, args) => {
+      spawned.push(args);
+      return { pid: 81_020 };
+    },
+    startManagedDesktop: (root) => {
+      launchContract = readPortsFile(root);
+      return { endpoint: "http://127.0.0.1:43003", pid: 81_021 };
+    },
     waitForDesktopPage: async () => { pageWaited = true; },
   });
   try {
     provisionRuntime(repo);
-    await agentUp(repo, { desktop: true });
+    const contract = await agentUp(repo, { desktop: true });
     NodeAssertStrict.default.equal(pageWaited, false);
+    NodeAssertStrict.default.deepEqual(spawned, [["run", "dev", "--host", "127.0.0.1", "--port", "41258", "--strictPort"]]);
+    NodeAssertStrict.default.deepEqual(NodeFS.readdirSync(pidsDir).sort(), ["desktop.pid", "web.pid"]);
+    NodeAssertStrict.default.equal(launchContract.serverPort, null);
+    NodeAssertStrict.default.equal(launchContract.healthUrl, null);
+    NodeAssertStrict.default.match(launchContract.seedLogin.token, /^[0-9a-f-]{36}$/);
+    NodeAssertStrict.default.equal(launchContract.seedLogin.token, contract.seedLogin.token);
   } finally {
     restoreHooks();
     NodeFS.rmSync(repo, { recursive: true, force: true });
@@ -598,7 +656,10 @@ NodeTest.test("agentUp removes the desktop PID after managed page readiness fail
     computeAvailablePorts: async () => ({ serverPort: 41_253, webPort: 41_254 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: spawnChild,
-    startManagedDesktop: () => ({ ...spawnChild(), endpoint: "http://127.0.0.1:43002" }),
+    startManagedDesktop: () => {
+      publishDesktopEndpoint(repo);
+      return { ...spawnChild(), endpoint: "http://127.0.0.1:43002" };
+    },
     stopManagedDesktop: () => ({ status: "stopped" }),
     waitForDesktopPage: async () => { throw new Error("managed app page did not load"); },
   });
@@ -966,12 +1027,11 @@ NodeTest.test("agentUp falls back to the captured desktop PID when managed clean
   const repo = makeRepo();
   const paths = getRuntimePaths(repo);
   const stopped = [];
-  let spawned = 0;
   const restoreHooks = setAgentUpTestHooks({
     stopRecordedRuntimePids: async () => {},
     computeAvailablePorts: async () => ({ serverPort: 41_285, webPort: 41_286 }),
     getElectronBinary: () => process.execPath,
-    spawnLogged: () => ({ pid: spawned++ === 0 ? 81_085 : 81_086 }),
+    spawnLogged: () => ({ pid: 81_085 }),
     startManagedDesktop: () => {
       NodeFS.writeFileSync(NodePath.join(paths.devDir, "electron-agent-runtime.json"), "session\n");
       return { endpoint: "http://127.0.0.1:43008", pid: 81_087 };
@@ -994,7 +1054,7 @@ NodeTest.test("agentUp falls back to the captured desktop PID when managed clean
       error = caught;
     }
     NodeAssertStrict.default.match(error.message, /cannot record desktop PID/);
-    NodeAssertStrict.default.deepEqual(stopped, [81_087, 81_086, 81_085]);
+    NodeAssertStrict.default.deepEqual(stopped, [81_087, 81_085]);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.devDir, "electron-agent-runtime.json")), false);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.pidsDir, "server.pid")), false);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.pidsDir, "web.pid")), false);
@@ -1384,7 +1444,7 @@ NodeTest.test("server stop polling does not treat a self-caused probe timeout as
 /** Waits for dev-web to report the server-only health port. */
 async function waitForServerPort(readOutput) {
   return waitUntil(() => {
-    const match = /Mcode server listening on 127\.0\.0\.1:(\d+)/.exec(readOutput());
+    const match = /Server ready on port (\d+)/.exec(readOutput());
     if (match) return Number(match[1]);
     return false;
   }, {
@@ -1468,7 +1528,7 @@ function writeGracefulRuntimeContract(repo, serverPort) {
   writePortsFile(buildPortsContract({
     repoRoot: repo,
     serverPort,
-    webPort: serverPort + 1,
+    webPort: 41_124,
     instanceToken: "instance-token-abc1234567890abc1234567890",
     worktreeIdentity: repo,
     seedLogin: {
@@ -1478,4 +1538,9 @@ function writeGracefulRuntimeContract(repo, serverPort) {
       cookieName: "mcode-auth",
     },
   }), repo);
+}
+
+function publishDesktopEndpoint(repo) {
+  const contract = readPortsFile(repo);
+  writePortsFile({ ...contract, serverPort: 19_504, healthUrl: "http://127.0.0.1:19504/health" }, repo);
 }

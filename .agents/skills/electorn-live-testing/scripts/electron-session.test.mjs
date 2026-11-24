@@ -56,8 +56,19 @@ function createSessionFixture(sessionFileName = "electron-live-testing.json") {
 
 test("blocks viewport emulation on the default session page", async () => {
   const fixture = createSessionFixture();
-  const session = await connectElectronSession(fixture.options);
+  const { playwright, repoRoot } = fixture.options;
+  const session = await connectElectronSession({ playwright, repoRoot });
 
+  await expect(session.page.setViewportSize({ width: 1200, height: 800 }))
+    .rejects.toThrow("setElectronWindowSize");
+});
+
+test("connects to the managed session by default", async () => {
+  const fixture = createSessionFixture("electron-agent-runtime.json");
+  const { playwright, repoRoot } = fixture.options;
+  const session = await connectElectronSession({ playwright, repoRoot });
+
+  expect(session.sessionFile).toBe(NodePath.join(repoRoot, ".dev", "electron-agent-runtime.json"));
   await expect(session.page.setViewportSize({ width: 1200, height: 800 }))
     .rejects.toThrow("setElectronWindowSize");
 });

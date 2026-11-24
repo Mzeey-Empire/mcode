@@ -9,7 +9,7 @@ Use one persistent Playwright connection to an agent-owned Electron process. Lau
 
 ## Start the session
 
-1. Read `docs/agents/runtime.md`. Run `bun run agent:setup` if runtime artifacts are absent or stale. Start the worktree runtime with `bun run --shell system agent:up` if it is not healthy. Poll `healthUrl` and `appUrl` before you start Electron.
+1. Read `docs/agents/runtime.md`. Run `bun run agent:setup` if runtime artifacts are absent or stale. Start the worktree runtime with `bun run --shell system agent:up --desktop`, then run `bun run agent:ready`.
 2. Read `.dev/ports.json`. Never print its token or seeded credentials.
 3. Make Playwright importable by the Node REPL. Prefer an existing external installation. Otherwise use the helper to create an isolated private package under `.dev/playwright-scratch`. Never add Playwright to the repository package manifest:
 
@@ -17,16 +17,8 @@ Use one persistent Playwright connection to an agent-owned Electron process. Lau
    bun .agents/skills/electorn-live-testing/scripts/ensure-playwright.mjs
    ```
 
-4. Start or reuse the owned Electron process. The launcher selects a dynamic CDP port and records only its own PID:
-
-   ```powershell
-   bun .agents/skills/electorn-live-testing/scripts/start-electron.mjs
-   ```
-
-   This Electron window does not use the server in `.dev/ports.json`. Its desktop process starts a private server on a port from 19500 to 19600, with its own database under the session's `.dev` runtime folder, and every load and reload reaches that server. Data you create through the `ports.json` API does not appear in the window. Read the window's server with `await page.evaluate(async () => (await window.desktopBridge.getServerUrl()).url)`, and never print the token in that URL.
-
-5. Add the absolute `.dev/playwright-scratch/node_modules` directory with `mcp__node_repl__js_add_node_module_dir`.
-6. Import Playwright and the session helper in `mcp__node_repl__js`. Use top-level `var` names because the kernel preserves bindings:
+4. Add the absolute `.dev/playwright-scratch/node_modules` directory with `mcp__node_repl__js_add_node_module_dir`.
+5. Import Playwright and the session helper in `mcp__node_repl__js`. Use top-level `var` names because the kernel preserves bindings:
 
    ```js
    var electronPlaywright = await import("playwright");
@@ -40,6 +32,10 @@ Use one persistent Playwright connection to an agent-owned Electron process. Lau
    var electronPage = electronSession.page;
    nodeRepl.write({ pid: electronSession.pid, url: electronPage.url() });
    ```
+
+The window, the API in `.dev/ports.json`, and `db:seed` use the same server and database.
+
+Running `start-electron.mjs` by hand starts a disposable window with its own server and database.
 
 Do not reset the Node REPL while the application is open. Do not launch a second session to perform the next action.
 
@@ -162,7 +158,7 @@ Main-process and preload changes require a rebuild and clean Electron relaunch. 
 
 ## Close the owned session
 
-Disconnect Playwright, then stop the exact process tree owned by the launcher:
+Disconnect Playwright:
 
 ```js
 await electronSessionHelper.disconnectElectronSession(electronSession);
@@ -172,9 +168,9 @@ nodeRepl.write("Playwright disconnected");
 ```
 
 ```powershell
-bun .agents/skills/electorn-live-testing/scripts/stop-electron.mjs
+bun run --shell system agent:down
 ```
 
-Then run `bun run --shell system agent:down` only when this workflow started the runtime. The stop helper verifies the recorded executable and dynamic CDP port before stopping the PID tree. If verification fails, inspect `.dev/electron-live-testing.json` and the live command before cleanup. Never kill Electron processes by name.
+Run `agent:down` only when this workflow started the runtime. For a disposable session launched by hand, run `bun .agents/skills/electorn-live-testing/scripts/stop-electron.mjs` to close it. Never kill Electron processes by name.
 
 Report desktop evidence separately from focused automated tests.

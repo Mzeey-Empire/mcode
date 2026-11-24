@@ -9,7 +9,7 @@ import { isOwnedElectronProcess } from "../../.agents/skills/electorn-live-testi
 import { checkBuildStamp, describeBuildStamp } from "./build-stamp.mjs";
 import { MANAGED_DESKTOP_SESSION_FILE } from "./managed-desktop.mjs";
 import { waitForDesktopPage, waitForHttpOk } from "./agent-up.mjs";
-import { getRuntimePaths, readPortsFile, resolveRepoRoot } from "./runtime-contract.mjs";
+import { getRuntimePaths, readPortsFile, resolveRepoRoot, waitForServerContract } from "./runtime-contract.mjs";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -26,9 +26,10 @@ export async function agentReady(
     throw new Error("Runtime contract belongs to a different worktree. Run 'bun run --shell system agent:up' again.");
   }
 
+  const readyContract = await waitForServerContract(root, contract, timeoutMs, httpOptions?.intervalMs);
   const desktop = readManagedDesktopSession(root, contract.appUrl);
   await Promise.all([
-    waitForHttpOk(contract.healthUrl, "server health", timeoutMs, httpOptions),
+    waitForHttpOk(readyContract.healthUrl, "server health", timeoutMs, httpOptions),
     waitForHttpOk(contract.appUrl, "web app", timeoutMs, httpOptions),
     ...(desktop ? [
       waitForCdpVersion(desktop.endpoint, timeoutMs, httpOptions),
