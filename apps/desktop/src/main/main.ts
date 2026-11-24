@@ -9,6 +9,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  crashReporter,
   dialog,
   ipcMain,
   Notification,
@@ -99,6 +100,15 @@ if (harnessUserDataDir && harnessCapabilityPath && NodePath.isAbsolute(harnessUs
     "userData",
     agentUserDataDir || NodePath.join(app.getPath("appData"), "Mcode-Dev"),
   );
+}
+
+// A Chromium internal check failure kills a renderer with exit code
+// 0x80000003 and no message, so a minidump is the only record of its cause.
+// Dumps stay on disk under userData's Crashpad folder and are never uploaded.
+// Crashpad watches only processes created after this call, and it runs after
+// the userData override so each worktree keeps its own dumps.
+if (!app.isPackaged) {
+  crashReporter.start({ uploadToServer: false });
 }
 
 const printsVersion = shouldPrintVersion(process.argv);
