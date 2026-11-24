@@ -95,6 +95,17 @@ logger: a `fatal` record in the daily `mcode.log.<date>` file and a mirror in
 error name, message, stack, errno fields, PID, and uptime. Event-loop stalls
 over 500ms and every process exit are appended to the daily log the same way.
 
+When a renderer dies, the desktop log records `Renderer process gone` with its
+reason and exit code. Exit code `-2147483645` (`0x80000003`) marks a deliberate
+Chromium crash, such as a failed internal check. CDP `Page.crash` produces the same
+code, so the exit code alone does not identify the cause. Development builds keep a
+minidump of every crash in `Crashpad/reports` under Electron's userData
+directory, `.dev/electron-agent-runtime` for `agent:up --desktop`. Nothing
+uploads them. Dumps can hold conversation text and tokens, so keep them out of
+issues and pull requests. Open one in WinDbg with Electron's symbol server,
+`https://symbols.electronjs.org`, to see the failing check's stack. Installed
+builds do not write minidumps.
+
 Startup checkpoint logs use past-tense messages and include the completed
 stage, server PID, and elapsed milliseconds since the bootstrap function began.
 Compare the last completed stage with the captured error. An exit before the

@@ -44,6 +44,7 @@ vi.mock("electron", () => ({
     getAllWindows: vi.fn().mockReturnValue([]),
   },
   clipboard: {},
+  crashReporter: { start: vi.fn() },
   dialog: { showErrorBox: vi.fn() },
   ipcMain: { handle: vi.fn(), on: vi.fn() },
   Menu: { buildFromTemplate: vi.fn(), setApplicationMenu: vi.fn() },

@@ -9,6 +9,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  crashReporter,
   dialog,
   ipcMain,
   Notification,
@@ -69,6 +70,7 @@ import {
 import { registerAttachmentsFeature } from "../features/attachments/index.js";
 import { isDesktopDev } from "./is-desktop-dev.js";
 import { shouldPrintVersion } from "./cli-args.js";
+import { crashDumpOptions } from "./crash-dumps.js";
 
 // Imports evaluate before any statement here, wherever they sit in the file,
 // so this marks the end of main's module loading.
@@ -99,6 +101,13 @@ if (harnessUserDataDir && harnessCapabilityPath && NodePath.isAbsolute(harnessUs
     "userData",
     agentUserDataDir || NodePath.join(app.getPath("appData"), "Mcode-Dev"),
   );
+}
+
+// Crashpad watches only processes created after it starts. Start it after the
+// userData override so dumps land in this launch's userData folder.
+const dumpOptions = crashDumpOptions(app.isPackaged);
+if (dumpOptions !== null) {
+  crashReporter.start(dumpOptions);
 }
 
 const printsVersion = shouldPrintVersion(process.argv);
