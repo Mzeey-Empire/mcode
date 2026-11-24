@@ -113,6 +113,64 @@ for (const serverPort of [19_504, null]) {
   });
 }
 
+for (const serverLock of [
+  { name: "force-stops the server after the grace period", port: 19_504, authToken: "seed-token", forceStop: true, exits: true },
+  { name: "ignores a different lock port", port: 19_505, authToken: "seed-token", forceStop: false, exits: false },
+  { name: "ignores a different lock token", port: 19_504, authToken: "other-token", forceStop: false, exits: false },
+  { name: "reports a server that survives the force-stop as unconfirmed", port: 19_504, authToken: "seed-token", forceStop: true, exits: false },
+]) {
+  NodeTest.test(`agentDown in desktop mode ${serverLock.name}`, async () => {
+    const repo = makeRepo();
+    const paths = getRuntimePaths(repo);
+    const pidFile = NodePath.join(paths.pidsDir, "desktop.pid");
+    const lockPath = NodePath.join(paths.devDir, "server.lock");
+    const originalFetch = globalThis.fetch;
+    const events = [];
+    let clock = 0;
+    let serverAlive = true;
+    globalThis.fetch = async () => {
+      events.push("shutdown request");
+      return new Response(null, { status: 200 });
+    };
+    try {
+      writeGracefulRuntimeContract(repo, 19_504, "desktop");
+      NodeFS.mkdirSync(paths.pidsDir, { recursive: true });
+      NodeFS.writeFileSync(pidFile, "999998\n");
+      NodeFS.writeFileSync(lockPath, JSON.stringify({
+        port: serverLock.port,
+        authToken: serverLock.authToken,
+        pid: 700_006,
+      }));
+
+      const result = await agentDown(repo, {
+        stopManagedDesktop: async () => {
+          events.push("stop Electron");
+          if (serverLock.exits) NodeFS.rmSync(lockPath);
+          return { status: "stopped" };
+        },
+        serverGraceMs: 25,
+        isProcessAlive: () => serverAlive,
+        now: () => clock,
+        sleep: async (durationMs) => { clock += durationMs; },
+        stop: async (pid) => {
+          events.push(["force-stop", pid, clock]);
+          if (serverLock.exits) serverAlive = false;
+        },
+      });
+
+      const expected = ["stop Electron", "shutdown request"];
+      if (serverLock.forceStop) expected.push(["force-stop", 700_006, 25]);
+      const unconfirmed = serverLock.forceStop && !serverLock.exits ? ["desktop.pid"] : [];
+      NodeAssertStrict.default.deepEqual(events, expected);
+      NodeAssertStrict.default.deepEqual(result, { complete: unconfirmed.length === 0, unconfirmed });
+      NodeAssertStrict.default.equal(NodeFS.existsSync(pidFile), unconfirmed.length > 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      NodeFS.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+}
+
 NodeTest.test("agentDown falls back to PID cleanup when the shutdown request never settles", { timeout: 1_000 }, async () => {
   const repo = makeRepo();
   const originalFetch = globalThis.fetch;

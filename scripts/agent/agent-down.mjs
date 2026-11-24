@@ -136,7 +136,7 @@ export async function stopRecordedRuntimePids(repoRoot = resolveRepoRoot(), opti
     assertRuntimeFileSafe(pidFile, "runtime PID file", true);
     if (!NodeFS.existsSync(pidFile)) continue;
     try {
-      await stopRuntimePidFile(name, pidFile, repoRoot, options, desktopOwnsServer);
+      await stopRuntimePidFile(name, pidFile, repoRoot, options);
     } catch (error) {
       unconfirmed.push(name);
       console.warn(`[agent:down] ${name}: ${error instanceof Error ? error.message : String(error)}`);
@@ -145,30 +145,56 @@ export async function stopRecordedRuntimePids(repoRoot = resolveRepoRoot(), opti
   return { complete: unconfirmed.length === 0, unconfirmed };
 }
 
-async function stopRuntimePidFile(name, pidFile, repoRoot, options, desktopOwnsServer) {
+async function stopRuntimePidFile(name, pidFile, repoRoot, options) {
   if (name === "server.pid") {
     return stopRecordedServerPidFile(pidFile, repoRoot, options);
   }
   if (name === "desktop.pid") {
-    await stopRecordedDesktopPidFile(pidFile, repoRoot, options);
-    if (desktopOwnsServer) await requestRuntimeShutdown(repoRoot, options.shutdownTimeoutMs);
-    return;
+    return stopRecordedDesktopPidFile(pidFile, repoRoot, options);
   }
   return stopRuntimePid(pidFile, repoRoot, options);
 }
 
 /** Stops the validated managed desktop process tree before removing its PID file. */
 export async function stopRecordedDesktopPidFile(pidFile, repoRoot, options = {}) {
+  const paths = getRuntimePaths(repoRoot);
+  const desktopOwnsServer = hasDesktopOwnedServer(paths.pidsDir);
+  const serverPid = desktopOwnsServer ? readDesktopServerPid(repoRoot, paths.devDir) : null;
   const stopDesktop = options.stopManagedDesktop ?? stopManagedDesktop;
   const result = await stopDesktop(repoRoot);
   if (result.status === "not-running") {
-    return stopRuntimePid(pidFile, repoRoot, options);
+    assertRuntimeFileSafe(pidFile, "runtime PID file");
+    await stopAndConfirmPid(parsePidFile(pidFile), options);
   }
   if (result.status === "unconfirmed") {
     throw new Error(`Could not confirm Electron stopped for PID ${result.pid}: ${result.reason}`);
   }
-  if (result.status === "stopped" || result.status === "already-stopped") {
-    NodeFS.rmSync(pidFile);
+  if (desktopOwnsServer) {
+    await requestRuntimeShutdown(repoRoot, options.shutdownTimeoutMs);
+    if (serverPid !== null && !await waitForServerGrace(serverPid, options)) {
+      await stopAndConfirmPid(serverPid, options);
+    }
+  }
+  // The desktop PID file keeps the desktop server eligible for a later shutdown retry.
+  NodeFS.rmSync(pidFile);
+}
+
+function readDesktopServerPid(repoRoot, devDir) {
+  const contract = readPortsFileForShutdown(repoRoot);
+  if (!contract?.healthUrl) return null;
+
+  const lock = readServerLock(NodePath.join(devDir, "server.lock"));
+  if (lock?.port !== contract.serverPort || lock.authToken !== contract.seedLogin.token) return null;
+  return Number.isSafeInteger(lock.pid) && lock.pid > 0 ? lock.pid : null;
+}
+
+function readServerLock(lockPath) {
+  assertRuntimeFileSafe(lockPath, "server lock", true);
+  try {
+    return JSON.parse(NodeFS.readFileSync(lockPath, "utf8"));
+  } catch (error) {
+    if (error instanceof SyntaxError || error?.code === "ENOENT") return null;
+    throw error;
   }
 }
 
@@ -184,19 +210,21 @@ async function stopRecordedServerPidFile(pidFile, repoRoot, options) {
   if (!options.gracefulShutdownRequested) {
     return stopRuntimePid(pidFile, repoRoot, options);
   }
-  const graceMs = options.serverGraceMs ?? options.shutdownGraceMs ?? 10_000;
-  const isProcessAlive = options.isProcessAlive ?? isPidAlive;
   const pid = parsePidFile(pidFile);
-  const stopped = await waitForProcessExit(pid, graceMs, {
-    isProcessAlive,
-    sleep: options.sleep,
-    now: options.now,
-  });
-  if (stopped) {
+  if (await waitForServerGrace(pid, options)) {
     NodeFS.rmSync(pidFile);
     return;
   }
   await stopRuntimePid(pidFile, repoRoot, options);
+}
+
+function waitForServerGrace(pid, options) {
+  const graceMs = options.serverGraceMs ?? options.shutdownGraceMs ?? 10_000;
+  return waitForProcessExit(pid, graceMs, {
+    isProcessAlive: options.isProcessAlive ?? isPidAlive,
+    sleep: options.sleep,
+    now: options.now,
+  });
 }
 
 function stopRuntimePid(pidFile, repoRoot, options) {
