@@ -19,10 +19,11 @@ import * as NodeUtil from "node:util";
 // Free minutes a month, counted in 2 vCPU Linux x64 minutes. GitHub-hosted runners
 // are absent on purpose: standard runners are free and unmetered for public repos.
 export const ALLOWANCE = { avrea: 3_000, blacksmith: 3_000 };
-// Leave each provider this many minutes before its allowance. Jobs that finish
-// between two passes are not counted yet, and Avrea without a card cancels new
-// jobs once the free minutes run out, which fails the PR check.
-export const SAFETY_MARGIN = 300;
+// Leave each provider this many minutes before its allowance. CI runs already
+// started when the pool changes still finish on the provider, at about 18
+// minutes a run, so this covers about three runs in flight. It holds only
+// because runner-pool.yml runs a pass after every CI run.
+export const SAFETY_MARGIN = 60;
 const POOL_ORDER = ["avrea", "blacksmith", "github"];
 const STATE_VARIABLE = "CI_RUNNER_USAGE";
 const POOL_VARIABLE = "CI_RUNNER_POOL";
@@ -121,10 +122,17 @@ export function classifyJob(labels) {
   return { provider, weight };
 }
 
-/** Rounds a job's run time up to whole minutes, the way providers bill. */
-export function billedMinutes(job) {
-  const seconds = (Date.parse(job.completed_at) - Date.parse(job.started_at)) / 1_000;
-  return Math.max(1, Math.ceil(seconds / 60));
+/**
+ * Returns the 2 vCPU Linux minutes a job drew from its provider's free minutes.
+ * Each provider rounds differently, fitted to its dashboard on 24 November 2026.
+ * Blacksmith rounds each job up to a whole 2 vCPU minute: 2,671 counted against
+ * 2,673 shown. Avrea matched per-second billing best: 2,929 counted against
+ * about 2,763 shown. Rounding every job up to a whole minute had counted 4,157,
+ * because most jobs run for under a minute.
+ */
+export function billedMinutes(job, { provider, weight }) {
+  const minutes = ((Date.parse(job.completed_at) - Date.parse(job.started_at)) / 60_000) * weight;
+  return provider === "blacksmith" ? Math.ceil(minutes) : minutes;
 }
 
 /**
@@ -321,7 +329,7 @@ async function runMinutes(gh, runEndpoint, counted) {
   for (const job of jobs) {
     const target = classifyJob(job.labels);
     if (target && job.run_attempt > counted && ranOnRunner(job)) {
-      minutes[target.provider] = (minutes[target.provider] ?? 0) + billedMinutes(job) * target.weight;
+      minutes[target.provider] = (minutes[target.provider] ?? 0) + billedMinutes(job, target);
     }
   }
   return minutes;
@@ -334,7 +342,7 @@ function ranOnRunner(job) {
 
 function printTally(io, state, pool) {
   for (const [provider, allowance] of Object.entries(ALLOWANCE)) {
-    io.stdout(`${provider}: ${state.used[provider] ?? 0} of ${allowance} free minutes used in ${state.month}`);
+    io.stdout(`${provider}: ${Math.round(state.used[provider] ?? 0)} of ${allowance} free minutes used in ${state.month}`);
   }
   io.stdout(`${POOL_VARIABLE}=${pool}`);
 }

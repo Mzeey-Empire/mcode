@@ -1,7 +1,7 @@
 import * as NodeTest from "node:test";
 import * as NodeAssertStrict from "node:assert/strict";
 
-import { choosePool, classifyJob, main } from "../runner-pool.mjs";
+import { billedMinutes, choosePool, classifyJob, main } from "../runner-pool.mjs";
 
 const REPO = "Mzeey-Empire/mcode";
 const NOW = new Date("2026-11-09T12:00:00Z");
@@ -105,12 +105,19 @@ NodeTest.default("weights each provider job in 2 vCPU Linux minutes and ignores 
   NodeAssertStrict.deepEqual(classifyJob(["avrea-macos-26-16-vcpu"]), { provider: "avrea", weight: 40 });
 });
 
+NodeTest.default("bills Avrea by the second and rounds each Blacksmith job up to a whole 2 vCPU minute", () => {
+  const fifteenSeconds = job([], 0.25);
+  NodeAssertStrict.equal(billedMinutes(fifteenSeconds, classifyJob(["avrea-ubuntu-latest-4-vcpu"])), 0.5);
+  NodeAssertStrict.equal(billedMinutes(fifteenSeconds, classifyJob(["blacksmith-4vcpu-ubuntu-2404"])), 1);
+  NodeAssertStrict.equal(billedMinutes(job([], 2.25), classifyJob(["blacksmith-4vcpu-ubuntu-2404"])), 5);
+});
+
 NodeTest.default("keeps a provider in the pool only while it is under today's share and the safety margin", () => {
   // 9 November: today's share of 3,000 over 30 days is 900.
   NodeAssertStrict.deepEqual(choosePool({ avrea: 899, blacksmith: 900 }, NOW), ["avrea", "github"]);
-  // 30 November: the share is 3,000, so the 300-minute margin decides.
+  // 30 November: the share is 3,000, so the 60-minute margin decides.
   const lastDay = new Date("2026-11-30T23:00:00Z");
-  NodeAssertStrict.deepEqual(choosePool({ avrea: 2_699, blacksmith: 2_700 }, lastDay), ["avrea", "github"]);
+  NodeAssertStrict.deepEqual(choosePool({ avrea: 2_939, blacksmith: 2_940 }, lastDay), ["avrea", "github"]);
   NodeAssertStrict.deepEqual(choosePool({ avrea: 5_000, blacksmith: 5_000 }, lastDay), ["github"]);
 });
 
