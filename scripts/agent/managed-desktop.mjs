@@ -7,6 +7,7 @@ import { resolveElectronBinary } from "../runtime/launch-mechanics.mjs";
 
 const rootDir = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..", "..");
 const skillRoot = NodePath.join(rootDir, ".agents", "skills", "electorn-live-testing", "scripts");
+const DESKTOP_STOP_TIMEOUT_MS = 30_000;
 export const MANAGED_DESKTOP_SESSION_FILE = "electron-agent-runtime.json";
 
 /** Starts the owned Electron desktop session for one managed runtime. */
@@ -28,13 +29,23 @@ async function runDesktopHelper(scriptName, exportName, repoRoot, electronBin, e
     "process.stdout.write(JSON.stringify(result));",
     "}).catch((error) => { console.error(error); process.exitCode = 1; });",
   ].join("");
+  const timeout = exportName === "stopElectron" ? DESKTOP_STOP_TIMEOUT_MS : 0;
   const output = await new Promise((resolveOutput, rejectOutput) => {
     NodeChildProcess.execFile(electronBin, ["-e", source], {
       cwd: repoRoot,
       encoding: "utf8",
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      timeout,
       windowsHide: true,
-    }, (error, stdout) => error ? rejectOutput(error) : resolveOutput(stdout));
+    }, (error, stdout) => {
+      if (timeout && error?.killed && error.signal === "SIGTERM") {
+        rejectOutput(new Error(`The desktop stop helper timed out after ${timeout}ms`, { cause: error }));
+      } else if (error) {
+        rejectOutput(error);
+      } else {
+        resolveOutput(stdout);
+      }
+    });
   });
   return JSON.parse(output);
 }
