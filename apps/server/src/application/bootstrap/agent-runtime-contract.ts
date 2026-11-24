@@ -1,5 +1,50 @@
 import * as NodeFS from "node:fs";
 
+/** Publishes one listening endpoint for desktop discovery and agent runtime readiness. */
+export function publishServerEndpoint({
+  lockPath,
+  contractPath,
+  port,
+  authToken,
+  singleInstance,
+  pid,
+  version,
+  ipcPath,
+}: {
+  lockPath: string;
+  contractPath?: string;
+  port: number;
+  authToken: string;
+  singleInstance: boolean;
+  pid: number;
+  version: string;
+  ipcPath: string;
+}): { lockError: string | null; contractError: string | null } {
+  let lockError: string | null = null;
+  let contractError: string | null = null;
+  try {
+    const lockData = JSON.stringify({
+      port,
+      ...(!singleInstance && { authToken }),
+      pid,
+      startedAt: new Date().toISOString(),
+      version,
+      ipcPath,
+    });
+    NodeFS.writeFileSync(lockPath, lockData, { mode: 0o600 });
+  } catch (error) {
+    lockError = String(error);
+  }
+  if (contractPath) {
+    try {
+      publishAgentRuntimeEndpoint(contractPath, port, authToken);
+    } catch (error) {
+      contractError = String(error);
+    }
+  }
+  return { lockError, contractError };
+}
+
 /** Publishes the listening endpoint to the contract owned by this server's auth token. */
 export function publishAgentRuntimeEndpoint(path: string, port: number, authToken: string): void {
   const stats = NodeFS.lstatSync(path, { throwIfNoEntry: false });
