@@ -591,10 +591,26 @@ async function writeStdout(value) {
   });
 }
 
+function describeStartupError(error) {
+  if (!(error instanceof Error)) return String(error);
+  // A failed rollback rides in an AggregateError; name what still needs stopping.
+  if (error instanceof AggregateError) {
+    const cleanupMessages = error.errors.slice(1).map((inner) => inner?.message ?? String(inner));
+    return [error.message, ...cleanupMessages].join("; ");
+  }
+  return error.message;
+}
+
 if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
   const repoArg = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
   const repoRoot = repoArg ? NodePath.resolve(repoArg) : resolveRepoRoot();
-  await agentUp(repoRoot, parseAgentUpOptions(process.argv.slice(2)));
+  try {
+    await agentUp(repoRoot, parseAgentUpOptions(process.argv.slice(2)));
+  } catch (error) {
+    // Agents read this output; a refusal such as the mode guard must stay one actionable line.
+    process.stderr.write(`Agent runtime did not start: ${describeStartupError(error)}\n`);
+    process.exit(1);
+  }
   if (readRuntimeDatabaseSeed(repoRoot) === "filtered") {
     console.warn(
       "The local database holds a filtered copy of your real data. Keep it out of screenshots and recordings; 'bun run agent:reset' empties it.",
