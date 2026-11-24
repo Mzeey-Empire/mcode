@@ -119,6 +119,7 @@ async function startProvisionedRuntime({ bunBin, desktop, electronBin, paths, re
     startedProcesses.push({ name: "web", pid: requireChildPid("web", web) });
     startedProcesses.at(-1).pidFile = persistPid(paths, "web", web.pid);
 
+    if (desktop) await waitForHttpOk(runtime.contract.appUrl, "web app");
     const desktopProcess = desktop ? await startRuntimeDesktop(repoRoot, electronBin) : null;
     if (desktopProcess) {
       startedProcesses.push({ name: "desktop", pid: requireChildPid("desktop", desktopProcess) });
@@ -377,39 +378,101 @@ export async function waitForHttpOk(url, label, timeoutMs = 30_000, options) {
   return waitForSharedHttpOk(url, label, timeoutMs, options);
 }
 
-/** Waits until Electron opens the exact managed worktree app page. */
+/** Waits until Electron's page reports the exact managed worktree app location. */
 export async function waitForDesktopPage(
   endpoint,
   appUrl,
-  { fetchImpl = globalThis.fetch, intervalMs = 200, probeTimeoutMs = 1_000, timeoutMs = 30_000 } = {},
+  {
+    fetchImpl,
+    readPageLocation,
+    intervalMs = 200,
+    probeTimeoutMs = 1_000,
+    timeoutMs = 30_000,
+  } = {},
 ) {
   const expectedUrl = new URL(appUrl);
   const deadline = Date.now() + timeoutMs;
+  let lastObservedLocations = [];
   while (Date.now() < deadline) {
-    const controller = new AbortController();
-    const remainingMs = Math.max(1, deadline - Date.now());
-    const probeTimer = setTimeout(() => controller.abort(), Math.min(probeTimeoutMs, remainingMs));
-    try {
-      const response = await fetchImpl(`${endpoint}/json/list`, { signal: controller.signal });
-      const targets = await response.json();
-      if (Array.isArray(targets) && targets.some((target) => isManagedAppPage(target, expectedUrl))) {
-        return;
-      }
-    } catch {
-      // Electron may expose CDP before the BrowserWindow finishes loading.
-    } finally {
-      clearTimeout(probeTimer);
-    }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, intervalMs));
+    const remainingMs = Math.min(probeTimeoutMs, deadline - Date.now());
+    const locations = await probeDesktopPages(endpoint, expectedUrl, remainingMs, { fetchImpl, readPageLocation });
+    if (locations.some((href) => isAppLocation(href, expectedUrl))) return;
+    if (locations.length > 0) lastObservedLocations = locations;
+
+    const delayMs = Math.min(intervalMs, deadline - Date.now());
+    if (delayMs > 0) await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
+  }
+  if (lastObservedLocations.some((href) => href.startsWith("chrome-error://"))) {
+    throw new Error(`Electron shows an error page instead of ${appUrl}; see .dev/logs/electron-live-testing.stderr.log`);
   }
   throw new Error(`Electron did not open the managed app URL within ${timeoutMs}ms`);
 }
 
-function isManagedAppPage(target, expectedUrl) {
-  if (target?.type !== "page" || typeof target.url !== "string") return false;
+async function probeDesktopPages(
+  endpoint,
+  expectedUrl,
+  timeoutMs,
+  { fetchImpl = globalThis.fetch, readPageLocation = readDesktopPageLocation },
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const targetUrl = new URL(target.url);
-    return targetUrl.origin === expectedUrl.origin && targetUrl.pathname === expectedUrl.pathname;
+    const response = await fetchImpl(`${endpoint}/json/list`, { signal: controller.signal });
+    const targets = await response.json();
+    if (!Array.isArray(targets)) return [];
+
+    const appTargets = targets.filter((target) => isManagedAppPage(target, expectedUrl));
+    const locations = await Promise.all(appTargets.map((target) =>
+      readPageLocation(target.webSocketDebuggerUrl, controller.signal),
+    ));
+    return locations.filter((href) => typeof href === "string");
+  } catch {
+    // Electron may expose CDP before the BrowserWindow finishes loading.
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readDesktopPageLocation(debuggerUrl, signal) {
+  if (typeof debuggerUrl !== "string" || signal.aborted) return null;
+  let socket;
+  try {
+    socket = new WebSocket(debuggerUrl);
+    return await new Promise((resolveLocation) => {
+      const unavailable = () => resolveLocation(null);
+      signal.addEventListener("abort", unavailable, { once: true });
+      socket.addEventListener("close", unavailable, { once: true });
+      socket.addEventListener("error", unavailable, { once: true });
+      socket.addEventListener("open", () => socket.send(JSON.stringify({
+        id: 1,
+        method: "Runtime.evaluate",
+        params: { expression: "location.href", returnByValue: true },
+      })), { once: true });
+      socket.addEventListener("message", ({ data }) => {
+        try {
+          const reply = JSON.parse(data);
+          if (reply?.id === 1) resolveLocation(reply.result?.result?.value ?? null);
+        } catch {
+          unavailable();
+        }
+      });
+    });
+  } catch {
+    return null;
+  } finally {
+    socket?.close();
+  }
+}
+
+function isManagedAppPage(target, expectedUrl) {
+  return target?.type === "page" && typeof target.url === "string" && isAppLocation(target.url, expectedUrl);
+}
+
+function isAppLocation(href, expectedUrl) {
+  try {
+    const pageUrl = new URL(href);
+    return pageUrl.origin === expectedUrl.origin && pageUrl.pathname === expectedUrl.pathname;
   } catch {
     return false;
   }
