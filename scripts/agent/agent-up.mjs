@@ -13,7 +13,6 @@ import {
   buildRuntimeStateEnv,
   assertRuntimeDirectorySafe,
   assertRuntimeFileSafe,
-  assertRuntimeRootSafe,
   computeAvailablePorts,
   ensureRuntimeRoot,
   generateInstanceToken,
@@ -85,14 +84,71 @@ export function setAgentUpTestHooks(hooks) {
  * @returns {Promise<import("./runtime-contract.mjs").AgentRuntimePorts>}
  */
 export async function agentUp(repoRoot = resolveRepoRoot(), { mode = "web", wait = false } = {}) {
-  assertRuntimeRootSafe(repoRoot);
-  assertRuntimeModeAvailable(repoRoot, mode);
   const paths = ensureRuntimeRoot(repoRoot);
-  prepareSharedRuntimeDirectories(paths);
+  const lockPath = NodePath.join(paths.devDir, "agent-up.lock");
+  acquireStartupLock(lockPath);
+  try {
+    return await startRuntime(repoRoot, paths, mode, wait);
+  } finally {
+    NodeFS.unlinkSync(lockPath);
+  }
+}
+
+function acquireStartupLock(lockPath) {
+  for (;;) {
+    try {
+      NodeFS.writeFileSync(lockPath, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+      return;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    const owner = readStartupLockOwner(lockPath);
+    if (owner === null) continue;
+    assertStartupLockOwnerExited(owner);
+    reclaimStartupLock(lockPath);
+  }
+}
+
+function readStartupLockOwner(lockPath) {
+  try {
+    assertRuntimeFileSafe(lockPath, "agent:up lock", true);
+    return parsePidFile(lockPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function assertStartupLockOwnerExited(pid) {
+  if (isPidAlive(pid)) {
+    throw new Error(`Another agent:up is starting this worktree's runtime (PID ${pid}). Wait for it, or run 'bun run --shell system agent:down'.`);
+  }
+}
+
+function reclaimStartupLock(lockPath) {
+  // Serialize stale removal so a second reclaimer cannot unlink a new owner's lock.
+  const reclaimPath = `${lockPath}.reclaim`;
+  acquireStartupLock(reclaimPath);
+  try {
+    const owner = readStartupLockOwner(lockPath);
+    if (owner === null) return;
+    assertStartupLockOwnerExited(owner);
+    NodeFS.unlinkSync(lockPath);
+  } finally {
+    NodeFS.unlinkSync(reclaimPath);
+  }
+}
+
+async function startRuntime(repoRoot, paths, mode, wait) {
+  assertRuntimeModeAvailable(repoRoot, mode);
   if (mode === "desktop") assertManagedDesktopPathsSafe(paths);
   assertRuntimeProvisioned(repoRoot, paths, mode === "desktop");
   const stopRuntimePids = agentUpTestHooks.stopRecordedRuntimePids ?? stopRecordedRuntimePids;
-  await stopRuntimePids(repoRoot);
+  const result = await stopRuntimePids(repoRoot);
+  if (!result.complete) {
+    throw new Error("The runtime did not stop cleanly; resolve the processes named above, then run agent:down again.");
+  }
+  prepareSharedRuntimeDirectories(paths);
 
   const runtime = await prepareRuntime(repoRoot, mode);
   const electronBin = requireElectronBinary();
@@ -168,9 +224,14 @@ async function startProvisionedRuntime({ bunBin, electronBin, paths, repoRoot, r
     await writeRuntimeSummary(contract, repoRoot, startedProcesses);
     return contract;
   } catch (error) {
-    const cleanupError = await cleanupStartedProcesses(startedProcesses, repoRoot);
-    if (cleanupError) {
-      throw new AggregateError([error, cleanupError], `Agent runtime startup failed: ${error.message}`, { cause: error });
+    const cleanupErrors = await cleanupStartedProcesses(startedProcesses, repoRoot);
+    if (cleanupErrors.length > 0) {
+      const details = cleanupErrors.map((failure) => failure?.message ?? String(failure));
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        `Agent runtime startup failed: ${error.message}; ${details.join("; ")}`,
+        { cause: error },
+      );
     }
     throw error;
   }
@@ -213,6 +274,9 @@ export function parseAgentUpOptions(args) {
  * @param {boolean} desktop
  */
 function assertRuntimeProvisioned(repoRoot, paths, desktop) {
+  for (const directory of [paths.dbDir, paths.logsDir, paths.playwrightScratchDir, paths.electronDir]) {
+    assertRuntimeDirectorySafe(directory, "runtime directory", true);
+  }
   const serverCjs = NodePath.resolve(repoRoot, "apps", "desktop", "dist", "server", "server.cjs");
   const desktopMain = NodePath.resolve(repoRoot, "apps", "desktop", "dist", "main", "main.cjs");
   const missing = [];
@@ -536,13 +600,14 @@ async function cleanupStartedProcesses(processes, repoRoot) {
       cleanupErrors.push(error);
     }
   }
+  if (cleanupErrors.length > 0) return cleanupErrors;
   try {
     assertRuntimeFileSafe(paths.portsFile, "runtime contract", true);
     NodeFS.rmSync(paths.portsFile, { force: true });
   } catch (error) {
     cleanupErrors.push(error);
   }
-  return cleanupErrors.length === 0 ? null : new AggregateError(cleanupErrors, "Agent runtime cleanup failed");
+  return cleanupErrors;
 }
 
 async function cleanupStartedProcess(processRecord, { paths, repoRoot, stopDesktop, stopOwnedProcess }) {
@@ -564,6 +629,9 @@ async function cleanupStartedDesktop(pid, paths, repoRoot, stopDesktop, stopOwne
     return stopCapturedDesktop(pid, paths, stopOwnedProcess);
   }
   if (result?.status === "not-running") return stopCapturedDesktop(pid, paths, stopOwnedProcess);
+  if (result?.status === "unconfirmed") {
+    throw new Error(`Could not confirm Electron stopped for PID ${pid}: ${result.reason}`);
+  }
 }
 
 async function stopCapturedDesktop(pid, paths, stopOwnedProcess) {
@@ -591,16 +659,6 @@ async function writeStdout(value) {
   });
 }
 
-function describeStartupError(error) {
-  if (!(error instanceof Error)) return String(error);
-  // A failed rollback rides in an AggregateError; name what still needs stopping.
-  if (error instanceof AggregateError) {
-    const cleanupMessages = error.errors.slice(1).map((inner) => inner?.message ?? String(inner));
-    return [error.message, ...cleanupMessages].join("; ");
-  }
-  return error.message;
-}
-
 if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
   const repoArg = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
   const repoRoot = repoArg ? NodePath.resolve(repoArg) : resolveRepoRoot();
@@ -608,7 +666,7 @@ if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]
     await agentUp(repoRoot, parseAgentUpOptions(process.argv.slice(2)));
   } catch (error) {
     // Agents read this output; a refusal such as the mode guard must stay one actionable line.
-    process.stderr.write(`Agent runtime did not start: ${describeStartupError(error)}\n`);
+    process.stderr.write(`Agent runtime did not start: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
   }
   if (readRuntimeDatabaseSeed(repoRoot) === "filtered") {

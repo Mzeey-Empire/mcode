@@ -14,7 +14,7 @@ import {
   readPortsFile,
   resolveRepoRoot,
 } from "./runtime-contract.mjs";
-import { parsePidFile, stopRecordedPidFile } from "./runtime-processes.mjs";
+import { parsePidFile, stopPid, stopRecordedPidFile } from "./runtime-processes.mjs";
 import { MANAGED_DESKTOP_SESSION_FILE, stopManagedDesktop } from "./managed-desktop.mjs";
 
 /**
@@ -22,7 +22,7 @@ import { MANAGED_DESKTOP_SESSION_FILE, stopManagedDesktop } from "./managed-desk
  *
  * @param {string} [repoRoot]
  * @param {{ stop?: (pid: number, signal: NodeJS.Signals) => Promise<void> | void }} [options]
- * @returns {Promise<void>}
+ * @returns {Promise<{ complete: boolean, unconfirmed: string[] }>}
  */
 export async function agentDown(repoRoot = resolveRepoRoot(), options = {}) {
   assertRuntimeRootSafe(repoRoot);
@@ -33,7 +33,7 @@ export async function agentDown(repoRoot = resolveRepoRoot(), options = {}) {
   const gracefulShutdownRequested = !hasDesktopOwnedServer(paths.pidsDir)
     && await requestRuntimeShutdown(repoRoot, options.shutdownTimeoutMs);
 
-  await stopRecordedRuntimePids(repoRoot, {
+  return stopRecordedRuntimePids(repoRoot, {
     ...options,
     gracefulShutdownRequested,
   });
@@ -112,14 +112,14 @@ function readPortsFileForShutdown(repoRoot) {
  *
  * @param {string} [repoRoot]
  * @param {{ stop?: (pid: number, signal: NodeJS.Signals) => Promise<void> | void }} [options]
- * @returns {Promise<void>}
+ * @returns {Promise<{ complete: boolean, unconfirmed: string[] }>}
  */
 export async function stopRecordedRuntimePids(repoRoot = resolveRepoRoot(), options = {}) {
   const paths = getRuntimePaths(repoRoot);
   assertRuntimeRootSafe(repoRoot);
   assertRuntimeDirectorySafe(paths.pidsDir, "runtime PID directory", true);
   assertRuntimeFileSafe(NodePath.join(paths.devDir, MANAGED_DESKTOP_SESSION_FILE), "desktop session", true);
-  if (!NodeFS.existsSync(paths.pidsDir)) return;
+  if (!NodeFS.existsSync(paths.pidsDir)) return { complete: true, unconfirmed: [] };
   const pidFiles = NodeFS.readdirSync(paths.pidsDir)
     .filter((name) => name.endsWith(".pid"))
     .sort()
@@ -130,43 +130,71 @@ export async function stopRecordedRuntimePids(repoRoot = resolveRepoRoot(), opti
     pidFiles.unshift("desktop.pid");
   }
 
+  const unconfirmed = [];
   for (const name of pidFiles) {
     const pidFile = NodePath.join(paths.pidsDir, name);
-    assertRuntimeFileSafe(pidFile, "runtime PID file");
+    assertRuntimeFileSafe(pidFile, "runtime PID file", true);
+    if (!NodeFS.existsSync(pidFile)) continue;
     try {
-      await stopRuntimePidFile(name, pidFile, repoRoot, options, desktopOwnsServer);
+      await stopRuntimePidFile(name, pidFile, repoRoot, options);
     } catch (error) {
-      if (error?.code !== "ENOENT") {
-        console.warn(`[agent:down] ${error instanceof Error ? error.message : String(error)}`);
-      }
+      unconfirmed.push(name);
+      console.warn(`[agent:down] ${name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  return { complete: unconfirmed.length === 0, unconfirmed };
 }
 
-async function stopRuntimePidFile(name, pidFile, repoRoot, options, desktopOwnsServer) {
+async function stopRuntimePidFile(name, pidFile, repoRoot, options) {
   if (name === "server.pid") {
     return stopRecordedServerPidFile(pidFile, repoRoot, options);
   }
   if (name === "desktop.pid") {
-    await stopRecordedDesktopPidFile(pidFile, repoRoot, options);
-    if (desktopOwnsServer) await requestRuntimeShutdown(repoRoot, options.shutdownTimeoutMs);
-    return;
+    return stopRecordedDesktopPidFile(pidFile, repoRoot, options);
   }
-  return stopRecordedPidFile(pidFile, { repoRoot, stop: options.stop });
+  return stopRuntimePid(pidFile, repoRoot, options);
 }
 
 /** Stops the validated managed desktop process tree before removing its PID file. */
 export async function stopRecordedDesktopPidFile(pidFile, repoRoot, options = {}) {
+  const paths = getRuntimePaths(repoRoot);
+  const desktopOwnsServer = hasDesktopOwnedServer(paths.pidsDir);
+  const serverPid = desktopOwnsServer ? readDesktopServerPid(repoRoot, paths.devDir) : null;
   const stopDesktop = options.stopManagedDesktop ?? stopManagedDesktop;
   const result = await stopDesktop(repoRoot);
   if (result.status === "not-running") {
-    return stopRecordedPidFile(pidFile, { repoRoot, stop: options.stop });
+    assertRuntimeFileSafe(pidFile, "runtime PID file");
+    await stopAndConfirmPid(parsePidFile(pidFile), options);
   }
   if (result.status === "unconfirmed") {
-    console.warn(`[agent:down] Could not confirm Electron stopped for PID ${result.pid}: ${result.reason}`);
+    throw new Error(`Could not confirm Electron stopped for PID ${result.pid}: ${result.reason}`);
   }
-  if (result.status === "stopped" || result.status === "already-stopped") {
-    NodeFS.rmSync(pidFile);
+  if (desktopOwnsServer) {
+    await requestRuntimeShutdown(repoRoot, options.shutdownTimeoutMs);
+    if (serverPid !== null && !await waitForServerGrace(serverPid, options)) {
+      await stopAndConfirmPid(serverPid, options);
+    }
+  }
+  // The desktop PID file keeps the desktop server eligible for a later shutdown retry.
+  NodeFS.rmSync(pidFile);
+}
+
+function readDesktopServerPid(repoRoot, devDir) {
+  const contract = readPortsFileForShutdown(repoRoot);
+  if (!contract?.healthUrl) return null;
+
+  const lock = readServerLock(NodePath.join(devDir, "server.lock"));
+  if (lock?.port !== contract.serverPort || lock.authToken !== contract.seedLogin.token) return null;
+  return Number.isSafeInteger(lock.pid) && lock.pid > 0 ? lock.pid : null;
+}
+
+function readServerLock(lockPath) {
+  assertRuntimeFileSafe(lockPath, "server lock", true);
+  try {
+    return JSON.parse(NodeFS.readFileSync(lockPath, "utf8"));
+  } catch (error) {
+    if (error instanceof SyntaxError || error?.code === "ENOENT") return null;
+    throw error;
   }
 }
 
@@ -180,22 +208,41 @@ export async function stopRecordedDesktopPidFile(pidFile, repoRoot, options = {}
  */
 async function stopRecordedServerPidFile(pidFile, repoRoot, options) {
   if (!options.gracefulShutdownRequested) {
-    await stopRecordedPidFile(pidFile, { repoRoot, stop: options.stop });
-    return;
+    return stopRuntimePid(pidFile, repoRoot, options);
   }
-  const graceMs = options.serverGraceMs ?? options.shutdownGraceMs ?? 10_000;
-  const isProcessAlive = options.isProcessAlive ?? isPidAlive;
   const pid = parsePidFile(pidFile);
-  const stopped = await waitForProcessExit(pid, graceMs, {
-    isProcessAlive,
-    sleep: options.sleep,
-    now: options.now,
-  });
-  if (stopped) {
+  if (await waitForServerGrace(pid, options)) {
     NodeFS.rmSync(pidFile);
     return;
   }
-  await stopRecordedPidFile(pidFile, { repoRoot, stop: options.stop });
+  await stopRuntimePid(pidFile, repoRoot, options);
+}
+
+function waitForServerGrace(pid, options) {
+  const graceMs = options.serverGraceMs ?? options.shutdownGraceMs ?? 10_000;
+  return waitForProcessExit(pid, graceMs, {
+    isProcessAlive: options.isProcessAlive ?? isPidAlive,
+    sleep: options.sleep,
+    now: options.now,
+  });
+}
+
+function stopRuntimePid(pidFile, repoRoot, options) {
+  return stopRecordedPidFile(pidFile, {
+    repoRoot,
+    stop: (pid, signal) => stopAndConfirmPid(pid, options, signal),
+  });
+}
+
+async function stopAndConfirmPid(pid, options, signal) {
+  const stop = options.stop ?? stopPid;
+  await stop(pid, signal);
+  const stopped = await waitForProcessExit(pid, 500, {
+    isProcessAlive: options.isProcessAlive ?? isPidAlive,
+    sleep: options.sleep,
+    now: options.now,
+  });
+  if (!stopped) throw new Error(`Could not confirm PID ${pid} stopped`);
 }
 
 /**
@@ -233,5 +280,9 @@ function delay(timeoutMs) {
 
 if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
   const repoRoot = process.argv[2] ? NodePath.resolve(process.argv[2]) : resolveRepoRoot();
-  await agentDown(repoRoot);
+  const result = await agentDown(repoRoot);
+  if (!result.complete) {
+    console.error(`[agent:down] Could not confirm stopped: ${result.unconfirmed.join(", ")}`);
+    process.exitCode = 1;
+  }
 }

@@ -113,6 +113,64 @@ for (const serverPort of [19_504, null]) {
   });
 }
 
+for (const serverLock of [
+  { name: "force-stops the server after the grace period", port: 19_504, authToken: "seed-token", forceStop: true, exits: true },
+  { name: "ignores a different lock port", port: 19_505, authToken: "seed-token", forceStop: false, exits: false },
+  { name: "ignores a different lock token", port: 19_504, authToken: "other-token", forceStop: false, exits: false },
+  { name: "reports a server that survives the force-stop as unconfirmed", port: 19_504, authToken: "seed-token", forceStop: true, exits: false },
+]) {
+  NodeTest.test(`agentDown in desktop mode ${serverLock.name}`, async () => {
+    const repo = makeRepo();
+    const paths = getRuntimePaths(repo);
+    const pidFile = NodePath.join(paths.pidsDir, "desktop.pid");
+    const lockPath = NodePath.join(paths.devDir, "server.lock");
+    const originalFetch = globalThis.fetch;
+    const events = [];
+    let clock = 0;
+    let serverAlive = true;
+    globalThis.fetch = async () => {
+      events.push("shutdown request");
+      return new Response(null, { status: 200 });
+    };
+    try {
+      writeGracefulRuntimeContract(repo, 19_504, "desktop");
+      NodeFS.mkdirSync(paths.pidsDir, { recursive: true });
+      NodeFS.writeFileSync(pidFile, "999998\n");
+      NodeFS.writeFileSync(lockPath, JSON.stringify({
+        port: serverLock.port,
+        authToken: serverLock.authToken,
+        pid: 700_006,
+      }));
+
+      const result = await agentDown(repo, {
+        stopManagedDesktop: async () => {
+          events.push("stop Electron");
+          if (serverLock.exits) NodeFS.rmSync(lockPath);
+          return { status: "stopped" };
+        },
+        serverGraceMs: 25,
+        isProcessAlive: () => serverAlive,
+        now: () => clock,
+        sleep: async (durationMs) => { clock += durationMs; },
+        stop: async (pid) => {
+          events.push(["force-stop", pid, clock]);
+          if (serverLock.exits) serverAlive = false;
+        },
+      });
+
+      const expected = ["stop Electron", "shutdown request"];
+      if (serverLock.forceStop) expected.push(["force-stop", 700_006, 25]);
+      const unconfirmed = serverLock.forceStop && !serverLock.exits ? ["desktop.pid"] : [];
+      NodeAssertStrict.default.deepEqual(events, expected);
+      NodeAssertStrict.default.deepEqual(result, { complete: unconfirmed.length === 0, unconfirmed });
+      NodeAssertStrict.default.equal(NodeFS.existsSync(pidFile), unconfirmed.length > 0);
+    } finally {
+      globalThis.fetch = originalFetch;
+      NodeFS.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+}
+
 NodeTest.test("agentDown falls back to PID cleanup when the shutdown request never settles", { timeout: 1_000 }, async () => {
   const repo = makeRepo();
   const originalFetch = globalThis.fetch;
@@ -142,7 +200,7 @@ NodeTest.test("agentDown falls back to PID cleanup when the shutdown request nev
     const stopping = agentDown(repo, {
       shutdownTimeoutMs: 25,
       serverGraceMs: 25,
-      isProcessAlive: () => true,
+      isProcessAlive: () => !stopCalled,
       stop: async () => {
         stopCalled = true;
       },
@@ -207,7 +265,7 @@ NodeTest.test("agentDown force-stops a server that ignores graceful shutdown", a
 
     await agentDown(repo, {
       serverGraceMs: 10,
-      isProcessAlive: () => true,
+      isProcessAlive: () => forceStops === 0,
       now: () => clock,
       sleep: async (durationMs) => { clock += durationMs; },
       stop: async (pid, signal) => {
@@ -241,7 +299,7 @@ NodeTest.test("agentDown stops the web process before the server process", async
 
     await agentDown(repo, {
       serverGraceMs: 10,
-      isProcessAlive: () => true,
+      isProcessAlive: (pid) => !stops.includes(pid),
       now: () => clock,
       sleep: async (durationMs) => { clock += durationMs; },
       stop: async (pid) => { stops.push(pid); },
@@ -259,6 +317,7 @@ NodeTest.test("agentDown retains the server PID file until forced termination se
   const originalFetch = globalThis.fetch;
   let releaseStop;
   let stopStarted = false;
+  let stopped = false;
   let clock = 0;
   const stopCompletion = new Promise((resolvePromise) => { releaseStop = resolvePromise; });
   globalThis.fetch = async () => new Response("", { status: 200 });
@@ -272,12 +331,13 @@ NodeTest.test("agentDown retains the server PID file until forced termination se
 
     const stopping = agentDown(repo, {
       serverGraceMs: 10,
-      isProcessAlive: () => true,
+      isProcessAlive: () => !stopped,
       now: () => clock,
       sleep: async (durationMs) => { clock += durationMs; },
       stop: async () => {
         stopStarted = true;
         await stopCompletion;
+        stopped = true;
       },
     });
 
@@ -329,6 +389,7 @@ NodeTest.test("agentUp removes stale PID files before launching server and web p
   const restoreHooks = setAgentUpTestHooks({
     stopRecordedRuntimePids: async (receivedRepo) => {
       NodeFS.rmSync(NodePath.join(getRuntimePaths(receivedRepo).pidsDir, "server.pid"), { force: true });
+      return { complete: true, unconfirmed: [] };
     },
     computeAvailablePorts: async () => ({ serverPort: 41_223, webPort: 41_224 }),
     getElectronBinary: () => process.execPath,
@@ -390,7 +451,10 @@ NodeTest.test("agentUp stops the recorded runtime before replacing it in the sam
   const pidFile = NodePath.join(paths.pidsDir, "server.pid");
   const launches = [];
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => NodeFS.unlinkSync(pidFile),
+    stopRecordedRuntimePids: async () => {
+      NodeFS.unlinkSync(pidFile);
+      return { complete: true, unconfirmed: [] };
+    },
     computeAvailablePorts: async () => ({ serverPort: 41_223, webPort: 41_224 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: (_command, _args, _options, logFile) => {
@@ -414,11 +478,71 @@ NodeTest.test("agentUp stops the recorded runtime before replacing it in the sam
   }
 });
 
+NodeTest.test("agentUp refuses a live startup lock before the mode guard, shutdown, or launch", async () => {
+  const repo = makeRepo();
+  const paths = getRuntimePaths(repo);
+  const lockPath = NodePath.join(paths.devDir, "agent-up.lock");
+  const restoreHooks = setAgentUpTestHooks({
+    stopRecordedRuntimePids: () => NodeAssertStrict.default.fail("startup must not stop the running runtime"),
+    spawnLogged: () => NodeAssertStrict.default.fail("startup must not spawn a process"),
+  });
+  try {
+    writeGracefulRuntimeContract(repo, 41_123);
+    NodeFS.mkdirSync(paths.pidsDir);
+    NodeFS.writeFileSync(NodePath.join(paths.pidsDir, "server.pid"), `${process.pid}\n`);
+    NodeFS.writeFileSync(lockPath, `${process.pid}\n`);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "server" }), {
+      message: new RegExp(`Another agent:up.*PID ${process.pid}`),
+    });
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(lockPath, "utf8"), `${process.pid}\n`);
+  } finally {
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentUp replaces a stale startup lock and removes its own lock after success", async () => {
+  const repo = makeRepo();
+  const lockPath = NodePath.join(getRuntimePaths(repo).devDir, "agent-up.lock");
+  const restoreHooks = setAgentUpTestHooks({
+    computeAvailablePorts: async () => ({ serverPort: 41_223 }),
+    getElectronBinary: () => process.execPath,
+    spawnLogged: () => {
+      NodeAssertStrict.default.equal(NodeFS.readFileSync(lockPath, "utf8"), `${process.pid}\n`);
+      return { pid: 80_100 };
+    },
+  });
+  try {
+    provisionRuntime(repo);
+    NodeFS.writeFileSync(lockPath, "2147483647\n");
+    const contract = await agentUp(repo, { mode: "server" });
+    NodeAssertStrict.default.equal(contract.mode, "server");
+    NodeAssertStrict.default.equal(NodeFS.existsSync(lockPath), false);
+  } finally {
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentUp removes its startup lock when provisioning validation fails", async () => {
+  const repo = makeRepo();
+  const lockPath = NodePath.join(getRuntimePaths(repo).devDir, "agent-up.lock");
+  try {
+    await NodeAssertStrict.default.rejects(() => agentUp(repo), /runtime is not provisioned/);
+    NodeAssertStrict.default.equal(NodeFS.existsSync(lockPath), false);
+  } finally {
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("agentUp preserves the database after it stops the prior runtime", async () => {
   const repo = makeRepo();
   const events = [];
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => { events.push("stopped"); },
+    stopRecordedRuntimePids: async () => {
+      events.push("stopped");
+      return { complete: true, unconfirmed: [] };
+    },
     computeAvailablePorts: async () => ({ serverPort: 41_229, webPort: 41_230 }),
     getElectronBinary: () => {
       NodeAssertStrict.default.deepEqual(events, ["stopped"]);
@@ -453,7 +577,7 @@ NodeTest.test("agentUp defaults to returning without health checks", async () =>
   const originalFetch = globalThis.fetch;
   let fetchCalled = false;
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_227, webPort: 41_228 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: () => ({ pid: 80_100 }),
@@ -488,7 +612,7 @@ NodeTest.test("agentUp prints a redacted startup summary and persists credential
   let output = "";
   let quiet = false;
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_241, webPort: 41_242 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: (_command, _args, _options, logFile) => ({
@@ -597,7 +721,7 @@ NodeTest.test("agentUp prepares fresh runtime directories before recording child
   const originalFetch = globalThis.fetch;
   let spawnCalls = 0;
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_225, webPort: 41_226 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: () => {
@@ -637,7 +761,7 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
   let healthUrl;
   let desktopPageProbes = 0;
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_251, webPort: 41_252 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: () => ({ pid: 81_000 }),
@@ -698,7 +822,7 @@ NodeTest.test("agentUp --desktop waits for the web app before launch even withou
   const startup = [];
   const spawned = [];
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_257, webPort: 41_258 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: (_command, args) => {
@@ -748,7 +872,7 @@ NodeTest.test("agentUp --desktop stops the web process without launching Electro
   let desktopStarted = false;
   const stopped = [];
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_259, webPort: 41_260 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: () => ({ pid: 81_022 }),
@@ -828,7 +952,7 @@ NodeTest.test("agentUp removes the desktop PID after managed page readiness fail
     return { pid: child.pid };
   };
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_253, webPort: 41_254 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: spawnChild,
@@ -864,7 +988,7 @@ NodeTest.test("agentUp hides the console window for runtime child processes", as
   const repo = makeRepo();
   const spawnOptions = [];
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_227, webPort: 41_228 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: (_command, _args, options) => {
@@ -892,7 +1016,10 @@ NodeTest.test("agentReset empties the local database before it starts the real r
     NodeFS.writeFileSync(paths.dbPath, "old database\n");
     const calls = [];
     await agentReset(repo, {
-      down: async () => calls.push("down"),
+      down: async () => {
+        calls.push("down");
+        return { complete: true, unconfirmed: [] };
+      },
       refreshDatabase: (receivedRepo) => {
         NodeAssertStrict.default.equal(receivedRepo, repo);
         NodeFS.writeFileSync(paths.dbPath, "snapshot\n");
@@ -1099,7 +1226,7 @@ NodeTest.test("agentUp cleans the managed desktop session when desktop PID regis
   const restoreFetch = mockReachableWebApp();
   let desktopStopped = false;
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_271, webPort: 41_272 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: () => ({ pid: 81_071 }),
@@ -1122,6 +1249,40 @@ NodeTest.test("agentUp cleans the managed desktop session when desktop PID regis
     await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "desktop" }), /cannot record desktop PID/);
     NodeAssertStrict.default.equal(desktopStopped, true);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(getRuntimePaths(repo).devDir, "electron-agent-runtime.json")), false);
+  } finally {
+    restoreFetch();
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentUp retains the desktop records when readiness fails and the Electron stop is unconfirmed", async () => {
+  const repo = makeRepo();
+  const paths = getRuntimePaths(repo);
+  const sessionFile = NodePath.join(paths.devDir, "electron-agent-runtime.json");
+  const restoreFetch = mockReachableWebApp();
+  const restoreHooks = setAgentUpTestHooks({
+    computeAvailablePorts: async () => ({ serverPort: 41_273, webPort: 41_274 }),
+    getElectronBinary: () => process.execPath,
+    spawnLogged: () => ({ pid: 81_074 }),
+    startManagedDesktop: () => {
+      NodeFS.writeFileSync(sessionFile, "session\n");
+      publishDesktopEndpoint(repo);
+      return { endpoint: "http://127.0.0.1:43007", pid: 81_075 };
+    },
+    waitForDesktopPage: async () => { throw new Error("desktop page failed readiness"); },
+    stopManagedDesktop: async () => ({ status: "unconfirmed", reason: "taskkill timed out" }),
+    stopPid: async () => {},
+  });
+  try {
+    provisionRuntime(repo);
+    await NodeAssertStrict.default.rejects(
+      () => agentUp(repo, { mode: "desktop", wait: true }),
+      { name: "AggregateError", message: /desktop page failed readiness.*PID 81075/ },
+    );
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(NodePath.join(paths.pidsDir, "desktop.pid"), "utf8"), "81075\n");
+    NodeAssertStrict.default.equal(NodeFS.existsSync(sessionFile), true);
+    NodeAssertStrict.default.equal(readPortsFile(repo).serverPort, 19_504);
   } finally {
     restoreFetch();
     restoreHooks();
@@ -1159,7 +1320,7 @@ NodeTest.test("agentUp stops the captured server when server PID persistence fai
   const repo = makeRepo();
   const stopped = [];
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_281, webPort: 41_282 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: () => ({ pid: 81_081 }),
@@ -1181,7 +1342,7 @@ NodeTest.test("agentUp stops captured web and server processes when web PID pers
   const stopped = [];
   let spawned = 0;
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_283, webPort: 41_284 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: () => ({ pid: spawned++ === 0 ? 81_083 : 81_084 }),
@@ -1207,7 +1368,7 @@ NodeTest.test("agentUp falls back to the captured desktop PID when managed clean
   const paths = getRuntimePaths(repo);
   const stopped = [];
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_285, webPort: 41_286 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: () => ({ pid: 81_085 }),
@@ -1249,7 +1410,7 @@ NodeTest.test("agentUp retains the desktop session when managed and captured cle
   const restoreFetch = mockReachableWebApp();
   const paths = getRuntimePaths(repo);
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_287, webPort: 41_288 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: (() => { let pid = 81_088; return () => ({ pid: pid++ }); })(),
@@ -1285,7 +1446,7 @@ NodeTest.test("agentUp stops the captured desktop PID when managed cleanup repor
   const paths = getRuntimePaths(repo);
   const stopped = [];
   const restoreHooks = setAgentUpTestHooks({
-    stopRecordedRuntimePids: async () => {},
+    stopRecordedRuntimePids: async () => ({ complete: true, unconfirmed: [] }),
     computeAvailablePorts: async () => ({ serverPort: 41_289, webPort: 41_290 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: (() => { let pid = 81_091; return () => ({ pid: pid++ }); })(),
@@ -1489,13 +1650,14 @@ NodeTest.test("agentDown keeps the desktop PID file when Electron shutdown is un
   NodeFS.mkdirSync(NodePath.dirname(pidFile), { recursive: true });
   NodeFS.writeFileSync(pidFile, "999998\n");
   try {
-    await agentDown(repo, {
+    const result = await agentDown(repo, {
       stopManagedDesktop: async () => ({
         pid: 999998,
         status: "unconfirmed",
         reason: "Reading the Electron command line timed out",
       }),
     });
+    NodeAssertStrict.default.deepEqual(result, { complete: false, unconfirmed: ["desktop.pid"] });
     NodeAssertStrict.default.equal(NodeFS.existsSync(pidFile), true);
   } finally {
     NodeFS.rmSync(repo, { recursive: true, force: true });
@@ -1521,6 +1683,41 @@ NodeTest.test("desktop PID remains when managed desktop cleanup rejects", async 
   }
 });
 
+NodeTest.test("agentReset and agentUp refuse to replace a runtime with an unconfirmed Electron stop", async () => {
+  const repo = makeRepo();
+  const paths = getRuntimePaths(repo);
+  const pidFile = NodePath.join(paths.pidsDir, "desktop.pid");
+  const stopRuntime = (root) => agentDown(root, {
+    stopManagedDesktop: async () => ({
+      pid: 999998,
+      status: "unconfirmed",
+      reason: "Reading the Electron command line timed out",
+    }),
+  });
+  const restoreHooks = setAgentUpTestHooks({
+    stopRecordedRuntimePids: stopRuntime,
+    computeAvailablePorts: () => NodeAssertStrict.default.fail("startup must stop before allocating ports"),
+  });
+  try {
+    provisionRuntime(repo);
+    writeGracefulRuntimeContract(repo, null, "desktop");
+    NodeFS.mkdirSync(paths.pidsDir, { recursive: true });
+    NodeFS.writeFileSync(pidFile, "999998\n");
+    const originalContract = NodeFS.readFileSync(paths.portsFile, "utf8");
+    await NodeAssertStrict.default.rejects(() => agentReset(repo, {
+      down: stopRuntime,
+      refreshDatabase: () => NodeAssertStrict.default.fail("reset must leave the database alone"),
+      up: () => NodeAssertStrict.default.fail("reset must not start a replacement runtime"),
+    }), /runtime did not stop cleanly/);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "desktop" }), /runtime did not stop cleanly/);
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(paths.portsFile, "utf8"), originalContract);
+    NodeAssertStrict.default.equal(NodeFS.existsSync(pidFile), true);
+  } finally {
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("agentReset does not start replacement before shutdown completes", async () => {
   const repo = makeRepo();
   let releaseShutdown;
@@ -1540,6 +1737,7 @@ NodeTest.test("agentReset does not start replacement before shutdown completes",
         shutdownStarted = true;
         await shutdown;
         NodeFS.unlinkSync(paths.portsFile);
+        return { complete: true, unconfirmed: [] };
       },
       refreshDatabase: () => NodeFS.writeFileSync(paths.dbPath, "snapshot\n"),
       up: async (_repo, { mode }) => {
