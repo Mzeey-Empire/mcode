@@ -6,16 +6,15 @@ const SESSION_FILE_NAME = "electron-live-testing.json";
 /**
  * Connects Playwright to the Electron process owned by start-electron.mjs.
  *
- * The first connection reloads the app so it signs in with the seeded login cookie. Pass
- * `reload: false` to reconnect from a later step script without losing the app's state.
- * Only a disposable session with its own session file, such as the perf workers, may pass
- * `allowViewportEmulation: true`.
+ * Connecting never reloads the app, so every connection finds the page as the last step left
+ * it. The Electron app signs in with the token in the server URL the desktop process gives it,
+ * not with the seeded login cookie, so the cookie needs no reload. Only a disposable session
+ * with its own session file, such as the perf workers, may pass `allowViewportEmulation: true`.
  */
 export async function connectElectronSession({
   playwright,
   repoRoot,
   sessionFileName = SESSION_FILE_NAME,
-  reload = true,
   allowViewportEmulation = false,
 }) {
   validateConnectionArguments(playwright, repoRoot, sessionFileName, allowViewportEmulation);
@@ -24,16 +23,22 @@ export async function connectElectronSession({
   const record = readSessionRecord(sessionFile, root);
   const ports = readRuntimePorts(root, record.appUrlPrefix);
   const connection = await connectToElectron(playwright, record, ports);
-  if (!allowViewportEmulation) {
-    for (const page of connection.context.pages()) blockViewportEmulation(page);
-    connection.context.on("page", blockViewportEmulation);
+  let page;
+  try {
+    if (!allowViewportEmulation) {
+      for (const candidate of connection.context.pages()) blockViewportEmulation(candidate);
+      connection.context.on("page", blockViewportEmulation);
+    }
+    page = await waitForAppPage(connection.context, record.appUrlPrefix);
+  } catch (error) {
+    // An open CDP connection keeps the calling step script alive after the error.
+    await connection.browser.close();
+    throw error;
   }
-  const page = await waitForAppPage(connection.context, record.appUrlPrefix);
-  const livePage = reload ? await reloadElectronAppPage(connection.context, page, record.appUrlPrefix) : page;
   return {
     appUrl: ports?.appUrl ?? null,
     ...connection,
-    page: livePage,
+    page,
     pid: record.pid,
     repoRoot: root,
     sessionFile,
@@ -102,13 +107,18 @@ async function connectToElectron(playwright, record, ports) {
   }
 
   if (ports && record.appUrlPrefix.startsWith(ports.appUrl)) {
-    await context.addCookies([
-      {
-        name: ports.seedLogin.cookieName,
-        value: ports.seedLogin.token,
-        url: ports.appUrl,
-      },
-    ]);
+    try {
+      await context.addCookies([
+        {
+          name: ports.seedLogin.cookieName,
+          value: ports.seedLogin.token,
+          url: ports.appUrl,
+        },
+      ]);
+    } catch (error) {
+      await browser.close();
+      throw error;
+    }
   }
   return {
     browser,

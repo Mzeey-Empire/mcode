@@ -23,6 +23,8 @@ Use one persistent Playwright connection to an agent-owned Electron process. Lau
    bun .agents/skills/electorn-live-testing/scripts/start-electron.mjs
    ```
 
+   This Electron window does not use the server in `.dev/ports.json`. Its desktop process starts a private server on a port from 19500 to 19600, with its own database under the session's `.dev` runtime folder, and every load and reload reaches that server. Data you create through the `ports.json` API does not appear in the window. Read the window's server with `await page.evaluate(async () => (await window.desktopBridge.getServerUrl()).url)`, and never print the token in that URL.
+
 5. Add the absolute `.dev/playwright-scratch/node_modules` directory with `mcp__node_repl__js_add_node_module_dir`.
 6. Import Playwright and the session helper in `mcp__node_repl__js`. Use top-level `var` names because the kernel preserves bindings:
 
@@ -52,7 +54,7 @@ var electronRequire = electronModule.createRequire(
 var electronPlaywright = electronRequire("playwright");
 ```
 
-Without a persistent Node REPL, write each step as a script under `.dev/verification/` and run it with `node` from the repository root. Electron keeps the app and its state between steps. Only the first connection needs the reload that signs the app in, so later steps pass `reload: false`:
+Without a persistent Node REPL, write each step as a script under `.dev/verification/` and run it with `node` from the repository root. Electron keeps the app and its state between steps. Connecting never reloads the page, so each step finds the app as the last one left it. The app signs in through the desktop process, not the seeded login cookie, so no step needs a reload to sign in:
 
 ```js
 import { createRequire } from "node:module";
@@ -64,7 +66,7 @@ const playwright = createRequire(`${repoRoot}/.dev/playwright-scratch/package.js
 const skill = (name) => import(pathToFileURL(`${repoRoot}/.agents/skills/electorn-live-testing/scripts/${name}`).href);
 const { connectElectronSession, disconnectElectronSession } = await skill("electron-session.mjs");
 
-const session = await connectElectronSession({ playwright, repoRoot, reload: false });
+const session = await connectElectronSession({ playwright, repoRoot });
 // act on session.page
 await disconnectElectronSession(session);
 ```
@@ -122,7 +124,7 @@ Measure motion on every frame inside the page. A screen recording holds only the
 
 Store screenshots, logs, and measurements under `.dev/verification/`. Keep exploratory specifications under `.dev/playwright-scratch/`; do not commit them.
 
-To screenshot, drive the app to the screen, then run the capture script instead of writing one. It connects without a reload, so the app keeps its state, and it creates the output folder. Connect once with a reload as shown in the session section above before the first capture, or the app may still be signed out:
+To screenshot, drive the app to the screen, then run the capture script instead of writing one. It connects like any other step, so the app keeps its state, and it creates the output folder:
 
 ```powershell
 node .agents/skills/electorn-live-testing/scripts/capture.mjs --out .dev/verification/<name>.png --width 1280 --height 800 --hover 'role=button[name="Settings"]'

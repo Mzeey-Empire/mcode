@@ -48,7 +48,7 @@ function createSessionFixture(sessionFileName = "electron-live-testing.json") {
     },
   };
   return {
-    options: { playwright, repoRoot, sessionFileName, reload: false },
+    options: { playwright, repoRoot, sessionFileName },
     emitPage: (newPage) => { listeners.get("page")?.(newPage); },
     connectionCount: () => connectionCount,
   };
@@ -86,6 +86,68 @@ test("rejects viewport emulation in the default session before connecting", asyn
   await expect(connectElectronSession({ ...fixture.options, allowViewportEmulation: true }))
     .rejects.toThrow("own sessionFileName");
   expect(fixture.connectionCount()).toBe(0);
+});
+
+function createWorktreeAppFixture() {
+  const repoRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "electron-session-test-"));
+  tempRoots.push(repoRoot);
+  const appUrl = "http://127.0.0.1:41890";
+  NodeFS.mkdirSync(NodePath.join(repoRoot, ".dev"));
+  NodeFS.writeFileSync(NodePath.join(repoRoot, ".dev", "electron-live-testing.json"), JSON.stringify({
+    status: "running",
+    pid: 4242,
+    debugPort: 9222,
+    repoRoot,
+    appUrlPrefix: appUrl,
+  }));
+  NodeFS.writeFileSync(NodePath.join(repoRoot, ".dev", "ports.json"), JSON.stringify({
+    appUrl,
+    worktreeIdentity: repoRoot,
+    seedLogin: { cookieName: "mcode-auth", token: "seed-token" },
+  }));
+  let reloadCount = 0;
+  const page = {
+    ...createPage(),
+    url: () => `${appUrl}/`,
+    reload: async () => { reloadCount += 1; },
+  };
+  const context = {
+    addCookies: async () => {},
+    on: () => {},
+    pages: () => [page],
+  };
+  const playwright = { chromium: { connectOverCDP: async () => ({ contexts: () => [context] }) } };
+  return { page, options: { playwright, repoRoot }, reloadCount: () => reloadCount };
+}
+
+test("connects to a signed-in worktree app page without reloading it", async () => {
+  const fixture = createWorktreeAppFixture();
+
+  const session = await connectElectronSession(fixture.options);
+
+  expect(session.page).toBe(fixture.page);
+  expect(fixture.reloadCount()).toBe(0);
+});
+
+test("closes the CDP connection when connecting fails after it opened", async () => {
+  const fixture = createWorktreeAppFixture();
+  let closeCount = 0;
+  const context = {
+    addCookies: async () => { throw new Error("Target closed"); },
+    on: () => {},
+    pages: () => [fixture.page],
+  };
+  const playwright = {
+    chromium: {
+      connectOverCDP: async () => ({
+        contexts: () => [context],
+        close: async () => { closeCount += 1; },
+      }),
+    },
+  };
+
+  await expect(connectElectronSession({ ...fixture.options, playwright })).rejects.toThrow("Target closed");
+  expect(closeCount).toBe(1);
 });
 
 test("reacquires the replacement app page after an aborted reload", async () => {
