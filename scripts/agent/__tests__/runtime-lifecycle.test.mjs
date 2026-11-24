@@ -1224,6 +1224,40 @@ NodeTest.test("desktop PID remains until the managed desktop process tree stops"
   }
 });
 
+NodeTest.test("agentDown removes the desktop PID file when Electron already stopped", async () => {
+  const repo = makeRepo();
+  const pidFile = NodePath.join(getRuntimePaths(repo).pidsDir, "desktop.pid");
+  NodeFS.mkdirSync(NodePath.dirname(pidFile), { recursive: true });
+  NodeFS.writeFileSync(pidFile, "999998\n");
+  try {
+    await agentDown(repo, {
+      stopManagedDesktop: async () => ({ pid: 999998, status: "already-stopped" }),
+    });
+    NodeAssertStrict.default.equal(NodeFS.existsSync(pidFile), false);
+  } finally {
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentDown keeps the desktop PID file when Electron shutdown is unconfirmed", async () => {
+  const repo = makeRepo();
+  const pidFile = NodePath.join(getRuntimePaths(repo).pidsDir, "desktop.pid");
+  NodeFS.mkdirSync(NodePath.dirname(pidFile), { recursive: true });
+  NodeFS.writeFileSync(pidFile, "999998\n");
+  try {
+    await agentDown(repo, {
+      stopManagedDesktop: async () => ({
+        pid: 999998,
+        status: "unconfirmed",
+        reason: "Reading the Electron command line timed out",
+      }),
+    });
+    NodeAssertStrict.default.equal(NodeFS.existsSync(pidFile), true);
+  } finally {
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("desktop PID remains when managed desktop cleanup rejects", async () => {
   const repo = makeRepo();
   const paths = getRuntimePaths(repo);

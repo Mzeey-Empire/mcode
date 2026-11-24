@@ -21,52 +21,70 @@ export function stopElectron(repoRoot = process.cwd(), options = {}) {
 
   const record = JSON.parse(readFileSync(sessionFile, "utf8"));
   validateRecord(record, root);
-  const commandLine = readCommandLine(record.pid);
-  if (!commandLine) {
-    rmSync(sessionFile, { force: true });
-    return { pid: record.pid, status: "already-stopped" };
-  }
+  const result = stopRecordedProcess(record, options);
+  if (result.status !== "unconfirmed") rmSync(sessionFile, { force: true });
+  return { pid: record.pid, ...result };
+}
 
-  const normalizedCommand = commandLine.toLowerCase();
-  const expectedExecutable = resolve(record.executablePath).toLowerCase();
-  const expectedPort = `--remote-debugging-port=${record.debugPort}`;
-  if (!normalizedCommand.includes(expectedExecutable) || !normalizedCommand.includes(expectedPort)) {
+function stopRecordedProcess(record, { isProcessAlive = isPidAlive, runCommand = spawnSync }) {
+  const { pid } = record;
+  if (!isProcessAlive(pid)) return { status: "already-stopped" };
+
+  const commandLine = readCommandLine(pid, runCommand);
+  if (commandLine === null) {
+    return { status: "unconfirmed", reason: "Reading the Electron command line timed out" };
+  }
+  if (!commandLine) {
+    if (!isProcessAlive(pid)) return { status: "already-stopped" };
+    return { status: "unconfirmed", reason: "Could not read the Electron command line" };
+  }
+  if (!matchesElectronCommand(record, commandLine)) {
     throw new Error("Recorded PID no longer matches the owned Electron command");
   }
 
-  const status = stopValidatedProcess(record.pid);
-  rmSync(sessionFile, { force: true });
-  return { pid: record.pid, status };
+  return stopValidatedProcess(pid, isProcessAlive, runCommand);
 }
 
-function stopValidatedProcess(pid) {
-  const stopped = terminateProcessTree(pid);
-  if (stopped.ok) return "stopped";
+function stopValidatedProcess(pid, isProcessAlive, runCommand) {
+  const stopped = terminateProcessTree(pid, runCommand);
+  if (stopped.ok) return { status: "stopped" };
+  if (stopped.timedOut) return { status: "unconfirmed", reason: stopped.error };
   // The process can exit after ownership validation but before taskkill runs.
-  if (!readCommandLine(pid)) return "already-stopped";
+  if (!isProcessAlive(pid)) return { status: "already-stopped" };
   throw new Error(`Could not stop Electron process tree: ${stopped.error}`);
 }
 
-function readCommandLine(pid) {
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code !== "ESRCH";
+  }
+}
+
+function readCommandLine(pid, runCommand = spawnSync) {
+  const options = { encoding: "utf8", timeout: 10_000, windowsHide: true };
   if (process.platform === "win32") {
-    const result = spawnSync(
+    const result = runCommand(
       "powershell.exe",
       [
         "-NoProfile",
         "-Command",
         `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`,
       ],
-      { encoding: "utf8" },
+      options,
     );
+    if (result.error?.code === "ETIMEDOUT") return null;
+    if (result.error) throw result.error;
     if (result.status !== 0) {
       throw new Error(`Could not inspect recorded Electron PID: ${result.stderr.trim()}`);
     }
     return result.stdout.trim();
   }
 
-  const result = spawnSync("ps", ["-ww", "-p", String(pid), "-o", "command="], {
-    encoding: "utf8",
-  });
+  const result = runCommand("ps", ["-ww", "-p", String(pid), "-o", "command="], options);
+  if (result.error?.code === "ETIMEDOUT") return null;
   return result.status === 0 ? result.stdout.trim() : "";
 }
 
@@ -74,15 +92,19 @@ function readCommandLine(pid) {
 export function isOwnedElectronProcess(record, root) {
   try {
     validateRecord(record, root);
+    if (!isPidAlive(record.pid)) return false;
     const commandLine = readCommandLine(record.pid);
-    if (!commandLine) return false;
-    const normalizedCommand = commandLine.toLowerCase();
-    const expectedExecutable = resolve(record.executablePath).toLowerCase();
-    const expectedPort = `--remote-debugging-port=${record.debugPort}`;
-    return normalizedCommand.includes(expectedExecutable) && normalizedCommand.includes(expectedPort);
+    return Boolean(commandLine) && matchesElectronCommand(record, commandLine);
   } catch {
     return false;
   }
+}
+
+function matchesElectronCommand(record, commandLine) {
+  const normalizedCommand = commandLine.toLowerCase();
+  const expectedExecutable = resolve(record.executablePath).toLowerCase();
+  const expectedPort = `--remote-debugging-port=${record.debugPort}`;
+  return normalizedCommand.includes(expectedExecutable) && normalizedCommand.includes(expectedPort);
 }
 
 function validateRecord(record, root) {

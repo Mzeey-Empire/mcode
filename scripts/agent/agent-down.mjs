@@ -145,7 +145,12 @@ export async function stopRecordedDesktopPidFile(pidFile, repoRoot, options = {}
   if (result.status === "not-running") {
     return stopRecordedPidFile(pidFile, { repoRoot, stop: options.stop });
   }
-  NodeFS.rmSync(pidFile);
+  if (result.status === "unconfirmed") {
+    console.warn(`[agent:down] Could not confirm Electron stopped for PID ${result.pid}: ${result.reason}`);
+  }
+  if (result.status === "stopped" || result.status === "already-stopped") {
+    NodeFS.rmSync(pidFile);
+  }
 }
 
 /**
