@@ -1141,6 +1141,40 @@ NodeTest.test("agentUp cleans the managed desktop session when desktop PID regis
   }
 });
 
+NodeTest.test("agentUp retains the desktop records when readiness fails and the Electron stop is unconfirmed", async () => {
+  const repo = makeRepo();
+  const paths = getRuntimePaths(repo);
+  const sessionFile = NodePath.join(paths.devDir, "electron-agent-runtime.json");
+  const restoreFetch = mockReachableWebApp();
+  const restoreHooks = setAgentUpTestHooks({
+    computeAvailablePorts: async () => ({ serverPort: 41_273, webPort: 41_274 }),
+    getElectronBinary: () => process.execPath,
+    spawnLogged: () => ({ pid: 81_074 }),
+    startManagedDesktop: () => {
+      NodeFS.writeFileSync(sessionFile, "session\n");
+      publishDesktopEndpoint(repo);
+      return { endpoint: "http://127.0.0.1:43007", pid: 81_075 };
+    },
+    waitForDesktopPage: async () => { throw new Error("desktop page failed readiness"); },
+    stopManagedDesktop: async () => ({ status: "unconfirmed", reason: "taskkill timed out" }),
+    stopPid: async () => {},
+  });
+  try {
+    provisionRuntime(repo);
+    await NodeAssertStrict.default.rejects(
+      () => agentUp(repo, { mode: "desktop", wait: true }),
+      { name: "AggregateError", message: /desktop page failed readiness.*PID 81075/ },
+    );
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(NodePath.join(paths.pidsDir, "desktop.pid"), "utf8"), "81075\n");
+    NodeAssertStrict.default.equal(NodeFS.existsSync(sessionFile), true);
+    NodeAssertStrict.default.equal(readPortsFile(repo).serverPort, 19_504);
+  } finally {
+    restoreFetch();
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("agentUp rejects a linked managed desktop user-data directory before spawning", async (context) => {
   const repo = makeRepo();
   const paths = getRuntimePaths(repo);

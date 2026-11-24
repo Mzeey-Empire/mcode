@@ -174,9 +174,14 @@ async function startProvisionedRuntime({ bunBin, electronBin, paths, repoRoot, r
     await writeRuntimeSummary(contract, repoRoot, startedProcesses);
     return contract;
   } catch (error) {
-    const cleanupError = await cleanupStartedProcesses(startedProcesses, repoRoot);
-    if (cleanupError) {
-      throw new AggregateError([error, cleanupError], `Agent runtime startup failed: ${error.message}`, { cause: error });
+    const cleanupErrors = await cleanupStartedProcesses(startedProcesses, repoRoot);
+    if (cleanupErrors.length > 0) {
+      const details = cleanupErrors.map((failure) => failure?.message ?? String(failure));
+      throw new AggregateError(
+        [error, ...cleanupErrors],
+        `Agent runtime startup failed: ${error.message}; ${details.join("; ")}`,
+        { cause: error },
+      );
     }
     throw error;
   }
@@ -545,13 +550,14 @@ async function cleanupStartedProcesses(processes, repoRoot) {
       cleanupErrors.push(error);
     }
   }
+  if (cleanupErrors.length > 0) return cleanupErrors;
   try {
     assertRuntimeFileSafe(paths.portsFile, "runtime contract", true);
     NodeFS.rmSync(paths.portsFile, { force: true });
   } catch (error) {
     cleanupErrors.push(error);
   }
-  return cleanupErrors.length === 0 ? null : new AggregateError(cleanupErrors, "Agent runtime cleanup failed");
+  return cleanupErrors;
 }
 
 async function cleanupStartedProcess(processRecord, { paths, repoRoot, stopDesktop, stopOwnedProcess }) {
@@ -573,6 +579,9 @@ async function cleanupStartedDesktop(pid, paths, repoRoot, stopDesktop, stopOwne
     return stopCapturedDesktop(pid, paths, stopOwnedProcess);
   }
   if (result?.status === "not-running") return stopCapturedDesktop(pid, paths, stopOwnedProcess);
+  if (result?.status === "unconfirmed") {
+    throw new Error(`Could not confirm Electron stopped for PID ${pid}: ${result.reason}`);
+  }
 }
 
 async function stopCapturedDesktop(pid, paths, stopOwnedProcess) {
@@ -600,16 +609,6 @@ async function writeStdout(value) {
   });
 }
 
-function describeStartupError(error) {
-  if (!(error instanceof Error)) return String(error);
-  // A failed rollback rides in an AggregateError; name what still needs stopping.
-  if (error instanceof AggregateError) {
-    const cleanupMessages = error.errors.slice(1).map((inner) => inner?.message ?? String(inner));
-    return [error.message, ...cleanupMessages].join("; ");
-  }
-  return error.message;
-}
-
 if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
   const repoArg = process.argv.slice(2).find((arg) => !arg.startsWith("--"));
   const repoRoot = repoArg ? NodePath.resolve(repoArg) : resolveRepoRoot();
@@ -617,7 +616,7 @@ if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]
     await agentUp(repoRoot, parseAgentUpOptions(process.argv.slice(2)));
   } catch (error) {
     // Agents read this output; a refusal such as the mode guard must stay one actionable line.
-    process.stderr.write(`Agent runtime did not start: ${describeStartupError(error)}\n`);
+    process.stderr.write(`Agent runtime did not start: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exit(1);
   }
   if (readRuntimeDatabaseSeed(repoRoot) === "filtered") {
