@@ -22,7 +22,10 @@ export async function agentReset(repoRoot = resolveRepoRoot(), options = {}) {
   const up = options.up ?? agentUp;
   const refreshDatabase = options.refreshDatabase ?? refreshRuntimeDatabase;
   const mode = readResetMode(repoRoot);
-  await down(repoRoot);
+  const result = await down(repoRoot);
+  if (!result.complete) {
+    throw new Error("The runtime did not stop cleanly; resolve the processes named above, then run agent:down again.");
+  }
   refreshDatabase(repoRoot);
   await up(repoRoot, { mode });
 }

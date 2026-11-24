@@ -9,6 +9,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import {
+  assertDevDirIgnored,
   buildPortsContract,
   buildRuntimeStateEnv,
   assertRuntimeDirectorySafe,
@@ -86,13 +87,18 @@ export function setAgentUpTestHooks(hooks) {
  */
 export async function agentUp(repoRoot = resolveRepoRoot(), { mode = "web", wait = false } = {}) {
   assertRuntimeRootSafe(repoRoot);
+  assertDevDirIgnored(repoRoot);
   assertRuntimeModeAvailable(repoRoot, mode);
-  const paths = ensureRuntimeRoot(repoRoot);
-  prepareSharedRuntimeDirectories(paths);
+  const paths = getRuntimePaths(repoRoot);
   if (mode === "desktop") assertManagedDesktopPathsSafe(paths);
   assertRuntimeProvisioned(repoRoot, paths, mode === "desktop");
   const stopRuntimePids = agentUpTestHooks.stopRecordedRuntimePids ?? stopRecordedRuntimePids;
-  await stopRuntimePids(repoRoot);
+  const result = await stopRuntimePids(repoRoot);
+  if (!result.complete) {
+    throw new Error("The runtime did not stop cleanly; resolve the processes named above, then run agent:down again.");
+  }
+  ensureRuntimeRoot(repoRoot);
+  prepareSharedRuntimeDirectories(paths);
 
   const runtime = await prepareRuntime(repoRoot, mode);
   const electronBin = requireElectronBinary();
@@ -213,6 +219,9 @@ export function parseAgentUpOptions(args) {
  * @param {boolean} desktop
  */
 function assertRuntimeProvisioned(repoRoot, paths, desktop) {
+  for (const directory of [paths.dbDir, paths.logsDir, paths.playwrightScratchDir, paths.electronDir]) {
+    assertRuntimeDirectorySafe(directory, "runtime directory", true);
+  }
   const serverCjs = NodePath.resolve(repoRoot, "apps", "desktop", "dist", "server", "server.cjs");
   const desktopMain = NodePath.resolve(repoRoot, "apps", "desktop", "dist", "main", "main.cjs");
   const missing = [];
