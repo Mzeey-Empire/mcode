@@ -103,40 +103,50 @@ NodeTest.test("available port assignment increments after the deterministic star
   }
 });
 
-NodeTest.test("ports.json round trips validated runtime ports", () => {
-  const repo = makeRepo({ gitignore: ".dev/\n" });
-  try {
-    const contract = buildPortsContract({
-      repoRoot: repo,
-      serverPort: 41_111,
-      webPort: 41_112,
-      instanceToken: "instance-token-abc1234567890abc1234567890",
-      worktreeIdentity: repo,
-      seedLogin: {
-        email: "agent@seed.local",
-        token: "seed-token",
-        authHeader: "Bearer seed-token",
-        cookieName: "mcode-auth",
-      },
-    });
+for (const [mode, webPort, appUrl] of [
+  ["web", 41_112, "http://127.0.0.1:41112"],
+  ["desktop", 41_112, "http://127.0.0.1:41112"],
+  ["server", null, null],
+]) {
+  NodeTest.test(`ports.json round trips ${mode} endpoints`, () => {
+    const repo = makeRepo({ gitignore: ".dev/\n" });
+    try {
+      const contract = buildPortsContract({
+        repoRoot: repo,
+        mode,
+        serverPort: 41_111,
+        webPort: 41_112,
+        instanceToken: "instance-token-abc1234567890abc1234567890",
+        worktreeIdentity: repo,
+        seedLogin: {
+          email: "agent@seed.local",
+          token: "seed-token",
+          authHeader: "Bearer seed-token",
+          cookieName: "mcode-auth",
+        },
+      });
 
-    writePortsFile(contract, repo);
-    const paths = getRuntimePaths(repo);
-    NodeAssertStrict.default.match(NodeFS.readFileSync(paths.portsFile, "utf8"), /"serverPort": 41111/);
-    NodeAssertStrict.default.deepEqual(readPortsFile(repo), contract);
-    if (process.platform !== "win32") {
-      NodeAssertStrict.default.equal(NodeFS.statSync(paths.portsFile).mode & 0o777, 0o600);
+      writePortsFile(contract, repo);
+      const paths = getRuntimePaths(repo);
+      NodeAssertStrict.default.match(NodeFS.readFileSync(paths.portsFile, "utf8"), /"serverPort": 41111/);
+      NodeAssertStrict.default.deepEqual(readPortsFile(repo), {
+        ...contract, mode, webPort, appUrl, healthUrl: "http://127.0.0.1:41111/health",
+      });
+      if (process.platform !== "win32") {
+        NodeAssertStrict.default.equal(NodeFS.statSync(paths.portsFile).mode & 0o777, 0o600);
+      }
+    } finally {
+      NodeFS.rmSync(repo, { recursive: true, force: true });
     }
-  } finally {
-    NodeFS.rmSync(repo, { recursive: true, force: true });
-  }
-});
+  });
+}
 
-NodeTest.test("ports.json accepts a pending endpoint only as a pair of nulls", () => {
+NodeTest.test("ports.json accepts a pending server pair only in desktop mode", () => {
   const repo = makeRepo({ gitignore: ".dev/\n" });
   try {
     const pending = buildPortsContract({
       repoRoot: repo,
+      mode: "desktop",
       serverPort: null,
       webPort: 41_112,
       instanceToken: "instance-token-abc1234567890abc1234567890",
@@ -151,6 +161,11 @@ NodeTest.test("ports.json accepts a pending endpoint only as a pair of nulls", (
     writePortsFile(pending, repo);
     const { serverPort, healthUrl } = readPortsFile(repo);
     NodeAssertStrict.default.deepEqual({ serverPort, healthUrl }, { serverPort: null, healthUrl: null });
+    NodeAssertStrict.default.throws(() => writePortsFile({ ...pending, mode: "web" }, repo), /serverPort/);
+    NodeAssertStrict.default.throws(
+      () => writePortsFile({ ...pending, mode: "server", webPort: null, appUrl: null }, repo),
+      /serverPort/,
+    );
     for (const endpoint of [
       { serverPort: 41_111, healthUrl: null },
       { serverPort: null, healthUrl: "http://127.0.0.1:41111/health" },
@@ -158,6 +173,37 @@ NodeTest.test("ports.json accepts a pending endpoint only as a pair of nulls", (
     ]) {
       NodeAssertStrict.default.throws(() => writePortsFile({ ...pending, ...endpoint }, repo), /healthUrl/);
     }
+  } finally {
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("ports.json rejects missing and unknown modes and a web URL in server mode", () => {
+  const repo = makeRepo({ gitignore: ".dev/\n" });
+  try {
+    const contract = buildPortsContract({
+      repoRoot: repo,
+      mode: "server",
+      serverPort: 41_111,
+      webPort: null,
+      instanceToken: "instance-token-abc1234567890abc1234567890",
+      seedLogin: {
+        email: "agent@seed.local",
+        token: "seed-token",
+        authHeader: "Bearer seed-token",
+        cookieName: "mcode-auth",
+      },
+    });
+    writePortsFile(contract, repo);
+    const { portsFile } = getRuntimePaths(repo);
+    for (const mode of [undefined, "unknown"]) {
+      NodeFS.writeFileSync(portsFile, JSON.stringify({ ...contract, mode }));
+      NodeAssertStrict.default.throws(() => readPortsFile(repo), /ports.json mode/);
+    }
+    NodeAssertStrict.default.throws(
+      () => writePortsFile({ ...contract, appUrl: "http://127.0.0.1:41112" }, repo),
+      /appUrl/,
+    );
   } finally {
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }
@@ -177,6 +223,7 @@ NodeTest.test("ports.json requires top-level instance token and worktree identit
   try {
     const contract = buildPortsContract({
       repoRoot: repo,
+      mode: "web",
       serverPort: 41_111,
       webPort: 41_112,
       instanceToken: "instance-token-abc1234567890abc1234567890",

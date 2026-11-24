@@ -50,6 +50,7 @@ const devToken = NodeCrypto.randomUUID();
 const instanceToken = generateInstanceToken();
 const singleInstance = resolveDevSingleInstanceFlag(process.env.MCODE_SINGLE_INSTANCE);
 const contract = buildPortsContract({
+  mode: "web",
   repoRoot,
   serverPort,
   webPort: process.env.MCODE_WEB_PORT

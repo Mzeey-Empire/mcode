@@ -51,6 +51,7 @@ NodeTest.test("plain agentUp publishes a complete contract for its standalone se
     await agentUp(repo);
 
     const contract = readPortsFile(repo);
+    NodeAssertStrict.default.equal(contract.mode, "web");
     NodeAssertStrict.default.equal(contract.serverPort, 41_225);
     NodeAssertStrict.default.equal(contract.healthUrl, "http://127.0.0.1:41225/health");
     NodeAssertStrict.default.deepEqual(launches.map(({ args }) => args[0]), [bundle, "run"]);

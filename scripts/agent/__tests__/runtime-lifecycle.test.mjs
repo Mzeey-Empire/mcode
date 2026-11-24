@@ -38,6 +38,7 @@ NodeTest.test("agentDown posts shutdown with seedLogin.authHeader and cleans onl
     const paths = getRuntimePaths(repo);
     const contract = buildPortsContract({
       repoRoot: repo,
+      mode: "web",
       serverPort: 41_123,
       webPort: 41_124,
       instanceToken: "instance-token-abc1234567890abc1234567890",
@@ -85,7 +86,7 @@ for (const serverPort of [19_504, null]) {
       return new Response(null, { status: 200 });
     };
     try {
-      writeGracefulRuntimeContract(repo, serverPort);
+      writeGracefulRuntimeContract(repo, serverPort, "desktop");
       NodeFS.mkdirSync(pidsDir, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(pidsDir, "desktop.pid"), "999998\n");
       NodeFS.writeFileSync(NodePath.join(pidsDir, "web.pid"), "999999\n");
@@ -122,6 +123,7 @@ NodeTest.test("agentDown falls back to PID cleanup when the shutdown request nev
     const paths = getRuntimePaths(repo);
     writePortsFile(buildPortsContract({
       repoRoot: repo,
+      mode: "web",
       serverPort: 41_125,
       webPort: 41_126,
       instanceToken: "instance-token-abc1234567890abc1234567890",
@@ -330,7 +332,7 @@ NodeTest.test("agentUp removes stale PID files before launching server and web p
     },
     computeAvailablePorts: async () => ({ serverPort: 41_223, webPort: 41_224 }),
     getElectronBinary: () => process.execPath,
-    spawnLogged: (_command, _args, options) => {
+    spawnLogged: () => {
       spawnAttempted = true;
       NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(getRuntimePaths(repo).pidsDir, "server.pid")), false);
       throw new Error("stop before real launch");
@@ -339,6 +341,7 @@ NodeTest.test("agentUp removes stale PID files before launching server and web p
 
   try {
     provisionRuntime(repo);
+    writeGracefulRuntimeContract(repo, null, "desktop");
     const paths = getRuntimePaths(repo);
     NodeFS.mkdirSync(paths.pidsDir, { recursive: true });
     NodeFS.writeFileSync(NodePath.join(paths.pidsDir, "server.pid"), "999998\n");
@@ -347,6 +350,64 @@ NodeTest.test("agentUp removes stale PID files before launching server and web p
 
     NodeAssertStrict.default.equal(spawnAttempted, true);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.pidsDir, "server.pid")), false);
+  } finally {
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentUp rejects a live PID in another mode or without a known mode before stopping anything", async () => {
+  const repo = makeRepo();
+  const paths = getRuntimePaths(repo);
+  const pidFile = NodePath.join(paths.pidsDir, "server.pid");
+  const restoreHooks = setAgentUpTestHooks({
+    stopRecordedRuntimePids: async () => NodeAssertStrict.default.fail("startup must not stop the running runtime"),
+    spawnLogged: () => NodeAssertStrict.default.fail("startup must not spawn a process"),
+  });
+
+  try {
+    provisionRuntime(repo);
+    NodeFS.mkdirSync(paths.pidsDir, { recursive: true });
+    NodeFS.writeFileSync(pidFile, `${process.pid}\n`);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "server" }), {
+      message: "A previous runtime is running in this worktree. Run 'bun run --shell system agent:down' first.",
+    });
+
+    writeGracefulRuntimeContract(repo, 41_123);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "server" }), {
+      message: "A web runtime is running in this worktree. Run 'bun run --shell system agent:down' first.",
+    });
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(pidFile, "utf8"), `${process.pid}\n`);
+  } finally {
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentUp stops the recorded runtime before replacing it in the same mode", async () => {
+  const repo = makeRepo();
+  const paths = getRuntimePaths(repo);
+  const pidFile = NodePath.join(paths.pidsDir, "server.pid");
+  const launches = [];
+  const restoreHooks = setAgentUpTestHooks({
+    stopRecordedRuntimePids: async () => NodeFS.unlinkSync(pidFile),
+    computeAvailablePorts: async () => ({ serverPort: 41_223, webPort: 41_224 }),
+    getElectronBinary: () => process.execPath,
+    spawnLogged: (_command, _args, _options, logFile) => {
+      launches.push(NodePath.basename(logFile));
+      if (launches.length === 1) NodeAssertStrict.default.equal(NodeFS.existsSync(pidFile), false);
+      return { pid: 80_100 + launches.length };
+    },
+  });
+
+  try {
+    provisionRuntime(repo);
+    writeGracefulRuntimeContract(repo, 41_123);
+    NodeFS.mkdirSync(paths.pidsDir, { recursive: true });
+    NodeFS.writeFileSync(pidFile, `${process.pid}\n`);
+    await agentUp(repo);
+    NodeAssertStrict.default.deepEqual(launches, ["server.log", "web.log"]);
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(pidFile, "utf8"), "80101\n");
   } finally {
     restoreHooks();
     NodeFS.rmSync(repo, { recursive: true, force: true });
@@ -430,7 +491,9 @@ NodeTest.test("agentUp prints a redacted startup summary and persists credential
     stopRecordedRuntimePids: async () => {},
     computeAvailablePorts: async () => ({ serverPort: 41_241, webPort: 41_242 }),
     getElectronBinary: () => process.execPath,
-    spawnLogged: () => ({ pid: 80_101 }),
+    spawnLogged: (_command, _args, _options, logFile) => ({
+      pid: NodePath.basename(logFile) === "server.log" ? 80_101 : 80_102,
+    }),
   });
   process.stdout.write = (chunk, callback) => {
     output += String(chunk);
@@ -445,11 +508,14 @@ NodeTest.test("agentUp prints a redacted startup summary and persists credential
     const persisted = readPortsFile(repo);
 
     NodeAssertStrict.default.deepEqual(summary, {
+      mode: "web",
+      processes: [{ name: "server", pid: 80_101 }, { name: "web", pid: 80_102 }],
       healthUrl: contract.healthUrl,
       appUrl: contract.appUrl,
       worktreeIdentity: contract.worktreeIdentity,
       contractPath: ".dev/ports.json",
     });
+    NodeAssertStrict.default.equal(output.split("\n").length, 2);
     NodeAssertStrict.default.doesNotMatch(output, /token|authHeader|instanceToken/i);
     NodeAssertStrict.default.match(persisted.seedLogin.authHeader, /^Bearer /);
     NodeAssertStrict.default.equal(persisted.instanceToken, contract.instanceToken);
@@ -467,10 +533,55 @@ NodeTest.test("agentUp prints a redacted startup summary and persists credential
   }
 });
 
-NodeTest.test("agentUp CLI options require --wait for blocking startup", () => {
-  NodeAssertStrict.default.deepEqual(parseAgentUpOptions([]), { desktop: false, wait: false });
-  NodeAssertStrict.default.deepEqual(parseAgentUpOptions(["--desktop"]), { desktop: true, wait: false });
-  NodeAssertStrict.default.deepEqual(parseAgentUpOptions(["--wait"]), { desktop: false, wait: true });
+NodeTest.test("agentUp CLI options select one start mode and require --wait for blocking startup", () => {
+  NodeAssertStrict.default.deepEqual(parseAgentUpOptions([]), { mode: "web", wait: false });
+  NodeAssertStrict.default.deepEqual(parseAgentUpOptions(["--desktop"]), { mode: "desktop", wait: false });
+  NodeAssertStrict.default.deepEqual(parseAgentUpOptions(["--server", "--wait"]), { mode: "server", wait: true });
+  NodeAssertStrict.default.deepEqual(parseAgentUpOptions(["--wait"]), { mode: "web", wait: true });
+  NodeAssertStrict.default.throws(() => parseAgentUpOptions(["--desktop", "--server"]), {
+    message: "Choose one start mode: --desktop or --server.",
+  });
+});
+
+NodeTest.test("agentUp --server records only the server and waits only for its health URL", async () => {
+  const repo = makeRepo();
+  const paths = getRuntimePaths(repo);
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  const launches = [];
+  const restoreHooks = setAgentUpTestHooks({
+    computeAvailablePorts: async () => ({ serverPort: 41_225, webPort: 41_226 }),
+    getElectronBinary: () => process.execPath,
+    spawnLogged: (_command, _args, _options, logFile) => {
+      launches.push(NodePath.basename(logFile));
+      return { pid: 80_103 };
+    },
+    startManagedDesktop: async () => NodeAssertStrict.default.fail("server mode must not start Electron"),
+  });
+  globalThis.fetch = async (url) => {
+    urls.push(url);
+    return new Response(null, { status: 200 });
+  };
+
+  try {
+    provisionRuntime(repo);
+    await agentUp(repo, parseAgentUpOptions(["--server", "--wait"]));
+    const { mode, healthUrl, webPort, appUrl } = readPortsFile(repo);
+    NodeAssertStrict.default.deepEqual({ mode, healthUrl, webPort, appUrl }, {
+      mode: "server",
+      healthUrl: "http://127.0.0.1:41225/health",
+      webPort: null,
+      appUrl: null,
+    });
+    NodeAssertStrict.default.deepEqual(urls, ["http://127.0.0.1:41225/health"]);
+    NodeAssertStrict.default.deepEqual(launches, ["server.log"]);
+    NodeAssertStrict.default.deepEqual(NodeFS.readdirSync(paths.pidsDir), ["server.pid"]);
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(NodePath.join(paths.pidsDir, "server.pid"), "utf8"), "80103\n");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 NodeTest.test("agentUp prepares fresh runtime directories before recording child PIDs", async () => {
@@ -561,7 +672,7 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
 
   try {
     provisionRuntime(repo);
-    const contract = await agentUp(repo, { desktop: true, wait: true });
+    const contract = await agentUp(repo, { mode: "desktop", wait: true });
 
     NodeAssertStrict.default.equal(healthUrl, "http://127.0.0.1:19504/health");
     NodeAssertStrict.default.equal(contract.serverPort, 19_504);
@@ -613,7 +724,7 @@ NodeTest.test("agentUp --desktop waits for the web app before launch even withou
   };
   try {
     provisionRuntime(repo);
-    const contract = await agentUp(repo, { desktop: true });
+    const contract = await agentUp(repo, { mode: "desktop" });
     NodeAssertStrict.default.deepEqual(startup, ["web started", "app returned 503", "app returned 200", "Electron started"]);
     NodeAssertStrict.default.equal(pageWaited, false);
     NodeAssertStrict.default.deepEqual(spawned, [["run", "dev", "--host", "127.0.0.1", "--port", "41258", "--strictPort"]]);
@@ -654,7 +765,7 @@ NodeTest.test("agentUp --desktop stops the web process without launching Electro
   try {
     provisionRuntime(repo);
     await NodeAssertStrict.default.rejects(
-      () => agentUp(repo, { desktop: true }),
+      () => agentUp(repo, { mode: "desktop" }),
       /web app did not become reachable: http:\/\/127\.0\.0\.1:41260/,
     );
     NodeAssertStrict.default.equal(desktopStarted, false);
@@ -734,7 +845,7 @@ NodeTest.test("agentUp removes the desktop PID after managed page readiness fail
   try {
     provisionRuntime(repo);
     await NodeAssertStrict.default.rejects(
-      () => agentUp(repo, { desktop: true, wait: true }),
+      () => agentUp(repo, { mode: "desktop", wait: true }),
       /managed app page did not load/,
     );
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.pidsDir, "desktop.pid")), false);
@@ -1008,7 +1119,7 @@ NodeTest.test("agentUp cleans the managed desktop session when desktop PID regis
   });
   try {
     provisionRuntime(repo);
-    await NodeAssertStrict.default.rejects(() => agentUp(repo, { desktop: true }), /cannot record desktop PID/);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "desktop" }), /cannot record desktop PID/);
     NodeAssertStrict.default.equal(desktopStopped, true);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(getRuntimePaths(repo).devDir, "electron-agent-runtime.json")), false);
   } finally {
@@ -1034,7 +1145,7 @@ NodeTest.test("agentUp rejects a linked managed desktop user-data directory befo
       context.skip(`links unavailable: ${error.message}`);
       return;
     }
-    await NodeAssertStrict.default.rejects(() => agentUp(repo, { desktop: true }), /managed desktop user-data directory must not be a link/);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "desktop" }), /managed desktop user-data directory must not be a link/);
     NodeAssertStrict.default.equal(spawned, false);
     NodeAssertStrict.default.equal(NodeFS.readFileSync(sentinel, "utf8"), "external\n");
   } finally {
@@ -1117,7 +1228,7 @@ NodeTest.test("agentUp falls back to the captured desktop PID when managed clean
     provisionRuntime(repo);
     let error;
     try {
-      await agentUp(repo, { desktop: true });
+      await agentUp(repo, { mode: "desktop" });
     } catch (caught) {
       error = caught;
     }
@@ -1159,7 +1270,7 @@ NodeTest.test("agentUp retains the desktop session when managed and captured cle
   });
   try {
     provisionRuntime(repo);
-    await NodeAssertStrict.default.rejects(() => agentUp(repo, { desktop: true }), /cannot record desktop PID/);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "desktop" }), /cannot record desktop PID/);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.devDir, "electron-agent-runtime.json")), true);
   } finally {
     restoreFetch();
@@ -1193,7 +1304,7 @@ NodeTest.test("agentUp stops the captured desktop PID when managed cleanup repor
   });
   try {
     provisionRuntime(repo);
-    await NodeAssertStrict.default.rejects(() => agentUp(repo, { desktop: true }), /cannot record desktop PID/);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "desktop" }), /cannot record desktop PID/);
     NodeAssertStrict.default.equal(stopped[0], 81_093);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.devDir, "electron-agent-runtime.json")), false);
   } finally {
@@ -1422,14 +1533,17 @@ NodeTest.test("agentReset does not start replacement before shutdown completes",
     const paths = getRuntimePaths(repo);
     NodeFS.mkdirSync(paths.dbDir, { recursive: true });
     NodeFS.writeFileSync(NodePath.join(paths.dbDir, "app.sqlite"), "keep\n");
+    writeGracefulRuntimeContract(repo, 19_504, "desktop");
 
     const resetting = agentReset(repo, {
       down: async () => {
         shutdownStarted = true;
         await shutdown;
+        NodeFS.unlinkSync(paths.portsFile);
       },
       refreshDatabase: () => NodeFS.writeFileSync(paths.dbPath, "snapshot\n"),
-      up: async () => {
+      up: async (_repo, { mode }) => {
+        NodeAssertStrict.default.equal(mode, "desktop");
         NodeAssertStrict.default.equal(NodeFS.existsSync(paths.dbPath), true);
         NodeAssertStrict.default.equal(NodeFS.readFileSync(paths.dbPath, "utf8"), "snapshot\n");
       },
@@ -1596,10 +1710,11 @@ function provisionRuntime(repo) {
   NodeFS.writeFileSync(desktopMain, "// desktop main\n");
 }
 
-/** Writes a valid runtime contract for graceful shutdown tests. */
-function writeGracefulRuntimeContract(repo, serverPort) {
+/** Writes a runtime contract for tests that start from a recorded runtime. */
+function writeGracefulRuntimeContract(repo, serverPort, mode = "web") {
   writePortsFile(buildPortsContract({
     repoRoot: repo,
+    mode,
     serverPort,
     webPort: 41_124,
     instanceToken: "instance-token-abc1234567890abc1234567890",

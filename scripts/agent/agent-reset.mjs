@@ -8,7 +8,7 @@ import * as NodeURL from "node:url";
 import { agentDown } from "./agent-down.mjs";
 import { agentUp } from "./agent-up.mjs";
 import { refreshRuntimeDatabase } from "./agent-setup.mjs";
-import { resolveRepoRoot } from "./runtime-contract.mjs";
+import { readPortsFile, resolveRepoRoot } from "./runtime-contract.mjs";
 
 /**
  * Stops the runtime, replaces its local database with an empty one, and restarts it.
@@ -21,9 +21,18 @@ export async function agentReset(repoRoot = resolveRepoRoot(), options = {}) {
   const down = options.down ?? agentDown;
   const up = options.up ?? agentUp;
   const refreshDatabase = options.refreshDatabase ?? refreshRuntimeDatabase;
+  const mode = readResetMode(repoRoot);
   await down(repoRoot);
   refreshDatabase(repoRoot);
-  await up(repoRoot);
+  await up(repoRoot, { mode });
+}
+
+function readResetMode(repoRoot) {
+  try {
+    return readPortsFile(repoRoot)?.mode ?? "web";
+  } catch {
+    return "web";
+  }
 }
 
 if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
