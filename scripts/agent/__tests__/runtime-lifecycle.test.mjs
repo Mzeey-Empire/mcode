@@ -478,6 +478,63 @@ NodeTest.test("agentUp stops the recorded runtime before replacing it in the sam
   }
 });
 
+NodeTest.test("agentUp refuses a live startup lock before the mode guard, shutdown, or launch", async () => {
+  const repo = makeRepo();
+  const paths = getRuntimePaths(repo);
+  const lockPath = NodePath.join(paths.devDir, "agent-up.lock");
+  const restoreHooks = setAgentUpTestHooks({
+    stopRecordedRuntimePids: () => NodeAssertStrict.default.fail("startup must not stop the running runtime"),
+    spawnLogged: () => NodeAssertStrict.default.fail("startup must not spawn a process"),
+  });
+  try {
+    writeGracefulRuntimeContract(repo, 41_123);
+    NodeFS.mkdirSync(paths.pidsDir);
+    NodeFS.writeFileSync(NodePath.join(paths.pidsDir, "server.pid"), `${process.pid}\n`);
+    NodeFS.writeFileSync(lockPath, `${process.pid}\n`);
+    await NodeAssertStrict.default.rejects(() => agentUp(repo, { mode: "server" }), {
+      message: new RegExp(`Another agent:up.*PID ${process.pid}`),
+    });
+    NodeAssertStrict.default.equal(NodeFS.readFileSync(lockPath, "utf8"), `${process.pid}\n`);
+  } finally {
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentUp replaces a stale startup lock and removes its own lock after success", async () => {
+  const repo = makeRepo();
+  const lockPath = NodePath.join(getRuntimePaths(repo).devDir, "agent-up.lock");
+  const restoreHooks = setAgentUpTestHooks({
+    computeAvailablePorts: async () => ({ serverPort: 41_223 }),
+    getElectronBinary: () => process.execPath,
+    spawnLogged: () => {
+      NodeAssertStrict.default.equal(NodeFS.readFileSync(lockPath, "utf8"), `${process.pid}\n`);
+      return { pid: 80_100 };
+    },
+  });
+  try {
+    provisionRuntime(repo);
+    NodeFS.writeFileSync(lockPath, "2147483647\n");
+    const contract = await agentUp(repo, { mode: "server" });
+    NodeAssertStrict.default.equal(contract.mode, "server");
+    NodeAssertStrict.default.equal(NodeFS.existsSync(lockPath), false);
+  } finally {
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentUp removes its startup lock when provisioning validation fails", async () => {
+  const repo = makeRepo();
+  const lockPath = NodePath.join(getRuntimePaths(repo).devDir, "agent-up.lock");
+  try {
+    await NodeAssertStrict.default.rejects(() => agentUp(repo), /runtime is not provisioned/);
+    NodeAssertStrict.default.equal(NodeFS.existsSync(lockPath), false);
+  } finally {
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("agentUp preserves the database after it stops the prior runtime", async () => {
   const repo = makeRepo();
   const events = [];

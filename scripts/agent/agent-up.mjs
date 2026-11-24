@@ -9,12 +9,10 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import {
-  assertDevDirIgnored,
   buildPortsContract,
   buildRuntimeStateEnv,
   assertRuntimeDirectorySafe,
   assertRuntimeFileSafe,
-  assertRuntimeRootSafe,
   computeAvailablePorts,
   ensureRuntimeRoot,
   generateInstanceToken,
@@ -86,10 +84,63 @@ export function setAgentUpTestHooks(hooks) {
  * @returns {Promise<import("./runtime-contract.mjs").AgentRuntimePorts>}
  */
 export async function agentUp(repoRoot = resolveRepoRoot(), { mode = "web", wait = false } = {}) {
-  assertRuntimeRootSafe(repoRoot);
-  assertDevDirIgnored(repoRoot);
+  const paths = ensureRuntimeRoot(repoRoot);
+  const lockPath = NodePath.join(paths.devDir, "agent-up.lock");
+  acquireStartupLock(lockPath);
+  try {
+    return await startRuntime(repoRoot, paths, mode, wait);
+  } finally {
+    NodeFS.unlinkSync(lockPath);
+  }
+}
+
+function acquireStartupLock(lockPath) {
+  for (;;) {
+    try {
+      NodeFS.writeFileSync(lockPath, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+      return;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    const owner = readStartupLockOwner(lockPath);
+    if (owner === null) continue;
+    assertStartupLockOwnerExited(owner);
+    reclaimStartupLock(lockPath);
+  }
+}
+
+function readStartupLockOwner(lockPath) {
+  try {
+    assertRuntimeFileSafe(lockPath, "agent:up lock", true);
+    return parsePidFile(lockPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function assertStartupLockOwnerExited(pid) {
+  if (isPidAlive(pid)) {
+    throw new Error(`Another agent:up is starting this worktree's runtime (PID ${pid}). Wait for it, or run 'bun run --shell system agent:down'.`);
+  }
+}
+
+function reclaimStartupLock(lockPath) {
+  // Serialize stale removal so a second reclaimer cannot unlink a new owner's lock.
+  const reclaimPath = `${lockPath}.reclaim`;
+  acquireStartupLock(reclaimPath);
+  try {
+    const owner = readStartupLockOwner(lockPath);
+    if (owner === null) return;
+    assertStartupLockOwnerExited(owner);
+    NodeFS.unlinkSync(lockPath);
+  } finally {
+    NodeFS.unlinkSync(reclaimPath);
+  }
+}
+
+async function startRuntime(repoRoot, paths, mode, wait) {
   assertRuntimeModeAvailable(repoRoot, mode);
-  const paths = getRuntimePaths(repoRoot);
   if (mode === "desktop") assertManagedDesktopPathsSafe(paths);
   assertRuntimeProvisioned(repoRoot, paths, mode === "desktop");
   const stopRuntimePids = agentUpTestHooks.stopRecordedRuntimePids ?? stopRecordedRuntimePids;
@@ -97,7 +148,6 @@ export async function agentUp(repoRoot = resolveRepoRoot(), { mode = "web", wait
   if (!result.complete) {
     throw new Error("The runtime did not stop cleanly; resolve the processes named above, then run agent:down again.");
   }
-  ensureRuntimeRoot(repoRoot);
   prepareSharedRuntimeDirectories(paths);
 
   const runtime = await prepareRuntime(repoRoot, mode);
