@@ -214,6 +214,17 @@ describe("Desktop Window creation", () => {
       expect.objectContaining({ message: "real render failure" }));
   });
 
+  it("logs why the app window's renderer process died", () => {
+    createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, backgroundColor: "#0a0a0f", hooks: createHooks() });
+
+    createWindowTest.emit("render-process-gone", {}, { reason: "crashed", exitCode: -1073741819 });
+
+    expect(sharedMocks.logger.error).toHaveBeenCalledWith(
+      "Renderer process gone: crashed (exit code -1073741819)",
+      expect.objectContaining({ reason: "crashed", exitCode: -1073741819 }),
+    );
+  });
+
   it("hardens Preview webviews and disposes resources only after close completes", () => {
     const hooks = createHooks();
     createWindow({ platform: "linux", displayName: "Mcode", isDesktopDev: () => false, backgroundColor: "#0a0a0f", hooks });
