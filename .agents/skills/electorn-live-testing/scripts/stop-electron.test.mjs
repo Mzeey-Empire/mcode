@@ -49,6 +49,24 @@ NodeTest.test("keeps the Electron session record when command-line inspection ti
   }
 });
 
+NodeTest.test("removes the Electron session when taskkill reports no running instance", {
+  skip: process.platform !== "win32",
+}, () => {
+  const { repoRoot, sessionFile } = writeSessionRecord(12345);
+  try {
+    const result = stopElectron(repoRoot, {
+      isProcessAlive: () => true,
+      runCommand: (command) => command === "taskkill.exe"
+        ? { status: 128, stderr: "There is no running instance of the task" }
+        : { status: 0, stdout: `"${process.execPath}" --remote-debugging-port=9222` },
+    });
+    NodeAssertStrict.deepEqual(result, { pid: 12345, status: "already-stopped" });
+    NodeAssertStrict.equal(NodeFS.existsSync(sessionFile), false);
+  } finally {
+    NodeFS.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 function writeSessionRecord(pid) {
   const repoRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "mcode-stop-electron-"));
   const sessionFile = NodePath.join(repoRoot, ".dev", "electron-live-testing.json");

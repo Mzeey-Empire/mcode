@@ -19,6 +19,9 @@ function terminateWindowsProcessTree(pid, runCommand) {
   if (stopped.error?.code === "ETIMEDOUT") {
     return { ok: false, timedOut: true, error: "taskkill timed out while stopping the Electron process tree" };
   }
+  if (stopped.status === 128 || /not found|no running instance/i.test(`${stopped.stdout}\n${stopped.stderr}`)) {
+    return { ok: true, alreadyStopped: true, error: null };
+  }
   return {
     ok: stopped.status === 0,
     error: stopped.status === 0 ? null : stopped.error?.message ?? stopped.stderr.trim(),

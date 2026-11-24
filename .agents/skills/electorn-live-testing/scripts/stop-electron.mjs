@@ -47,6 +47,7 @@ function stopRecordedProcess(record, { isProcessAlive = isPidAlive, runCommand =
 
 function stopValidatedProcess(pid, isProcessAlive, runCommand) {
   const stopped = terminateProcessTree(pid, runCommand);
+  if (stopped.alreadyStopped) return { status: "already-stopped" };
   if (stopped.ok) return { status: "stopped" };
   if (stopped.timedOut) return { status: "unconfirmed", reason: stopped.error };
   // The process can exit after ownership validation but before taskkill runs.
