@@ -13,7 +13,7 @@ import { getRuntimePaths, readPortsFile, resolveRepoRoot, waitForServerContract 
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-/** Waits for the contract's server, web, and optional managed desktop endpoints. */
+/** Waits for the endpoints required by the recorded runtime mode. */
 export async function agentReady(
   repoRoot = resolveRepoRoot(),
   { timeoutMs = DEFAULT_TIMEOUT_MS, httpOptions, desktopOptions } = {},
@@ -26,22 +26,25 @@ export async function agentReady(
     throw new Error("Runtime contract belongs to a different worktree. Run 'bun run --shell system agent:up' again.");
   }
 
+  const { mode, appUrl } = contract;
+  const desktop = mode === "desktop" ? readManagedDesktopSession(root, appUrl) : null;
   const readyContract = await waitForServerContract(root, contract, timeoutMs, httpOptions?.intervalMs);
-  const desktop = readManagedDesktopSession(root, contract.appUrl);
   await Promise.all([
     waitForHttpOk(readyContract.healthUrl, "server health", timeoutMs, httpOptions),
-    waitForHttpOk(contract.appUrl, "web app", timeoutMs, httpOptions),
+    ...(mode === "server" ? [] : [waitForHttpOk(appUrl, "web app", timeoutMs, httpOptions)]),
     ...(desktop ? [
       waitForCdpVersion(desktop.endpoint, timeoutMs, httpOptions),
-      waitForDesktopPage(desktop.endpoint, contract.appUrl, { ...desktopOptions, timeoutMs }),
+      waitForDesktopPage(desktop.endpoint, appUrl, { ...desktopOptions, timeoutMs }),
     ] : []),
   ]);
-  return { desktop: Boolean(desktop) };
+  return { mode };
 }
 
 function readManagedDesktopSession(repoRoot, appUrl) {
   const sessionFile = NodePath.join(getRuntimePaths(repoRoot).devDir, MANAGED_DESKTOP_SESSION_FILE);
-  if (!NodeFS.existsSync(sessionFile)) return null;
+  if (!NodeFS.existsSync(sessionFile)) {
+    throw new Error("Managed desktop session record is missing. Rerun 'bun run --shell system agent:up --desktop'.");
+  }
   const stat = NodeFS.lstatSync(sessionFile);
   if (!stat.isFile() || stat.isSymbolicLink()) {
     throw new Error("Managed desktop session record is invalid. Run 'bun run --shell system agent:down' first.");
@@ -123,7 +126,7 @@ function assertNotLinkedPath(path, label, allowMissing) {
 if (process.argv[1] && import.meta.url === NodeURL.pathToFileURL(process.argv[1]).href) {
   try {
     const result = await agentReady();
-    process.stdout.write(`Agent runtime is ready${result.desktop ? " with desktop" : ""}.\n`);
+    process.stdout.write(`Agent runtime is ready (${result.mode}).\n`);
     const staleBundles = describeBuildStamp(checkBuildStamp(resolveRepoRoot()));
     if (staleBundles) process.stderr.write(staleBundles);
   } catch (error) {

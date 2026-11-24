@@ -25,10 +25,10 @@ NodeTest.test("agentReady polls contract health and app URLs until both respond"
   });
 
   try {
-    writeContract(repo, health.port, app.port);
+    writeContract(repo, { serverPort: health.port, webPort: app.port });
     const result = await agentReady(repo, { timeoutMs: 1_000, httpOptions: { intervalMs: 5, probeTimeoutMs: 50 } });
 
-    NodeAssertStrict.default.deepEqual(result, { desktop: false });
+    NodeAssertStrict.default.deepEqual(result, { mode: "web" });
     NodeAssertStrict.default.ok(healthRequests >= 2, "health URL was polled from the contract");
     NodeAssertStrict.default.ok(appRequests >= 3, "app URL was polled from the contract");
   } finally {
@@ -38,40 +38,68 @@ NodeTest.test("agentReady polls contract health and app URLs until both respond"
   }
 });
 
-NodeTest.test("agentReady reads the endpoint that Electron's server publishes after startup", async () => {
+NodeTest.test("agentReady accepts server mode when only health answers", async () => {
   const repo = makeRepo();
   const urls = [];
+  const health = await startServer((request, response) => {
+    urls.push(request.url);
+    response.writeHead(200).end();
+  });
   try {
-    writeContract(repo, null, 41_112);
-    const ready = agentReady(repo, {
-      timeoutMs: 1_000,
-      httpOptions: {
-        intervalMs: 5,
-        fetchImpl: async (url) => {
-          urls.push(url);
-          return new Response(null, { status: 200 });
-        },
-      },
-    });
-    writeContract(repo, 19_504, 41_112);
-
-    NodeAssertStrict.default.deepEqual(await ready, { desktop: false });
-    NodeAssertStrict.default.deepEqual(urls.sort(), [
-      "http://127.0.0.1:19504/health",
-      "http://127.0.0.1:41112",
-    ]);
+    writeContract(repo, { mode: "server", serverPort: health.port, webPort: null });
+    const result = await agentReady(repo, { timeoutMs: 1_000, httpOptions: { intervalMs: 5, probeTimeoutMs: 50 } });
+    NodeAssertStrict.default.deepEqual(result, { mode: "server" });
+    NodeAssertStrict.default.deepEqual(urls, ["/health"]);
   } finally {
+    await closeServer(health.server);
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }
 });
 
+NodeTest.test("agentReady still requires the app to answer in web mode", async () => {
+  const repo = makeRepo();
+  const health = await startServer((_request, response) => response.writeHead(200).end());
+  const app = await startServer((_request, response) => response.writeHead(503).end());
+  try {
+    writeContract(repo, { serverPort: health.port, webPort: app.port });
+    await NodeAssertStrict.default.rejects(
+      () => agentReady(repo, { timeoutMs: 100, httpOptions: { intervalMs: 5, probeTimeoutMs: 50 } }),
+      /web app did not become reachable/,
+    );
+  } finally {
+    await closeServer(health.server);
+    await closeServer(app.server);
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentReady reads the endpoint that Electron's server publishes after startup", async () => {
+  const probes = await withManagedDesktopPage((appUrl) => appUrl, async (repo, options, contract) => {
+    writePortsFile({ ...contract, serverPort: null, healthUrl: null }, repo);
+    const ready = agentReady(repo, options);
+    writePortsFile(contract, repo);
+    NodeAssertStrict.default.deepEqual(await ready, { mode: "desktop" });
+  });
+  NodeAssertStrict.default.equal(probes, 1);
+});
+
 NodeTest.test("agentReady points to the Electron log when the server never publishes its endpoint", async () => {
+  await withManagedDesktopPage((appUrl) => appUrl, async (repo, options, contract) => {
+    writePortsFile({ ...contract, serverPort: null, healthUrl: null }, repo);
+    await NodeAssertStrict.default.rejects(
+      () => agentReady(repo, { ...options, timeoutMs: 25 }),
+      /Electron's server has not named itself in \.dev\/ports\.json.*\.dev\/logs\/electron-live-testing\.stderr\.log/,
+    );
+  });
+});
+
+NodeTest.test("agentReady asks to rerun desktop startup when its session record is missing", async () => {
   const repo = makeRepo();
   try {
-    writeContract(repo, null, 41_112);
+    writeContract(repo, { mode: "desktop", serverPort: null, webPort: 41_112 });
     await NodeAssertStrict.default.rejects(
       () => agentReady(repo, { timeoutMs: 25, httpOptions: { intervalMs: 5 } }),
-      /Electron's server has not named itself in \.dev\/ports\.json.*\.dev\/logs\/electron-live-testing\.stderr\.log/,
+      /Managed desktop session record is missing.*agent:up --desktop/,
     );
   } finally {
     NodeFS.rmSync(repo, { recursive: true, force: true });
@@ -84,7 +112,7 @@ NodeTest.test("agentReady fails at the deadline when a contract endpoint never b
   const app = await startServer((_request, response) => response.writeHead(200).end());
 
   try {
-    writeContract(repo, health.port, app.port);
+    writeContract(repo, { serverPort: health.port, webPort: app.port });
     await NodeAssertStrict.default.rejects(
       () => agentReady(repo, { timeoutMs: 60, httpOptions: { intervalMs: 5, probeTimeoutMs: 20 } }),
       /server health did not become reachable/,
@@ -96,15 +124,15 @@ NodeTest.test("agentReady fails at the deadline when a contract endpoint never b
   }
 });
 
-NodeTest.test("agentReady verifies the optional managed desktop CDP endpoint and exact app page", async () => {
+NodeTest.test("agentReady verifies the managed desktop CDP endpoint and exact app page", async () => {
   const probes = await withManagedDesktopPage((appUrl) => appUrl, async (repo, options) => {
-    NodeAssertStrict.default.deepEqual(await agentReady(repo, options), { desktop: true });
+    NodeAssertStrict.default.deepEqual(await agentReady(repo, options), { mode: "desktop" });
   });
   NodeAssertStrict.default.equal(probes, 1);
 });
 
 NodeTest.test("agentReady reports the Chromium error page even when CDP lists the app URL", async () => {
-  await withManagedDesktopPage(() => "chrome-error://chromewebdata/", async (repo, options, appUrl) => {
+  await withManagedDesktopPage(() => "chrome-error://chromewebdata/", async (repo, options, { appUrl }) => {
     await NodeAssertStrict.default.rejects(() => agentReady(repo, options), {
       message: `Electron shows an error page instead of ${appUrl}; see .dev/logs/electron-live-testing.stderr.log`,
     });
@@ -115,7 +143,7 @@ NodeTest.test("agentReady retries when the Chromium error page is replaced by th
   const probes = await withManagedDesktopPage(
     (appUrl, probe) => probe === 1 ? "chrome-error://chromewebdata/" : appUrl,
     async (repo, options) => {
-      NodeAssertStrict.default.deepEqual(await agentReady(repo, options), { desktop: true });
+      NodeAssertStrict.default.deepEqual(await agentReady(repo, options), { mode: "desktop" });
     },
   );
   NodeAssertStrict.default.equal(probes, 2);
@@ -125,7 +153,7 @@ async function withManagedDesktopPage(locationForProbe, checkReadiness) {
   const repo = makeRepo();
   const health = await startServer((_request, response) => response.writeHead(200).end());
   const app = await startServer((_request, response) => response.writeHead(200).end());
-  const contract = writeContract(repo, health.port, app.port);
+  const contract = writeContract(repo, { mode: "desktop", serverPort: health.port, webPort: app.port });
   let probes = 0;
   const desktop = Bun.serve({
     hostname: "127.0.0.1",
@@ -171,7 +199,7 @@ async function withManagedDesktopPage(locationForProbe, checkReadiness) {
         timeoutMs: 1_000,
         httpOptions: { intervalMs: 5, probeTimeoutMs: 50 },
         desktopOptions: { intervalMs: 10, probeTimeoutMs: 200 },
-      }, contract.appUrl);
+      }, contract);
       return probes;
     } finally {
       stopOwnedProcess(desktopProcess);
@@ -188,7 +216,7 @@ NodeTest.test("agentReady rejects a desktop session whose PID command is not own
   const repo = makeRepo();
   const desktopProcess = startOwnedProcess(repo, 43_001);
   try {
-    const contract = writeContract(repo, 43_002, 43_003);
+    const contract = writeContract(repo, { mode: "desktop", serverPort: 43_002, webPort: 43_003 });
     const sessionFile = NodePath.join(getRuntimePaths(repo).devDir, MANAGED_DESKTOP_SESSION_FILE);
     NodeFS.writeFileSync(sessionFile, `${JSON.stringify({
       status: "running",
@@ -251,7 +279,7 @@ NodeTest.test("agentReady compares worktree paths with platform case rules", asy
   const health = await startServer((_request, response) => response.writeHead(200).end());
   const app = await startServer((_request, response) => response.writeHead(200).end());
   try {
-    writeContract(repo, health.port, app.port, repo.toUpperCase());
+    writeContract(repo, { serverPort: health.port, webPort: app.port, worktreeIdentity: repo.toUpperCase() });
     if (process.platform === "win32") {
       await agentReady(repo, { httpOptions: { intervalMs: 5, probeTimeoutMs: 50 } });
     } else {
@@ -264,9 +292,10 @@ NodeTest.test("agentReady compares worktree paths with platform case rules", asy
   }
 });
 
-function writeContract(repo, serverPort, webPort, worktreeIdentity = repo) {
+function writeContract(repo, { mode = "web", serverPort, webPort, worktreeIdentity = repo }) {
   const contract = buildPortsContract({
     repoRoot: repo,
+    mode,
     serverPort,
     webPort,
     instanceToken: "a".repeat(64),

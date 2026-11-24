@@ -18,12 +18,13 @@ import {
   ensureRuntimeRoot,
   generateInstanceToken,
   getRuntimePaths,
+  readRecordedRuntimeMode,
   resolveRepoRoot,
   waitForServerContract,
   writePortsFile,
 } from "./runtime-contract.mjs";
-import { stopPid } from "./runtime-processes.mjs";
-import { requestRuntimeShutdown, stopRecordedRuntimePids } from "./agent-down.mjs";
+import { parsePidFile, stopPid } from "./runtime-processes.mjs";
+import { isPidAlive, requestRuntimeShutdown, stopRecordedRuntimePids } from "./agent-down.mjs";
 import { MANAGED_DESKTOP_SESSION_FILE, startManagedDesktop, stopManagedDesktop } from "./managed-desktop.mjs";
 import { isFixtureRepo } from "./fixture-repo.mjs";
 import { hasRuntimeDatabaseMarker, readRuntimeDatabaseSeed } from "./runtime-database.mjs";
@@ -77,25 +78,53 @@ export function setAgentUpTestHooks(hooks) {
 }
 
 /**
- * Starts Vite and the worktree server, with Electron owning the server in desktop mode.
+ * Starts the worktree runtime surfaces for the requested mode.
  *
  * @param {string} [repoRoot]
- * @param {{ desktop?: boolean, wait?: boolean }} [options]
+ * @param {{ mode?: import("./runtime-contract.mjs").AgentRuntimePorts["mode"], wait?: boolean }} [options]
  * @returns {Promise<import("./runtime-contract.mjs").AgentRuntimePorts>}
  */
-export async function agentUp(repoRoot = resolveRepoRoot(), { desktop = false, wait = false } = {}) {
+export async function agentUp(repoRoot = resolveRepoRoot(), { mode = "web", wait = false } = {}) {
   assertRuntimeRootSafe(repoRoot);
+  assertRuntimeModeAvailable(repoRoot, mode);
   const paths = ensureRuntimeRoot(repoRoot);
   prepareSharedRuntimeDirectories(paths);
-  if (desktop) assertManagedDesktopPathsSafe(paths);
-  assertRuntimeProvisioned(repoRoot, paths, desktop);
+  if (mode === "desktop") assertManagedDesktopPathsSafe(paths);
+  assertRuntimeProvisioned(repoRoot, paths, mode === "desktop");
   const stopRuntimePids = agentUpTestHooks.stopRecordedRuntimePids ?? stopRecordedRuntimePids;
   await stopRuntimePids(repoRoot);
 
-  const runtime = await prepareRuntime(repoRoot, desktop);
+  const runtime = await prepareRuntime(repoRoot, mode);
   const electronBin = requireElectronBinary();
   const bunBin = resolveBunBinary();
-  return startProvisionedRuntime({ bunBin, desktop, electronBin, paths, repoRoot, runtime, wait });
+  return startProvisionedRuntime({ bunBin, electronBin, paths, repoRoot, runtime, wait });
+}
+
+function assertRuntimeModeAvailable(repoRoot, mode) {
+  const { pidsDir } = getRuntimePaths(repoRoot);
+  assertRuntimeDirectorySafe(pidsDir, "runtime PID directory", true);
+  if (!NodeFS.existsSync(pidsDir)) return;
+  const recordedMode = readRecordedRuntimeMode(repoRoot);
+  if (recordedMode === mode) return;
+
+  for (const name of NodeFS.readdirSync(pidsDir)) {
+    if (!name.endsWith(".pid")) continue;
+    const pidFile = NodePath.join(pidsDir, name);
+    assertRuntimeFileSafe(pidFile, "runtime PID file", true);
+    if (isRecordedPidAlive(pidFile)) {
+      throw new Error(`A ${recordedMode ?? "previous"} runtime is running in this worktree. Run 'bun run --shell system agent:down' first.`);
+    }
+  }
+}
+
+function isRecordedPidAlive(pidFile) {
+  let pid;
+  try {
+    pid = parsePidFile(pidFile);
+  } catch {
+    return false;
+  }
+  return isPidAlive(pid);
 }
 
 function requireElectronBinary() {
@@ -104,24 +133,28 @@ function requireElectronBinary() {
   return electronBin;
 }
 
-async function startProvisionedRuntime({ bunBin, desktop, electronBin, paths, repoRoot, runtime, wait }) {
+async function startProvisionedRuntime({ bunBin, electronBin, paths, repoRoot, runtime, wait }) {
+  const { mode } = runtime.contract;
   const startedProcesses = [];
   const persistPid = agentUpTestHooks.writePid ?? writePid;
   try {
-    if (!desktop) {
+    if (mode !== "desktop") {
       const server = await startRuntimeServer({ bunBin, electronBin, paths, repoRoot, runtime });
       startedProcesses.push({ name: "server", pid: requireChildPid("server", server) });
       startedProcesses.at(-1).pidFile = persistPid(paths, "server", server.pid);
     }
     writePortsFile(runtime.contract, repoRoot);
 
-    const web = await startRuntimeWeb({ bunBin, paths, repoRoot, runtime });
-    startedProcesses.push({ name: "web", pid: requireChildPid("web", web) });
-    startedProcesses.at(-1).pidFile = persistPid(paths, "web", web.pid);
+    if (mode !== "server") {
+      const web = await startRuntimeWeb({ bunBin, paths, repoRoot, runtime });
+      startedProcesses.push({ name: "web", pid: requireChildPid("web", web) });
+      startedProcesses.at(-1).pidFile = persistPid(paths, "web", web.pid);
+    }
 
-    if (desktop) await waitForHttpOk(runtime.contract.appUrl, "web app");
-    const desktopProcess = desktop ? await startRuntimeDesktop(repoRoot, electronBin) : null;
-    if (desktopProcess) {
+    let desktopProcess = null;
+    if (mode === "desktop") {
+      await waitForHttpOk(runtime.contract.appUrl, "web app");
+      desktopProcess = await startRuntimeDesktop(repoRoot, electronBin);
       startedProcesses.push({ name: "desktop", pid: requireChildPid("desktop", desktopProcess) });
       startedProcesses.at(-1).pidFile = persistPid(paths, "desktop", desktopProcess.pid);
     }
@@ -132,7 +165,7 @@ async function startProvisionedRuntime({ bunBin, desktop, electronBin, paths, re
       await waitForRuntimeReadiness(contract, desktopProcess);
     }
 
-    await writeRuntimeSummary(contract, repoRoot);
+    await writeRuntimeSummary(contract, repoRoot, startedProcesses);
     return contract;
   } catch (error) {
     const cleanupError = await cleanupStartedProcesses(startedProcesses, repoRoot);
@@ -157,16 +190,19 @@ function assertManagedDesktopPathsSafe(paths) {
 
 async function waitForRuntimeReadiness(contract, desktopProcess) {
   await waitForHttpOk(contract.healthUrl, "server health");
-  await waitForHttpOk(contract.appUrl, "web app");
+  if (contract.mode !== "server") await waitForHttpOk(contract.appUrl, "web app");
   if (desktopProcess) await waitForRuntimeDesktopPage(desktopProcess.endpoint, contract.appUrl);
 }
 
 /** Parses command-line startup options. */
 export function parseAgentUpOptions(args) {
-  return {
-    desktop: args.includes("--desktop"),
-    wait: args.includes("--wait"),
-  };
+  const desktop = args.includes("--desktop");
+  const server = args.includes("--server");
+  if (desktop && server) throw new Error("Choose one start mode: --desktop or --server.");
+  let mode = "web";
+  if (desktop) mode = "desktop";
+  if (server) mode = "server";
+  return { mode, wait: args.includes("--wait") };
 }
 
 /**
@@ -201,7 +237,7 @@ async function waitForRuntimeDesktopPage(endpoint, appUrl) {
   return waitForPage(endpoint, appUrl);
 }
 
-async function prepareRuntime(repoRoot, desktop) {
+async function prepareRuntime(repoRoot, mode) {
   const computeRuntimePorts = agentUpTestHooks.computeAvailablePorts ?? computeAvailablePorts;
   const { serverPort, webPort } = await computeRuntimePorts(repoRoot);
   const token = NodeCrypto.randomUUID();
@@ -214,7 +250,8 @@ async function prepareRuntime(repoRoot, desktop) {
     webPort,
     contract: buildPortsContract({
       repoRoot,
-      serverPort: desktop ? null : serverPort,
+      mode,
+      serverPort: mode === "desktop" ? null : serverPort,
       webPort,
       instanceToken,
       worktreeIdentity: repoRoot,
@@ -283,10 +320,12 @@ async function startRuntimeWeb({ bunBin, paths, repoRoot, runtime }) {
   );
 }
 
-async function writeRuntimeSummary(contract, repoRoot) {
+async function writeRuntimeSummary(contract, repoRoot, startedProcesses) {
   if (process.argv.includes("--quiet")) return;
   const { portsFile } = getRuntimePaths(repoRoot);
   await writeStdout(`${JSON.stringify({
+    mode: contract.mode,
+    processes: startedProcesses.map(({ name, pid }) => ({ name, pid })),
     healthUrl: contract.healthUrl,
     appUrl: contract.appUrl,
     worktreeIdentity: contract.worktreeIdentity,

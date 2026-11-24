@@ -217,7 +217,7 @@ async function waitForProcessExit(pid, timeoutMs, { isProcessAlive, sleep = dela
 }
 
 /** Returns whether a PID currently refers to a live process. */
-function isPidAlive(pid) {
+export function isPidAlive(pid) {
   try {
     process.kill(pid, 0);
     return true;

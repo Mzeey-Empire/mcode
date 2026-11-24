@@ -213,15 +213,30 @@ export async function computeAvailablePorts(worktreePath) {
  * @returns {AgentRuntimePorts | null}
  */
 export function readPortsFile(repoRoot = resolveRepoRoot()) {
+  const parsed = readPortsJson(repoRoot);
+  if (parsed === undefined) return null;
+  validatePortsContract(parsed);
+  return parsed;
+}
+
+/** Reads the mode for startup ownership checks, even if other contract fields are invalid. */
+export function readRecordedRuntimeMode(repoRoot) {
+  try {
+    const mode = readPortsJson(repoRoot)?.mode;
+    return isRuntimeMode(mode) ? mode : null;
+  } catch {
+    return null;
+  }
+}
+
+function readPortsJson(repoRoot) {
   assertRuntimeRootSafe(repoRoot);
   const { portsFile } = getRuntimePaths(repoRoot);
   assertRuntimeFileSafe(portsFile, "runtime contract", true);
   if (!NodeFS.existsSync(portsFile)) {
-    return null;
+    return undefined;
   }
-  const parsed = JSON.parse(NodeFS.readFileSync(portsFile, "utf8"));
-  validatePortsContract(parsed);
-  return parsed;
+  return JSON.parse(NodeFS.readFileSync(portsFile, "utf8"));
 }
 
 /** Waits for Electron's server to publish its endpoint for this runtime. */
@@ -259,19 +274,20 @@ export function writePortsFile(ports, repoRoot = resolveRepoRoot()) {
 /**
  * Builds the machine-readable runtime contract consumed by agents.
  *
- * @param {{ repoRoot?: string, serverPort: number | null, webPort: number, instanceToken: string, worktreeIdentity?: string, seedLogin: AgentRuntimePorts["seedLogin"] }} input
+ * @param {{ repoRoot?: string, mode: AgentRuntimePorts["mode"], serverPort: number | null, webPort: number | null, instanceToken: string, worktreeIdentity?: string, seedLogin: AgentRuntimePorts["seedLogin"] }} input
  * @returns {AgentRuntimePorts}
  */
 export function buildPortsContract(input) {
   const repoRoot = NodePath.resolve(input.repoRoot ?? resolveRepoRoot());
   const paths = getRuntimePaths(repoRoot);
   return {
+    mode: input.mode,
     instanceToken: input.instanceToken,
     worktreeIdentity: input.worktreeIdentity ?? repoRoot,
     serverPort: input.serverPort,
-    webPort: input.webPort,
+    webPort: input.mode === "server" ? null : input.webPort,
     healthUrl: input.serverPort === null ? null : `http://127.0.0.1:${input.serverPort}/health`,
-    appUrl: `http://127.0.0.1:${input.webPort}`,
+    appUrl: input.mode === "server" ? null : `http://127.0.0.1:${input.webPort}`,
     seedLogin: input.seedLogin,
     logsDir: paths.logsDir,
   };
@@ -299,6 +315,7 @@ export function assertInsideDevDir(candidate, devDir) {
  */
 function validatePortsContract(ports) {
   assertContractObject(ports, "ports.json must contain an object");
+  if (!isRuntimeMode(ports.mode)) throw new Error("ports.json mode must be web, desktop, or server");
   validateRuntimePorts(ports);
   validateInstanceContract(ports);
   validateRuntimeUrls(ports);
@@ -309,13 +326,24 @@ function assertContractObject(value, message) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(message);
 }
 
+function isRuntimeMode(mode) {
+  return mode === "web" || mode === "desktop" || mode === "server";
+}
+
 function validateRuntimePorts(ports) {
-  for (const name of ["serverPort", "webPort"]) {
-    const port = ports[name];
-    if (name === "serverPort" && port === null) continue;
-    if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
-      throw new Error(`Invalid ${name}: ${port}`);
-    }
+  if (ports.mode !== "desktop" || ports.serverPort !== null) {
+    assertValidPort(ports.serverPort, "serverPort");
+  }
+  if (ports.mode === "server") {
+    if (ports.webPort !== null) throw new Error("ports.json webPort must be null in server mode");
+  } else {
+    assertValidPort(ports.webPort, "webPort");
+  }
+}
+
+function assertValidPort(port, name) {
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+    throw new Error(`Invalid ${name}: ${port}`);
   }
 }
 
@@ -336,7 +364,8 @@ function validateRuntimeUrls(ports) {
   if (ports.healthUrl !== healthUrl) {
     throw new Error("ports.json healthUrl must match serverPort");
   }
-  if (ports.appUrl !== `http://127.0.0.1:${ports.webPort}`) {
+  const appUrl = ports.mode === "server" ? null : `http://127.0.0.1:${ports.webPort}`;
+  if (ports.appUrl !== appUrl) {
     throw new Error("ports.json appUrl must match webPort");
   }
 }
@@ -359,12 +388,13 @@ function validateSeedLogin(seedLogin) {
 
 /**
  * @typedef {{
+ *   mode: "web" | "desktop" | "server",
  *   serverPort: number | null,
- *   webPort: number,
+ *   webPort: number | null,
  *   instanceToken: string,
  *   worktreeIdentity: string,
  *   healthUrl: string | null,
- *   appUrl: string,
+ *   appUrl: string | null,
  *   seedLogin: {
  *     email: "agent@seed.local",
  *     token: string,
