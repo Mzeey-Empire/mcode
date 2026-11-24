@@ -3,6 +3,13 @@ name: Runner Pool
 # Rewrites CI_RUNNER_POOL, the runner providers ci.yml rotates PRs across, so
 # Avrea and Blacksmith stay inside their free monthly minutes.
 on:
+  # GitHub treats the schedule as a request: in November 2026 it ran every 4 to
+  # 12 hours, long enough for CI to use hundreds of minutes past the safety
+  # margin. A pass after each CI run keeps the pool current, and reads only the
+  # runs that are new since the last pass.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
