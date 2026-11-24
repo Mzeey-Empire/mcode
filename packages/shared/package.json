@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./paths": "./src/paths/index.ts",
     "./node/host-runtime": "./src/node/host-runtime.ts",
+    "./node/process-command-error": "./src/node/process-command-error.ts",
     "./node/shutdown-deadlines": "./src/node/shutdown-deadlines.ts",
     "./model-effort": "./src/model-effort/index.ts",
     "./fast-mode": "./src/fast-mode/index.ts",

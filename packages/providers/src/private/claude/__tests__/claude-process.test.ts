@@ -1,16 +1,70 @@
-import { describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeEvents from "node:events";
 import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
+import { logger } from "@mcode/shared";
+import { ProcessCommandError } from "@mcode/shared/node/process-command-error";
 import { diag, parseDiagLine } from "@mcode/shared/diagnostics";
 import { ClaudeOwnedProcess } from "../claude-process.js";
 import { CanonicalLiveEventPublisher } from "../../canonical-live-event-publisher.js";
 import { ProviderRuntimeEventSchema, providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
 describe("ClaudeOwnedProcess diagnostics", () => {
+  it.each([false, true])("logs process command diagnostics on retirement failure (wrapped: %s)", async (wrapped) => {
+    const stderr = `Access denied\nAuthorization: Bearer sk-test-SENTINEL123456\n${"x".repeat(3_000)}\nSTDERR_TAIL`;
+    const message = `Command failed: powershell.exe -Command "Write-Error 'token=summary-SENTINEL123456'"\n${stderr}`;
+    const commandError = ProcessCommandError.fromExecFileError(Object.assign(new Error(message), {
+      code: 5,
+      signal: null,
+      killed: false,
+      stderr,
+    }));
+    const failure = wrapped ? new Error(`termination failed: ${message}`, { cause: commandError }) : commandError;
+    const logError = vi.spyOn(logger, "error").mockImplementation(() => logger);
+    const owned = new ClaudeOwnedProcess({
+      attach: () => undefined,
+      terminateTree: async () => { throw failure; },
+    }, "test process", () => undefined, undefined, async () => {});
+    let child: SpawnedProcess | undefined;
+    try {
+      child = owned.spawn({
+        command: process.execPath,
+        args: ["-e", "process.stdin.resume()"],
+        cwd: process.cwd(),
+        env: process.env,
+      });
+      await expect(owned.retire()).rejects.toBe(failure);
+      expect(commandError.message).toBe(message);
+      const logged = JSON.stringify(logError.mock.calls);
+      expect.soft(logged.includes("SENTINEL123456"), "log contains a secret").toBe(false);
+      expect.soft(logged.includes("STDERR_TAIL"), "log contains the stderr tail").toBe(false);
+      const call: readonly unknown[] = logError.mock.lastCall ?? [];
+      expect(call[0]).toBe("Claude owned process retirement failed");
+      const record = call[1];
+      expect(record).toMatchObject({
+        pid: child.pid,
+        error: expect.stringMatching(/^Command failed:/),
+        exitCode: 5,
+        signal: null,
+        timedOut: false,
+        stderrExcerpt: expect.stringMatching(/^Access denied/),
+      });
+      assert(typeof record === "object" && record !== null && "stderrExcerpt" in record);
+      assert(typeof record.stderrExcerpt === "string");
+      expect(Buffer.byteLength(record.stderrExcerpt)).toBeLessThanOrEqual(2_048);
+    } finally {
+      logError.mockRestore();
+      if (child && child.exitCode === null && child.signalCode == null) {
+        const exited = NodeEvents.once(child, "exit");
+        child.stdin.end();
+        await exited;
+      }
+    }
+  });
+
   it("holds the real SDK stdout pipe and drains all 1500 messages in order", async () => {
     const held = Promise.withResolvers<void>();
     let finishedWriting = false;

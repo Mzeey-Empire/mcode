@@ -4,6 +4,7 @@ import type { SpawnOptions, SpawnedProcess } from "@anthropic-ai/claude-agent-sd
 import type { ProviderProcessPort } from "../../host-ports.js";
 import { logger } from "@mcode/shared";
 import { diag } from "@mcode/shared/diagnostics";
+import { ProcessCommandError } from "@mcode/shared/node/process-command-error";
 
 /** Captures only the process created for one SDK query, including a late spawn. */
 export class ClaudeOwnedProcess {
@@ -95,7 +96,10 @@ export class ClaudeOwnedProcess {
           diag.emit("claude.process", { th: this.threadId }, () => ({ step: "terminated", pid, ok: false }));
         }
         this.processes.set(pid, child);
-        logger.error("Claude owned process retirement failed", { pid, error: String(error) });
+        logger.error("Claude owned process retirement failed", {
+          pid,
+          ...(ProcessCommandError.logFields(error) ?? { error: String(error) }),
+        });
       },
     );
   }

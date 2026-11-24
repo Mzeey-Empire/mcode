@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { assert, describe, it, expect, vi, beforeEach } from "vitest";
 
 const { mockExecFile } = vi.hoisted(() => ({
   mockExecFile: vi.fn(),
@@ -280,6 +280,67 @@ describe("killProcessTree", () => {
 
     expect(processKill).not.toHaveBeenCalledWith(-5678, "SIGKILL");
     expect(processKill).not.toHaveBeenCalledWith(5678, "SIGKILL");
+  });
+
+  it("surfaces diagnostics when the Windows process snapshot command fails", async () => {
+    const cause = Object.assign(new Error("Windows process snapshot failed"), {
+      code: 1,
+      signal: null,
+      killed: false,
+      stderr: "Get-CimInstance : Access denied",
+    });
+    mockExecFile.mockRejectedValue(cause);
+
+    await expect(killProcessTree(1234, {
+      platform: "win32",
+      execFile: mockExecFile,
+    })).rejects.toMatchObject({
+      cause,
+      message: "Windows process snapshot failed",
+      exitCode: 1,
+      signal: null,
+      timedOut: false,
+      stderrExcerpt: "Get-CimInstance : Access denied",
+    });
+  });
+
+  it("surfaces and logs bounded stderr when taskkill times out", async () => {
+    const stderr = `Access denied\nAuthorization: Bearer sk-test-SENTINEL123456\n${"界".repeat(900)}\nSTDERR_TAIL`;
+    const message = `Command failed: taskkill /T /F /PID 1234\n${stderr}`;
+    mockExecFile.mockRejectedValue(Object.assign(new Error(message), {
+      code: null,
+      signal: "SIGTERM",
+      killed: true,
+      stderr: Buffer.from(stderr),
+    }));
+    const diagnostics = {
+      exitCode: null,
+      signal: "SIGTERM",
+      timedOut: true,
+    };
+
+    await expect(killProcessTree(1234, {
+      platform: "win32",
+      execFile: mockExecFile,
+      getWindowsProcessSnapshot: async () => ROOT_SNAPSHOT,
+    })).rejects.toMatchObject({ message, ...diagnostics });
+    const warn = vi.mocked(logger.warn);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect.soft(logged.includes("SENTINEL123456"), "log contains a secret").toBe(false);
+    expect.soft(logged.includes("STDERR_TAIL"), "log contains the stderr tail").toBe(false);
+    const call: readonly unknown[] = warn.mock.lastCall ?? [];
+    expect(call[0]).toBe("killProcessTree: unexpected error killing process tree");
+    const record = call[1];
+    assert(typeof record === "object" && record !== null && "stderrExcerpt" in record);
+    assert(typeof record.stderrExcerpt === "string");
+    expect.soft(Buffer.byteLength(record.stderrExcerpt)).toBeLessThanOrEqual(2_048);
+    expect(record).toMatchObject({
+      pid: 1234,
+      error: expect.stringMatching(/^Command failed:/),
+      ...diagnostics,
+    });
+    expect(record.stderrExcerpt.startsWith("Access denied")).toBe(true);
+    expect.soft(record.stderrExcerpt.endsWith("[truncated]")).toBe(true);
   });
 
   it("does not taskkill a Windows root after the captured root is replaced", async () => {
