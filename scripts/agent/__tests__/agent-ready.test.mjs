@@ -97,25 +97,63 @@ NodeTest.test("agentReady fails at the deadline when a contract endpoint never b
 });
 
 NodeTest.test("agentReady verifies the optional managed desktop CDP endpoint and exact app page", async () => {
+  const probes = await withManagedDesktopPage((appUrl) => appUrl, async (repo, options) => {
+    NodeAssertStrict.default.deepEqual(await agentReady(repo, options), { desktop: true });
+  });
+  NodeAssertStrict.default.equal(probes, 1);
+});
+
+NodeTest.test("agentReady reports the Chromium error page even when CDP lists the app URL", async () => {
+  await withManagedDesktopPage(() => "chrome-error://chromewebdata/", async (repo, options, appUrl) => {
+    await NodeAssertStrict.default.rejects(() => agentReady(repo, options), {
+      message: `Electron shows an error page instead of ${appUrl}; see .dev/logs/electron-live-testing.stderr.log`,
+    });
+  });
+});
+
+NodeTest.test("agentReady retries when the Chromium error page is replaced by the app", async () => {
+  const probes = await withManagedDesktopPage(
+    (appUrl, probe) => probe === 1 ? "chrome-error://chromewebdata/" : appUrl,
+    async (repo, options) => {
+      NodeAssertStrict.default.deepEqual(await agentReady(repo, options), { desktop: true });
+    },
+  );
+  NodeAssertStrict.default.equal(probes, 2);
+});
+
+async function withManagedDesktopPage(locationForProbe, checkReadiness) {
   const repo = makeRepo();
   const health = await startServer((_request, response) => response.writeHead(200).end());
   const app = await startServer((_request, response) => response.writeHead(200).end());
-  const desktop = await startServer((request, response) => {
-    if (request.url === "/json/version") {
-      response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(validCdpVersion(desktop.port)));
-      return;
-    }
-    if (request.url === "/json/list") {
-      response.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify([
-        { type: "page", url: `http://127.0.0.1:${app.port}` },
-      ]));
-      return;
-    }
-    response.writeHead(404).end();
+  const contract = writeContract(repo, health.port, app.port);
+  let probes = 0;
+  const desktop = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request, server) {
+      const path = new URL(request.url).pathname;
+      if (path === "/json/version") return Response.json(validCdpVersion(server.port));
+      if (path === "/json/list") {
+        return Response.json([{
+          type: "page",
+          url: contract.appUrl,
+          webSocketDebuggerUrl: `ws://127.0.0.1:${server.port}/devtools/page/app`,
+        }]);
+      }
+      if (path === "/devtools/page/app" && server.upgrade(request)) return;
+      return new Response(null, { status: 404 });
+    },
+    websocket: {
+      message(socket, message) {
+        const { id, method, params } = JSON.parse(message);
+        if (method !== "Runtime.evaluate" || params?.expression !== "location.href" || params?.returnByValue !== true) return;
+        const value = locationForProbe(contract.appUrl, ++probes);
+        socket.send(JSON.stringify({ id, result: { result: { type: "string", value } } }));
+      },
+    },
   });
 
   try {
-    const contract = writeContract(repo, health.port, app.port);
     const desktopProcess = startOwnedProcess(repo, desktop.port);
     const sessionFile = NodePath.join(getRuntimePaths(repo).devDir, MANAGED_DESKTOP_SESSION_FILE);
     NodeFS.writeFileSync(sessionFile, `${JSON.stringify({
@@ -129,23 +167,22 @@ NodeTest.test("agentReady verifies the optional managed desktop CDP endpoint and
     })}\n`);
 
     try {
-      const result = await agentReady(repo, {
+      await checkReadiness(repo, {
         timeoutMs: 1_000,
         httpOptions: { intervalMs: 5, probeTimeoutMs: 50 },
-        desktopOptions: { intervalMs: 5, probeTimeoutMs: 50 },
-      });
-
-      NodeAssertStrict.default.deepEqual(result, { desktop: true });
+        desktopOptions: { intervalMs: 10, probeTimeoutMs: 200 },
+      }, contract.appUrl);
+      return probes;
     } finally {
       stopOwnedProcess(desktopProcess);
     }
   } finally {
     await closeServer(health.server);
     await closeServer(app.server);
-    await closeServer(desktop.server);
+    await desktop.stop(true);
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }
-});
+}
 
 NodeTest.test("agentReady rejects a desktop session whose PID command is not owned", async () => {
   const repo = makeRepo();

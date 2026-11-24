@@ -536,6 +536,10 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
       publishDesktopEndpoint(repo);
       return { endpoint: "http://127.0.0.1:43001", pid: 81_001 };
     },
+    waitForDesktopPage: (endpoint, appUrl) => waitForDesktopPage(endpoint, appUrl, {
+      intervalMs: 5,
+      readPageLocation: async () => "http://127.0.0.1:41252/?ready=1",
+    }),
   });
   globalThis.fetch = async (url) => {
     if (String(url).endsWith("/json/list")) {
@@ -546,6 +550,7 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
           url: desktopPageProbes < 3
             ? "http://127.0.0.1:41252-not-the-app/"
             : "http://127.0.0.1:41252/?ready=1",
+          webSocketDebuggerUrl: "ws://127.0.0.1:43001/devtools/page/app",
         },
       ]));
     }
@@ -573,29 +578,43 @@ NodeTest.test("agentUp --desktop waits for the managed Electron app and records 
   }
 });
 
-NodeTest.test("agentUp --desktop defaults to no CDP readiness wait", async () => {
+NodeTest.test("agentUp --desktop waits for the web app before launch even without a CDP readiness wait", async () => {
   const repo = makeRepo();
   const { pidsDir } = getRuntimePaths(repo);
+  const originalFetch = globalThis.fetch;
   let pageWaited = false;
   let launchContract;
+  const startup = [];
   const spawned = [];
   const restoreHooks = setAgentUpTestHooks({
     stopRecordedRuntimePids: async () => {},
     computeAvailablePorts: async () => ({ serverPort: 41_257, webPort: 41_258 }),
     getElectronBinary: () => process.execPath,
     spawnLogged: (_command, args) => {
+      startup.push("web started");
       spawned.push(args);
       return { pid: 81_020 };
     },
     startManagedDesktop: (root) => {
+      startup.push("Electron started");
       launchContract = readPortsFile(root);
       return { endpoint: "http://127.0.0.1:43003", pid: 81_021 };
     },
     waitForDesktopPage: async () => { pageWaited = true; },
   });
+  globalThis.fetch = async (url) => {
+    if (url !== "http://127.0.0.1:41258") return new Response(null, { status: 404 });
+    if (!startup.includes("app returned 503")) {
+      startup.push("app returned 503");
+      return new Response(null, { status: 503 });
+    }
+    startup.push("app returned 200");
+    return new Response(null, { status: 200 });
+  };
   try {
     provisionRuntime(repo);
     const contract = await agentUp(repo, { desktop: true });
+    NodeAssertStrict.default.deepEqual(startup, ["web started", "app returned 503", "app returned 200", "Electron started"]);
     NodeAssertStrict.default.equal(pageWaited, false);
     NodeAssertStrict.default.deepEqual(spawned, [["run", "dev", "--host", "127.0.0.1", "--port", "41258", "--strictPort"]]);
     NodeAssertStrict.default.deepEqual(NodeFS.readdirSync(pidsDir).sort(), ["desktop.pid", "web.pid"]);
@@ -604,6 +623,46 @@ NodeTest.test("agentUp --desktop defaults to no CDP readiness wait", async () =>
     NodeAssertStrict.default.match(launchContract.seedLogin.token, /^[0-9a-f-]{36}$/);
     NodeAssertStrict.default.equal(launchContract.seedLogin.token, contract.seedLogin.token);
   } finally {
+    globalThis.fetch = originalFetch;
+    restoreHooks();
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentUp --desktop stops the web process without launching Electron when the app never answers successfully", async () => {
+  const repo = makeRepo();
+  const { pidsDir } = getRuntimePaths(repo);
+  const originalFetch = globalThis.fetch;
+  const originalNow = Date.now;
+  let desktopStarted = false;
+  const stopped = [];
+  const restoreHooks = setAgentUpTestHooks({
+    stopRecordedRuntimePids: async () => {},
+    computeAvailablePorts: async () => ({ serverPort: 41_259, webPort: 41_260 }),
+    getElectronBinary: () => process.execPath,
+    spawnLogged: () => ({ pid: 81_022 }),
+    startManagedDesktop: () => {
+      desktopStarted = true;
+      return { endpoint: "http://127.0.0.1:43004", pid: 81_023 };
+    },
+    stopPid: async (pid) => { stopped.push(pid); },
+  });
+  globalThis.fetch = async () => {
+    Date.now = () => originalNow() + 30_000;
+    return new Response(null, { status: 503 });
+  };
+  try {
+    provisionRuntime(repo);
+    await NodeAssertStrict.default.rejects(
+      () => agentUp(repo, { desktop: true }),
+      /web app did not become reachable: http:\/\/127\.0\.0\.1:41260/,
+    );
+    NodeAssertStrict.default.equal(desktopStarted, false);
+    NodeAssertStrict.default.deepEqual(stopped, [81_022]);
+    NodeAssertStrict.default.deepEqual(NodeFS.readdirSync(pidsDir), []);
+  } finally {
+    Date.now = originalNow;
+    globalThis.fetch = originalFetch;
     restoreHooks();
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }
@@ -629,13 +688,19 @@ NodeTest.test("waitForDesktopPage bounds stalled CDP probes and rejects a differ
   );
   NodeAssertStrict.default.ok(aborts >= 1);
 
-  await waitForDesktopPage("http://127.0.0.1:43001", "http://127.0.0.1:41252/app", {
-    fetchImpl: async () => new Response(JSON.stringify([
-      { type: "page", url: "http://127.0.0.1:41252/app-preview" },
-      { type: "page", url: "http://127.0.0.1:41252/app?ready=1" },
-    ])),
-    timeoutMs: 40,
-  });
+  await NodeAssertStrict.default.rejects(
+    () => waitForDesktopPage("http://127.0.0.1:43001", "http://127.0.0.1:41252/app", {
+      fetchImpl: async () => Response.json([{
+        type: "page",
+        url: "http://127.0.0.1:41252/app-preview",
+        webSocketDebuggerUrl: "ws://127.0.0.1:43001/devtools/page/preview",
+      }]),
+      readPageLocation: async () => "http://127.0.0.1:41252/app?ready=1",
+      intervalMs: 1,
+      timeoutMs: 40,
+    }),
+    /Electron did not open the managed app URL within 40ms/,
+  );
 });
 
 NodeTest.test("agentUp removes the desktop PID after managed page readiness fails", { timeout: 10_000 }, async () => {
@@ -920,6 +985,7 @@ NodeTest.test("agentDown rejects a linked runtime root before reading external c
 
 NodeTest.test("agentUp cleans the managed desktop session when desktop PID registration fails", async () => {
   const repo = makeRepo();
+  const restoreFetch = mockReachableWebApp();
   let desktopStopped = false;
   const restoreHooks = setAgentUpTestHooks({
     stopRecordedRuntimePids: async () => {},
@@ -946,6 +1012,7 @@ NodeTest.test("agentUp cleans the managed desktop session when desktop PID regis
     NodeAssertStrict.default.equal(desktopStopped, true);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(getRuntimePaths(repo).devDir, "electron-agent-runtime.json")), false);
   } finally {
+    restoreFetch();
     restoreHooks();
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }
@@ -1025,6 +1092,7 @@ NodeTest.test("agentUp stops captured web and server processes when web PID pers
 
 NodeTest.test("agentUp falls back to the captured desktop PID when managed cleanup rejects", async () => {
   const repo = makeRepo();
+  const restoreFetch = mockReachableWebApp();
   const paths = getRuntimePaths(repo);
   const stopped = [];
   const restoreHooks = setAgentUpTestHooks({
@@ -1059,6 +1127,7 @@ NodeTest.test("agentUp falls back to the captured desktop PID when managed clean
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.pidsDir, "server.pid")), false);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.pidsDir, "web.pid")), false);
   } finally {
+    restoreFetch();
     restoreHooks();
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }
@@ -1066,6 +1135,7 @@ NodeTest.test("agentUp falls back to the captured desktop PID when managed clean
 
 NodeTest.test("agentUp retains the desktop session when managed and captured cleanup both fail", async () => {
   const repo = makeRepo();
+  const restoreFetch = mockReachableWebApp();
   const paths = getRuntimePaths(repo);
   const restoreHooks = setAgentUpTestHooks({
     stopRecordedRuntimePids: async () => {},
@@ -1092,6 +1162,7 @@ NodeTest.test("agentUp retains the desktop session when managed and captured cle
     await NodeAssertStrict.default.rejects(() => agentUp(repo, { desktop: true }), /cannot record desktop PID/);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.devDir, "electron-agent-runtime.json")), true);
   } finally {
+    restoreFetch();
     restoreHooks();
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }
@@ -1099,6 +1170,7 @@ NodeTest.test("agentUp retains the desktop session when managed and captured cle
 
 NodeTest.test("agentUp stops the captured desktop PID when managed cleanup reports not-running", async () => {
   const repo = makeRepo();
+  const restoreFetch = mockReachableWebApp();
   const paths = getRuntimePaths(repo);
   const stopped = [];
   const restoreHooks = setAgentUpTestHooks({
@@ -1125,6 +1197,7 @@ NodeTest.test("agentUp stops the captured desktop PID when managed cleanup repor
     NodeAssertStrict.default.equal(stopped[0], 81_093);
     NodeAssertStrict.default.equal(NodeFS.existsSync(NodePath.join(paths.devDir, "electron-agent-runtime.json")), false);
   } finally {
+    restoreFetch();
     restoreHooks();
     NodeFS.rmSync(repo, { recursive: true, force: true });
   }
@@ -1543,4 +1616,10 @@ function writeGracefulRuntimeContract(repo, serverPort) {
 function publishDesktopEndpoint(repo) {
   const contract = readPortsFile(repo);
   writePortsFile({ ...contract, serverPort: 19_504, healthUrl: "http://127.0.0.1:19504/health" }, repo);
+}
+
+function mockReachableWebApp() {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 200 });
+  return () => { globalThis.fetch = originalFetch; };
 }
