@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearCommands, registerCommand } from "@/lib/command-registry";
 
@@ -36,7 +36,10 @@ vi.mock("@/components/ui/command", () => ({
 import { RootView } from "../RootView";
 
 describe("RootView", () => {
-  afterEach(() => clearCommands());
+  afterEach(() => {
+    cleanup();
+    clearCommands();
+  });
 
   it("renames an open action when its command is registered again with a new title", () => {
     const dispose = registerCommand({ id: "plan.implement", title: "Implement v2", category: "Plan", handler: () => undefined });

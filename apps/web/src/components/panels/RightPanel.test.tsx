@@ -153,7 +153,7 @@ vi.mock("@/features/preview/state/previewTabsStore", () => ({
       activatePage: activatePreviewPage,
       closePage: closePreviewPage,
       openPage: openPreviewPage,
-      setTabSet: (_scopeId: string, tabSet: typeof previewTabSet.current) => {
+      setTabSet: (_workspaceId: string, _scopeId: string, tabSet: typeof previewTabSet.current) => {
         previewTabSet.current = tabSet;
       },
     }),
@@ -195,6 +195,12 @@ import {
   useBrowserAutomationStore,
 } from "@/features/preview";
 
+async function renderPanel(): Promise<ReturnType<typeof render>> {
+  const view = render(<RightPanel />);
+  await act(async () => {});
+  return view;
+}
+
 describe("RightPanel", () => {
   beforeEach(() => {
     previewTabSet.current = null;
@@ -205,7 +211,7 @@ describe("RightPanel", () => {
     vi.mocked(createTerminalForScope).mockClear();
     previewPanelRender.mockReset();
     previewTabsBridge.list.mockReset();
-    previewTabsBridge.list.mockResolvedValue({ ok: true, data: null });
+    previewTabsBridge.list.mockImplementation(async () => ({ ok: true, data: previewTabSet.current }));
     previewTabsBridge.updatedListener.current = null;
     previewTabsBridge.onUpdated.mockReset();
     previewTabsBridge.onUpdated.mockImplementation((listener: (payload: unknown) => void) => {
@@ -244,10 +250,10 @@ describe("RightPanel", () => {
 
   afterEach(() => cleanup());
 
-  it("renders an empty workspace terminal scope without an external-store snapshot warning", () => {
+  it("renders an empty workspace terminal scope without an external-store snapshot warning", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    render(<RightPanel />);
+    await renderPanel();
 
     expect(screen.getByTestId("right-panel")).toBeInTheDocument();
     expect(error.mock.calls.flat().join(" ")).not.toContain(
@@ -289,7 +295,7 @@ describe("RightPanel", () => {
       .getAllByRole("tab")
       .map((tab) => tab.textContent);
 
-  it("lists two shells and an action run as one Terminal entry with three row-1 tabs", () => {
+  it("lists two shells and an action run as one Terminal entry with three row-1 tabs", async () => {
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     useProjectActionStore.getState().applyRun(buildRun({}));
     useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
@@ -303,7 +309,7 @@ describe("RightPanel", () => {
       },
     });
 
-    render(<RightPanel />);
+    await renderPanel();
 
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "terminal");
     expect(within(screen.getByTestId("panel-header-leading")).getByRole("tablist", { name: "Terminals" })).toBe(terminalStrip());
@@ -317,7 +323,7 @@ describe("RightPanel", () => {
     useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
     useTerminalStore.setState({ terminals: { "thread-1": [actionRecord] }, ptyToThread: { "pty-action": "thread-1" } });
 
-    render(<RightPanel />);
+    await renderPanel();
 
     fireEvent.click(within(terminalStrip()).getByRole("button", { name: "Close Build (ends the shell)" }));
 
@@ -346,7 +352,7 @@ describe("RightPanel", () => {
       },
       activeTabId: "singleton:preview",
     },
-  ])("keeps $name on its current surface until the Terminal tool is selected", ({ panel, activeTabId }) => {
+  ])("keeps $name on its current surface until the Terminal tool is selected", async ({ panel, activeTabId }) => {
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     useProjectActionStore.getState().applyRun(buildRun({
       revision: 0,
@@ -357,7 +363,7 @@ describe("RightPanel", () => {
     useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState(panel) } });
     useTerminalStore.setState({ terminals: { "thread-1": [actionRecord] } });
 
-    render(<RightPanel />);
+    await renderPanel();
 
     const activityRail = screen.getByTestId("activity-rail");
     if (activeTabId === null) {
@@ -366,6 +372,7 @@ describe("RightPanel", () => {
       expect(activityRail).toHaveAttribute("data-active-tab-id", activeTabId);
     }
     fireEvent.click(screen.getByTestId("select-singleton:terminal"));
+    await act(async () => {});
 
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-active-tab-id", "singleton:terminal");
   });
@@ -384,7 +391,7 @@ describe("RightPanel", () => {
       ptyToThread: Object.fromEntries([...records, actionRecord].map((record) => [record.id, "thread-1"])),
     });
 
-    render(<RightPanel />);
+    await renderPanel();
 
     const findAdd = () => within(screen.getByTestId("panel-header-leading")).getByRole("button", { name: "New terminal" });
     await waitFor(() => expect(findAdd()).not.toHaveAttribute("aria-haspopup"));
@@ -411,19 +418,19 @@ describe("RightPanel", () => {
       ptyToThread: { "pty-1": "thread-1" },
     });
 
-    render(<RightPanel />);
+    await renderPanel();
     fireEvent.click(within(terminalStrip()).getByRole("button", { name: "Close zsh (ends the shell)" }));
 
     await waitFor(() => expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", ""));
     expect(terminalKill).toHaveBeenCalledWith("pty-1");
   });
 
-  it("hides the Terminal tool from the rail without stopping its records", () => {
+  it("hides the Terminal tool from the rail without stopping its records", async () => {
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
     useTerminalStore.setState({ terminals: { "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "zsh" }] } });
 
-    render(<RightPanel />);
+    await renderPanel();
     fireEvent.click(screen.getByTestId("close-singleton:terminal"));
 
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "");
@@ -431,20 +438,21 @@ describe("RightPanel", () => {
     expect(useTerminalStore.getState().terminals["thread-1"]).toHaveLength(1);
   });
 
-  it("labels the panel body with the selected rail tool and follows a switch", () => {
+  it("labels the panel body with the selected rail tool and follows a switch", async () => {
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     useDiffStore.setState({ rightPanelByThread: { "thread-1": terminalToolPanelState() } });
     useTerminalStore.setState({ terminals: { "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "zsh" }] } });
     act(() => useDiffStore.getState().setRightPanelTab("workspace-1", "thread-1", "changes"));
 
-    render(<RightPanel />);
+    await renderPanel();
     expect(screen.getByRole("tabpanel", { name: "changes" })).toHaveAttribute("id", "right-panel-tabpanel");
 
     fireEvent.click(screen.getByTestId("select-singleton:terminal"));
+    await act(async () => {});
     expect(screen.getByRole("tabpanel", { name: "terminal" })).toBeInTheDocument();
   });
 
-  it("opens the Terminal tool in the background for a new record and closes it with the last one", () => {
+  it("opens the Terminal tool in the background for a new record and closes it with the last one", async () => {
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     useDiffStore.setState({
       rightPanelByThread: {
@@ -452,7 +460,7 @@ describe("RightPanel", () => {
       },
     });
     useTerminalStore.setState({ hasHydrated: true });
-    render(<RightPanel />);
+    await renderPanel();
 
     act(() => useTerminalStore.getState().addTerminal("thread-1", "pty-1", "zsh"));
 
@@ -468,7 +476,7 @@ describe("RightPanel", () => {
     expect(useDiffStore.getState().getRightPanel("workspace-1", "thread-1").openTabs).toEqual(["changes"]);
   });
 
-  it("lists three Browser pages as one Browser entry with three row-1 tabs", () => {
+  it("lists three Browser pages as one Browser entry with three row-1 tabs", async () => {
     const page = (id: string, title: string) => ({
       id,
       threadId: "workspace-1",
@@ -489,7 +497,7 @@ describe("RightPanel", () => {
       },
     });
 
-    render(<RightPanel />);
+    await renderPanel();
     const strip = screen.getByRole("tablist", { name: "Browser pages" });
 
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "preview");
@@ -502,7 +510,7 @@ describe("RightPanel", () => {
     expect(openPreviewPage).toHaveBeenCalledWith("workspace-1", "workspace-1");
   });
 
-  it("projects workspace panel state without Terminal instances when switching to an untouched thread", () => {
+  it("projects workspace panel state without Terminal instances when switching to an untouched thread", async () => {
     useDiffStore.setState({
       rightPanelFallbackByWorkspace: {
         "workspace-1": createRightPanelState({
@@ -526,7 +534,7 @@ describe("RightPanel", () => {
       },
     });
 
-    const { rerender } = render(<RightPanel />);
+    const { rerender } = await renderPanel();
 
     expect(screen.getByTestId("activity-rail")).toHaveAttribute(
       "data-open-tabs",
@@ -559,13 +567,13 @@ describe("RightPanel", () => {
     expect(reconcileWarmPreviewScopes([first], second, new Set())).toEqual([second, first]);
   });
 
-  it("puts the panel controls in row 1", () => {
+  it("puts the panel controls in row 1", async () => {
     useDiffStore.setState({
       rightPanelFallbackByWorkspace: {
         "workspace-1": createRightPanelState({ visible: true, width: 400, openTabs: ["tasks"], activeTab: "tasks" }),
       },
     });
-    render(<RightPanel />);
+    await renderPanel();
     const row1 = screen.getByTestId("panel-header-row-1");
 
     expect(row1).toHaveClass("window-drag");
@@ -576,13 +584,13 @@ describe("RightPanel", () => {
     expect(within(row1).getByRole("button", { name: "Restore" })).toBeInTheDocument();
   });
 
-  it("offers the way back to the chat, not Restore, when a narrow window made the panel full-surface", () => {
+  it("offers the way back to the chat, not Restore, when a narrow window made the panel full-surface", async () => {
     useDiffStore.setState({
       rightPanelFallbackByWorkspace: {
         "workspace-1": createRightPanelState({ visible: true, width: 400, openTabs: ["tasks"], activeTab: "tasks" }),
       },
     });
-    render(<RightPanel />);
+    await renderPanel();
     act(() => useUiStore.getState().setRightPanelMaximized(true, "layout"));
     const row1 = screen.getByTestId("panel-header-row-1");
     expect(within(row1).queryByRole("button", { name: "Restore" })).toBeNull();
@@ -598,7 +606,7 @@ describe("RightPanel", () => {
     ["Linux caption buttons cover the rail's top strip", "linux", "panel-header-row-1"],
     ["macOS leaves the rail's top strip free", "darwin", "activity-rail-caption-strip"],
     ["the browser build has no caption buttons", undefined, "activity-rail-caption-strip"],
-  ])("places Hide panel where %s", (_case, platform, hostTestId) => {
+  ])("places Hide panel where %s", async (_case, platform, hostTestId) => {
     const bridge = window.desktopBridge;
     Object.defineProperty(window, "desktopBridge", {
       configurable: true,
@@ -609,7 +617,7 @@ describe("RightPanel", () => {
         "workspace-1": createRightPanelState({ visible: true, width: 400 }),
       },
     });
-    render(<RightPanel />);
+    await renderPanel();
 
     const toggles = screen.getAllByRole("button", { name: "Hide panel" });
     expect(toggles).toHaveLength(1);
@@ -619,7 +627,7 @@ describe("RightPanel", () => {
     expect(toggleRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", null);
   });
 
-  it("gives the header rows only to the active tool", () => {
+  it("gives the header rows only to the active tool", async () => {
     useWorkspaceStore.setState({ activeThreadId: "thread-1" });
     const panel = (activeTabId: string) => ({
       rightPanelByThread: {
@@ -635,7 +643,7 @@ describe("RightPanel", () => {
       },
     });
     useDiffStore.setState(panel("singleton:changes"));
-    render(<RightPanel />);
+    await renderPanel();
     const leading = screen.getByTestId("panel-header-leading");
     const row2 = screen.getByTestId("panel-header-row-2");
 
@@ -664,7 +672,7 @@ describe("RightPanel", () => {
       terminals: { "workspace-1": [{ id: "pty-1", threadId: "workspace-1", label: "Shell" }] },
     });
     useToastStore.setState({ toasts: [] });
-    render(<RightPanel />);
+    await renderPanel();
 
     fireEvent.click(screen.getByRole("button", { name: "Close Shell (ends the shell)" }));
 
@@ -679,15 +687,15 @@ describe("RightPanel", () => {
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "terminal");
   });
 
-  it("releases focus before making the right panel inert", () => {
+  it("releases focus before making the right panel inert", async () => {
     useDiffStore.setState({
       rightPanelFallbackByWorkspace: {
         "workspace-1": createRightPanelState({ visible: true, width: 400 }),
       },
     });
-    render(<RightPanel />);
+    await renderPanel();
     const toggle = screen.getByRole("button", { name: "Hide panel" });
-    toggle.focus();
+    act(() => toggle.focus());
     expect(toggle).toHaveFocus();
 
     act(() => useDiffStore.getState().hideRightPanel("workspace-1"));
@@ -697,31 +705,31 @@ describe("RightPanel", () => {
     expect(screen.getByTestId("right-panel")).not.toHaveAttribute("aria-hidden");
   });
 
-  it("does not create a stacking context while visible", () => {
+  it("does not create a stacking context while visible", async () => {
     useDiffStore.setState({
       rightPanelFallbackByWorkspace: {
         "workspace-1": createRightPanelState({ visible: true, width: 400 }),
       },
     });
 
-    render(<RightPanel />);
+    await renderPanel();
 
     // Any translate, including translate-x-0, traps Design overlays below the
     // body-level Browser surface host that paints the hosted page.
     expect(screen.getByTestId("right-panel").className).not.toMatch(/(^|\s)-?translate-/);
   });
 
-  it("floats Review over the conversation when it cannot dock and docks it again without remounting it", () => {
+  it("floats Review over the conversation when it cannot dock and docks it again without remounting it", async () => {
     useDiffStore.setState({
       rightPanelFallbackByWorkspace: {
         "workspace-1": createRightPanelState({ visible: true, width: 560, openTabs: ["changes"], activeTab: "changes" }),
       },
     });
-    render(<RightPanel />);
+    await renderPanel();
     const panel = screen.getByTestId("right-panel");
     const reviewBody = screen.getByTestId("review-controls");
     const toggle = screen.getByRole("button", { name: "Hide panel" });
-    toggle.focus();
+    act(() => toggle.focus());
     expect(panel).toHaveAttribute("data-posture", "docked");
 
     // Docking needs the composer's 480px beside the panel's 384px.
@@ -736,7 +744,7 @@ describe("RightPanel", () => {
     expect(toggle).toHaveFocus();
   });
 
-  it("keeps an idle existing Browser page behind the default panel screen", () => {
+  it("keeps an idle existing Browser page behind the default panel screen", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "browser-tab-1",
@@ -751,7 +759,7 @@ describe("RightPanel", () => {
       }],
     };
 
-    render(<RightPanel />);
+    await renderPanel();
     expect(useDiffStore.getState().getRightPanelVisible("workspace-1")).toBe(false);
     expect(useDiffStore.getState().getRightPanel("workspace-1").openTabs).toEqual([]);
 
@@ -767,7 +775,7 @@ describe("RightPanel", () => {
     expect(activatePreviewPage).not.toHaveBeenCalled();
   });
 
-  it("restores an explicitly retained Browser tab when the hidden panel had no active instance", () => {
+  it("restores an explicitly retained Browser tab when the hidden panel had no active instance", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "browser-tab-1",
@@ -791,7 +799,7 @@ describe("RightPanel", () => {
         }),
       },
     });
-    render(<RightPanel />);
+    await renderPanel();
     act(() => useDiffStore.getState().showRightPanel("workspace-1"));
 
     expect(screen.queryByTestId("panel-empty-state")).not.toBeInTheDocument();
@@ -804,7 +812,7 @@ describe("RightPanel", () => {
     expect(activatePreviewPage).not.toHaveBeenCalled();
   });
 
-  it("reveals the Browser on an empty panel without selecting the agent's page", () => {
+  it("reveals the Browser on an empty panel without selecting the agent's page", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "default-browser-tab",
@@ -844,7 +852,7 @@ describe("RightPanel", () => {
       ]),
     });
 
-    render(<RightPanel />);
+    await renderPanel();
     act(() => useDiffStore.getState().showRightPanel("workspace-1"));
 
     expect(screen.queryByTestId("panel-empty-state")).not.toBeInTheDocument();
@@ -857,7 +865,7 @@ describe("RightPanel", () => {
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-browser-acting", "true");
   });
 
-  it("keeps the user's tool and page while the agent acts in another Browser page", () => {
+  it("keeps the user's tool and page while the agent acts in another Browser page", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "existing-browser-tab",
@@ -907,7 +915,7 @@ describe("RightPanel", () => {
       ]),
     });
 
-    render(<RightPanel />);
+    await renderPanel();
 
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "tasks");
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-browser-acting", "true");
@@ -919,7 +927,7 @@ describe("RightPanel", () => {
     expect(activatePreviewPage).not.toHaveBeenCalled();
   });
 
-  it("does not re-open Browser while the final page close callback is synchronous", () => {
+  it("does not re-open Browser while the final page close callback is synchronous", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "browser-tab-1",
@@ -953,7 +961,7 @@ describe("RightPanel", () => {
       options.onLastClose?.();
     });
 
-    render(<RightPanel />);
+    await renderPanel();
     expect(screen.getByTestId("preview-panel")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close Closing page" }));
 
@@ -963,7 +971,7 @@ describe("RightPanel", () => {
     expect(activatePreviewPage).not.toHaveBeenCalled();
   });
 
-  it("covers the visible Browser edge without changing its layout geometry", () => {
+  it("covers the visible Browser edge without changing its layout geometry", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "browser-tab-1",
@@ -988,7 +996,7 @@ describe("RightPanel", () => {
       },
     });
 
-    render(<RightPanel />);
+    await renderPanel();
     expect(screen.getByTestId("preview-panel")).toHaveAttribute(
       "data-covered-right",
       "0",
@@ -1027,7 +1035,7 @@ describe("RightPanel", () => {
       hostedScopeIds: new Set([browserAutomationScopeKey("workspace-1", "workspace-1")]),
     });
 
-    render(<RightPanel />);
+    await renderPanel();
     await waitFor(() => expect(screen.queryByTestId("automation-preview-dock")).not.toBeNull());
     const dock = screen.getByTestId("automation-preview-dock");
     expect(dock).not.toBeNull();
@@ -1038,7 +1046,7 @@ describe("RightPanel", () => {
     await waitFor(() => expect(browserSurfacePresentationCoordinator.getActivityRailOverlap()).toBe(112));
   });
 
-  it("does not render the active Browser surface for another scope's request", () => {
+  it("does not render the active Browser surface for another scope's request", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "browser-tab-1",
@@ -1062,7 +1070,7 @@ describe("RightPanel", () => {
         }),
       },
     });
-    render(<RightPanel />);
+    await renderPanel();
     const renderCount = previewPanelRender.mock.calls.length;
 
     act(() => useBrowserAutomationStore.setState({
@@ -1083,7 +1091,7 @@ describe("RightPanel", () => {
     expect(previewPanelRender).toHaveBeenCalledTimes(renderCount);
   });
 
-  it("keeps a closed Browser scope warm while its active request settles", () => {
+  it("keeps a closed Browser scope warm while its active request settles", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "browser-tab-1",
@@ -1131,7 +1139,7 @@ describe("RightPanel", () => {
       options.onLastClose?.();
     });
 
-    render(<RightPanel />);
+    await renderPanel();
     fireEvent.click(screen.getByRole("button", { name: "Close Busy page" }));
 
     expect(screen.getByTestId("panel-empty-state")).toBeInTheDocument();
@@ -1143,8 +1151,8 @@ describe("RightPanel", () => {
     expect(screen.queryByTestId("preview-panel")).not.toBeInTheDocument();
   });
 
-  it("keeps an ordinary host-published Browser page behind the default screen", () => {
-    const { rerender } = render(<RightPanel />);
+  it("keeps an ordinary host-published Browser page behind the default screen", async () => {
+    const { rerender } = await renderPanel();
 
     act(() => useDiffStore.getState().showRightPanel("workspace-1"));
     expect(screen.getByTestId("panel-empty-state")).toBeInTheDocument();
@@ -1174,7 +1182,7 @@ describe("RightPanel", () => {
   });
 
   it("does not reveal an ordinary Electron-created Browser page from a host update", async () => {
-    const { rerender } = render(<RightPanel />);
+    const { rerender } = await renderPanel();
 
     act(() => useDiffStore.getState().showRightPanel("workspace-1"));
     expect(screen.getByTestId("panel-empty-state")).toBeInTheDocument();
@@ -1212,7 +1220,7 @@ describe("RightPanel", () => {
         }),
       },
     });
-    const { rerender } = render(<RightPanel />);
+    const { rerender } = await renderPanel();
     expect(screen.getByTestId("panel-empty-state")).toBeInTheDocument();
 
     await waitFor(() => expect(previewTabsBridge.updatedListener.current).toBeTypeOf("function"));
@@ -1238,7 +1246,7 @@ describe("RightPanel", () => {
     expect(activatePreviewPage).not.toHaveBeenCalled();
   });
 
-  it("does not let a background Browser page alter an existing active panel tab", () => {
+  it("does not let a background Browser page alter an existing active panel tab", async () => {
     previewTabSet.current = {
       threadId: "workspace-1",
       activeTabId: "browser-tab-1",
@@ -1263,7 +1271,7 @@ describe("RightPanel", () => {
       },
     });
 
-    render(<RightPanel />);
+    await renderPanel();
 
     expect(screen.queryByTestId("panel-empty-state")).not.toBeInTheDocument();
     expect(screen.getByTestId("activity-rail")).toHaveAttribute("data-open-tabs", "changes");

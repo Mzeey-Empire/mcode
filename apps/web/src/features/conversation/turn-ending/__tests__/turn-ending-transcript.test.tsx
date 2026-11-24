@@ -1,5 +1,5 @@
 import { createMockMessage } from "@mcode/contracts/testing";
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAgentModelState, type AgentModelState, type AgentTurn, type AgentTurnEnding } from "@mcode/contracts/compat/agent-model";
 import { type Message } from "@mcode/contracts/models/message";
@@ -64,7 +64,10 @@ function useTranscript() {
   });
 }
 
-afterEach(() => resetThreadStoreForTests());
+afterEach(() => {
+  cleanup();
+  resetThreadStoreForTests();
+});
 
 describe("turn endings in the reloaded transcript", () => {
   it("shows a retried turn once, with only the latest attempt's answer and notice", () => {

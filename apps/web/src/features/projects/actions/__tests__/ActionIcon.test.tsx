@@ -40,11 +40,12 @@ describe("ActionIcon", () => {
     expect(slot).toHaveStyle({ width: "16px", height: "16px" });
   });
 
-  it("draws the derived default for an id this build does not know", () => {
+  it("draws the derived default for an id this build does not know", async () => {
     cdnReturnsSvg();
     render(<ActionIcon iconId="from-a-newer-build" command="cargo test" />);
 
     expect(screen.getByTestId("action-icon")).toHaveAttribute("data-icon-id", "rust");
+    await waitFor(() => expect(screen.getByTestId("action-icon").querySelector("img")).not.toBeNull());
   });
 
   it("does not show the previous tool's image after the command changes tools", async () => {

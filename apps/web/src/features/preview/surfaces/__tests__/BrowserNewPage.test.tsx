@@ -85,8 +85,9 @@ function installHistory(history: BrowserHistory) {
   return bridge;
 }
 
-function renderPage(onOpen = vi.fn(), threadId = THREAD_ID) {
+async function renderPage(onOpen = vi.fn(), threadId = THREAD_ID): Promise<typeof onOpen> {
   render(<BrowserNewPage threadId={threadId} browserWorkspaceId={WORKSPACE_ID} onOpen={onOpen} />);
+  await act(async () => {});
   return onOpen;
 }
 
@@ -116,7 +117,7 @@ describe("BrowserNewPage", () => {
   describe("tiles", () => {
     it("opens the run's own port from a running tile", async () => {
       seedRuns(actionRun({ port: actionPort() }));
-      const onOpen = renderPage();
+      const onOpen = await renderPage();
       const running = tile("web");
 
       expect(running).toHaveAttribute("data-state", "running");
@@ -128,40 +129,40 @@ describe("BrowserNewPage", () => {
 
     it("opens a bracketed IPv6 address as the run reported it", async () => {
       seedRuns(actionRun({ port: actionPort({ host: "::1", url: "http://[::1]:5173/" }) }));
-      const onOpen = renderPage();
+      const onOpen = await renderPage();
 
       await userEvent.click(tile("web"));
 
       expect(onOpen).toHaveBeenCalledWith("http://[::1]:5173/");
     });
 
-    it("shows Starting without Start while a running action has not announced a port", () => {
+    it("shows Starting without Start while a running action has not announced a port", async () => {
       seedRuns(actionRun({ port: actionPort({ runId: "run-0", reachable: false }), runId: "run-1" }));
-      renderPage();
+      await renderPage();
 
       expect(tile("web")).toHaveAttribute("data-state", "starting");
       expect(within(tile("web")).getByText("Starting")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Start web" })).not.toBeInTheDocument();
     });
 
-    it("keeps a running action Starting when its own port stops answering", () => {
+    it("keeps a running action Starting when its own port stops answering", async () => {
       seedRuns(actionRun({ port: actionPort({ reachable: false }) }));
-      renderPage();
+      await renderPage();
 
       expect(tile("web")).toHaveAttribute("data-state", "starting");
       expect(screen.queryByRole("button", { name: "Start web" })).not.toBeInTheDocument();
     });
 
-    it("never treats a port kept from an earlier run as running", () => {
+    it("never treats a port kept from an earlier run as running", async () => {
       seedRuns(actionRun({ runId: "run-2", port: actionPort({ runId: "run-1", reachable: true }) }));
-      renderPage();
+      await renderPage();
 
       expect(tile("web")).toHaveAttribute("data-state", "starting");
     });
 
-    it("shows a stopped server with its port as history and no tile for an action that never ran", () => {
+    it("shows a stopped server with its port as history and no tile for an action that never ran", async () => {
       seedRuns(stoppedRun(), actionRun({ actionId: "docs", actionName: "docs", runId: "run-9", port: null }));
-      renderPage();
+      await renderPage();
 
       expect(screen.getAllByTestId("browser-server-tile")).toHaveLength(1);
       expect(tile("web")).toHaveAttribute("data-state", "stopped");
@@ -170,7 +171,7 @@ describe("BrowserNewPage", () => {
     });
 
     it("lists a server that starts running after the page is open without polling", async () => {
-      renderPage();
+      await renderPage();
       expect(screen.queryByTestId("browser-server-tile")).not.toBeInTheDocument();
 
       act(() => seedRuns(actionRun({ port: actionPort() })));
@@ -183,7 +184,7 @@ describe("BrowserNewPage", () => {
   describe("Start", () => {
     it("restarts in the open terminal, then opens the page only after the new run reports its port", async () => {
       seedRuns(stoppedRun());
-      const onOpen = renderPage();
+      const onOpen = await renderPage();
       transport.restartWorkspaceAction.mockResolvedValue(actionRun({
         runId: "run-2",
         revision: 1,
@@ -211,7 +212,7 @@ describe("BrowserNewPage", () => {
 
     it("starts a new run when the terminal is closed", async () => {
       seedRuns(stoppedRun({ terminalSessionId: null }));
-      renderPage();
+      await renderPage();
       transport.startWorkspaceAction.mockResolvedValue(actionRun({
         runId: "run-2",
         createdAt: "2026-08-22T12:10:00.000Z",
@@ -227,7 +228,7 @@ describe("BrowserNewPage", () => {
 
     it("does not open the port kept from the earlier run while the new run is still Starting", async () => {
       seedRuns(stoppedRun());
-      const onOpen = renderPage();
+      const onOpen = await renderPage();
       transport.restartWorkspaceAction.mockResolvedValue(actionRun({
         runId: "run-2",
         createdAt: "2026-08-22T12:10:00.000Z",
@@ -242,7 +243,7 @@ describe("BrowserNewPage", () => {
 
     it("returns to Stopped with a toast when the start request fails", async () => {
       seedRuns(stoppedRun());
-      const onOpen = renderPage();
+      const onOpen = await renderPage();
       transport.restartWorkspaceAction.mockRejectedValue(new Error("terminal gone"));
 
       await userEvent.click(screen.getByRole("button", { name: "Start web" }));
@@ -266,7 +267,7 @@ describe("BrowserNewPage", () => {
     it("lists newest first, naming a loopback page after the server on its port", async () => {
       seedRuns(stoppedRun());
       installHistory(history);
-      renderPage();
+      await renderPage();
 
       const rows = await screen.findAllByTestId("browser-recent-page");
 
@@ -278,7 +279,7 @@ describe("BrowserNewPage", () => {
 
     it("opens a recent page on click", async () => {
       installHistory(history);
-      const onOpen = renderPage();
+      const onOpen = await renderPage();
 
       await userEvent.click(await screen.findByRole("button", { name: "Open Docs" }));
 
@@ -287,7 +288,7 @@ describe("BrowserNewPage", () => {
 
     it("removes a page and reloads the list", async () => {
       const bridge = installHistory(history);
-      renderPage();
+      await renderPage();
       bridge.list.mockResolvedValue({ entries: [history.entries[1]!], thumbnails: [] });
 
       await userEvent.click(await screen.findByRole("button", { name: "Remove Docs from recent pages" }));
@@ -303,7 +304,7 @@ describe("BrowserNewPage", () => {
         entries: [],
         thumbnails: [{ origin: "http://127.0.0.1:5173", capturedAt: NOW, dataUrl: "data:image/jpeg;base64,AAAA" }],
       });
-      renderPage();
+      await renderPage();
 
       await waitFor(() => expect(tile("web").querySelector("img")).toHaveAttribute("src", "data:image/jpeg;base64,AAAA"));
     });
@@ -316,16 +317,16 @@ describe("BrowserNewPage", () => {
         entries: [{ url: "https://example.com/", title: "Example", faviconUrl: null, lastVisitedAt: Date.now() }],
         thumbnails: [],
       });
-      renderPage(vi.fn(), WORKSPACE_ID);
+      await renderPage(vi.fn(), WORKSPACE_ID);
 
       expect(await screen.findByRole("button", { name: "Open Example" })).toBeInTheDocument();
       expect(screen.queryByTestId("browser-server-tile")).not.toBeInTheDocument();
       expect(transport.listWorkspaceActionRuns).not.toHaveBeenCalled();
     });
 
-    it("shows tiles without thumbnails or recent pages in the web runtime", () => {
+    it("shows tiles without thumbnails or recent pages in the web runtime", async () => {
       seedRuns(actionRun({ port: actionPort() }));
-      renderPage();
+      await renderPage();
 
       expect(tile("web").querySelector("img")).toBeNull();
       expect(screen.queryByRole("list", { name: "Recent pages" })).not.toBeInTheDocument();

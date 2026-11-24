@@ -1,6 +1,6 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import React from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../Composer";
@@ -288,7 +288,7 @@ describe("Composer capsule", () => {
       expect(opened).toEqual([{ section: "providers" }]);
     } finally {
       window.removeEventListener("mcode:open-settings", listener);
-      useProviderAvailabilityStore.setState({ providers: [] });
+      act(() => useProviderAvailabilityStore.setState({ providers: [] }));
     }
   });
 });

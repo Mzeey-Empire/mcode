@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolCall } from "@/transport/types";
@@ -11,17 +11,23 @@ const call: ToolCall = {
   output: "hello", isError: false, isComplete: false,
 };
 
+async function openShellPanel(toggle: HTMLElement): Promise<void> {
+  await act(async () => {
+    fireEvent.click(toggle);
+  });
+}
+
 describe("ShellToolCallRow automatic expansion", () => {
   it.each([
     ["queued", "Queued command", "Queued"],
     ["waiting", "Waiting for approval", "Waiting for approval"],
     ["denied", "Denied command", "Denied"],
-  ] satisfies [NonNullable<ToolCall["status"]>, string, string][])("shows %s without claiming execution", (status, label, footer) => {
+  ] satisfies [NonNullable<ToolCall["status"]>, string, string][])("shows %s without claiming execution", async (status, label, footer) => {
     render(<ShellToolCallRow toolCall={{ ...call, status, isComplete: status === "denied", durationMs: 20_000 }} />);
     const toggle = screen.getByRole("button", { name: new RegExp(`^${label}`) });
     expect(toggle).toHaveTextContent(`${label}echo hello`);
     expect(toggle).not.toHaveTextContent("20s");
-    fireEvent.click(toggle);
+    await openShellPanel(toggle);
     expect(within(screen.getByRole("region", { name: "Shell output" })).getByText(footer, { exact: true })).toBeVisible();
     expect(screen.queryByText("Running command")).toBeNull();
   });
@@ -34,7 +40,7 @@ describe("ShellToolCallRow automatic expansion", () => {
     expect(screen.getByRole("button")).toHaveTextContent(/^Ran 1 command · 1 denied$/);
   });
 
-  it("does not construct a completed transcript before disclosure", () => {
+  it("does not construct a completed transcript before disclosure", async () => {
     const { container } = render(<ShellToolCallRow toolCall={{ ...call, isComplete: true }} />);
     const toggle = screen.getByRole("button", { name: /^Ran command/ });
     expect(screen.queryByRole("region", { name: "Shell output" })).toBeNull();
@@ -42,25 +48,26 @@ describe("ShellToolCallRow automatic expansion", () => {
     expect(container.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
     fireEvent.pointerEnter(screen.getByText("echo hello"));
     expect(container.querySelector('[data-slot="tooltip-trigger"]')).toHaveTextContent("echo hello");
-    fireEvent.click(toggle);
+    await openShellPanel(toggle);
     const panel = screen.getByRole("region", { name: "Shell output" });
     expect(panel).toBeVisible();
     expect(toggle).toHaveAttribute("aria-controls", panel.id);
   });
 
-  it("stays collapsed while running until clicked", () => {
+  it("stays collapsed while running until clicked", async () => {
     render(<ShellToolCallRow toolCall={call} />);
     const toggle = screen.getByRole("button", { name: /^Running command/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("region", { name: "Shell output" })).toBeNull();
-    fireEvent.click(toggle);
+    await openShellPanel(toggle);
     expect(screen.getByRole("region", { name: "Shell output" })).toBeVisible();
   });
 
-  it("keeps a manual open when output arrives", () => {
+  it("keeps a manual open when output arrives", async () => {
     const { rerender } = render(<ShellToolCallRow toolCall={{ ...call, output: null }} />);
-    fireEvent.click(screen.getByRole("button", { name: /^Running command/ }));
+    await openShellPanel(screen.getByRole("button", { name: /^Running command/ }));
     rerender(<ShellToolCallRow toolCall={{ ...call, output: "more output" }} />);
+    await act(async () => {});
     expect(screen.getByRole("button", { name: /^Running command/ })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("more output")).toBeVisible();
   });
@@ -98,11 +105,11 @@ describe("ShellToolCallRow automatic expansion", () => {
     expect(screen.getByRole("button", { name: /^Ran command/ })).toHaveTextContent(/^Ran command2secho hello$/);
   });
 
-  it.each(["Bash", "command_execution"])("labels a failed %s command and preserves its exit code in the transcript", (toolName) => {
+  it.each(["Bash", "command_execution"])("labels a failed %s command and preserves its exit code in the transcript", async (toolName) => {
     render(<ShellToolCallRow toolCall={{ ...call, toolName, isComplete: true, isError: true, exitCode: 3, durationMs: 3_000 }} />);
     const toggle = screen.getByRole("button", { name: /^Ran command/ });
     expect(toggle).toHaveTextContent(/^Ran commandecho hellofailed · 3s$/);
-    fireEvent.click(toggle);
+    await openShellPanel(toggle);
     expect(within(screen.getByRole("region", { name: "Shell output" })).getByText("exit code 3", { exact: true })).toBeVisible();
   });
 
@@ -145,9 +152,9 @@ describe("Shell transcript controls", () => {
     ["Success", { isComplete: true }],
     ["exit code 2", { isComplete: true, isError: true, exitCode: 2 }],
     ["cancelled", { isComplete: true, isCancelled: true }],
-  ])("shows %s in the transcript footer", (label, state) => {
+  ])("shows %s in the transcript footer", async (label, state) => {
     render(<ShellToolCallRow toolCall={{ ...call, ...state }} />);
-    fireEvent.click(screen.getByRole("button", { name: /^(Running|Ran) command/ }));
+    await openShellPanel(screen.getByRole("button", { name: /^(Running|Ran) command/ }));
     const panel = screen.getByRole("region", { name: "Shell output" });
     expect(within(panel).getByText(label)).toBeVisible();
     expect(within(panel).queryByText(label === "Success" ? "Running" : "Success")).toBeNull();

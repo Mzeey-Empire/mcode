@@ -101,11 +101,13 @@ async function queueSend() {
   return { entry: queued()[0]!, composer };
 }
 
-function drainNext(): Promise<void> {
-  useThreadStore.setState({ runningThreadIds: new Set() });
-  const next = useQueueStore.getState().claimNextQueuedMessage(THREAD_ID);
-  expect(next).toBeDefined();
-  return sendQueuedMessage(THREAD_ID, next!);
+async function drainNext(): Promise<void> {
+  await act(async () => {
+    useThreadStore.setState({ runningThreadIds: new Set() });
+    const next = useQueueStore.getState().claimNextQueuedMessage(THREAD_ID);
+    expect(next).toBeDefined();
+    await sendQueuedMessage(THREAD_ID, next!);
+  });
 }
 
 /**

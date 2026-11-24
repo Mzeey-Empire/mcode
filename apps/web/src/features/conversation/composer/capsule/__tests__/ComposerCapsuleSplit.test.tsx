@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef, useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -132,6 +132,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   useProviderModelsStore.setState(useProviderModelsStore.getInitialState());
   registerProviderModels("codex", []);
   vi.useRealTimers();
@@ -153,7 +154,10 @@ describe("ComposerCapsuleSplit", () => {
     fireEvent.click(within(picker).getByRole("radio", { name: "Claude" }));
     await act(async () => {});
     fireEvent.change(within(picker).getByPlaceholderText("Search models"), { target: { value: "Haiku" } });
-    fireEvent.click(within(picker).getAllByRole("option", { name: /\bHaiku\b/ })[0]);
+    const haiku = within(picker).getAllByRole("option", { name: /\bHaiku\b/ })[0];
+    await act(async () => {
+      fireEvent.click(haiku);
+    });
 
     expect(onSelectionChange).toHaveBeenCalledWith(expect.objectContaining({ provider: "claude", modelId: "claude-haiku-9" }));
   });

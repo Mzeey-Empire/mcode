@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { cleanup, act, render, waitFor } from "@testing-library/react";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { BROWSER_AUTOMATION_CONTRACT_VERSION, type BrowserAutomationControllerState, type BrowserAutomationHostDispatch, type BrowserAutomationResponse } from "@mcode/contracts/models/browser-automation";
 import { type BrowserTabSet } from "@mcode/contracts/models/browser-tab";
@@ -608,7 +608,7 @@ describe("BrowserAutomationHost", () => {
     delete window.desktopBridge;
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
     expect(window.desktopBridge).toBeUndefined();
-    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "web-preview");
+    act(() => useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "web-preview"));
     webExecutor.executeWebBrowserDispatch.mockResolvedValue(successResponse(dispatch(1, 31).request));
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
@@ -639,7 +639,7 @@ describe("BrowserAutomationHost", () => {
   it("waits for the seeded web preview iframe before the first open dispatch", async () => {
     delete window.desktopBridge;
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "web-preview");
+    act(() => useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "web-preview"));
     webExecutor.executeWebBrowserDispatch.mockResolvedValue(successResponse(dispatch(1, 36).request));
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
@@ -714,7 +714,7 @@ describe("BrowserAutomationHost", () => {
     iframe.src = openRequest.args.url;
     setIframeIdentity(iframe, tabId);
     document.body.append(iframe);
-    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", tabId);
+    act(() => useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", tabId));
     iframe.addEventListener("load", () => {
       useBrowserAutomationStore.getState().refreshTarget("workspace-1", "thread-1", tabId);
     }, { once: true });
@@ -774,7 +774,7 @@ describe("BrowserAutomationHost", () => {
     secondIframe.src = secondRequest.args.url;
     setIframeIdentity(secondIframe, secondTabId);
     document.body.append(secondIframe);
-    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", secondTabId);
+    act(() => useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", secondTabId));
     secondIframe.addEventListener("load", () => {
       useBrowserAutomationStore.getState().refreshTarget("workspace-1", "thread-1", secondTabId);
     }, { once: true });
@@ -840,7 +840,7 @@ describe("BrowserAutomationHost", () => {
     iframe.src = openRequest.args.url;
     setIframeIdentity(iframe, tabId);
     document.body.append(iframe);
-    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", tabId);
+    act(() => useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", tabId));
     iframe.addEventListener("load", () => {
       useBrowserAutomationStore.getState().refreshTarget("workspace-1", "thread-1", tabId);
     }, { once: true });
@@ -857,11 +857,14 @@ describe("BrowserAutomationHost", () => {
       value: () => ({ left: 40, top: 20, width: 640, height: 480, right: 680, bottom: 500, x: 40, y: 20, toJSON: () => ({}) }),
     });
     document.body.append(dock);
-    const releaseDock = browserSurfacePresentationCoordinator.registerAutomationAnchor(
-      "workspace-1",
-      "thread-1",
-      dock,
-    );
+    let releaseDock!: () => void;
+    act(() => {
+      releaseDock = browserSurfacePresentationCoordinator.registerAutomationAnchor(
+        "workspace-1",
+        "thread-1",
+        dock,
+      );
+    });
     await act(async () => usePreviewTabsStore.getState().activatePage("workspace-1", "thread-1", tabId));
     await waitFor(() => expect(usePreviewTabsStore.getState().tabSetByScope[previewTabsScopeKey("workspace-1", "thread-1")]?.activeTabId).toBe(tabId));
     const surface = document.querySelector<HTMLElement>('[data-automation-persistent-scope="thread-1"]');
@@ -896,7 +899,7 @@ describe("BrowserAutomationHost", () => {
     )).toHaveAttribute("data-covered-left", "112"));
 
     iframe.remove();
-    releaseDock();
+    act(() => releaseDock());
     dock.remove();
     view.unmount();
   });
@@ -938,7 +941,7 @@ describe("BrowserAutomationHost", () => {
   it("seeds an empty registered web target for normal open requests", async () => {
     delete window.desktopBridge;
     vi.stubEnv("VITE_MCODE_WEB_AUTOMATION", "1");
-    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "web-preview");
+    act(() => useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "web-preview"));
     webExecutor.executeWebBrowserDispatch.mockResolvedValue(successResponse(dispatch(1, 37).request));
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
@@ -1145,6 +1148,8 @@ describe("BrowserAutomationHost", () => {
   });
 
   afterEach(() => {
+
+    cleanup();
     delete window.desktopBridge;
     vi.unstubAllEnvs();
     browserSurfacePresentationCoordinator.dispose();
@@ -1684,7 +1689,7 @@ describe("BrowserAutomationHost", () => {
     const first = deferred<BrowserAutomationResponse>();
     const second = deferred<BrowserAutomationResponse>();
     execute.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-2", "tab-1");
+    act(() => useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-2", "tab-1"));
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
     const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
@@ -2411,11 +2416,13 @@ describe("BrowserAutomationHost", () => {
           left: 5, top: 10, width: 700, height: 500, right: 705, bottom: 510, x: 5, y: 10, toJSON: () => undefined,
         });
         document.body.append(oldestDock);
-        browserSurfacePresentationCoordinator.registerAutomationAnchor(
-          "workspace-1",
-          "sequential-0",
-          oldestDock,
-        );
+        act(() => {
+          browserSurfacePresentationCoordinator.registerAutomationAnchor(
+            "workspace-1",
+            "sequential-0",
+            oldestDock,
+          );
+        });
         await waitFor(() => expect(oldestVisiblePanel).toHaveAttribute(
           "data-automation-only",
           "false",
@@ -2458,23 +2465,29 @@ describe("BrowserAutomationHost", () => {
       left: 20, top: 30, width: 900, height: 700, right: 920, bottom: 730, x: 20, y: 30, toJSON: () => undefined,
     });
     document.body.append(fourthDock, fifthDock);
-    browserSurfacePresentationCoordinator.registerAutomationAnchor(
-      "workspace-1",
-      "sequential-4",
-      fourthDock,
-      false,
-    );
-    browserSurfacePresentationCoordinator.registerAutomationAnchor(
-      "workspace-1",
-      "sequential-5",
-      fifthDock,
-      true,
-    );
+    act(() => {
+      browserSurfacePresentationCoordinator.registerAutomationAnchor(
+        "workspace-1",
+        "sequential-4",
+        fourthDock,
+        false,
+      );
+    });
+    act(() => {
+      browserSurfacePresentationCoordinator.registerAutomationAnchor(
+        "workspace-1",
+        "sequential-5",
+        fifthDock,
+        true,
+      );
+    });
     await waitFor(() => expect(fifthPanel).toHaveAttribute("data-automation-only", "false"));
     expect(fourthPanel).toHaveAttribute("data-automation-only", "true");
 
-    browserSurfacePresentationCoordinator.setAutomationAnchorVisibility("workspace-1", "sequential-4", true);
-    browserSurfacePresentationCoordinator.setAutomationAnchorVisibility("workspace-1", "sequential-5", false);
+    act(() => {
+      browserSurfacePresentationCoordinator.setAutomationAnchorVisibility("workspace-1", "sequential-4", true);
+      browserSurfacePresentationCoordinator.setAutomationAnchorVisibility("workspace-1", "sequential-5", false);
+    });
     await waitFor(() => expect(fourthPanel).toHaveAttribute("data-automation-only", "false"));
     expect(fifthPanel).toHaveAttribute("data-automation-only", "true");
     expect(document.querySelector(
@@ -2964,7 +2977,7 @@ describe("BrowserAutomationHost", () => {
     vi.spyOn(button, "getBoundingClientRect").mockReturnValue({ width: 80, height: 20 } as DOMRect);
     const clicked = vi.fn();
     button.addEventListener("click", clicked);
-    useBrowserAutomationStore.getState().setControllerForTarget("workspace-1", "thread-1", "tab-1", { tabId: "tab-1", controller: "agent", controlEpoch: 0 });
+    act(() => useBrowserAutomationStore.getState().setControllerForTarget("workspace-1", "thread-1", "tab-1", { tabId: "tab-1", controller: "agent", controlEpoch: 0 }));
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
     const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
@@ -2994,7 +3007,7 @@ describe("BrowserAutomationHost", () => {
     vi.spyOn(input, "getBoundingClientRect").mockReturnValue({ width: 120, height: 20 } as DOMRect);
     const clicked = vi.fn();
     button.addEventListener("click", clicked);
-    useBrowserAutomationStore.getState().setControllerForTarget("workspace-1", "thread-1", "tab-1", { tabId: "tab-1", controller: "agent", controlEpoch: 2 });
+    act(() => useBrowserAutomationStore.getState().setControllerForTarget("workspace-1", "thread-1", "tab-1", { tabId: "tab-1", controller: "agent", controlEpoch: 2 }));
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
     const hostId = sessionStorage.getItem("mcode.browserAutomation.hostId");
@@ -3163,7 +3176,7 @@ describe("BrowserAutomationHost", () => {
     const view = render(<BrowserAutomationHost />);
     await waitFor(() => expect(harness.transport.registerBrowserAutomationHost).toHaveBeenCalledOnce());
     await waitFor(() => expect(controllerChanged).not.toBeNull());
-    useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "tab-1");
+    act(() => useBrowserAutomationStore.getState().registerTarget("workspace-1", "thread-1", "tab-1"));
     act(() => controllerChanged?.({ tabId: "tab-1", controller: "human", controlEpoch: 2 }));
     const key = browserAutomationTargetKey("workspace-1", "thread-1", "tab-1");
 

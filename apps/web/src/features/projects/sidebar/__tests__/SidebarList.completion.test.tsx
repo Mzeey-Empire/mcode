@@ -1,7 +1,7 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import type { ThreadCompletionResult } from "@mcode/contracts/ws/methods";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 
@@ -73,6 +73,7 @@ describe("SidebarList completion", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });

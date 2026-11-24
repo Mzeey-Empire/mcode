@@ -86,7 +86,7 @@ function makeMessage(content: string): Message {
 }
 
 describe("hidden plan messages", () => {
-  it.each(["", "The plan adds the helper."])("points to the saved plan for an assistant response containing %j", (content) => {
+  it.each(["", "The plan adds the helper."])("points to the saved plan for an assistant response containing %j", async (content) => {
     const plan: PlanVersion = {
       id: "plan-1", threadId: "thread-1", messageId: "msg-1", version: 1,
       title: "Add the helper", contentMd: "# Add the helper", author: "agent",
@@ -99,6 +99,7 @@ describe("hidden plan messages", () => {
     const { container, rerender } = render(<MessageBubble message={message} />);
     expect(container.textContent).toContain("Plan v1 is in the Plan tab.");
     rerender(<MessageBubble message={{ ...message, id: "another-response" }} />);
+    await act(async () => {});
     expect(container.textContent).not.toContain("Plan v1 is in the Plan tab.");
   });
 
@@ -576,7 +577,7 @@ describe("MessageBubble user messages", () => {
         `http://127.0.0.1:19400/attachments/${threadId}/sent-image.png`,
       );
     } finally {
-      clearAttachmentTransportWsUrlCache();
+      act(() => clearAttachmentTransportWsUrlCache());
     }
   });
 
@@ -690,7 +691,7 @@ describe("MessageBubble user messages", () => {
       await user.click(tile);
       expect(getByTestId("mock-lightbox")).toHaveAttribute("data-active-src", httpSrc);
     } finally {
-      clearAttachmentTransportWsUrlCache();
+      act(() => clearAttachmentTransportWsUrlCache());
     }
   });
 
@@ -856,7 +857,10 @@ describe("MessageBubble agent response state", () => {
 });
 
 describe("MessageBubble provider notices", () => {
-  afterEach(() => resetThreadStoreForTests());
+  afterEach(() => {
+    cleanup();
+    resetThreadStoreForTests();
+  });
 
   it("suppresses only notices represented by the current Composer collection", () => {
     const notice: Message = {
@@ -880,9 +884,9 @@ describe("MessageBubble provider notices", () => {
     const { container, rerender } = render(<MessageBubble message={notice} />);
     expect(container).toBeEmptyDOMElement();
 
-    resetThreadStoreForTests({
+    act(() => resetThreadStoreForTests({
       records: new Map([["thread-1", createEmptyThreadRecord()]]),
-    });
+    }));
     rerender(<MessageBubble message={notice} />);
 
     expect(container).toHaveTextContent("Review the workspace permissions.");

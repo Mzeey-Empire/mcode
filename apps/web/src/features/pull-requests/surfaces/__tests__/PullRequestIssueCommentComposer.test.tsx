@@ -1,5 +1,5 @@
 import type { PullRequestIdentity, PullRequestMutationExpected, PullRequestPostCommentResult } from "@mcode/contracts/pull-requests";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -139,6 +139,7 @@ describe("PullRequestIssueCommentComposer", () => {
     await user.type(textarea, "Keyboard comment");
     fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
     expect(postComment).toHaveBeenCalledOnce();
+    await act(async () => {});
   });
 
   it("posts a compact reply and closes it after acceptance", async () => {

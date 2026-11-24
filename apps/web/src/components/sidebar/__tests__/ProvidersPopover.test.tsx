@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ProviderCliUpdate, ProviderStatus } from "@mcode/contracts/providers/provider-status";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -43,9 +43,16 @@ function serve(statuses: ProviderStatus[]) {
   vi.mocked(mockTransport.listProviderStatus).mockResolvedValue(statuses);
 }
 
-function openBell() {
+async function renderBell(): Promise<void> {
+  render(<ProvidersBell />);
+  await act(async () => {});
+}
+
+async function openBell(): Promise<HTMLElement> {
   fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
-  return screen.findByTestId("providers-popover");
+  const popover = await screen.findByTestId("providers-popover");
+  await act(async () => {});
+  return popover;
 }
 
 beforeEach(() => {
@@ -58,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.useRealTimers();
   useProviderStatusStore.setState({ statuses: [] });
   useWorkspaceStore.setState({ activeWorkspaceId: null, pendingNewThread: false });
@@ -67,7 +75,7 @@ afterEach(() => {
 describe("ProvidersBell", () => {
   it("shows the Notifications header and a No notifications empty state, with no dot, when nothing needs attention", async () => {
     serve([status("claude", {})]);
-    render(<ProvidersBell />);
+    await renderBell();
 
     expect(screen.queryByTestId("providers-bell-dot")).toBeNull();
     const popover = await openBell();
@@ -80,7 +88,7 @@ describe("ProvidersBell", () => {
 
   it("lists a signed-out Devin with a Sign in action that runs its login command", async () => {
     serve([DEVIN_SIGNED_OUT]);
-    render(<ProvidersBell />);
+    await renderBell();
 
     expect(screen.getByTestId("providers-bell-dot")).toBeInTheDocument();
     const popover = await openBell();
@@ -90,11 +98,12 @@ describe("ProvidersBell", () => {
     fireEvent.click(within(popover).getByRole("button", { name: "Sign in" }));
     expect(signInMock).toHaveBeenCalledWith(["devin", "auth", "login"]);
     expect(mockTransport.getProviderUsage).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByTestId("providers-popover")).toBeNull());
   });
 
   it("re-checks past the cache when opened while a provider reads signed out", async () => {
     serve([DEVIN_SIGNED_OUT]);
-    render(<ProvidersBell />);
+    await renderBell();
     await openBell();
     expect(mockTransport.listProviderStatus).toHaveBeenCalledWith(true);
   });
@@ -102,7 +111,7 @@ describe("ProvidersBell", () => {
   it("enables Sign in without an open project, runs the row's login command and closes the popover", async () => {
     useWorkspaceStore.setState({ activeWorkspaceId: null });
     serve([DEVIN_SIGNED_OUT]);
-    render(<ProvidersBell />);
+    await renderBell();
 
     const signIn = within(await openBell()).getByRole("button", { name: "Sign in" });
     expect(signIn).not.toHaveAttribute("aria-disabled");
@@ -117,7 +126,7 @@ describe("ProvidersBell", () => {
       status("claude", { rateLimit: { resetsAt: FOUR_PM, limitType: "five_hour" } }),
       status("codex", { rateLimit: { resetsAt: null, limitType: null } }),
     ]);
-    render(<ProvidersBell />);
+    await renderBell();
 
     const popover = await openBell();
     expect(within(popover).getByText("5-hour limit reached · resets 16:00")).toBeInTheDocument();
@@ -131,7 +140,7 @@ describe("ProvidersBell new models", () => {
     vi.mocked(mockTransport.acknowledgeProviderModels).mockClear();
     useUiStore.setState({ primarySurface: "pullRequests" });
     serve([CLAUDE_NEW_MODEL]);
-    render(<ProvidersBell />);
+    await renderBell();
 
     expect(screen.getByTestId("providers-bell-dot")).toBeInTheDocument();
     const popover = await openBell();
@@ -151,7 +160,7 @@ describe("ProvidersBell CLI updates", () => {
     serve([codexCli({ state: "available", target: "0.48.0" })]);
     let finish: (status: ProviderStatus) => void = () => {};
     vi.mocked(mockTransport.updateProviderCli).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-    render(<ProvidersBell />);
+    await renderBell();
 
     expect(screen.getByTestId("providers-bell-dot")).toBeInTheDocument();
     const popover = await openBell();
@@ -176,7 +185,7 @@ describe("ProvidersBell CLI updates", () => {
 
   it("turns a running update into its failure reason with Retry when the update fails", async () => {
     serve([codexCli({ state: "running", target: "0.48.0" })]);
-    render(<ProvidersBell />);
+    await renderBell();
     const popover = await openBell();
 
     act(() => useProviderStatusStore.getState().apply(codexCli({ state: "failed", target: "0.48.0", reason: "npm ERR! code E404" })));
@@ -187,7 +196,7 @@ describe("ProvidersBell CLI updates", () => {
 
   it("omits the installed version when the CLI did not report one", async () => {
     serve([status("codex", { cli: { installed: null, managedBy: "user", latest: "0.48.0", update: { state: "available", target: "0.48.0" } } })]);
-    render(<ProvidersBell />);
+    await renderBell();
 
     const popover = await openBell();
     expect(within(popover).getByText("available")).toBeInTheDocument();
@@ -198,19 +207,20 @@ describe("ProvidersBell CLI updates", () => {
     const reason = "npm ERR! code EACCES";
     serve([codexCli({ state: "failed", target: "0.48.0", reason })]);
     vi.mocked(mockTransport.updateProviderCli).mockResolvedValue(codexCli({ state: "failed", target: "0.48.0", reason }));
-    render(<ProvidersBell />);
+    await renderBell();
 
     const popover = await openBell();
     expect(within(popover).getByText(reason)).toBeInTheDocument();
     fireEvent.click(within(popover).getByRole("button", { name: "Retry" }));
     expect(mockTransport.updateProviderCli).toHaveBeenCalledWith("codex");
+    await act(async () => {});
   });
 
   it("keeps the row when the update request itself fails", async () => {
     serve([codexCli({ state: "available", target: "0.48.0" })]);
     vi.mocked(mockTransport.updateProviderCli).mockRejectedValue(new Error("socket closed"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    render(<ProvidersBell />);
+    await renderBell();
 
     const popover = await openBell();
     fireEvent.click(within(popover).getByRole("button", { name: "Update" }));

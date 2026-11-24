@@ -1,6 +1,6 @@
 import { createMockWorkspace, createMockThread } from "@mcode/contracts/testing";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Markdown from "react-markdown";
 import { MarkdownContent } from "../components/chat/MarkdownContent";
@@ -61,6 +61,7 @@ describe("MarkdownContent link handling", () => {
   });
 
   afterEach(() => {
+    cleanup();
     delete (window as unknown as Record<string, unknown>).desktopBridge;
     vi.unstubAllGlobals();
   });
@@ -211,6 +212,7 @@ describe("MarkdownContent workspace preview navigation", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     delete (window as unknown as Record<string, unknown>).desktopBridge;
     useWorkspaceStore.setState({
@@ -306,13 +308,6 @@ describe("MarkdownContent workspace preview navigation", () => {
       fireEvent.click(link!);
     });
     expect(mockOpenExternal).toHaveBeenCalledWith("mcode-workspace:///page.html", "/proj/plain");
-
-    useWorkspaceStore.setState({
-      workspaces: [],
-      activeWorkspaceId: null,
-      activeThreadId: null,
-    });
-    delete (window as unknown as Record<string, unknown>).desktopBridge;
   });
 
   it("treats inline workspace html path like a previewable shortcut", async () => {
@@ -569,13 +564,15 @@ describe("MarkdownContent parse reuse", () => {
   // Tooltip triggers take a React useId, which differs on every mount whether or not the parse is reused.
   const withoutMountIds = (html: string) => html.replace(/id="base-ui-[^"]*"/g, 'id="base-ui"');
 
-  it("renders a remounted message from its stored parse with identical DOM", () => {
+  it("renders a remounted message from its stored parse with identical DOM", async () => {
     const first = render(<MarkdownContent content={settled} />);
+    await act(async () => {});
     const firstHtml = withoutMountIds(first.container.innerHTML);
     first.unmount();
     const parsesBefore = markdownParses();
 
     const second = render(<MarkdownContent content={settled} />);
+    await act(async () => {});
 
     expect(markdownParses()).toBe(parsesBefore);
     expect(withoutMountIds(second.container.innerHTML)).toBe(firstHtml);
@@ -641,6 +638,7 @@ describe("MarkdownContent parse reuse", () => {
 
 describe("MarkdownContent inline code double-click", () => {
   afterEach(() => {
+    cleanup();
     window.getSelection()?.removeAllRanges();
   });
 

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { GoalLookupResult, GoalState } from "@mcode/contracts/models/goal";
@@ -108,7 +108,7 @@ describe("ActiveGoalChip", () => {
 
     expect(screen.getAllByText("Clearing...").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("button", { name: "Clearing..." })).toBeDisabled();
-    resolveClear(lookup({ goal: null }));
+    await act(async () => resolveClear(lookup({ goal: null })));
   });
 
   it("does not leave refresh pending when same-thread clear overlaps details refresh", async () => {

@@ -1,5 +1,5 @@
 import type { PullRequestDetail, PullRequestSubmitReviewResult } from "@mcode/contracts/pull-requests";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -153,7 +153,7 @@ describe("PullRequestSubmitReviewDialog", () => {
     expect(await screen.findByRole("dialog")).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
 
-    resolve({
+    await act(async () => resolve({
       ok: true,
       effect: "review",
       idempotencyKey: request.idempotencyKey,
@@ -164,8 +164,8 @@ describe("PullRequestSubmitReviewDialog", () => {
         submittedAt: "2026-07-12T01:01:00.000Z",
       },
       acceptedDraftIds: [created.ok ? created.localId : ""],
-    });
-    await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
   it("keeps an outdated overall review visible until the user explicitly starts fresh", async () => {

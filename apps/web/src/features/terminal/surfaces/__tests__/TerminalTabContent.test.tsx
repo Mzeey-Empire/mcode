@@ -1,5 +1,5 @@
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const terminalKill = vi.mocked(mockTransport.terminalKill);
@@ -59,8 +59,10 @@ function setConfirmOnKill(value: ConfirmOnKill): void {
   });
 }
 
-function renderTool() {
-  return render(<TerminalTabContent workspaceId="workspace-1" threadId="thread-1" scopeId="thread-1" />);
+async function renderTool(): Promise<ReturnType<typeof render>> {
+  const view = render(<TerminalTabContent workspaceId="workspace-1" threadId="thread-1" scopeId="thread-1" />);
+  await act(async () => {});
+  return view;
 }
 
 function actionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): WorkspaceEnvironmentActionRun {
@@ -84,8 +86,11 @@ function actionRun(overrides: Partial<WorkspaceEnvironmentActionRun> = {}): Work
   };
 }
 
+/** Seeds the run in the store and on the fake server, so the hydration the tool starts on mount keeps it. */
 function seedAction(run: WorkspaceEnvironmentActionRun, state: TerminalInstance["state"] = "running"): void {
   useProjectActionStore.getState().applyRun(run);
+  vi.mocked(mockTransport.listWorkspaceActionRuns).mockResolvedValue([run]);
+  getWorkspaceActionRun.mockResolvedValue(run);
   seed([shell("pty-action", { kind: "action", actionId: "web", label: "web", state })]);
 }
 
@@ -107,12 +112,13 @@ describe("Terminal tool header", () => {
   });
 
   afterEach(() => {
+    cleanup();
     useToastStore.setState({ toasts: [] });
   });
 
   describe("closing a terminal", () => {
     it("closes an idle shell without asking and closes the tool with its last record", async () => {
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
 
@@ -124,7 +130,7 @@ describe("Terminal tool header", () => {
 
     it("keeps the tool open while other records remain", async () => {
       seed([shell("pty-1"), shell("pty-2", { label: "bash" })]);
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
 
@@ -134,7 +140,7 @@ describe("Terminal tool header", () => {
 
     it("asks before stopping a shell that has child processes, and Cancel keeps it running", async () => {
       terminalHasChildren.mockResolvedValue({ hasChildren: true });
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
       expect(await screen.findByText("Stop pwsh?")).toBeInTheDocument();
@@ -147,7 +153,7 @@ describe("Terminal tool header", () => {
 
     it("stops the shell once when the user confirms", async () => {
       terminalHasChildren.mockResolvedValue({ hasChildren: true });
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
       fireEvent.click(await screen.findByRole("button", { name: "Stop and close" }));
@@ -158,7 +164,7 @@ describe("Terminal tool header", () => {
 
     it("asks when the child-process check fails, because losing a process costs more than a click", async () => {
       terminalHasChildren.mockRejectedValue(new Error("inspection unavailable"));
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
 
@@ -168,7 +174,7 @@ describe("Terminal tool header", () => {
 
     it("keeps the tab and says so when the kill fails", async () => {
       terminalKill.mockRejectedValue(new Error("pty gone"));
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
 
@@ -182,7 +188,7 @@ describe("Terminal tool header", () => {
     it("never asks when confirmOnKill is never, even with child processes", async () => {
       setConfirmOnKill("never");
       terminalHasChildren.mockResolvedValue({ hasChildren: true });
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
 
@@ -192,7 +198,7 @@ describe("Terminal tool header", () => {
 
     it("always asks about a live shell when confirmOnKill is always, without probing for children", async () => {
       setConfirmOnKill("always");
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
 
@@ -203,7 +209,7 @@ describe("Terminal tool header", () => {
     it("never asks about a shell that already exited, even when confirmOnKill is always", async () => {
       setConfirmOnKill("always");
       seed([shell("pty-1", { state: "exited" })]);
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
 
@@ -213,7 +219,7 @@ describe("Terminal tool header", () => {
 
     it("names the confirmation after the tab it came from", async () => {
       terminalHasChildren.mockResolvedValue({ hasChildren: true });
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
 
@@ -226,7 +232,7 @@ describe("Terminal tool header", () => {
       terminalHasChildren.mockImplementation(
         (ptyId: string) => new Promise((resolve) => answers.set(ptyId, resolve)),
       );
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
       closeTab("bash");
@@ -245,7 +251,7 @@ describe("Terminal tool header", () => {
     it("closes without asking when the shell exits while its children are being checked", async () => {
       let answer: (value: { hasChildren: boolean }) => void = () => {};
       terminalHasChildren.mockImplementation(() => new Promise((resolve) => (answer = resolve)));
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
       await waitFor(() => expect(terminalHasChildren).toHaveBeenCalled());
@@ -259,7 +265,7 @@ describe("Terminal tool header", () => {
     it("drops the question when its terminal goes away underneath it", async () => {
       seed([shell("pty-1"), shell("pty-2", { label: "bash" })]);
       terminalHasChildren.mockResolvedValue({ hasChildren: true });
-      renderTool();
+      await renderTool();
 
       closeTab("pwsh");
       expect(await screen.findByText("Stop pwsh?")).toBeInTheDocument();
@@ -271,22 +277,22 @@ describe("Terminal tool header", () => {
   });
 
   describe("row 1", () => {
-    it("numbers shells that share a label and names action records after their action", () => {
+    it("numbers shells that share a label and names action records after their action", async () => {
       seed([
         shell("pty-1"),
         shell("pty-2"),
         shell("pty-3", { kind: "action", actionId: "unknown-action", label: "action" }),
       ]);
-      renderTool();
+      await renderTool();
 
       expect(screen.getByRole("button", { name: "Close 1 · pwsh (ends the shell)" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Close 2 · pwsh (ends the shell)" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Close Project Action (ends the shell)" })).toBeInTheDocument();
     });
 
-    it("selecting a tab makes it the scope's active terminal", () => {
+    it("selecting a tab makes it the scope's active terminal", async () => {
       seed([shell("pty-1"), shell("pty-2", { label: "bash" })], "pty-1");
-      renderTool();
+      await renderTool();
 
       fireEvent.click(screen.getByRole("tab", { name: "bash" }));
 
@@ -295,7 +301,7 @@ describe("Terminal tool header", () => {
 
     it("disables + at the server's record cap and explains why", async () => {
       seed(Array.from({ length: TERMINAL_MAX_PER_SCOPE }, (_, index) => shell(`pty-${index}`, { label: `sh${index}` })));
-      renderTool();
+      await renderTool();
 
       await waitFor(() => expect(screen.getByTestId("panel-tab-add")).not.toHaveAttribute("aria-haspopup"));
       const add = screen.getByTestId("panel-tab-add");
@@ -308,17 +314,17 @@ describe("Terminal tool header", () => {
     it.each([
       ["running", { status: "running" as const }, "running", "Running"],
       ["failed", { status: "failed" as const, exitCode: 1 }, "failed", "Failed"],
-    ])("badges a %s run", (_name, overrides, badge, label) => {
+    ])("badges a %s run", async (_name, overrides, badge, label) => {
       seedAction(actionRun(overrides));
-      renderTool();
+      await renderTool();
 
       expect(screen.getByTestId("action-tab-badge")).toHaveAttribute("data-badge", badge);
       expect(screen.getByRole("tab", { name: `web, ${label}` })).toHaveAttribute("aria-selected");
     });
 
-    it("shows the needs-you ring for a run awaiting approval", () => {
+    it("shows the needs-you ring for a run awaiting approval", async () => {
       seedAction(actionRun({ status: "awaiting-approval", startedAt: null }), "pending");
-      renderTool();
+      await renderTool();
 
       expect(screen.getByTestId("action-tab-badge")).toHaveAttribute("data-badge", "pending");
       expect(screen.getByRole("tab", { name: "web, Approval required" })).toHaveAttribute("aria-selected");
@@ -327,7 +333,7 @@ describe("Terminal tool header", () => {
     it("closes a pending action without asking, even when confirmOnKill is always, since nothing is running", async () => {
       setConfirmOnKill("always");
       seedAction(actionRun({ status: "awaiting-approval", startedAt: null }), "pending");
-      renderTool();
+      await renderTool();
 
       closeTab("web");
 
@@ -335,16 +341,16 @@ describe("Terminal tool header", () => {
       expect(screen.queryByText("Stop web?")).not.toBeInTheDocument();
     });
 
-    it("shows no badge once the run completed", () => {
+    it("shows no badge once the run completed", async () => {
       seedAction(actionRun({ status: "completed", exitCode: 0 }));
-      renderTool();
+      await renderTool();
 
       expect(screen.queryByTestId("action-tab-badge")).not.toBeInTheDocument();
     });
 
     it("asks to stop a running action without probing for children, and names its command", async () => {
       seedAction(actionRun());
-      renderTool();
+      await renderTool();
 
       closeTab("web");
 
@@ -356,7 +362,7 @@ describe("Terminal tool header", () => {
 
     it("kills the terminal when the user confirms Stop and close", async () => {
       seedAction(actionRun());
-      renderTool();
+      await renderTool();
 
       closeTab("web");
       fireEvent.click(await screen.findByRole("button", { name: "Stop and close" }));
@@ -366,7 +372,7 @@ describe("Terminal tool header", () => {
 
     it("keeps a running action when the user cancels", async () => {
       seedAction(actionRun());
-      renderTool();
+      await renderTool();
 
       closeTab("web");
       fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
@@ -378,7 +384,7 @@ describe("Terminal tool header", () => {
     it("does not ask about a running action when confirmOnKill is never", async () => {
       setConfirmOnKill("never");
       seedAction(actionRun());
-      renderTool();
+      await renderTool();
 
       closeTab("web");
 
@@ -388,7 +394,7 @@ describe("Terminal tool header", () => {
 
     it("treats an action whose command ended like any shell and skips the question without children", async () => {
       seedAction(actionRun({ status: "completed", exitCode: 0 }));
-      renderTool();
+      await renderTool();
 
       closeTab("web");
 
@@ -398,18 +404,18 @@ describe("Terminal tool header", () => {
   });
 
   describe("row 2", () => {
-    it("shows the active shell's folder name first and keeps the full path on the copy button", () => {
+    it("shows the active shell's folder name first and keeps the full path on the copy button", async () => {
       seed([shell("pty-1", { cwd: "/work/repo" })]);
-      renderTool();
+      await renderTool();
 
       const pill = screen.getByTestId("working-folder-pill");
       expect(pill).toHaveTextContent(/^repo\/work\/$/);
       expect(screen.getByRole("button", { name: "Copy /work/repo" })).toBeInTheDocument();
     });
 
-    it("follows the active tab", () => {
+    it("follows the active tab", async () => {
       seed([shell("pty-1", { cwd: "/work/one" }), shell("pty-2", { cwd: "/work/two", label: "bash" })], "pty-1");
-      renderTool();
+      await renderTool();
       expect(screen.getByRole("button", { name: "Copy /work/one" })).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("tab", { name: "bash" }));
@@ -417,18 +423,18 @@ describe("Terminal tool header", () => {
       expect(screen.getByRole("button", { name: "Copy /work/two" })).toBeInTheDocument();
     });
 
-    it("offers action controls, not shell controls, for an action record", () => {
+    it("offers action controls, not shell controls, for an action record", async () => {
       seedAction(actionRun());
-      renderTool();
+      await renderTool();
 
       expect(screen.getByTestId("action-command-pill")).toHaveTextContent("bun run dev");
       expect(screen.queryByTestId("working-folder-pill")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Clear terminal" })).not.toBeInTheDocument();
     });
 
-    it("offers only the command pill and More while the run awaits approval", () => {
+    it("offers only the command pill and More while the run awaits approval", async () => {
       seedAction(actionRun({ status: "awaiting-approval", startedAt: null }), "pending");
-      renderTool();
+      await renderTool();
 
       expect(screen.getByTestId("action-command-pill")).toHaveTextContent("bun run dev");
       expect(screen.getByRole("button", { name: "More terminal actions" })).toBeInTheDocument();
@@ -437,12 +443,12 @@ describe("Terminal tool header", () => {
       }
     });
 
-    it("Clear asks only the active terminal to clear its view", () => {
+    it("Clear asks only the active terminal to clear its view", async () => {
       const cleared: string[] = [];
       const listener = (event: Event) => cleared.push((event as CustomEvent<string>).detail);
       window.addEventListener(TERMINAL_CLEAR, listener);
       seed([shell("pty-1"), shell("pty-2", { label: "bash" })], "pty-2");
-      renderTool();
+      await renderTool();
 
       fireEvent.click(screen.getByRole("button", { name: "Clear terminal" }));
       window.removeEventListener(TERMINAL_CLEAR, listener);
@@ -450,9 +456,9 @@ describe("Terminal tool header", () => {
       expect(cleared).toEqual(["pty-2"]);
     });
 
-    it("Search opens the shelf for the active terminal", () => {
+    it("Search opens the shelf for the active terminal", async () => {
       seed([shell("pty-1"), shell("pty-2", { label: "bash" })], "pty-2");
-      renderTool();
+      await renderTool();
 
       fireEvent.click(screen.getByRole("button", { name: "Search terminal" }));
 

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { cleanup, act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserAutomationControllerState, BrowserAutomationPointerEvent } from "@mcode/contracts/models/browser-automation";
 import { browserAutomationTargetKey, useBrowserAutomationStore } from "../../automation/browserAutomationStore";
@@ -47,6 +47,8 @@ describe("BrowserActingOverlay agent cursor", () => {
   });
 
   afterEach(() => {
+
+    cleanup();
     vi.useRealTimers();
     useBrowserAutomationStore.setState({ controllers: new Map(), actingTargets: new Set(), pointers: new Map() });
   });

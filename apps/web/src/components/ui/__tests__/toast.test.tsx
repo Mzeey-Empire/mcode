@@ -69,7 +69,7 @@ describe("ToastLane", () => {
     renderLane();
     show({ kind: "needs-you", title: "Approve the plan", meta: "Approval required · 14:35", onOpen });
 
-    screen.getByRole("button", { name: /Approve the plan/ }).focus();
+    act(() => screen.getByRole("button", { name: /Approve the plan/ }).focus());
     await user.keyboard("{Enter}");
 
     expect(onOpen).toHaveBeenCalledOnce();
@@ -82,7 +82,7 @@ describe("ToastLane", () => {
     renderLane();
     show({ kind: "failed", title: "Bump Electron" });
 
-    screen.getByRole("button", { name: "Dismiss" }).focus();
+    act(() => screen.getByRole("button", { name: "Dismiss" }).focus());
     await user.keyboard("{Escape}");
 
     expect(store().toasts).toEqual([]);

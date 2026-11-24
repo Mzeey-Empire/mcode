@@ -1,6 +1,6 @@
 // Type-only so node-environment files skip loading the DOM matchers at runtime.
 import type {} from "@testing-library/jest-dom/vitest";
-import { afterEach, beforeEach } from "vitest";
+import { afterAll, afterEach } from "vitest";
 
 function createTestStorage(): Storage {
   const values = new Map<string, string>();
@@ -118,30 +118,53 @@ if (typeof window !== "undefined") {
   });
 }
 
-const ACT_WARNING_LIMIT = 200;
+// Every warning is counted, but only the first few are printed: one looping
+// component can raise tens of thousands, and printing them all floods the CI log.
+const ACT_WARNING_PRINT_CAP = 10;
 let actWarningCount = 0;
 const originalConsoleError = console.error;
 console.error = function (this: Console, ...args: unknown[]) {
   const first = args[0];
   if (typeof first === "string" && first.includes("not wrapped in act(")) {
     actWarningCount += 1;
-    if (actWarningCount > ACT_WARNING_LIMIT) return;
+    if (actWarningCount > ACT_WARNING_PRINT_CAP) return;
   }
   originalConsoleError.apply(this, args);
 };
 
-beforeEach(() => {
+const ACT_WARNING_ADVICE =
+  "A component updated outside act(), often because the test did not await an async update, or flushed fake timers while the component was still mounted. " +
+  "Await the update with findBy* or waitFor, " +
+  "call cleanup() before flushing timers, or wrap the update in act().";
+
+/**
+ * Reads and resets the warning count. The count is reset only here, never before a
+ * test, so warnings raised at module load or in beforeAll reach the first check.
+ */
+function takeActWarnings(): string | undefined {
+  const count = actWarningCount;
   actWarningCount = 0;
-});
+  if (count === 0) return undefined;
+  const suppressed = count - ACT_WARNING_PRINT_CAP;
+  return suppressed > 0
+    ? `${count} React act() warning(s); the first ${ACT_WARNING_PRINT_CAP} were printed and ${suppressed} more were suppressed. `
+    : `${count} React act() warning(s). `;
+}
 
 // Vitest runs afterEach hooks in reverse registration order, so this runs after the
 // test file's hooks and Testing Library's cleanup and counts the warnings they cause.
 afterEach(() => {
-  if (actWarningCount > ACT_WARNING_LIMIT) {
-    throw new Error(
-      `This test printed ${actWarningCount} React act() warnings, more than the limit of ${ACT_WARNING_LIMIT}. ` +
-        "A component kept updating outside act(), often because the test flushed fake timers while the component was still mounted. " +
-        "Call cleanup() before flushing timers, or wrap the update in act().",
-    );
+  const warnings = takeActWarnings();
+  if (warnings !== undefined) {
+    throw new Error(`This test printed ${warnings}${ACT_WARNING_ADVICE}`);
+  }
+});
+
+// Catches warnings raised after the last test's check, such as in a file's afterAll
+// or from a timer that fires late. Registered first, so it runs after the file's own.
+afterAll(() => {
+  const warnings = takeActWarnings();
+  if (warnings !== undefined) {
+    throw new Error(`This file printed ${warnings}after its last test. ${ACT_WARNING_ADVICE}`);
   }
 });

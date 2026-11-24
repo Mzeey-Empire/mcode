@@ -2,7 +2,7 @@ import { createMockThread, createMockThreadAttention, createMockThreadPullReques
 import type { ThreadAttention } from "@mcode/contracts/models/thread-attention";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { useState } from "react";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 
@@ -140,7 +140,7 @@ describe("SidebarThreadRow", () => {
     expect(row).toHaveAttribute("data-menu-open");
 
     fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
-    await vi.waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     expect(row).not.toHaveAttribute("data-menu-open");
     // The menu needs real timers to open and close; the shared teardown expects fake ones.
     vi.useFakeTimers();
@@ -160,6 +160,7 @@ describe("SidebarThreadRow", () => {
     }
 
     afterEach(() => {
+      cleanup();
       useThreadStore.setState({ runningThreadIds: new Set() });
       act(() => threadAttentionStore.getState().apply({ ...finished("t1"), lastTurn: null }));
     });
@@ -812,6 +813,7 @@ describe("SidebarThreadRow", () => {
     }
 
     afterEach(() => {
+      cleanup();
       useComposerDraftStore.setState({ drafts: {} });
       useThreadDraftStore.setState({ drafts: {} });
       useSidebarWidthStore.setState({ width: 304 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
@@ -69,14 +69,16 @@ describe("ThreadOverview subagents", () => {
     resetProviderUsageForTests();
   });
 
-  it("shows a loaded sub-agent summary only when present and opens its panel", () => {
+  it("shows a loaded sub-agent summary only when present and opens its panel", async () => {
     const thread = branchlessThread();
     const first = render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
     expect(screen.queryByTestId("thread-overview-subagents")).not.toBeInTheDocument();
     first.unmount();
 
     seedSubagentRoster(thread.id, [rosterEntry("agent-1", { provider: "claude", status: "running" })]);
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     const summary = screen.getByTestId("thread-overview-subagents");
     expect(summary).toHaveAccessibleName("Subagents, 1 running");
@@ -90,23 +92,25 @@ describe("ThreadOverview subagents", () => {
     expect(mockOpenSubagentsPanel).toHaveBeenCalledOnce();
   });
 
-  it("renders the sub-agent summary in Activity, above the Usage summary", () => {
+  it("renders the sub-agent summary in Activity, above the Usage summary", async () => {
     const thread = branchlessThread();
     seedSubagentRoster(thread.id, [rosterEntry("agent-1", { provider: "claude", status: "running" })]);
     seedProviderUsageForTests({ providerId: "claude", quotaCategories: [], usageStatus: "ready-empty" });
 
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     const usage = screen.getByTestId("thread-overview-usage");
     const subagents = screen.getByTestId("thread-overview-subagents");
     expect(usage.compareDocumentPosition(subagents) & Node.DOCUMENT_POSITION_PRECEDING).not.toBe(0);
   });
 
-  it("bounds the disc stack to three, lets the text carry the total, and omits the zero running count", () => {
+  it("bounds the disc stack to three, lets the text carry the total, and omits the zero running count", async () => {
     const thread = branchlessThread();
     seedSubagentRoster(thread.id, Array.from({ length: 8 }, (_, index) => rosterEntry(`agent-${index}`)));
 
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     const summary = screen.getByTestId("thread-overview-subagents");
     expect(summary).toHaveAccessibleName("Subagents, 8 finished");
@@ -115,7 +119,7 @@ describe("ThreadOverview subagents", () => {
     expect(summary.querySelectorAll('[data-testid="provider-disc"]')).toHaveLength(3);
   });
 
-  it("counts failed entries apart and stopped entries as finished", () => {
+  it("counts failed entries apart and stopped entries as finished", async () => {
     const thread = branchlessThread();
     seedSubagentRoster(thread.id, [
       rosterEntry("failed", { status: "failed" }),
@@ -124,6 +128,7 @@ describe("ThreadOverview subagents", () => {
     ]);
 
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     expect(screen.getByTestId("thread-overview-subagents")).toHaveAccessibleName("Subagents, 1 running · 1 failed · 1 finished");
   });

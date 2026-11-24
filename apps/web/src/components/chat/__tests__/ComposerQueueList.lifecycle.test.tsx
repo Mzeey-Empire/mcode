@@ -96,14 +96,16 @@ describe("ComposerQueueList lifecycle", () => {
     useThreadStore.setState({ runningThreadIds: new Set([THREAD_ID]) });
     render(<QueueControls provider={provider} />);
 
-    useThreadStore.getState().handleAgentEvent({
-      type: "turnComplete",
-      threadId: THREAD_ID,
-      reason: "end_turn",
-      costUsd: null,
-      tokensIn: 0,
-      tokensOut: 0,
-    } satisfies AgentEvent);
+    act(() => {
+      useThreadStore.getState().handleAgentEvent({
+        type: "turnComplete",
+        threadId: THREAD_ID,
+        reason: "end_turn",
+        costUsd: null,
+        tokensIn: 0,
+        tokensOut: 0,
+      } satisfies AgentEvent);
+    });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(400);
     });

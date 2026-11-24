@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { ToolCall } from "@/transport/types";
 import type { NarrativeItem } from "../../narrative/types";
@@ -63,23 +63,29 @@ function Transcript({ items }: { items: readonly TranscriptNarrativeItem[] }) {
   );
 }
 
+async function settleScrollAreas(): Promise<void> {
+  await act(async () => {});
+}
+
 describe("TranscriptNarrativeRow call disclosure", () => {
-  it("keeps a running shell's manual open after its output arrives and it completes", () => {
+  it("keeps a running shell's manual open after its output arrives and it completes", async () => {
     const view = render(<Transcript items={[activeRow(shellCall("tc-1"))]} />);
     fireEvent.click(screen.getByRole("button", { name: /Running command/ }));
 
     view.rerender(<Transcript items={[toolGroupRow([shellCall("tc-1", { isComplete: true, output: "first output" })])]} />);
+    await settleScrollAreas();
 
     expect(screen.getByRole("button", { name: /Ran command/ })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("first output")).toBeVisible();
   });
 
-  it("keeps an open lone shell listed and open when its group grows", () => {
+  it("keeps an open lone shell listed and open when its group grows", async () => {
     const first = shellCall("tc-1", { isComplete: true, output: "first output" });
     const view = render(<Transcript items={[toolGroupRow([first])]} />);
     fireEvent.click(screen.getByRole("button", { name: /Ran command/ }));
 
     view.rerender(<Transcript items={[toolGroupRow([first, shellCall("tc-2", { isComplete: true, output: "second output" })])]} />);
+    await settleScrollAreas();
 
     const firstChild = screen.getByRole("list", { name: "Tool call 1 of 2" });
     expect(within(firstChild).getByRole("button", { name: /Ran command/ })).toHaveAttribute("aria-expanded", "true");
@@ -87,12 +93,13 @@ describe("TranscriptNarrativeRow call disclosure", () => {
     expect(screen.queryByText("second output")).toBeNull();
   });
 
-  it("opens the earlier group an open running shell completes into, and collapsing it closes the shell", () => {
+  it("opens the earlier group an open running shell completes into, and collapsing it closes the shell", async () => {
     const read: ToolCall = { id: "read-1", toolName: "Read", toolInput: { file_path: "a.ts" }, output: "contents", isError: false, isComplete: true };
     const view = render(<Transcript items={[toolGroupRow([read]), activeRow(shellCall("tc-1"))]} />);
     fireEvent.click(screen.getByRole("button", { name: /Running command/ }));
 
     view.rerender(<Transcript items={[toolGroupRow([read, shellCall("tc-1", { isComplete: true, output: "first output" })])]} />);
+    await settleScrollAreas();
 
     const shellChild = screen.getByRole("list", { name: "Tool call 2 of 2" });
     expect(within(shellChild).getByRole("button", { name: /Ran command/ })).toHaveAttribute("aria-expanded", "true");

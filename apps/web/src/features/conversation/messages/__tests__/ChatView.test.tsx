@@ -340,9 +340,23 @@ function enableAtomicSubscriptionTransport() {
 }
 
 /** Simulate a residency lease transition through its external-store contract. */
+async function renderChatView(): Promise<ReturnType<typeof render>> {
+  const view = render(<ChatView />);
+  await act(async () => {});
+  return view;
+}
+
+async function settleRerender(rerender: ReturnType<typeof render>["rerender"]): Promise<void> {
+  await act(async () => {
+    rerender(<ChatView />);
+  });
+}
+
 function setDisplayedThreadIds(threadIds: readonly string[]) {
   chatViewDisplayLeaseIdsRef.current = threadIds;
-  for (const listener of chatViewDisplayLeaseListeners) listener();
+  act(() => {
+    for (const listener of chatViewDisplayLeaseListeners) listener();
+  });
 }
 
 /** Produces the thread-store fields consumed by ChatView. */
@@ -403,15 +417,15 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewThreadMockRef.current = defaultThreadState();
   });
 
-  it("renders thread title as static span by default", () => {
-    render(<ChatView />);
+  it("renders thread title as static span by default", async () => {
+    await renderChatView();
     // Title text is visible
     expect(screen.getByText("My Thread")).toBeInTheDocument();
     // No input is shown
     expect(screen.queryByTestId("chat-header-title-input")).not.toBeInTheDocument();
   });
 
-  it("docks the Overview beside the composer once a preparing thread's pane mounts", () => {
+  it("docks the Overview beside the composer once a preparing thread's pane mounts", async () => {
     const realRect = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       return this.dataset.testid === "chat-view" ? new DOMRect(0, 0, 1400, 900) : realRect.call(this);
@@ -419,14 +433,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     onTestFinished(() => { vi.restoreAllMocks(); });
     const preparing = { ...makeThread(), clientPreparing: true };
     setupWorkspaceMock(defaultWorkspaceState({ threads: [preparing] }));
-    const view = render(<ChatView />);
+    const view = await renderChatView();
     setupWorkspaceMock(defaultWorkspaceState());
-    view.rerender(<ChatView />);
+    await settleRerender(view.rerender);
 
     expect(screen.getByTestId("chat-composer-stage")).toHaveStyle({ paddingRight: OVERVIEW_CANVAS_RESERVE_CSS });
   });
 
-  it("keeps the Overview docked and the composer beside it while a thread is preparing", () => {
+  it("keeps the Overview docked and the composer beside it while a thread is preparing", async () => {
     const realRect = HTMLElement.prototype.getBoundingClientRect;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       return this.dataset.testid === "thread-preparing-shell" ? new DOMRect(0, 0, 1400, 900) : realRect.call(this);
@@ -435,7 +449,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const preparing = { ...makeThread(), clientPreparing: true };
     setupWorkspaceMock(defaultWorkspaceState({ threads: [preparing] }));
 
-    render(<ChatView />);
+    await renderChatView();
 
     const shell = screen.getByTestId("thread-preparing-shell");
     expect(within(shell).getByTestId("thread-overview-card")).toHaveAttribute("data-presentation", "docked");
@@ -452,7 +466,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     setupWorkspaceMock({ ...defaultWorkspaceState({ threads: [preparing] }), workspaces: [{ ...WORKSPACE, is_git_repo: true }], newThreadBranch: "release/2" });
     const user = userEvent.setup();
 
-    render(<ChatView />);
+    await renderChatView();
 
     const card = within(screen.getByTestId("thread-preparing-shell")).getByTestId("thread-overview-card");
     const workspaceRow = within(card).getByTestId("overview-target-workspace");
@@ -466,8 +480,8 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByRole("group", { name: "Workspace" })).not.toBeInTheDocument();
   });
 
-  it("keeps an empty selected thread free of starter suggestions", () => {
-    render(<ChatView />);
+  it("keeps an empty selected thread free of starter suggestions", async () => {
+    await renderChatView();
 
     expect(screen.getByTestId("message-list")).toBeInTheDocument();
     expect(screen.getByTestId("composer")).toBeInTheDocument();
@@ -534,7 +548,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     const user = userEvent.setup();
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
     expect(screen.getByTestId("composer")).toBeDisabled();
@@ -547,8 +561,8 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(chatViewTransportMock.continueAutomaticSetup).toHaveBeenCalledWith(thread.id);
   });
 
-  it("names the project before the thread title in the header breadcrumb", () => {
-    render(<ChatView />);
+  it("names the project before the thread title in the header breadcrumb", async () => {
+    await renderChatView();
 
     const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(breadcrumb).toHaveTextContent(/Test Project\s*\/\s*My Thread$/);
@@ -557,7 +571,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
   it("enters edit mode on double click", async () => {
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     const titleContainer = screen.getByTestId("chat-header-title");
     await user.dblClick(titleContainer);
@@ -567,7 +581,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
   it("opens the thread menu with Fork thread and the sidebar's actions on a title click", async () => {
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     await user.click(screen.getByTestId("chat-header-title"));
 
@@ -579,7 +593,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
   it("renames on double-click without leaving the thread menu open", async () => {
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     await user.dblClick(screen.getByTestId("chat-header-title"));
 
@@ -593,7 +607,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const threadState = defaultThreadState();
     chatViewThreadMockRef.current = threadState;
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     await user.click(screen.getByTestId("chat-header-title"));
     await user.click(await screen.findByRole("menuitem", { name: "Fork thread" }));
@@ -608,7 +622,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const threadState = defaultThreadState({ activeRecord: record, records: new Map([["thread-1", record]]) });
     chatViewThreadMockRef.current = threadState;
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     await user.click(screen.getByTestId("chat-header-title"));
     await user.click(await screen.findByRole("menuitem", { name: "Fork thread" }));
@@ -621,7 +635,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const threadState = defaultThreadState();
     chatViewThreadMockRef.current = threadState;
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     await user.click(screen.getByTestId("chat-header-title"));
     const fork = await screen.findByRole("menuitem", { name: "Fork thread" });
@@ -637,7 +651,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const threadState = defaultThreadState({ activeRecord: record, records: new Map([["thread-1", record]]) });
     chatViewThreadMockRef.current = threadState;
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     await user.click(screen.getByTestId("chat-header-title"));
     const fork = await screen.findByRole("menuitem", { name: "Fork thread" });
@@ -650,7 +664,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
   it("focuses the title editor after Rename in the header menu", async () => {
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     await user.click(screen.getByTestId("chat-header-title"));
     await user.click(await screen.findByRole("menuitem", { name: "Rename thread" }));
@@ -664,7 +678,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     setupWorkspaceMock(defaultWorkspaceState({ updateThreadTitle }));
 
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     const titleContainer = screen.getByTestId("chat-header-title");
     await user.dblClick(titleContainer);
@@ -684,7 +698,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     setupWorkspaceMock(defaultWorkspaceState({ updateThreadTitle }));
 
     const user = userEvent.setup();
-    render(<ChatView />);
+    await renderChatView();
 
     const titleContainer = screen.getByTestId("chat-header-title");
     await user.dblClick(titleContainer);
@@ -709,7 +723,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     setupWorkspaceMock(state);
 
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     // Enter edit mode on thread 1
     const titleContainer = screen.getByTestId("chat-header-title");
@@ -723,13 +737,13 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       threads: [thread1, thread2],
     });
     setupWorkspaceMock(newState);
-    rerender(<ChatView />);
+    await settleRerender(rerender);
 
     // Edit mode should be closed
     expect(screen.queryByTestId("chat-header-title-input")).not.toBeInTheDocument();
   });
 
-  it("shows the selected thread shell before persisted history resolves", () => {
+  it("shows the selected thread shell before persisted history resolves", async () => {
     const selectedThread = makeThread({ id: "thread-2", title: "Thread 2" });
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: selectedThread.id,
@@ -737,7 +751,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1" });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("chat-header-title")).toHaveTextContent("Thread 2");
     expect(screen.getByTestId("conversation-transition-shell")).toHaveTextContent("Thread 2");
@@ -746,12 +760,12 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     for (const el of screen.queryAllByTestId("message-list")) expect(el).not.toBeVisible();
   });
 
-  it("tells the launch check a reopened thread's transcript is shown only once its history loads", () => {
+  it("tells the launch check a reopened thread's transcript is shown only once its history loads", async () => {
     const thread = makeThread({ id: "thread-2", title: "Thread 2" });
     setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1" });
 
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
     expect(transcriptShown(thread.id)).toBe(false);
 
     const record = { ...createEmptyThreadRecord(), messages: [createMockMessage({ id: "thread-2-message", thread_id: thread.id })] };
@@ -760,13 +774,13 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: record,
       records: new Map([[thread.id, record]]),
     });
-    act(() => rerender(<ChatView />));
+    await settleRerender(rerender);
 
     expect(transcriptShown(thread.id)).toBe(true);
     expect(transcriptShown("thread-1")).toBe(false);
   });
 
-  it("keeps startup progress visible while the durable thread hydrates", () => {
+  it("keeps startup progress visible while the durable thread hydrates", async () => {
     const startupThread = makeThread({ id: "thread-2", title: "Thread 2" });
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: startupThread.id,
@@ -780,8 +794,26 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       },
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1" });
+    chatViewTransportMock.getThreadStartup.mockResolvedValue({
+      startupId: "00000000-0000-4000-8000-000000000001",
+      failureSeenAt: null,
+      workspaceId: startupThread.workspace_id,
+      kind: "direct",
+      state: "running",
+      phase: "agent",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "agent", state: "running" },
+      ],
+      transcript: [],
+      cancellation: "none",
+      revision: 1,
+      threadId: startupThread.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    } satisfies ThreadStartup);
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("startup-trail")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
@@ -791,7 +823,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
   it.each([
     { queuedMessage: "Review this spec", shown: "Review this spec" },
     { queuedMessage: "", shown: undefined },
-  ])("draws the first message as the durable bubble will, text $queuedMessage", ({ queuedMessage, shown }) => {
+  ])("draws the first message as the durable bubble will, text $queuedMessage", async ({ queuedMessage, shown }) => {
     const thread = { ...makeThread({ id: "thread-with-attachment", mode: "worktree", worktree_managed: true }), clientPreparing: true };
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: thread.id,
@@ -812,7 +844,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
 
-    render(<ChatView />);
+    await renderChatView();
 
     const shell = screen.getByTestId("thread-preparing-shell");
     expect(within(shell).getByText("design-notes.pdf")).toBeInTheDocument();
@@ -822,7 +854,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(within(bubble!).queryByText(thread.title)).toBeNull();
   });
 
-  it("keeps echoing the first message when a completed startup clears its pending entry before the placeholder hands off", () => {
+  it("keeps echoing the first message when a completed startup clears its pending entry before the placeholder hands off", async () => {
     const startupId = "00000000-0000-4000-8000-000000000032";
     const placeholder = { ...makeThread({ id: "thread-early-placeholder", title: "Prepare checkout", mode: "worktree", worktree_managed: true }), clientPreparing: true };
     const persisted = { ...placeholder, id: "thread-early-persisted" };
@@ -873,22 +905,22 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     };
 
     showThread(placeholder, { [placeholder.id]: pendingStartup });
-    const view = render(<ChatView />);
+    const view = await renderChatView();
     showThread(placeholder, {});
-    view.rerender(<ChatView />);
+    await settleRerender(view.rerender);
     expectEcho(placeholder);
 
     showThread(persisted, {});
-    view.rerender(<ChatView />);
+    await settleRerender(view.rerender);
     expectEcho(persisted);
 
     showThread(other, {});
-    view.rerender(<ChatView />);
+    await settleRerender(view.rerender);
     expect(bubbleFor(other).getByText("Other thread")).toBeInTheDocument();
     expect(bubbleFor(other).queryByText("design-notes.pdf")).toBeNull();
   });
 
-  it("stops echoing the first message when a cancelled startup returns it to the composer", () => {
+  it("stops echoing the first message when a cancelled startup returns it to the composer", async () => {
     const startupId = "00000000-0000-4000-8000-000000000033";
     const thread = { ...makeThread({ id: "thread-cancelled-echo", title: "Prepare checkout", mode: "worktree", worktree_managed: true }), clientPreparing: true };
     act(() => useThreadStartupStore.getState().apply({
@@ -917,10 +949,10 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       pendingStartupByThreadId: { [thread.id]: { startupId, context: "new-worktree", queuedMessage: "Review this spec" } },
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
-    const view = render(<ChatView />);
+    const view = await renderChatView();
 
     setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread], pendingStartupByThreadId: {} }));
-    view.rerender(<ChatView />);
+    await settleRerender(view.rerender);
 
     const bubble = screen.getByTestId("thread-preparing-shell").querySelector<HTMLElement>(`[data-message-id="preparing-${thread.id}"]`);
     expect(bubble).not.toBeNull();
@@ -963,7 +995,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: placeholder.id });
 
-    const view = render(<ChatView />);
+    const view = await renderChatView();
     const preparingShell = screen.getByTestId("thread-preparing-shell");
     expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
     await waitFor(() => expect(chatViewTransportMock.getThreadStartup).toHaveBeenCalledWith(startupId));
@@ -978,7 +1010,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       pendingStartupByThreadId: { [persisted.id]: pendingStartup },
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: persisted.id });
-    view.rerender(<ChatView />);
+    await settleRerender(view.rerender);
 
     expect(screen.getByTestId("thread-preparing-shell")).toBe(preparingShell);
     expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
@@ -1017,7 +1049,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: persistedRecord,
       records: new Map([[persisted.id, persistedRecord]]),
     });
-    view.rerender(<ChatView />);
+    await settleRerender(view.rerender);
 
     expect(screen.getByTestId("chat-message-stage")).toBeInTheDocument();
     const visible = screen.getAllByTestId("message-list").find((el) => !el.closest(`[aria-hidden="true"]`));
@@ -1065,7 +1097,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: restoredThread.id });
     const user = userEvent.setup();
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
     expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
@@ -1118,7 +1150,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       records: new Map([[restoredThread.id, activeRecord]]),
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
     expect(screen.getAllByTestId("startup-trail")).toHaveLength(1);
@@ -1179,7 +1211,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       records: new Map([[startupThread.id, persistedRecord]]),
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
     expect(screen.getByTestId("startup-step-setup")).toHaveAttribute("data-tone", "cancelled");
@@ -1235,7 +1267,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     setupWorkspaceMock(workspace);
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
 
-    render(<ChatView />);
+    await renderChatView();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     await userEvent.setup().click(screen.getByRole("button", { name: "Edit message" }));
 
@@ -1277,7 +1309,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     };
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id, activeRecord: record, records: new Map([[thread.id, record]]) });
 
-    render(<ChatView />);
+    await renderChatView();
     await userEvent.setup().click(screen.getByRole("button", { name: "Edit message" }));
 
     const saved = Object.values(useThreadDraftStore.getState().drafts)[0];
@@ -1337,7 +1369,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     useThreadDraftStore.setState({ drafts: {} });
     const revokePreview = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
-    render(<ChatView />);
+    await renderChatView();
     const user = userEvent.setup();
     const edit = await screen.findByRole("button", { name: "Edit message" });
     await user.click(edit);
@@ -1359,7 +1391,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     revokePreview.mockRestore();
   });
 
-  function renderAgentFailedWithoutTurn(kind: "managed-worktree" | "attached-worktree") {
+  async function renderAgentFailedWithoutTurn(kind: "managed-worktree" | "attached-worktree") {
     const thread = makeThread({
       id: "thread-agent-failed",
       mode: "worktree",
@@ -1390,14 +1422,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     useThreadStartupStore.getState().apply(startup);
     setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads: [thread] }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
-    render(<ChatView />);
+    await renderChatView();
     expect(screen.getByTestId("startup-step-agent")).toHaveTextContent("Thread didn't start");
     expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
     return startup;
   }
 
   it("resends a managed worktree's saved first message when its agent failed before any turn", async () => {
-    const startup = renderAgentFailedWithoutTurn("managed-worktree");
+    const startup = await renderAgentFailedWithoutTurn("managed-worktree");
     chatViewTransportMock.retryThreadStartupAgent.mockResolvedValue({ ...startup, state: "running", error: undefined, revision: 2 });
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
@@ -1406,12 +1438,12 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     await vi.waitFor(() => expect(useThreadStartupStore.getState().recordsByStartupId[startup.startupId]).toMatchObject({ state: "running", revision: 2 }));
   });
 
-  it("offers no Retry when an existing worktree's agent fails without an errored turn", () => {
-    renderAgentFailedWithoutTurn("attached-worktree");
+  it("offers no Retry when an existing worktree's agent fails without an errored turn", async () => {
+    await renderAgentFailedWithoutTurn("attached-worktree");
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
-  it("keeps a recovered startup visible while the durable thread hydrates", () => {
+  it("keeps a recovered startup visible while the durable thread hydrates", async () => {
     const startupThread = makeThread({ id: "thread-2", title: "Thread 2" });
     useThreadStartupStore.getState().apply({
       startupId: "00000000-0000-4000-8000-000000000002",
@@ -1438,13 +1470,13 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1" });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("startup-trail")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
   });
 
-  it("keeps the preparing shell until a completed startup conversation paints", () => {
+  it("keeps the preparing shell until a completed startup conversation paints", async () => {
     const startupThread = makeThread({ id: "thread-2", title: "Thread 2" });
     useThreadStartupStore.getState().apply({
       startupId: "00000000-0000-4000-8000-000000000003",
@@ -1470,14 +1502,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1" });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("thread-preparing-shell")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-transition-shell")).not.toBeInTheDocument();
     expect(screen.queryByTestId("startup-trail")).not.toBeInTheDocument();
   });
 
-  it("holds the outgoing transcript while a selected cold thread hydrates", () => {
+  it("holds the outgoing transcript while a selected cold thread hydrates", async () => {
     const thread1 = makeThread({ id: "thread-1", title: "Thread 1" });
     const thread2 = makeThread({ id: "thread-2", title: "Thread 2" });
     const outgoingRecord = {
@@ -1494,7 +1526,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       records: new Map([[thread1.id, outgoingRecord]]),
     });
 
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: thread2.id,
@@ -1505,7 +1537,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: createEmptyThreadRecord(),
       records: new Map([[thread1.id, outgoingRecord]]),
     });
-    act(() => rerender(<ChatView />));
+    await settleRerender(rerender);
 
     expect(screen.getByTestId("chat-header-title")).toHaveTextContent("Thread 2");
     const held = screen.getAllByTestId("message-list")
@@ -1524,7 +1556,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: targetRecord,
       records: new Map([[thread1.id, outgoingRecord], [thread2.id, targetRecord]]),
     });
-    act(() => rerender(<ChatView />));
+    await settleRerender(rerender);
 
     expect(screen.queryByTestId("conversation-hold-overlay")).not.toBeInTheDocument();
     const visible = screen.getAllByTestId("message-list").find((el) => !el.closest(`[aria-hidden="true"]`));
@@ -1532,7 +1564,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(visible).toHaveAttribute("data-display-thread-id", thread2.id);
   });
 
-  it("holds the outgoing transcript for an empty running target", () => {
+  it("holds the outgoing transcript for an empty running target", async () => {
     const thread1 = makeThread({ id: "thread-1", title: "Thread 1" });
     const thread2 = makeThread({ id: "thread-2", title: "Thread 2", status: "active" });
     const outgoingRecord = {
@@ -1550,7 +1582,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       records: new Map([[thread1.id, outgoingRecord]]),
     });
 
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: thread2.id,
@@ -1562,7 +1594,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: createEmptyThreadRecord(),
       records: new Map([[thread1.id, outgoingRecord]]),
     });
-    act(() => rerender(<ChatView />));
+    await settleRerender(rerender);
 
     const held = screen.getAllByTestId("message-list")
       .find((el) => el.getAttribute("data-display-thread-id") === thread1.id);
@@ -1573,7 +1605,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByTestId("startup-trail")).not.toBeInTheDocument();
   });
 
-  it("drops a stale hold when rapid switching reaches another cold thread", () => {
+  it("drops a stale hold when rapid switching reaches another cold thread", async () => {
     const thread1 = makeThread({ id: "thread-1", title: "Thread 1" });
     const thread2 = makeThread({ id: "thread-2", title: "Thread 2" });
     const thread3 = makeThread({ id: "thread-3", title: "Thread 3" });
@@ -1590,7 +1622,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: outgoingRecord,
       records: new Map([[thread1.id, outgoingRecord]]),
     });
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: thread2.id,
@@ -1601,7 +1633,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: createEmptyThreadRecord(),
       records: new Map([[thread1.id, outgoingRecord]]),
     });
-    act(() => rerender(<ChatView />));
+    await settleRerender(rerender);
 
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: thread3.id,
@@ -1612,14 +1644,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: createEmptyThreadRecord(),
       records: new Map([[thread1.id, outgoingRecord]]),
     });
-    act(() => rerender(<ChatView />));
+    await settleRerender(rerender);
 
     expect(screen.queryByTestId("conversation-hold-overlay")).not.toBeInTheDocument();
     for (const el of screen.queryAllByTestId("message-list")) expect(el).not.toBeVisible();
     expect(screen.getByTestId("conversation-transition-shell")).toHaveAttribute("data-thread-id", thread3.id);
   });
 
-  it("renders a full-stage hydration error when no transcript is available", () => {
+  it("renders a full-stage hydration error when no transcript is available", async () => {
     chatViewThreadMockRef.current = defaultThreadState({
       activeRecord: {
         ...createEmptyThreadRecord(),
@@ -1627,14 +1659,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       },
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("conversation-error")).toHaveTextContent("Conversation request failed");
     expect(screen.queryByTestId("conversation-loading")).not.toBeInTheDocument();
     for (const el of screen.queryAllByTestId("message-list")) expect(el).not.toBeVisible();
   });
 
-  it("keeps a live turn visible when hydration fails before any messages are resident", () => {
+  it("keeps a live turn visible when hydration fails before any messages are resident", async () => {
     chatViewThreadMockRef.current = defaultThreadState({
       runningThreadIds: new Set(["thread-1"]),
       activeRecord: {
@@ -1643,14 +1675,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       },
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent("Conversation refresh failed");
     expect(screen.getByTestId("message-list")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-error")).not.toBeInTheDocument();
   });
 
-  it("keeps resident messages visible beside a generic hydration error", () => {
+  it("keeps resident messages visible beside a generic hydration error", async () => {
     chatViewThreadMockRef.current = defaultThreadState({
       activeRecord: {
         ...createEmptyThreadRecord(),
@@ -1659,14 +1691,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       },
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.getByTestId("conversation-error-banner")).toHaveTextContent("Could not refresh conversation: Conversation refresh failed");
     expect(screen.getByTestId("message-list")).toBeInTheDocument();
     expect(screen.queryByTestId("conversation-error")).not.toBeInTheDocument();
   });
 
-  it("leaves a failed turn's error to the transcript instead of a refresh banner", () => {
+  it("leaves a failed turn's error to the transcript instead of a refresh banner", async () => {
     chatViewThreadMockRef.current = defaultThreadState({
       activeRecord: {
         ...createEmptyThreadRecord(),
@@ -1676,13 +1708,13 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       },
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.queryByTestId("conversation-error-banner")).not.toBeInTheDocument();
     expect(screen.getByTestId("message-list")).toBeInTheDocument();
   });
 
-  it("leaves a rejected send to its toast instead of a conversation banner", () => {
+  it("leaves a rejected send to its toast instead of a conversation banner", async () => {
     chatViewThreadMockRef.current = defaultThreadState({
       activeRecord: {
         ...createEmptyThreadRecord(),
@@ -1692,7 +1724,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       },
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(screen.queryByTestId("conversation-error-banner")).not.toBeInTheDocument();
     expect(screen.queryByTestId("conversation-error")).not.toBeInTheDocument();
@@ -1711,7 +1743,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       runningThreadIds: new Set([thread2.id]),
     });
 
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => {
       expect(chatViewTransportMock.subscribeThread).toHaveBeenCalledWith(thread1.id);
@@ -1722,7 +1754,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       currentThreadId: thread1.id,
       runningThreadIds: new Set(),
     });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
 
     await waitFor(() => {
       expect(chatViewTransportMock.unsubscribeThread).toHaveBeenCalledWith(thread2.id);
@@ -1735,7 +1767,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       .mockRejectedValueOnce(new Error("temporary subscribe failure"))
       .mockResolvedValue(undefined);
 
-    render(<ChatView />);
+    await renderChatView();
 
     await waitFor(() => {
       expect(chatViewTransportMock.subscribeThread).toHaveBeenCalledTimes(2);
@@ -1750,7 +1782,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     chatViewTransportMock.subscribeThread.mockRejectedValue(new Error("persistent subscribe failure"));
 
-    render(<ChatView />);
+    await renderChatView();
 
     // Each retry timer only requests a re-render; act flushes it, and the
     // reconcile effect then issues the next subscribe.
@@ -1772,7 +1804,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       threads,
     }));
 
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
     await waitFor(() => {
       expect(chatViewTransportMock.subscribeThread).toHaveBeenCalledWith(threads[0]!.id);
     });
@@ -1783,7 +1815,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     for (const thread of threads.slice(1)) {
       setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: thread.id, threads }));
       chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread.id });
-      act(() => rerender(<ChatView />));
+      rerender(<ChatView />);
     }
 
     await waitFor(() => {
@@ -1805,7 +1837,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       runningThreadIds: new Set([thread2.id]),
     });
 
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenCalledWith({
@@ -1820,7 +1852,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(chatViewTransportMock.unsubscribeThread).not.toHaveBeenCalled();
 
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: thread1.id });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
 
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenCalledWith({
@@ -1833,7 +1865,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
   it("adds and removes canonical detail leases without duplicating subscriptions", async () => {
     const setThreadSubscriptions = enableAtomicSubscriptionTransport();
-    const { unmount } = render(<ChatView />);
+    const { unmount } = await renderChatView();
 
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenLastCalledWith({
@@ -1882,7 +1914,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       runningThreadIds,
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
     const input = setThreadSubscriptions.mock.calls[0]?.[0] as { threadIds: string[] };
@@ -1912,7 +1944,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: firstRecord,
       records: new Map([["thread-1", firstRecord]]),
     });
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenCalledWith({
@@ -1928,7 +1960,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: secondRecord,
       records: new Map([["thread-1", secondRecord]]),
     });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
 
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
   });
@@ -1942,7 +1974,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     } };
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1", activeRecord: record,
       records: new Map([["thread-1", record]]) });
-    render(<ChatView />);
+    await renderChatView();
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledExactlyOnceWith({
       threadIds: ["thread-1"], revisions: { "thread-1": { conversationRevision: 14, rosterRevision: 3 } },
       progressCursors: { "thread-1": { epoch: "parent-epoch", sequence: 40, ownerThreadId: "parent-thread" } },
@@ -1963,7 +1995,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     } };
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1", activeRecord: record,
       records: new Map([["thread-1", record]]) });
-    render(<ChatView />);
+    await renderChatView();
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledExactlyOnceWith({
       threadIds: ["thread-1"], revisions: { "thread-1": { conversationRevision: 14, rosterRevision: 3 } },
       progressCursors: { "thread-1": { epoch: "runtime-epoch", sequence: 40, ...(liveShown ? { liveShown: true } : {}) } },
@@ -1995,7 +2027,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       records: new Map([["thread-1", record]]),
     });
 
-    render(<ChatView />);
+    await renderChatView();
 
     await waitFor(() => {
       expect(chatViewApplyCanonicalRecoveriesMock).toHaveBeenCalledWith([recovery]);
@@ -2005,12 +2037,12 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       .toBeLessThan(chatViewResidencyMock.refresh.mock.invocationCallOrder[0]!);
   });
 
-  it("does not record telemetry for an already-applied empty atomic subscription set", () => {
+  it("does not record telemetry for an already-applied empty atomic subscription set", async () => {
     enableAtomicSubscriptionTransport();
     setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: null, threads: [] }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: null });
 
-    render(<ChatView />);
+    await renderChatView();
 
     expect(getThreadSwitchTelemetryCounters().subscriptionsSkipped).toBe(0);
   });
@@ -2026,7 +2058,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       currentThreadId: activeThreadId,
       runningThreadIds,
     });
-    render(<ChatView />);
+    await renderChatView();
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
     const input = setThreadSubscriptions.mock.calls[0]?.[0] as { threadIds: string[] };
@@ -2044,16 +2076,16 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       writable: true,
       value: setThreadSubscriptions,
     });
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
     });
 
     chatViewThreadMockRef.current = defaultThreadState();
-    rerender(<ChatView />);
+    await settleRerender(rerender);
     chatViewThreadMockRef.current = defaultThreadState();
-    rerender(<ChatView />);
+    await settleRerender(rerender);
 
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
     requestResolvers[0]?.();
@@ -2077,7 +2109,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       writable: true,
       value: setThreadSubscriptions,
     });
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
     expect(requests[0]?.input).toEqual({
@@ -2086,7 +2118,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
 
     setupWorkspaceMock({ ...defaultWorkspaceState(), activeThreadId: "thread-2", threads: [makeThread({ id: "thread-2" })] });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
 
     await act(async () => {});
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
@@ -2113,7 +2145,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       writable: true,
       value: setThreadSubscriptions,
     });
-    const { rerender, unmount } = render(<ChatView />);
+    const { rerender, unmount } = await renderChatView();
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledWith({
       threadIds: ["thread-1"],
@@ -2121,7 +2153,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     }));
 
     setupWorkspaceMock({ ...defaultWorkspaceState(), activeThreadId: null, threads: [] });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
     unmount();
 
     expect(setThreadSubscriptions).toHaveBeenCalledWith({ threadIds: [] });
@@ -2144,11 +2176,11 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       writable: true,
       value: setThreadSubscriptions,
     });
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
     chatViewConnectionStatusRef.current = "reconnecting";
-    rerender(<ChatView />);
+    await settleRerender(rerender);
     requests[0]?.({ canonicalRecoveries: [deltaRecovery("thread-1")] });
     await act(async () => {});
 
@@ -2173,7 +2205,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
     chatViewResidencyMock.refresh.mockRejectedValueOnce(new Error("refresh failed"));
 
-    render(<ChatView />);
+    await renderChatView();
 
     await waitFor(() => {
       expect(chatViewResidencyMock.refresh).toHaveBeenCalledWith(
@@ -2207,7 +2239,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: record,
       records: new Map([[thread1.id, record]]),
     });
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
 
@@ -2217,7 +2249,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       activeRecord: record,
       records: new Map([[thread1.id, record]]),
     });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
     requests[0]?.({ canonicalRecoveries: [deltaRecovery(thread1.id)] });
@@ -2245,7 +2277,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       value: setThreadSubscriptions,
     });
     const thread2 = makeThread({ id: "thread-2", title: "Thread 2", status: "active" });
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
 
@@ -2256,7 +2288,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewThreadMockRef.current = defaultThreadState({
       runningThreadIds: new Set([thread2.id]),
     });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
 
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
@@ -2291,7 +2323,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       .mockRejectedValueOnce(new Error("temporary atomic subscribe failure"))
       .mockResolvedValue(undefined);
 
-    render(<ChatView />);
+    await renderChatView();
 
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
@@ -2320,7 +2352,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     onTestFinished(() => {
       vi.useRealTimers();
     });
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => expect(setThreadSubscriptions).toHaveBeenCalledTimes(1));
 
@@ -2331,13 +2363,13 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewThreadMockRef.current = defaultThreadState({
       runningThreadIds: new Set([thread2.id]),
     });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
     chatViewThreadMockRef.current = defaultThreadState({
       runningThreadIds: new Set([thread3.id]),
     });
-    rerender(<ChatView />);
+    await settleRerender(rerender);
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
     requests[0]?.reject(new Error("stale D1 failure"));
@@ -2358,7 +2390,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
   it("reconciles the complete atomic set after reconnecting", async () => {
     const setThreadSubscriptions = enableAtomicSubscriptionTransport();
-    const { rerender } = render(<ChatView />);
+    const { rerender } = await renderChatView();
 
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
@@ -2369,11 +2401,11 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
 
     chatViewConnectionStatusRef.current = "reconnecting";
-    rerender(<ChatView />);
+    await settleRerender(rerender);
     expect(setThreadSubscriptions).toHaveBeenCalledTimes(1);
 
     chatViewConnectionStatusRef.current = "connected";
-    rerender(<ChatView />);
+    await settleRerender(rerender);
 
     await waitFor(() => {
       expect(setThreadSubscriptions).toHaveBeenCalledTimes(2);
@@ -2384,12 +2416,12 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     });
   });
 
-  it("does not resolve transport while unmounting without subscriptions", () => {
+  it("does not resolve transport while unmounting without subscriptions", async () => {
     chatViewConnectionStatusRef.current = "reconnecting";
     setupWorkspaceMock({ ...defaultWorkspaceState(), activeThreadId: null, threads: [] });
     chatViewThreadMockRef.current = defaultThreadState();
 
-    const { unmount } = render(<ChatView />);
+    const { unmount } = await renderChatView();
     unmount();
 
     expect(chatViewGetTransportMock).not.toHaveBeenCalled();

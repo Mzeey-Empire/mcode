@@ -207,10 +207,12 @@ describe("TerminalSearchShelf", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Find in terminal" }), {
       target: { value: "alpha" },
     });
-    useTerminalStore.getState().setTerminalSearchOptions("pty-a", {
-      caseSensitive: true,
-      wholeWord: false,
-      regex: false,
+    act(() => {
+      useTerminalStore.getState().setTerminalSearchOptions("pty-a", {
+        caseSensitive: true,
+        wholeWord: false,
+        regex: false,
+      });
     });
     first.unmount();
 

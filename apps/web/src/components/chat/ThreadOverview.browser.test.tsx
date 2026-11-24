@@ -149,6 +149,7 @@ describe("ThreadOverview Browser rows", () => {
     const navigate = (useWorkspaceStore as unknown as { setState: ReturnType<typeof vi.fn> }).setState;
     navigate.mockClear();
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     const row = screen.getByRole("button", { name: "Browser, Working on the page, Agent page" });
     const user = userEvent.setup();
@@ -183,7 +184,7 @@ describe("ThreadOverview Browser rows", () => {
     expect(screen.queryByTestId("thread-overview-browser")).not.toBeInTheDocument();
   });
 
-  it("shows a pending agent Browser page before target attachment finishes", () => {
+  it("shows a pending agent Browser page before target attachment finishes", async () => {
     useBrowserAutomationStore.setState({
       registered: true,
       status: "registered",
@@ -221,6 +222,7 @@ describe("ThreadOverview Browser rows", () => {
     });
 
     render(<ThreadOverview thread={branchlessThread()} threadPaneWidth={1400} />);
+    await act(async () => {});
 
     expect(screen.getByRole("button", { name: "Browser, Working on the page, example.test" })).toBeInTheDocument();
   });

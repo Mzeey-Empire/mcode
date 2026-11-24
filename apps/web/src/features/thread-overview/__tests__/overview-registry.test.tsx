@@ -22,6 +22,10 @@ function mockLoadedEntries() {
   vi.mocked(mockTransport.getRemoteUrl).mockResolvedValue({ label: "example/repo", webUrl: "https://github.com/example/repo" });
 }
 
+async function settleMountReads(): Promise<void> {
+  await act(async () => {});
+}
+
 async function closeOverview() {
   fireEvent.click(screen.getByTestId("header-overview-toggle"));
   await waitFor(() => expect(screen.queryByTestId("thread-overview-card")).not.toBeInTheDocument());
@@ -278,12 +282,14 @@ describe("overview registry", () => {
     expect(screen.getByTestId("thread-overview-recap-skeleton")).toBeInTheDocument();
     await closeOverview();
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
+    await settleMountReads();
     expect(screen.getByTestId("thread-overview-recap-skeleton")).toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-recap-refresh")).toBeDisabled();
 
     await closeOverview();
     await act(async () => { rejectRequest(new Error("Recap request failed")); });
     fireEvent.click(screen.getByTestId("header-overview-toggle"));
+    await settleMountReads();
     expect(screen.queryByTestId("thread-overview-recap-skeleton")).not.toBeInTheDocument();
     expect(screen.getByTestId("thread-overview-recap-text")).toHaveTextContent("Couldn't generate recap");
     expect(screen.getByTestId("thread-overview-recap-refresh")).toBeEnabled();
@@ -304,8 +310,9 @@ describe("overview registry", () => {
     expect(mockTransport.generateRecap).toHaveBeenCalledTimes(2);
   });
 
-  it("hides Recap on a thread with no messages and no recap", () => {
+  it("hides Recap on a thread with no messages and no recap", async () => {
     render(<ThreadOverview thread={thread} threadPaneWidth={1400} />);
+    await settleMountReads();
     expect(screen.getByTestId("thread-overview-card")).toBeInTheDocument();
     expect(screen.queryByTestId("thread-overview-recap")).not.toBeInTheDocument();
   });

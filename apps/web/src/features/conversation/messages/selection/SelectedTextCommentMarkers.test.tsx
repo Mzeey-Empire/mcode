@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLayoutEffect, useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -211,6 +211,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   useComposerDraftStore.setState({ drafts: {} });
   if (originalClientRects) Object.defineProperty(Range.prototype, "getClientRects", originalClientRects);
   else Reflect.deleteProperty(Range.prototype, "getClientRects");
@@ -267,7 +268,7 @@ describe("SelectedTextCommentMarkers", () => {
     await waitFor(() => expect(firstHighlight).not.toHaveClass("bg-primary/30"));
     expect(secondHighlight).toHaveClass("bg-primary/30");
 
-    firstMarker!.focus();
+    act(() => firstMarker!.focus());
     await waitFor(() => expect(firstHighlight).toHaveClass("bg-primary/30"));
     expect(secondHighlight).not.toHaveClass("bg-primary/30");
 

@@ -61,10 +61,16 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
 });
 
+async function renderSection(): Promise<ReturnType<typeof render>> {
+  const view = render(<ThreadsSection />);
+  await act(async () => {});
+  return view;
+}
+
 describe("ThreadsSection new-thread defaults", () => {
   it("writes the provider and model together when a model comes from another provider, keeping a level it offers", async () => {
     const update = seedSettings((s) => ({ ...s, model: { ...s.model, defaults: { ...s.model.defaults, provider: "claude", reasoning: "high" } } }));
-    render(<ThreadsSection />);
+    await renderSection();
     const picker = await openModelPicker();
     fireEvent.click(within(picker).getByRole("radio", { name: "Codex" }));
     fireEvent.click(await within(picker).findByRole("option", { name: "GPT-9 Wide" }));
@@ -76,7 +82,7 @@ describe("ThreadsSection new-thread defaults", () => {
 
   it("writes a level picked in the reasoning pane and names it on the model part", async () => {
     seedSettings((s) => ({ ...s, model: { ...s.model, defaults: { ...s.model.defaults, provider: "codex", id: "gpt-9-deep", reasoning: "high" } } }));
-    render(<ThreadsSection />);
+    await renderSection();
     const picker = await openModelPicker();
     const pane = await within(picker).findByRole("listbox", { name: "Reasoning for GPT-9 Deep" });
     fireEvent.click(within(pane).getByRole("option", { name: "Low" }));
@@ -86,16 +92,16 @@ describe("ThreadsSection new-thread defaults", () => {
     expect(screen.getByRole("button", { name: /^Model:/ })).toHaveAccessibleName("Model: Codex GPT-9 Deep, Low");
   });
 
-  it.each([["Plan", "plan"], ["Build", "build"]] as const)("writes %s as the default mode", (label, mode) => {
+  it.each([["Plan", "plan"], ["Build", "build"]] as const)("writes %s as the default mode", async (label, mode) => {
     seedSettings((s) => ({ ...s, agent: { ...s.agent, defaults: { ...s.agent.defaults, mode: mode === "plan" ? "build" : "plan" } } }));
-    render(<ThreadsSection />);
+    await renderSection();
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Mode" })).getByRole("radio", { name: label }));
     expect(saved().agent.defaults.mode).toBe(mode);
   });
 
   it("writes the permission, and marks the unsupervised choice with the warning icon", async () => {
     seedSettings((s) => ({ ...s, agent: { ...s.agent, defaults: { ...s.agent.defaults, permission: "supervised" } } }));
-    render(<ThreadsSection />);
+    await renderSection();
     expect(screen.queryByTestId("settings-unsupervised-icon")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Permission: Ask me" }));
@@ -116,13 +122,13 @@ describe("ThreadsSection stale default model", () => {
     useToastStore.setState({ toasts: [] });
   });
 
-  function renderWithDefault(id: string) {
+  async function renderWithDefault(id: string): Promise<void> {
     seedSettings((s) => ({ ...s, model: { ...s.model, defaults: { ...s.model.defaults, provider: "codex", id } } }));
-    render(<ThreadsSection />);
+    await renderSection();
   }
 
   it("warns once when the saved model is missing from the loaded catalog", async () => {
-    renderWithDefault("gpt-retired");
+    await renderWithDefault("gpt-retired");
 
     const warning = await screen.findByText(STALE_WARNING);
     expect(screen.getByRole("button", { name: /^Model:/ })).toHaveAccessibleDescription(warning.textContent ?? "");
@@ -133,7 +139,7 @@ describe("ThreadsSection stale default model", () => {
   });
 
   it("shows no warning for a listed model", async () => {
-    renderWithDefault("gpt-9-deep");
+    await renderWithDefault("gpt-9-deep");
     await vi.waitFor(() => expect(useProviderModelsStore.getState().models.codex).toHaveLength(CODEX_MODELS.length));
     await act(async () => {});
 
@@ -145,7 +151,7 @@ describe("ThreadsSection stale default model", () => {
 describe("ThreadsSection small-task model", () => {
   it("saves Auto as the automatic choice and a model as its provider and id", async () => {
     seedSettings((s) => ({ ...s, model: { ...s.model, utility: { provider: "claude", id: "claude-haiku-4-5" } } }));
-    render(<ThreadsSection />);
+    await renderSection();
 
     fireEvent.click(screen.getByRole("button", { name: /^Model for small tasks:/ }));
     let picker = await screen.findByRole("dialog", { name: "Choose the model for small tasks" });
@@ -165,7 +171,7 @@ describe("ThreadsSection small-task model", () => {
 describe("ThreadsSection cleanup", () => {
   it("keeps a saved retention period outside the presets selected through opening and closing the picker", async () => {
     seedSettings((s) => ({ ...s, thread: { ...s.thread, completion: { ...s.thread.completion, retentionDays: 45 } } }));
-    render(<ThreadsSection />);
+    await renderSection();
     const trigger = screen.getByTestId("settings-retention-trigger");
     expect(trigger).toHaveTextContent("45 days");
 
@@ -180,7 +186,7 @@ describe("ThreadsSection cleanup", () => {
 
   it("saves Never as no automatic deletion", async () => {
     seedSettings();
-    render(<ThreadsSection />);
+    await renderSection();
     fireEvent.click(screen.getByTestId("settings-retention-trigger"));
     fireEvent.click(await screen.findByRole("option", { name: "Never" }));
     await act(async () => {});
@@ -190,7 +196,7 @@ describe("ThreadsSection cleanup", () => {
   it("shows a failed merge setting write beside the switch", async () => {
     const update = seedSettings();
     update.mockResolvedValueOnce("Settings file is read-only");
-    render(<ThreadsSection />);
+    await renderSection();
     const control = screen.getByRole("switch", { name: "Close threads when their PRs merge" });
     fireEvent.click(control);
     expect(await screen.findByRole("alert")).toHaveTextContent("Settings file is read-only");

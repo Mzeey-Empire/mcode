@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SubagentRosterEntry } from "@mcode/contracts/models/subagent-roster";
@@ -48,6 +48,7 @@ describe("ActivityRail expansion", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.clearAllTimers();
     vi.useRealTimers();
   });
@@ -298,14 +299,17 @@ describe("ActivityRail expansion", () => {
     expect(handlers.onCreate).toHaveBeenCalledWith("preview");
   });
 
-  it("offers Terminal in the add menu only while the tool is closed", () => {
+  it("offers Terminal in the add menu only while the tool is closed", async () => {
     const { rerender } = render(railElement(["changes"]));
     fireEvent.click(screen.getByRole("button", { name: "Open tool" }));
+    await act(async () => vi.runOnlyPendingTimers());
     expect(screen.getByRole("menuitem", { name: "Terminal" })).not.toHaveAttribute("aria-disabled");
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await act(async () => vi.runOnlyPendingTimers());
 
     rerender(railElement(["terminal", "changes"]));
     fireEvent.click(screen.getByRole("button", { name: "Open tool" }));
+    await act(async () => vi.runOnlyPendingTimers());
     expect(screen.queryByRole("menuitem", { name: "Terminal" })).not.toBeInTheDocument();
   });
 
@@ -360,7 +364,7 @@ describe("ActivityRail expansion", () => {
       bottom: 88,
     } as DOMRect);
 
-    terminal.focus();
+    act(() => terminal.focus());
     fireEvent.pointerDown(terminal, { button: 0, pointerId: 1, clientY: 20 });
     fireEvent.pointerMove(terminal, { pointerId: 1, clientY: 47 });
     expect(handlers.onReorder).not.toHaveBeenCalled();

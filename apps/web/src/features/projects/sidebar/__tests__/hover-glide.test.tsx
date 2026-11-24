@@ -1,6 +1,6 @@
 import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, cleanup } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -82,6 +82,7 @@ describe("HoverGlide", () => {
   }
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     document.body.replaceChildren();
   });
@@ -166,6 +167,7 @@ describe("SidebarList hover highlight", () => {
   });
 
   afterEach(() => {
+    cleanup();
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });
 

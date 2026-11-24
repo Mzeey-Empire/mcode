@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -38,6 +38,8 @@ function renderRow(
 }
 
 afterEach(() => {
+
+  cleanup();
   useViewportDragStore.getState().setEdge(null);
 });
 

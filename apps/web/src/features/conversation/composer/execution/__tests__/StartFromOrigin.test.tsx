@@ -1,5 +1,5 @@
 import { createMockWorkspace } from "@mcode/contracts/testing";
-import { render, renderHook, screen } from "@testing-library/react";
+import { act, render, renderHook, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -41,7 +41,7 @@ describe("Start from origin switch", () => {
     expect(off.origin).toMatchObject({ checked: false, forced: false });
     expect(targetLabelText(off.label)).toBe("From main");
 
-    useWorkspaceStore.getState().setNewThreadStartFromOrigin(true);
+    act(() => useWorkspaceStore.getState().setNewThreadStartFromOrigin(true));
 
     const on = selection("worktree");
     expect(on.origin).toMatchObject({ checked: true, forced: false });
