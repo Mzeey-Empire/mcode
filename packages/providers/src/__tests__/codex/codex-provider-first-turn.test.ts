@@ -197,6 +197,65 @@ describe("CodexProvider first turn on new session", () => {
     }
   });
 
+  it("records command execution from approval when completion beats the response write acknowledgement", async () => {
+    const batches: ProviderEventBatch[] = [];
+    const provider = makeProvider(undefined, undefined, undefined, {
+      submit: async (batch) => { batches.push(batch); return acceptedEventReceipt; },
+    });
+    try {
+      await provider.sendTurn({
+        turnId: "access-turn", turnExecutionId: schemaValidExecutionId, sessionId, workspaceId: "workspace-test",
+        threadId, message: "hello", cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+        providerOptions: {}, permissionMode: "supervised", approvalReviewMode: "manual",
+      });
+      await vi.waitFor(() => expect(sendTurnMock.mock.calls.length).toBe(1));
+      const server = appServers[0];
+      assert(server);
+      const handler = server.options.approvalHandler;
+      assert(handler);
+      const scope = { threadId: "sdk-thread-1", turnId: "turn-test-id" };
+      const item = { type: "commandExecution", id: "command-1", command: "echo approved" };
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-30T12:00:00.000Z"));
+      server.emit("notification", { method: "item/started", params: { ...scope, item: { ...item, status: "inProgress" } } });
+      const request: CodexApprovalRequest = {
+        rpcId: 15, method: "item/commandExecution/requestApproval",
+        params: { ...scope, itemId: item.id, command: item.command, cwd: process.cwd() },
+      };
+      const response = handler(request);
+      const [approval] = provider.listPendingApprovals(threadId);
+      assert(approval);
+
+      vi.setSystemTime(new Date("2026-10-30T12:00:46.000Z"));
+      const delivery = provider.resolveApproval(approval.requestId, { choiceId: "allow" });
+      expect(await response).toEqual({ decision: "accept" });
+      vi.setSystemTime(new Date("2026-10-30T12:00:46.250Z"));
+      server.emit("notification", {
+        method: "item/completed", params: { ...scope, item: { ...item, status: "completed", exitCode: 0, aggregatedOutput: "approved\n" } },
+      });
+      request.responseWritten?.(true);
+      expect(await delivery).toEqual({ status: "resolved" });
+      await provider.flushCanonicalEvents();
+
+      const commandTiming = batches.flatMap((batch) => submittedRuntimeEvents([batch]).flatMap(({ event }) => {
+        if (event.type === AgentEventType.ToolResult && event.toolCallId === item.id) {
+          return [{ type: event.type, at: batch.events[0]?.providerTimestamp }];
+        }
+        if (event.type === AgentEventType.ToolUse && event.toolCallId === item.id && event.status === "running" && !event.phase) {
+          return [{ type: event.type, at: batch.events[0]?.providerTimestamp }];
+        }
+        return [];
+      }));
+      expect(commandTiming).toEqual([
+        { type: "toolUse", at: "2026-10-30T12:00:46.000Z" },
+        { type: "toolResult", at: "2026-10-30T12:00:46.250Z" },
+      ]);
+    } finally {
+      vi.useRealTimers();
+      await provider.shutdown();
+    }
+  });
+
   it.each([
     { choiceId: "allow", decision: "accept" },
     { choiceId: "deny", decision: "decline" },

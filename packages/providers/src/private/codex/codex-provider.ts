@@ -3080,7 +3080,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
-  /** Publish resolution only after the native response write completes. */
+  /** Publish the approval receipt only after the native response write completes. */
   async resolveApproval(requestId: string, response: ApprovalResponse): Promise<ApprovalRespondResult> {
     const entry = this.pendingPermissions.get(requestId);
     if (!entry) return { status: "not_pending" };
@@ -3091,17 +3091,25 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     entry.replying = true;
     this.runtime.recordUsage(entry.sessionId);
     const decision = this.nativeApprovalDecision(choice, response);
+    const allowed = decision !== "deny";
+    // A fast command can complete before the response write is acknowledged.
+    if (allowed) this.publishCommandApproval(entry, true);
     entry.resolve(mapDecisionToCodexResponse(entry.method, decision, entry.params));
     if (!await entry.acknowledged) {
-      // Codex never got the answer, so a stop or turn end that skipped this write settles it now.
-      entry.replying = false;
-      if (entry.deferredDrain) this.drainPending((pending) => pending === entry, entry.deferredDrain);
+      this.restoreApprovalAfterWriteFailure(entry, allowed);
       return { status: "failed", message: "The answer did not reach Codex" };
     }
     if (!this.pendingPermissions.delete(requestId)) return { status: "not_pending" };
-    this.publishCommandApproval(entry, decision !== "deny");
+    if (!allowed) this.publishCommandApproval(entry, false);
     this.publishApprovalDecision(requestId, entry, approvalOutcome(choice, response));
     return { status: "resolved" };
+  }
+
+  private restoreApprovalAfterWriteFailure(entry: PendingPermissionEntry, allowed: boolean): void {
+    // Codex never got the answer, so a stop or turn end that skipped this write settles it now.
+    entry.replying = false;
+    if (entry.deferredDrain) this.drainPending((pending) => pending === entry, entry.deferredDrain);
+    else if (allowed) this.publishCommandApproval(entry);
   }
 
   private nativeApprovalDecision(choice: ApprovalChoice | undefined, response: ApprovalResponse): Parameters<typeof mapDecisionToCodexResponse>[1] {
