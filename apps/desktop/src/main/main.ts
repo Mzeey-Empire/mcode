@@ -70,6 +70,7 @@ import {
 import { registerAttachmentsFeature } from "../features/attachments/index.js";
 import { isDesktopDev } from "./is-desktop-dev.js";
 import { shouldPrintVersion } from "./cli-args.js";
+import { crashDumpOptions } from "./crash-dumps.js";
 
 // Imports evaluate before any statement here, wherever they sit in the file,
 // so this marks the end of main's module loading.
@@ -102,12 +103,11 @@ if (harnessUserDataDir && harnessCapabilityPath && NodePath.isAbsolute(harnessUs
   );
 }
 
-// A Chromium internal check failure kills a renderer with exit code
-// 0x80000003 and no message. Dumps stay on disk under userData's Crashpad folder.
-// Crashpad watches only processes created after this call, and it runs after
-// the userData override so each worktree keeps its own dumps.
-if (!app.isPackaged) {
-  crashReporter.start({ uploadToServer: false });
+// Crashpad watches only processes created after it starts. Start it after the
+// userData override so dumps land in this launch's userData folder.
+const dumpOptions = crashDumpOptions(app.isPackaged);
+if (dumpOptions !== null) {
+  crashReporter.start(dumpOptions);
 }
 
 const printsVersion = shouldPrintVersion(process.argv);
