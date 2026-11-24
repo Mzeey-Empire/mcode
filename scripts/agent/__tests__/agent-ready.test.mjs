@@ -38,6 +38,46 @@ NodeTest.test("agentReady polls contract health and app URLs until both respond"
   }
 });
 
+NodeTest.test("agentReady reads the endpoint that Electron's server publishes after startup", async () => {
+  const repo = makeRepo();
+  const urls = [];
+  try {
+    writeContract(repo, null, 41_112);
+    const ready = agentReady(repo, {
+      timeoutMs: 1_000,
+      httpOptions: {
+        intervalMs: 5,
+        fetchImpl: async (url) => {
+          urls.push(url);
+          return new Response(null, { status: 200 });
+        },
+      },
+    });
+    writeContract(repo, 19_504, 41_112);
+
+    NodeAssertStrict.default.deepEqual(await ready, { desktop: false });
+    NodeAssertStrict.default.deepEqual(urls.sort(), [
+      "http://127.0.0.1:19504/health",
+      "http://127.0.0.1:41112",
+    ]);
+  } finally {
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("agentReady points to the Electron log when the server never publishes its endpoint", async () => {
+  const repo = makeRepo();
+  try {
+    writeContract(repo, null, 41_112);
+    await NodeAssertStrict.default.rejects(
+      () => agentReady(repo, { timeoutMs: 25, httpOptions: { intervalMs: 5 } }),
+      /Electron's server has not named itself in \.dev\/ports\.json.*\.dev\/logs\/electron-live-testing\.stderr\.log/,
+    );
+  } finally {
+    NodeFS.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test("agentReady fails at the deadline when a contract endpoint never becomes ready", async () => {
   const repo = makeRepo();
   const health = await startServer((_request, response) => response.writeHead(503).end());

@@ -24,7 +24,7 @@ import { openDesktopSocket, findFixtureWorkspace } from "./thread-lifecycle.mjs"
 import { renderFixtureWrapper } from "./codex-protocol-notices.mjs";
 import { connectElectronSession, disconnectElectronSession } from "../../electorn-live-testing/scripts/electron-session.mjs";
 
-const DESKTOP_RUNTIME = ".dev/electron-agent-runtime/runtime";
+const DESKTOP_RUNTIME = ".dev";
 const MAX_MOVE_PX = 1;
 const SETTLE_MS = 1200;
 const MIN_USABLE_SAMPLES = 10;

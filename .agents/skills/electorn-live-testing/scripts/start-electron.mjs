@@ -87,7 +87,9 @@ export async function startElectron(repoRoot = process.cwd(), options = {}) {
   const sessionFile = join(runtime.paths.devDir, settings.sessionFileName);
   const userDataDir = join(runtime.paths.devDir, settings.sessionFileName.slice(0, -".json".length));
   runtime.runtimeContract.assertRuntimeDirectorySafe(userDataDir, "managed desktop user-data directory", true);
-  runtime.runtimeContract.assertRuntimeDirectorySafe(join(userDataDir, "runtime"), "managed desktop runtime directory", true);
+  if (!settings.useWorktreeServer) {
+    runtime.runtimeContract.assertRuntimeDirectorySafe(join(userDataDir, "runtime"), "managed desktop runtime directory", true);
+  }
   const existing = await readExistingSession(sessionFile, root);
   if (existing) return existing;
   const debugPort = await runtime.runtimeContract.findAvailablePort(
@@ -114,6 +116,9 @@ async function loadElectronRuntime(root, options) {
   const packagedExecutablePath = options.packagedExecutablePath
     ? resolve(options.packagedExecutablePath)
     : null;
+  if (options.useWorktreeServer && packagedExecutablePath) {
+    throw new Error("useWorktreeServer requires an unpackaged Electron launch");
+  }
   const ports = runtimeContract.readPortsFile(root);
   if (!packagedExecutablePath && !ports) {
     throw new Error("Start the worktree runtime before launching Electron");
@@ -129,7 +134,8 @@ function resolveElectronSettings(options, ports, packagedExecutablePath) {
   const performanceMode = resolvePerformanceMode(options);
   const accelerationMode = resolveAccelerationMode(options, performanceMode);
   const rendererUrl = resolveRendererUrl(options, packagedExecutablePath, ports);
-  return { accelerationMode, packagedExecutablePath, performanceMode, rendererUrl, sessionFileName };
+  const useWorktreeServer = options.useWorktreeServer ?? false;
+  return { accelerationMode, packagedExecutablePath, performanceMode, rendererUrl, sessionFileName, useWorktreeServer };
 }
 
 function resolveSessionFileName(options) {
@@ -248,13 +254,12 @@ function writeStartingSession(sessionFile, record) {
   });
 }
 
-function buildElectronEnvironment(root, runtime, launch, settings) {
+/** Builds the launch environment for a worktree-owned or disposable Electron server. */
+export function buildElectronEnvironment(root, runtime, launch, settings) {
   const env = {
     ...process.env,
     ...runtime.runtimeContract.buildRuntimeStateEnv(root, {
       MCODE_AGENT_FIXTURE_REPO: runtime.paths.fixtureRepoDir,
-      MCODE_DATA_DIR: launch.electronRuntimeDir,
-      MCODE_DB_PATH: join(launch.electronRuntimeDir, "db", "app.sqlite"),
       MCODE_ELECTRON_USER_DATA_DIR: launch.userDataDir,
     }),
     ...(settings.rendererUrl ? { ELECTRON_RENDERER_URL: settings.rendererUrl } : {}),
@@ -264,6 +269,15 @@ function buildElectronEnvironment(root, runtime, launch, settings) {
       : {}),
     NODE_ENV: settings.rendererUrl ? "development" : "production",
   };
+  if (settings.useWorktreeServer) {
+    env.MCODE_AUTH_TOKEN = runtime.ports.seedLogin.token;
+    env.MCODE_AGENT_RUNTIME_CONTRACT = runtime.paths.portsFile;
+    env.MCODE_INSTANCE_TOKEN = runtime.ports.instanceToken;
+    env.MCODE_WORKTREE_IDENTITY = root;
+  } else {
+    env.MCODE_DATA_DIR = launch.electronRuntimeDir;
+    env.MCODE_DB_PATH = join(launch.electronRuntimeDir, "db", "app.sqlite");
+  }
   delete env.ELECTRON_RUN_AS_NODE;
   return env;
 }

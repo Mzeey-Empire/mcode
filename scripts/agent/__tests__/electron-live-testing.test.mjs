@@ -6,14 +6,46 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { parseCaptureArguments } from "../../../.agents/skills/electorn-live-testing/scripts/capture.mjs";
-import { probeCdpVersion } from "../../../.agents/skills/electorn-live-testing/scripts/start-electron.mjs";
+import { buildElectronEnvironment, probeCdpVersion } from "../../../.agents/skills/electorn-live-testing/scripts/start-electron.mjs";
 import * as usageFixture from "../../../.agents/skills/electorn-live-testing/scripts/usage-fixture.mjs";
+import * as runtimeContract from "../runtime-contract.mjs";
 
 const validCdpVersion = {
   Browser: "Electron/37.3.1",
   "Protocol-Version": "1.3",
   webSocketDebuggerUrl: "ws://127.0.0.1:43000/devtools/browser/session",
 };
+
+NodeTest.test("managed Electron uses the worktree database and the contract's server identity", () => {
+  const root = NodePath.resolve("worktree-fixture");
+  const env = buildElectronEnvironment(root, {
+    runtimeContract,
+    paths: runtimeContract.getRuntimePaths(root),
+    ports: { seedLogin: { token: "runtime-token" }, instanceToken: "runtime-instance" },
+  }, {
+    userDataDir: NodePath.join(root, ".dev", "electron-agent-runtime"),
+    electronRuntimeDir: NodePath.join(root, ".dev", "electron-agent-runtime", "runtime"),
+  }, { useWorktreeServer: true });
+
+  NodeAssertStrict.default.equal(env.MCODE_DATA_DIR, NodePath.join(root, ".dev"));
+  NodeAssertStrict.default.equal(env.MCODE_DB_PATH, NodePath.join(root, ".dev", "db", "app.sqlite"));
+  NodeAssertStrict.default.equal(env.MCODE_AUTH_TOKEN, "runtime-token");
+  NodeAssertStrict.default.equal(env.MCODE_INSTANCE_TOKEN, "runtime-instance");
+  NodeAssertStrict.default.equal(env.MCODE_WORKTREE_IDENTITY, root);
+  NodeAssertStrict.default.equal(env.MCODE_AGENT_RUNTIME_CONTRACT, NodePath.join(root, ".dev", "ports.json"));
+});
+
+NodeTest.test("disposable Electron keeps its session's private database", () => {
+  const root = NodePath.resolve("worktree-fixture");
+  const userDataDir = NodePath.join(root, ".dev", "electron-live-testing");
+  const env = buildElectronEnvironment(root, {
+    runtimeContract,
+    paths: runtimeContract.getRuntimePaths(root),
+  }, { userDataDir, electronRuntimeDir: NodePath.join(userDataDir, "runtime") }, {});
+
+  NodeAssertStrict.default.equal(env.MCODE_DATA_DIR, NodePath.join(userDataDir, "runtime"));
+  NodeAssertStrict.default.equal(env.MCODE_DB_PATH, NodePath.join(userDataDir, "runtime", "db", "app.sqlite"));
+});
 
 NodeTest.test("bounds a fetch that never settles", { timeout: 5_000 }, async () => {
   const ready = await probeCdpVersion("http://127.0.0.1:43000", {
