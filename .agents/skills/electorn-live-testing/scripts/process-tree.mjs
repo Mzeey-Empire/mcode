@@ -1,13 +1,26 @@
 import * as NodeChildProcess from "node:child_process";
 
-/** Stops a detached process tree and reports whether the operating system accepted the request. */
-export function terminateProcessTree(pid, runCommand = NodeChildProcess.spawnSync) {
+/**
+ * Asks the operating system to stop a detached process tree and reports whether it accepted the request.
+ * Acceptance does not mean the tree has exited; callers that need that must wait for the PID.
+ *
+ * @param {number} pid
+ * @param {{ runCommand?: typeof NodeChildProcess.spawnSync, platform?: NodeJS.Platform, kill?: (pid: number, signal: NodeJS.Signals) => void, signal?: "SIGTERM" | "SIGKILL" }} [options]
+ */
+export function terminateProcessTree(pid, options = {}) {
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     throw new Error("Process tree PID must be a positive integer");
   }
-  return process.platform === "win32"
+  const { runCommand, platform, kill, signal } = {
+    runCommand: NodeChildProcess.spawnSync,
+    platform: process.platform,
+    kill: (target, killSignal) => process.kill(target, killSignal),
+    signal: "SIGTERM",
+    ...options,
+  };
+  return platform === "win32"
     ? terminateWindowsProcessTree(pid, runCommand)
-    : terminatePosixProcessTree(pid);
+    : terminatePosixProcessTree(pid, kill, signal);
 }
 
 function terminateWindowsProcessTree(pid, runCommand) {
@@ -28,19 +41,19 @@ function terminateWindowsProcessTree(pid, runCommand) {
   };
 }
 
-function terminatePosixProcessTree(pid) {
+function terminatePosixProcessTree(pid, kill, signal) {
   try {
-    process.kill(-pid, "SIGTERM");
+    kill(-pid, signal);
     return { ok: true, error: null };
   } catch (groupError) {
     if (groupError?.code !== "ESRCH") throw groupError;
   }
 
   try {
-    process.kill(pid, "SIGTERM");
+    kill(pid, signal);
     return { ok: true, error: null };
   } catch (processError) {
-    if (processError?.code === "ESRCH") return { ok: true, error: null };
+    if (processError?.code === "ESRCH") return { ok: true, alreadyStopped: true, error: null };
     throw processError;
   }
 }

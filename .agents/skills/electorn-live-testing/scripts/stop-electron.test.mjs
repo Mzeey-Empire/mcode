@@ -49,12 +49,11 @@ NodeTest.test("keeps the Electron session record when command-line inspection ti
   }
 });
 
-NodeTest.test("removes the Electron session when taskkill reports no running instance", {
-  skip: process.platform !== "win32",
-}, () => {
+NodeTest.test("removes the Electron session when taskkill reports no running instance", () => {
   const { repoRoot, sessionFile } = writeSessionRecord(12345);
   try {
     const result = stopElectron(repoRoot, {
+      platform: "win32",
       isProcessAlive: () => true,
       runCommand: (command) => command === "taskkill.exe"
         ? { status: 128, stderr: "There is no running instance of the task" }
@@ -62,6 +61,60 @@ NodeTest.test("removes the Electron session when taskkill reports no running ins
     });
     NodeAssertStrict.deepEqual(result, { pid: 12345, status: "already-stopped" });
     NodeAssertStrict.equal(NodeFS.existsSync(sessionFile), false);
+  } finally {
+    NodeFS.rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+for (const scenario of [
+  { name: "waits for Electron to exit after SIGTERM", diesOn: "SIGTERM", signals: ["SIGTERM"], status: "stopped" },
+  { name: "force-stops Electron that ignores SIGTERM", diesOn: "SIGKILL", signals: ["SIGTERM", "SIGKILL"], status: "stopped" },
+  { name: "reports Electron that survives SIGKILL as unconfirmed", diesOn: null, signals: ["SIGTERM", "SIGKILL"], status: "unconfirmed" },
+  { name: "treats an unreaped zombie as exited", diesOn: null, zombieAfter: "SIGTERM", signals: ["SIGTERM"], status: "stopped" },
+]) {
+  NodeTest.test(`on POSIX, ${scenario.name}`, () => {
+    const { repoRoot, sessionFile } = writeSessionRecord(12345);
+    const sent = [];
+    const received = (signal) => sent.some((entry) => entry.signal === signal);
+    try {
+      const result = stopElectron(repoRoot, {
+        platform: "linux",
+        exitWaitMs: 0,
+        sleepSync: () => {},
+        kill: (pid, signal) => sent.push({ pid, signal }),
+        isProcessAlive: () => !(scenario.diesOn && received(scenario.diesOn)),
+        runCommand: (command, args) => {
+          NodeAssertStrict.equal(command, "ps");
+          if (args.includes("stat=")) {
+            return { status: 0, stdout: scenario.zombieAfter && received(scenario.zombieAfter) ? "Z\n" : "S\n" };
+          }
+          return { status: 0, stdout: `${process.execPath} --remote-debugging-port=9222\n` };
+        },
+      });
+      NodeAssertStrict.equal(result.status, scenario.status);
+      NodeAssertStrict.deepEqual(sent, scenario.signals.map((signal) => ({ pid: -12345, signal })));
+      NodeAssertStrict.equal(NodeFS.existsSync(sessionFile), scenario.status === "unconfirmed");
+    } finally {
+      NodeFS.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+}
+
+NodeTest.test("on Windows, reports Electron still running after taskkill as unconfirmed", () => {
+  const { repoRoot, sessionFile } = writeSessionRecord(12345);
+  try {
+    const result = stopElectron(repoRoot, {
+      platform: "win32",
+      exitWaitMs: 0,
+      sleepSync: () => {},
+      isProcessAlive: () => true,
+      runCommand: (command) => command === "taskkill.exe"
+        ? { status: 0, stdout: "SUCCESS", stderr: "" }
+        : { status: 0, stdout: `"${process.execPath}" --remote-debugging-port=9222` },
+    });
+    NodeAssertStrict.equal(result.status, "unconfirmed");
+    NodeAssertStrict.match(result.reason, /still running/);
+    NodeAssertStrict.equal(NodeFS.existsSync(sessionFile), true);
   } finally {
     NodeFS.rmSync(repoRoot, { recursive: true, force: true });
   }
