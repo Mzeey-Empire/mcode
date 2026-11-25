@@ -736,6 +736,8 @@ interface WorkspaceState {
   /** Apply a server-authoritative completion lifecycle push. */
   applyThreadLifecycle: (thread: Thread) => void;
   applyThreadActivity: (threadId: string, at: string) => void;
+  /** Record a worktree path the server saved or cleared after it announced the thread. */
+  applyThreadWorktreePath: (threadId: string, worktreePath: string | null) => void;
   applyThreadPullRequests: (threadId: string, prs: ThreadPullRequest[]) => void;
   /** Remove a thread after server-authoritative automatic cleanup. */
   applyThreadDeleted: (threadId: string) => void;
@@ -1766,6 +1768,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       const existing = state.threads.find((thread) => thread.id === threadId);
       if (!existing || Date.parse(existing.last_activity_at) >= Date.parse(at)) return state;
       return { threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, last_activity_at: at } : thread) };
+    });
+  },
+
+  applyThreadWorktreePath: (threadId, worktreePath) => {
+    set((state) => {
+      const existing = state.threads.find((thread) => thread.id === threadId);
+      if (!existing || existing.worktree_path === worktreePath) return state;
+      return { threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, worktree_path: worktreePath } : thread) };
     });
   },
 

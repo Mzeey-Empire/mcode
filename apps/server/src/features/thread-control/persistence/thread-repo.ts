@@ -121,12 +121,16 @@ export class ThreadRepo {
     return this.reader.hasRetentionCleanupJob(id);
   }
 
-  updateWorktreePath(id: Parameters<ThreadStore["updateWorktreePath"]>[0], worktreePath: Parameters<ThreadStore["updateWorktreePath"]>[1]): Promise<ReturnType<ThreadStore["updateWorktreePath"]>> {
-    return this.writer.execute(threadWriteOperations.updateWorktreePath, [id, worktreePath]);
+  async updateWorktreePath(id: Parameters<ThreadStore["updateWorktreePath"]>[0], worktreePath: Parameters<ThreadStore["updateWorktreePath"]>[1]): Promise<ReturnType<ThreadStore["updateWorktreePath"]>> {
+    const updated = await this.writer.execute(threadWriteOperations.updateWorktreePath, [id, worktreePath]);
+    if (updated) broadcast("thread.worktreeChanged", { threadId: id, worktreePath });
+    return updated;
   }
 
-  clearWorktreePath(id: Parameters<ThreadStore["clearWorktreePath"]>[0]): Promise<ReturnType<ThreadStore["clearWorktreePath"]>> {
-    return this.writer.execute(threadWriteOperations.clearWorktreePath, [id]);
+  async clearWorktreePath(id: Parameters<ThreadStore["clearWorktreePath"]>[0]): Promise<ReturnType<ThreadStore["clearWorktreePath"]>> {
+    const cleared = await this.writer.execute(threadWriteOperations.clearWorktreePath, [id]);
+    if (cleared) broadcast("thread.worktreeChanged", { threadId: id, worktreePath: null });
+    return cleared;
   }
 
   async updateCheckoutToNamedBranch(id: Parameters<ThreadStore["updateCheckoutToNamedBranch"]>[0], branch: Parameters<ThreadStore["updateCheckoutToNamedBranch"]>[1]): Promise<Thread | null> {

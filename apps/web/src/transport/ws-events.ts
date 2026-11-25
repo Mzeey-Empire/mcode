@@ -330,6 +330,14 @@ export function startPushListeners(): void {
   );
 
   unsubs.push(
+    pushEmitter.on("thread.worktreeChanged", (data) => {
+      const parsed = WS_CHANNELS["thread.worktreeChanged"].safeParse(data);
+      if (!parsed.success) return;
+      useWorkspaceStore.getState().applyThreadWorktreePath(parsed.data.threadId, parsed.data.worktreePath);
+    }),
+  );
+
+  unsubs.push(
     pushEmitter.on("thread.resumeScheduled", (data) => {
       const parsed = WS_CHANNELS["thread.resumeScheduled"].safeParse(data);
       if (!parsed.success) return;

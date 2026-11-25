@@ -2,6 +2,7 @@ import { inject, injectable } from "tsyringe";
 import { sanitizeBranchForFolder, validateBranchName, logger } from "@mcode/shared";
 import type { Thread } from "@mcode/contracts/models/thread";
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
+import { broadcast } from "../../../application/transport/push.js";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { GitWorktreeService } from "../git/git-worktree-service.js";
 import { SandboxWorktreeCleanupPolicy } from "./sandbox-worktree-cleanup-policy.js";
@@ -157,6 +158,7 @@ export class ProjectWorktreeService {
       const committed = await this.writer.execute(projectLifecycleWriteOperations.persistProvisionedWorktree,
         [thread.id, thread.workspace_id, provisioned.info.path]);
       if (!committed) throw new Error(`Failed to persist worktree path for thread ${thread.id}`);
+      broadcast("thread.worktreeChanged", { threadId: committed.id, worktreePath: committed.worktree_path });
       return committed;
     } catch (error) {
       // A lost acknowledgment may follow a commit; deleting that checkout would corrupt durable state.
