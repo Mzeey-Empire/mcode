@@ -2077,6 +2077,76 @@ describe("Workspace Behavior", () => {
       },
     );
 
+    // The composer holds no copy of a placeholder's draft, so after a failed first send nothing else releases it.
+    it.each(["same-startup retry", "recovery"] as const)(
+      "releases a failed placeholder's kept attachments when %s makes the thread",
+      async (completion) => {
+        const ws = createMockWorkspace({ id: `ws-kept-${completion}` });
+        const durable = createMockThread({ id: `durable-kept-${completion}`, workspace_id: ws.id });
+        const previewUrl = `blob:kept-${completion}`;
+        const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+        const draft = {
+          ...pendingComposerDraft,
+          attachments: [{
+            id: `attachment-kept-${completion}`,
+            name: "preview.png",
+            mimeType: "image/png",
+            sizeBytes: 128,
+            previewUrl,
+            filePath: "C:/tmp/preview.png",
+          }],
+        };
+        useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+        (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>)
+          .mockRejectedValueOnce(new Error("Response lost"))
+          .mockResolvedValueOnce(createMockCreateAndSendResult({ id: durable.id, workspace_id: ws.id }));
+
+        await expect(useWorkspaceStore.getState().createAndSendMessage(
+          draft.input,
+          draft.modelId,
+          undefined,
+          toComposerAttachmentMetas(draft.attachments),
+          draft.reasoning,
+          draft.provider,
+          undefined,
+          true,
+          draft.fastMode ?? undefined,
+          draft.input,
+          draft.mentions,
+          undefined,
+          undefined,
+          undefined,
+          draft.selectedTextComments,
+          draft,
+        )).rejects.toThrow("Response lost");
+        const placeholderId = useWorkspaceStore.getState().activeThreadId!;
+
+        if (completion === "same-startup retry") {
+          (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+          await useWorkspaceStore.getState().retryPreparingThread(placeholderId);
+        } else {
+          (mockTransport.getThreadStartup as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+            ...cancelledBeforeThread(placeholderId, ws.id),
+            state: "running",
+            phase: "agent",
+            steps: [{ phase: "thread", state: "completed" }, { phase: "agent", state: "running" }],
+            cancellation: "none",
+            threadId: durable.id,
+          });
+          (mockTransport.listAllThreads as ReturnType<typeof vi.fn>).mockResolvedValueOnce([durable]);
+          (mockTransport.listRunning as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+          await useWorkspaceStore.getState().adoptPreparingThread(placeholderId);
+        }
+
+        expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
+        expect(useComposerDraftStore.getState().getDraft(placeholderId)).toBeUndefined();
+        expect(useComposerDraftStore.getState().getDraft(durable.id)).toBeUndefined();
+        expect(revokeObjectUrl).toHaveBeenCalledOnce();
+        expect(revokeObjectUrl).toHaveBeenCalledWith(previewUrl);
+        revokeObjectUrl.mockRestore();
+      },
+    );
+
     it("createAndSendMessage sends a base branch when attaching a detached existing worktree", async () => {
       const ws = createMockWorkspace({ id: "ws-detached-existing" });
       const created = createMockThread({

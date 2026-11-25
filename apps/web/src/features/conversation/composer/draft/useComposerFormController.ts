@@ -188,6 +188,14 @@ function draftPersistTarget(
   return snapshotDraftTarget(state);
 }
 
+/** A placeholder row stands in for a thread until the server confirms it; only placeholders carry these flags. */
+function isUnconfirmedThread(
+  thread: UseComposerFormControllerOptions["activeThread"],
+  threadId: string,
+): boolean {
+  return thread?.id === threadId && (thread.clientPreparing === true || thread.clientError != null);
+}
+
 /** Captures the selection fields a draft entity stores outside ComposerDraft. */
 function snapshotDraftSelection(selection: ComposerAgentSelection): ThreadDraftSelection {
   return {
@@ -225,7 +233,7 @@ export function useComposerFormController({
     replaceAttachments,
   } = attachments;
   const owner: ComposerOwner = threadId
-    ? { kind: "thread", id: threadId }
+    ? { kind: isUnconfirmedThread(activeThread, threadId) ? "placeholder" : "thread", id: threadId }
     : draftId
       ? { kind: "draft", id: draftId }
       : { kind: "new" };

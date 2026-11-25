@@ -12,9 +12,16 @@ import {
   releaseBrowserCaptureSpills,
 } from "@/features/preview/capture/browser-capture-spill";
 
-/** Identity of the session a Composer is bound to. */
+/**
+ * Identity of the session a Composer is bound to.
+ *
+ * A `placeholder` is a thread the server has not confirmed yet. Its stored draft is the first message, kept for Edit
+ * message and Retry after a failed start, and the timeline already shows it. So that owner reads no draft and saves
+ * none, which leaves the locked composer empty and the kept message intact.
+ */
 export type ComposerOwner =
   | { kind: "thread"; id: string }
+  | { kind: "placeholder"; id: string }
   | { kind: "draft"; id: string }
   | { kind: "new" };
 
@@ -136,7 +143,7 @@ export function resolveComposerSessionForOwner({
   const threadSettings = readComposerThreadSettings(owner.id);
   return resolveComposerSession({
     threadId: owner.id,
-    getDraft,
+    getDraft: owner.kind === "placeholder" ? () => undefined : getDraft,
     threadRow: readWorkspaceThread(owner.id),
     threadSettings,
     globalDefaults: readComposerGlobalDefaults(),

@@ -592,6 +592,18 @@ function draftChangedSinceSubmission(pending: PendingThreadCreation, draft: Comp
 }
 
 /**
+ * Drops a placeholder's kept first message once a retry or recovery makes its thread. The composer never holds a
+ * copy of a placeholder's draft, so the kept draft owns its attachments and releases them unless they move with an
+ * edited draft to the new thread. If the original send is still in flight and later confirms, it releases them
+ * again; release is idempotent.
+ */
+function releasePlaceholderDraftUnlessMoved(placeholderId: string, movedDraft: ComposerDraft | undefined): void {
+  const draftStore = useComposerDraftStore.getState();
+  if (movedDraft) draftStore.removeDraftAfterAttachmentTransfer(placeholderId);
+  else draftStore.clearDraft(placeholderId);
+}
+
+/**
  * Optional RPC dispatch callback used by workspace actions. Tests inject a
  * stub here; production code uses {@link getTransport} directly. The shape
  * mirrors the transport's `call` method so handlers can be swapped freely.
@@ -845,7 +857,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     workspaceId: string,
     result: CreateAndSendResult,
     transportWasWorktree: boolean,
-    releasePlaceholderDraft: boolean,
+    attachmentOwner: "submitting-composer" | "kept-draft",
   ) => {
     const { runtimeSnapshot, warnings, ...thread } = result;
     if (!pendingThreadCreationByPlaceholderId.has(placeholderId)) {
@@ -859,8 +871,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
     const draftStore = useComposerDraftStore.getState();
     const draft = draftStore.getDraft(placeholderId);
-    const editedDraft = !releasePlaceholderDraft && pending && draftChangedSinceSubmission(pending, draft) ? draft : undefined;
-    if (releasePlaceholderDraft) draftStore.clearDraft(placeholderId);
+    const editedDraft = pending && draftChangedSinceSubmission(pending, draft) ? draft : undefined;
+    if (attachmentOwner === "kept-draft") releasePlaceholderDraftUnlessMoved(placeholderId, editedDraft);
     else draftStore.removeDraftAfterAttachmentTransfer(placeholderId);
     // Apply the snapshot before the transfer so a pre-agent "idle" snapshot
     // cannot erase the optimistic running mark: the transfer then re-asserts
@@ -978,7 +990,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         attempt.workspaceId,
         result,
         attempt.transportMode === "worktree",
-        false,
+        "submitting-composer",
       );
       return result;
     } catch (error) {
@@ -994,7 +1006,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     const draft = draftStore.getDraft(placeholderId);
     const editedDraft = draftChangedSinceSubmission(pending, draft) ? draft : undefined;
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
-    draftStore.removeDraftAfterAttachmentTransfer(placeholderId);
+    releasePlaceholderDraftUnlessMoved(placeholderId, editedDraft);
     // Without the create response, the server snapshot is the only source of the
     // execution identity that lets the turn's terminal event settle the record.
     if (runtimeSnapshot) useThreadStore.getState().applyThreadRuntimeSnapshot(runtimeSnapshot);
@@ -1590,7 +1602,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           currentPending.workspaceId,
           result,
           currentPending.transportMode === "worktree",
-          retry.newStartup,
+          // The first send failed, so the kept draft, not the submitting composer, owns the attachments now.
+          "kept-draft",
         );
         return result;
       } catch (error) {
