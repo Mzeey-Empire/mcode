@@ -905,6 +905,7 @@ async function initializeWorkspaceWatchers(): Promise<ReturnType<typeof workspac
 
 /** Starts watchers and repairs metadata for one persisted workspace. */
 async function initializeWorkspaceWatcher(workspace: ReturnType<typeof workspaceRepo.listAll>[number]): Promise<void> {
+  if (workspace.kind === "no_project") return;
   gitWatcherService.watchWorkspace(workspace.id, workspace.path);
   for (const thread of threadService.list(workspace.id)) {
     if (thread.mode === "worktree" && thread.worktree_path) {

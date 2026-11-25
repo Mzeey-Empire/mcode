@@ -516,8 +516,8 @@ export class ReviewWorktreeService {
     let matchCount = 0;
     const target = new URL(repositoryUrl);
     const targetKey = `${target.host.toLowerCase()}${target.pathname.toLowerCase()}`;
-    for (const workspace of this.workspaceRepo.listAll()) {
-      if (!workspace.is_git_repo) continue;
+    const gitProjects = this.workspaceRepo.listAll().filter((workspace) => workspace.kind === "project" && workspace.is_git_repo);
+    for (const workspace of gitProjects) {
       const remotes = await this.gitRepository.listNormalizedRemotes(workspace.path);
       if (!remotes.some((remote) => {
         const url = new URL(remote.webUrl);

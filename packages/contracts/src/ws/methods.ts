@@ -604,6 +604,7 @@ export const WorkspaceCreateErrorCodeSchema = lazySchema(() => z.enum([
   "not_a_directory",
   "too_broad",
   "permission_denied",
+  "reserved_folder",
 ]));
 
 /** Stable registration failure codes for client-side copy. */
@@ -714,6 +715,10 @@ export const WS_METHODS = lazySchema(() => ({
       name: z.string().trim().min(1).max(120).optional(),
     }),
     result: WorkspaceCreateResultSchema(),
+  },
+  "workspace.createNoProject": {
+    params: z.object({ id: z.string().uuid() }),
+    result: WorkspaceSchema(),
   },
   /** Rename a workspace without changing its filesystem path. */
   "workspace.rename": {

@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import * as NodeEvents from "node:events";
+import * as NodePath from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -10,8 +11,10 @@ import { CiWatcherService } from "../../../../pull-requests/status/ci-watcher.js
 import { createThreadPersistenceTestRuntime } from "../../../../thread-control/testing/thread-persistence-test-runtime.js";
 import { ThreadRepo } from "../../../../thread-control/persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../persistence/workspace-repo.js";
+import { FakeGitExecutor } from "../../../git/execution/index.js";
+import { WorkspaceService } from "../../workspace-service.js";
 import { addClient, broadcast, _resetForTest } from "../../../../../application/transport/push.js";
-import { syncThreadPullRequests, updateThreadSettings } from "../workspace-thread-rpc.js";
+import { createNoProjectWorkspace, syncThreadPullRequests, updateThreadSettings } from "../workspace-thread-rpc.js";
 
 const pushSchema = z.object({ channel: z.string(), data: z.unknown() });
 const checks = { aggregate: "passing", runs: [], fetchedAt: 1 } satisfies PullRequestWatchSnapshot["checks"];
@@ -69,6 +72,42 @@ function nextPush(client: WebSocket): Promise<z.infer<typeof pushSchema>> {
 }
 
 afterEach(() => _resetForTest());
+
+it("refreshes connected clients only when a no-project workspace is created", async () => {
+  const f = await fixture();
+  const workspaceService = new WorkspaceService(f.workspaces, f.threads, f.writer,
+    { removeForThread: vi.fn() },
+    {
+      teardownThread: vi.fn(async () => undefined),
+      deletePersistentData: async <Result>(_ids: readonly string[], remove: () => Promise<Result>) => remove(),
+      notifyThreadsHidden: vi.fn(),
+    },
+    new FakeGitExecutor(),
+    { killByThread: vi.fn(async () => undefined) },
+    NodePath.dirname(f.database.filename),
+  );
+  const socket = await connectClients();
+  const id = crypto.randomUUID();
+  try {
+    const pushes = socket.clients.map(nextPush);
+    const workspace = await createNoProjectWorkspace({ workspaceService }, { id });
+    expect(workspace).toMatchObject({ id, kind: "no_project" });
+    expect(await Promise.all(pushes)).toEqual([
+      { channel: "workspace.orderChanged", data: {} },
+      { channel: "workspace.orderChanged", data: {} },
+    ]);
+
+    const afterDuplicate = socket.clients.map(nextPush);
+    await expect(createNoProjectWorkspace({ workspaceService }, { id })).rejects.toThrow(/Workspace ID.*already exists/);
+    broadcast("workspace.deleted", { workspaceId: id });
+    expect(await Promise.all(afterDuplicate)).toEqual([
+      { channel: "workspace.deleted", data: { workspaceId: id } },
+      { channel: "workspace.deleted", data: { workspaceId: id } },
+    ]);
+  } finally {
+    await socket.close();
+  }
+});
 
 it.each([true, null])("passes Thinking %s to the settings service", async (thinking) => {
   const updateSettings = vi.fn().mockResolvedValue(true);

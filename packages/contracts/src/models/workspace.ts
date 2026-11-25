@@ -8,6 +8,8 @@ export const WorkspaceSchema = lazySchema(() =>
     id: z.string(),
     name: z.string(),
     path: z.string(),
+    /** Distinguishes a registered project from a workspace owned by no-project threads. */
+    kind: z.enum(["project", "no_project"]),
     provider_config: z.record(z.unknown()),
     is_git_repo: z.boolean(),
     created_at: z.string(),

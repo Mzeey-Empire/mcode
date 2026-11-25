@@ -281,11 +281,15 @@ function lintBreaks(
 function lintContractStepEntries(order: ReadonlyMap<string, number>, policy: LintPolicy, problems: string[]): void {
   for (const [tag, step] of Object.entries(policy.contractSteps)) {
     const ordinal = order.get(tag);
-    if (ordinal === undefined) problems.push(`CONTRACT_STEPS names ${tag}, which is not in the journal`);
+    if (ordinal === undefined) {
+      problems.push(`CONTRACT_STEPS names ${tag}, which is not in the journal`);
+      continue;
+    }
     if (step.reason.trim() === "") problems.push(`CONTRACT_STEPS entry ${tag} has no reason`);
     if (tag in policy.compatibleSteps) problems.push(`${tag} is in both CONTRACT_STEPS and COMPATIBLE_STEPS`);
     const expanded = step.expandedIn;
-    if (expanded !== undefined && (order.get(expanded) ?? Infinity) >= (ordinal ?? -1)) {
+    if (expanded === tag && step.breaks.length === 0) continue;
+    if (expanded !== undefined && (order.get(expanded) ?? Infinity) >= ordinal) {
       problems.push(`CONTRACT_STEPS entry ${tag} says it was expanded in ${expanded}, which is not an earlier migration`);
     }
   }

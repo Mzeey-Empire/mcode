@@ -7,7 +7,8 @@ export type ContractStep = Readonly<{
    * Tag of the newest migration that shipped in the release whose code no longer uses the removed
    * shape. Required after the floor migration: the step raises the floor to this migration's `when`,
    * so that release keeps opening the database and only older builds refuse. Optional before it,
-   * where the seeded floor already covers the step.
+   * where the seeded floor already covers the step. A behavior break without a detected schema
+   * break can use its own tag when only the migrating build understands the new data.
    */
   expandedIn?: string;
 }>;
@@ -30,6 +31,11 @@ export const FLOOR_TABLE_NAME = "mcode_schema_compatibility";
  * contain {@link floorUpsertStatement} for that migration's `when` and the step's own tag.
  */
 export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
+  "0112_eminent_millenium_guard": {
+    breaks: [],
+    expandedIn: "0112_eminent_millenium_guard",
+    reason: "Older builds list no-project workspaces as registered projects.",
+  },
   "0106_assistant_content_appends": {
     breaks: [],
     expandedIn: "0104_graceful_patriot",

@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { Database } from "bun:sqlite";
 import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import { createThreadPersistenceTestRuntime } from "../../../thread-control/testing/thread-persistence-test-runtime.js";
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -280,6 +281,7 @@ describe("WorkspaceService.delete - two-phase orchestration", () => {
       createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
       { killByThread: vi.fn().mockResolvedValue(undefined) },
+      NodePath.dirname(db.filename),
     );
   });
 
@@ -709,6 +711,7 @@ describe("WorkspaceService.delete - runtime teardown", () => {
       mockThreadDeletion,
       mockGitExecutor,
       { killByThread: vi.fn().mockResolvedValue(undefined) },
+      NodePath.dirname(db.filename),
     );
   });
 
@@ -763,6 +766,7 @@ describe("Workspace delete - cross-workspace fork lineage", () => {
       createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
       { killByThread: vi.fn().mockResolvedValue(undefined) },
+      NodePath.dirname(db.filename),
     );
   });
 
@@ -1027,6 +1031,7 @@ describe("Workspace delete - zero-worktree fast path", () => {
       createThreadDeletionTeardownServiceMock(),
       mockGitExecutor,
       { killByThread: vi.fn().mockResolvedValue(undefined) },
+      NodePath.dirname(db.filename),
     );
   });
 

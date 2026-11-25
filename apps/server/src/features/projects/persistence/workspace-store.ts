@@ -6,10 +6,10 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
 import type { Database } from "bun:sqlite";
-import { and, asc, count, desc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, notExists, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { Workspace } from "@mcode/contracts/models/workspace";
-import { threads, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
+import { threads, threadStartups, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -19,6 +19,7 @@ function rowToWorkspace(row: WorkspaceRow): Workspace {
     id: row.id,
     name: row.name,
     path: row.path,
+    kind: row.kind,
     provider_config: JSON.parse(row.providerConfig) as Record<
       string,
       unknown
@@ -51,11 +52,11 @@ export class WorkspaceStore {
   }
 
   /** Create a new workspace and return the fully-populated record. */
-  create(name: string, path: string, isGitRepo = true): Workspace {
+  create(name: string, path: string, isGitRepo = true, kind: Workspace["kind"] = "project"): Workspace {
     const id = NodeCrypto.randomUUID();
     const now = new Date().toISOString();
 
-    this.orm.transaction((tx) => {
+    return this.orm.transaction((tx) => {
       // Evict a soft-deleted row occupying this path only if it has no remaining
       // child threads (i.e. async cleanup already finished). If threads still
       // exist the CleanupWorker will hard-delete the workspace once done.
@@ -78,34 +79,21 @@ export class WorkspaceStore {
         .update(workspaces)
         .set({ sortOrder: sql`${workspaces.sortOrder} + 1` })
         .run();
-      tx
+      const row = tx
         .insert(workspaces)
         .values({
           id,
           name,
           path,
+          kind,
           isGitRepo: isGitRepo ? 1 : 0,
           createdAt: now,
           updatedAt: now,
           sortOrder: 0,
         })
-        .run();
+        .returning().get();
+      return rowToWorkspace(row);
     });
-
-    return {
-      id,
-      name,
-      path,
-      provider_config: {},
-      is_git_repo: isGitRepo,
-      created_at: now,
-      updated_at: now,
-      pinned: false,
-      last_opened_at: null,
-      sort_order: 0,
-      deleted_at: null,
-      icon_path: null,
-    };
   }
 
   /** Move an existing workspace to the top of the sidebar (sort_order 0). */
@@ -139,6 +127,7 @@ export class WorkspaceStore {
     const rows = this.orm
       .select({ id: workspaces.id })
       .from(workspaces)
+      .where(and(eq(workspaces.kind, "project"), isNull(workspaces.deletedAt)))
       .orderBy(asc(workspaces.sortOrder), asc(workspaces.id))
       .all();
 
@@ -201,11 +190,12 @@ export class WorkspaceStore {
   /** Search registered non-deleted workspaces by name or repository path. */
   search(query: string, limit: number): Workspace[] {
     const normalized = query.trim();
+    const liveProjects = and(isNull(workspaces.deletedAt), eq(workspaces.kind, "project"));
     if (!normalized) {
       return this.orm
         .select()
         .from(workspaces)
-        .where(isNull(workspaces.deletedAt))
+        .where(liveProjects)
         .orderBy(
           sql`${workspaces.lastOpenedAt} DESC NULLS LAST`,
           desc(workspaces.updatedAt),
@@ -221,7 +211,7 @@ export class WorkspaceStore {
       .from(workspaces)
       .where(
         and(
-          isNull(workspaces.deletedAt),
+          liveProjects,
           or(
             sql`${workspaces.name} LIKE ${pattern} ESCAPE '\\'`,
             sql`${workspaces.path} LIKE ${pattern} ESCAPE '\\'`,
@@ -236,6 +226,75 @@ export class WorkspaceStore {
       .limit(limit)
       .all()
       .map(rowToWorkspace);
+  }
+
+  /** Insert an isolated workspace without changing the project order. */
+  createNoProject(id: string, path: string): { workspace: Workspace; inserted: boolean } {
+    const now = new Date().toISOString();
+    const inserted = this.orm.insert(workspaces)
+      .values({ id, path, name: "No project", isGitRepo: 0, kind: "no_project", createdAt: now, updatedAt: now })
+      .onConflictDoNothing()
+      .returning().get();
+    if (!inserted) throw new Error(`Workspace ID or path already exists: ${id}`);
+    return { workspace: rowToWorkspace(inserted), inserted: true };
+  }
+
+  /** List registered paths, including those still held by soft-deleted rows. */
+  listPathsIncludeDeleted(): string[] {
+    return this.orm.select({ path: workspaces.path }).from(workspaces).all().map(({ path }) => path);
+  }
+
+  /** Find every pre-thread failure that should retire when a No project thread is deleted. */
+  findThreadlessNoProjectFailureIds(workspaceId: string): string[] {
+    return this.orm.select({ id: threadStartups.startupId }).from(threadStartups)
+      .innerJoin(workspaces, eq(threadStartups.workspaceId, workspaces.id))
+      .where(and(
+        eq(workspaces.id, workspaceId),
+        eq(workspaces.kind, "no_project"),
+        isNull(threadStartups.threadId),
+        inArray(threadStartups.state, ["failed", "interrupted"]),
+      )).all().map(({ id }) => id);
+  }
+
+  /** Find old No project workspaces without any thread or startup that can still use them. */
+  findRemovableNoProject(createdBefore: string, retryUpdatedSince: string): Workspace[] {
+    return this.orm.select().from(workspaces)
+      .where(this.removableNoProject(createdBefore, retryUpdatedSince)).all().map(rowToWorkspace);
+  }
+
+  /** Recheck eligibility on the writer connection before deleting a swept workspace. */
+  deleteRemovableNoProject(id: string, createdBefore: string, retryUpdatedSince: string): boolean {
+    return runChanges(this.orm.delete(workspaces)
+      .where(and(eq(workspaces.id, id), this.removableNoProject(createdBefore, retryUpdatedSince)))).changes > 0;
+  }
+
+  private removableNoProject(createdBefore: string, retryUpdatedSince: string) {
+    return and(
+      eq(workspaces.kind, "no_project"),
+      lt(workspaces.createdAt, createdBefore),
+      notExists(this.orm.select({ id: threads.id }).from(threads)
+        .where(eq(threads.workspaceId, workspaces.id))),
+      notExists(this.orm.select({ id: threadStartups.startupId }).from(threadStartups)
+        .where(and(eq(threadStartups.workspaceId, workspaces.id), or(
+          inArray(threadStartups.state, ["pending", "running", "blocked"]),
+          // A deleted thread's foreign key is cleared too, but setup and agent need a thread.
+          // Acknowledging the trail leaves a pre-thread retry available.
+          and(
+            isNull(threadStartups.threadId),
+            inArray(threadStartups.phase, ["thread", "fetch", "worktree"]),
+            inArray(threadStartups.state, ["failed", "interrupted"]),
+            gte(threadStartups.updatedAt, retryUpdatedSince),
+            or(
+              sql`json_extract(${threadStartups.errorJson}, '$.retryable') = 1`,
+              and(
+                eq(threadStartups.state, "interrupted"),
+                eq(threadStartups.cancellation, "none"),
+                isNull(threadStartups.errorJson),
+              ),
+            ),
+          ),
+        )))),
+    );
   }
 
   /** Rename a non-deleted workspace and return its updated record. */
@@ -295,11 +354,18 @@ export class WorkspaceStore {
     return result.changes > 0;
   }
 
-  /** Permanently remove a workspace and all its children (via FK cascade). */
+  /** Hard-delete a workspace, guarding No project creation rollback against concurrent use. */
   hardDelete(id: string): boolean {
     const result = runChanges(this.orm
       .delete(workspaces)
-      .where(eq(workspaces.id, id))
+      .where(and(eq(workspaces.id, id), or(
+        eq(workspaces.kind, "project"),
+        and(
+          notExists(this.orm.select({ id: threads.id }).from(threads).where(eq(threads.workspaceId, workspaces.id))),
+          notExists(this.orm.select({ id: threadStartups.startupId }).from(threadStartups)
+            .where(eq(threadStartups.workspaceId, workspaces.id))),
+        ),
+      )))
       );
     return result.changes > 0;
   }
@@ -314,13 +380,14 @@ export class WorkspaceStore {
   }
 
   /** Find a single soft-deleted workspace by path. O(1) lookup for finalization. */
-  findDeletingByPath(path: string): { id: string; path: string; deletedAt: string } | null {
+  findDeletingByPath(path: string): Pick<WorkspaceRow, "id" | "path" | "kind"> & { deletedAt: string } | null {
     const row = this.orm
-      .select({ id: workspaces.id, path: workspaces.path, deletedAt: workspaces.deletedAt })
+      .select({ id: workspaces.id, path: workspaces.path, kind: workspaces.kind, deletedAt: workspaces.deletedAt })
       .from(workspaces)
       .where(and(eq(workspaces.path, path), isNotNull(workspaces.deletedAt)))
       .get();
-    return (row ?? null) as { id: string; path: string; deletedAt: string } | null;
+    if (!row || row.deletedAt === null) return null;
+    return { ...row, deletedAt: row.deletedAt };
   }
 
   /** Find a workspace by ID regardless of deletion status. Used during cleanup. */

@@ -88,6 +88,7 @@ export function createMockWorkspace(
     id: crypto.randomUUID(),
     name: "test-project",
     path: "/tmp/test-project",
+    kind: "project",
     provider_config: {},
     is_git_repo: true,
     created_at: DEFAULT_TIMESTAMP,

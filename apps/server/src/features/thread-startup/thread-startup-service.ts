@@ -126,6 +126,11 @@ export class ThreadStartupService {
     return this.commit(threadStartupStateWriteOperations.fail, [[startupId, error, detail], this.timestamp()]);
   }
 
+  /** Persist and publish the retirement of a startup whose thread is being deleted. */
+  retireForDeletedThread(...input: Parameters<ThreadStartupStateStore["retireForDeletedThread"]>): Promise<ThreadStartup> {
+    return this.commit(threadStartupStateWriteOperations.retireForDeletedThread, [input, this.timestamp()]);
+  }
+
   /** Persist and publish acknowledgement of the startup failure the user saw. */
   async acknowledgeFailure(startupId: string, revision: number): Promise<ThreadStartup | null> {
     const committed = await this.writer.execute(threadStartupStateWriteOperations.acknowledgeFailure, [[startupId, revision], this.timestamp()]);

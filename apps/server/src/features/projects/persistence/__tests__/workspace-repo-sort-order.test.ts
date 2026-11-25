@@ -55,6 +55,18 @@ describe("WorkspaceStore sort_order", () => {
     expect(repo.listAll().map((w) => w.name)).toEqual(["b", "a", "c"]);
   });
 
+  it("indexes only projects when a hidden workspace also has sort_order 0", () => {
+    const b = repo.create("b", "/b", true);
+    const a = repo.create("a", "/a", true);
+    const { workspace: hidden } = repo.createNoProject("00000000-0000-4000-8000-000000000000", "/hidden");
+
+    repo.reorderToIndex(a.id, 1);
+
+    expect(repo.listAll().filter((workspace) => workspace.kind === "project").map((workspace) => workspace.id))
+      .toEqual([b.id, a.id]);
+    expect(repo.findById(hidden.id)?.sort_order).toBe(0);
+  });
+
   it("prependToSortOrder moves a workspace to the top without duplicates", () => {
     const a = repo.create("a", "/a", true);
     repo.create("b", "/b", true);

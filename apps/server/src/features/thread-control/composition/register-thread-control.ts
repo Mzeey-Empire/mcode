@@ -49,6 +49,7 @@ export function registerThreadControlServices(container: DependencyContainer): v
   })) });
   container.register(DelegatedTaskService, { useFactory: instanceCachingFactory((c) => new DelegatedTaskService({
     tasks: c.resolve(DelegatedTaskRepo), threads: c.resolve(ThreadRepo), startups: c.resolve(ThreadStartupService),
+    workspaces: c.resolve(WorkspaceRepo),
     approvals: c.resolve(ThreadControlApprovalRepo), canonical: c.resolve(CanonicalAgentBoundary),
     resumes: c.resolve(TurnResumeScheduleStore),
     plannedRestart: c.resolve(PlannedRestart),

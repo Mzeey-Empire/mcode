@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMockMessage } from "@mcode/contracts/testing";
+import { getMcodeDir } from "@mcode/shared";
 import type { BackgroundCallKind } from "@mcode/contracts/models/tool-call-record";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { CanonicalAgentStore } from "../../canonical/canonical-agent-store.js";
@@ -137,7 +138,7 @@ describe("AgentWorkload", () => {
     const unusedDependency = {} as never;
     const workspaces = new WorkspaceService(unusedDependency, unusedDependency, writer,
       { removeForThread: () => {} }, Object.assign(deletion, { teardownThread }), unusedDependency,
-      { killByThread: async () => {} });
+      { killByThread: async () => {} }, getMcodeDir());
     workspaces.delete("w").catch(() => {});
   }
 

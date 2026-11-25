@@ -39,12 +39,13 @@ export class ThreadLaunchService {
     if (!source || source.deleted_at) return rejection("not_found", "Source thread not found");
     const modes = resolveModes(authority, source, parsed);
     if ("status" in modes) return modes;
-    if (authority.permissionMode === "supervised" && parsed.workspace.type === "new_worktree") {
+    const project = this.deps.workspaces.findById(source.workspace_id);
+    if (requiresNewWorktreeApproval(authority, parsed.workspace, project)) {
       return rejection("forbidden", "A supervised caller cannot create a worktree without the user's approval");
     }
     const target = await this.resolveTarget(source, parsed);
     if (target.status === "rejected") return target;
-    const placement = await this.placement(source.workspace_id, parsed.workspace);
+    const placement = await this.placement(source.workspace_id, parsed.workspace, project);
     if ("status" in placement) return placement;
     try {
       const thread = await this.deps.commands.createAndSend({
@@ -83,7 +84,15 @@ export class ThreadLaunchService {
     return { status: "rejected", error: targetRejection(target) };
   }
 
-  private async placement(workspaceId: string, workspace: ThreadLaunchWorkspace): Promise<LaunchPlacement | LaunchRejection> {
+  private async placement(
+    workspaceId: string,
+    workspace: ThreadLaunchWorkspace,
+    project: ReturnType<WorkspaceRepo["findById"]>,
+  ): Promise<LaunchPlacement | LaunchRejection> {
+    if (project?.kind === "no_project") {
+      if (workspace.type !== "root") return rejection("invalid_placement", "A No project thread has no repository");
+      return { fields: { mode: "direct", branch: "" } };
+    }
     if (workspace.type === "root") {
       const branch = await this.deps.repository.getCurrentBranch(workspaceId);
       if (!branch) return rejection("invalid_placement", "The project root has no current branch");
@@ -96,7 +105,6 @@ export class ThreadLaunchService {
         existingWorktreeBaseBranch: workspace.baseBranch,
       } };
     }
-    const project = this.deps.workspaces.findById(workspaceId);
     if (!project) return rejection("not_found", "Project not found");
     const commit = await this.resolveCommit(project.path, workspace);
     if (typeof commit !== "string") return commit;
@@ -119,6 +127,14 @@ export class ThreadLaunchService {
     const commit = await this.deps.repository.resolveLocalBranchCommit(repoPath, workspace.baseRef);
     return commit ?? rejection("invalid_placement", `No local branch ${workspace.baseRef}`);
   }
+}
+
+function requiresNewWorktreeApproval(
+  authority: InternalThreadControlAuthority,
+  placement: ThreadLaunchWorkspace,
+  project: ReturnType<WorkspaceRepo["findById"]>,
+): boolean {
+  return project?.kind !== "no_project" && authority.permissionMode === "supervised" && placement.type === "new_worktree";
 }
 
 function resolveModes(authority: InternalThreadControlAuthority, source: Thread, input: ThreadLaunchInput): LaunchModes | LaunchRejection {

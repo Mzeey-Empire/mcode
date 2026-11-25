@@ -5,6 +5,9 @@ import { databaseWriteOperation } from "../../../runtime/persistence/sqlite/data
 /** Workspace mutations admitted to the sole application database writer. */
 export const workspaceWriteOperations = {
   create: databaseWriteOperation("workspace.create", z.tuple([z.string(), z.string(), z.boolean()]), WorkspaceSchema()),
+  createNoProject: databaseWriteOperation("workspace.createNoProject", z.tuple([z.string().uuid(), z.string()]),
+    z.object({ workspace: WorkspaceSchema(), inserted: z.boolean() })),
+  deleteRemovableNoProject: databaseWriteOperation("workspace.deleteRemovableNoProject", z.tuple([z.string(), z.string(), z.string()]), z.boolean()),
   prependToSortOrder: databaseWriteOperation("workspace.prependToSortOrder", z.tuple([z.string()]), z.void()),
   reorderToIndex: databaseWriteOperation("workspace.reorderToIndex", z.tuple([z.string(), z.number().int()]), z.void()),
   rename: databaseWriteOperation("workspace.rename", z.tuple([z.string(), z.string()]), WorkspaceSchema().nullable()),

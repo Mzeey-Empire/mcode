@@ -5,6 +5,7 @@
  */
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { createThreadPersistenceTestRuntime } from "../../testing/thread-persistence-test-runtime.js";
@@ -25,10 +26,14 @@ import {
   type SandboxWorktreeCleanupPolicy,
   WorkspaceService,
 } from "../../../projects/index.js";
-import type { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";
+import { ThreadDeletionTeardownService } from "../../lifecycle/thread-deletion-teardown-service.js";
 import { getMcodeDir } from "@mcode/shared";
+import { NoProjectWorkspaceSweep } from "../no-project-workspace-sweep.js";
+import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
+import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 
 const TEST_HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 const WT_BASE = NodePath.join(getMcodeDir(), "worktrees", "integration-test");
 
@@ -50,6 +55,7 @@ describe("Cleanup integration", () => {
 
   beforeEach(() => {
     db = (persistenceRuntime = createThreadPersistenceTestRuntime()).database;
+    const mcodeDir = NodePath.dirname(db.filename);
     cleanupJobRepo = new CleanupJobRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     threadRepo = new ThreadRepo(persistenceRuntime.reader, persistenceRuntime.writer);
     workspaceRepo = new WorkspaceRepo(persistenceRuntime.reader, persistenceRuntime.writer);
@@ -114,6 +120,7 @@ describe("Cleanup integration", () => {
       TEST_HOST_RUNTIME,
       undefined,
       0,
+      new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, mcodeDir),
     );
 
     workspaceService = new WorkspaceService(
@@ -124,11 +131,290 @@ describe("Cleanup integration", () => {
       mockThreadDeletion,
       {} as unknown as GitExecutor,
       { killByThread: vi.fn().mockResolvedValue(undefined) },
+      mcodeDir,
     );
   });
 
   afterEach(() => {
     worker.dispose();
+  });
+
+  function ageWorkspace(id: string): void {
+    db.prepare("UPDATE workspaces SET created_at = ? WHERE id = ?").run("2026-08-12T09:00:00.000Z", id);
+  }
+
+  function expireThread(id: string): void {
+    db.prepare("UPDATE threads SET user_completed_at = ?, scheduled_deletion_at = ? WHERE id = ?")
+      .run("2026-08-12T09:00:00.000Z", "2026-08-12T09:01:00.000Z", id);
+  }
+
+  function threadServiceWithStartupTeardown(startups: ThreadStartupService): ThreadService {
+    const deletion = new ThreadDeletionTeardownService(
+      threadRepo,
+      { beginThreadDeletion: () => () => {}, cancelSetupForThread: async () => {} },
+      { beginThreadTeardown: async () => () => {}, stopForThread: async () => {} },
+      { cancelForRepoPath: async () => {} },
+      { teardownThread: async () => {} },
+      { teardownThread: async () => {} },
+      { unwatchThreadWorktree: () => {} },
+      undefined,
+      startups,
+      workspaceRepo,
+    );
+    deletion.bindAcceptedProgress({ discardThreads: async () => {}, finishThreadDeletion: () => {} });
+    return new ThreadService(
+      threadRepo, projectWorktreeService, mockAttachmentService, mockHandoffStorage, deletion,
+    );
+  }
+
+  it("purges an expired no-project thread and removes its populated workspace", async () => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    await NodeFSPromises.writeFile(NodePath.join(workspace.path, "notes.txt"), "thread notes");
+    ageWorkspace(workspace.id);
+    const thread = await threadRepo.create(workspace.id, "Expired", "direct", "");
+    expireThread(thread.id);
+
+    await worker.poll();
+
+    expect(threadRepo.listAllByWorkspace(workspace.id)).toEqual([]);
+    expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+    await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps a shared no-project folder until the last thread is purged", async () => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    ageWorkspace(workspace.id);
+    const first = await threadRepo.create(workspace.id, "First", "direct", "");
+    const second = await threadRepo.create(workspace.id, "Second", "direct", "");
+    const notes = NodePath.join(workspace.path, "notes.txt");
+    await NodeFSPromises.writeFile(notes, "shared notes");
+
+    expireThread(first.id);
+    await worker.poll();
+    expect(threadRepo.listAllByWorkspace(workspace.id).map((thread) => thread.id)).toEqual([second.id]);
+    expect(await NodeFSPromises.readFile(notes, "utf8")).toBe("shared notes");
+
+    expireThread(second.id);
+    await worker.poll();
+    expect(threadRepo.listAllByWorkspace(workspace.id)).toEqual([]);
+    expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+    await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("unlinks an orphan junction without touching its target", async ({ skip }) => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    ageWorkspace(workspace.id);
+    const outside = NodePath.join(NodePath.dirname(db.filename), "outside");
+    await NodeFSPromises.mkdir(outside);
+    await NodeFSPromises.writeFile(NodePath.join(outside, "keep.txt"), "outside data");
+    await NodeFSPromises.rmdir(workspace.path);
+    try {
+      await NodeFSPromises.symlink(outside, workspace.path, process.platform === "win32" ? "junction" : "dir");
+    } catch {
+      skip();
+      return;
+    }
+
+    await worker.poll();
+
+    expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+    await expect(NodeFSPromises.lstat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await NodeFSPromises.readFile(NodePath.join(outside, "keep.txt"), "utf8")).toBe("outside data");
+  });
+
+  it("removes a leftover folder from an earlier sweep that deleted only the row", async () => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    await NodeFSPromises.writeFile(NodePath.join(workspace.path, "notes.txt"), "old notes");
+    await workspaceRepo.hardDelete(workspace.id);
+
+    await worker.poll();
+
+    await expect(NodeFSPromises.lstat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps a directory whose ID belongs to a soft-deleted project", async () => {
+    const workspace = await workspaceRepo.create("Project", NodePath.join(NodePath.dirname(db.filename), "project"));
+    const directory = NodePath.join(NodePath.dirname(db.filename), "no-project", workspace.id);
+    await NodeFSPromises.mkdir(directory, { recursive: true });
+    await workspaceRepo.softDelete(workspace.id);
+    const file = NodePath.join(directory, "keep.txt");
+    await NodeFSPromises.writeFile(file, "project data");
+
+    await worker.poll();
+
+    expect(await NodeFSPromises.readFile(file, "utf8")).toBe("project data");
+  });
+
+  it.each(["client-app", "uuid", "nested"])("keeps a registered project under the managed root (%s)", async (location) => {
+    const entry = NodePath.join(NodePath.dirname(db.filename), "no-project", location === "client-app" ? location : crypto.randomUUID());
+    const directory = location === "nested" ? NodePath.join(entry, "project") : entry;
+    await NodeFSPromises.mkdir(directory, { recursive: true });
+    const workspace = await workspaceRepo.create("Project", directory);
+    if (location === "nested") await workspaceRepo.softDelete(workspace.id);
+    const file = NodePath.join(directory, "keep.txt");
+    await NodeFSPromises.writeFile(file, "project data");
+
+    const sweep = new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, NodePath.dirname(db.filename));
+    await sweep.run();
+
+    expect(await NodeFSPromises.readFile(file, "utf8")).toBe("project data");
+  });
+
+  it("keeps an empty no-project workspace during the first-thread grace period", async () => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+
+    await worker.poll();
+    expect(workspaceRepo.findById(workspace.id)?.path).toBe(workspace.path);
+    expect(await NodeFSPromises.readdir(workspace.path)).toEqual([]);
+
+    ageWorkspace(workspace.id);
+    await worker.poll();
+    expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+    await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each([false, true])("keeps a retryable pre-thread failure updated within seven days (seen: %s)", async (seen) => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    ageWorkspace(workspace.id);
+    const { reader, writer } = persistenceRuntime;
+    const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
+    const startupId = crypto.randomUUID();
+    await startups.start({ startupId, workspaceId: workspace.id, kind: "direct" });
+    await startups.advance(startupId, "thread");
+    const failed = await startups.fail(startupId, {
+      code: "THREAD_CREATE_FAILED", message: "Thread creation failed", retryable: true,
+    });
+    if (seen) await startups.acknowledgeFailure(startupId, failed.revision);
+    const now = Date.now();
+    db.prepare("UPDATE thread_startups SET created_at = ?, updated_at = ? WHERE startup_id = ?").run(
+      new Date(now - 8 * DAY_MS).toISOString(),
+      new Date(now - 7 * DAY_MS + 60_000).toISOString(),
+      startupId,
+    );
+
+    await worker.poll();
+
+    expect(workspaceRepo.findById(workspace.id)?.id).toBe(workspace.id);
+    expect(await NodeFSPromises.readdir(workspace.path)).toEqual([]);
+  });
+
+  it.each(["AGENT_FAILED", "thread_deleted"])("removes the workspace after deleting the thread for %s", async (code) => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    ageWorkspace(workspace.id);
+    const thread = await threadRepo.create(workspace.id, "Failed start", "direct", "");
+    const { reader, writer } = persistenceRuntime;
+    const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
+    const startupId = crypto.randomUUID();
+    await startups.start({ startupId, workspaceId: workspace.id, kind: "direct" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, thread.id);
+    const failedAtAgent = code === "AGENT_FAILED";
+    if (failedAtAgent) await startups.advance(startupId, "agent");
+    await startups.fail(startupId, { code, message: "Startup failed", retryable: failedAtAgent });
+
+    await worker.poll();
+    expect(workspaceRepo.findById(workspace.id)?.id).toBe(workspace.id);
+    expect((await NodeFSPromises.stat(workspace.path)).isDirectory()).toBe(true);
+
+    await threadService.delete(thread.id, false);
+    await worker.poll();
+
+    expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+    await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("sweeps the workspace after deleting the thread made by a successful retry", async () => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    ageWorkspace(workspace.id);
+    const { reader, writer } = persistenceRuntime;
+    const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
+    const failedId = crypto.randomUUID();
+    await startups.start({ startupId: failedId, workspaceId: workspace.id, kind: "direct" });
+    await startups.advance(failedId, "thread");
+    await startups.fail(failedId, {
+      code: "THREAD_CREATE_FAILED", message: "Thread creation failed", retryable: true,
+    });
+    const interruptedId = crypto.randomUUID();
+    await startups.start({ startupId: interruptedId, workspaceId: workspace.id, kind: "direct" });
+    await startups.advance(interruptedId, "thread");
+    await startups.interruptNonterminalOnStartup();
+
+    const retryId = crypto.randomUUID();
+    await startups.start({ startupId: retryId, workspaceId: workspace.id, kind: "direct" });
+    await startups.advance(retryId, "thread");
+    const thread = await threadRepo.create(workspace.id, "Successful retry", "direct", "");
+    await startups.bindThread(retryId, thread.id);
+    await startups.advance(retryId, "agent");
+    await startups.complete(retryId);
+
+    expect(await threadServiceWithStartupTeardown(startups).delete(thread.id, false)).toBe(true);
+    await worker.poll();
+
+    expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+    await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each(["failed", "interrupted"])("sweeps the workspace when a thread-less %s startup expires", async (state) => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    ageWorkspace(workspace.id);
+    const { reader, writer } = persistenceRuntime;
+    const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
+    const startupId = crypto.randomUUID();
+    await startups.start({ startupId, workspaceId: workspace.id, kind: "direct" });
+    await startups.advance(startupId, "thread");
+    if (state === "failed") {
+      await startups.fail(startupId, {
+        code: "THREAD_CREATE_FAILED", message: "Thread creation failed", retryable: true,
+      });
+    } else {
+      await startups.interruptNonterminalOnStartup();
+    }
+
+    const expiredAt = new Date(Date.now() - 7 * DAY_MS - 60_000).toISOString();
+    db.prepare("UPDATE thread_startups SET created_at = ?, updated_at = ? WHERE startup_id = ?")
+      .run(expiredAt, expiredAt, startupId);
+
+    await worker.poll();
+
+    expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+    await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it.each(["failed", "interrupted"])("sweeps a deleted no-project thread's folder after a %s thread phase", async (state) => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    ageWorkspace(workspace.id);
+    await NodeFSPromises.writeFile(NodePath.join(workspace.path, "notes.txt"), "thread notes");
+    const thread = await threadRepo.create(workspace.id, "Unfinished start", "direct", "");
+    const { reader, writer } = persistenceRuntime;
+    const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
+    const startupId = crypto.randomUUID();
+    await startups.start({ startupId, workspaceId: workspace.id, kind: "direct" });
+    await startups.advance(startupId, "thread");
+    await startups.bindThread(startupId, thread.id);
+    await startups.appendOutput(startupId, "Thread persisted");
+    if (state === "failed") {
+      await startups.fail(startupId, {
+        code: "THREAD_CREATE_FAILED", message: "Thread creation failed", retryable: true,
+      });
+    } else {
+      await startups.interruptNonterminalOnStartup();
+    }
+    const beforeDeletion = startups.get(startupId);
+
+    const service = threadServiceWithStartupTeardown(startups);
+    expect(await service.delete(thread.id, false)).toBe(true);
+    const afterDeletion = startups.get(startupId);
+    await worker.poll();
+
+    expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+    await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(afterDeletion).toMatchObject({
+      state,
+      phase: "thread",
+      steps: beforeDeletion?.steps,
+      transcript: beforeDeletion?.transcript,
+      ...(state === "failed" ? { error: { code: "thread_deleted", retryable: false } } : { cancellation: "requested" }),
+    });
   });
 
   it("full flow: delete thread -> enqueue job -> worker processes -> thread hard-deleted", async () => {

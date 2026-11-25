@@ -46,7 +46,7 @@ type WorkspaceThreadRpcHandlerMap = {
 
 /** Defines the feature services required to route validated Workspace and Thread RPC calls. */
 export interface WorkspaceThreadRouterDeps {
-  workspaceService: Pick<WorkspaceService, "create" | "delete" | "findById" | "forceDelete" | "list" | "rename" | "reorder">;
+  workspaceService: Pick<WorkspaceService, "create" | "createNoProject" | "delete" | "findById" | "forceDelete" | "list" | "rename" | "reorder">;
   workspaceEnvironmentService: Pick<
     WorkspaceEnvironmentService,
     "beginThreadDeletion" | "beginWorkspaceDeletion" | "cancelSetupForThread" | "cancelSetupForWorkspace" | "removeWorkspaceApprovals" | "read"
@@ -70,6 +70,7 @@ export interface WorkspaceThreadRouterDeps {
 const workspaceThreadHandlers = {
   "workspace.list": (deps) => deps.workspaceService.list(),
   "workspace.create": createWorkspace,
+  "workspace.createNoProject": createNoProjectWorkspace,
   "workspace.rename": (deps, params) => deps.workspaceService.rename(params.id, params.name),
   "workspace.delete": (deps, params) => deleteWorkspace(deps, params.id),
   "workspace.forceDelete": (deps, params) => forceDeleteWorkspace(deps, params.id),
@@ -84,7 +85,7 @@ const workspaceThreadHandlers = {
   "workspace.touchLastOpened": async (deps, params) => {
     await deps.workspaceRepo.touchLastOpened(params.id);
     const workspace = deps.workspaceService.findById(params.id);
-    if (workspace && !workspace.is_git_repo) deps.gitWatcherService.retryWatch(workspace.id, workspace.path);
+    if (workspace?.kind === "project" && !workspace.is_git_repo) deps.gitWatcherService.retryWatch(workspace.id, workspace.path);
     return { ok: true as const };
   },
   "workspace.reorder": async (deps, params) => {
@@ -150,6 +151,14 @@ async function createWorkspace(
     });
   }
   return result;
+}
+
+/** Create the hidden workspace and refresh connected clients when a row was inserted. */
+export function createNoProjectWorkspace(
+  deps: { workspaceService: Pick<WorkspaceService, "createNoProject"> },
+  params: WorkspaceThreadRpcParamsByMethod["workspace.createNoProject"],
+) {
+  return deps.workspaceService.createNoProject(params.id, () => broadcast("workspace.orderChanged", {}));
 }
 
 async function deleteWorkspace(

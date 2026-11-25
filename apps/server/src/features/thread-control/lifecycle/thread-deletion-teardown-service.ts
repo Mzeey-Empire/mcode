@@ -3,6 +3,7 @@ import { logger } from "@mcode/shared";
 import { GithubService } from "../../pull-requests/github/github-service.js";
 import { CiWatcherService } from "../../pull-requests/status/ci-watcher.js";
 import { GitWatcherService } from "../../projects/git/git-watcher-service.js";
+import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { ProjectActionService } from "../../projects/environment/project-action-service.js";
 import { WorkspaceEnvironmentService } from "../../projects/environment/workspace-environment-service.js";
 import { ThreadRepo } from "../persistence/thread-repo.js";
@@ -74,7 +75,9 @@ export class ThreadDeletionTeardownService {
     @inject(ThreadTeardownService) private readonly threadTeardownService: Pick<ThreadTeardownService, "teardownThread">,
     @inject(GitWatcherService) private readonly gitWatcherService: Pick<GitWatcherService, "unwatchThreadWorktree">,
     @inject(TurnResumeScheduler, { isOptional: true }) private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unschedule">,
-    @inject(ThreadStartupService, { isOptional: true }) private readonly startups?: Pick<ThreadStartupService, "findByThreadId" | "fail">,
+    @inject(ThreadStartupService, { isOptional: true })
+    private readonly startups?: Pick<ThreadStartupService, "findByThreadId" | "fail" | "retireForDeletedThread">,
+    @inject(WorkspaceRepo) private readonly workspaces?: Pick<WorkspaceRepo, "findThreadlessNoProjectFailureIds">,
   ) {}
 
   /** Stop thread work and detach its file watcher before persistent data is removed. */
@@ -86,12 +89,8 @@ export class ThreadDeletionTeardownService {
       releaseActionAdmission = await this.projectActionService.beginThreadTeardown(threadId);
       const thread = this.threadRepo.findById(threadId);
       await this.workspaceEnvironmentService.cancelSetupForThread(threadId);
-      const startup = this.startups?.findByThreadId(threadId);
-      if (startup && ["pending", "running", "blocked"].includes(startup.state)) {
-        await this.startups?.fail(startup.startupId, {
-          code: "thread_deleted", message: "Thread was deleted before startup completed", retryable: false,
-        });
-      }
+      if (thread) await this.retireSupersededStartups(thread.workspace_id);
+      await this.teardownStartup(threadId);
       await this.projectActionService.stopForThread(threadId);
       if (thread?.worktree_path) {
         await this.githubService.cancelForRepoPath(thread.worktree_path);
@@ -102,6 +101,29 @@ export class ThreadDeletionTeardownService {
     } finally {
       releaseActionAdmission?.();
       releaseDeletionBarrier();
+    }
+  }
+
+  private async retireSupersededStartups(workspaceId: string): Promise<void> {
+    const { startups, workspaces } = this;
+    if (!startups || !workspaces) return;
+    for (const startupId of workspaces.findThreadlessNoProjectFailureIds(workspaceId)) {
+      await startups.retireForDeletedThread(startupId);
+    }
+  }
+
+  private async teardownStartup(threadId: string): Promise<void> {
+    const startups = this.startups;
+    if (!startups) return;
+    let startup = startups.findByThreadId(threadId);
+    if (!startup) return;
+    if (["pending", "running", "blocked"].includes(startup.state)) {
+      startup = await startups.fail(startup.startupId, {
+        code: "thread_deleted", message: "Thread was deleted before startup completed", retryable: false,
+      });
+    }
+    if (startup.state === "interrupted" || (startup.state === "failed" && startup.error?.code !== "thread_deleted")) {
+      await startups.retireForDeletedThread(startup.startupId);
     }
   }
 }

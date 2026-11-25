@@ -1,5 +1,6 @@
 import "reflect-metadata";
 import type { Database } from "bun:sqlite";
+import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openReadOnlyDatabase } from "../../../../runtime/persistence/sqlite/read-only-database.js";
 import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/owned-test-database.js";
@@ -38,7 +39,7 @@ async function harness() {
     notifyThreadsHidden: vi.fn(),
   };
   const killByThread = vi.fn(async (_scopeId: string) => undefined);
-  const service = new WorkspaceService(workspaces, threads, owned.writer, { removeForThread }, deletion, new FakeGitExecutor(), { killByThread });
+  const service = new WorkspaceService(workspaces, threads, owned.writer, { removeForThread }, deletion, new FakeGitExecutor(), { killByThread }, NodePath.dirname(owned.db.filename));
   const git: Pick<GitWorktreeService, "createWorktree" | "removeWorktree"> = {
     createWorktree: vi.fn(async () => ({ name: "test", path: "/fixture/.worktrees/test", branch: "feature/test", managed: true, createdBranch: true, warnings: [] })),
     removeWorktree: vi.fn(async () => true),

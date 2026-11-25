@@ -77,6 +77,8 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
     ...buildThreadControlAuditStoreWriteHandlers(db),
     ...buildExternalThreadControlPairingStoreWriteHandlers(db),
     [operations.create.name, databaseWriteHandler(operations.create, (input) => workspace.create(...input))],
+    [operations.createNoProject.name, databaseWriteHandler(operations.createNoProject, (input) => workspace.createNoProject(...input))],
+    [operations.deleteRemovableNoProject.name, databaseWriteHandler(operations.deleteRemovableNoProject, (input) => workspace.deleteRemovableNoProject(...input))],
     [operations.prependToSortOrder.name, databaseWriteHandler(operations.prependToSortOrder, (input) => workspace.prependToSortOrder(...input))],
     [operations.reorderToIndex.name, databaseWriteHandler(operations.reorderToIndex, (input) => workspace.reorderToIndex(...input))],
     [operations.rename.name, databaseWriteHandler(operations.rename, (input) => workspace.rename(...input))],
