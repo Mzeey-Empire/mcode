@@ -32,7 +32,7 @@ import { getTransport } from "@/transport";
 import type { Workspace } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { useSidebarScope } from "./ScopeBar";
-import { isInClosedScope, type SidebarItem } from "./sidebar-model";
+import { NO_PROJECT_NAME, isInClosedScope, type SidebarItem } from "./sidebar-model";
 import { useCompletionStore } from "./completion-store";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import type { SidebarScope } from "./sidebar-ui-store";
@@ -408,8 +408,6 @@ function ProjectRowActions({
     </div>
   );
 }
-
-const NO_PROJECT_NAME = "No project";
 
 function noProjectThreadsOf(state: { workspaces: readonly Workspace[]; threads: readonly WorkspaceThread[] }): readonly WorkspaceThread[] {
   const hidden = new Set(state.workspaces.filter((workspace) => workspace.kind === "no_project").map((workspace) => workspace.id));

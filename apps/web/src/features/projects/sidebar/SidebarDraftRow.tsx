@@ -8,7 +8,7 @@ import { useRelativeTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { useThreadDraftStore, type ThreadDraft } from "@/stores/threadDraftStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
-import type { SidebarItem } from "./sidebar-model";
+import { NO_PROJECT_GROUP_KEY, NO_PROJECT_NAME, type SidebarItem } from "./sidebar-model";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import { DraftTag, useSidebarNarrow } from "./sidebar-label-tooltip";
 import { groupedTreeLineClass, isThreadRowNavigationEvent } from "./SidebarThreadRow";
@@ -20,7 +20,7 @@ type DraftItem = Extract<SidebarItem, { kind: "draft" }>;
 export const SidebarDraftRow = memo(function SidebarDraftRow({ item, ctx }: { item: DraftItem; ctx: SidebarRowContext }) {
   const draft = useThreadDraftStore((state) => state.drafts[item.draftId]);
   const isActive = useWorkspaceStore((state) => state.activeDraftId === item.draftId);
-  const workspaceName = useWorkspaceStore((state) => state.workspaces.find((workspace) => workspace.id === item.workspaceId)?.name ?? "");
+  const workspaceName = useWorkspaceStore((state) => (item.workspaceId === NO_PROJECT_GROUP_KEY ? NO_PROJECT_NAME : state.workspaces.find((workspace) => workspace.id === item.workspaceId)?.name ?? ""));
   if (!draft) return null;
   return (
     <DraftRow
@@ -84,7 +84,7 @@ function FlatDraftBody({ draft, isActive, workspaceName, onDiscard }: DraftBodyP
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <div className="flex h-4 min-w-0 items-center gap-1 text-caption text-muted">
-        <ProjectIcon workspaceId={draft.workspaceId} name={workspaceName} size={16} />
+        <ProjectIcon workspaceId={draft.workspaceId} name={workspaceName} size={16} noProject={draft.workspaceId === NO_PROJECT_GROUP_KEY} />
         <span className="text-fade min-w-0 flex-1">{workspaceName}</span>
         <DraftCorner draft={draft} onDiscard={onDiscard} />
       </div>

@@ -19,6 +19,8 @@ import { PULL_REQUEST_LINE_CLASS, PullRequestLine, pullRequestNumberWidth } from
 export interface ThreadPreviewPayload {
   readonly thread: WorkspaceThread;
   readonly workspaceName: string;
+  /** The thread lives in a hidden No project workspace, so the card shows no branch. */
+  readonly noProject: boolean;
 }
 
 /** The DOM id of the open thread card, so the row it describes can point to it with `aria-describedby`. */
@@ -105,21 +107,21 @@ function ThreadPreviewContent({ payload }: { payload: ThreadPreviewPayload }) {
       sideOffset={8}
       className={cn("w-80 max-w-[calc(100vw-16px)] max-h-(--available-height) items-stretch p-3", !body && "invisible")}
     >
-      {body ? <SidebarThreadPreview workspaceName={body.workspaceName} thread={body.thread} /> : null}
+      {body ? <SidebarThreadPreview workspaceName={body.workspaceName} noProject={body.noProject} thread={body.thread} /> : null}
     </TooltipContent>
   );
 }
 
-function SidebarThreadPreview({ workspaceName, thread }: { workspaceName: string; thread: WorkspaceThread }) {
+function SidebarThreadPreview({ workspaceName, noProject, thread }: { workspaceName: string; noProject: boolean; thread: WorkspaceThread }) {
   const ranked = isPrable(thread) ? rankPullRequests(thread.pull_requests) : [];
   return (
     <div data-testid={`thread-preview-${thread.id}`} className="-mx-2 flex min-h-0 flex-col gap-2 overflow-x-hidden overflow-y-auto px-2 text-ink">
       <div className="min-w-0 shrink-0 text-label font-semibold [overflow-wrap:anywhere]">{thread.title}</div>
       <div className="grid shrink-0 gap-1.5 text-xs text-muted">
-        <PreviewFact label={`Project, ${workspaceName}`} icon={<ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} />}>
+        <PreviewFact label={`Project, ${workspaceName}`} icon={<ProjectIcon workspaceId={thread.workspace_id} name={workspaceName} size={14} noProject={noProject} />}>
           {workspaceName}
         </PreviewFact>
-        <ThreadPreviewBranch thread={thread} />
+        {noProject ? null : <ThreadPreviewBranch thread={thread} />}
         <ThreadPreviewModel thread={thread} />
         {thread.user_completed_at !== null ? <ClosedThreadLifecycle thread={thread} completedAt={thread.user_completed_at} /> : null}
       </div>

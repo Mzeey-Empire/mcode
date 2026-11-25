@@ -4,6 +4,9 @@ import type { SidebarScope, SidebarView } from "./sidebar-ui-store";
 /** Synthetic sidebar group key, shared with No project drafts. Never a workspace id; server requests need the real one. */
 export const NO_PROJECT_GROUP_KEY = NO_PROJECT_DRAFT_WORKSPACE_ID;
 
+/** What the group, and a No project thread's project label, is called. */
+export const NO_PROJECT_NAME = "No project";
+
 /**
  * Thread identity, hierarchy and parsed timestamps used to derive sidebar order.
  */

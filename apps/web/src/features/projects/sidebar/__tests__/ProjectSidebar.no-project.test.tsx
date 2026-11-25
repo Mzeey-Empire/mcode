@@ -25,6 +25,7 @@ vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => ({
   VirtualViewport: (await import("./fake-virtual-viewport")).FakeVirtualViewport,
 }));
 
+import { useThreadDraftStore, type ThreadDraft } from "@/stores/threadDraftStore";
 import { useWorkspaceStore } from "../../state/workspaceStore";
 import { useSidebarUiStore } from "../sidebar-ui-store";
 import { NO_PROJECT_GROUP_KEY } from "../sidebar-model";
@@ -51,6 +52,12 @@ function header(): HTMLElement {
   return screen.getByRole("group", { name: /^No project, \d+ threads?$/ });
 }
 
+function rowOf(threadId: string): HTMLElement {
+  const row = screen.getAllByTestId("thread-item").find((el) => el.dataset.threadId === threadId);
+  if (!row) throw new Error(`no row for ${threadId}`);
+  return row;
+}
+
 describe("ProjectSidebar No project group", () => {
   beforeEach(() => {
     useSidebarUiStore.setState({ view: "projects", scope: "active", expandedProjects: new Set([NO_PROJECT_GROUP_KEY, PROJECT.id]), showMore: new Set() });
@@ -58,6 +65,7 @@ describe("ProjectSidebar No project group", () => {
 
   afterEach(() => {
     cleanup();
+    useThreadDraftStore.setState({ drafts: {} });
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
     localStorage.clear();
   });
@@ -65,8 +73,8 @@ describe("ProjectSidebar No project group", () => {
   it("shows the group above the projects, holding the No project threads of every hidden workspace", () => {
     const second = createMockWorkspace({ id: "ws-hidden-2", name: "No project", kind: "no_project", is_git_repo: false });
     seed([PROJECT, HIDDEN, second], [
-      thread({ id: "t-1", title: "Sketch a schema" }),
-      thread({ id: "t-2", title: "Trip notes", workspace_id: second.id }),
+      thread({ id: "t-1", title: "Sketch a schema", last_activity_at: new Date().toISOString() }),
+      thread({ id: "t-2", title: "Trip notes", workspace_id: second.id, last_activity_at: new Date(Date.now() - 60_000).toISOString() }),
       thread({ id: "t-3", title: "Project work", workspace_id: PROJECT.id }),
     ]);
 
@@ -140,6 +148,86 @@ describe("ProjectSidebar No project group", () => {
     expect(screen.queryByRole("radiogroup", { name: "Thread scope" })).toBeNull();
     expect(screen.queryByTestId("no-project-row")).toBeNull();
     expect(screen.getByTestId("project-drop-well")).toBeInTheDocument();
+  });
+
+  it("marks a No project row with the inbox where a project shows its badge, in the Threads view", () => {
+    useSidebarUiStore.setState({ view: "threads" });
+    seed([PROJECT, HIDDEN], [
+      thread({ id: "t-1", title: "Sketch a schema" }),
+      thread({ id: "t-2", title: "Project work", workspace_id: PROJECT.id }),
+    ]);
+
+    render(<ProjectSidebar />);
+
+    const noProjectRow = rowOf("t-1");
+    expect(within(noProjectRow).getByTestId("no-project-mark")).toBeInTheDocument();
+    expect(within(noProjectRow).getByText("No project")).toBeInTheDocument();
+    expect(within(noProjectRow).queryByTestId("project-badge")).toBeNull();
+    const projectRow = rowOf("t-2");
+    expect(within(projectRow).getByTestId("project-badge")).toBeInTheDocument();
+    expect(within(projectRow).queryByTestId("no-project-mark")).toBeNull();
+  });
+
+  it("lists a closed No project thread with the mark in the Threads view", () => {
+    useSidebarUiStore.setState({ view: "threads", scope: "completed" });
+    seed([HIDDEN], [thread({ id: "t-closed", title: "Old sketch", user_completed_at: "2026-11-01T00:00:00.000Z" })]);
+
+    render(<ProjectSidebar />);
+
+    expect(within(rowOf("t-closed")).getByTestId("no-project-mark")).toBeInTheDocument();
+  });
+
+  it("shows no branch or checkout mode on a No project row, which has no repository", () => {
+    seed([PROJECT, HIDDEN], [
+      thread({ id: "t-1", title: "Sketch a schema", branch: "main", mode: "direct" }),
+      thread({ id: "t-2", title: "Project work", workspace_id: PROJECT.id, branch: "main", mode: "direct" }),
+    ]);
+
+    render(<ProjectSidebar />);
+
+    const noProjectRow = rowOf("t-1");
+    expect(within(noProjectRow).queryByLabelText(/^Branch,/)).toBeNull();
+    expect(within(noProjectRow).queryByLabelText(/ mode$/)).toBeNull();
+    const projectRow = rowOf("t-2");
+    expect(within(projectRow).getByLabelText("Branch, main")).toBeInTheDocument();
+  });
+
+  describe("a No project draft", () => {
+    const NO_PROJECT_DRAFT: ThreadDraft = {
+      id: "draft-np",
+      workspaceId: NO_PROJECT_GROUP_KEY,
+      createdAt: 1,
+      updatedAt: 1,
+      draft: { input: "Plan the garden", attachments: [], modelId: "m", provider: "claude", reasoning: "high" },
+      selection: { interactionMode: "build", permissionMode: "full", orchestrationMode: "standard", approvalReviewMode: "manual", thinking: null },
+      target: { mode: "direct", branch: "", branchSource: "branch", branchRemote: null, startFromOrigin: false, selectedWorktree: null },
+    };
+
+    beforeEach(() => {
+      useThreadDraftStore.setState({ drafts: { [NO_PROJECT_DRAFT.id]: NO_PROJECT_DRAFT } });
+    });
+
+    it("shows in the group, above the group's threads", () => {
+      seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
+
+      render(<ProjectSidebar />);
+
+      const draftRow = screen.getByTestId("draft-item");
+      expect(within(draftRow).getByText("Plan the garden")).toBeInTheDocument();
+      expect(header().compareDocumentPosition(draftRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(draftRow.compareDocumentPosition(rowOf("t-1")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("shows the inbox mark and the name No project in the Threads view", () => {
+      useSidebarUiStore.setState({ view: "threads" });
+      seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
+
+      render(<ProjectSidebar />);
+
+      const draftRow = screen.getByTestId("draft-item");
+      expect(within(draftRow).getByTestId("no-project-mark")).toBeInTheDocument();
+      expect(within(draftRow).getByText("No project")).toBeInTheDocument();
+    });
   });
 });
 

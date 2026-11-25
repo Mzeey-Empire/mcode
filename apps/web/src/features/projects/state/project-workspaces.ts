@@ -32,3 +32,8 @@ export function isNoProjectWorkspaceId(workspaces: readonly Workspace[], workspa
   if (!workspaceId) return false;
   return workspaces.some((workspace) => workspace.id === workspaceId && workspace.kind === "no_project");
 }
+
+/** Whether `workspace` is a hidden No project row. False while the row has not loaded. */
+export function isNoProjectWorkspace(workspace: Workspace | undefined): boolean {
+  return workspace?.kind === "no_project";
+}
