@@ -18,6 +18,7 @@ import {
   type ThreadFilters,
   type ThreadSortField,
 } from "@/stores/sidebarSearchStore";
+import { isNoProjectWorkspaceId } from "@/features/projects/state/project-workspaces";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { PALETTE_LIST_HINTS, PaletteFooterHints } from "../PaletteFooterHints";
 import { useSidebarUiStore } from "@/features/projects/sidebar/sidebar-ui-store";
@@ -30,6 +31,7 @@ interface SearchRow {
   thread: Thread | RecentThread;
   workspaceName: string;
   workspacePath: string;
+  noProject: boolean;
 }
 
 function getThreadSearchResultLabel(loading: boolean, hasQuery: boolean, resultCount: number): string {
@@ -71,6 +73,24 @@ export function filterAndSortRecentThreads(
           : left[sortField].localeCompare(right[sortField]);
       return sortDirection === "asc" ? order : -order;
     });
+}
+
+function ThreadSearchBranch({ branch }: { branch: string }) {
+  return (
+    <>
+      <span aria-hidden className="text-muted/35">·</span>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span className="max-w-40 text-fade font-mono" aria-label={`Branch, ${branch}`}>
+              {branch}
+            </span>
+          }
+        />
+        <TooltipContent>{branch}</TooltipContent>
+      </Tooltip>
+    </>
+  );
 }
 
 /** One compact thread record in the cross-project finder. */
@@ -116,17 +136,7 @@ function ThreadSearchResult({
           />
           <TooltipContent>{row.workspacePath}</TooltipContent>
         </Tooltip>
-        <span aria-hidden className="text-muted/35">·</span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="max-w-40 text-fade font-mono" aria-label={`Branch, ${thread.branch}`}>
-                {thread.branch}
-              </span>
-            }
-          />
-          <TooltipContent>{thread.branch}</TooltipContent>
-        </Tooltip>
+        {row.noProject ? null : <ThreadSearchBranch branch={thread.branch} />}
         <span className="shrink-0 font-mono text-caption tabular-nums text-muted/45">{relativeTime(thread.updated_at)}</span>
       </div>
     </CommandItem>
@@ -197,6 +207,7 @@ export function ThreadSearchView() {
         thread,
         workspaceName: thread.workspace_name,
         workspacePath: thread.workspace_path,
+        noProject: isNoProjectWorkspaceId(workspaces, thread.workspace_id),
       }));
     }
     return serverResults.map((thread) => {
@@ -205,9 +216,10 @@ export function ThreadSearchView() {
         thread,
         workspaceName: workspace?.name ?? "Unknown project",
         workspacePath: workspace?.path ?? "",
+        noProject: isNoProjectWorkspaceId(workspaces, thread.workspace_id),
       };
     });
-  }, [query, serverResults, sortedRecentThreads, workspaceById]);
+  }, [query, serverResults, sortedRecentThreads, workspaceById, workspaces]);
 
   const providers = useMemo(
     () =>
