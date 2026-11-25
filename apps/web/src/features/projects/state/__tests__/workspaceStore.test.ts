@@ -48,7 +48,10 @@ vi.mock("@/features/preview/automation/browserAutomationStore", () => ({
   releaseBrowserAutomationWorkspaceScopes: vi.fn(),
 }));
 
-import { useWorkspaceStore, type WorkspaceRpcCall } from "../workspaceStore";
+import { selectNewThreadIsNoProject, useWorkspaceStore, type WorkspaceRpcCall } from "../workspaceStore";
+import { INTERACTION_MODES, PERMISSION_MODES } from "@/transport";
+import { ORCHESTRATION_MODES } from "@mcode/contracts/models/enums";
+import { NO_PROJECT_DRAFT_WORKSPACE_ID, useThreadDraftStore } from "@/stores/threadDraftStore";
 import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useDiffStore } from "@/stores/diffStore";
@@ -94,6 +97,40 @@ describe("workspace list loaded flag", () => {
     vi.mocked(mockTransport.listWorkspaces).mockRejectedValueOnce(new Error("offline"));
     await useWorkspaceStore.getState().loadWorkspaces();
     expect(useWorkspaceStore.getState().workspacesLoaded).toBe(false);
+  });
+});
+
+describe("workspaceStore loadWorkspaceIfMissing", () => {
+  beforeEach(() => {
+    vi.mocked(mockTransport.listWorkspaces).mockReset().mockResolvedValue([makeWs(), makeWs({ id: "ws-hidden", kind: "no_project", is_git_repo: false })]);
+  });
+
+  it("reloads the list for a workspace it does not know, once for concurrent calls", async () => {
+    useWorkspaceStore.setState({ workspaces: [makeWs()] });
+
+    useWorkspaceStore.getState().loadWorkspaceIfMissing("ws-hidden");
+    useWorkspaceStore.getState().loadWorkspaceIfMissing("ws-hidden");
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().workspaces.map((workspace) => workspace.id)).toEqual(["ws-1", "ws-hidden"]));
+
+    expect(mockTransport.listWorkspaces).toHaveBeenCalledOnce();
+  });
+
+  it("does not reload for a workspace it already has", () => {
+    useWorkspaceStore.setState({ workspaces: [makeWs()] });
+
+    useWorkspaceStore.getState().loadWorkspaceIfMissing("ws-1");
+
+    expect(mockTransport.listWorkspaces).not.toHaveBeenCalled();
+  });
+
+  it("reloads again for a later unknown workspace once the first reload has settled", async () => {
+    useWorkspaceStore.setState({ workspaces: [makeWs()] });
+    useWorkspaceStore.getState().loadWorkspaceIfMissing("ws-hidden");
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().workspaces).toHaveLength(2));
+
+    useWorkspaceStore.getState().loadWorkspaceIfMissing("ws-unlisted");
+
+    await vi.waitFor(() => expect(mockTransport.listWorkspaces).toHaveBeenCalledTimes(2));
   });
 });
 
@@ -157,6 +194,38 @@ describe("workspaceStore reorderWorkspace", () => {
     await useWorkspaceStore.getState().reorderWorkspace("c", 0, call as unknown as WorkspaceRpcCall);
     expect(useWorkspaceStore.getState().workspaces.map((w) => w.id)).toEqual(["c", "a", "b"]);
     expect(call).toHaveBeenCalledWith("workspace.reorder", { id: "c", newIndex: 0 });
+  });
+
+  it("counts project rows only, so a hidden No project row neither shifts the index nor moves", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        makeWs({ id: "a", name: "a" }),
+        makeWs({ id: "hidden", name: "No project", kind: "no_project", is_git_repo: false }),
+        makeWs({ id: "b", name: "b" }),
+      ],
+    });
+    const call = vi.fn().mockResolvedValue({ ok: true });
+
+    await useWorkspaceStore.getState().reorderWorkspace("a", 1, call as unknown as WorkspaceRpcCall);
+
+    expect(useWorkspaceStore.getState().workspaces.map((w) => w.id)).toEqual(["b", "hidden", "a"]);
+    expect(call).toHaveBeenCalledWith("workspace.reorder", { id: "a", newIndex: 1 });
+  });
+
+  it("bounds the index by the project count, not the row count", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        makeWs({ id: "a", name: "a" }),
+        makeWs({ id: "b", name: "b" }),
+        makeWs({ id: "hidden", name: "No project", kind: "no_project", is_git_repo: false }),
+      ],
+    });
+    const call = vi.fn().mockResolvedValue({ ok: true });
+
+    await useWorkspaceStore.getState().reorderWorkspace("a", 2, call as unknown as WorkspaceRpcCall);
+
+    expect(useWorkspaceStore.getState().workspaces.map((w) => w.id)).toEqual(["b", "a", "hidden"]);
+    expect(call).toHaveBeenCalledWith("workspace.reorder", { id: "a", newIndex: 1 });
   });
 
   it("reverts workspaces order when RPC fails", async () => {
@@ -674,5 +743,181 @@ describe("workspaceStore whole thread hydration", () => {
     finish([deleted]);
     await loading;
     expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual(["pushed"]);
+  });
+});
+
+describe("workspaceStore No project target", () => {
+  const PROJECT = makeWs({ id: "ws-project", name: "fixture-repo" });
+  const HIDDEN = makeWs({ id: "ws-hidden", name: "No project", kind: "no_project", is_git_repo: false });
+
+  beforeEach(() => {
+    vi.mocked(mockTransport.createNoProjectWorkspace).mockReset().mockImplementation(async (id) => ({ ...HIDDEN, id }));
+    useThreadDraftStore.setState({ drafts: {} });
+    useWorkspaceStore.setState({
+      workspaces: [PROJECT],
+      workspacesLoaded: true,
+      activeWorkspaceId: PROJECT.id,
+      activeThreadId: "thread-open",
+      newThreadTarget: { kind: "project" },
+    });
+  });
+
+  it("clears the active workspace and thread and opens the new-thread canvas on No project", () => {
+    useWorkspaceStore.getState().beginNoProjectThread();
+
+    const state = useWorkspaceStore.getState();
+    expect(state.activeWorkspaceId).toBeNull();
+    expect(state.activeThreadId).toBeNull();
+    expect(state.pendingNewThread).toBe(true);
+    expect(state.newThreadTarget.kind).toBe("no-project");
+    expect(selectNewThreadIsNoProject(state)).toBe(true);
+  });
+
+  it("leaves No project when a project's new thread begins", () => {
+    useWorkspaceStore.getState().beginNoProjectThread();
+
+    useWorkspaceStore.getState().beginNewThread(PROJECT.id);
+
+    const state = useWorkspaceStore.getState();
+    expect(state.newThreadTarget).toEqual({ kind: "project" });
+    expect(state.activeWorkspaceId).toBe(PROJECT.id);
+    expect(selectNewThreadIsNoProject(state)).toBe(false);
+  });
+
+  it("starts another No project thread when a new thread begins beside a hidden workspace", () => {
+    useWorkspaceStore.setState({ workspaces: [PROJECT, HIDDEN], activeWorkspaceId: HIDDEN.id, newThreadTarget: { kind: "project" } });
+
+    useWorkspaceStore.getState().beginNewThread();
+
+    const state = useWorkspaceStore.getState();
+    expect(state.activeWorkspaceId).toBeNull();
+    expect(state.newThreadTarget.kind).toBe("no-project");
+  });
+
+  describe("selectNewThreadIsNoProject", () => {
+    it("is false on a project", () => {
+      expect(selectNewThreadIsNoProject(useWorkspaceStore.getState())).toBe(false);
+    });
+
+    it("is true on a first run: loaded, no project, nothing active", () => {
+      useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null });
+      expect(selectNewThreadIsNoProject(useWorkspaceStore.getState())).toBe(true);
+    });
+
+    it("is false before the workspace list has loaded, so a returning user never flashes No project", () => {
+      useWorkspaceStore.setState({ workspaces: [], workspacesLoaded: false, activeWorkspaceId: null });
+      expect(selectNewThreadIsNoProject(useWorkspaceStore.getState())).toBe(false);
+    });
+
+    it("is false when projects exist and none is active", () => {
+      useWorkspaceStore.setState({ activeWorkspaceId: null });
+      expect(selectNewThreadIsNoProject(useWorkspaceStore.getState())).toBe(false);
+    });
+
+    it("counts a hidden row as no project even when it is the only workspace", () => {
+      useWorkspaceStore.setState({ workspaces: [HIDDEN], activeWorkspaceId: null });
+      expect(selectNewThreadIsNoProject(useWorkspaceStore.getState())).toBe(true);
+    });
+  });
+
+  describe("activateNoProjectWorkspace", () => {
+    it("asks the server for a fresh id, adds the returned row and makes it active on the canvas", async () => {
+      useWorkspaceStore.getState().beginNoProjectThread();
+
+      const workspace = await useWorkspaceStore.getState().activateNoProjectWorkspace();
+
+      expect(mockTransport.createNoProjectWorkspace).toHaveBeenCalledExactlyOnceWith(workspace.id);
+      const state = useWorkspaceStore.getState();
+      expect(state.activeWorkspaceId).toBe(workspace.id);
+      expect(state.workspaces.map((item) => item.id)).toEqual([PROJECT.id, workspace.id]);
+    });
+
+    it("makes a different workspace for each attempt, including a retry after a failure", async () => {
+      useWorkspaceStore.getState().beginNoProjectThread();
+      vi.mocked(mockTransport.createNoProjectWorkspace).mockRejectedValueOnce(new Error("disk full"));
+
+      await expect(useWorkspaceStore.getState().activateNoProjectWorkspace()).rejects.toThrow("disk full");
+      await useWorkspaceStore.getState().activateNoProjectWorkspace();
+      await useWorkspaceStore.getState().activateNoProjectWorkspace();
+
+      const ids = vi.mocked(mockTransport.createNoProjectWorkspace).mock.calls.map(([id]) => id);
+      expect(new Set(ids).size).toBe(3);
+    });
+
+    it("makes a different workspace for each of two overlapping attempts", async () => {
+      useWorkspaceStore.getState().beginNoProjectThread();
+
+      const [first, second] = await Promise.all([
+        useWorkspaceStore.getState().activateNoProjectWorkspace(),
+        useWorkspaceStore.getState().activateNoProjectWorkspace(),
+      ]);
+
+      expect(second.id).not.toBe(first.id);
+      expect(useWorkspaceStore.getState().workspaces.map((item) => item.id)).toEqual([PROJECT.id, first.id, second.id]);
+    });
+
+    it("works on a first run, where No project was never chosen", async () => {
+      useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null, activeThreadId: null });
+
+      const workspace = await useWorkspaceStore.getState().activateNoProjectWorkspace();
+
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(workspace.id);
+    });
+
+    it("leaves the selection alone when the user opened a thread while the workspace was being made", async () => {
+      useWorkspaceStore.getState().beginNoProjectThread();
+      let finish: (workspace: Workspace) => void = () => { throw new Error("Request has not started"); };
+      vi.mocked(mockTransport.createNoProjectWorkspace).mockImplementationOnce((id) => new Promise((resolve) => {
+        finish = (workspace) => resolve({ ...workspace, id });
+      }));
+
+      const activating = useWorkspaceStore.getState().activateNoProjectWorkspace();
+      useWorkspaceStore.setState({ activeWorkspaceId: PROJECT.id, activeThreadId: "thread-open" });
+      finish(HIDDEN);
+      const workspace = await activating;
+
+      const state = useWorkspaceStore.getState();
+      expect(state.activeWorkspaceId).toBe(PROJECT.id);
+      expect(state.activeThreadId).toBe("thread-open");
+      expect(state.workspaces.map((item) => item.id)).toEqual([PROJECT.id, workspace.id]);
+    });
+
+    it("leaves the selection alone when the user switched to a project's new-thread canvas meanwhile", async () => {
+      useWorkspaceStore.getState().beginNoProjectThread();
+      let finish: (workspace: Workspace) => void = () => { throw new Error("Request has not started"); };
+      vi.mocked(mockTransport.createNoProjectWorkspace).mockImplementationOnce((id) => new Promise((resolve) => {
+        finish = (workspace) => resolve({ ...workspace, id });
+      }));
+
+      const activating = useWorkspaceStore.getState().activateNoProjectWorkspace();
+      useWorkspaceStore.getState().beginNewThread(PROJECT.id);
+      finish(HIDDEN);
+      await activating;
+
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(PROJECT.id);
+    });
+  });
+
+  it("opens a No project draft on the No project target without activating its local key", () => {
+    const draftId = useThreadDraftStore.getState().saveDraft({
+      workspaceId: NO_PROJECT_DRAFT_WORKSPACE_ID,
+      draft: { input: "draft", mentions: [], selectedTextComments: [], attachments: [], modelId: "gpt-5.5", provider: "codex", reasoning: "high" },
+      selection: {
+        interactionMode: INTERACTION_MODES.PLAN,
+        permissionMode: PERMISSION_MODES.FULL,
+        orchestrationMode: ORCHESTRATION_MODES.STANDARD,
+        approvalReviewMode: "manual",
+        thinking: null,
+      },
+      target: { mode: "direct", branch: "", branchSource: "branch", branchRemote: null, startFromOrigin: false, selectedWorktree: null },
+    });
+    if (!draftId) throw new Error("draft was not saved");
+
+    useWorkspaceStore.getState().openThreadDraft(NO_PROJECT_DRAFT_WORKSPACE_ID, draftId);
+
+    const state = useWorkspaceStore.getState();
+    expect(state.activeDraftId).toBe(draftId);
+    expect(state.activeWorkspaceId).toBeNull();
+    expect(state.newThreadTarget.kind).toBe("no-project");
   });
 });

@@ -325,7 +325,10 @@ export function startPushListeners(): void {
     pushEmitter.on("thread.created", (data) => {
       const parsed = WS_CHANNELS["thread.created"].safeParse(data);
       if (!parsed.success) return;
-      useWorkspaceStore.getState().applyThreadCreated(parsed.data.thread);
+      const store = useWorkspaceStore.getState();
+      store.applyThreadCreated(parsed.data.thread);
+      // `workspace.orderChanged` for a new hidden No project row can arrive after its first thread.
+      store.loadWorkspaceIfMissing(parsed.data.thread.workspace_id);
     }),
   );
 

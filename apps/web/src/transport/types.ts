@@ -229,6 +229,11 @@ export interface McodeTransport {
   // Workspace commands
   createWorkspace(name: string | undefined, path: string): Promise<WorkspaceCreateResult>;
   listWorkspaces(): Promise<Workspace[]>;
+  /**
+   * Create the hidden No project workspace for a client-generated id, or return the one that id already made,
+   * so a send whose outcome is unknown can be retried with the same id.
+   */
+  createNoProjectWorkspace(id: string): Promise<Workspace>;
   /** Resolve the icon each workspace shows; unknown or deleted ids are omitted. */
   resolveProjectIcons(workspaceIds: string[]): Promise<ProjectIcon[]>;
   /** Store a chosen icon path, or null to return to automatic detection. */

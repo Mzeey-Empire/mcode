@@ -156,6 +156,29 @@ describe("ws-events thread.lifecycleChanged", () => {
     expect(paths()).toEqual([null, null]);
   });
 
+  it("loads the workspace list once when threads arrive in a workspace this client has not heard of", async () => {
+    const hidden = createMockWorkspace({ id: "ws-hidden", kind: "no_project", is_git_repo: false });
+    useWorkspaceStore.setState({ threads: [], workspaces: [createMockWorkspace({ id: "ws-known" })], activeWorkspaceId: null });
+    vi.mocked(mockTransport.listWorkspaces).mockClear().mockResolvedValueOnce([hidden]);
+    startPushListeners();
+
+    pushEmitter.emit("thread.created", { thread: makeThread({ id: "first", workspace_id: hidden.id }) });
+    pushEmitter.emit("thread.created", { thread: makeThread({ id: "second", workspace_id: hidden.id }) });
+
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().workspaces.map((workspace) => workspace.id)).toEqual([hidden.id]));
+    expect(mockTransport.listWorkspaces).toHaveBeenCalledOnce();
+  });
+
+  it("does not reload the workspace list for a thread in a workspace it already has", () => {
+    useWorkspaceStore.setState({ threads: [], workspaces: [createMockWorkspace({ id: "ws-known" })], activeWorkspaceId: null });
+    vi.mocked(mockTransport.listWorkspaces).mockClear();
+    startPushListeners();
+
+    pushEmitter.emit("thread.created", { thread: makeThread({ id: "external", workspace_id: "ws-known" }) });
+
+    expect(mockTransport.listWorkspaces).not.toHaveBeenCalled();
+  });
+
   it("applies a server-authoritative completion push", () => {
     useWorkspaceStore.setState({ threads: [makeThread()] });
     startPushListeners();

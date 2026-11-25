@@ -18,6 +18,9 @@ import {
   serializeComposerDraft,
 } from "@/lib/composer-draft-storage";
 
+/** Local draft key for new No project threads. Server requests need a real workspace ID. */
+export const NO_PROJECT_DRAFT_WORKSPACE_ID = "no-project";
+
 /** New-thread execution target captured with a draft so reopening restores it. */
 export interface ThreadDraftTarget {
   mode: "direct" | "worktree" | "existing-worktree";
