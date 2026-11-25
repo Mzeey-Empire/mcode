@@ -58,7 +58,7 @@ describe("ThreadDeleteDialog for a No project thread", () => {
 
     expect(await screen.findByText("Deletes the thread. The folder stays while “Sketch, take two” uses it.")).toBeInTheDocument();
     expect(screen.queryByText(HIDDEN.path)).toBeNull();
-    expect(screen.getByRole("button", { name: "Delete thread" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete thread and folder" })).toBeNull();
   });
 

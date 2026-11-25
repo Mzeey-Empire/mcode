@@ -105,8 +105,7 @@ export function ThreadDeleteDialog({
 }
 
 function deleteLabel(folder: NoProjectFolder | null): string {
-  if (!folder) return "Delete";
-  return folder.keptForTitle === null ? "Delete thread and folder" : "Delete thread";
+  return folder?.keptForTitle === null ? "Delete thread and folder" : "Delete";
 }
 
 function NoProjectDeleteBody({ folder }: { folder: NoProjectFolder }) {
