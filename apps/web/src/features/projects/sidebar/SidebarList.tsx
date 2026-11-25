@@ -25,10 +25,11 @@ import { VirtualViewport, type VirtualHost, type VirtualRow, type ViewportPositi
 import { usePreparingRowEntrance } from "@/features/thread-startup";
 import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { projectWorkspaces } from "../state/project-workspaces";
 import { selectPreparingThreadIds, selectSidebarFacts } from "../state/thread-index";
-import type { SidebarItem } from "./sidebar-model";
+import { NO_PROJECT_GROUP_KEY, type SidebarItem } from "./sidebar-model";
 import type { SidebarRowContext } from "./sidebar-row-context";
-import { ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
+import { NoProjectHeader, ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
 import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { freezeOrder, selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
@@ -179,9 +180,10 @@ function useProjectDrag(controllerRef: React.RefObject<VirtualViewport | null>) 
     endDrag();
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const workspaceIds = useWorkspaceStore.getState().workspaces.map((workspace) => workspace.id);
-    const oldIndex = workspaceIds.indexOf(String(active.id));
-    const overIndex = workspaceIds.indexOf(String(over.id));
+    // The server reorders project rows only, so the index it receives must not count hidden No project rows.
+    const projectIds = projectWorkspaces(useWorkspaceStore.getState().workspaces).map((workspace) => workspace.id);
+    const oldIndex = projectIds.indexOf(String(active.id));
+    const overIndex = projectIds.indexOf(String(over.id));
     if (oldIndex < 0 || overIndex < 0) return;
     void useWorkspaceStore.getState().reorderWorkspace(String(active.id), dropIndex(event, oldIndex, overIndex));
   }, [endDrag]);
@@ -236,10 +238,15 @@ function EmptyRow({ item }: { item: Extract<SidebarItem, { kind: "empty" }> }) {
   return item.scope === "completed" ? <p className="px-2 py-1 text-label text-muted">No closed threads</p> : null;
 }
 
+function GroupHeaderRow({ item, ctx, dropEdge }: { item: Extract<SidebarItem, { kind: "project" }>; ctx: SidebarRowContext; dropEdge: DropEdge | null }) {
+  if (item.workspaceId === NO_PROJECT_GROUP_KEY) return <NoProjectHeader item={item} ctx={ctx} />;
+  return item.section === "recent" ? <SortableProjectRow item={item} ctx={ctx} dropEdge={dropEdge} /> : <ProjectHeader item={item} ctx={ctx} />;
+}
+
 const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: SidebarItem; ctx: SidebarRowContext; dropEdge: DropEdge | null }) {
   switch (item.kind) {
     case "project":
-      return item.section === "recent" ? <SortableProjectRow item={item} ctx={ctx} dropEdge={dropEdge} /> : <ProjectHeader item={item} ctx={ctx} />;
+      return <GroupHeaderRow item={item} ctx={ctx} dropEdge={dropEdge} />;
     case "draft":
       return <div data-testid="draft-item" data-draft-id={item.draftId}><SidebarDraftRow item={item} ctx={ctx} /></div>;
     case "draft-divider":
@@ -441,7 +448,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
   const closedScope = useSidebarUiStore(selectClosedScope);
   const rows = useMemo(() => toVirtualRows(items, closedScope), [items, closedScope]);
   const itemsByKey = useMemo(() => new Map<string, SidebarItem>(items.map((item) => [item.key, item])), [items]);
-  const sortableIds = useMemo(() => items.flatMap((item) => (item.kind === "project" && item.section === "recent" ? [item.workspaceId] : [])), [items]);
+  const sortableIds = useMemo(() => items.flatMap((item) => (item.kind === "project" && item.section === "recent" && item.workspaceId !== NO_PROJECT_GROUP_KEY ? [item.workspaceId] : [])), [items]);
   const entrance = useEntranceKeys(items);
   usePreparingRowEntrance(containerRef, entrance.rowKeys, entrance.preparing);
 

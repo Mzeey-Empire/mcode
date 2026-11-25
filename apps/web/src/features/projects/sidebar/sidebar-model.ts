@@ -1,4 +1,8 @@
+import { NO_PROJECT_DRAFT_WORKSPACE_ID } from "@/stores/threadDraftStore";
 import type { SidebarScope, SidebarView } from "./sidebar-ui-store";
+
+/** Synthetic sidebar group key, shared with No project drafts. Never a workspace id; server requests need the real one. */
+export const NO_PROJECT_GROUP_KEY = NO_PROJECT_DRAFT_WORKSPACE_ID;
 
 /**
  * Thread identity, hierarchy and parsed timestamps used to derive sidebar order.
@@ -44,6 +48,8 @@ export interface SidebarInputs {
   readonly facts: readonly SidebarThreadFacts[];
   /** Workspace ids in the user's project order. */
   readonly projectOrder: readonly string[];
+  /** Hidden No project workspace ids. Their threads share one group, never a project's. */
+  readonly noProjectWorkspaceIds: ReadonlySet<string>;
   /** Unsent draft ids per workspace, newest first. Shown above that project's threads in Active. */
   readonly draftsByWorkspace: ReadonlyMap<string, readonly string[]>;
   /** Threads for which `threadAttentionNeedsUser` is true. Never Older. */
@@ -215,12 +221,21 @@ function threadItem(row: FamilyRow, section: SidebarSection, layout: "grouped" |
   };
 }
 
-function groupByWorkspace(placed: readonly Placed[]): Map<string, Placed[]> {
+function groupKeyOf(fact: SidebarThreadFacts, inputs: SidebarInputs): string {
+  return inputs.noProjectWorkspaceIds.has(fact.workspaceId) ? NO_PROJECT_GROUP_KEY : fact.workspaceId;
+}
+
+function groupOrder(inputs: SidebarInputs): readonly string[] {
+  return [NO_PROJECT_GROUP_KEY, ...inputs.projectOrder];
+}
+
+function groupByWorkspace(placed: readonly Placed[], inputs: SidebarInputs): Map<string, Placed[]> {
   const map = new Map<string, Placed[]>();
   for (const entry of placed) {
-    const list = map.get(entry.fact.workspaceId);
+    const key = groupKeyOf(entry.fact, inputs);
+    const list = map.get(key);
     if (list) list.push(entry);
-    else map.set(entry.fact.workspaceId, [entry]);
+    else map.set(key, [entry]);
   }
   return map;
 }
@@ -337,14 +352,15 @@ function projectGroup(workspaceId: string, placed: readonly Placed[], ctx: Secti
 }
 
 function recentProjectsView(parts: Partitioned, inputs: SidebarInputs): SidebarItem[] {
-  const recentByWorkspace = groupByWorkspace(parts.recent);
-  const olderWorkspaces = new Set(parts.older.map((entry) => entry.fact.workspaceId));
+  const recentByWorkspace = groupByWorkspace(parts.recent, inputs);
+  const olderWorkspaces = new Set(parts.older.map((entry) => groupKeyOf(entry.fact, inputs)));
   const ctx: SectionContext = { inputs, section: "recent" };
   const options: ProjectGroupOptions = { collapsedSet: inputs.ui.collapsedProjects, capped: true, drafts: true };
-  return inputs.projectOrder.flatMap((workspaceId) => {
+  return groupOrder(inputs).flatMap((workspaceId) => {
     const placed = recentByWorkspace.get(workspaceId) ?? [];
     const hasDrafts = (inputs.draftsByWorkspace.get(workspaceId)?.length ?? 0) > 0;
-    if (placed.length === 0 && !hasDrafts && olderWorkspaces.has(workspaceId)) return [];
+    // No project is not something the user added, so with no thread in scope it has no group, not an empty one.
+    if (placed.length === 0 && (workspaceId === NO_PROJECT_GROUP_KEY || (!hasDrafts && olderWorkspaces.has(workspaceId)))) return [];
     return projectGroup(workspaceId, placed, ctx, options);
   });
 }
@@ -354,7 +370,7 @@ function flatRows(placed: readonly Placed[], section: SidebarSection): SidebarIt
 }
 
 function recentThreadsView(parts: Partitioned, inputs: SidebarInputs): SidebarItem[] {
-  const drafts = inputs.projectOrder.flatMap((workspaceId) => draftItems(workspaceId, inputs, "flat"));
+  const drafts = groupOrder(inputs).flatMap((workspaceId) => draftItems(workspaceId, inputs, "flat"));
   const threads = flatRows(parts.recent, "recent");
   const divider: SidebarItem[] = drafts.length > 0 && threads.length > 0 ? [{ kind: "draft-divider", key: "draft-divider" }] : [];
   return [...drafts, ...divider, ...threads];
@@ -362,10 +378,10 @@ function recentThreadsView(parts: Partitioned, inputs: SidebarInputs): SidebarIt
 
 function olderOpenItems(older: readonly Placed[], inputs: SidebarInputs): SidebarItem[] {
   if (inputs.ui.view === "threads") return flatRows(older, "older");
-  const byWorkspace = groupByWorkspace(older);
+  const byWorkspace = groupByWorkspace(older, inputs);
   const ctx: SectionContext = { inputs, section: "older" };
   const options: ProjectGroupOptions = { collapsedSet: inputs.ui.collapsedOlderProjects, capped: false, drafts: false };
-  return inputs.projectOrder.flatMap((workspaceId) => {
+  return groupOrder(inputs).flatMap((workspaceId) => {
     const placed = byWorkspace.get(workspaceId);
     return placed ? projectGroup(workspaceId, placed, ctx, options) : [];
   });
@@ -382,10 +398,10 @@ function olderSectionItems(older: readonly Placed[], inputs: SidebarInputs): Sid
 function completedItems(parts: Partitioned, inputs: SidebarInputs): SidebarItem[] {
   if (parts.completed.length === 0) return [{ kind: "empty", key: "empty", scope: "completed" }];
   if (inputs.ui.view === "threads") return flatRows(parts.completed, "recent");
-  const byWorkspace = groupByWorkspace(parts.completed);
+  const byWorkspace = groupByWorkspace(parts.completed, inputs);
   const ctx: SectionContext = { inputs, section: "recent" };
   const options: ProjectGroupOptions = { collapsedSet: inputs.ui.collapsedProjects, capped: false, drafts: false };
-  return inputs.projectOrder.flatMap((workspaceId) => {
+  return groupOrder(inputs).flatMap((workspaceId) => {
     const placed = byWorkspace.get(workspaceId);
     return placed ? projectGroup(workspaceId, placed, ctx, options) : [];
   });

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buildServerImageUrl } from "@/lib/server-image-url";
 import { useProjectIconStore } from "./projectIconStore";
@@ -42,14 +43,29 @@ export interface ProjectIconProps {
   name: string;
   size: ProjectIconSize;
   className?: string;
+  /** Shows the inbox mark for a hidden No project workspace. */
+  noProject?: boolean;
 }
 
-/** A project's icon image, or a hue-tinted badge with its initials when it has none or the image fails to load. */
-export function ProjectIcon({ workspaceId, name, size, className }: ProjectIconProps) {
+/** The inbox icon used for No project threads. */
+export function NoProjectMark({ size, className }: { size: ProjectIconSize; className?: string }) {
+  return (
+    <span aria-hidden data-testid="no-project-mark" style={{ width: size, height: size }} className={cn("inline-flex shrink-0 items-center justify-center text-muted", className)}>
+      <Inbox size={Math.round(size * 0.875)} />
+    </span>
+  );
+}
+
+/**
+ * A project's icon image, or a hue-tinted badge with its initials when it has none or the image fails to load.
+ * A No project workspace shows the plain inbox mark instead.
+ */
+export function ProjectIcon({ workspaceId, name, size, className, noProject = false }: ProjectIconProps) {
   const icon = useProjectIconStore((state) => state.iconsByWorkspaceId[workspaceId]);
   const src = icon && icon.source !== "none" ? buildServerImageUrl(icon.url) : null;
   const hue = projectHue(workspaceId);
   const style = { width: size, height: size, borderRadius: RADIUS_BY_SIZE[size] };
+  if (noProject) return <NoProjectMark size={size} className={className} />;
   // Keyed by src so a new version gets a fresh load attempt after an earlier one failed.
   return src
     ? <ProjectIconImage key={src} src={src} name={name} size={size} style={style} className={className} hue={hue} />

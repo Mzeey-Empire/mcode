@@ -7,6 +7,7 @@ import { useWorkspaceStore } from "../state/workspaceStore";
 import { projectWorkspaces } from "../state/project-workspaces";
 import { selectSidebarFacts } from "../state/thread-index";
 import {
+  NO_PROJECT_GROUP_KEY,
   deriveSidebarModel,
   reconcileItems,
   trackNeedsUserEnds,
@@ -43,6 +44,13 @@ function draftIdsByWorkspace(drafts: Readonly<Record<string, ThreadDraft>>): Rea
   return new Map([...grouped].map(([workspaceId, list]) => [workspaceId, list.sort((a, b) => b.updatedAt - a.updatedAt).map((draft) => draft.id)]));
 }
 
+function useStableSet(ids: readonly string[]): ReadonlySet<string> {
+  const previous = useRef<ReadonlySet<string>>(NO_IDS);
+  const next = new Set(ids);
+  if (!sameMembers(previous.current, next)) previous.current = next;
+  return previous.current;
+}
+
 function useNeedsUserIds(): ReadonlySet<string> {
   const byThreadId = threadAttentionStore((state) => state.byThreadId);
   const previous = useRef<ReadonlySet<string>>(NO_IDS);
@@ -63,7 +71,7 @@ function useNeedsUserEndedAt(needsUserIds: ReadonlySet<string>): ReadonlyMap<str
   }, [needsUserIds]);
 }
 
-function useModelUi(projectOrder: readonly string[]): SidebarModelUi {
+function useModelUi(groupKeys: readonly string[]): SidebarModelUi {
   const scope = useSidebarUiStore((state) => state.scope);
   const view = useSidebarUiStore((state) => state.view);
   const olderOpen = useSidebarUiStore((state) => state.olderOpen);
@@ -71,7 +79,7 @@ function useModelUi(projectOrder: readonly string[]): SidebarModelUi {
   const collapsedOlderProjects = useSidebarUiStore((state) => state.collapsedOlderProjects);
   const showMore = useSidebarUiStore((state) => state.showMore);
   const frozen = useSidebarUiStore((state) => state.frozen);
-  const collapsedProjects = useMemo(() => collapsedProjectsOf(projectOrder, expandedProjects), [projectOrder, expandedProjects]);
+  const collapsedProjects = useMemo(() => collapsedProjectsOf(groupKeys, expandedProjects), [groupKeys, expandedProjects]);
   return useMemo(
     () => ({ scope, view, olderOpen, collapsedProjects, collapsedOlderProjects, showMore, frozen }),
     [scope, view, olderOpen, collapsedProjects, collapsedOlderProjects, showMore, frozen],
@@ -102,11 +110,13 @@ function useSidebarInputs(now: number): SidebarInputs {
   const needsUserIds = useNeedsUserIds();
   const needsUserEndedAt = useNeedsUserEndedAt(needsUserIds);
   const projectOrder = useMemo(() => projectWorkspaces(workspaces).map((workspace) => workspace.id), [workspaces]);
-  const ui = useModelUi(projectOrder);
+  const noProjectWorkspaceIds = useStableSet(workspaces.filter((workspace) => workspace.kind === "no_project").map((workspace) => workspace.id));
+  const groupKeys = useMemo(() => [NO_PROJECT_GROUP_KEY, ...projectOrder], [projectOrder]);
+  const ui = useModelUi(groupKeys);
   const draftsByWorkspace = useMemo(() => draftIdsByWorkspace(drafts), [drafts]);
   return useMemo(
-    () => ({ facts, projectOrder, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch }),
-    [facts, projectOrder, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch],
+    () => ({ facts, projectOrder, noProjectWorkspaceIds, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch }),
+    [facts, projectOrder, noProjectWorkspaceIds, draftsByWorkspace, needsUserIds, needsUserEndedAt, completions, olderAfterDays, ui, selectedThreadId, now, snapshotEpoch],
   );
 }
 
@@ -156,7 +166,8 @@ function onlyProjectOrderChanged(prev: SidebarInputs, next: SidebarInputs): bool
 function onlyClockChanged(prev: SidebarInputs, next: SidebarInputs): boolean {
   return prev.now !== next.now && prev.facts === next.facts && prev.completions === next.completions
     && prev.needsUserIds === next.needsUserIds && prev.ui === next.ui && prev.selectedThreadId === next.selectedThreadId
-    && prev.draftsByWorkspace === next.draftsByWorkspace && prev.projectOrder === next.projectOrder;
+    && prev.draftsByWorkspace === next.draftsByWorkspace && prev.projectOrder === next.projectOrder
+    && prev.noProjectWorkspaceIds === next.noProjectWorkspaceIds;
 }
 
 /**

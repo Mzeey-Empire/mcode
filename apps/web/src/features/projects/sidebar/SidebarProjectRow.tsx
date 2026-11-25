@@ -3,12 +3,12 @@ import { useShallow } from "zustand/shallow";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { KeyboardCode, useDndContext, type DraggableSyntheticListeners } from "@dnd-kit/core";
-import { ChevronRight, GitBranchMinus, SquarePen } from "lucide-react";
+import { ChevronRight, GitBranchMinus, Plus, SquarePen } from "lucide-react";
 import type { ChecksStatus } from "@mcode/contracts/github";
 import { Button } from "@/components/ui/button";
 import { MoreIcon } from "@/components/ui/icon-map";
 import { Spinner } from "@/components/ui/spinner";
-import { IconOnlyStatus, useSidebarNarrow } from "./sidebar-label-tooltip";
+import { IconOnlyStatus, SidebarLabelTrigger, useSidebarNarrow } from "./sidebar-label-tooltip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -17,7 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ProjectIcon } from "@/features/projects/icons/ProjectIcon";
+import { NoProjectMark, ProjectIcon } from "@/features/projects/icons/ProjectIcon";
 import { threadRowLook } from "@/features/thread-attention/thread-row-presentation";
 import { STATUS_LABEL_TEXT_CLASS } from "@/components/ui/status-mark";
 import { useRolledUpThreadRowState } from "@/features/thread-attention/thread-rollup";
@@ -118,15 +118,7 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
   // Only headers roll up CI, so only they subscribe; a checks poll must not re-render thread rows.
   const checksById = useWorkspaceStore((state) => state.checksById);
   const scope = useSidebarScope();
-  const completions = useCompletionStore((state) => state.entries);
-  const scopedThreads = useMemo(() => threads.filter((thread) => inScope(thread, scope, completions)), [threads, scope, completions]);
-  const selectedThreadId = useWorkspaceStore((state) => state.activeThreadId);
-  // A collapsed project keeps the selected thread listed under it with its own status, so the roll-up covers only the threads it hides.
-  const hiddenThreads = useMemo(
-    () => (item.collapsed ? scopedThreads.filter((thread) => thread.id !== selectedThreadId) : NO_THREADS),
-    [item.collapsed, scopedThreads, selectedThreadId],
-  );
-  const collapsedStatus = useRolledUpThreadRowState(hiddenThreads);
+  const { scopedThreads, collapsedStatus } = useGroupRollup(threads, item.collapsed);
   if (!workspace) return null;
   return (
     <>
@@ -145,6 +137,18 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
     </>
   );
 });
+
+function useGroupRollup(threads: readonly WorkspaceThread[], collapsed: boolean): { scopedThreads: readonly WorkspaceThread[]; collapsedStatus: ThreadRowState } {
+  const scope = useSidebarScope();
+  const completions = useCompletionStore((state) => state.entries);
+  const scopedThreads = useMemo(() => threads.filter((thread) => inScope(thread, scope, completions)), [threads, scope, completions]);
+  const selectedThreadId = useWorkspaceStore((state) => state.activeThreadId);
+  const hiddenThreads = useMemo(
+    () => (collapsed ? scopedThreads.filter((thread) => thread.id !== selectedThreadId) : NO_THREADS),
+    [collapsed, scopedThreads, selectedThreadId],
+  );
+  return { scopedThreads, collapsedStatus: useRolledUpThreadRowState(hiddenThreads) };
+}
 
 function ProjectEmptyNote({ item, scope }: { item: ProjectItem; scope: SidebarScope }) {
   const hasDrafts = useThreadDraftStore((state) => Object.values(state.drafts).some((draft) => draft.workspaceId === item.workspaceId));
@@ -228,7 +232,7 @@ function ProjectWorkspaceRow({
       )}
       {...sortableListeners}
     >
-      <ProjectDisclosure workspace={workspace} isExpanded={!item.collapsed} onToggle={actions.toggle} />
+      <ProjectDisclosure name={workspace.name} isExpanded={!item.collapsed} onToggle={actions.toggle} />
       <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} />
       <ProjectTitle workspace={workspace} onClick={actions.toggle} />
       <ProjectGitStatus isGitRepository={workspace.is_git_repo} />
@@ -367,9 +371,9 @@ function ProjectCollapsedStatus({ status }: { status: ThreadRowState }) {
   );
 }
 
-function ProjectDisclosure({ workspace, isExpanded, onToggle }: { workspace: Workspace; isExpanded: boolean; onToggle: () => void }) {
+function ProjectDisclosure({ name, isExpanded, onToggle }: { name: string; isExpanded: boolean; onToggle: () => void }) {
   return (
-    <Button type="button" variant="ghost" size="icon-compact" aria-label={`Toggle threads for ${workspace.name}`} aria-expanded={isExpanded} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="mr-1 size-3.5 shrink-0 text-muted hover:bg-transparent hover:text-ink active:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent">
+    <Button type="button" variant="ghost" size="icon-compact" aria-label={`Toggle threads for ${name}`} aria-expanded={isExpanded} onKeyDown={stopDragStartKeys} onClick={(event) => { event.stopPropagation(); onToggle(); }} className="mr-1 size-3.5 shrink-0 text-muted hover:bg-transparent hover:text-ink active:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent">
       <ChevronRight aria-hidden className={cn("size-3.5 transition-transform duration-150 motion-reduce:transition-none", isExpanded && "rotate-90")} />
     </Button>
   );
@@ -404,3 +408,43 @@ function ProjectRowActions({
     </div>
   );
 }
+
+const NO_PROJECT_NAME = "No project";
+
+function noProjectThreadsOf(state: { workspaces: readonly Workspace[]; threads: readonly WorkspaceThread[] }): readonly WorkspaceThread[] {
+  const hidden = new Set(state.workspaces.filter((workspace) => workspace.kind === "no_project").map((workspace) => workspace.id));
+  const owned = state.threads.filter((thread) => hidden.has(thread.workspace_id));
+  return owned.length === 0 ? NO_THREADS : owned;
+}
+
+/** The No project group header: collapse and new-thread controls only. */
+export const NoProjectHeader = memo(function NoProjectHeader({ item, ctx }: { item: ProjectItem; ctx: SidebarRowContext }) {
+  const threads = useWorkspaceStore(useShallow(noProjectThreadsOf));
+  const { collapsedStatus } = useGroupRollup(threads, item.collapsed);
+  const toggle = useCallback(() => ctx.onToggleProject(item.workspaceId, item.section), [ctx, item.workspaceId, item.section]);
+  const createThread = useCallback((event: React.MouseEvent) => {
+    event.stopPropagation();
+    ctx.onCreateNoProjectThread();
+  }, [ctx]);
+  return (
+    <div
+      {...HOVER_ROW_PROPS}
+      role="group"
+      tabIndex={-1}
+      aria-label={`${NO_PROJECT_NAME}, ${item.count} ${item.count === 1 ? "thread" : "threads"}`}
+      data-testid="no-project-row"
+      onClick={toggle}
+      className="group/ws relative flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2 pl-1 text-label text-muted outline-none"
+    >
+      <ProjectDisclosure name={NO_PROJECT_NAME} isExpanded={!item.collapsed} onToggle={toggle} />
+      <NoProjectMark size={16} />
+      <span className="min-w-0 flex-1 text-fade font-medium">{NO_PROJECT_NAME}</span>
+      <ProjectCollapsedStatus status={collapsedStatus} />
+      <div className="hidden shrink-0 items-center justify-end gap-1 group-hover/ws:flex group-focus-within/ws:flex has-data-popup-open:flex">
+        <SidebarLabelTrigger label="New thread without a project">
+          <Button variant="ghost" size="icon-compact" aria-label="New thread without a project" onClick={createThread} className={PROJECT_ACTION_CLASS}><Plus aria-hidden className="size-3.5" /></Button>
+        </SidebarLabelTrigger>
+      </div>
+    </div>
+  );
+});
