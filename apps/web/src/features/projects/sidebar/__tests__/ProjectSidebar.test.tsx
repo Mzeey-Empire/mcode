@@ -45,6 +45,7 @@ vi.mock("@dnd-kit/sortable", async (importOriginal) => {
 
 vi.mock("../../state/workspaceStore", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../state/workspaceStore")>();
+  const { emptyWorktreeListing } = await import("../../state/worktree-listing");
   // The store state object must be built once: ProjectTree memoizes its row
   // list on slice references, so a fresh literal per selector call would loop
   // the render -> setRows -> publish cycle forever.
@@ -65,8 +66,7 @@ vi.mock("../../state/workspaceStore", async (importOriginal) => {
     beginNewThread: vi.fn(),
     updateThreadTitle: vi.fn(),
     loadWorktrees: vi.fn(),
-    worktrees: [],
-    worktreesLoadedForWorkspace: null,
+    worktreeListing: emptyWorktreeListing(null),
     checksById: {},
     error: null,
     reorderWorkspace: vi.fn(),
@@ -192,6 +192,7 @@ afterEach(() => {
 
 // Import after mocks are registered.
 import { useWorkspaceStore } from "../../state/workspaceStore";
+import { emptyWorktreeListing } from "../../state/worktree-listing";
 import { useSidebarUiStore } from "../sidebar-ui-store";
 import { SIDEBAR_STATUS_WORD_WIDTH } from "../sidebar-label-tooltip";
 import { useSidebarWidthStore } from "@/components/sidebar/sidebarWidthStore";
@@ -303,8 +304,7 @@ function createProjectTreeStoreMock(options: ProjectTreeStoreMockOptions) {
     deleteThread: vi.fn(),
     ...actions,
     loadWorktrees: vi.fn(),
-    worktrees: [],
-    worktreesLoadedForWorkspace: null,
+    worktreeListing: emptyWorktreeListing(null),
     checksById: {},
     error: null,
   };
@@ -1315,8 +1315,7 @@ describe("ProjectSidebar action-required indicator", () => {
       setPendingNewThread: vi.fn(),
       updateThreadTitle: vi.fn(),
       loadWorktrees: vi.fn(),
-      worktrees: [],
-      worktreesLoadedForWorkspace: null,
+      worktreeListing: emptyWorktreeListing(null),
       error: null,
       pendingStartupByThreadId: currentPendingStartup,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1368,8 +1367,7 @@ describe("ProjectSidebar action-required indicator", () => {
         setPendingNewThread: vi.fn(),
         updateThreadTitle: vi.fn(),
         loadWorktrees: vi.fn(),
-        worktrees: [],
-        worktreesLoadedForWorkspace: null,
+        worktreeListing: emptyWorktreeListing(null),
         error: null,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       })) as any);
@@ -1713,8 +1711,7 @@ describe("ProjectSidebar PR-ability gating by mode", () => {
       setPendingNewThread: vi.fn(),
       updateThreadTitle: vi.fn(),
       loadWorktrees: vi.fn(),
-      worktrees: [],
-      worktreesLoadedForWorkspace: null,
+      worktreeListing: emptyWorktreeListing(null),
       error: null,
       pendingStartupByThreadId: {},
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

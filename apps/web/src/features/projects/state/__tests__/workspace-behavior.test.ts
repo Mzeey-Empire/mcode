@@ -8,6 +8,7 @@ import {
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useWorkspaceStore, __clearPendingThreadCreationsForTests } from "../workspaceStore";
+import { emptyWorktreeListing, withListedWorktrees } from "../worktree-listing";
 import { isThreadExecuting, scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { useQueueStore } from "@/stores/queueStore";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
@@ -1437,8 +1438,7 @@ describe("Workspace Behavior", () => {
         activeWorkspaceId: ws.id,
         newThreadMode: "worktree",
         newThreadBranch: "main",
-        worktreesLoadedForWorkspace: ws.id,
-        worktrees: [],
+        worktreeListing: emptyWorktreeListing(ws.id),
       });
 
       const sending = useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
@@ -1468,7 +1468,6 @@ describe("Workspace Behavior", () => {
       expect(useWorkspaceStore.getState().activeThreadId).toBe(durable.id);
       expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toEqual([durable.id]);
       expect(useWorkspaceStore.getState().pendingStartupByThreadId[durable.id]?.startupId).toBe(placeholderId);
-      expect(useWorkspaceStore.getState().worktreesLoadedForWorkspace).toBeNull();
       expect(mockTransport.listWorktrees).toHaveBeenCalledWith(ws.id);
 
       rejectRpc(new Error("Connection closed before reply"));
@@ -1478,8 +1477,7 @@ describe("Workspace Behavior", () => {
 
       const worktrees = [{ name: "new-worktree", path: durable.worktree_path!, branch: "main", managed: true }];
       resolveWorktrees(worktrees);
-      await vi.waitFor(() => expect(useWorkspaceStore.getState().worktreesLoadedForWorkspace).toBe(ws.id));
-      expect(useWorkspaceStore.getState().worktrees).toEqual(worktrees);
+      await vi.waitFor(() => expect(useWorkspaceStore.getState().worktreeListing.worktrees).toEqual(worktrees));
     });
 
     it("stamps the server execution on a creation recovered before its response arrives", async () => {
@@ -2614,12 +2612,12 @@ describe("Workspace Behavior", () => {
         workspaces: [ws],
         activeWorkspaceId: ws.id,
         threads: [parent],
-        worktrees: [{
+        worktreeListing: withListedWorktrees(emptyWorktreeListing(ws.id), [{
           name: "branchless-existing",
           path: "C:/repo/.worktrees/branchless-existing",
           branch: "(detached)",
           managed: true,
-        }],
+        }], new Set()),
       });
       (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
         createMockCreateAndSendResult(created),
@@ -2670,12 +2668,12 @@ describe("Workspace Behavior", () => {
         workspaces: [ws],
         activeWorkspaceId: ws.id,
         threads: [parent],
-        worktrees: [{
+        worktreeListing: withListedWorktrees(emptyWorktreeListing(ws.id), [{
           name: "branchless-existing",
           path: "/repo/.worktrees/branchless-existing",
           branch: "(detached)",
           managed: true,
-        }],
+        }], new Set()),
       });
 
       await expect(

@@ -36,6 +36,7 @@ import type { CompletionEntry } from "./completion-machine";
 import { ThreadOptionsMenu, useThreadMenuOpenFor, type ThreadMenuActions } from "./thread-menu";
 import { DraftTag, IconOnlyStatus, SidebarLabelTrigger, useSidebarNarrow, useSidebarStatusIconOnly } from "./sidebar-label-tooltip";
 import { HOVER_ROW_PROPS } from "./hover-glide";
+import { worktreePresence } from "../state/worktree-listing";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
 
@@ -209,7 +210,7 @@ interface ThreadRowVisualProps {
 function createThreadRowPresentation(
   thread: WorkspaceThread,
   rowState: ThreadRowState,
-  ctx: Pick<SidebarRowContext, "worktreesLoadedFor" | "validWorktreePaths" | "availableProviders">,
+  ctx: Pick<SidebarRowContext, "worktreeListing" | "availableProviders">,
   { startupHeld, isActive, closedScope }: { startupHeld: boolean; isActive: boolean; closedScope: boolean },
   completion: CompletionEntry | undefined,
 ): ThreadRowPresentation {
@@ -217,7 +218,7 @@ function createThreadRowPresentation(
   return {
     look: threadRowLook(rowState),
     titleTone: threadTitleTone(rowState, isActive),
-    isStaleWorktree: hasStaleThreadWorktree(thread, ctx.worktreesLoadedFor, ctx.validWorktreePaths),
+    isStaleWorktree: worktreePresence(ctx.worktreeListing, thread) === "missing",
     ...threadProviderPresentation(thread.provider, ctx.availableProviders),
     scaffoldDim: thread.clientError || startupHeld ? "opacity-[0.72]" : false,
     closedRow: closedScope,
@@ -226,17 +227,6 @@ function createThreadRowPresentation(
     completionFailure: completion?.phase === "failed" ? completion.failure.message : null,
     lifecycleKind: lifecycleKindOf(completion, isUserCompleted),
   };
-}
-
-function hasStaleThreadWorktree(
-  thread: WorkspaceThread,
-  worktreesLoadedFor: string | null,
-  validWorktreePaths: ReadonlySet<string>,
-): boolean {
-  if (worktreesLoadedFor !== thread.workspace_id || thread.mode !== "worktree") return false;
-  if (!thread.worktree_path) return false;
-  const path = thread.worktree_path.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-  return !validWorktreePaths.has(path);
 }
 
 function threadProviderPresentation(

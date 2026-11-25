@@ -10,6 +10,7 @@ import { useUiStore } from "@/stores/uiStore";
 import type { Thread, Workspace } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useWorkspaceStore } from "./state/workspaceStore";
+import { needsWorktreeCheck } from "./state/worktree-listing";
 import { useSidebarUiStore } from "./sidebar/sidebar-ui-store";
 import type { InlineEditState, SidebarRowContext } from "./sidebar/sidebar-row-context";
 import { ThreadDeleteDialog, useThreadDeletion } from "./sidebar/thread-deletion";
@@ -56,17 +57,16 @@ function editStateFor(thread: WorkspaceThread): InlineEditState {
   return { threadId: thread.id, title: thread.title, originalTitle: thread.title };
 }
 
+/** Asks git once per worktree path the tree has not checked, such as a thread a delegated task just created. */
 function useLoadActiveWorkspaceWorktrees(): void {
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const loadedFor = useWorkspaceStore((s) => s.worktreesLoadedForWorkspace);
   const loadWorktrees = useWorkspaceStore((s) => s.loadWorktrees);
-  const needsWorktrees = useWorkspaceStore((s) => activeWorkspaceId !== null && s.threads.some(
-    (thread) => thread.workspace_id === activeWorkspaceId && thread.mode === "worktree" && Boolean(thread.worktree_path),
+  const needsCheck = useWorkspaceStore((s) => activeWorkspaceId !== null && s.threads.some(
+    (thread) => thread.workspace_id === activeWorkspaceId && needsWorktreeCheck(s.worktreeListing, thread),
   ));
   useEffect(() => {
-    if (!activeWorkspaceId || loadedFor === activeWorkspaceId || !needsWorktrees) return;
-    void loadWorktrees(activeWorkspaceId);
-  }, [activeWorkspaceId, loadedFor, needsWorktrees, loadWorktrees]);
+    if (activeWorkspaceId && needsCheck) void loadWorktrees(activeWorkspaceId);
+  }, [activeWorkspaceId, needsCheck, loadWorktrees]);
 }
 
 /** Inline rename: F2 on the active thread, double-click, commit and cancel. */
@@ -206,16 +206,10 @@ function useMenus() {
   return { threadMenu, setThreadMenu, draftMenu, setDraftMenu, openThreadMenu, openDraftMenu };
 }
 
-function normalizedPath(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-}
-
 function useRowFacts() {
-  const worktreesLoadedFor = useWorkspaceStore((s) => s.worktreesLoadedForWorkspace);
-  const worktrees = useWorkspaceStore((s) => s.worktrees);
+  const worktreeListing = useWorkspaceStore((s) => s.worktreeListing);
   const availableProviders = useProviderAvailabilityStore((s) => s.providers);
-  const validWorktreePaths = useMemo(() => new Set(worktrees.map((worktree) => normalizedPath(worktree.path))), [worktrees]);
-  return { worktreesLoadedFor, validWorktreePaths, availableProviders };
+  return { worktreeListing, availableProviders };
 }
 
 function useThreadAndDraftActions() {
@@ -252,7 +246,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
   const retryThreadCleanup = useWorkspaceStore((s) => s.retryThreadCleanup);
   useLoadActiveWorkspaceWorktrees();
 
-  const { worktreesLoadedFor, validWorktreePaths, availableProviders } = facts;
+  const { worktreeListing, availableProviders } = facts;
   const { setInlineEdit } = rename;
   const openDeletion = deletion.open;
   const selectThread = clicks.select;
@@ -266,8 +260,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     renamingThreadId: rename.inlineEdit?.threadId ?? null,
   }), [setInlineEdit, openDeletion, selectThread, rename.inlineEdit]);
   const ctx = useMemo<SidebarRowContext>(() => ({
-    worktreesLoadedFor,
-    validWorktreePaths,
+    worktreeListing,
     availableProviders,
     inlineEdit: rename.inlineEdit,
     onToggleProject: toggleProject,
@@ -289,7 +282,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     onDiscardDraft: actions.discardDraft,
     onDraftContextMenu: menus.openDraftMenu,
   }), [
-    worktreesLoadedFor, validWorktreePaths, availableProviders,
+    worktreeListing, availableProviders,
     rename.inlineEdit, rename.change, rename.commit, rename.cancel,
     toggleProject, toggleShowMore, actions.createThread, actions.openDraft, actions.discardDraft,
     projects.openDelete, projects.openRename, clicks.click, clicks.doubleClick, clicks.select,

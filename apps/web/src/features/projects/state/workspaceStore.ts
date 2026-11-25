@@ -43,6 +43,7 @@ import type { ScheduledTurnResume } from "@mcode/contracts/models/turn-recovery"
 import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 import type { Message } from "@mcode/contracts/models/message";
 import { isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
+import { emptyWorktreeListing, knownWorktreePaths, withListedWorktrees, type WorktreeListing } from "./worktree-listing";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { readRememberedStartFromOrigin, rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
 import { recordThreadSelection } from "@/lib/thread-switch-telemetry";
@@ -103,7 +104,6 @@ function optimisticCreationSuccessState(
   thread: Omit<CreateAndSendResult, "runtimeSnapshot" | "warnings">,
   warnings: CreateAndSendResult["warnings"],
   pending: PendingThreadCreation | undefined,
-  transportWasWorktree: boolean,
 ) {
   const hydratedThread = hydrateCreatedThread(thread, pending);
   const createdThread = warnings?.length
@@ -119,7 +119,6 @@ function optimisticCreationSuccessState(
     activeThreadId: state.activeThreadId === placeholderId ? thread.id : state.activeThreadId,
     pendingStartupByThreadId,
     error: null,
-    ...(transportWasWorktree ? { worktreesLoadedForWorkspace: null } : {}),
   };
 }
 
@@ -426,7 +425,7 @@ function newThreadCreationTarget(state: NewThreadTargetState): ThreadCreationTar
 
 function branchThreadCreationTarget(
   params: BranchThreadParams,
-  worktrees: WorktreeInfo[],
+  worktrees: readonly WorktreeInfo[],
 ): ThreadCreationTarget {
   const branch = params.branch ?? "";
   if (params.mode === "direct") return { transportMode: "direct", branch };
@@ -633,10 +632,8 @@ interface WorkspaceState {
   newThreadPullRequestNumber: number | undefined;
   /** The "Start from origin" switch, remembered per project. Applies to New worktree mode only. */
   newThreadStartFromOrigin: boolean;
-  worktrees: WorktreeInfo[];
-  worktreesLoading: boolean;
-  /** The workspace ID whose worktrees are currently in the `worktrees` array. Null before any load. */
-  worktreesLoadedForWorkspace: string | null;
+  /** The active project's git worktrees. Ask `worktreePresence` whether a thread's worktree exists. */
+  worktreeListing: WorktreeListing;
   selectedWorktree: AttachedWorktree | null;
   /** In-memory map of thread ID → PR URL, populated immediately on PR creation so the header can link without waiting for the next poll. */
   prUrlsByThreadId: Record<string, string>;
@@ -856,7 +853,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     placeholderId: string,
     workspaceId: string,
     result: CreateAndSendResult,
-    transportWasWorktree: boolean,
     attachmentOwner: "submitting-composer" | "kept-draft",
   ) => {
     const { runtimeSnapshot, warnings, ...thread } = result;
@@ -886,7 +882,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       thread,
       warnings,
       pending,
-      transportWasWorktree,
     ));
     if (get().activeThreadId === thread.id) {
       void getConversationResidency().activate(thread.id, get().threads);
@@ -989,7 +984,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         placeholderId,
         attempt.workspaceId,
         result,
-        attempt.transportMode === "worktree",
         "submitting-composer",
       );
       return result;
@@ -1018,7 +1012,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       thread,
       undefined,
       pending,
-      pending.transportMode === "worktree",
     ));
     if (get().activeThreadId === thread.id) {
       void getConversationResidency().activate(thread.id, get().threads);
@@ -1168,9 +1161,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   newThreadBranchRemote: null,
   newThreadPullRequestNumber: undefined,
   newThreadStartFromOrigin: false,
-  worktrees: [],
-  worktreesLoading: false,
-  worktreesLoadedForWorkspace: null,
+  worktreeListing: emptyWorktreeListing(null),
   selectedWorktree: null,
   // Branch-from-chat fields — safe defaults; always reset by initBranchMode before use.
   branchExecMode: "direct" as const,
@@ -1327,9 +1318,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       newThreadBranch: "",
       newThreadBranchRemote: null,
       newThreadStartFromOrigin: id ? readRememberedStartFromOrigin(id) : false,
-      worktrees: [],
-      worktreesLoading: false,
-      worktreesLoadedForWorkspace: null,
+      worktreeListing: emptyWorktreeListing(id, get().worktreeListing.requestId + 1),
       selectedWorktree: null,
     });
     reconcileSelectedConversation();
@@ -1534,7 +1523,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   branchThread: async (params) => {
     const workspaceId = get().activeWorkspaceId;
     if (!workspaceId) throw new Error("No workspace selected");
-    const target = branchThreadCreationTarget(params, get().worktrees);
+    const target = branchThreadCreationTarget(params, get().worktreeListing.worktrees);
     const pending: PendingThreadCreation = {
       workspaceId,
       content: params.content,
@@ -1601,7 +1590,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           placeholderId,
           currentPending.workspaceId,
           result,
-          currentPending.transportMode === "worktree",
           // The first send failed, so the kept draft, not the submitting composer, owns the attachments now.
           "kept-draft",
         );
@@ -1949,14 +1937,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   loadWorktrees: async (workspaceId) => {
-    set({ worktreesLoading: true, error: null });
+    if (get().activeWorkspaceId !== workspaceId) return;
+    const requestId = get().worktreeListing.requestId + 1;
+    // Snapshot before asking git: only paths known now can be called missing by the answer.
+    const knownPaths = knownWorktreePaths(get().threads, workspaceId);
+    set((state) => ({
+      worktreeListing: { ...state.worktreeListing, workspaceId, requestedPaths: knownPaths, requestId },
+      error: null,
+    }));
+    const isLatest = () => {
+      const listing = get().worktreeListing;
+      return listing.workspaceId === workspaceId && listing.requestId === requestId;
+    };
     try {
       const worktrees = await getTransport().listWorktrees(workspaceId);
-      if (get().activeWorkspaceId !== workspaceId) return;
-      set({ worktrees, worktreesLoading: false, worktreesLoadedForWorkspace: workspaceId, error: null });
+      if (!isLatest()) return;
+      set((state) => ({ worktreeListing: withListedWorktrees(state.worktreeListing, worktrees, knownPaths), error: null }));
     } catch (e) {
-      if (get().activeWorkspaceId !== workspaceId) return;
-      set({ worktreesLoading: false, error: String(e) });
+      if (!isLatest()) return;
+      set({ error: String(e) });
     }
   },
 
