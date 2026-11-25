@@ -24,8 +24,7 @@ import { ProjectSidebar } from "../ProjectSidebar";
 
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
 
-function worktreeThread(id: string): Thread {
-  // Recent activity keeps the row out of the collapsed Older group.
+function recentWorktreeThread(id: string): Thread {
   const at = new Date().toISOString();
   return createMockThread({
     id, workspace_id: "ws-1", title: `Title ${id}`, mode: "worktree", worktree_path: `/alpha-worktrees/${id}`,
@@ -45,11 +44,12 @@ async function settle(): Promise<void> {
   await act(async () => {});
 }
 
-const EXISTING = worktreeThread("existing");
-const ARRIVED = worktreeThread("arrived");
+const EXISTING = recentWorktreeThread("existing");
+const ARRIVED = recentWorktreeThread("arrived");
 
 describe("SidebarList worktree presence", () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     vi.mocked(mockTransport.listWorktrees).mockReset();
     useSidebarUiStore.setState({ view: "projects", scope: "active", expandedProjects: new Set(["ws-1"]), showMore: new Set() });
     useWorkspaceStore.setState({
@@ -65,6 +65,7 @@ describe("SidebarList worktree presence", () => {
     cleanup();
     useWorkspaceStore.getState().setActiveWorkspace(null);
     useWorkspaceStore.setState({ workspaces: [], threads: [] });
+    vi.useRealTimers();
   });
 
   it("does not mark a worktree thread that arrives after the list loaded as unavailable", async () => {
@@ -75,8 +76,21 @@ describe("SidebarList worktree presence", () => {
     act(() => useWorkspaceStore.setState((state) => ({ threads: [ARRIVED, ...state.threads] })));
     await settle();
 
+    expect(mockTransport.listWorktrees).toHaveBeenCalledTimes(2);
     expect(within(row("arrived")).queryByText("Worktree unavailable")).not.toBeInTheDocument();
     expect(within(row("existing")).queryByText("Worktree unavailable")).not.toBeInTheDocument();
+  });
+
+  it("marks a newly arrived worktree thread when the fresh listing leaves it out", async () => {
+    vi.mocked(mockTransport.listWorktrees).mockResolvedValue(listed(EXISTING));
+    render(<ProjectSidebar />);
+    await settle();
+
+    act(() => useWorkspaceStore.setState((state) => ({ threads: [ARRIVED, ...state.threads] })));
+    await settle();
+
+    expect(mockTransport.listWorktrees).toHaveBeenCalledTimes(2);
+    expect(within(row("arrived")).getByText("Worktree unavailable")).toBeInTheDocument();
   });
 
   it("marks a worktree thread whose directory git no longer lists", async () => {
@@ -93,5 +107,17 @@ describe("SidebarList worktree presence", () => {
     await settle();
 
     expect(screen.queryByText("Worktree unavailable")).not.toBeInTheDocument();
+  });
+
+  it("asks git again after a failed listing and marks a worktree the retry no longer finds", async () => {
+    vi.mocked(mockTransport.listWorktrees).mockRejectedValueOnce(new Error("git timed out after 10000ms")).mockResolvedValue([]);
+    render(<ProjectSidebar />);
+    await settle();
+    expect(screen.queryByText("Worktree unavailable")).not.toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+
+    expect(mockTransport.listWorktrees).toHaveBeenCalledTimes(2);
+    expect(within(row("existing")).getByText("Worktree unavailable")).toBeInTheDocument();
   });
 });

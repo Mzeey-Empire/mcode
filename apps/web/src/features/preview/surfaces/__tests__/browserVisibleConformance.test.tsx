@@ -44,7 +44,7 @@ const {
     threads: [] as Thread[],
     prUrlsByThreadId: {},
     checksById: {},
-    worktreeListing: { workspaceId: "workspace-visible", worktrees: [], listedPaths: new Set<string>(), checkedPaths: new Set<string>(), requestedPaths: new Set<string>(), requestId: 0 },
+    worktreeListing: { workspaceId: "workspace-visible", worktrees: [], listedPaths: new Set<string>(), checkedPaths: new Set<string>(), requestedPaths: new Set<string>(), requestId: 0, failedAttempts: 0 },
   },
 }));
 

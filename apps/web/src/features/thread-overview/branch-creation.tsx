@@ -41,9 +41,6 @@ function updateThreadToNamedBranch(threadId: string, branch: string): void {
       Object.entries(state.checksById).filter(([candidateId]) => candidateId !== threadId),
     ) as typeof state.checksById,
   }));
-  // The worktree's branch changed, so the listed branch for its checkout is out of date.
-  const workspaceId = useWorkspaceStore.getState().threads.find((candidate) => candidate.id === threadId)?.workspace_id;
-  if (workspaceId) void useWorkspaceStore.getState().loadWorktrees(workspaceId);
 }
 
 /** Branch naming dialog shared by both branch entry points. */
@@ -84,6 +81,7 @@ function CreateThreadBranchDialogSession({
       const result = await getTransport().createBranch(thread.workspace_id, name, thread.id);
       const nextBranch = result.branch || name;
       updateThreadToNamedBranch(thread.id, nextBranch);
+      void useWorkspaceStore.getState().loadWorktrees(thread.workspace_id);
       onOpenChange(false);
       onCreated(nextBranch);
     } catch (err) {

@@ -43,7 +43,9 @@ import type { ScheduledTurnResume } from "@mcode/contracts/models/turn-recovery"
 import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 import type { Message } from "@mcode/contracts/models/message";
 import { isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
-import { emptyWorktreeListing, knownWorktreePaths, withListedWorktrees, type WorktreeListing } from "./worktree-listing";
+import {
+  emptyWorktreeListing, knownWorktreePaths, withFailedListing, withListedWorktrees, worktreeRetryDelayMs, type WorktreeListing,
+} from "./worktree-listing";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { readRememberedStartFromOrigin, rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
 import { recordThreadSelection } from "@/lib/thread-switch-telemetry";
@@ -1939,10 +1941,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   loadWorktrees: async (workspaceId) => {
     if (get().activeWorkspaceId !== workspaceId) return;
     const requestId = get().worktreeListing.requestId + 1;
-    // Snapshot before asking git: only paths known now can be called missing by the answer.
-    const knownPaths = knownWorktreePaths(get().threads, workspaceId);
+    const worktreePathsKnownAtRequestStart = knownWorktreePaths(get().threads, workspaceId);
     set((state) => ({
-      worktreeListing: { ...state.worktreeListing, workspaceId, requestedPaths: knownPaths, requestId },
+      worktreeListing: { ...state.worktreeListing, workspaceId, requestedPaths: worktreePathsKnownAtRequestStart, requestId },
       error: null,
     }));
     const isLatest = () => {
@@ -1952,10 +1953,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     try {
       const worktrees = await getTransport().listWorktrees(workspaceId);
       if (!isLatest()) return;
-      set((state) => ({ worktreeListing: withListedWorktrees(state.worktreeListing, worktrees, knownPaths), error: null }));
+      set((state) => ({
+        worktreeListing: withListedWorktrees(state.worktreeListing, worktrees, worktreePathsKnownAtRequestStart),
+        error: null,
+      }));
     } catch (e) {
       if (!isLatest()) return;
-      set({ error: String(e) });
+      set((state) => ({ worktreeListing: withFailedListing(state.worktreeListing), error: String(e) }));
+      setTimeout(() => {
+        if (isLatest()) void get().loadWorktrees(workspaceId);
+      }, worktreeRetryDelayMs(get().worktreeListing.failedAttempts));
     }
   },
 

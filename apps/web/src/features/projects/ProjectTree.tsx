@@ -57,8 +57,7 @@ function editStateFor(thread: WorkspaceThread): InlineEditState {
   return { threadId: thread.id, title: thread.title, originalTitle: thread.title };
 }
 
-/** Asks git once per worktree path the tree has not checked, such as a thread a delegated task just created. */
-function useLoadActiveWorkspaceWorktrees(): void {
+function useRefreshWorktreesForNewPaths(): void {
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const loadWorktrees = useWorkspaceStore((s) => s.loadWorktrees);
   const needsCheck = useWorkspaceStore((s) => activeWorkspaceId !== null && s.threads.some(
@@ -244,7 +243,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
   const toggleShowMore = useSidebarUiStore((s) => s.toggleShowMore);
   const reopenThread = useWorkspaceStore((s) => s.reopenThread);
   const retryThreadCleanup = useWorkspaceStore((s) => s.retryThreadCleanup);
-  useLoadActiveWorkspaceWorktrees();
+  useRefreshWorktreesForNewPaths();
 
   const { worktreeListing, availableProviders } = facts;
   const { setInlineEdit } = rename;
