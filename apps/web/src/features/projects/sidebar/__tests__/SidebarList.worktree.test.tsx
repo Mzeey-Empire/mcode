@@ -101,6 +101,37 @@ describe("SidebarList worktree presence", () => {
     expect(within(row("existing")).getByText("Worktree unavailable")).toBeInTheDocument();
   });
 
+  it("asks git again when the server reassigns a worktree path an earlier listing found missing", async () => {
+    vi.mocked(mockTransport.listWorktrees).mockResolvedValueOnce([]).mockResolvedValue(listed(EXISTING));
+    render(<ProjectSidebar />);
+    await settle();
+    expect(within(row("existing")).getByText("Worktree unavailable")).toBeInTheDocument();
+
+    act(() => {
+      useWorkspaceStore.getState().applyThreadWorktreePath("existing", null);
+      useWorkspaceStore.getState().applyThreadWorktreePath("existing", EXISTING.worktree_path);
+    });
+    await settle();
+
+    expect(mockTransport.listWorktrees).toHaveBeenCalledTimes(2);
+    expect(within(row("existing")).queryByText("Worktree unavailable")).not.toBeInTheDocument();
+  });
+
+  it("drops the earlier missing answer for a reassigned path even when the fresh listing fails", async () => {
+    vi.mocked(mockTransport.listWorktrees).mockResolvedValueOnce([]).mockRejectedValue(new Error("git timed out after 10000ms"));
+    render(<ProjectSidebar />);
+    await settle();
+    expect(within(row("existing")).getByText("Worktree unavailable")).toBeInTheDocument();
+
+    act(() => {
+      useWorkspaceStore.getState().applyThreadWorktreePath("existing", null);
+      useWorkspaceStore.getState().applyThreadWorktreePath("existing", EXISTING.worktree_path);
+    });
+    await settle();
+
+    expect(within(row("existing")).queryByText("Worktree unavailable")).not.toBeInTheDocument();
+  });
+
   it("leaves worktree threads unmarked when the listing fails", async () => {
     vi.mocked(mockTransport.listWorktrees).mockRejectedValue(new Error("git timed out after 10000ms"));
     render(<ProjectSidebar />);

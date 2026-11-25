@@ -44,7 +44,7 @@ import type { TurnRuntimeSnapshot } from "@mcode/contracts/models/turn-runtime";
 import type { Message } from "@mcode/contracts/models/message";
 import { isDetachedWorktree, normalizeWorktreePath, type AttachedWorktree } from "@/lib/worktree";
 import {
-  emptyWorktreeListing, knownWorktreePaths, withFailedListing, withListedWorktrees, worktreeRetryDelayMs, type WorktreeListing,
+  emptyWorktreeListing, knownWorktreePaths, withFailedListing, withListedWorktrees, withReassignedPath, worktreeRetryDelayMs, type WorktreeListing,
 } from "./worktree-listing";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
 import { readRememberedStartFromOrigin, rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
@@ -736,7 +736,7 @@ interface WorkspaceState {
   /** Apply a server-authoritative completion lifecycle push. */
   applyThreadLifecycle: (thread: Thread) => void;
   applyThreadActivity: (threadId: string, at: string) => void;
-  /** Record a worktree path the server saved or cleared after it announced the thread. */
+  /** Apply a server-saved worktree path to a thread already in the store. Null clears the path. */
   applyThreadWorktreePath: (threadId: string, worktreePath: string | null) => void;
   applyThreadPullRequests: (threadId: string, prs: ThreadPullRequest[]) => void;
   /** Remove a thread after server-authoritative automatic cleanup. */
@@ -1772,11 +1772,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   applyThreadWorktreePath: (threadId, worktreePath) => {
-    set((state) => {
-      const existing = state.threads.find((thread) => thread.id === threadId);
-      if (!existing || existing.worktree_path === worktreePath) return state;
-      return { threads: state.threads.map((thread) => thread.id === threadId ? { ...thread, worktree_path: worktreePath } : thread) };
-    });
+    const existing = get().threads.find((thread) => thread.id === threadId);
+    if (!existing || existing.worktree_path === worktreePath) return;
+    const threads = get().threads.map((thread) => thread.id === threadId ? { ...thread, worktree_path: worktreePath } : thread);
+    const listing = get().worktreeListing;
+    if (!worktreePath || listing.workspaceId !== existing.workspace_id) {
+      set({ threads });
+      return;
+    }
+    set({ threads, worktreeListing: withReassignedPath(listing, worktreePath) });
+    // A listing already in flight may have run before this directory existed; the newer request replaces its answer.
+    void get().loadWorktrees(existing.workspace_id);
   },
 
   applyScheduledResume: (threadId, resume) => {

@@ -60,6 +60,15 @@ export function withFailedListing(listing: WorktreeListing): WorktreeListing {
   return { ...listing, failedAttempts: listing.failedAttempts + 1 };
 }
 
+/**
+ * Forgets a `missing` answer for a path the server just assigned, which can reuse a path an
+ * earlier listing found missing. The caller then starts a fresh listing to answer for it.
+ */
+export function withReassignedPath(listing: WorktreeListing, worktreePath: string): WorktreeListing {
+  const path = normalizeWorktreePath(worktreePath);
+  return { ...listing, checkedPaths: new Set([...listing.checkedPaths].filter((checked) => checked !== path)) };
+}
+
 /** Wait before retrying a failed listing: doubles from 2 seconds per failure in a row, up to 1 minute. */
 export function worktreeRetryDelayMs(failedAttempts: number): number {
   return Math.min(FIRST_RETRY_DELAY_MS * 2 ** Math.max(failedAttempts - 1, 0), MAX_RETRY_DELAY_MS);
