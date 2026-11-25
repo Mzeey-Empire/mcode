@@ -41,4 +41,12 @@ describe("GitWorktreeService", () => {
       NodeFS.rmSync(repository, { recursive: true, force: true });
     }
   });
+
+  it("reports a failed git listing instead of an empty worktree list", async () => {
+    const gitExecutor = new FakeGitExecutor();
+    gitExecutor.setResponse(["worktree", "list", "--porcelain"], new Error("git timed out after 10000ms"));
+    const service = new GitWorktreeService({} as WorkspaceRepo, gitExecutor, TEST_HOST_RUNTIME);
+
+    await expect(service.listWorktreesAt("/repo")).rejects.toThrow("git timed out after 10000ms");
+  });
 });
