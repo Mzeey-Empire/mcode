@@ -611,6 +611,16 @@ export function App() {
         },
       }),
       registerCommand({
+        id: "thread.newNoProject",
+        title: "New thread without a project",
+        category: "Thread",
+        handler: () => {
+          // Same entry as the sidebar's No project "+": the canvas must be the visible surface, not just the target.
+          useUiStore.getState().setPrimarySurface("chat");
+          useWorkspaceStore.getState().beginNoProjectThread();
+        },
+      }),
+      registerCommand({
         id: "thread.search",
         title: "Search Threads",
         category: "Thread",
