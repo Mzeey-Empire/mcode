@@ -15,8 +15,18 @@ const hoisted = await vi.hoisted(async () => {
     pinned: true,
     last_opened_at: Date.now(),
   });
+  const hiddenWorkspace: Workspace = createMockWorkspace({
+    id: "ws-hidden",
+    name: "No project",
+    path: "/home/.mcode/no-project/a",
+    kind: "no_project",
+    is_git_repo: false,
+    pinned: true,
+    last_opened_at: Date.now(),
+  });
   return {
     pinnedWorkspace,
+    hiddenWorkspace,
     setActiveWorkspace: vi.fn(),
     enrich: vi.fn(),
   };
@@ -36,7 +46,7 @@ beforeAll(() => {
 vi.mock("../state/workspaceStore", () => ({
   useWorkspaceStore: (selector: (s: unknown) => unknown) =>
     selector({
-      workspaces: [hoisted.pinnedWorkspace],
+      workspaces: [hoisted.pinnedWorkspace, hoisted.hiddenWorkspace],
       setActiveWorkspace: hoisted.setActiveWorkspace,
       pinWorkspace: vi.fn(),
     }),
@@ -82,5 +92,16 @@ describe("ProjectsView", () => {
 
     expect(hoisted.setActiveWorkspace).toHaveBeenCalledWith("ws-1");
     expect(useCommandPaletteStore.getState().isOpen).toBe(false);
+  });
+
+  it("lists only real projects, never a hidden No project workspace", () => {
+    act(() => {
+      useCommandPaletteStore.getState().open({ intent: "projects" });
+    });
+
+    renderWithCommandPaletteShell(<ProjectsView />);
+
+    expect(screen.getAllByTestId("project-row")).toHaveLength(1);
+    expect(screen.queryByText("No project")).toBeNull();
   });
 });

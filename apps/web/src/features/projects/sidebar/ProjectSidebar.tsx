@@ -10,6 +10,7 @@ import { useWorkspaceStartupRecovery } from "@/features/thread-startup/state/thr
 import { ProjectDropWell } from "../ProjectDropWell";
 import { useProjectTreeMenus } from "../ProjectTree";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { isProjectWorkspace } from "../state/project-workspaces";
 import { CompletionUndoLine } from "./CompletionUndoLine";
 import { ScopeBar } from "./ScopeBar";
 import { SidebarList } from "./SidebarList";
@@ -70,7 +71,7 @@ export function ProjectSidebar() {
   const selectedThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const shown = useSidebarMotion(model, cause, selectedThreadId);
   const { ctx, overlays } = useProjectTreeMenus();
-  const hasProjects = useWorkspaceStore((s) => s.workspaces.length > 0);
+  const hasProjects = useWorkspaceStore((s) => s.workspaces.some(isProjectWorkspace));
   const error = useWorkspaceStore((s) => s.error);
   useWorkspaceLoading();
   return (

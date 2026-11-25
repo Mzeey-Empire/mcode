@@ -4,6 +4,7 @@ import { threadAttentionStore } from "@/features/thread-attention/thread-attenti
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadDraftStore, type ThreadDraft } from "@/stores/threadDraftStore";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { projectWorkspaces } from "../state/project-workspaces";
 import { selectSidebarFacts } from "../state/thread-index";
 import {
   deriveSidebarModel,
@@ -100,7 +101,7 @@ function useSidebarInputs(now: number): SidebarInputs {
   const completions = useCompletionStore((state) => state.entries);
   const needsUserIds = useNeedsUserIds();
   const needsUserEndedAt = useNeedsUserEndedAt(needsUserIds);
-  const projectOrder = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces]);
+  const projectOrder = useMemo(() => projectWorkspaces(workspaces).map((workspace) => workspace.id), [workspaces]);
   const ui = useModelUi(projectOrder);
   const draftsByWorkspace = useMemo(() => draftIdsByWorkspace(drafts), [drafts]);
   return useMemo(

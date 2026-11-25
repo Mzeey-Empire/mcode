@@ -1,4 +1,4 @@
-import { createMockThreadPullRequest, createMockThread, createMockThreadAttention } from "@mcode/contracts/testing";
+import { createMockThreadPullRequest, createMockThread, createMockThreadAttention, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { StrictMode } from "react";
 import { render, screen, act, fireEvent, within, cleanup } from "@testing-library/react";
@@ -253,13 +253,7 @@ function rowIndent(row: HTMLElement | undefined): string | undefined {
   return row?.querySelector<HTMLElement>("[style*='padding-left']")?.style.paddingLeft;
 }
 
-const WORKSPACE = {
-  id: "ws-1",
-  name: "Test Project",
-  path: "/test",
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
-};
+const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Test Project", path: "/test" });
 
 /** Wire up store mocks so ProjectTree renders a workspace with one thread. */
 interface ProjectTreeStoreMockOptions {
@@ -1291,16 +1285,7 @@ describe("ProjectSidebar action-required indicator", () => {
     // satisfies the mock without importing the internal type.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const state = {
-      workspaces: [
-        {
-          id: "ws-1",
-          name: "Test",
-          path: "/test",
-          provider_config: {},
-          created_at: "",
-          updated_at: "",
-        },
-      ],
+      workspaces: [createMockWorkspace({ id: "ws-1", name: "Test", path: "/test" })],
       activeWorkspaceId: "ws-1",
       activeThreadId: null,
       threads: [currentThread],

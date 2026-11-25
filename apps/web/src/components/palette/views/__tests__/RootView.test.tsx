@@ -1,10 +1,12 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMockWorkspace } from "@mcode/contracts/testing";
+import type { Workspace } from "@/transport/types";
 import { clearCommands, registerCommand } from "@/lib/command-registry";
 
 const mocks = vi.hoisted(() => ({
   palette: { query: ">", close: () => undefined },
-  workspace: { workspaces: [], setActiveWorkspace: () => undefined, setActiveThread: () => undefined },
+  workspace: { workspaces: [] as Workspace[], setActiveWorkspace: () => undefined, setActiveThread: () => undefined },
   recent: { threads: [], fetch: () => undefined },
 }));
 
@@ -39,6 +41,22 @@ describe("RootView", () => {
   afterEach(() => {
     cleanup();
     clearCommands();
+    mocks.workspace.workspaces = [];
+    mocks.palette.query = ">";
+  });
+
+  it("lists recent projects but never a hidden No project workspace", () => {
+    mocks.palette.query = "";
+    mocks.workspace.workspaces = [
+      createMockWorkspace({ id: "ws-project", name: "fixture-repo", last_opened_at: 2 }),
+      createMockWorkspace({ id: "ws-hidden", name: "No project", kind: "no_project", is_git_repo: false, last_opened_at: 3 }),
+    ];
+
+    render(<RootView />);
+
+    const recent = screen.getByRole("region", { name: "Recent Projects" });
+    expect(within(recent).getByText("fixture-repo")).toBeInTheDocument();
+    expect(within(recent).queryByText("No project")).toBeNull();
   });
 
   it("renames an open action when its command is registered again with a new title", () => {

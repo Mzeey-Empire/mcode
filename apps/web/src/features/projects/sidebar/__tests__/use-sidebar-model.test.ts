@@ -82,3 +82,27 @@ describe("useSidebarModel change cause", () => {
     expect(result.current.cause).toBe("push");
   });
 });
+
+describe("useSidebarModel project list", () => {
+  beforeEach(() => {
+    useSidebarUiStore.setState({ view: "projects", scope: "active", olderOpen: false, expandedProjects: new Set(["ws-1", "ws-hidden"]), showMore: new Set() });
+    useWorkspaceStore.setState({
+      workspaces: [
+        createMockWorkspace({ id: "ws-1" }),
+        createMockWorkspace({ id: "ws-hidden", name: "No project", kind: "no_project", is_git_repo: false }),
+      ],
+      threads: [],
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    useWorkspaceStore.setState({ workspaces: [], threads: [] });
+  });
+
+  it("orders only real projects, never a hidden No project workspace", () => {
+    const { result } = renderHook(() => useSidebarModel());
+
+    expect(result.current.model.items.filter((item) => item.kind === "project").map((item) => item.key)).toEqual(["project:ws-1"]);
+  });
+});

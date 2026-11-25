@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { projectWorkspaces } from "@/features/projects/state/project-workspaces";
 import { useRecentThreadsStore } from "@/stores/recentThreadsStore";
 import { executeCommand, getCommandsSnapshot, subscribeCommands } from "@/lib/command-registry";
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
@@ -114,7 +115,7 @@ export function RootView() {
       // Recent projects (last 8, by last_opened_at). The store uses snake_case fields
       // mirroring the SQLite columns; the previous camelCase reads silently produced
       // an empty list because every value was `undefined`.
-      const recentProjects = [...workspaces]
+      const recentProjects = projectWorkspaces(workspaces)
         .filter((w) => w.last_opened_at != null)
         .sort((a, b) => (b.last_opened_at ?? 0) - (a.last_opened_at ?? 0))
         .slice(0, 8);
