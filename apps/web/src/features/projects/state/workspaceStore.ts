@@ -622,6 +622,19 @@ function pendingCreationWithCurrentDraft(
   };
 }
 
+/**
+ * A reload is the first sign of an expired No project workspace when the client missed its
+ * `workspace.deleted` push, so it keeps that workspace's unsent first messages the same way.
+ */
+async function keepSendsOfExpiredNoProjectWorkspaces(previous: readonly Workspace[], next: readonly Workspace[]): Promise<void> {
+  const listed = new Set(next.map((workspace) => workspace.id));
+  const expired = previous.filter((workspace) => workspace.kind === "no_project" && !listed.has(workspace.id));
+  if (expired.length === 0) return;
+  // Deferred import: the keeper reads this store, so a static import would be circular.
+  const { keepExpiredNoProjectSends } = await import("@/features/thread-startup/edit-startup-message");
+  for (const workspace of expired) keepExpiredNoProjectSends(workspace.id);
+}
+
 function draftChangedSinceSubmission(pending: PendingThreadCreation, draft: ComposerDraft | undefined): draft is ComposerDraft {
   if (!draft) return false;
   if (pending.composerDraft) return JSON.stringify(draft) !== JSON.stringify(pending.composerDraft);
@@ -745,6 +758,11 @@ interface WorkspaceState {
     composerDraft?: ComposerDraft,
     approvalReviewMode?: ApprovalReviewMode,
     devinMode?: DevinMode,
+    /**
+     * The hidden workspace {@link WorkspaceState.activateNoProjectWorkspace} made for this send. When set, the thread
+     * starts there in Direct mode with no branch, whatever workspace or new-thread target the store holds by now.
+     */
+    noProjectWorkspaceId?: string,
   ) => Promise<Thread>;
   /** Branch an existing thread into a new child with handoff context. */
   branchThread: (params: BranchThreadParams) => Promise<Thread>;
@@ -868,6 +886,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   let activationQueued = false;
   let activationGeneration = 0;
   let missingWorkspaceLoad: Promise<void> | null = null;
+  let workspaceLoadGeneration = 0;
   const reconcileSelectedConversation = () => {
     if (activationQueued) return;
     activationQueued = true;
@@ -1233,8 +1252,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
   loadWorkspaces: async () => {
     set({ loading: true, error: null });
+    // Only the newest reload applies: an older answer can predate a deletion, and the merge below would keep it.
+    const generation = ++workspaceLoadGeneration;
     try {
-      const workspaces = await getTransport().listWorkspaces();
+      // Captured before the request: a workspace added while it is in flight is missing from the response
+      // because it is newer, not because it expired, so it is kept rather than dropped.
+      const previous = get().workspaces;
+      const listed = await getTransport().listWorkspaces();
+      if (generation !== workspaceLoadGeneration) return;
+      await keepSendsOfExpiredNoProjectWorkspaces(previous, listed);
+      if (generation !== workspaceLoadGeneration) return;
+      const known = new Set([...previous, ...listed].map((workspace) => workspace.id));
+      const workspaces = [...listed, ...get().workspaces.filter((workspace) => !known.has(workspace.id))];
       set({ workspaces, workspacesLoaded: true, loading: false });
       void useProjectIconStore.getState().resolve(workspaces.map((workspace) => workspace.id)).catch((error: unknown) => {
         console.error("Project icon resolution failed", error);
@@ -1243,7 +1272,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         console.error("Browser profile reconciliation failed", error);
       });
     } catch (e) {
-      set({ error: String(e), loading: false });
+      if (generation === workspaceLoadGeneration) set({ error: String(e), loading: false });
     }
   },
 
@@ -1557,11 +1586,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     composerDraft,
     approvalReviewMode,
     devinMode,
+    noProjectWorkspaceId,
   ) => {
-    const workspaceId = get().activeWorkspaceId;
-    if (!workspaceId) throw new Error("No workspace selected");
     const state = get();
-    const target = newThreadCreationTarget(state);
+    const workspaceId = noProjectWorkspaceId ?? state.activeWorkspaceId;
+    if (!workspaceId) throw new Error("No workspace selected");
+    const target: ThreadCreationTarget = noProjectWorkspaceId
+      ? { transportMode: "direct", branch: "" }
+      : newThreadCreationTarget(state);
     const pending: PendingThreadCreation = {
       workspaceId,
       content,
@@ -1585,7 +1617,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       goalObjective,
     };
 
-    return createPendingThread(pending, threadCreationContext("new", state.newThreadMode));
+    return createPendingThread(pending, threadCreationContext("new", noProjectWorkspaceId ? "direct" : state.newThreadMode));
   },
 
   branchThread: async (params) => {

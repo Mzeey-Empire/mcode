@@ -93,6 +93,25 @@ describe("workspace list loaded flag", () => {
     expect(useWorkspaceStore.getState().workspacesLoaded).toBe(true);
   });
 
+  it("ignores an older reload's answer that predates a deletion", async () => {
+    const kept = createMockWorkspace({ id: "ws-kept" });
+    const deleted = createMockWorkspace({ id: "ws-deleted" });
+    useWorkspaceStore.setState({ workspaces: [kept, deleted] });
+    const answers: Array<(workspaces: Workspace[]) => void> = [];
+    const heldAnswer = () => new Promise<Workspace[]>((resolve) => answers.push(resolve));
+    vi.mocked(mockTransport.listWorkspaces).mockImplementationOnce(heldAnswer).mockImplementationOnce(heldAnswer);
+    const older = useWorkspaceStore.getState().loadWorkspaces();
+    useWorkspaceStore.getState().removeWorkspaceFromState(deleted.id);
+    const newer = useWorkspaceStore.getState().loadWorkspaces();
+
+    answers[0]!([kept, deleted]);
+    await older;
+    answers[1]!([kept]);
+    await newer;
+
+    expect(useWorkspaceStore.getState().workspaces.map((workspace) => workspace.id)).toEqual([kept.id]);
+  });
+
   it("does not count a failed workspace answer as loaded", async () => {
     vi.mocked(mockTransport.listWorkspaces).mockRejectedValueOnce(new Error("offline"));
     await useWorkspaceStore.getState().loadWorkspaces();

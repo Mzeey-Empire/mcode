@@ -139,6 +139,7 @@ describe("dispatchComposerTarget selected-text comments", () => {
       }),
       "automatic",
       undefined,
+      undefined,
     );
   });
 

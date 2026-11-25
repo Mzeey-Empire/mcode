@@ -58,6 +58,8 @@ export interface ComposerSubmissionQueue {
 export interface UseComposerSubmissionControllerOptions {
   threadId?: string;
   workspaceId?: string;
+  /** Set to send a new No project thread without a workspaceId. Each send first makes its own hidden workspace. */
+  noProject?: boolean;
   isNewThread: boolean;
   branchFromMessageId?: string;
   isAgentRunning: boolean;
@@ -78,6 +80,7 @@ type SubmitAttemptOutcome = "complete" | "checkout-pending";
 export function useComposerSubmissionController({
   threadId,
   workspaceId,
+  noProject = false,
   isNewThread,
   branchFromMessageId,
   isAgentRunning,
@@ -134,6 +137,10 @@ export function useComposerSubmissionController({
         queuePrepared(preparedSubmission);
         return;
       }
+      // The hidden workspace is made before the draft clears, so a failure here leaves the draft and text as they
+      // are; the retry is a new attempt with a new workspace.
+      const noProjectWorkspace = await createNoProjectWorkspaceForSend(noProject);
+      if (!noProjectWorkspace) return;
       // Only an existing-thread Send can be confirmed by its messageId later;
       // new-thread and branch Sends settle on their dispatch result alone.
       const sendsToThisThread = target.kind === "existing-thread";
@@ -167,6 +174,7 @@ export function useComposerSubmissionController({
         messageId,
         threadId,
         workspaceId,
+        noProjectWorkspaceId: noProjectWorkspace.workspaceId,
         branchFromMessageId,
         target,
         execution,
@@ -200,12 +208,12 @@ export function useComposerSubmissionController({
         finishEditing: queue.finishEditing,
       });
     },
-    [annotationScopeId, branchFromMessageId, execution, form, isAgentRunning, isNewThread, onBranchModeExit, onThreadCreated, onThreadCreationFailed, onThreadPreparing, queue, queuePrepared, threadId, workspaceId],
+    [annotationScopeId, branchFromMessageId, execution, form, isAgentRunning, isNewThread, noProject, onBranchModeExit, onThreadCreated, onThreadCreationFailed, onThreadPreparing, queue, queuePrepared, threadId, workspaceId],
   );
 
   const runSubmissionAttempt = useCallback(async (): Promise<SubmitAttemptOutcome> => {
     // Enter submits even while Send is disabled. A pending target keeps the draft until its branch is known.
-    if (execution.targetPending || !canSubmitWithoutWorkspace(isNewThread, workspaceId)) return "complete";
+    if (execution.targetPending || !canSubmitWithoutWorkspace(isNewThread, workspaceId, noProject)) return "complete";
     const submission = await prepareComposerSubmission({
       annotationScopeId,
       form,
@@ -241,7 +249,7 @@ export function useComposerSubmissionController({
     if (checkoutPending) return "checkout-pending";
     await executePreparedDispatch(submission, target);
     return "complete";
-  }, [annotationScopeId, branchFromMessageId, executePreparedDispatch, execution, form, isAgentRunning, isNewThread, startingThread, queue, queuePrepared, threadId, workspaceId]);
+  }, [annotationScopeId, branchFromMessageId, executePreparedDispatch, execution, form, isAgentRunning, isNewThread, noProject, startingThread, queue, queuePrepared, threadId, workspaceId]);
 
   const submit = useCallback(async () => {
     if (submitInFlightRef.current) return;
@@ -283,9 +291,23 @@ export function useComposerSubmissionController({
   };
 }
 
-/** Allows only workspace-backed new-thread submissions to enter transport. */
-function canSubmitWithoutWorkspace(isNewThread: boolean, workspaceId: string | undefined): boolean {
-  return !isNewThread || Boolean(workspaceId);
+/**
+ * Makes the hidden workspace one No project send runs in. Returns an empty result for any other send, and null,
+ * after showing the failure, when the workspace could not be made.
+ */
+async function createNoProjectWorkspaceForSend(noProject: boolean): Promise<{ workspaceId?: string } | null> {
+  if (!noProject) return {};
+  try {
+    return { workspaceId: (await useWorkspaceStore.getState().activateNoProjectWorkspace()).id };
+  } catch (error) {
+    showDispatchFailure(error, false);
+    return null;
+  }
+}
+
+/** Allows only new-thread submissions with a workspace, or the No project target that makes its own, to enter transport. */
+function canSubmitWithoutWorkspace(isNewThread: boolean, workspaceId: string | undefined, noProject: boolean): boolean {
+  return !isNewThread || Boolean(workspaceId) || noProject;
 }
 
 /** Checks active-turn queue policy against the stable submitted text. */

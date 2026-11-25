@@ -29,7 +29,7 @@ import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { emitPtyData, emitPtyExit } from "@/features/terminal/adapters/pty-data-registry";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { applyActionRun } from "@/features/terminal/state/applyActionRun";
-import { useThreadStartupStore } from "@/features/thread-startup";
+import { keepExpiredNoProjectSends, useThreadStartupStore } from "@/features/thread-startup";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 import { invalidateReviewOperandLists } from "@/components/diff/review-operand-lists";
 import { acceptTurnRevert } from "@/features/conversation/turn-revert/useTurnRevert";
@@ -608,6 +608,8 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("workspace.deleted", (data) => {
       const { workspaceId } = data as { workspaceId: string };
+      // Runs first: it needs the workspace's kind and must see the placeholder still open.
+      keepExpiredNoProjectSends(workspaceId);
       const store = useWorkspaceStore.getState();
       if (store.activeWorkspaceId === workspaceId) {
         store.setActiveWorkspace(null);

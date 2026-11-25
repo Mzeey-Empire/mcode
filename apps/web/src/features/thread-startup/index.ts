@@ -10,6 +10,8 @@ export { useAcknowledgeStartupFailure } from "./useStartupActions";
 export { startupDecision, type StartupDecision } from "./startup-step-copy";
 /** Edit message for a startup that never produced a working thread. */
 export { editStartupMessage } from "./edit-startup-message";
+/** Keeps the unsent first messages of a No project workspace the server expired. */
+export { keepExpiredNoProjectSends } from "./edit-startup-message";
 /** Authoritative startup record state and recovery hook. */
 export { useThreadStartup, useThreadStartupStore } from "./state/thread-startup-store";
 /** The 04g first-send motion: the start column records, the docked surface and the sidebar play. */

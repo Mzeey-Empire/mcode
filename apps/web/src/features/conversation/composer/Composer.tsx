@@ -36,6 +36,7 @@ import { isGoalOpen } from "@mcode/contracts/models/goal";
 import type { MessageMention } from "@mcode/contracts/models/mention";
 import type { SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
+import { NO_PROJECT_DRAFT_WORKSPACE_ID } from "@/stores/threadDraftStore";
 import { useComposerFormController } from "./draft/useComposerFormController";
 import { useComposerExecutionTarget } from "./execution/useComposerExecutionTarget";
 import { useComposerAgentControlState } from "./controls/useComposerAgentControlState";
@@ -222,6 +223,8 @@ interface ComposerProps {
   threadId?: string;
   isNewThread?: boolean;
   workspaceId?: string;
+  /** Set for a new No project thread and leave workspaceId unset. */
+  noProject?: boolean;
   /** Draft-thread binding: `null` tracks a fresh new-thread composer, a string opens that draft. */
   draftId?: string | null;
   /** Set while this thread's startup has not ended: the editor is inert, and Stop or Esc cancels the startup. */
@@ -269,6 +272,7 @@ export function Composer({
   threadId,
   isNewThread,
   workspaceId,
+  noProject = false,
   draftId,
   startingThread: startingThreadStartup,
   branchFromMessageId,
@@ -293,7 +297,7 @@ export function Composer({
   const form = useComposerFormController({
     threadId,
     isNewThread: isNewThread === true,
-    workspaceId,
+    workspaceId: noProject ? NO_PROJECT_DRAFT_WORKSPACE_ID : workspaceId,
     draftId,
     branchFromMessageId,
     activeThread,
@@ -350,6 +354,7 @@ export function Composer({
     branchFromMessageId,
     isNewThread: isNewThread === true,
     workspaceId,
+    noProject,
   });
   const {
     mode: composerMode,
@@ -511,6 +516,7 @@ export function Composer({
   } = useComposerSubmissionController({
     threadId,
     workspaceId,
+    noProject,
     isNewThread: isNewThread === true,
     branchFromMessageId,
     isAgentRunning,
