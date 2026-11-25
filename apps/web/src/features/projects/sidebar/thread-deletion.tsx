@@ -1,9 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { isNoProjectWorkspace } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
 
 /** The thread a delete dialog asks about. */
@@ -42,6 +43,28 @@ export function useThreadDeletion() {
   return { dialog, deleteWorktree, setDeleteWorktree, isDeleting, open, close, confirm };
 }
 
+interface NoProjectFolder {
+  path: string;
+  keptForTitle: string | null;
+}
+
+/**
+ * Describes the folder a No project thread's delete would take with it. Forks share their parent's
+ * hidden workspace, and the server removes the folder only once no thread uses it, so the dialog
+ * must say which case the user is in. Null for a project thread.
+ */
+function useNoProjectFolder(threadId: string | undefined): NoProjectFolder | null {
+  const threads = useWorkspaceStore((s) => s.threads);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  return useMemo(() => {
+    const thread = threads.find((candidate) => candidate.id === threadId);
+    const workspace = workspaces.find((candidate) => candidate.id === thread?.workspace_id);
+    if (!thread || !workspace || !isNoProjectWorkspace(workspace)) return null;
+    const other = threads.find((candidate) => candidate.workspace_id === workspace.id && candidate.id !== thread.id);
+    return { path: workspace.path, keptForTitle: other?.title ?? null };
+  }, [threads, workspaces, threadId]);
+}
+
 /** Asks to confirm a thread delete, offering to delete its worktree too. */
 export function ThreadDeleteDialog({
   dialog,
@@ -58,23 +81,43 @@ export function ThreadDeleteDialog({
   onClose: () => void;
   onConfirm: () => Promise<void>;
 }) {
+  const folder = useNoProjectFolder(dialog?.threadId);
   return (
     <Dialog open={dialog !== null} onOpenChange={(open) => { if (!open && !isDeleting) onClose(); }}>
-      <DialogContent showCloseButton={false} className="sm:max-w-md overflow-hidden">
-        <div className="flex flex-col gap-2">
+      {/* The wider No project dialog fits "Cancel" beside "Delete thread and folder" on one row. */}
+      <DialogContent showCloseButton={false} className={`${folder ? "sm:max-w-lg" : "sm:max-w-md"} overflow-hidden`}>
+        {/* min-w-0 lets the dialog's grid column shrink below the folder path's one-line width, so the path fades instead of widening the column past the dialog. */}
+        <div className="flex min-w-0 flex-col gap-2">
           <DialogTitle>Delete thread</DialogTitle>
-          <DialogDescription>Are you sure you want to delete &ldquo;{dialog?.threadTitle}&rdquo;? This action cannot be undone.</DialogDescription>
+          {folder ? <NoProjectDeleteBody folder={folder} /> : <DialogDescription>Are you sure you want to delete &ldquo;{dialog?.threadTitle}&rdquo;? This action cannot be undone.</DialogDescription>}
         </div>
         <ThreadDeleteWorktreeOption dialog={dialog} deleteWorktree={deleteWorktree} isDeleting={isDeleting} onChange={onDeleteWorktreeChange} />
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="outline" className="cursor-pointer" disabled={isDeleting} onClick={onClose}>Cancel</Button>
           <Button variant="destructive" className="cursor-pointer" disabled={isDeleting} onClick={onConfirm}>
             {isDeleting && <Spinner size={16} className="text-current" />}
-            {isDeleting ? "Deleting..." : "Delete"}
+            {isDeleting ? "Deleting..." : deleteLabel(folder)}
           </Button>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function deleteLabel(folder: NoProjectFolder | null): string {
+  if (!folder) return "Delete";
+  return folder.keptForTitle === null ? "Delete thread and folder" : "Delete thread";
+}
+
+function NoProjectDeleteBody({ folder }: { folder: NoProjectFolder }) {
+  if (folder.keptForTitle !== null) {
+    return <DialogDescription>Deletes the thread. The folder stays while &ldquo;{folder.keptForTitle}&rdquo; uses it.</DialogDescription>;
+  }
+  return (
+    <>
+      <DialogDescription>Deletes the thread, its folder, and any files the agent wrote there.</DialogDescription>
+      <div className="text-fade font-mono text-xs text-muted">{folder.path}</div>
+    </>
   );
 }
 
