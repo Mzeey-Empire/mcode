@@ -143,18 +143,16 @@ export class GitWorktreeService {
     return stdout.trim();
   }
 
-  /** List Git worktrees registered for an arbitrary repository path. */
+  /**
+   * List Git worktrees registered for an arbitrary repository path. Throws when git fails:
+   * an empty list would tell callers that every worktree is gone.
+   */
   async listWorktreesAt(repoPath: string): Promise<WorktreeInfo[]> {
     const worktreesDirectory = normalizeWorktreePath(getManagedWorktreeBaseDir(repoPath));
     const normalizedRepository = normalizeWorktreePath(repoPath);
-    let output: string;
-    try {
-      ({ stdout: output } = await this.gitExecutor.exec(
-        ["-C", repoPath, "worktree", "list", "--porcelain"],
-      ));
-    } catch {
-      return [];
-    }
+    const { stdout: output } = await this.gitExecutor.exec(
+      ["-C", repoPath, "worktree", "list", "--porcelain"],
+    );
 
     const worktrees: WorktreeInfo[] = [];
     let currentPath = "";
