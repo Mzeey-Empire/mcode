@@ -9,6 +9,7 @@ import { ActionIcon } from "@/features/projects/actions/ActionIcon";
 import { shellActionIconId } from "@/features/projects/actions/action-icons";
 import { ThreadActionRunMenu } from "@/features/projects/actions/ThreadActionRunMenu";
 import { useProjectActions } from "@/features/projects/actions/useProjectActions";
+import { useIsNoProjectWorkspace } from "@/features/projects/state/workspace-selectors";
 import { createTerminalForScope } from "@/lib/ensure-terminal";
 import { ActionTabGlyph, actionBadgeLabel } from "./ActionTabGlyph";
 import { TERMINAL_CAP_REASON } from "./terminalTabs";
@@ -29,9 +30,11 @@ interface TerminalTabStripProps {
 /**
  * Row 1 of the Terminal tool: one tab per terminal record and a + capped at {@link TERMINAL_MAX_PER_SCOPE}.
  * In a thread with Project Actions the + opens the Actions menu. Otherwise it opens a shell.
+ * No project threads never load Project Actions.
  */
 export function TerminalTabStrip(props: TerminalTabStripProps) {
-  return props.threadId === null
+  const noProject = useIsNoProjectWorkspace(props.workspaceId);
+  return props.threadId === null || noProject
     ? <TerminalTabs {...props} />
     : <ThreadTerminalTabs {...props} threadId={props.threadId} />;
 }

@@ -3,11 +3,18 @@ import { Globe, Terminal, Files, Diff, FileText, Layers, Settings } from "lucide
 import type { RightPanelTool } from "@/stores/diffStore";
 
 /**
- * Whether a thread is active. Tab availability is filtered by scope first: some
+ * Whether a thread is active, and whether it has a project. Tab availability is filtered by scope first: some
  * tab types (Plan) only make sense once a thread exists, so they are
- * dropped when the panel runs threadless against the workspace root. See ADR-0004.
+ * dropped when the panel runs threadless against the workspace root. A No project thread has no repository and
+ * no project to configure, so it also drops the project-only types. See ADR-0004.
  */
-export type PanelScope = "threadless" | "thread";
+export type PanelScope = "threadless" | "thread" | "no-project-thread";
+
+/** Returns no-project-thread for a No project workspace, even when threadId is null. */
+export function resolvePanelScope(threadId: string | null, inNoProjectWorkspace: boolean): PanelScope {
+  if (inNoProjectWorkspace) return "no-project-thread";
+  return threadId ? "thread" : "threadless";
+}
 
 /**
  * Static metadata describing one panel tab type for the availability model and
@@ -24,6 +31,8 @@ export interface PanelTabType {
   readonly blurb: string;
   /** Only creatable once a thread exists; dropped by the scope filter when threadless. */
   readonly needsThread: boolean;
+  /** Reads a git repository or a project's shared settings; dropped for a No project thread, which has neither. */
+  readonly projectOnly?: boolean;
   /** Command id whose keybinding renders as the card's keycap, when it has one. */
   readonly commandId?: string;
   /**
@@ -78,6 +87,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     // read the workspace root and need no thread; a thread adds the turn views.
     // See CONTEXT.md → "Review tab".
     needsThread: false,
+    projectOnly: true,
     commandId: "changes.toggle",
   },
   {
@@ -86,6 +96,7 @@ export const PANEL_TAB_TYPES: readonly PanelTabType[] = [
     icon: Settings,
     blurb: "Shared by all project threads",
     needsThread: false,
+    projectOnly: true,
     commandId: "projectEnvironment.open",
   },
   {
@@ -118,7 +129,8 @@ export function shownTabTypes(
   openTabs: readonly RightPanelTool[],
 ): readonly PanelTabType[] {
   return PANEL_TAB_TYPES.filter((type) => {
-    const allowedInScope = scope === "thread" || !type.needsThread;
-    return allowedInScope && !openTabs.includes(type.id);
+    const allowedInScope = scope !== "threadless" || !type.needsThread;
+    const allowedForProject = scope !== "no-project-thread" || !type.projectOnly;
+    return allowedInScope && allowedForProject && !openTabs.includes(type.id);
   });
 }

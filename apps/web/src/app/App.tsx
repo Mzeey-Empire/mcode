@@ -30,6 +30,7 @@ import {
 import { useUiStore } from "@/stores/uiStore";
 import { initShortcuts } from "@/lib/shortcuts";
 import { summonTab } from "@/lib/summon-tab";
+import { registerProjectOnlyCommands } from "./project-only-commands";
 import { openFindInFile } from "@/features/files/find-in-file-command";
 import { openGoToFile } from "@/features/files/go-to-file-command";
 import { executeCommand, registerCommand } from "@/lib/command-registry";
@@ -38,7 +39,7 @@ import { setContext } from "@/lib/context-tracker";
 import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
 import { useIdleReclamation } from "@/hooks/useIdleReclamation";
 import { useComposerLayoutGuard } from "@/hooks/useComposerLayoutGuard";
-import { showRightPanelAdaptive, toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
+import { toggleRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { useOpenPlanWhenReady } from "@/components/panels/plan/use-open-plan-when-ready";
 import { usePlanCommands } from "@/components/panels/plan/use-plan-commands";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -666,17 +667,7 @@ export function App() {
           toggleRightPanelAdaptive(activeWorkspaceId, activeThreadId);
         },
       }),
-      registerCommand({
-        id: "projectEnvironment.open",
-        title: "Open Project Settings",
-        category: "Project",
-        handler: () => {
-          const { activeWorkspaceId, activeThreadId } = useWorkspaceStore.getState();
-          if (!activeWorkspaceId) return;
-          showRightPanelAdaptive(activeWorkspaceId, activeThreadId);
-          useDiffStore.getState().setRightPanelTab(activeWorkspaceId, activeThreadId, "environment");
-        },
-      }),
+      registerProjectOnlyCommands(),
       registerCommand({
         id: "terminal.toggle",
         title: "Toggle Terminal",
@@ -737,12 +728,6 @@ export function App() {
         category: "View",
         // Subagents is thread-only; summonTab no-ops when there is no thread.
         handler: () => summonTab("subagents"),
-      }),
-      registerCommand({
-        id: "changes.toggle",
-        title: "Toggle Changes Panel",
-        category: "View",
-        handler: () => summonTab("changes"),
       }),
       registerCommand({
         id: "preview.toggle",
