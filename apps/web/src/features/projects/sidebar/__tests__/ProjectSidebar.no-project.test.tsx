@@ -2,6 +2,7 @@ import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing"
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { DndContextProps, DragEndEvent } from "@dnd-kit/core";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 
@@ -190,6 +191,39 @@ describe("ProjectSidebar No project group", () => {
     expect(within(noProjectRow).queryByLabelText(/ mode$/)).toBeNull();
     const projectRow = rowOf("t-2");
     expect(within(projectRow).getByLabelText("Branch, main")).toBeInTheDocument();
+  });
+
+  describe("row menu", () => {
+    async function menuItemNames(title: RegExp): Promise<(string | null)[]> {
+      render(<ProjectSidebar />);
+      fireEvent.contextMenu(screen.getByRole("button", { name: title }));
+      const menu = await screen.findByRole("menu");
+      return Array.from(menu.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent);
+    }
+
+    it("offers a No project thread only the items that need no project", async () => {
+      seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
+
+      expect(await menuItemNames(/^Sketch a schema/)).toEqual(["Close thread", "Rename thread", "Copy", "Delete"]);
+    });
+
+    it("copies no branch from a No project thread", async () => {
+      seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
+      const user = userEvent.setup();
+      await menuItemNames(/^Sketch a schema/);
+
+      await user.click(await screen.findByRole("menuitem", { name: "Copy" }));
+
+      expect(await screen.findByRole("menuitem", { name: "Path" })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Thread ID" })).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Branch" })).toBeNull();
+    });
+
+    it("keeps the project items on a project thread", async () => {
+      seed([PROJECT, HIDDEN], [thread({ id: "t-2", title: "Project work", workspace_id: PROJECT.id })]);
+
+      expect(await menuItemNames(/^Project work/)).toEqual(["Close thread", "Rename thread", "Auto-close behavior", "Copy", "Project settings", "Delete"]);
+    });
   });
 
   describe("a No project draft", () => {
