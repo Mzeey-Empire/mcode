@@ -574,6 +574,20 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(within(breadcrumb).getByTestId("chat-header-title")).toHaveTextContent("My Thread");
   });
 
+  it("names a No project thread with plain text and the inbox mark, never a project link", async () => {
+    const hidden = createMockWorkspace({ id: "ws-hidden", name: "No project", kind: "no_project", is_git_repo: false });
+    const thread = makeThread({ workspace_id: hidden.id });
+    setupWorkspaceMock({ ...defaultWorkspaceState({ threads: [thread], activeThreadId: thread.id }), workspaces: [hidden], activeWorkspaceId: hidden.id });
+
+    await renderChatView();
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumb).toHaveTextContent(/No project\s*\/\s*My Thread$/);
+    expect(within(breadcrumb).getByTestId("no-project-mark")).toBeInTheDocument();
+    expect(within(breadcrumb).queryByRole("link")).toBeNull();
+    expect(within(breadcrumb).getAllByRole("button")).toEqual([within(breadcrumb).getByTestId("chat-header-title")]);
+  });
+
   it("enters edit mode on double click", async () => {
     const user = userEvent.setup();
     await renderChatView();

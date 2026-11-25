@@ -16,6 +16,8 @@ import { HeaderActions } from "@/components/chat/HeaderActions";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
 import { CanvasBreadcrumb } from "@/components/shell/CanvasBreadcrumb";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
+import { NoProjectMark } from "@/features/projects/icons/ProjectIcon";
+import { useIsNoProjectWorkspace } from "@/features/projects/state/workspace-selectors";
 import { selectNewThreadIsNoProject, useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
@@ -327,10 +329,11 @@ interface ThreadHeaderRename {
 /** Renders the thread header for both surface variants; the preparing variant omits `rename` and `paneWidth` and passes its own `actions`. */
 function ThreadHeader({ state, rename, forkPoint, paneWidth, actions }: { state: ChatViewState; rename?: ThreadHeaderRename; forkPoint?: ThreadForkPoint | null; paneWidth?: number; actions?: ReactNode }) {
   const thread = state.activeThread!;
+  const noProject = useIsNoProjectWorkspace(thread.workspace_id);
   return (
     <CanvasHeader>
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <CanvasBreadcrumb projectName={state.activeWorkspaceName || undefined} workspaceId={thread.workspace_id}>
+        <CanvasBreadcrumb projectName={state.activeWorkspaceName || undefined} workspaceId={thread.workspace_id} icon={noProject ? <NoProjectMark size={14} /> : undefined}>
           {rename ? (
             <ThreadHeaderTitle thread={thread} rename={rename} forkPoint={forkPoint ?? null} />
           ) : (
