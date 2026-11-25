@@ -247,14 +247,15 @@ function PreparingThreadSurface({
   const paneRef = useRef<HTMLDivElement>(null);
   // The thread has no durable Overview yet, so the card the user sent from stays docked, keeping its reserve
   // and the column width the same from the start column through to the running thread.
-  const overviewScope = useMemo(() => newThreadOverviewScope(thread.workspace_id), [thread.workspace_id]);
+  const noProject = useIsNoProjectWorkspace(thread.workspace_id);
+  const overviewScope = useMemo(() => (noProject ? null : newThreadOverviewScope(thread.workspace_id)), [noProject, thread.workspace_id]);
   const { overview } = useCanvasOverview(paneRef, overviewScope, thread.id);
   const overviewDocked = overview.presentation === "docked";
   const overviewReserve = overviewDocked ? OVERVIEW_CANVAS_RESERVE_CSS : undefined;
   return (
     <div ref={paneRef} className={cn("@container relative flex h-full flex-col bg-background", overviewDocked && "[--chat-gutter:--spacing(6)]")} data-testid="thread-preparing-shell" data-thread-view>
       <OverviewLayer>
-        <ThreadHeader state={state} actions={<NewThreadOverview scope={overviewScope} overview={overview} readOnly />} />
+        <ThreadHeader state={state} actions={overviewScope ? <NewThreadOverview scope={overviewScope} overview={overview} readOnly /> : undefined} />
         <div className="min-h-0 flex-1 overflow-y-auto pt-4" style={{ paddingRight: overviewReserve }}>
           <PreparingTranscriptRow ref={motion.message}>
             <MessageBubble message={preparingUserMessage(thread, echoedStartup)} />
