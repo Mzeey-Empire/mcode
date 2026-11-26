@@ -1,6 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { getDefaultSettings, PartialSettingsSchema, SettingsSchema } from "../settings.js";
 
+describe("settings.diagnostics.crashDumps", () => {
+  it("defaults older settings to off and preserves an explicit opt-in", () => {
+    const legacy = SettingsSchema().parse({ diagnostics: { recording: false } });
+    expect(legacy.diagnostics).toEqual({ recording: false, crashDumps: false });
+
+    const patch = PartialSettingsSchema().parse({ diagnostics: { crashDumps: true } });
+    const enabled = SettingsSchema().parse(patch);
+    expect(enabled.diagnostics).toEqual({ recording: true, crashDumps: true });
+  });
+});
+
 describe("settings.provider.enabled", () => {
   it("defaults claude/codex/copilot to true and others to false", () => {
     const s = getDefaultSettings();

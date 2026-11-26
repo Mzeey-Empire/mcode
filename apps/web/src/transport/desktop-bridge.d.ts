@@ -32,6 +32,16 @@ export interface RendererCrashReport {
   readonly componentStack?: string;
 }
 
+/** Local crash dump state reported by the desktop main process. */
+export type CrashDumpsState = {
+  /** The saved crash dump setting read at launch. */
+  enabledAtLaunch: boolean;
+  /** The absolute path to Electron's crash dump directory. */
+  directory: string;
+  /** The total size of local minidumps in bytes. */
+  totalBytes: number;
+};
+
 /** App version and auto-update controls exposed by the main process. */
 interface AppBridge {
   /** Read the running app version (from package.json at build time). */
@@ -62,6 +72,10 @@ interface AppBridge {
   }): Promise<UpdateStatus>;
   /** Read whether this process started with GPU acceleration on. */
   getHardwareAcceleration?(): Promise<{ enabled: boolean }>;
+  /** Read the launch setting and the location and size of local crash dumps. */
+  getCrashDumps?(): Promise<CrashDumpsState>;
+  /** Delete local crash dumps and return the updated state. */
+  deleteCrashDumps?(): Promise<CrashDumpsState>;
   /** Restart the desktop app so launch-time settings take effect. */
   relaunch?(): Promise<void>;
   /** Subscribe to push updates of update-status. Returns the listener for cleanup. */

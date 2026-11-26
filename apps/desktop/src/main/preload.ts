@@ -257,6 +257,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     getHardwareAcceleration(): Promise<{ enabled: boolean }> {
       return ipcRenderer.invoke("app:get-hardware-acceleration");
     },
+    /** Read the launch setting and the location and size of local crash dumps. */
+    getCrashDumps(): Promise<unknown> {
+      return ipcRenderer.invoke("app:get-crash-dumps");
+    },
+    /** Delete local crash dumps and return the updated state. */
+    deleteCrashDumps(): Promise<unknown> {
+      return ipcRenderer.invoke("app:delete-crash-dumps");
+    },
     /** Restart the desktop app so launch-time settings take effect. */
     relaunch(): Promise<void> {
       return ipcRenderer.invoke("app:relaunch");

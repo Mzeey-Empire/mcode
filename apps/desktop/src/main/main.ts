@@ -70,7 +70,7 @@ import {
 import { registerAttachmentsFeature } from "../features/attachments/index.js";
 import { isDesktopDev } from "./is-desktop-dev.js";
 import { shouldPrintVersion } from "./cli-args.js";
-import { crashDumpOptions } from "./crash-dumps.js";
+import { crashDumpOptions, crashDumpsTotalBytes, deleteCrashDumps } from "./crash-dumps.js";
 
 // Imports evaluate before any statement here, wherever they sit in the file,
 // so this marks the end of main's module loading.
@@ -103,9 +103,15 @@ if (harnessUserDataDir && harnessCapabilityPath && NodePath.isAbsolute(harnessUs
   );
 }
 
+const persistedSettings = readPersistedSettings();
+const CRASH_DUMPS_ENABLED_AT_LAUNCH = persistedSettings?.settings.diagnostics.crashDumps ?? false;
+
 // Crashpad watches only processes created after it starts. Start it after the
 // userData override so dumps land in this launch's userData folder.
-const dumpOptions = crashDumpOptions(app.isPackaged);
+const dumpOptions = crashDumpOptions(
+  app.isPackaged,
+  persistedSettings?.settings.diagnostics.crashDumps ?? null,
+);
 if (dumpOptions !== null) {
   crashReporter.start(dumpOptions);
 }
@@ -127,7 +133,7 @@ NodeFS.mkdirSync(getMcodeDir(), { recursive: true });
 const APP_ID = "com.mzeey.mcode";
 const HARDWARE_ACCELERATION_MODE = resolveHardwareAccelerationMode(
   process.env,
-  readPersistedSettings()?.settings.graphics.hardwareAcceleration ?? null,
+  persistedSettings?.settings.graphics.hardwareAcceleration ?? null,
 );
 let desktopWindow: DesktopWindowFeature | null = null;
 
@@ -508,6 +514,30 @@ function registerIpcHandlers(): void {
       throw new Error("Hardware acceleration state requires the main renderer");
     }
     return { enabled: HARDWARE_ACCELERATION_MODE === "default" };
+  });
+
+  async function getCrashDumpsState(directory: string) {
+    return {
+      enabledAtLaunch: CRASH_DUMPS_ENABLED_AT_LAUNCH,
+      directory,
+      totalBytes: await crashDumpsTotalBytes(directory),
+    };
+  }
+
+  ipcMain.handle("app:get-crash-dumps", (event) => {
+    if (event.sender !== getMainWindow()?.webContents) {
+      throw new Error("Crash dump state requires the main renderer");
+    }
+    return getCrashDumpsState(app.getPath("crashDumps"));
+  });
+
+  ipcMain.handle("app:delete-crash-dumps", async (event) => {
+    if (event.sender !== getMainWindow()?.webContents) {
+      throw new Error("Crash dump deletion requires the main renderer");
+    }
+    const directory = app.getPath("crashDumps");
+    await deleteCrashDumps(directory);
+    return getCrashDumpsState(directory);
   });
 
   ipcMain.handle("app:relaunch", (event) => {
