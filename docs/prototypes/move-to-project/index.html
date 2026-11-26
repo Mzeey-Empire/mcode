@@ -204,6 +204,7 @@
   .pop { position: absolute; background: var(--raised); border-radius: 12px; box-shadow: var(--shadow); padding: 5px; z-index: 20; min-width: 220px; }
   .pop .search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; color: var(--muted); border-bottom: 1px solid var(--border); margin-bottom: 4px; }
   .pop .search input { flex: 1; background: transparent; border: 0; outline: 0; color: var(--ink); font: inherit; }
+  .pop .search input::placeholder, .palette .in input::placeholder { color: var(--muted); opacity: 1; }
   .mi { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 8px; border-radius: 7px; text-align: left; }
   .mi:hover, .mi.kb { background: var(--hover); }
   .mi .lab { flex: 1; min-width: 0; }
@@ -305,6 +306,9 @@
   .ptabs button { padding: 4px 8px; border-radius: 6px; color: var(--muted); font-size: 12px; }
   .ptabs button:hover { color: var(--ink); }
   .ptabs button[aria-selected="true"] { background: var(--selected); color: var(--ink); }
+  .pop .gl { color: var(--muted); font-size: 11.5px; font-weight: 500; padding: 6px 8px 4px; }
+  .static-val { display: flex; align-items: center; gap: 8px; height: 34px; color: var(--ink); }
+  .static-val .i { color: var(--muted); }
   .mi .tag { font-size: 11.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
   .mi .sub { color: var(--muted); font-size: 12px; }
   .mi.two { height: auto; min-height: 38px; padding: 6px 8px; align-items: center; }
@@ -483,6 +487,7 @@ const suggestedName = t => folderOwner(t).folder.replace(/^\d{4}-\d{2}-\d{2}-/, 
 const defaultParent = () => (projects().length ? "~/src" : "~");
 const joinPath = (parent, name) => (parent.includes("\\") ? `${parent}\\${name}` : `${parent}/${name}`);
 const MODE_LABEL = { local: "Local", newwt: "New worktree", existingwt: "Existing worktree" };
+const MODE_ICON = { local: "laptop", newwt: "tree", existingwt: "folder" };
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 /* ============================== Shell ============================== */
@@ -768,7 +773,7 @@ function moveMarker(ev) {
   const line = `<div class="ev-line" role="note"><span class="mid">${ic("move", "sm")}${how}</span></div>`;
   if (ev.kind === "new" || !ev.files.length) return `<div class="ev">${line}</div>`;
   const gone = S.sim.expired;
-  const state = gone ? `<span class="state-pill ok">Sent</span>` : ev.sent ? `<span class="state-pill ok">Sent with the next turn</span>` : `<span class="state-pill">Goes with the next turn</span>`;
+  const state = gone ? `<span class="state-pill ok">Sent</span>` : ev.sent ? `<span class="state-pill ok">Sent to the agent</span>` : `<span class="state-pill">Goes with the next turn</span>`;
   return `<div class="ev">${line}<div class="ev-card">
     <div class="top">${ic(gone ? "trash" : "clock", "sm")}<span class="grow">${gone
       ? `Mcode deleted the old folder on ${DEADLINE}.`
@@ -866,8 +871,8 @@ const threadList = ts => `<ul>${ts.map(o => `<li><span class="fade">${esc(o.titl
 /* Runs in is one dropdown, as in the new-thread target; New worktree and Existing worktree each add the one field they need. */
 function runsIn(mv, p) {
   /* The reason sits outside the dimmed control so it stays readable. */
-  if (!p.git) return `<div class="field"><span class="lab">Runs in</span><button class="trigger" aria-disabled="true" aria-describedby="runs-why">${ic("laptop", "sm")}<span class="lab">Local</span></button><span class="help" id="runs-why">${esc(p.name)} is not a git repo, so it runs Local.</span></div>`;
-  const icon = { local: "laptop", newwt: "tree", existingwt: "fork" }[mv.mode];
+  if (!p.git) return `<div class="field"><span class="lab">Runs in</span><span class="static-val">${ic("laptop", "sm")}Local</span><span class="help">${esc(p.name)} is not a git repo, so it runs Local.</span></div>`;
+  const icon = MODE_ICON[mv.mode];
   const runs = `<div class="field"><span class="lab">Runs in</span><button class="trigger" data-mvpicker="runs" aria-haspopup="listbox">${ic(icon, "sm")}<span class="lab">${MODE_LABEL[mv.mode]}</span>${mv.mode === "local" ? `<span class="hint mono">${esc(p.branch)}</span>` : ""}${ic("down", "sm")}</button></div>`;
   const base = mv.base ?? p.branch, pr = mv.pr && p.prs.find(x => x.n === mv.pr);
   if (mv.mode === "newwt") return runs + `<div class="field"><span class="lab">From</span><button class="trigger" data-mvpicker="branch" aria-haspopup="listbox">${ic(pr ? "pr" : "branch", "sm")}${pr
@@ -877,15 +882,12 @@ function runsIn(mv, p) {
   if (mv.mode === "existingwt") return runs + `<div class="field"><span class="lab">Worktree</span><button class="trigger" data-mvpicker="worktree" aria-haspopup="listbox">${ic("fork", "sm")}${mv.wt ? `<span class="lab mono fade">${esc(mv.wt.path)}</span><span class="hint mono">${esc(mv.wt.branch)}</span>` : `<span class="lab ph">Choose a worktree</span>`}${ic("down", "sm")}</button></div>`;
   return runs;
 }
+/* The app's names-only Workspace menu: Local carries the project folder, as it does when starting a thread. */
 function runsPicker(mv, p) {
-  const opts = [
-    ["local", "laptop", `In <span class="mono">${esc(p.path)}</span> on <span class="mono">${esc(p.branch)}</span>, next to your own changes`],
-    ["newwt", "tree", "A separate checkout on a new branch"],
-    ["existingwt", "fork", p.worktrees.length ? "A checkout you already have" : `${esc(p.name)} has no other worktrees`],
-  ];
-  return listPicker("Runs in", opts.map(([m, icon, sub]) => {
+  return listPicker("Runs in", `<div class="gl">Workspace</div>` + ["newwt", "existingwt", "local"].map(m => {
     const off = m === "existingwt" && !p.worktrees.length;
-    return `<button class="mi two" role="option" aria-selected="${mv.mode === m}" ${off ? 'aria-disabled="true"' : `data-mvmode="${m}"`}>${ic(icon, "sm ico")}<span class="lab"><span>${MODE_LABEL[m]}</span><span class="sub">${sub}</span></span>${mv.mode === m ? ic("check", "sm") : ""}</button>`;
+    const trail = m === "local" ? `<span class="hint mono fade">${esc(p.path)}</span>` : off ? `<span class="hint">None yet</span>` : "";
+    return `<button class="mi" role="option" aria-selected="${mv.mode === m}" ${off ? 'aria-disabled="true"' : `data-mvmode="${m}"`}>${ic(MODE_ICON[m], "sm ico")}<span class="lab">${MODE_LABEL[m]}</span>${trail}${mv.mode === m ? ic("check", "sm") : ""}</button>`;
   }).join(""));
 }
 /* The new-thread target picker: Branches and Pull requests tabs, text rows with a "current" tag, and Start from origin
@@ -893,7 +895,7 @@ function runsPicker(mv, p) {
 function branchPicker(mv, p) {
   const base = mv.base ?? p.branch, q = mv.pq.trim().toLowerCase(), onPrs = mv.btab === "prs";
   const none = what => `<div style="padding:12px 8px;color:var(--muted)">No ${what} matches “${esc(mv.pq)}”.</div>`;
-  const branchRows = p.branches.filter(b => b.includes(q)).map(b => `<button class="mi" role="option" aria-selected="${!mv.pr && base === b}" data-mvbase="${esc(b)}"><span class="lab mono fade">${esc(b)}</span>${b === p.branch ? `<span class="tag">current</span>` : ""}${!mv.pr && base === b ? ic("check", "sm") : ""}</button>`);
+  const branchRows = p.branches.filter(b => b.includes(q)).map(b => `<button class="mi" role="option" aria-selected="${!mv.pr && base === b}" data-mvbase="${esc(b)}"><span class="lab mono fade">${esc(b)}</span>${b === p.branch ? `<span class="tag">current</span>` : p.worktrees.some(w => w.branch === b) ? `<span class="tag">worktree</span>` : ""}${!mv.pr && base === b ? ic("check", "sm") : ""}</button>`);
   const prRows = p.prs.filter(x => `${x.title} ${x.head} #${x.n}`.toLowerCase().includes(q)).map(x => `<button class="mi two" role="option" aria-selected="${mv.pr === x.n}" data-mvpr="${x.n}"><span class="lab"><span class="fade">${esc(x.title)}</span><span class="sub mono">#${x.n} · ${esc(x.head)}</span></span>${mv.pr === x.n ? ic("check", "sm") : ""}</button>`);
   const rows = onPrs ? prRows : branchRows;
   return `<div class="pop in-dialog col" data-stop role="dialog" aria-label="Start from">
@@ -908,7 +910,7 @@ function filesNotice(mv, t) {
   const files = folderFiles(t);
   if (mv.dest !== "existing" || !files.length) return "";
   const copied = files.length === 1 ? "It is not copied into the project; the agent is told where it is on its next turn." : "They are not copied into the project; the agent is told where they are on its next turn.";
-  return notice({ tone: "warning", title: `After the move, Mcode deletes the ${plural(files.length, "file", "files")} in this thread's folder on ${DEADLINE}`,
+  return notice({ tone: "warning", title: `After the move, Mcode deletes the thread's ${plural(files.length, "file", "files")} on ${DEADLINE}`,
     detail: `<div>${copied} Choose New project to keep the files with the thread.</div>`,
     more: `<div><span class="k">Files in this folder</span><ul class="mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>`,
     openKey: "showFiles" });
@@ -978,7 +980,8 @@ function moveDialogHtml() {
     : failed ? "Try again"
     : mv.dest === "new" ? "Create project" : n > 1 ? `Move ${n} threads` : "Move thread";
   const primaryAttrs = locked ? 'aria-busy="true" aria-disabled="true"'
-    : `data-act="mvgo" ${block ? "disabled" : ""}`;
+    /* An open picker covers the notices under it, so the move waits until it closes. */
+    : `data-act="mvgo" ${block || mv.picker ? "disabled" : ""}`;
   const picker = mv.picker === "project" ? projectPicker(mv)
     : mv.picker === "runs" ? runsPicker(mv, project(mv.pid))
     : mv.picker === "branch" ? branchPicker(mv, project(mv.pid))
@@ -1023,7 +1026,7 @@ function applyNew(mv) {
   const name = mv.name.trim();
   const id = "p" + S.nextId;
   const chip = name.split(/[-_. ]/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join("") || name.slice(0, 2).toUpperCase();
-  const p = { id, name, chip, c: "c2", path: joinPath(mv.parent, name), git: mv.git && !S.sim.failGit, branch: mv.git && !S.sim.failGit ? "main" : null, branches: ["main"], worktrees: [] };
+  const p = { id, name, chip, c: "c2", path: joinPath(mv.parent, name), git: mv.git && !S.sim.failGit, branch: mv.git && !S.sim.failGit ? "main" : null, branches: ["main"], prs: [], worktrees: [] };
   S.added = [p, ...S.added];
   S.nextId += 1;
   for (const o of sharersOf(lead)) {
