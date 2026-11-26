@@ -18,12 +18,14 @@ import { logger } from "@mcode/shared";
 import type { GitExecutor } from "../git/execution/index.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { projectLifecycleWriteOperations } from "./project-lifecycle-write-operations.js";
-import { isTooBroadFolder } from "./workspace-path.js";
+import { isTooBroadFolder, isWithinWorkspaceRoot, resolveNoProjectRoot } from "./workspace-path.js";
 import { TerminalBackend, TERMINAL_BACKEND_TOKEN } from "../../terminal/backends/terminal-backend.js";
 
 /** Handles workspace creation, rename, listing, and two-phase deletion. */
 @injectable()
 export class WorkspaceService {
+  private readonly noProjectRoot: string;
+
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
@@ -32,7 +34,10 @@ export class WorkspaceService {
     @inject(delay(() => ThreadDeletionTeardownService)) private readonly threadDeletion: Pick<ThreadDeletionTeardownService, "teardownThread" | "deletePersistentData" | "notifyThreadsHidden">,
     @inject("GitExecutor") private readonly gitExecutor: GitExecutor,
     @inject(TERMINAL_BACKEND_TOKEN) private readonly terminals: Pick<TerminalBackend, "killByThread">,
-  ) {}
+    @inject("McodeDir") mcodeDir: string,
+  ) {
+    this.noProjectRoot = NodePath.join(mcodeDir, "no-project");
+  }
 
   /**
    * Create a new workspace, or return the existing one (`reused: true`) if the path is already
@@ -44,11 +49,12 @@ export class WorkspaceService {
    * the stale workspace so the user can re-add immediately.
    */
   async create(name: string | undefined, requestedPath: string): Promise<WorkspaceCreateResult> {
-    const validated = await validateWorkspacePath(requestedPath);
+    const validated = await validateWorkspacePath(requestedPath, this.noProjectRoot);
     if (!validated.ok) return validated;
     const { path } = validated;
     const existing = this.workspaceRepo.findByPath(path) ?? await this.findLegacyAlias(path);
     if (existing) {
+      if (existing.kind === "no_project") return reservedFolder();
       const current = await this.writer.execute(projectLifecycleWriteOperations.reuseWorkspace, [existing.id]);
       if (!current) throw new Error("Workspace was deleted while it was being reopened");
       return { ok: true, workspace: current, reused: true };
@@ -59,12 +65,40 @@ export class WorkspaceService {
     // evicts only if no threads remain; if it can't, force-delete here.
     const stale = this.workspaceRepo.findDeletingByPath(path);
     if (stale) {
+      if (stale.kind === "no_project") return reservedFolder();
       await this.forceDelete(stale.id);
     }
 
     const isGitRepo = await this.detectGitRepo(path);
     const workspace = await this.workspaceRepo.create(name ?? NodePath.basename(path), path, isGitRepo);
     return { ok: true, workspace, reused: false };
+  }
+
+  /** Create the isolated workspace for a no-project thread with a fresh UUID. */
+  async createNoProject(id: string, onInserted?: () => void): Promise<Workspace> {
+    const path = NodePath.join(this.noProjectRoot, id);
+    if (NodePath.dirname(path) !== this.noProjectRoot || NodePath.basename(path) !== id) {
+      throw new Error("Invalid no-project workspace ID");
+    }
+    if (this.workspaceRepo.findByIdIncludeDeleted(id)) {
+      throw new Error(`Workspace ID already exists: ${id}`);
+    }
+    await NodeFSPromises.mkdir(this.noProjectRoot, { recursive: true });
+    const root = await resolveNoProjectRoot(this.noProjectRoot);
+
+    const { workspace } = await this.workspaceRepo.createNoProject(id, path);
+    try {
+      await NodeFSPromises.mkdir(path);
+    } catch (error) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+      await this.workspaceRepo.hardDelete(id);
+      throw new Error("No project folder still exists from an earlier creation.", { cause: error });
+    }
+    if (await NodeFSPromises.realpath(path) !== NodePath.join(root, id)) {
+      throw new Error("No project folder does not match its workspace ID");
+    }
+    onInserted?.();
+    return workspace;
   }
 
   /**
@@ -149,6 +183,7 @@ export class WorkspaceService {
    */
   private async findLegacyAlias(canonicalPath: string): Promise<Workspace | null> {
     for (const workspace of this.workspaceRepo.listAll()) {
+      if (workspace.kind !== "project") continue;
       const resolved = await NodeFSPromises.realpath(workspace.path).catch(() => null);
       if (resolved === canonicalPath) return workspace;
     }
@@ -176,13 +211,18 @@ function registrationFailure(code: WorkspaceCreateErrorCode, message: string): E
   return { ok: false, error: { code, message } };
 }
 
-async function validateWorkspacePath(requestedPath: string): Promise<
+function reservedFolder(): Extract<WorkspaceCreateResult, { ok: false }> {
+  return registrationFailure("reserved_folder", "This folder belongs to a No project thread.");
+}
+
+async function validateWorkspacePath(requestedPath: string, noProjectRoot: string): Promise<
   { ok: true; path: string } | Extract<WorkspaceCreateResult, { ok: false }>
 > {
   const expandedPath = requestedPath.replace(/^~(?=$|[\\/])/, NodeOS.homedir());
   if (!NodePath.isAbsolute(expandedPath)) {
     return registrationFailure("path_not_absolute", "Choose an absolute folder path.");
   }
+  if (isWithinWorkspaceRoot(noProjectRoot, expandedPath)) return reservedFolder();
 
   try {
     const details = await NodeFSPromises.stat(expandedPath);
@@ -190,6 +230,11 @@ async function validateWorkspacePath(requestedPath: string): Promise<
       return registrationFailure("not_a_directory", "That's a file, not a folder.");
     }
     const path = await NodeFSPromises.realpath(expandedPath);
+    const canonicalRoot = await NodeFSPromises.realpath(noProjectRoot).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return noProjectRoot;
+      throw error;
+    });
+    if (isWithinWorkspaceRoot(canonicalRoot, path)) return reservedFolder();
     if (await isTooBroadFolder(path)) {
       return registrationFailure("too_broad", "Choose a project folder, not your home folder or a filesystem root.");
     }

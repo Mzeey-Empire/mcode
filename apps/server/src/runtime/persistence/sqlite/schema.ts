@@ -28,6 +28,7 @@ export const workspaces = sqliteTable(
     id: text("id").primaryKey().notNull(),
     name: text("name").notNull(),
     path: text("path").notNull().unique(),
+    kind: text("kind", { enum: ["project", "no_project"] }).notNull().default("project"),
     providerConfig: text("provider_config").notNull().default("{}"),
     createdAt: text("created_at").notNull().default(timestampDefault),
     updatedAt: text("updated_at").notNull().default(timestampDefault),

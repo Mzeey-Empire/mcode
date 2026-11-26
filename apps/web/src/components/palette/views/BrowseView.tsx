@@ -29,6 +29,7 @@ const REGISTRATION_ERROR_COPY: Record<WorkspaceCreateErrorCode, string> = {
   not_a_directory: "That's a file, not a folder.",
   too_broad: "Pick a project folder, not your home folder or a drive.",
   permission_denied: "Mcode can't read this folder.",
+  reserved_folder: "This folder belongs to a No project thread.",
 };
 
 const RESOLUTION_WARNING_COPY: Record<Exclude<BrowseResult["requestedPath"], "folder">, string> = {

@@ -213,7 +213,7 @@ async function harness(
   vi.stubEnv("MCODE_DB_PATH", runtime.reader.filename);
   const plannedRestart = new PlannedRestart(
     canonical, restartRecovery, messages);
-  const service = new DelegatedTaskService({ tasks, threads, startups, approvals, canonical, targets, git: worktrees, control, resumes,
+  const service = new DelegatedTaskService({ tasks, threads, workspaces, startups, approvals, canonical, targets, git: worktrees, control, resumes,
     approvalService, cancellation, plannedRestart,
     commands: { createAndSend: async (command, options) => {
       const created = await creation.createInitialTurn(command, options);
@@ -1076,6 +1076,25 @@ describe("delegated task lifecycle", { timeout: 30_000 }, () => {
     expect(f.threads.listByWorkspace(f.workspace.id).map((thread) => thread.id)).toEqual([f.coordinator.id]);
     const thread = f.threads.findById(first.threadId ?? "");
     expect(git(thread?.worktree_path ?? "", "rev-parse", "HEAD")).toBe(f.localSha);
+  });
+
+  it("shares a No project checkout and rejects a delegated worktree", async () => {
+    const f = await harness();
+    const id = NodeCrypto.randomUUID();
+    const path = NodePath.join(f.root, "no-project", id);
+    NodeFS.mkdirSync(path, { recursive: true });
+    await f.workspaces.createNoProject(id, path);
+    const coordinator = await f.threads.create(id, "No project coordinator", "direct", "", false, "codex");
+    const source = { ...f.source, sourceThreadId: coordinator.id };
+
+    expect(await f.service.delegate(source, f.input)).toEqual({
+      status: "rejected",
+      error: { code: "invalid_placement", message: "A No project thread has no repository", retryable: false },
+    });
+    const child = requireTask(await f.service.delegate(source, { ...f.input, isolation: "shared" }));
+    expect(f.threads.findById(child.threadId ?? "")).toMatchObject({
+      workspace_id: id, mode: "direct", branch: "", worktree_path: null,
+    });
   });
 
   it.each([

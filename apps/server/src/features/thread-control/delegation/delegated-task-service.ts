@@ -11,6 +11,7 @@ import type { ThreadControlApprovalRepo } from "../authority/persistence/thread-
 import type { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
 import { cancelThreadStartup, type CancelThreadStartupDeps } from "../../thread-startup/cancel-thread-startup.js";
 import type { GitWorktreeService } from "../../projects/git/git-worktree-service.js";
+import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import type { CanonicalAgentBoundary } from "../../agents/canonical/canonical-agent-boundary.js";
 import { targetRejection, type DelegationTargetResolver } from "../../agents/collaboration/delegation-target-resolver.js";
 import { selectReasoningLevel } from "../../agents/collaboration/reasoning-effort-option.js";
@@ -29,6 +30,7 @@ import type { PlannedRestart } from "../../agents/recovery/planned-restart/index
 export interface DelegatedTaskDeps {
   tasks: DelegatedTaskRepo;
   threads: Pick<ThreadRepo, "findById">;
+  workspaces: Pick<WorkspaceRepo, "findById">;
   startups: Pick<ThreadStartupService, "get">;
   approvals: ThreadControlApprovalRepo;
   canonical: Pick<CanonicalAgentBoundary, "loadLatestAttempt" | "loadTerminalProjection">;
@@ -303,10 +305,12 @@ export class DelegatedTaskService {
     }
     const target = await this.pinTarget(input);
     if ("status" in target) return target;
+    const checkout = await this.checkout(source, input.isolation);
+    if ("status" in checkout) return checkout;
     return {
       workspaceId: source.workspace_id, title: input.title, prompt: input.prompt, ...target,
       permissionMode: input.permissionMode ?? authority.permissionMode, coordinatorPermissionMode: authority.permissionMode,
-      checkout: await this.checkout(source, input.isolation), messageId: NodeCrypto.randomUUID(),
+      checkout, messageId: NodeCrypto.randomUUID(),
       creatorTurnId: authority.sourceTurnId, creatorToolCallId: authority.sourceToolCallId,
       creatorProviderId: ProviderIdSchema.parse(authority.sourceProviderId), userId: authority.userId,
     };
@@ -323,7 +327,11 @@ export class DelegatedTaskService {
     };
   }
 
-  private async checkout(source: Thread, isolation: DelegateTaskInput["isolation"]): Promise<DelegatedTaskPlan["checkout"]> {
+  private async checkout(source: Thread, isolation: DelegateTaskInput["isolation"]): Promise<DelegatedTaskPlan["checkout"] | TaskRejection> {
+    if (this.deps.workspaces.findById(source.workspace_id)?.kind === "no_project") {
+      if (isolation === "worktree") return rejection("invalid_placement", "A No project thread has no repository");
+      return { kind: "direct", branch: "" };
+    }
     if (isolation === "worktree") return {
       kind: "new_worktree", baseBranch: source.base_branch ?? source.branch,
       commit: await this.deps.git.resolveHeadCommit(source.workspace_id, source.mode, source.worktree_path),

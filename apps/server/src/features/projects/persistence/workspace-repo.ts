@@ -17,6 +17,30 @@ export class WorkspaceRepo {
     return this.writer.execute(workspaceWriteOperations.create, [name, path, isGitRepo]);
   }
 
+  /** Commit a caller-identified no-project workspace. */
+  createNoProject(id: string, path: string): Promise<ReturnType<WorkspaceStore["createNoProject"]>> {
+    return this.writer.execute(workspaceWriteOperations.createNoProject, [id, path]);
+  }
+
+  /** List registered paths, including those still held by soft-deleted rows. */
+  listPathsIncludeDeleted(): string[] {
+    return this.reader.listPathsIncludeDeleted();
+  }
+
+  /** Find every pre-thread failure that should retire when a No project thread is deleted. */
+  findThreadlessNoProjectFailureIds(workspaceId: string): string[] {
+    return this.reader.findThreadlessNoProjectFailureIds(workspaceId);
+  }
+
+  findRemovableNoProject(createdBefore: string, retryUpdatedSince: string): ReturnType<WorkspaceStore["findRemovableNoProject"]> {
+    return this.reader.findRemovableNoProject(createdBefore, retryUpdatedSince);
+  }
+
+  /** Hard-delete a swept workspace if it still qualifies. */
+  deleteRemovableNoProject(id: string, createdBefore: string, retryUpdatedSince: string): Promise<boolean> {
+    return this.writer.execute(workspaceWriteOperations.deleteRemovableNoProject, [id, createdBefore, retryUpdatedSince]);
+  }
+
   prependToSortOrder(id: Parameters<WorkspaceStore["prependToSortOrder"]>[0]): Promise<ReturnType<WorkspaceStore["prependToSortOrder"]>> {
     return this.writer.execute(workspaceWriteOperations.prependToSortOrder, [id]);
   }

@@ -26,6 +26,7 @@ import { pruneStaleToolOutputArtifacts } from "@mcode/providers";
 import { ThreadControlMutationReservationService, ThreadService } from "../index.js";
 import { ThreadDeletionTeardownService } from "../lifecycle/thread-deletion-teardown-service.js";
 import { CleanupActionRunner } from "./cleanup-action-runner.js";
+import { NoProjectWorkspaceSweep } from "./no-project-workspace-sweep.js";
 import { launchTelemetry } from "../../../runtime/diagnostics/launch-telemetry.js";
 import { DATABASE_WRITER_MAX_PENDING, DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 
@@ -90,6 +91,7 @@ export class CleanupWorker {
     // Tests that pin a Windows host have no real process handles to wait for.
     @inject("CleanupHandleReleaseDelayMs", { isOptional: true })
     private readonly handleReleaseDelayMs = HANDLE_RELEASE_DELAY_MS,
+    @inject(NoProjectWorkspaceSweep) private readonly noProjectSweep?: NoProjectWorkspaceSweep,
   ) {
     this.mutationReservations = mutationReservations
       ?? new ThreadControlMutationReservationService();
@@ -193,6 +195,7 @@ export class CleanupWorker {
           if (!(error instanceof DatabaseWriteOutcomeUnknown)) throw error;
         }
       }
+      if (!this.stopped) await this.noProjectSweep?.run();
     } finally {
       this.running = false;
     }

@@ -107,6 +107,7 @@ describe("WorkspaceService", () => {
       },
       new FakeGitExecutor(),
       { killByThread: vi.fn().mockResolvedValue(undefined) },
+      directory,
     );
   });
 

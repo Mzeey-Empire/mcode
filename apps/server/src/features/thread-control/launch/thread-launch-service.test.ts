@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import * as NodeCrypto from "node:crypto";
 import * as NodeEvents from "node:events";
+import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { IAgentProvider, IProviderRegistry } from "@mcode/contracts/providers/interfaces";
@@ -52,7 +53,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function harness(coordinatorMode: "direct" | "worktree" = "direct", setup = false) {
+async function harness(coordinatorMode: "direct" | "worktree" | "no_project" = "direct", setup = false) {
   const fixture = await createOriginFixture();
   const { runtime, workspace, workspaces, repository, worktrees, executor, host } = fixture;
   const threads = new ThreadRepo(runtime.reader, runtime.writer);
@@ -122,13 +123,22 @@ async function harness(coordinatorMode: "direct" | "worktree" = "direct", setup 
       return created.thread;
     } },
   });
+  const sourceWorkspace = coordinatorMode === "no_project" ? await createNoProjectSourceWorkspace(fixture) : workspace;
   const coordinator = coordinatorMode === "worktree"
     ? await threadService.create(workspace.id, "Coordinator", "worktree", "main", { provider: "codex", branchless: true })
-    : await threads.create(workspace.id, "Coordinator", "direct", "main", false, "codex");
+    : await threads.create(sourceWorkspace.id, "Coordinator", "direct", coordinatorMode === "no_project" ? "" : "main", false, "codex");
   await threads.updateModel(coordinator.id, "gpt-test");
   const source: InternalThreadControlAuthority = { type: "internal", userId: "local-user", sourceThreadId: coordinator.id,
     sourceTurnId: NodeCrypto.randomUUID(), sourceToolCallId: "launch-call", sourceProviderId: "codex", permissionMode: "full" };
   return { ...fixture, threads, service, threadService, environment, canonical, messages, coordinator, source, sendTurn, finishSetup };
+}
+
+async function createNoProjectSourceWorkspace(fixture: Awaited<ReturnType<typeof createOriginFixture>>) {
+  const id = NodeCrypto.randomUUID();
+  const path = NodePath.join(fixture.root, "no-project", id);
+  const { workspace } = await fixture.workspaces.createNoProject(id, path);
+  await NodeFSPromises.mkdir(path, { recursive: true });
+  return workspace;
 }
 
 function requireLaunch(result: ThreadLaunchResult) {
@@ -217,6 +227,28 @@ describe("thread launch", { timeout: 30_000 }, () => {
     const f = await harness("worktree");
     const launched = requireLaunch(await f.service.launch(f.source, input));
     expect(f.threads.findById(launched.threadId)).toMatchObject({ mode: "direct", worktree_path: null, branch: "main" });
+  });
+
+  it("launches at the shared No project root with an empty branch", async () => {
+    const f = await harness("no_project");
+    const launched = requireLaunch(await f.service.launch(f.source, input));
+
+    expect(f.threads.findById(launched.threadId)).toMatchObject({
+      workspace_id: f.coordinator.workspace_id, mode: "direct", worktree_path: null, branch: "",
+    });
+  });
+
+  it.each(["existing_worktree", "new_worktree"] as const)("rejects %s for a No project source", async (type) => {
+    const f = await harness("no_project");
+    const workspace = type === "existing_worktree"
+      ? { type, worktreePath: f.repoPath }
+      : { type, baseRef: "main" };
+
+    expect(await f.service.launch({ ...f.source, permissionMode: "supervised" }, { ...input, workspace })).toEqual({
+      status: "rejected",
+      error: { code: "invalid_placement", message: "A No project thread has no repository", retryable: false },
+    });
+    expect(f.threads.listAllByWorkspace(f.coordinator.workspace_id).map((thread) => thread.id)).toEqual([f.coordinator.id]);
   });
 
   it("returns a visible ordinary thread without delegation lineage", async () => {

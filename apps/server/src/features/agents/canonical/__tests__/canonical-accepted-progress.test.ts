@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
+import { getMcodeDir } from "@mcode/shared";
 import { AgentEventSchema, type AgentEvent } from "@mcode/contracts/events/agent-event";
 import { CanonicalAgentProgressFrameSchema, type CanonicalAgentProgressFrame } from "@mcode/contracts/models/canonical-agent-progress";
 import { ProviderRuntimeExtensionSchema, type ProviderRuntimeExtension } from "@mcode/contracts/events/provider-runtime-event";
@@ -2451,7 +2452,7 @@ describe("accepted parent progress with the actual SQLite writer", { timeout: 30
       } } as unknown as ApplicationDatabaseWriter;
       const unusedDependency = {} as never;
       const workspaces = new WorkspaceService(unusedDependency, unusedDependency, lifecycleWriter, { removeForThread: () => {} },
-        Object.assign(deletion, { teardownThread: () => new Promise<void>(() => {}) }), unusedDependency, { killByThread: async () => {} });
+        Object.assign(deletion, { teardownThread: () => new Promise<void>(() => {}) }), unusedDependency, { killByThread: async () => {} }, getMcodeDir());
 
       void workspaces.delete("workspace");
       await expect.poll(() => db.prepare("SELECT deleted_at IS NOT NULL AS hidden FROM threads WHERE id = ?").get(execution.threadId))

@@ -279,6 +279,20 @@ export class ThreadStartupStateStore {
     });
   }
 
+  /** Retire a failed or interrupted startup before deleting its thread or the retry's thread. */
+  retireForDeletedThread(startupId: string): ThreadStartup {
+    const startup = this.require(startupId);
+    if (startup.state === "interrupted") {
+      // Only failed records can carry an error. Cancellation preserves the interrupted step.
+      if (startup.cancellation === "requested") return startup;
+      return this.persistNext(startup, { cancellation: "requested" });
+    }
+    if (startup.state !== "failed" || startup.error?.code === "thread_deleted") return startup;
+    return this.persistNext(startup, {
+      error: { code: "thread_deleted", message: "Thread was deleted", retryable: false },
+    });
+  }
+
   /** Record the first time the user sees a failed or interrupted startup. */
   acknowledgeFailure(startupId: string, revision: number): ThreadStartup | null {
     const startup = this.startupRepo.findById(startupId);

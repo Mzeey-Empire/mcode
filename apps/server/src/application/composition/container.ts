@@ -91,6 +91,7 @@ import {
 /** Initialize server dependencies; the optional worker factory supports fault-injection tests. */
 export async function setupContainer(mcodeDir: string, options: { createDatabaseWriterWorker?: () => DatabaseWriterWorker } = {}): Promise<typeof container> {
   container.register<HostRuntime>("HostRuntime", { useValue: hostRuntime });
+  container.register("McodeDir", { useValue: mcodeDir });
   container.register("ProcessStartRunner", { useValue: sharedProcessStartWorkerClient().run });
   registerBrowserAutomation(container);
 

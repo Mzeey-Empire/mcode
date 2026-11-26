@@ -52,6 +52,7 @@ describe("WorkspaceService.create", () => {
       },
       new FakeGitExecutor(),
       { killByThread: vi.fn(async () => undefined) },
+      directory,
     );
   });
 
@@ -68,6 +69,83 @@ describe("WorkspaceService.create", () => {
     expect(result).toMatchObject({ ok: true, reused: false, workspace: { name: "project", path: project } });
     if (!result.ok) throw new Error("Expected successful registration");
     expect(repo.listAll()).toEqual([result.workspace]);
+  });
+
+  it("rejects a second creation with the same no-project ID and preserves the original workspace", async () => {
+    const firstProject = await repo.create("First", project);
+    const secondProject = await repo.create("Second", NodePath.join(directory, "second"));
+    const id = crypto.randomUUID();
+    const root = NodePath.join(directory, "no-project");
+    const first = await service.createNoProject(id);
+    const notes = NodePath.join(first.path, "notes.txt");
+    await NodeFSPromises.writeFile(notes, "original notes");
+    await expect(service.createNoProject(id)).rejects.toThrow(/Workspace ID.*already exists/);
+
+    expect(first).toMatchObject({ id, path: NodePath.join(root, id), name: "No project", kind: "no_project", is_git_repo: false });
+    expect(await NodeFSPromises.readdir(root)).toEqual([id]);
+    expect(await NodeFSPromises.readFile(notes, "utf8")).toBe("original notes");
+    expect(service.list()).toContainEqual(first);
+    expect(repo.findById(firstProject.id)?.sort_order).toBe(1);
+    expect(repo.findById(secondProject.id)?.sort_order).toBe(0);
+    expect(repo.search("", 10).map((workspace) => workspace.id).sort()).toEqual([firstProject.id, secondProject.id].sort());
+    expect(repo.search("No project", 10)).toEqual([]);
+  });
+
+  it("rejects Add project on the no-project root and its descendants", async () => {
+    const workspace = await service.createNoProject(crypto.randomUUID());
+    const subfolder = NodePath.join(workspace.path, "subfolder");
+    await NodeFSPromises.mkdir(subfolder);
+    for (const path of [NodePath.dirname(workspace.path), workspace.path, subfolder]) {
+      expect(await service.create(undefined, path)).toMatchObject({
+        ok: false, error: { code: "reserved_folder" },
+      });
+    }
+    expect(repo.listAll()).toEqual([workspace]);
+  });
+
+  it("rolls back the new row when the UUID folder already exists", async () => {
+    const id = crypto.randomUUID();
+    const path = NodePath.join(directory, "no-project", id);
+    await NodeFSPromises.mkdir(path, { recursive: true });
+    const notes = NodePath.join(path, "notes.txt");
+    await NodeFSPromises.writeFile(notes, "previous thread notes");
+
+    await expect(service.createNoProject(id)).rejects.toThrow("No project folder still exists");
+    expect(repo.findByIdIncludeDeleted(id)).toBeNull();
+    expect(await NodeFSPromises.readFile(notes, "utf8")).toBe("previous thread notes");
+  });
+
+  it.for([
+    { target: "outside the root" },
+    { target: "a sibling folder" },
+  ])("rejects creation when the no-project leaf points to $target", async ({ target }, { skip }) => {
+    const id = crypto.randomUUID();
+    const root = NodePath.join(directory, "no-project");
+    const path = NodePath.join(root, id);
+    await NodeFSPromises.mkdir(root);
+    const linkTarget = target === "a sibling folder" ? (await service.createNoProject(crypto.randomUUID())).path : project;
+    try {
+      await NodeFSPromises.symlink(linkTarget, path, process.platform === "win32" ? "junction" : "dir");
+    } catch {
+      skip();
+      return;
+    }
+
+    await expect(service.createNoProject(id)).rejects.toThrow(/No project folder/);
+    expect(repo.findByIdIncludeDeleted(id)).toBeNull();
+  });
+
+  it("refuses a redirected no-project root before creating a leaf", async ({ skip }) => {
+    const root = NodePath.join(directory, "no-project");
+    try {
+      await NodeFSPromises.symlink(project, root, process.platform === "win32" ? "junction" : "dir");
+    } catch {
+      skip();
+      return;
+    }
+
+    await expect(service.createNoProject(crypto.randomUUID())).rejects.toThrow("No project root");
+    expect(await NodeFSPromises.readdir(project)).toEqual([]);
   });
 
   it("reuses a legacy registration stored under a non-canonical alias", async () => {

@@ -96,6 +96,16 @@ project", "Recent Projects", "No projects yet") says _project_; the code and
 this glossary say _Workspace_. They are the same thing.
 _Avoid_: using "project" in code or schema; reserve it for user-facing copy.
 
+### No project
+Where a thread runs when the user starts it without choosing a project. Each
+such thread gets a hidden workspace (`kind = 'no_project'`, named "No project")
+whose folder Mcode creates under its data directory. The folder is not a git
+repository. Forks and delegated threads share it, and it is removed with the
+last thread that uses it. The user sees a "No project" group, never the hidden
+workspace, and a thread never moves between No project and a project. See
+[ADR 0035](docs/adr/0035-no-project-thread-lives-in-a-hidden-workspace.md).
+_Avoid_: "chat" for these threads; they are threads like any other.
+
 ### Project icon
 The small image that identifies a project in the sidebar, the new-thread
 breadcrumb, and the project chooser. A file the user chose inside the project
