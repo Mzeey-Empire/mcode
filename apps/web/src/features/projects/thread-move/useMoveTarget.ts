@@ -9,6 +9,7 @@ import {
   type ComposerTargetSelectionState,
 } from "@/features/conversation/composer/execution/useComposerTargetSelection";
 import type { UnavailableMode } from "@/features/conversation/composer/execution/WorkspaceTargetMenu";
+import { readRememberedStartFromOrigin } from "@/lib/start-from-origin-preference";
 import { isDetachedWorktree, type AttachedWorktree } from "@/lib/worktree";
 
 /** Where the move asks the server to place the thread. */
@@ -48,10 +49,16 @@ export interface MoveTargetState {
   readonly request: MoveTarget | null;
 }
 
+// Start from origin begins as the project's last new worktree thread left it, as the new-thread rail does. The
+// dialog only reads that preference: a move is not a new thread, so it does not change what the composer offers.
+function initialPicks(workspaceId: string | undefined): MovePicks {
+  return { ...NO_PICKS, startFromOrigin: readRememberedStartFromOrigin(workspaceId ?? null) };
+}
+
 /** The picks for one project. Choosing another project starts them over, so a worktree path never crosses projects. */
 function useMovePicks(workspaceId: string | undefined): { readonly picks: MovePicks; readonly update: (change: Partial<MovePicks>) => void } {
-  const [held, setHeld] = useState<{ readonly workspaceId: string | undefined; readonly picks: MovePicks }>({ workspaceId, picks: NO_PICKS });
-  const picksFor = (state: typeof held) => (state.workspaceId === workspaceId ? state.picks : NO_PICKS);
+  const [held, setHeld] = useState<{ readonly workspaceId: string | undefined; readonly picks: MovePicks }>(() => ({ workspaceId, picks: initialPicks(workspaceId) }));
+  const picksFor = (state: typeof held) => (state.workspaceId === workspaceId ? state.picks : initialPicks(workspaceId));
   const update = (change: Partial<MovePicks>) => setHeld((previous) => ({ workspaceId, picks: { ...picksFor(previous), ...change } }));
   return { picks: picksFor(held), update };
 }

@@ -23,6 +23,7 @@ import { MoveThreadDialogHost } from "../MoveThreadDialog";
 import { closeMoveThreadDialog, openMoveThreadDialog } from "../move-thread-store";
 import { installListboxLayout } from "@/__tests__/helpers/picker-layout";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
+import { rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
 
 installListboxLayout();
 
@@ -460,6 +461,21 @@ describe("MoveThreadDialog worktree targets", () => {
     expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From main (remote)");
     await user.click(moveButton());
     expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin: true } });
+  });
+
+  it("starts from origin when the project's last new worktree thread did", async () => {
+    rememberStartFromOrigin(GIT_PROJECT.id, true);
+    try {
+      const user = await openDialog();
+      await pickProject(user, "gitty");
+      await chooseMode(user, "New worktree");
+
+      expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From main (remote)");
+      await user.click(moveButton());
+      expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin: true } });
+    } finally {
+      rememberStartFromOrigin(GIT_PROJECT.id, false);
+    }
   });
 
   it("names a remote-only branch without its remote and always starts from origin", async () => {
