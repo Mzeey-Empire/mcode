@@ -652,6 +652,55 @@ describe("CodexEventMapper", () => {
     ]);
   });
 
+  it("timestamps command events from their native item notifications", () => {
+    const started = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { startedAtMs: 1793361600000, item: { type: "commandExecution", id: "cmd-timed" } },
+    });
+    const completed = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        completedAtMs: 1793361600400,
+        item: { type: "commandExecution", id: "cmd-timed", command: "echo hi", exitCode: 0 },
+      },
+    });
+
+    expect(started.map(({ event }) => event)).toMatchObject([
+      { type: "toolUse", toolCallId: "cmd-timed", occurredAt: "2026-10-30T12:00:00.000Z" },
+    ]);
+    expect(completed.map(({ event }) => event)).toMatchObject([
+      { type: "toolUse", toolCallId: "cmd-timed", occurredAt: "2026-10-30T12:00:00.400Z" },
+      { type: "toolResult", toolCallId: "cmd-timed", occurredAt: "2026-10-30T12:00:00.400Z" },
+    ]);
+  });
+
+  it("emits an approval-granted command start without the native item start time", () => {
+    const threadId = "native-thread";
+    const itemId = "cmd-approval";
+    mapper = new CodexEventMapper("test-thread", threadId);
+    const started = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: {
+        threadId,
+        startedAtMs: 1793361600000,
+        item: { type: "commandExecution", id: itemId, command: "echo hi" },
+      },
+    });
+    const waiting = mapper.commandApprovalRequested(itemId, threadId);
+    const approved = mapper.commandApprovalResolved(itemId, true, threadId);
+
+    expect(started.map(({ event }) => event)).toMatchObject([
+      { type: "toolUse", toolCallId: itemId, occurredAt: "2026-10-30T12:00:00.000Z" },
+    ]);
+    expect(waiting.map(({ event }) => event)).toMatchObject([{ type: "toolUse", toolCallId: itemId, phase: "waiting" }]);
+    expect(approved.map(({ event }) => event)).toMatchObject([{ type: "toolUse", toolCallId: itemId, status: "running" }]);
+    expect(approved[0]?.event).not.toHaveProperty("phase");
+    expect(approved[0]?.event).not.toHaveProperty("occurredAt");
+  });
+
   it("emits live command start, enriched command use, then command result", () => {
     const started = mapper.mapNotification({
       jsonrpc: "2.0",

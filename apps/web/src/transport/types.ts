@@ -132,8 +132,13 @@ export interface ToolCall {
   parentToolCallId?: string;
   /** Elapsed wall-clock seconds reported by the most recent toolProgress event. */
   elapsedSeconds?: number;
-  /** Epoch ms when the toolUse event was received, used for duration display. */
+  /** Epoch ms when the toolUse event was received; orders the row and drives its running timer. */
   startedAt?: number;
+  /**
+   * Epoch ms, on the server's clock, when the provider produced the start event. The finished
+   * duration measures from it, so late delivery does not inflate the duration.
+   */
+  eventStartedAt?: number;
   /** Epoch ms when the provider last reported meaningful activity for this call. */
   lastActivityAt?: number;
   /** Wall-clock duration when the tool call completed (ms). */

@@ -39,6 +39,22 @@ function assistantPhase(phase: unknown): CodexAssistantTextItem["phase"] {
 
 type ToolResultAgentEvent = Extract<CodexMappedEvent, { type: typeof AgentEventType.ToolResult }>;
 type ToolUseAgentEvent = Extract<CodexMappedEvent, { type: typeof AgentEventType.ToolUse }>;
+
+function stampItemToolEvents(notification: CodexNotification, events: CodexMappedEvent[]): CodexMappedEvent[] {
+  if (notification.unrecognized) return events;
+  const timestamp = notification.method === "item/started" ? notification.params.startedAtMs
+    : notification.method === "item/completed" ? notification.params.completedAtMs
+    : undefined;
+  if (timestamp === undefined) return events;
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return events;
+  const occurredAt = date.toISOString();
+  // Command state is reused at approval, when timing needs to start afresh.
+  return events.map((event) => event.type === AgentEventType.ToolUse || event.type === AgentEventType.ToolResult
+    ? { ...event, occurredAt }
+    : event);
+}
+
 type ChildNotificationContext = {
   childThreadId: string | undefined;
   parentCollaborationItemId: string | undefined;
@@ -1641,7 +1657,7 @@ export class CodexEventMapper {
     this.disposition = { kind: "state-only", reason: "native-state" };
     this.replayedChildEvents = [];
     const events = notification
-      ? this.mapNotificationInternal(notification)
+      ? stampItemToolEvents(notification, this.mapNotificationInternal(notification))
       : this.malformedNotification();
     const mapped = this.dedupeChildEvents([...events, ...this.replayedChildEvents]).map((event) => this.toRuntimeEvent(event));
     if (mapped.some(({ event }) => event.type === AgentEventType.System && event.systemNotice?.kind === "diagnostic")) {

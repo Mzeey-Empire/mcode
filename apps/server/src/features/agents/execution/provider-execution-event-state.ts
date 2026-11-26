@@ -7,6 +7,7 @@ import { CodexLiveEventEffects, type PreparedCodexLiveEvent } from "./codex-live
 import { sameExecution } from "./execution-mailbox-protocol.js";
 import type { ExecutionIdentity } from "./execution-mailbox-protocol.js";
 import { OtherProviderLiveEventEffects, type OtherProviderRuntimeIntent } from "./provider-live-event-effects.js";
+import { withToolEventTime } from "./tool-event-time.js";
 
 /** Providers whose parent event effects have an execution worker implementation. */
 export type ExecutionLiveProviderId = string;
@@ -95,7 +96,7 @@ export class ProviderExecutionEventState {
     | { kind: "parent"; runtime: ProviderRuntimeEvent }
     | { kind: "writer-owned" }
     | { kind: "rejected" } {
-    if (draft.sourceProviderId !== this.providerId || !this.matchesExecution(draft)) {
+    if (!this.matchesProviderExecution(draft)) {
       return { kind: "rejected" };
     }
     if (draft.payload.type !== "item.recorded") return { kind: "writer-owned" };
@@ -104,7 +105,9 @@ export class ProviderExecutionEventState {
     const runtime = this.validatedRuntimeEvent(draft, item);
     if (!runtime) return { kind: "rejected" };
     if (hasWriterOwnedExtension(runtime)) return { kind: "writer-owned" };
-    return { kind: "parent", runtime };
+    // Publish the time the server saves, so the live row and a reload measure the same span.
+    const event = withToolEventTime(runtime.event, { providerTimestamp: draft.providerTimestamp, createdAt: item.createdAt });
+    return { kind: "parent", runtime: event === runtime.event ? runtime : { ...runtime, event } };
   }
 
   private validatedRuntimeEvent(
@@ -121,8 +124,8 @@ export class ProviderExecutionEventState {
     return { ...runtime.data, event: parsed.event.event };
   }
 
-  private matchesExecution(draft: ProviderEventDraft): boolean {
-    return sameExecution(draft.routing, this.execution);
+  private matchesProviderExecution(draft: ProviderEventDraft): boolean {
+    return draft.sourceProviderId === this.providerId && sameExecution(draft.routing, this.execution);
   }
 }
 

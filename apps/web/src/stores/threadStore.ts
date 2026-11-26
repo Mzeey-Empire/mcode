@@ -2166,12 +2166,18 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   const toolUseStatus = (event: Extract<AgentEvent, { type: "toolUse" }>): ToolCall["status"] => event.phase ?? event.status;
 
+  const eventTimeMs = (occurredAt: string | undefined): number | undefined => {
+    const parsed = occurredAt ? Date.parse(occurredAt) : NaN;
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+
   const newToolCall = (
     event: Extract<AgentEvent, { type: "toolUse" }>,
     toolName: string,
     toolInput: Record<string, unknown>,
   ): ToolCall => {
     const id = event.toolCallId || crypto.randomUUID();
+    const eventStartedAt = eventTimeMs(event.occurredAt);
     return {
       id,
       toolName,
@@ -2183,8 +2189,16 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       parentToolCallId: event.parentToolCallId || undefined,
       status: toolUseStatus(event) ?? "running",
       startedAt: Date.now(),
+      ...(eventStartedAt !== undefined ? { eventStartedAt } : {}),
       lastActivityAt: Date.now(),
     };
+  };
+
+  /** An approved call's clock restarts when it begins running, on both the receipt and event clocks. */
+  const restartedToolCall = (call: ToolCall, event: Extract<AgentEvent, { type: "toolUse" }>): ToolCall => {
+    const { eventStartedAt: _waitingStart, ...rest } = call;
+    const eventStartedAt = eventTimeMs(event.occurredAt);
+    return { ...rest, startedAt: Date.now(), ...(eventStartedAt !== undefined ? { eventStartedAt } : {}) };
   };
 
   const appendToolCall = (threadId: string, toolCall: ToolCall): void => {
@@ -2205,7 +2219,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const status = toolUseStatus(event);
     if (existing && status && !existing.isComplete) {
       patchRec(event.threadId, (record) => ({ toolCalls: record.toolCalls.map((call) => call.id === event.toolCallId
-        ? { ...call, status, ...(status === "running" && call.status !== "running" ? { startedAt: Date.now() } : {}) }
+        ? { ...(status === "running" && call.status !== "running" ? restartedToolCall(call, event) : call), status }
         : call) }));
       return;
     }
@@ -2268,6 +2282,22 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return toolCalls.some((toolCall) => toolCall.parentToolCallId === id && !toolCall.isComplete);
   };
 
+  /**
+   * Measures between the provider's start and result times when both are known, as the saved
+   * record does, so the live row matches a reload. Receipt times are the fallback for events
+   * from older servers.
+   */
+  const measuredToolDurationMs = (
+    toolCall: ToolCall,
+    event: Extract<AgentEvent, { type: "toolResult" }>,
+  ): number | undefined => {
+    const eventCompletedAt = eventTimeMs(event.occurredAt);
+    if (toolCall.eventStartedAt != null && eventCompletedAt !== undefined) {
+      return Math.max(0, eventCompletedAt - toolCall.eventStartedAt);
+    }
+    return toolCall.startedAt != null ? Math.max(0, Date.now() - toolCall.startedAt) : undefined;
+  };
+
   const completedToolCall = (
     toolCall: ToolCall,
     event: Extract<AgentEvent, { type: "toolResult" }>,
@@ -2277,7 +2307,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     const durationFromInput = mergedInput.durationMs;
     const durationMs = typeof durationFromInput === "number" && Number.isFinite(durationFromInput)
       ? durationFromInput
-      : toolCall.startedAt != null ? Math.max(0, Date.now() - toolCall.startedAt) : undefined;
+      : measuredToolDurationMs(toolCall, event);
     return {
       ...toolCall,
       toolInput: mergedInput,
