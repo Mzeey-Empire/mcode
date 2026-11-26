@@ -1,7 +1,9 @@
 /*
  * Adapted from T3 Code's sourceSelection.ts (apps/web/src/components/files).
- * Changed: rows map to lines through a `lineOf` callback, and a point whose line has no mounted row
- * (a collapsed gap between hunks) lands on the edge of the mounted row beside it.
+ * Changed: the caller names the rows that belong to a selection (`rowsOf`) and maps each to a line
+ * (`lineOf`), so a split diff's two columns can share line numbers; a point whose line has no mounted row
+ * (a collapsed gap between hunks) lands on the edge of the mounted row beside it; the engine's selection
+ * is also read through `ShadowRoot.getSelection`; and copy always returns the text, minus unknown lines.
  *
  * MIT License
  *
@@ -132,10 +134,10 @@ function isInside(root: ShadowRoot, range: StaticRange) {
   return root.contains(range.startContainer) && root.contains(range.endContainer);
 }
 
-/** Whether the browser's selection has both ends inside `root`. */
-export function holdsSelection(root: ShadowRoot) {
+/** The browser's selection when both its ends are inside `root`. */
+export function rangeHeldBy(root: ShadowRoot) {
   const range = rangeIn(root);
-  return range !== undefined && isInside(root, range);
+  return range && isInside(root, range) ? range : undefined;
 }
 
 function isCaret(anchor: End, focus: End) {
@@ -173,6 +175,14 @@ function rowOf(node: Node) {
   return element?.closest<HTMLElement>("[data-line]") ?? null;
 }
 
+/** Which rows of a file's shadow root a selection covers, and the line of the text each one shows. */
+export interface SourceRows {
+  /** The mounted rows that belong to the selection, in document order. */
+  readonly rowsOf: (root: ShadowRoot) => Iterable<HTMLElement>;
+  /** The zero-based line of the text that a mounted row shows, or NaN for a row that shows none. */
+  readonly lineOf: (row: HTMLElement) => number;
+}
+
 /**
  * A text selection in a virtualized file, kept as offsets into the file's text.
  * The browser's own selection can only reach mounted rows: an end whose row unmounts
@@ -180,7 +190,8 @@ function rowOf(node: Node) {
  * onto the rows after every render.
  */
 export class SourceSelection {
-  readonly #lineOf: (row: HTMLElement) => number;
+  readonly #rowsOf: SourceRows["rowsOf"];
+  readonly #lineOf: SourceRows["lineOf"];
   #text = "";
   #lineStarts: number[] | undefined;
   #ends: Ends | undefined;
@@ -195,8 +206,8 @@ export class SourceSelection {
     | { readonly range: StaticRange | undefined; readonly clippedByRender: boolean }
     | undefined;
 
-  /** `lineOf` gives the zero-based line of the text that a mounted row shows, or NaN for a row that shows none. */
-  constructor(lineOf: (row: HTMLElement) => number) {
+  constructor({ rowsOf, lineOf }: SourceRows) {
+    this.#rowsOf = rowsOf;
     this.#lineOf = lineOf;
   }
 
@@ -231,7 +242,7 @@ export class SourceSelection {
 
   #mounted(root: ShadowRoot): Mounted | undefined {
     const rows: MountedRow[] = [];
-    for (const element of root.querySelectorAll<HTMLElement>("[data-line]")) {
+    for (const element of this.#rowsOf(root)) {
       const line = this.#lineOf(element);
       if (Number.isInteger(line)) rows.push({ element, line });
     }

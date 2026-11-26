@@ -341,10 +341,8 @@ export function ReviewDiffView({
   const handleRef = useRef<CodeViewHandle<DiffRowMeta, undefined>>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const spy = useReviewScrollSpy(files, scrollerRef, id);
-  const { wrapperProps: selectionProps, onPostRender: drawSelection } = useDiffSelection(
-    scrollerRef,
-    renderMode,
-  );
+  const { wrapperProps: selectionProps, onPostRender: drawSelection } =
+    useDiffSelection(scrollerRef);
   const bulkDiffExpand = useDiffStore((s) => s.bulkDiffExpand);
   const shikiTheme = useShikiTheme();
 

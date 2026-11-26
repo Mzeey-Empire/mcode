@@ -6,11 +6,14 @@ import { type DiffSelection, useDiffSelection } from "../useDiffSelection";
 import {
   type BrowserSelection,
   LINES,
+  OLD_LINES,
   type SelectionEngine,
   TEXT,
   highlightedText,
   installBrowserSelection,
   mountDiffHost,
+  mountSplitHost,
+  pointIn,
   range,
   restoreBrowserSelection,
   select,
@@ -30,11 +33,11 @@ function instanceOf(fileDiff: FileDiffMetadata) {
   return instance;
 }
 
-function setup(renderMode: "unified" | "side-by-side") {
+function mountHook() {
   const hook: { current?: DiffSelection } = {};
   function Wrapper() {
     const scrollerRef = useRef<HTMLDivElement>(null);
-    hook.current = useDiffSelection(scrollerRef, renderMode);
+    hook.current = useDiffSelection(scrollerRef);
     return (
       <div {...hook.current.wrapperProps}>
         <div ref={scrollerRef} data-testid="scroller" />
@@ -42,8 +45,13 @@ function setup(renderMode: "unified" | "side-by-side") {
     );
   }
   const view = render(<Wrapper />);
+  return { hook, scroller: view.getByTestId("scroller") };
+}
+
+function setup() {
+  const { hook, scroller } = mountHook();
   const { host, content } = mountDiffHost();
-  view.getByTestId("scroller").append(host);
+  scroller.append(host);
   const instance = instanceOf(addedFile());
   // Pierre rewrites the rows, then reports the render.
   const rewrite = (indices: readonly number[]) => {
@@ -51,6 +59,25 @@ function setup(renderMode: "unified" | "side-by-side") {
     hook.current?.onPostRender(host, instance, "update");
   };
   return { host, content, rewrite };
+}
+
+/** Every line changed, so the two columns hold different text at the same split indices. */
+function setupSplit() {
+  const { hook, scroller } = mountHook();
+  const { host, deletions, additions } = mountSplitHost();
+  scroller.append(host);
+  const instance = instanceOf(
+    parseDiffFromFile(
+      { name: "a.txt", contents: `${OLD_LINES.join("\n")}\n` },
+      { name: "a.txt", contents: `${TEXT}\n` },
+    ),
+  );
+  const rewrite = (indices: readonly number[]) => {
+    showRows(deletions, indices, OLD_LINES);
+    showRows(additions, indices);
+    hook.current?.onPostRender(host, instance, "update");
+  };
+  return { host, deletions, additions, rewrite };
 }
 
 const ENGINES: readonly SelectionEngine[] = ["composed-ranges", "shadow-root-selection"];
@@ -69,7 +96,7 @@ describe.each(ENGINES)("useDiffSelection with %s", (engine) => {
   });
 
   it("keeps a selection made in a file when the file's rows are rewritten", () => {
-    const { content, rewrite } = setup("unified");
+    const { content, rewrite } = setup();
     const held = range(0, 9);
     rewrite(held);
     select(browser, content, [2, 4], [7, 3]);
@@ -82,7 +109,7 @@ describe.each(ENGINES)("useDiffSelection with %s", (engine) => {
   });
 
   it("copies the whole selection when the rows that hold it have scrolled out", () => {
-    const { host, content, rewrite } = setup("unified");
+    const { host, content, rewrite } = setup();
     rewrite(range(0, 9));
     select(browser, content, [2, 4], [7, 3]);
     document.dispatchEvent(new Event("selectionchange"));
@@ -98,7 +125,7 @@ describe.each(ENGINES)("useDiffSelection with %s", (engine) => {
   });
 
   it("copies the rebuilt text while every row that holds the selection is mounted", () => {
-    const { host, content, rewrite } = setup("unified");
+    const { host, content, rewrite } = setup();
     rewrite(range(0, 9));
     select(browser, content, [2, 4], [7, 3]);
     document.dispatchEvent(new Event("selectionchange"));
@@ -112,15 +139,43 @@ describe.each(ENGINES)("useDiffSelection with %s", (engine) => {
     expect(copied.get("text/plain")).toBe(TEXT.slice(start, end));
   });
 
-  it("leaves the browser's own selection alone in side-by-side mode", () => {
-    const { content, rewrite } = setup("side-by-side");
-    rewrite(range(0, 9));
-    select(browser, content, [2, 4], [7, 3]);
-    document.dispatchEvent(new Event("selectionchange"));
+  describe("in the split layout", () => {
+    it.each([
+      ["additions", LINES],
+      ["deletions", OLD_LINES],
+    ] as const)("keeps a selection made in the %s column when its rows are rewritten", (side, lines) => {
+      const split = setupSplit();
+      const held = range(0, 9);
+      split.rewrite(held);
+      select(browser, split[side], [2, 4], [7, 3]);
+      document.dispatchEvent(new Event("selectionchange"));
 
-    rewrite(range(10, 19));
-    rewrite(range(0, 9));
+      split.rewrite(range(10, 19));
+      split.rewrite(held);
 
-    expect(browser.toString()).toBe("");
+      expect(browser.toString()).toBe(highlightedText(held, [2, 4], [7, 3], lines));
+    });
+
+    it("leaves a selection that spans both columns to the browser", () => {
+      const { host, deletions, additions, rewrite } = setupSplit();
+      const held = range(0, 9);
+      rewrite(held);
+      const [anchorNode, anchorOffset] = pointIn(additions, 2, 4);
+      const [focusNode, focusOffset] = pointIn(deletions, 7, 3);
+      browser.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+      document.dispatchEvent(new Event("selectionchange"));
+      const copied = new Map<string, string>();
+      const clipboardData = { setData: (type: string, value: string) => copied.set(type, value) };
+
+      rewrite(range(10, 19));
+      rewrite(held);
+      fireEvent.copy(host, { clipboardData });
+
+      // The browser's range, collapsed onto the columns by the rewrite, was not drawn back onto rows.
+      const kept = browser.snapshot();
+      expect(kept?.startContainer).toBe(deletions);
+      expect(kept?.endContainer).toBe(additions);
+      expect(copied.size).toBe(0);
+    });
   });
 });

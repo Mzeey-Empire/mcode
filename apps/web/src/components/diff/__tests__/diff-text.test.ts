@@ -1,6 +1,11 @@
-import { hydratePartialDiff, parseDiffFromFile, parsePatchFiles } from "@pierre/diffs";
+import {
+  type FileDiffMetadata,
+  hydratePartialDiff,
+  parseDiffFromFile,
+  parsePatchFiles,
+} from "@pierre/diffs";
 import { describe, expect, it } from "vitest";
-import { unifiedDiffText } from "../diff-text";
+import { splitColumnText, unifiedDiffText } from "../diff-text";
 
 const numbered = (from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, index) => `line ${from + index}`);
@@ -99,5 +104,107 @@ describe("unifiedDiffText", () => {
     );
 
     expect(unifiedDiffText(diff).text).toBe("one\ntwo\n2\nthree");
+  });
+});
+
+// A 1-to-2 change, a pure deletion, a pure addition, and a collapsed gap before each hunk.
+const SPLIT_PATCH = `diff --git a/a.txt b/a.txt
+index 1111111..2222222 100644
+--- a/a.txt
++++ b/a.txt
+@@ -5,1 +5,2 @@
+-line 5
++line 5 changed
++line 5b added
+@@ -16,3 +16,0 @@
+-line 16
+-line 17
+-line 18
+@@ -24,0 +23,2 @@
++added a
++added b
+`;
+
+const SPLIT_NEW_FILE = `${[
+  ...numbered(1, 4),
+  "line 5 changed",
+  "line 5b added",
+  ...numbered(6, 15),
+  ...numbered(19, 24),
+  "added a",
+  "added b",
+  ...numbered(25, 30),
+].join("\n")}\n`;
+
+/** One entry per split row: its text, or `undefined` for a row whose text is unknown. */
+function splitLines(diff: FileDiffMetadata, side: "deletions" | "additions") {
+  const { text, unknown } = splitColumnText(diff, side);
+  return text.split("\n").map((line, index) => (unknown.has(index) ? undefined : line));
+}
+
+const gap = (count: number) => Array<undefined>(count).fill(undefined);
+
+describe("splitColumnText", () => {
+  it("places each side's lines at the shared split rows of a patch-only diff", () => {
+    const diff = parsePatchFiles(SPLIT_PATCH)[0]!.files[0]!;
+
+    expect(splitLines(diff, "deletions")).toEqual([
+      ...gap(4),
+      "line 5",
+      undefined, // buffer: the new side has a second line here
+      ...gap(10),
+      "line 16",
+      "line 17",
+      "line 18",
+      ...gap(6),
+      undefined, // buffers: the old side has nothing for the added lines
+      undefined,
+    ]);
+    expect(splitLines(diff, "additions")).toEqual([
+      ...gap(4),
+      "line 5 changed",
+      "line 5b added",
+      ...gap(10),
+      undefined, // buffers: the new side has nothing for the deleted lines
+      undefined,
+      undefined,
+      ...gap(6),
+      "added a",
+      "added b",
+    ]);
+  });
+
+  it("fills the collapsed rows of a hydrated diff and leaves only the buffers unknown", () => {
+    const diff = hydratePartialDiff("clone", parsePatchFiles(SPLIT_PATCH)[0]!.files[0]!, {
+      oldFile: { name: "a.txt", contents: OLD_FILE },
+      newFile: { name: "a.txt", contents: SPLIT_NEW_FILE },
+    });
+
+    expect(splitLines(diff, "deletions")).toEqual([
+      ...numbered(1, 4),
+      "line 5",
+      undefined,
+      ...numbered(6, 15),
+      "line 16",
+      "line 17",
+      "line 18",
+      ...numbered(19, 24),
+      undefined,
+      undefined,
+      ...numbered(25, 30),
+    ]);
+    expect(splitLines(diff, "additions")).toEqual([
+      ...numbered(1, 4),
+      "line 5 changed",
+      "line 5b added",
+      ...numbered(6, 15),
+      undefined,
+      undefined,
+      undefined,
+      ...numbered(19, 24),
+      "added a",
+      "added b",
+      ...numbered(25, 30),
+    ]);
   });
 });

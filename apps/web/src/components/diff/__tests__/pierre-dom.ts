@@ -125,16 +125,39 @@ function rowElement(index: number, lines: readonly string[]) {
   return row;
 }
 
-/** A diff host with an open shadow root and Pierre's `[data-content]` column. */
-export function mountDiffHost() {
+/** The old side of a split diff: other text, at the same split indices as {@link LINES}. */
+export const OLD_LINES = LINES.map((_, index) => `old ${index} ${"klmnopqrst".repeat(2)}`);
+
+function mountShadowHost() {
   const host = document.createElement("diffs-container");
   document.body.append(host);
   // Pierre's element builds its own shadow root once the package is loaded; a bare tag needs one.
   const root = host.shadowRoot ?? host.attachShadow({ mode: "open" });
-  const content = document.createElement("div");
-  content.dataset.content = "";
+  return { host, root };
+}
+
+function codeColumn(kind: "unified" | "deletions" | "additions") {
+  const column = document.createElement("div");
+  column.dataset.code = "";
+  column.dataset[kind] = "";
+  return column;
+}
+
+/** A diff host with an open shadow root and the one `[data-code][data-unified]` column of a unified diff. */
+export function mountDiffHost() {
+  const { host, root } = mountShadowHost();
+  const content = codeColumn("unified");
   root.append(content);
   return { host, root, content };
+}
+
+/** A diff host with the old and new `[data-code]` columns of a split diff in one shadow root. */
+export function mountSplitHost() {
+  const { host, root } = mountShadowHost();
+  const deletions = codeColumn("deletions");
+  const additions = codeColumn("additions");
+  root.append(deletions, additions);
+  return { host, root, deletions, additions };
 }
 
 /** Pierre rewrites the whole code column when the virtualizer moves its window. */
@@ -193,10 +216,11 @@ export function highlightedText(
   mounted: readonly number[],
   from: readonly [row: number, column: number],
   to: readonly [row: number, column: number],
+  lines: readonly string[] = LINES,
 ) {
   return mounted
     .filter((index) => index >= from[0] && index <= to[0])
-    .map((index) => LINES[index]!.slice(index === from[0] ? from[1] : 0, index === to[0] ? to[1] : undefined))
+    .map((index) => lines[index]!.slice(index === from[0] ? from[1] : 0, index === to[0] ? to[1] : undefined))
     .join("");
 }
 

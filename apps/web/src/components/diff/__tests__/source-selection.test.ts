@@ -4,12 +4,14 @@ import { SourceSelection } from "../source-selection";
 import {
   type BrowserSelection,
   LINES,
+  OLD_LINES,
   type SelectionEngine,
   TEXT,
   endpointRows,
   highlightedText,
   installBrowserSelection,
   mountDiffHost,
+  mountSplitHost,
   range,
   restoreBrowserSelection,
   select,
@@ -18,7 +20,13 @@ import {
 } from "./pierre-dom";
 
 const NO_UNKNOWN: ReadonlySet<number> = new Set();
-const unifiedIndexOf = (row: HTMLElement) => Number(row.dataset.lineIndex?.split(",")[0]);
+
+/** The rows of one `[data-code]` column, numbered by one comma-separated part of `data-line-index`. */
+const columnRows = (column: string, part: number) => ({
+  rowsOf: (root: ShadowRoot) =>
+    root.querySelectorAll<HTMLElement>(`[data-code][data-${column}] [data-line]`),
+  lineOf: (row: HTMLElement) => Number(row.dataset.lineIndex?.split(",")[part]),
+});
 
 function offsetOf(index: number, column: number) {
   return LINES.slice(0, index).reduce((total, line) => total + line.length + 1, 0) + column;
@@ -35,7 +43,7 @@ describe.each(ENGINES)("SourceSelection with %s", (engine) => {
 
   beforeEach(() => {
     browser = installBrowserSelection(engine);
-    selection = new SourceSelection(unifiedIndexOf);
+    selection = new SourceSelection(columnRows("unified", 0));
     ({ root, content } = mountDiffHost());
   });
 
@@ -139,6 +147,25 @@ describe.each(ENGINES)("SourceSelection with %s", (engine) => {
       expect(startScrolledOut).toBe(expected);
       expect(expected).not.toContain("unmodified");
     });
+  });
+
+  it("keeps a selection to its own column when both columns share row indices", () => {
+    const split = mountSplitHost();
+    const newSide = new SourceSelection(columnRows("additions", 1));
+    const show = (indices: readonly number[]) => {
+      showRows(split.deletions, indices, OLD_LINES);
+      showRows(split.additions, indices);
+      newSide.render(split.root, TEXT);
+    };
+    const held = range(0, 9);
+    show(held);
+    select(browser, split.additions, [2, 4], [7, 3]);
+    newSide.sync(split.root, TEXT);
+
+    show(range(10, 19));
+    show(held);
+
+    expect(browser.toString()).toBe(highlightedText(held, [2, 4], [7, 3]));
   });
 
   it("keeps both ends on their rows across a gap of collapsed rows", () => {
