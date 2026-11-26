@@ -12,6 +12,7 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { createAgentModelState } from "@mcode/contracts/compat/agent-model";
 import { recoverParentNarrative } from "@/stores/parent-narrative-recovery";
+import { prepareLiveNarrative } from "@/features/conversation/narrative/live-narrative-timeline";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -87,6 +88,30 @@ describe("Tool Call Matching", () => {
     vi.advanceTimersByTime(60_000);
     useThreadStore.getState().handleAgentEvent({ type: "toolResult", threadId: "thread-1", toolCallId: "recovered", output: "alpha", isError: false, occurredAt: "2026-11-26T10:00:00.700Z" });
     expect(getTestThreadToolCalls("thread-1")[0]?.durationMs).toBe(700);
+  });
+
+  it("keeps a recovered tool after the thought saved before it when its event time is earlier", () => {
+    const at = "2026-11-26T10:00:00.000Z";
+    const state = createAgentModelState();
+    state.turns.parent = {
+      id: "parent", threadId: "thread-1", executionId: "00000000-0000-4000-8000-000000000001", status: "Running", trigger: { kind: "user" },
+      permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested", attemptOf: null,
+      providerIdentities: [], startedAt: at, providerStartedAt: null, ending: null, endedAt: null, createdAt: at, updatedAt: at,
+    };
+    const item = { threadId: "thread-1", turnId: "parent", providerIdentities: [], createdAt: at, updatedAt: at };
+    state.items.thought = { ...item, id: "thought", kind: "reasoning", payload: { projection: "narrationSegment", record: {
+      id: "thinking", message_id: "", text: "Checking the file.", is_final_response: 0, started_at: "2026-11-26T10:00:05.000Z", ended_at: null, sort_order: 1,
+    } } };
+    state.items.tool = { ...item, id: "tool", kind: "tool-call", payload: { projection: "toolCall", record: {
+      id: "delayed", message_id: "", parent_tool_call_id: null, tool_name: "Bash", input_summary: "{}", output_summary: "",
+      status: "running", started_at: "2026-11-26T10:00:02.000Z", completed_at: null, sort_order: 2,
+    } } };
+    const { toolCalls, thoughtSegments } = recoverParentNarrative("thread-1", state);
+    const { timeline } = prepareLiveNarrative({
+      toolCalls: toolCalls ?? [], thoughtSegments: thoughtSegments ?? [], hooks: [], streamingText: "", isAgentRunning: true,
+    });
+    expect(timeline.map((event) => event.kind)).toEqual(["thought", "tool"]);
+    expect(toolCalls?.[0]?.eventStartedAt).toBe(Date.parse("2026-11-26T10:00:02.000Z"));
   });
 
   it("starts an approved command's event-time duration at approval", () => {

@@ -179,11 +179,17 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
   const held = backgroundHeldToolIds(tools.map(({ record }) => ({
     id: record.id, parentId: record.parent_tool_call_id, background: record.background === true,
   })));
+  const orderedStarts = orderedToolStarts(items);
   const patch: Partial<ThreadRecord> = {
     toolCalls: tools.map((item) => {
       // The saved start is on the server's event clock, so a later live result measures from it as a reload does.
       const savedStart = Date.parse(item.record.started_at);
-      const tool = { ...recordToToolCall(item.record), ...(Number.isFinite(savedStart) ? { eventStartedAt: savedStart } : {}) };
+      const orderedStart = orderedStarts.get(item.record.id);
+      const tool = {
+        ...recordToToolCall(item.record),
+        ...(Number.isFinite(savedStart) ? { eventStartedAt: savedStart } : {}),
+        ...(orderedStart !== undefined ? { startedAt: orderedStart } : {}),
+      };
       return terminal && !held.has(tool.id) ? { ...tool, isComplete: true } : tool;
     }),
     thoughtSegments: thoughts.filter((item) => item.record.is_final_response !== 1).map(({ record }) => ({
@@ -199,6 +205,23 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
       && item.record.ended_at === null && item.record.text.length > 0),
   };
   return { patch, terminal, streaming };
+}
+
+/**
+ * The live timeline orders rows by start time, but a tool's saved start is the provider's event time
+ * while thoughts, hooks, and approvals are saved when processed, which can be later. Lifting each tool
+ * to the latest time saved before it keeps the saved narrative order across a reconnect.
+ */
+function orderedToolStarts(items: readonly ParentNarrativeRecoveryItem[]): Map<string, number> {
+  const starts = new Map<string, number>();
+  let latest = Number.NEGATIVE_INFINITY;
+  for (const item of items) {
+    const time = Date.parse(item.kind === "approval" ? item.record.decided_at : item.record.started_at);
+    if (!Number.isFinite(time)) continue;
+    latest = Math.max(latest, time);
+    if (item.kind === "toolCall") starts.set(item.record.id, latest);
+  }
+  return starts;
 }
 
 /**
