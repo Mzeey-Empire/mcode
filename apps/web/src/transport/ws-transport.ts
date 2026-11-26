@@ -1007,6 +1007,7 @@ export function createWsTransport(
     // Workspace
     listWorkspaces: () => rpc<Workspace[]>("workspace.list", {}),
     createWorkspace: (name, path) => rpc<WorkspaceCreateResult>("workspace.create", { name, path }),
+    createNoProjectWorkspace: (id) => rpc<Workspace>("workspace.createNoProject", { id }),
     renameWorkspace: (id, name) => rpc<Workspace>("workspace.rename", { id, name }),
     resolveProjectIcons: async (workspaceIds) =>
       (await rpc<{ icons: ProjectIcon[] }>("workspace.icon.resolve", { workspaceIds })).icons,

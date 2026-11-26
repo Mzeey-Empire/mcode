@@ -37,6 +37,8 @@ export interface UseComposerExecutionTargetOptions {
   branchFromMessageId?: string;
   isNewThread: boolean;
   workspaceId?: string;
+  /** Allows a new No project thread to proceed with workspaceId unset. */
+  noProject?: boolean;
 }
 
 /** Execution target state and operations for new-thread, branch, and existing-thread Composer flows. */
@@ -67,12 +69,18 @@ export interface ComposerExecutionTargetController {
   setNewThreadBranchFromPullRequest(branch: string, pullRequestNumber: number): void;
 }
 
+/** A new thread needs a workspace picked first, unless it goes to No project, which makes its own. */
+function needsWorkspaceFor(isNewThread: boolean, workspaceId: string | undefined, noProject: boolean): boolean {
+  return isNewThread && !workspaceId && !noProject;
+}
+
 /** Owns the Composer execution target selection and its workspace data lifecycle. */
 export function useComposerExecutionTarget({
   activeThread,
   branchFromMessageId,
   isNewThread,
   workspaceId,
+  noProject = false,
 }: UseComposerExecutionTargetOptions): ComposerExecutionTargetController {
   const activeWorkspace = useWorkspaceStore((state) =>
     state.workspaces.find((workspace) => workspace.id === state.activeWorkspaceId),
@@ -92,7 +100,7 @@ export function useComposerExecutionTarget({
   const setNewThreadBranch = useWorkspaceStore((state) => state.setNewThreadBranch);
   const setNewThreadBranchFromPr = useWorkspaceStore((state) => state.setNewThreadBranchFromPr);
   const isGitRepo = activeWorkspace?.is_git_repo ?? false;
-  const needsWorkspace = isNewThread && !workspaceId;
+  const needsWorkspace = needsWorkspaceFor(isNewThread, workspaceId, noProject);
   const composerMode = isNewThread
     ? newThreadComposerMode(isGitRepo, newThreadMode)
     : (activeThread?.mode === "worktree" ? "worktree" : "direct");

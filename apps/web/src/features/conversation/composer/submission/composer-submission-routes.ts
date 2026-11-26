@@ -17,6 +17,8 @@ import {
 export interface DispatchComposerTargetOptions {
   threadId?: string;
   workspaceId?: string;
+  /** Set for a new No project thread: the hidden workspace its send just made. It starts in Direct mode with no branch. */
+  noProjectWorkspaceId?: string;
   branchFromMessageId?: string;
   target: ComposerExecutionTarget;
   execution: ComposerExecutionTargetController;
@@ -55,7 +57,7 @@ function composerDraftForPendingCreation(
 
 /** Dispatches a prepared Composer submit to the target selected by the user. */
 export async function dispatchComposerTarget(options: DispatchComposerTargetOptions): Promise<void> {
-  if (options.target.kind === "new-thread" && options.workspaceId) {
+  if (options.target.kind === "new-thread" && (options.workspaceId || options.noProjectWorkspaceId)) {
     await dispatchNewThread(options);
     return;
   }
@@ -80,6 +82,7 @@ export function isComposerTargetReady(target: ComposerExecutionTarget): boolean 
 /** Issues the create-thread RPC for a prepared new-thread submission. */
 function createThreadForSubmission(
   submission: PreparedComposerSubmission,
+  noProjectWorkspaceId: string | undefined,
 ): Promise<Thread> {
   const { snapshot, prepared } = submission;
   const selection = snapshot.selection;
@@ -103,6 +106,7 @@ function createThreadForSubmission(
     composerDraftForPendingCreation(submission),
     selection.approvalReviewMode,
     scoped.devinMode,
+    noProjectWorkspaceId,
   );
 }
 
@@ -119,8 +123,9 @@ async function dispatchNewThread(
     onThreadCreationFailed,
   } = options;
   if (target.kind !== "new-thread") return;
-  synchronizeNewThreadTarget(execution, target);
-  const creatingThread = createThreadForSubmission(submission);
+  // A No project send carries its own workspace and Direct target, so it leaves the store's new-thread target alone.
+  if (!options.noProjectWorkspaceId) synchronizeNewThreadTarget(execution, target);
+  const creatingThread = createThreadForSubmission(submission, options.noProjectWorkspaceId);
   notifyThreadPreparing(onThreadPreparing);
   await completeNewThreadCreation(creatingThread, onThreadCreated, onThreadCreationFailed);
 }

@@ -16,7 +16,7 @@ import { HeaderActions } from "@/components/chat/HeaderActions";
 import { ThreadTitleEditor } from "@/components/chat/ThreadTitleEditor";
 import { CanvasBreadcrumb } from "@/components/shell/CanvasBreadcrumb";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
-import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { selectNewThreadIsNoProject, useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import { PRIMARY_CONTENT_RAIL_CLASS } from "@/lib/layout-rails";
@@ -742,7 +742,9 @@ export function ChatViewSurface(props: ChatViewSurfaceProps) {
   const { state } = props;
   const { pendingStartup, startup, startingThread, keepPreparingShell } = useSelectedThreadStartup(state);
   const handedOff = useHandedOffThread(state.activeThread?.id, startup?.threadId, keepPreparingShell);
-  if (!state.activeThreadId) return <NewThreadStartColumn projectName={state.activeWorkspaceName || undefined} workspaceId={state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} />;
+  const noProject = useWorkspaceStore(selectNewThreadIsNoProject);
+  // On No project the hidden workspace may be active after a failed send; it is not a project to name or run in.
+  if (!state.activeThreadId) return <NewThreadStartColumn projectName={noProject ? undefined : state.activeWorkspaceName || undefined} workspaceId={noProject ? undefined : state.activeWorkspaceId ?? undefined} draftId={state.activeDraftId} noProject={noProject} />;
   if (!state.activeThread) return <MissingThreadSurface />;
   if (keepPreparingShell) return <PreparingThreadSurface thread={state.activeThread} state={state} startup={startup} pendingStartup={pendingStartup} startingThread={startingThread} />;
   return <ActiveThreadSurface {...props} startup={startup} startingThread={startingThread} handedOff={handedOff} />;

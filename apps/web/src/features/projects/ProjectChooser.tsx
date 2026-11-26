@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from "react";
-import { ChevronRightIcon, FolderIcon, PlusIcon } from "lucide-react";
+import { ChevronRightIcon, InboxIcon, PlusIcon } from "lucide-react";
 import type { Workspace } from "@mcode/contracts/models/workspace";
 import { PALETTE_SOURCES } from "@/components/palette/palette-sources";
 import { Picker, type PickerRow } from "@/components/ui/picker";
@@ -8,7 +8,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { FOCUS_RING_CLASS } from "@/components/ui/focus-ring";
 import { cn } from "@/lib/utils";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
-import { useWorkspaceStore } from "./state/workspaceStore";
+import { useProjectWorkspaces } from "./state/workspace-selectors";
+import { selectNewThreadIsNoProject, useWorkspaceStore } from "./state/workspaceStore";
 import { ProjectIcon } from "./icons/ProjectIcon";
 
 /** Props for {@link ProjectChooser}. */
@@ -23,25 +24,32 @@ export interface ProjectChooserProps {
 
 const SOURCES_META = PALETTE_SOURCES.map((source) => source.shortTitle).join(", ");
 
-/**
- * Paper's project chooser (02b): the project list with a check on the active project, or the
- * "No projects yet" state, above an Add project row that opens the palette on Sources.
- * Choosing a project starts a new thread in it.
- */
+type ChooserItem =
+  | { readonly kind: "no-project" }
+  | { readonly kind: "project"; readonly workspace: Workspace };
+
+const NO_PROJECT_ITEM: ChooserItem = { kind: "no-project" };
+const NO_PROJECT_LABEL = "No project";
+const NO_PROJECT_ROW_KEY = "no-project";
+
+/** Starts a new-thread composer in the selected target. Add project opens the palette's Sources view. */
 export function ProjectChooser({ trigger, triggerTooltip, side = "bottom" }: ProjectChooserProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const projects = useProjectWorkspaces();
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
+  const onNoProject = useWorkspaceStore(selectNewThreadIsNoProject);
   const beginNewThread = useWorkspaceStore((state) => state.beginNewThread);
+  const beginNoProjectThread = useWorkspaceStore((state) => state.beginNoProjectThread);
 
   const setOpenAndResetQuery = (next: boolean) => {
     setOpen(next);
     if (!next) setQuery("");
   };
 
-  const chooseProject = (workspace: Workspace) => {
-    beginNewThread(workspace.id);
+  const chooseItem = (item: ChooserItem) => {
+    if (item.kind === "no-project") beginNoProjectThread();
+    else beginNewThread(item.workspace.id);
     setOpenAndResetQuery(false);
   };
 
@@ -68,17 +76,13 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom" }: Pro
         sideOffset={12}
         className="flex w-[min(92vw,30rem)] flex-col gap-px p-[0.6rem]"
       >
-        {workspaces.length === 0 ? (
-          <NoProjects />
-        ) : (
-          <ProjectList
-            workspaces={workspaces}
-            activeWorkspaceId={activeWorkspaceId}
-            query={query}
-            onQueryChange={setQuery}
-            onSelect={chooseProject}
-          />
-        )}
+        <ChooserList
+          projects={projects}
+          selectedKey={onNoProject ? NO_PROJECT_ROW_KEY : activeWorkspaceId ?? undefined}
+          query={query}
+          onQueryChange={setQuery}
+          onSelect={chooseItem}
+        />
         <div aria-hidden className="mx-0.5 mb-1 h-px shrink-0 bg-border" />
         <AddProjectRow onClick={addProject} />
       </PopoverContent>
@@ -86,33 +90,44 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom" }: Pro
   );
 }
 
-interface ProjectListProps {
-  readonly workspaces: readonly Workspace[];
-  readonly activeWorkspaceId: string | null;
+interface ChooserListProps {
+  readonly projects: readonly Workspace[];
+  readonly selectedKey: string | undefined;
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
-  readonly onSelect: (workspace: Workspace) => void;
+  readonly onSelect: (item: ChooserItem) => void;
 }
 
-function ProjectList({ workspaces, activeWorkspaceId, query, onQueryChange, onSelect }: ProjectListProps) {
-  const matches = useMemo(() => filterProjects(workspaces, query), [workspaces, query]);
+function ChooserList({ projects, selectedKey, query, onQueryChange, onSelect }: ChooserListProps) {
+  const items = useMemo(() => chooserItems(projects, query), [projects, query]);
   return (
     <Picker
       query={query}
       onQueryChange={onQueryChange}
       searchPlaceholder="Search projects"
-      items={matches}
+      items={items}
       total={null}
       status="ready"
-      selectedKey={activeWorkspaceId ?? undefined}
-      renderItem={projectRow}
+      selectedKey={selectedKey}
+      renderItem={chooserRow}
       onSelect={onSelect}
     />
   );
 }
 
-function projectRow(workspace: Workspace): PickerRow {
-  return { key: workspace.id, name: workspace.name, icon: <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} /> };
+function chooserRow(item: ChooserItem): PickerRow {
+  if (item.kind === "no-project") {
+    return { key: NO_PROJECT_ROW_KEY, name: NO_PROJECT_LABEL, icon: <InboxIcon aria-hidden className="size-4" />, group: "no-project" };
+  }
+  const { workspace } = item;
+  return { key: workspace.id, name: workspace.name, icon: <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} />, group: "projects" };
+}
+
+function chooserItems(projects: readonly Workspace[], query: string): readonly ChooserItem[] {
+  const matches = filterProjects(projects, query).map((workspace): ChooserItem => ({ kind: "project", workspace }));
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [NO_PROJECT_ITEM, ...matches];
+  return NO_PROJECT_LABEL.toLowerCase().startsWith(needle) ? [...matches, NO_PROJECT_ITEM] : matches;
 }
 
 /** Projects whose name or folder contains the query, ignoring case, in the store's order. */
@@ -121,23 +136,6 @@ function filterProjects(workspaces: readonly Workspace[], query: string): readon
   if (!needle) return workspaces;
   return workspaces.filter(
     (workspace) => workspace.name.toLowerCase().includes(needle) || workspace.path.toLowerCase().includes(needle),
-  );
-}
-
-function NoProjects() {
-  return (
-    <div className="flex flex-col items-center gap-3 px-4 pt-5 pb-4 text-center">
-      <span
-        aria-hidden
-        className="flex size-[3.6rem] shrink-0 items-center justify-center rounded-lg border border-border bg-selected text-muted"
-      >
-        <FolderIcon className="size-[1.8rem]" />
-      </span>
-      <div className="flex flex-col items-center gap-0.5">
-        <p className="text-label text-ink">No projects yet</p>
-        <p className="text-caption text-muted">Add a folder to start working in its code.</p>
-      </div>
-    </div>
   );
 }
 

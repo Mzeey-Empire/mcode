@@ -26,7 +26,8 @@ import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useQueueStore } from "@/stores/queueStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraftStore";
-import { useThreadDraftStore } from "@/stores/threadDraftStore";
+import { NO_PROJECT_DRAFT_WORKSPACE_ID, useThreadDraftStore } from "@/stores/threadDraftStore";
+import { isNoProjectWorkspaceId, isProjectWorkspace, moveProjectRow, projectWorkspaces } from "./project-workspaces";
 import { toComposerAttachmentMetas } from "@/features/conversation/composer/draft/composer-attachment-operations";
 import { useDiffStore } from "@/stores/diffStore";
 import { newThreadOverviewKey, useOverviewStore } from "@/stores/overviewStore";
@@ -376,6 +377,41 @@ function targetForAttachedWorktree(
   };
 }
 
+/**
+ * Where the new-thread canvas starts its thread: in the active project, or in a hidden No project workspace.
+ * The target carries no workspace id: each No project send makes its own, so a retry never reuses a row the
+ * server may have swept.
+ */
+export type NewThreadTarget = { readonly kind: "project" } | { readonly kind: "no-project" };
+
+const PROJECT_NEW_THREAD_TARGET: NewThreadTarget = { kind: "project" };
+const NO_PROJECT_NEW_THREAD_TARGET: NewThreadTarget = { kind: "no-project" };
+
+/**
+ * Whether the new-thread canvas is on No project: the user chose it, the active workspace is a hidden No project
+ * row, or a first run has no project to choose and nothing active.
+ */
+export function selectNewThreadIsNoProject(
+  state: Pick<WorkspaceState, "newThreadTarget" | "workspaces" | "workspacesLoaded" | "activeWorkspaceId">,
+): boolean {
+  if (state.newThreadTarget.kind === "no-project") return true;
+  if (isNoProjectWorkspaceId(state.workspaces, state.activeWorkspaceId)) return true;
+  return state.workspacesLoaded
+    && state.activeWorkspaceId === null
+    && !state.workspaces.some(isProjectWorkspace);
+}
+
+/**
+ * Whether the user is still on the No project new-thread canvas they were on when `draftId` was active:
+ * no thread selected, and the canvas still on No project.
+ */
+function isOnNoProjectCanvas(
+  state: Pick<WorkspaceState, "newThreadTarget" | "workspaces" | "workspacesLoaded" | "activeWorkspaceId" | "activeThreadId" | "activeDraftId">,
+  draftId: string | null,
+): boolean {
+  return state.activeThreadId === null && state.activeDraftId === draftId && selectNewThreadIsNoProject(state);
+}
+
 /** The new-thread target fields that decide what a first send creates. */
 export type NewThreadTargetState = Pick<
   WorkspaceState,
@@ -507,6 +543,20 @@ function buildOptimisticThreadPlaceholder(
 
 const pendingThreadCreationByPlaceholderId = new Map<string, PendingThreadCreation>();
 
+/**
+ * True when a placeholder row is still waiting to become this thread. The server can announce the thread
+ * before its create call returns; adding it then would show the thread twice until that call swaps the
+ * placeholder out, so the create result (or startup recovery) adds it instead.
+ */
+function isAwaitedByPlaceholder(threadId: string): boolean {
+  const startupId = useThreadStartupStore.getState().startupIdByThreadId[threadId];
+  if (!startupId) return false;
+  for (const pending of pendingThreadCreationByPlaceholderId.values()) {
+    if (pending.startupId === startupId) return true;
+  }
+  return false;
+}
+
 async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateAndSendResult> {
   return getTransport().createAndSendMessage({
     workspaceId: pending.workspaceId,
@@ -586,6 +636,19 @@ function pendingCreationWithCurrentDraft(
   };
 }
 
+/**
+ * A reload is the first sign of an expired No project workspace when the client missed its
+ * `workspace.deleted` push, so it keeps that workspace's unsent first messages the same way.
+ */
+async function keepSendsOfExpiredNoProjectWorkspaces(previous: readonly Workspace[], next: readonly Workspace[]): Promise<void> {
+  const listed = new Set(next.map((workspace) => workspace.id));
+  const expired = previous.filter((workspace) => workspace.kind === "no_project" && !listed.has(workspace.id));
+  if (expired.length === 0) return;
+  // Deferred import: the keeper reads this store, so a static import would be circular.
+  const { keepExpiredNoProjectSends } = await import("@/features/thread-startup/edit-startup-message");
+  for (const workspace of expired) keepExpiredNoProjectSends(workspace.id);
+}
+
 function draftChangedSinceSubmission(pending: PendingThreadCreation, draft: ComposerDraft | undefined): draft is ComposerDraft {
   if (!draft) return false;
   if (pending.composerDraft) return JSON.stringify(draft) !== JSON.stringify(pending.composerDraft);
@@ -624,6 +687,8 @@ interface WorkspaceState {
   /** The draft entity bound to the new-thread composer, when one is open. */
   activeDraftId: string | null;
   pendingNewThread: boolean;
+  /** New-thread canvas start: active project or No project. */
+  newThreadTarget: NewThreadTarget;
   loading: boolean;
   error: string | null;
   newThreadMode: "direct" | "worktree" | "existing-worktree";
@@ -644,6 +709,11 @@ interface WorkspaceState {
 
   // Workspace actions
   loadWorkspaces: () => Promise<void>;
+  /**
+   * Reload the workspace list when `workspaceId` is not in it, as when a thread arrives from another client in a
+   * hidden No project workspace this client has not heard of. Concurrent calls share one reload.
+   */
+  loadWorkspaceIfMissing: (workspaceId: string) => void;
   createWorkspace: (name: string | undefined, path: string) => Promise<WorkspaceCreateResult>;
   /** Rename a workspace and refresh its local record. */
   renameWorkspace: (id: string, name: string) => Promise<void>;
@@ -702,6 +772,11 @@ interface WorkspaceState {
     composerDraft?: ComposerDraft,
     approvalReviewMode?: ApprovalReviewMode,
     devinMode?: DevinMode,
+    /**
+     * The hidden workspace {@link WorkspaceState.activateNoProjectWorkspace} made for this send. When set, the thread
+     * starts there in Direct mode with no branch, whatever workspace or new-thread target the store holds by now.
+     */
+    noProjectWorkspaceId?: string,
   ) => Promise<Thread>;
   /** Branch an existing thread into a new child with handoff context. */
   branchThread: (params: BranchThreadParams) => Promise<Thread>;
@@ -744,8 +819,18 @@ interface WorkspaceState {
   /** Record a thread's committed resume schedule, or its removal. */
   applyScheduledResume: (threadId: string, resume: ScheduledTurnResume | null) => void;
   setActiveThread: (id: string | null) => void;
-  /** Enter a clean pending-thread composer, optionally selecting its workspace first. */
+  /**
+   * Enter a clean pending-thread composer, optionally selecting its project first. With no argument it keeps the
+   * active project, or stays on No project when the active workspace is a hidden No project row.
+   */
   beginNewThread: (workspaceId?: string | null) => void;
+  /** Enter a clean pending-thread composer on No project: no active workspace, thread, or draft. */
+  beginNoProjectThread: () => void;
+  /**
+   * Makes a hidden No project workspace under a fresh id for one first send, so a retry or an overlapping send
+   * never shares a folder. Selects it only when the user is still on that canvas.
+   */
+  activateNoProjectWorkspace: () => Promise<Workspace>;
   /** Opens a persisted new-thread draft in the composer, restoring its target config. */
   openThreadDraft: (workspaceId: string, draftId: string) => void;
   /** Deletes a draft entity and unbinds it when it is the open one. */
@@ -814,6 +899,8 @@ function isConfirmedCompletion(previous: Thread | undefined, next: Thread): bool
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   let activationQueued = false;
   let activationGeneration = 0;
+  let missingWorkspaceLoad: Promise<void> | null = null;
+  let workspaceLoadGeneration = 0;
   const reconcileSelectedConversation = () => {
     if (activationQueued) return;
     activationQueued = true;
@@ -968,6 +1055,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       },
       activeDraftId: null,
       pendingNewThread: false,
+      // The thread exists now, so the canvas leaves No project; a later No project send makes a new hidden workspace.
+      newThreadTarget: PROJECT_NEW_THREAD_TARGET,
       newThreadBranchSource: "branch",
       newThreadPullRequestNumber: undefined,
       error: null,
@@ -1157,6 +1246,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   pendingStartupByThreadId: {},
   activeDraftId: null,
   pendingNewThread: false,
+  newThreadTarget: PROJECT_NEW_THREAD_TARGET,
   loading: false,
   error: null,
   newThreadMode: readRememberedComposerMode(),
@@ -1176,8 +1266,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
   loadWorkspaces: async () => {
     set({ loading: true, error: null });
+    // Only the newest reload applies: an older answer can predate a deletion, and the merge below would keep it.
+    const generation = ++workspaceLoadGeneration;
     try {
-      const workspaces = await getTransport().listWorkspaces();
+      // Captured before the request: a workspace added while it is in flight is missing from the response
+      // because it is newer, not because it expired, so it is kept rather than dropped.
+      const previous = get().workspaces;
+      const listed = await getTransport().listWorkspaces();
+      if (generation !== workspaceLoadGeneration) return;
+      await keepSendsOfExpiredNoProjectWorkspaces(previous, listed);
+      if (generation !== workspaceLoadGeneration) return;
+      const known = new Set([...previous, ...listed].map((workspace) => workspace.id));
+      const workspaces = [...listed, ...get().workspaces.filter((workspace) => !known.has(workspace.id))];
       set({ workspaces, workspacesLoaded: true, loading: false });
       void useProjectIconStore.getState().resolve(workspaces.map((workspace) => workspace.id)).catch((error: unknown) => {
         console.error("Project icon resolution failed", error);
@@ -1186,8 +1286,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         console.error("Browser profile reconciliation failed", error);
       });
     } catch (e) {
-      set({ error: String(e), loading: false });
+      if (generation === workspaceLoadGeneration) set({ error: String(e), loading: false });
     }
+  },
+
+  loadWorkspaceIfMissing: (workspaceId) => {
+    if (get().workspaces.some((workspace) => workspace.id === workspaceId)) return;
+    missingWorkspaceLoad ??= get().loadWorkspaces().finally(() => {
+      missingWorkspaceLoad = null;
+    });
   },
 
   createWorkspace: async (name, path) => {
@@ -1319,6 +1426,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       activeWorkspaceId: id,
       activeDraftId: null,
       ...(shouldClearThread ? { activeThreadId: null } : {}),
+      ...(id && !isNoProjectWorkspaceId(get().workspaces, id) ? { newThreadTarget: PROJECT_NEW_THREAD_TARGET } : {}),
       newThreadBranch: "",
       newThreadBranchRemote: null,
       newThreadStartFromOrigin: id ? readRememberedStartFromOrigin(id) : false,
@@ -1405,15 +1513,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   reorderWorkspace: async (id, newIndex, call) => {
+    // `newIndex` counts project rows only, as the server's does; hidden No project rows keep their places.
     const prev = get().workspaces.slice();
-    const oldIndex = prev.findIndex((w) => w.id === id);
+    const projectCount = projectWorkspaces(prev).length;
+    const oldIndex = projectWorkspaces(prev).findIndex((w) => w.id === id);
     if (oldIndex < 0) return;
-    const bounded = Math.max(0, Math.min(newIndex, prev.length - 1));
+    const bounded = Math.max(0, Math.min(newIndex, projectCount - 1));
     if (oldIndex === bounded) return;
-    const next = [...prev];
-    const [removed] = next.splice(oldIndex, 1);
-    next.splice(bounded, 0, removed!);
-    set({ workspaces: next, error: null });
+    set({ workspaces: moveProjectRow(prev, id, bounded), error: null });
     try {
       if (call) {
         await call("workspace.reorder", { id, newIndex: bounded });
@@ -1443,7 +1550,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   applyThreadCreated: (thread) => {
-    if (isDelegatedSubagent(thread)) return;
+    if (isDelegatedSubagent(thread) || isAwaitedByPlaceholder(thread.id)) return;
     set((state) => {
       if (state.threads.some((existing) => existing.id === thread.id)) return state;
       return { threads: [thread, ...state.threads] };
@@ -1493,11 +1600,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     composerDraft,
     approvalReviewMode,
     devinMode,
+    noProjectWorkspaceId,
   ) => {
-    const workspaceId = get().activeWorkspaceId;
-    if (!workspaceId) throw new Error("No workspace selected");
     const state = get();
-    const target = newThreadCreationTarget(state);
+    const workspaceId = noProjectWorkspaceId ?? state.activeWorkspaceId;
+    if (!workspaceId) throw new Error("No workspace selected");
+    const target: ThreadCreationTarget = noProjectWorkspaceId
+      ? { transportMode: "direct", branch: "" }
+      : newThreadCreationTarget(state);
     const pending: PendingThreadCreation = {
       workspaceId,
       content,
@@ -1521,7 +1631,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       goalObjective,
     };
 
-    return createPendingThread(pending, threadCreationContext("new", state.newThreadMode));
+    return createPendingThread(pending, threadCreationContext("new", noProjectWorkspaceId ? "direct" : state.newThreadMode));
   },
 
   branchThread: async (params) => {
@@ -1731,6 +1841,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         return { threads: state.threads.filter((candidate) => candidate.id !== thread.id) };
       }
       const existing = state.threads.find((candidate) => candidate.id === thread.id);
+      if (!existing && isAwaitedByPlaceholder(thread.id)) return state;
       const lastActivity = existing && Date.parse(existing.last_activity_at) > Date.parse(thread.last_activity_at)
         ? existing.last_activity_at
         : thread.last_activity_at;
@@ -1836,15 +1947,40 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   beginNewThread: (workspaceId) => {
+    if (isNoProjectWorkspaceId(get().workspaces, workspaceId ?? get().activeWorkspaceId)) {
+      get().beginNoProjectThread();
+      return;
+    }
     if (workspaceId && get().activeWorkspaceId !== workspaceId) {
       get().setActiveWorkspace(workspaceId);
     }
     get().setActiveThread(null);
     get().setPendingNewThread(true);
-    set({ activeDraftId: null });
+    set({ activeDraftId: null, newThreadTarget: PROJECT_NEW_THREAD_TARGET });
     // Each new thread starts with its targets in view, even after the user closed the card on the last one.
     const activeWorkspaceId = get().activeWorkspaceId;
     if (activeWorkspaceId) useOverviewStore.getState().reopen(newThreadOverviewKey(activeWorkspaceId));
+  },
+
+  beginNoProjectThread: () => {
+    get().setActiveWorkspace(null);
+    get().setActiveThread(null);
+    get().setPendingNewThread(true);
+    set({ activeDraftId: null, newThreadTarget: NO_PROJECT_NEW_THREAD_TARGET });
+  },
+
+  activateNoProjectWorkspace: async () => {
+    const draftId = get().activeDraftId;
+    const workspace = await getTransport().createNoProjectWorkspace(crypto.randomUUID());
+    set((state) => ({
+      workspaces: state.workspaces.some((item) => item.id === workspace.id)
+        ? state.workspaces.map((item) => (item.id === workspace.id ? workspace : item))
+        : [...state.workspaces, workspace],
+      // Not setActiveWorkspace: the canvas keeps its draft, and a hidden row needs no recency bump or PR sync.
+      // A user who moved on during the await keeps their selection; the send still goes to this workspace.
+      ...(isOnNoProjectCanvas(state, draftId) ? { activeWorkspaceId: workspace.id } : {}),
+    }));
+    return workspace;
   },
 
   setActiveDraftId: (draftId) => {
@@ -1854,16 +1990,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   openThreadDraft: (workspaceId, draftId) => {
     const entity = useThreadDraftStore.getState().drafts[draftId];
     if (!entity || entity.workspaceId !== workspaceId) return;
-    if (get().activeWorkspaceId !== workspaceId) {
-      get().setActiveWorkspace(workspaceId);
-    }
+    const isNoProject = workspaceId === NO_PROJECT_DRAFT_WORKSPACE_ID;
+    if (isNoProject) get().setActiveWorkspace(null);
+    else if (get().activeWorkspaceId !== workspaceId) get().setActiveWorkspace(workspaceId);
     get().setActiveThread(null);
-    useDiffStore.getState().hideRightPanel(workspaceId, null);
+    if (!isNoProject) useDiffStore.getState().hideRightPanel(workspaceId, null);
     // Mirrors setPendingNewThread(true) but restores the draft's target
     // instead of resetting it.
     set({
       pendingNewThread: true,
       activeDraftId: draftId,
+      newThreadTarget: isNoProject ? NO_PROJECT_NEW_THREAD_TARGET : PROJECT_NEW_THREAD_TARGET,
       newThreadMode: entity.target.mode,
       newThreadBranch: entity.target.branch,
       newThreadBranchSource: entity.target.branchSource,
@@ -1872,7 +2009,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       newThreadStartFromOrigin: entity.target.startFromOrigin,
       selectedWorktree: entity.target.selectedWorktree,
     });
-    useOverviewStore.getState().reopen(newThreadOverviewKey(workspaceId));
+    if (!isNoProject) useOverviewStore.getState().reopen(newThreadOverviewKey(workspaceId));
   },
 
   discardThreadDraft: (draftId) => {

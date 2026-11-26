@@ -646,6 +646,61 @@ describe("Workspace Behavior", () => {
     expect(useWorkspaceStore.getState().pendingStartupByThreadId[created.id]).toBeUndefined();
   });
 
+  it.each(["applyThreadLifecycle", "applyThreadCreated"] as const)(
+    "shows a new thread once when the server announces it through %s before the creation response",
+    async (announce) => {
+      const ws = createMockWorkspace({ id: `ws-early-${announce}` });
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id, threads: [], newThreadMode: "direct" });
+      const created = createMockThread({ id: `server-thread-${announce}`, workspace_id: ws.id });
+      let respond!: () => void;
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+        (params: { startupId: string }) => new Promise<CreateAndSendResult>((resolve) => {
+          respond = () => resolve(createMockCreateAndSendResult(created));
+          // The startup binds its thread, then the thread is announced, both before the response.
+          useThreadStartupStore.getState().apply({
+            startupId: params.startupId,
+            failureSeenAt: null,
+            workspaceId: ws.id,
+            kind: "direct",
+            state: "running",
+            phase: "agent",
+            steps: [{ phase: "thread", state: "completed" }, { phase: "agent", state: "running" }],
+            transcript: [],
+            cancellation: "none",
+            revision: 1,
+            threadId: created.id,
+            createdAt: "2026-09-02T12:00:00.000Z",
+            updatedAt: "2026-09-02T12:00:00.000Z",
+          });
+          useWorkspaceStore.getState()[announce](created);
+        }),
+      );
+
+      // Scoped to this project: an earlier test's late refresh can add its own thread to the shared store.
+      const rowIds = () => useWorkspaceStore.getState().threads.filter((thread) => thread.workspace_id === ws.id).map((thread) => thread.id);
+      const send = useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+      await vi.waitFor(() => expect(respond).toBeTypeOf("function"));
+      expect(rowIds()).toEqual([useWorkspaceStore.getState().activeThreadId]);
+
+      respond();
+      await send;
+      expect(rowIds()).toEqual([created.id]);
+    },
+  );
+
+  it("still adds a thread announced while another thread's creation is in flight", async () => {
+    const ws = createMockWorkspace({ id: "ws-early-other" });
+    useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id, threads: [], newThreadMode: "direct" });
+    const other = createMockThread({ id: "thread-from-elsewhere", workspace_id: ws.id });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockImplementation(() => new Promise(() => {}));
+
+    void useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+    await vi.waitFor(() => expect(useWorkspaceStore.getState().activeThreadId).not.toBeNull());
+    useWorkspaceStore.getState().applyThreadLifecycle(other);
+
+    expect(useWorkspaceStore.getState().threads.map((thread) => thread.id)).toContain(other.id);
+  });
+
   it.each(["failed", "cancelled", "interrupted"] as const)(
     "clears the pending startup when the startup lifecycle ends %s",
     async (terminalState) => {

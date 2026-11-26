@@ -123,7 +123,7 @@ describe("App", () => {
     vi.restoreAllMocks();
     useConnectionStore.setState({ status: "connecting" });
     useUiStore.setState({ rightPanelMaximized: false });
-    useWorkspaceStore.setState({ workspaces: [], activeWorkspaceId: null, activeThreadId: null });
+    useWorkspaceStore.setState({ workspaces: [], workspacesLoaded: false, activeWorkspaceId: null, activeThreadId: null, newThreadTarget: { kind: "project" } });
     delete (window as unknown as Record<string, unknown>).desktopBridge;
   });
 
@@ -169,7 +169,13 @@ describe("App", () => {
     expect(row).toHaveAttribute("data-right-panel-visible", "false");
   });
 
-  it("renders the landing screen when no workspace is active", async () => {
+  it("asks for a project when projects exist and none is active", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [createMockWorkspace({ id: "listed-project" })],
+      workspacesLoaded: true,
+      activeWorkspaceId: null,
+      activeThreadId: null,
+    });
     render(<App />);
     await waitFor(() => {
       const main = screen.getByRole("main");
@@ -178,6 +184,41 @@ describe("App", () => {
       ).toBeInTheDocument();
     });
     expect(within(screen.getByRole("main")).queryByRole("img", { name: "Mcode" })).toBeNull();
+  });
+
+  it("starts a first run with no projects on No project", async () => {
+    useWorkspaceStore.setState({ workspaces: [], workspacesLoaded: true, activeWorkspaceId: null, activeThreadId: null });
+    render(<App />);
+
+    expect(
+      await within(screen.getByRole("main")).findByRole("heading", { name: "What should we work on?" }),
+    ).toBeInTheDocument();
+  });
+
+  it("starts a thread without a project from its palette command", async () => {
+    const workspace = createMockWorkspace({ id: "active-project" });
+    useWorkspaceStore.setState({ workspaces: [workspace], workspacesLoaded: true, activeWorkspaceId: workspace.id, activeThreadId: null });
+    render(<App />);
+    await screen.findByRole("heading", { name: "What should we build in test-project?" });
+
+    act(() => executeCommand("thread.newNoProject"));
+
+    expect(await screen.findByRole("heading", { name: "What should we work on?" })).toBeInTheDocument();
+    expect(useWorkspaceStore.getState().activeWorkspaceId).toBeNull();
+  });
+
+  it("brings the No project canvas on screen when its palette command runs from Pull requests", async () => {
+    const workspace = createMockWorkspace({ id: "active-project" });
+    useWorkspaceStore.setState({ workspaces: [workspace], workspacesLoaded: true, activeWorkspaceId: workspace.id, activeThreadId: null });
+    useUiStore.setState({ primarySurface: "pullRequests" });
+    render(<App />);
+    await screen.findByRole("heading", { name: "Pull requests" });
+
+    act(() => executeCommand("thread.newNoProject"));
+
+    expect(await screen.findByRole("heading", { name: "What should we work on?" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Pull requests" })).toBeNull();
+    expect(useUiStore.getState().primarySurface).toBe("chat");
   });
 
   it("renders the docked sidebar at the stored sidebar width", async () => {

@@ -1,4 +1,4 @@
-import { createMockMessage, createMockThread } from "@mcode/contracts/testing";
+import { createMockMessage, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { mockTransport } from "@/__tests__/mocks/transport";
@@ -73,7 +73,8 @@ const {
 
 const chatViewTransportMock = vi.mocked(mockTransport);
 
-vi.mock("@/features/projects/state/workspaceStore", () => ({
+vi.mock("@/features/projects/state/workspaceStore", async (importOriginal) => ({
+  selectNewThreadIsNoProject: (await importOriginal<typeof import("@/features/projects/state/workspaceStore")>()).selectNewThreadIsNoProject,
   useWorkspaceStore: Object.assign(
     vi.fn((selector: (s: unknown) => unknown) => {
       const snap = chatViewWorkspaceMockRef.current;
@@ -165,7 +166,9 @@ vi.mock("@/features/conversation/residency/conversation-residency", async (impor
 
 // Composer and MessageList have deep dependencies; stub them out.
 vi.mock("../../composer/Composer", () => ({
-  Composer: ({ startingThread }: { readonly startingThread?: unknown }) => <button data-testid="composer" disabled={startingThread !== undefined}>Send</button>,
+  Composer: ({ startingThread, workspaceId, noProject }: { readonly startingThread?: unknown; readonly workspaceId?: string; readonly noProject?: boolean }) => (
+    <button data-testid="composer" data-workspace={workspaceId ?? ""} data-no-project={String(noProject === true)} disabled={startingThread !== undefined}>Send</button>
+  ),
 }));
 
 vi.mock("../MessageList", async () => {
@@ -261,9 +264,11 @@ function defaultWorkspaceState(overrides: Partial<{
   const thread = makeThread();
   return {
     workspaces: [WORKSPACE],
-    activeWorkspaceId: "ws-1",
+    activeWorkspaceId: "ws-1" as string | null,
     activeThreadId: overrides.activeThreadId !== undefined ? overrides.activeThreadId : thread.id,
     pendingNewThread: false,
+    newThreadTarget: { kind: "project" as const },
+    workspacesLoaded: true,
     pendingStartupByThreadId: overrides.pendingStartupByThreadId ?? {},
     resolvePendingStartup: vi.fn(),
     threads: overrides.threads ?? [thread],
@@ -2413,6 +2418,57 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
         threadIds: ["thread-1"],
         revisions: { "thread-1": { conversationRevision: 0, rosterRevision: 0 } },
       });
+    });
+  });
+
+  describe("new-thread canvas without a chosen project", () => {
+    function setupNewThreadCanvas(overrides: Record<string, unknown>) {
+      setupWorkspaceMock({ ...defaultWorkspaceState(), activeWorkspaceId: null, activeThreadId: null, threads: [], ...overrides });
+      chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: null });
+    }
+
+    it("starts a first run with no projects on the No project heading", async () => {
+      setupNewThreadCanvas({ workspaces: [] });
+
+      await renderChatView();
+
+      expect(screen.getByRole("heading", { level: 1 })).toHaveAccessibleName("What should we work on?");
+      expect(screen.getByTestId("new-thread-project-slot")).toHaveTextContent("No project");
+    });
+
+    it("keeps asking for a project before the workspace list has loaded", async () => {
+      setupNewThreadCanvas({ workspaces: [], workspacesLoaded: false });
+
+      await renderChatView();
+
+      expect(screen.getByRole("heading", { level: 1 })).toHaveAccessibleName("What should we build in a project?");
+    });
+
+    it("keeps asking for a project when projects exist but none is chosen", async () => {
+      setupNewThreadCanvas({ workspaces: [createMockWorkspace({ id: "ws-1" })] });
+
+      await renderChatView();
+
+      expect(screen.getByRole("heading", { level: 1 })).toHaveAccessibleName("What should we build in a project?");
+    });
+
+    it("keeps a hidden No project workspace out of the composer and the Overview scope after a failed send", async () => {
+      const hidden = createMockWorkspace({ id: "ws-hidden", name: "No project", kind: "no_project", is_git_repo: false });
+      setupNewThreadCanvas({ workspaces: [createMockWorkspace({ id: "ws-1" }), hidden], activeWorkspaceId: hidden.id });
+
+      await renderChatView();
+
+      expect(screen.getByRole("heading", { level: 1 })).toHaveAccessibleName("What should we work on?");
+      expect(screen.getByTestId("composer")).toHaveAttribute("data-no-project", "true");
+      expect(screen.getByTestId("composer")).toHaveAttribute("data-workspace", "");
+    });
+
+    it("does not treat a hidden No project row as a project when deciding it is a first run", async () => {
+      setupNewThreadCanvas({ workspaces: [createMockWorkspace({ id: "ws-hidden", kind: "no_project", is_git_repo: false })] });
+
+      await renderChatView();
+
+      expect(screen.getByRole("heading", { level: 1 })).toHaveAccessibleName("What should we work on?");
     });
   });
 

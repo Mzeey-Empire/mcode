@@ -16,6 +16,8 @@ const transportDefaults: Partial<McodeTransport> = {
   heartbeatBrowserAutomationHost: vi.fn().mockResolvedValue(undefined),
   cancelBrowserAutomationRequest: vi.fn().mockResolvedValue(undefined),
   listWorkspaces: vi.fn().mockResolvedValue([]),
+  createNoProjectWorkspace: vi.fn().mockImplementation(async (id: string) =>
+    createMockWorkspace({ id, name: "No project", kind: "no_project", is_git_repo: false })),
   renameWorkspace: vi.fn().mockResolvedValue(createMockWorkspace()),
   resolveProjectIcons: vi.fn().mockResolvedValue([]),
   listProjectIconCandidates: vi.fn().mockResolvedValue({ files: [], total: 0 }),

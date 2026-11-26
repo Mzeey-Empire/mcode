@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { CommandGroup, CommandItem, CommandList, CommandEmpty } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "./state/workspaceStore";
+import { useProjectWorkspaces } from "./state/workspace-selectors";
 import { useProjectSelectorStore } from "./state/projectSelectorStore";
 import { ProjectRow } from "./ProjectRow";
 import { PaletteFooterHints, type PaletteHint } from "@/components/palette/PaletteFooterHints";
@@ -21,7 +22,7 @@ export function ProjectsView() {
   const query = useCommandPaletteStore((s) => s.query);
   const close = useCommandPaletteStore((s) => s.close);
   const setQuery = useCommandPaletteStore((s) => s.setQuery);
-  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const workspaces = useProjectWorkspaces();
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const pinWorkspace = useWorkspaceStore((s) => s.pinWorkspace);
 

@@ -1,4 +1,5 @@
 import { useMemo, useRef } from "react";
+import { InboxIcon } from "lucide-react";
 import { CanvasBreadcrumb } from "@/components/shell/CanvasBreadcrumb";
 import { CanvasHeader } from "@/components/shell/CanvasHeader";
 import { OverviewLayer } from "@/features/thread-overview/overview-layer";
@@ -18,6 +19,8 @@ import { recordFirstSend } from "@/features/thread-startup";
 import { Composer } from "../../composer/Composer";
 import { ProjectSlotHeading } from "./ProjectSlotHeading";
 
+const NO_PROJECT_LABEL = "No project";
+
 /** Props for {@link NewThreadStartColumn}. */
 export interface NewThreadStartColumnProps {
   /** Active project name, or undefined before a project is chosen. */
@@ -26,13 +29,15 @@ export interface NewThreadStartColumnProps {
   readonly workspaceId: string | undefined;
   /** Composer draft that holds the unsent prompt. */
   readonly draftId: string | null;
+  /** Set for the No project canvas and pass workspaceId as undefined to omit Overview. */
+  readonly noProject?: boolean;
 }
 
 /**
  * The new-thread canvas: a breadcrumb header over a centred column of question and composer. With a
  * project chosen, the Overview card shows where the thread will run, as it does for a running thread.
  */
-export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewThreadStartColumnProps) {
+export function NewThreadStartColumn({ projectName, workspaceId, draftId, noProject = false }: NewThreadStartColumnProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const columnRef = useRef<HTMLDivElement>(null);
   const canvasWidth = useElementWidth(canvasRef, workspaceId);
@@ -44,7 +49,11 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
     <div ref={canvasRef} className={cn("@container relative flex h-full min-h-0 flex-col bg-background", docked && "[--chat-gutter:--spacing(6)]")}>
       <OverviewLayer>
         <CanvasHeader>
-          <CanvasBreadcrumb projectName={projectName} workspaceId={workspaceId}>
+          <CanvasBreadcrumb
+            projectName={noProject ? NO_PROJECT_LABEL : projectName}
+            workspaceId={workspaceId}
+            icon={noProject ? <InboxIcon size={14} className="shrink-0" aria-hidden /> : undefined}
+          >
             <span aria-current="page" className="shrink-0 text-label text-ink">New thread</span>
           </CanvasBreadcrumb>
           {scope ? <NewThreadOverview scope={scope} overview={overview} /> : null}
@@ -56,13 +65,14 @@ export function NewThreadStartColumn({ projectName, workspaceId, draftId }: NewT
           style={{ paddingRight: docked ? OVERVIEW_CANVAS_RESERVE_CSS : undefined }}
         >
           <div className="px-4 pb-4 sm:px-8">
-            <div key={projectName ?? "projectless"} className={cn(PRIMARY_CONTENT_RAIL_CLASS, "animate-fade-up-in flex justify-center")}>
-              <ProjectSlotHeading projectName={projectName} />
+            <div key={noProject ? "no-project" : projectName ?? "projectless"} className={cn(PRIMARY_CONTENT_RAIL_CLASS, "animate-fade-up-in flex justify-center")}>
+              <ProjectSlotHeading projectName={projectName} noProject={noProject} />
             </div>
           </div>
           <Composer
             isNewThread
             workspaceId={workspaceId}
+            noProject={noProject}
             draftId={draftId}
             onThreadPreparing={(thread) => {
               if (columnRef.current) recordFirstSend(thread.id, columnRef.current);
