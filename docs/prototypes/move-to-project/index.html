@@ -1,0 +1,899 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Epic #1814 "Threads without a project".
+  Question: what should starting, finding, and managing a thread without a project look like?
+  One file: a site map, the flows, and a clickable mock of the Mcode shell with simulation switches
+  for states that are hard to reach by hand. State lives in memory; nothing talks to a server.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>#1814 Threads without a project</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  /* Tokens copied from the running app's computed values (apps/web/src/index.css). */
+  :root, [data-theme="dark"] {
+    --page: oklch(0% 0 0); --background: oklch(0% 0 0); --panel: oklch(13% 0.003 260);
+    --raised: oklch(17% 0.003 260);
+    --hover: color-mix(in oklch, oklch(95.5% 0.005 260) 5%, transparent);
+    --selected: color-mix(in oklch, oklch(95.5% 0.005 260) 12%, transparent);
+    --ink: oklch(95.5% 0.005 260); --muted: oklch(65% 0.005 260);
+    --primary: oklch(72% 0.170 75); --on-primary: oklch(15% 0.02 75);
+    --success: oklch(78% 0.130 145); --error: oklch(78% 0.130 25); --destructive: oklch(65% 0.200 25);
+    --focus: oklch(62% 0.190 264); --border: oklch(19% 0.003 260); --link: oklch(70% 0.140 260);
+    --segment-on: color-mix(in oklch, oklch(95.5% 0.005 260) 12%, transparent);
+    --segment-edge: color-mix(in oklch, oklch(95.5% 0.005 260) 14%, transparent);
+    --scrim: oklch(0% 0 0 / 0.55); --shadow: 0 12px 32px oklch(0% 0 0 / 0.6), 0 0 0 1px oklch(25% 0.003 260);
+  }
+  [data-theme="light"] {
+    --page: oklch(95.5% 0.005 260); --background: oklch(99% 0.005 260); --panel: oklch(96.5% 0.005 260);
+    --raised: oklch(99% 0.005 260);
+    --hover: oklch(95.5% 0.005 260); --selected: oklch(90% 0.005 260);
+    --ink: oklch(19% 0.005 260); --muted: oklch(47% 0.010 260);
+    --primary: oklch(52% 0.170 75); --on-primary: oklch(99% 0.005 260);
+    --success: oklch(52% 0.120 145); --error: oklch(52% 0.140 25); --destructive: oklch(57.7% 0.190 27.3);
+    --focus: oklch(52% 0.170 264); --border: oklch(92.5% 0.005 260); --link: oklch(52% 0.140 260);
+    --segment-on: oklch(99% 0.005 260); --segment-edge: oklch(0 0 0 / 0.08);
+    --scrim: oklch(20% 0.005 260 / 0.25); --shadow: 0 12px 32px oklch(20% 0.01 260 / 0.14), 0 0 0 1px oklch(90% 0.005 260);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--page); color: var(--ink); font: 400 13px/1.45 "Public Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-ligatures: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 6px; }
+  svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+  svg.i.sm { width: 14px; height: 14px; }
+  .fade { overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+
+  /* ---------- Prototype chrome (deliberately not Mcode styling) ---------- */
+  .proto-top { position: fixed; inset: 0 0 auto 0; height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 12px;
+    background: #1b1b2e; color: #e8e8ff; font: 500 12px/1 system-ui, sans-serif; z-index: 50; border-bottom: 1px solid #2c2c4a; }
+  .proto-top .tag { background: #ff5ac8; color: #1b1b2e; padding: 4px 7px; border-radius: 4px; font-weight: 700; letter-spacing: .04em; margin-right: 10px; }
+  .proto-top .tab { padding: 8px 12px; border-radius: 6px; color: #b9b9e0; }
+  .proto-top .tab[aria-selected="true"] { background: #33335a; color: #fff; }
+  .proto-top .spacer { flex: 1; }
+  .proto-top .ghost { padding: 7px 10px; border-radius: 6px; color: #b9b9e0; border: 1px solid #3a3a60; }
+  .stage { position: fixed; inset: 44px 0 0 0; overflow: auto; }
+  /* On the prototype tab the variant bar gets its own strip, so it never covers the composer. */
+  body.on-app .stage { bottom: 52px; }
+
+  .proto-bar { position: fixed; inset: auto 0 0 0; height: 52px; z-index: 60; display: flex; align-items: center; justify-content: safe center; gap: 10px;
+    background: #1b1b2e; color: #e8e8ff; border-top: 1px solid #3a3a60; padding: 0 12px; font: 500 11.5px/1 system-ui, sans-serif; overflow-x: auto; white-space: nowrap; }
+  .proto-bar .grp { display: flex; align-items: center; gap: 4px; }
+  .proto-bar .lbl { color: #8f8fc0; margin-right: 2px; }
+  .proto-bar .opt { padding: 6px 8px; border-radius: 6px; color: #c8c8ee; }
+  .proto-bar .opt[aria-pressed="true"] { background: #ff5ac8; color: #1b1b2e; }
+  .proto-bar .sep { width: 1px; align-self: stretch; background: #3a3a60; }
+  .proto-bar .state { color: #8f8fc0; font: 400 11px/1.2 ui-monospace, monospace; }
+
+  /* ---------- Doc tabs (site map, flows) ---------- */
+  .doc { max-width: 1240px; margin: 0 auto; padding: 32px 32px 140px; }
+  .doc h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.01em; }
+  .doc h2 { font-size: 15px; margin: 32px 0 12px; }
+  .doc p.lead { color: var(--muted); margin: 0 0 20px; max-width: 760px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 18px; color: var(--muted); font-size: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 4px; font: 600 10px/1 system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; padding: 3px 6px; border-radius: 4px; vertical-align: 1px; }
+  .pill.new { background: oklch(72% 0.17 75 / .18); color: var(--primary); }
+  .pill.chg { background: oklch(70% 0.14 260 / .18); color: var(--link); }
+  .pill.hide { background: oklch(65% 0.005 260 / .18); color: var(--muted); }
+  .map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .col { background: var(--panel); border-radius: 12px; padding: 14px 14px 10px; }
+  .col h3 { margin: 0 0 2px; font-size: 13px; }
+  .col .sub { color: var(--muted); font-size: 11.5px; margin-bottom: 10px; }
+  .tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+  .tree ul { padding-left: 14px; border-left: 1px solid var(--border); margin: 2px 0 4px 5px; }
+  .tree li { padding: 3px 0; }
+  .tree .node { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+  .tree .note { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+  .tree .go { color: var(--link); font-size: 11.5px; }
+  .tree .dim { color: var(--muted); }
+  table.keep { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.keep th, table.keep td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.keep th { color: var(--muted); font-weight: 500; }
+  .decided { margin: 0; padding: 0 0 0 20px; display: grid; gap: 6px; max-width: 900px; }
+
+  .flows { display: grid; gap: 14px; }
+  .flow { background: var(--panel); border-radius: 12px; padding: 14px; }
+  .flow h3 { margin: 0 0 10px; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .steps { display: flex; align-items: stretch; gap: 6px; overflow-x: auto; }
+  .step { flex: 1 1 0; min-width: 170px; background: var(--background); border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+  .step:hover { border-color: var(--muted); }
+  .step .n { color: var(--muted); font-size: 11px; }
+  .step .t { font-weight: 500; }
+  .step .s { color: var(--muted); font-size: 11.5px; flex: 1; }
+  .step .open { color: var(--link); font-size: 11.5px; }
+  .arrow { align-self: center; color: var(--muted); }
+
+  /* ---------- The app mock ---------- */
+  .app { position: relative; display: flex; height: 100%; min-height: 640px; background: var(--page); }
+  .sb { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--page); border-right: 1px solid var(--border); }
+  .sb-top { display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 12px; }
+  .logo { display: flex; align-items: center; gap: 7px; font-weight: 700; }
+  .logo .mark { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, oklch(55% 0.03 260), oklch(35% 0.03 260)); }
+  .icon-btn { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 7px; color: var(--muted); }
+  .icon-btn:hover { background: var(--hover); color: var(--ink); }
+  .icon-btn.on { background: var(--selected); color: var(--ink); }
+  .sb-search { display: flex; align-items: center; gap: 6px; padding: 0 8px 0 6px; }
+  .search-box { flex: 1; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 8px; background: var(--panel); color: var(--muted); }
+  .sb-view { display: flex; align-items: center; justify-content: space-between; padding: 14px 6px 6px 8px; }
+  .view-btn { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; padding: 4px 6px; border-radius: 6px; }
+  .view-btn:hover { background: var(--hover); }
+  .seg { display: inline-flex; padding: 2px; border-radius: 999px; background: var(--panel); }
+  .seg button { padding: 5px 12px; border-radius: 999px; color: var(--muted); }
+  .seg button[aria-checked="true"] { background: var(--segment-on); box-shadow: 0 0 0 1px var(--segment-edge); color: var(--ink); font-weight: 500; }
+  .sb-list { flex: 1; overflow-y: auto; padding: 2px 6px 12px; }
+  .sb-foot { display: flex; gap: 6px; padding: 8px 8px 10px; color: var(--muted); }
+  .grp-head { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px 0 6px; border-radius: 8px; position: relative; }
+  .grp-head:hover { background: var(--hover); }
+  .grp-head .name { flex: 1; min-width: 0; }
+  .grp-head .acts { display: none; gap: 2px; }
+  .grp-head:hover .acts, .grp-head:focus-within .acts { display: flex; }
+  .grp-head .acts.always { display: flex; }
+  .chip { width: 18px; height: 18px; border-radius: 5px; display: inline-grid; place-items: center; font: 700 8.5px/1 "Public Sans", sans-serif; flex-shrink: 0; }
+  .chip.c1 { background: oklch(45% 0.09 175 / .35); color: oklch(80% 0.11 175); }
+  .chip.c2 { background: oklch(45% 0.09 300 / .35); color: oklch(80% 0.11 300); }
+  .chip.c3 { background: oklch(45% 0.09 40 / .35); color: oklch(80% 0.11 40); }
+  [data-theme="light"] .chip.c1 { color: oklch(42% 0.11 175); } [data-theme="light"] .chip.c2 { color: oklch(42% 0.11 300); } [data-theme="light"] .chip.c3 { color: oklch(42% 0.11 40); }
+  .chip.plain { background: transparent; color: var(--muted); }
+  .row { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 8px; border-radius: 8px; position: relative; cursor: pointer; }
+  .row.indent { padding-left: 30px; }
+  .row:hover { background: var(--hover); }
+  .row[aria-current="true"] { background: var(--selected); }
+  .row .title { flex: 1; min-width: 0; }
+  .row .meta { color: var(--muted); font-size: 11.5px; flex-shrink: 0; }
+  .row .more { display: none; }
+  .row:hover .more, .row:focus-within .more, .row .more.open { display: inline-grid; }
+  .row:hover .meta { display: none; }
+  .lane { width: 14px; display: inline-grid; place-items: center; flex-shrink: 0; }
+  .spin { width: 11px; height: 11px; border-radius: 50%; border: 1.6px solid var(--muted); border-top-color: transparent; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; border-top-color: var(--muted); opacity: .6; } }
+  .empty-line { padding: 2px 0 6px 30px; color: var(--muted); font-size: 12px; }
+  .empty-line.flat { padding-left: 8px; }
+  .skel { height: 10px; border-radius: 4px; background: var(--panel); margin: 10px 8px 10px 30px; }
+  .undo-line { display: flex; gap: 6px; align-items: center; padding: 4px 8px 4px 30px; color: var(--muted); font-size: 12px; }
+  .link { color: var(--link); }
+  .link:hover { text-decoration: underline; }
+
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--background); position: relative; }
+  .hdr { height: 46px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
+  .crumb { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--panel); font-weight: 500; max-width: 520px; min-width: 0; }
+  .crumb .sep { color: var(--muted); }
+  .crumb .muted { color: var(--muted); font-weight: 400; }
+  .hdr .right { margin-left: auto; display: flex; gap: 4px; }
+  .canvas { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 32px 60px; }
+  .q { font-size: 28px; font-weight: 600; letter-spacing: -.02em; margin: 0 0 26px; text-align: center; }
+  .slot { color: var(--primary); border-bottom: 2px dashed var(--primary); padding: 0 3px 1px; font-weight: 600; letter-spacing: -.02em; }
+  .slot:hover { opacity: .85; }
+  .noproj { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 999px; background: var(--panel); color: var(--muted); margin-bottom: 22px; }
+  .noproj:hover { background: var(--selected); color: var(--ink); }
+  .composer-wrap { width: 100%; max-width: 760px; position: relative; }
+  .composer { display: flex; align-items: flex-end; gap: 8px; padding: 7px 7px 7px 10px; border-radius: 24px; background: var(--panel); }
+  .composer textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: 400 15px/1.45 "Public Sans", sans-serif; padding: 7px 4px; min-height: 34px; max-height: 160px; }
+  .composer textarea::placeholder { color: var(--muted); }
+  .model { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border-radius: 999px; background: var(--page); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+  [data-theme="light"] .model { background: var(--background); box-shadow: 0 0 0 1px var(--border); }
+  .model .lvl { color: var(--muted); font-weight: 400; }
+  .model .key { color: var(--primary); }
+  .send { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--selected); color: var(--muted); flex-shrink: 0; }
+  .send.ready { background: var(--primary); color: var(--on-primary); }
+  .alert { display: flex; gap: 10px; align-items: flex-start; background: var(--panel); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; }
+  .alert .msg { flex: 1; }
+  .alert .msg b { color: var(--error); font-weight: 600; }
+  .alert details { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; font-weight: 500; background: var(--selected); }
+  .btn:hover { filter: brightness(1.1); }
+  .btn.primary { background: var(--primary); color: var(--on-primary); }
+  .btn.danger { background: var(--destructive); color: white; }
+  .btn.ghost { background: transparent; }
+  .btn.ghost:hover { background: var(--hover); }
+
+  .thread { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 32px 12px; }
+  .col-rail { max-width: 720px; margin: 0 auto; }
+  .u-msg { background: var(--panel); border-radius: 14px; padding: 10px 14px; margin: 10px 0 18px; white-space: pre-wrap; }
+  .a-prose { font-size: 14px; line-height: 1.6; margin: 0 0 10px; }
+  .tool { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; margin: 6px 0 12px; }
+  .tool code { color: var(--ink); background: var(--panel); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+  .footer-line { color: var(--muted); font-size: 12px; margin: 8px 0 22px; }
+  .running-line { display: flex; gap: 8px; align-items: center; color: var(--muted); margin: 4px 0 16px; }
+  .bottom-composer { padding: 6px 32px 18px; }
+
+  .ov { position: absolute; top: 50px; right: 12px; width: 312px; background: var(--raised); border-radius: 14px; box-shadow: var(--shadow); padding: 6px; z-index: 5; }
+  .ov-sec + .ov-sec { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
+  .ov-row { display: flex; align-items: center; gap: 9px; min-height: 32px; padding: 4px 8px; border-radius: 8px; }
+  .ov-row:hover { background: var(--hover); }
+  .ov-row .k { color: var(--muted); width: 74px; flex-shrink: 0; }
+  .ov-row .v { flex: 1; min-width: 0; }
+  .ov-row .add { color: var(--muted); }
+  .ov-row .ico { color: var(--muted); }
+  .plus-add { color: var(--success); } .minus-del { color: var(--error); }
+
+  .pop { position: absolute; background: var(--raised); border-radius: 12px; box-shadow: var(--shadow); padding: 5px; z-index: 20; min-width: 220px; }
+  .pop .search { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; color: var(--muted); border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .pop .search input { flex: 1; background: transparent; border: 0; outline: 0; color: var(--ink); font: inherit; }
+  .mi { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 8px; border-radius: 7px; text-align: left; }
+  .mi:hover, .mi.kb { background: var(--hover); }
+  .mi .lab { flex: 1; min-width: 0; }
+  .mi .hint { color: var(--muted); font-size: 11.5px; }
+  .mi.danger { color: var(--error); }
+  .mi[aria-disabled="true"] { color: var(--muted); }
+  .mi .ico { color: var(--muted); }
+  .mi.danger .ico { color: var(--error); }
+  .mdiv { height: 1px; background: var(--border); margin: 4px 2px; }
+
+  .scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 30; display: flex; justify-content: center; align-items: flex-start; }
+  .palette { margin-top: 56px; width: 600px; max-width: calc(100% - 40px); background: var(--raised); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+  .palette .in { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 14px; border-bottom: 1px solid var(--border); color: var(--muted); }
+  .palette .in input { flex: 1; background: transparent; border: 0; outline: 0; color: var(--ink); font: 400 14px "Public Sans", sans-serif; }
+  .palette .body { max-height: 380px; overflow-y: auto; padding: 6px; }
+  .palette .gh { color: var(--muted); font-size: 11.5px; padding: 8px 8px 4px; }
+  .palette .foot { display: flex; gap: 14px; align-items: center; padding: 9px 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11.5px; }
+  kbd { font: 500 10.5px/1 "JetBrains Mono", monospace; background: var(--selected); color: var(--ink); padding: 3px 5px; border-radius: 4px; }
+  .dialog { margin-top: 140px; width: 440px; background: var(--raised); border-radius: 14px; box-shadow: var(--shadow); padding: 18px; }
+  .dialog h4 { margin: 0 0 8px; font-size: 15px; }
+  .dialog p { margin: 0 0 6px; color: var(--muted); }
+  .dialog .path { font-size: 12px; background: var(--panel); border-radius: 6px; padding: 6px 8px; margin: 8px 0 16px; color: var(--ink); }
+  .dialog .acts { display: flex; justify-content: flex-end; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="proto-top" role="tablist" aria-label="Prototype sections">
+  <span class="tag">PROTOTYPE</span>
+  <span style="margin-right:12px;color:#b9b9e0">#1814 Threads without a project</span>
+  <button class="tab" role="tab" data-tab="map">1 · Site map</button>
+  <button class="tab" role="tab" data-tab="flows">2 · Flows</button>
+  <button class="tab" role="tab" data-tab="app">3 · Clickable prototype</button>
+  <span class="spacer"></span>
+  <button class="ghost" data-act="theme">Toggle light / dark</button>
+  <button class="ghost" data-act="reset">Reset</button>
+</div>
+<div class="stage" id="stage"></div>
+<div id="bar"></div>
+
+
+<script>
+/* ============================== Icons (Lucide paths) ============================== */
+const P = {
+  panelLeft: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>',
+  panelRight: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  folderPlus: '<path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  pen: '<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/>',
+  down: '<path d="m6 9 6 6 6-6"/>', right: '<path d="m9 18 6-6-6-6"/>',
+  back: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>', fwd: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>', up: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  settings: '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+  pr: '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M6 9v12"/>',
+  bell: '<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
+  terminal: '<path d="M12 19h8"/><path d="m4 17 6-6-6-6"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>', check: '<path d="M20 6 9 17l-5-5"/>',
+  rename: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  branch: '<path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+  laptop: '<path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"/><path d="M20.054 15.987H3.946"/>',
+  diff: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/>',
+  key: '<path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4"/><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/>',
+  restore: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+  gauge: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+  spark: '<path d="M12 3v3"/><path d="M12 18v3"/><path d="M3 12h3"/><path d="M18 12h3"/><path d="m5.6 5.6 2.1 2.1"/><path d="m16.3 16.3 2.1 2.1"/><path d="m5.6 18.4 2.1-2.1"/><path d="m16.3 7.7 2.1-2.1"/>',
+};
+const ic = (n, cls = "") => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n]}</svg>`;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* ============================== Data ============================== */
+const PROJECTS = [
+  { id: "mcode", name: "mcode", chip: "MC", c: "c1" },
+  { id: "billing", name: "billing-api", chip: "BA", c: "c2" },
+  { id: "docs", name: "docs-site", chip: "DS", c: "c3" },
+];
+/* projectId null means "No project". status: running | approval | finished | idle. */
+function seedThreads() {
+  return [
+    { id: "t1", projectId: "mcode", title: "Fix sidebar fade on narrow widths", status: "running", closed: false, ageMin: 0, branch: "fix/sidebar-fade", messages: [
+      { u: "The sidebar row fade clips the status mark under 320px. Fix it." },
+      { a: "The fade mask covers the whole row, so the mark sits under it. I'll mask only the title span.", tool: "Edited SidebarThreadRow.tsx" } ] },
+    { id: "t2", projectId: "mcode", title: "Retry provider reconnect", status: "finished", closed: false, ageMin: 12, branch: "feat/reconnect-retry", messages: [
+      { u: "Add a retry with backoff when the Codex socket drops." }, { a: "Added a capped exponential backoff and a test for the third retry.", tool: "Ran bun run test:files packages/providers" } ] },
+    { id: "t3", projectId: "billing", title: "Upgrade Stripe SDK", status: "approval", closed: false, ageMin: 120, branch: "chore/stripe-v18", messages: [
+      { u: "Upgrade the Stripe SDK to v18 and fix the breaking changes." }, { a: "Upgraded. Two call sites changed: refunds and webhooks.", tool: "Ran bun install" } ] },
+    { id: "n1", projectId: null, title: "SQLite WAL vs rollback journal", status: "idle", closed: false, ageMin: 25, messages: [
+      { u: "When should I pick WAL over the rollback journal for a desktop app with one writer?" },
+      { a: "Pick WAL. With one writer and several readers, readers no longer block the writer, and commits are cheaper because they append to the WAL file instead of rewriting pages.", tool: "Ran sqlite3 :memory: \"pragma journal_mode=wal\"" },
+      { a: "Keep the rollback journal only if the database lives on a network share, because WAL needs shared memory on one host." } ] },
+    /* A fork shares its parent's folder (folderOf), so deleting one of the two must not delete the folder. */
+    { id: "f1", projectId: null, title: "Branch: WAL checkpoint tuning", status: "idle", closed: false, ageMin: 18, folderOf: "n1", messages: [
+      { u: "When should I pick WAL over the rollback journal for a desktop app with one writer?" },
+      { a: "Pick WAL. With one writer and several readers, readers no longer block the writer.", tool: "Ran sqlite3 :memory: \"pragma journal_mode=wal\"" },
+      { u: "Branch from here: how often should the WAL checkpoint?" },
+      { a: "Let the default auto-checkpoint run at 1000 pages, and checkpoint manually after bulk imports." } ] },
+    { id: "n2", projectId: null, title: "Draft release notes for 0.42", status: "finished", closed: false, ageMin: 60, messages: [
+      { u: "Draft release notes from these bullet points: faster startup, new Overview card, fixed reconnect." },
+      { a: "Here is a draft in three short sections. I wrote it to notes.md in this thread's folder.", tool: "Wrote notes.md" } ] },
+    { id: "n3", projectId: null, title: "Regex for semver ranges", status: "idle", closed: true, ageMin: 2880, messages: [
+      { u: "Give me a regex that matches ^1.2.3 and ~1.2 style ranges." }, { a: "Here's one with named groups, plus three test strings it should reject." } ] },
+  ];
+}
+
+/* ============================== State ============================== */
+const initial = () => ({
+  tab: "map", theme: "dark",
+  hasProjects: true, failNext: false, loading: false,
+  added: [],                   // projects added through "Add project"
+  view: "projects",            // threads | projects
+  scope: "open",
+  screen: { kind: "new", target: null },   // target: null | "none" | projectId
+  overlay: null, menuFor: null, menuXY: null, query: "",
+  ovOpen: false, err: null, undo: null, renaming: null,
+  threads: seedThreads(), expanded: { none: true, mcode: true, billing: false, docs: false }, nextId: 4,
+});
+let S = initial();
+let draft = "";
+function set(patch) {
+  S = { ...S, ...patch };
+  // Only an open thread and the No project draft have an Overview toggle. Any other screen drops the open state,
+  // so no card or Escape handler acts on an Overview the user cannot see or reach.
+  if (S.screen.kind === "new" && S.screen.target !== "none") S.ovOpen = false;
+  render();
+}
+/* "Add project" simulates a folder pick that always returns this one. */
+const ADDED_PROJECT = { id: "myapp", name: "my-app", chip: "MA", c: "c1" };
+const project = id => [...PROJECTS, ...S.added].find(p => p.id === id);
+const projects = () => [...(S.hasProjects ? PROJECTS : []), ...S.added];
+const threadIsVisible = t => t.projectId === null || projects().some(p => p.id === t.projectId);
+const byRecency = list => [...list].sort((a, b) => a.ageMin - b.ageMin);
+const formatAge = m => (m < 1 ? "now" : m < 60 ? m + "m" : m < 1440 ? Math.floor(m / 60) + "h" : Math.floor(m / 1440) + "d");
+const threadsVisible = () => S.threads.filter(t => (S.scope === "open" ? !t.closed : t.closed)).filter(threadIsVisible);
+const noProjectThreads = () => threadsVisible().filter(t => t.projectId === null);
+const current = () => (S.screen.kind === "thread" ? S.threads.find(t => t.id === S.screen.id) : null);
+const folderPath = id => `~/.mcode/no-project/${id}-7f3a/`;
+const threadFolder = t => folderPath(t.folderOf ?? t.id);
+/* Another thread using the same folder, if any. A fork shares its parent's. */
+const folderSharer = t => S.threads.find(o => o.id !== t.id && o.projectId === null && (o.folderOf ?? o.id) === (t.folderOf ?? t.id));
+/* With no projects, the new-thread canvas starts on "No project"; otherwise it waits for a choice. */
+const freshCanvas = () => ({ kind: "new", target: projects().length ? null : "none" });
+/* Same refusal the app gives a project thread today. */
+const closeBlockReason = t => ({ running: "Running", approval: "Approval required" }[t.status] ?? null);
+
+/* ============================== Shell ============================== */
+function render() {
+  document.documentElement.dataset.theme = S.theme;
+  document.querySelectorAll(".proto-top .tab").forEach(b => b.setAttribute("aria-selected", String(b.dataset.tab === S.tab)));
+  const stage = document.getElementById("stage");
+  const focusKey = document.activeElement?.dataset?.fk;
+  if (S.tab === "map") stage.innerHTML = renderMap();
+  else if (S.tab === "flows") stage.innerHTML = renderFlows();
+  else stage.innerHTML = renderApp();
+  document.getElementById("bar").innerHTML = S.tab === "app" ? renderBar() : "";
+  document.body.classList.toggle("on-app", S.tab === "app");
+  const ta = stage.querySelector("textarea[data-fk]");
+  if (ta) { ta.value = draft; autosize(ta); }
+  if (focusKey) { const el = stage.querySelector(`[data-fk="${focusKey}"]`); if (el) { el.focus(); if (el.setSelectionRange && el.value) el.setSelectionRange(el.value.length, el.value.length); } }
+  if (S.overlay === "palette") stage.querySelector('[data-fk="palette"]')?.focus();
+  const chooser = stage.querySelector("#chooser"), slot = stage.querySelector("#slot"), main = stage.querySelector(".main");
+  if (chooser && slot && main) {
+    const s = slot.getBoundingClientRect(), m = main.getBoundingClientRect();
+    chooser.style.left = `${s.left - m.left}px`; chooser.style.top = `${s.bottom - m.top + 10}px`;
+  }
+  if (S.overlay === "chooser") stage.querySelector('[data-fk="chooser"]')?.focus();
+}
+function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; }
+
+/* ============================== Tab 1: site map ============================== */
+const pill = (k, t) => `<span class="pill ${k}">${t}</span>`;
+function renderMap() {
+  return `<div class="doc">
+  <h1>Site map: threads without a project</h1>
+  <p class="lead">Every surface a no-project thread touches, and what happens to it. It is a thread with no user project; Mcode makes a private folder for it. Click a <span class="link">open ›</span> link to jump to that screen in the clickable prototype.</p>
+  <div class="legend"><span>${pill("new", "New")} added for no-project threads</span><span>${pill("chg", "Changed")} existing surface gains a no-project case</span><span>${pill("hide", "Hidden")} project-only, absent in a no-project thread</span><span>Unmarked: unchanged</span></div>
+  <div class="map">
+    <div class="col"><h3>Sidebar</h3><div class="sub">Orients. Where no-project threads are found.</div>
+      <ul class="tree">
+        <li><span class="node">Header</span><ul>
+          <li><span class="node">Search ${pill("chg", "Changed")}</span><span class="note">Opens the palette; results include no-project threads.</span></li>
+          <li><span class="node">Add project</span></li>
+          <li><span class="node">New thread (Ctrl+N)</span><span class="note">Opens the new-thread canvas; "No project" is one of its choices.</span></li>
+        </ul></li>
+        <li><span class="node">View: Threads / Projects</span><ul>
+          <li><span class="node">Threads view ${pill("chg", "Changed")}</span><span class="note">No-project threads mix in by recency, with a plain mark where a project chip would be.</span><a class="go" href="#" data-goto="threadsView">open ›</a></li>
+        </ul></li>
+        <li><span class="node">Scope: Open / Closed</span><span class="note">Shown whenever any thread exists, so closed no-project threads stay reachable with zero projects.</span><a class="go" href="#" data-goto="closedNoProjects">open ›</a></li>
+        <li><span class="node">Projects view</span><ul>
+          <li><span class="node">"No project" group ${pill("new", "New")}</span><span class="note">At the top, inside Open / Closed. Plain icon, no "…" menu, "+" starts a thread without a project. Open or closed state is remembered. Rendered only when it has a thread in scope.</span><a class="go" href="#" data-goto="sidebarNone">open ›</a><ul>
+            <li><span class="node">Thread row</span><span class="note">Title, status mark, age. No branch or worktree badge.</span></li>
+          </ul></li>
+          <li><span class="node">Project group › threads</span><span class="note dim">Never holds a no-project thread. With no projects, nothing is rendered for them.</span></li>
+          <li><span class="node">Loading: skeleton rows</span><a class="go" href="#" data-goto="loading">open ›</a></li>
+        </ul></li>
+        <li><span class="node">Row menu ${pill("chg", "Changed")}</span><a class="go" href="#" data-goto="noProjectMenu">open ›</a><ul>
+          <li><span class="node">Rename thread</span></li>
+          <li><span class="node">Copy path / thread ID</span></li>
+          <li><span class="node">Close thread / Restore thread</span><span class="note">Close is disabled while the thread is Running or needs approval.</span><a class="go" href="#" data-goto="closeBlocked">open ›</a></li>
+          <li><span class="node">Delete thread ${pill("chg", "Changed")}</span><span class="note">Confirms, then removes the thread and its folder now.</span></li>
+          <li><span class="node dim">Branch, Project settings ${pill("hide", "Hidden")}</span></li>
+        </ul></li>
+      </ul></div>
+
+    <div class="col"><h3>Main canvas</h3><div class="sub">The conversation. Where a thread starts and runs.</div>
+      <ul class="tree">
+        <li><span class="node">New-thread canvas ${pill("chg", "Changed")}</span><a class="go" href="#" data-goto="newThread">open ›</a><ul>
+          <li><span class="node">"What should we build in [project]?"</span></li>
+          <li><span class="node">"What should we work on?" + No project pill ${pill("new", "New")}</span><span class="note">Neutral pill, not the amber project slot. Opens the chooser. Send needs an explicit choice.</span><a class="go" href="#" data-goto="newNone">open ›</a></li>
+          <li><span class="node">Project chooser ${pill("chg", "Changed")}</span><span class="note">"No project" is the first row for an empty search. When typing, it shows only if "no project" starts with the text, after any matching projects. "Add project" is last and simulates a folder pick (adds my-app).</span><a class="go" href="#" data-goto="chooser">open ›</a></li>
+          <li><span class="node">No projects yet ${pill("chg", "Changed")}</span><span class="note">No projects and no threads: no groups and no Open / Closed switch. The canvas starts on "No project". The chooser lists "No project", then "Add project".</span><a class="go" href="#" data-goto="firstRun">open ›</a></li>
+          <li><span class="node">Create failed ${pill("new", "New")}</span><span class="note">Draft kept, plain reason, Retry.</span><a class="go" href="#" data-goto="createFailed">open ›</a></li>
+        </ul></li>
+        <li><span class="node">No-project thread view ${pill("new", "New")}</span><a class="go" href="#" data-goto="noProjectThread">open ›</a><ul>
+          <li><span class="node">Header: "No project › title"</span></li>
+          <li><span class="node">Timeline</span><span class="note dim">Same document grammar as a project thread.</span></li>
+          <li><span class="node">Composer</span><span class="note dim">Model, permission, attachments, slash commands.</span></li>
+          <li><span class="node dim">Review, changes, revert ${pill("hide", "Hidden")}</span></li>
+        </ul></li>
+        <li><span class="node">Project thread view</span><span class="note dim">Unchanged. Use it to compare.</span><a class="go" href="#" data-goto="projectThread">open ›</a></li>
+      </ul></div>
+
+    <div class="col"><h3>Overlays</h3><div class="sub">Pickers, menus, dialogs.</div>
+      <ul class="tree">
+        <li><span class="node">Command palette (Ctrl+K) ${pill("chg", "Changed")}</span><a class="go" href="#" data-goto="palette">open ›</a><ul>
+          <li><span class="node">Command: New thread without a project ${pill("new", "New")}</span><span class="note">No dedicated shortcut.</span></li>
+          <li><span class="node">Results include no-project threads</span><a class="go" href="#" data-goto="paletteQuery">open ›</a></li>
+        </ul></li>
+        <li><span class="node">Overview card ${pill("chg", "Changed")}</span><span class="note">A no-project thread shows Folder, Terminals, Browser, Usage. The Folder row appears once the thread exists; before that there is no folder and no new Terminal or Browser tab. It drops Local, Branch, Git, Changes, PR, Project actions.</span><a class="go" href="#" data-goto="noProjectOverview">open ›</a></li>
+        <li><span class="node">Delete thread dialog ${pill("chg", "Changed")}</span><span class="note">A fork shares its parent's folder; deleting either keeps the folder while the other exists.</span><a class="go" href="#" data-goto="deleteDialog">open ›</a></li>
+      </ul></div>
+
+    <div class="col"><h3>Right panel</h3><div class="sub">Inspects. Keyed by a no-project sentinel, not a project.</div>
+      <ul class="tree">
+        <li><span class="node">Terminal</span><span class="note">Opens in the thread's folder.</span></li>
+        <li><span class="node">Browser</span><span class="note">Own partition per thread (ADR from CWP-01 decides).</span></li>
+        <li><span class="node">Files ${pill("chg", "Changed")}</span><span class="note">Lists the thread's folder; no git status.</span></li>
+        <li><span class="node">Plan</span></li>
+        <li><span class="node dim">Review ${pill("hide", "Hidden")}</span><span class="note">No repository to diff.</span></li>
+        <li><span class="node dim">Pull requests ${pill("hide", "Hidden")}</span></li>
+      </ul></div>
+  </div>
+
+  <h2>What a no-project thread keeps and drops, compared with a project thread</h2>
+  <table class="keep">
+    <tr><th>Surface</th><th>Project thread</th><th>No-project thread</th><th>Why</th></tr>
+    <tr><td>Composer</td><td>Model, permission, attachments, slash commands</td><td>Same</td><td>Where it runs lives in the Overview card, not the composer, so the composer needs no change.</td></tr>
+    <tr><td>Where it runs</td><td>Local / New worktree / Existing worktree, branch</td><td class="mono">~/.mcode/no-project/&lt;id&gt;/</td><td>No repository, so no branch or worktree to choose.</td></tr>
+    <tr><td>Changes, Review, revert</td><td>Yes</td><td>No</td><td>The folder is not a git repository (ADR 0027). CWP-01 decides any substitute.</td></tr>
+    <tr><td>Terminals, Browser, Usage, Plan, Subagents</td><td>Yes</td><td>Yes</td><td>Nothing about them needs a project.</td></tr>
+    <tr><td>Close / Restore</td><td>Close needs the thread idle. Closed threads are deleted after the retention period (3 days by default).</td><td>Same rules; the folder is deleted with the thread</td><td>One lifecycle for every thread.</td></tr>
+    <tr><td>Delete</td><td>Thread menu</td><td>Thread menu, and the folder goes too, now (unless a fork still uses it)</td><td>The folder belongs to the thread, or to the thread and its forks.</td></tr>
+  </table>
+
+  <h2>Decided</h2>
+  <ol class="decided">
+    <li>The place is "No project"; each item is a thread, as everywhere else in Mcode.</li>
+    <li>One sidebar design: a collapsible "No project" group at the top of the Projects view, inside Open / Closed. App-owned look, a "+" action, expanded state remembered.</li>
+    <li>No explanatory captions.</li>
+    <li>Closing follows project-thread rules: Close, Restore, deleted with its folder after the retention period (3 days by default). Close is refused while Running or awaiting approval. Delete removes the thread and its folder now; a folder shared with a fork stays until the last thread using it goes.</li>
+    <li>Empty sections are not rendered. Open / Closed stays visible whenever any thread exists.</li>
+    <li>With zero projects the new-thread canvas starts on "No project"; the chooser lists "No project", then "Add project".</li>
+    <li>New-thread heading: "What should we work on?" plus a neutral "No project" pill. Starting needs an explicit choice.</li>
+    <li>The chooser shows "No project" only for an empty search or one matching "no project".</li>
+    <li>A thread is never moved between No project and a project.</li>
+    <li>New thread is Ctrl+N. The palette (Ctrl+K) has "New thread without a project". No other shortcut.</li>
+    <li>The Overview card shows the folder only after the thread exists.</li>
+  </ol>
+</div>`;
+}
+
+/* ============================== Tab 2: flows ============================== */
+const FLOWS = [
+  { name: "First thread in an empty app", tag: "CWP-04", steps: [
+    ["No projects yet", "No threads either: no groups, no Open / Closed. The canvas starts on No project.", "firstRun"],
+    ["Open the chooser", "No project first, Add project second.", "firstRunChooser"],
+    ["Send", "The thread is created and opens. It appears under No project.", "noProjectThread"] ] },
+  { name: "New thread without a project from the sidebar", tag: "CWP-04, CWP-05", steps: [
+    ["No project group +", "Or Ctrl+K, then New thread without a project.", "sidebarNone"],
+    ["New-thread canvas", "Composer focused, No project preset.", "newNone"],
+    ["Send", "Opens the thread; the row shows Running.", "noProjectThread"] ] },
+  { name: "Switch a new thread between No project and a project", tag: "CWP-04", steps: [
+    ["New thread (Ctrl+N)", "Slot reads 'choose a project'.", "newThread"],
+    ["Open the chooser", "'No project' is the first row.", "chooser"],
+    ["Pick a project", "The heading names the project; draft kept.", "newInProject"] ] },
+  { name: "Find a thread again", tag: "CWP-05", steps: [
+    ["Ctrl+K", "Palette lists recent threads.", "palette"],
+    ["Type part of the title", "Threads match by title.", "paletteQuery"],
+    ["Enter", "Opens the thread.", "noProjectThread"] ] },
+  { name: "Close and restore", tag: "CWP-05", steps: [
+    ["Row menu › Close thread", "Same rules as a project thread.", "noProjectMenu"],
+    ["Undo, or find it under Closed", "Closed scope lists closed threads until the retention period (3 days) ends.", "closed"],
+    ["Restore", "It returns to Open.", "closed"] ] },
+  { name: "Close is refused while a thread is busy", tag: "CWP-05", steps: [
+    ["Thread is running", "Close is disabled; the reason reads Running.", "closeBlocked"],
+    ["Thread needs approval", "Close is disabled; the reason reads Approval required.", "closeApproval"] ] },
+  { name: "Delete a thread", tag: "CWP-03, CWP-05", steps: [
+    ["Row menu › Delete thread", "", "noProjectMenu"],
+    ["Confirm", "Names the folder that goes with it.", "deleteDialog"],
+    ["Gone", "Row, conversation and folder removed.", "sidebarNone"] ] },
+  { name: "What a no-project thread does not show", tag: "CWP-06", steps: [
+    ["Open a project thread", "Overview card: Local, Branch, Changes, PR.", "projectOverview"],
+    ["Open a no-project thread", "Overview card: Folder, Terminals, Browser, Usage.", "noProjectOverview"] ] },
+];
+function renderFlows() {
+  return `<div class="doc"><h1>Flows</h1><p class="lead">Each card opens the clickable prototype at that step. The Sim bar at the bottom of the prototype sets states that are hard to reach by hand: no projects, a failing create, loading, a running thread.</p>
+  <div class="flows">${FLOWS.map(f => `<div class="flow"><h3>${esc(f.name)} <span class="pill chg">${esc(f.tag)}</span></h3><div class="steps">${
+    f.steps.map((s, i) => `${i ? `<span class="arrow">${ic("fwd", "sm")}</span>` : ""}<button class="step" data-goto="${s[2]}"><span class="n">Step ${i + 1}</span><span class="t">${esc(s[0])}</span><span class="s">${esc(s[1])}</span><span class="open">Open in prototype ›</span></button>`).join("")
+  }</div></div>`).join("")}</div></div>`;
+}
+
+/* Presets: jump into the app at a specific state. */
+function goto(key) {
+  const base = { tab: "app", overlay: null, menuFor: null, ovOpen: false, err: null, query: "", undo: null, loading: false, failNext: false, scope: "open", renaming: null, hasProjects: true, added: [], threads: seedThreads(), screen: { kind: "new", target: null } };
+  const firstNone = () => base.threads.find(t => t.projectId === null && !t.closed)?.id;
+  const presets = {
+    newThread: { screen: { kind: "new", target: null } },
+    chooser: { screen: { kind: "new", target: null }, overlay: "chooser" },
+    newInProject: { screen: { kind: "new", target: "mcode" } },
+    firstRun: { hasProjects: false, threads: [], screen: { kind: "new", target: "none" } },
+    firstRunChooser: { hasProjects: false, threads: [], screen: { kind: "new", target: "none" }, overlay: "chooser" },
+    newNone: { screen: { kind: "new", target: "none" } },
+    createFailed: { screen: { kind: "new", target: "none" }, failNext: true, err: "create" },
+    noProjectThread: { screen: { kind: "thread", id: firstNone() } },
+    noProjectOverview: { screen: { kind: "thread", id: firstNone() }, ovOpen: true },
+    projectThread: { screen: { kind: "thread", id: "t1" } },
+    projectOverview: { screen: { kind: "thread", id: "t1" }, ovOpen: true },
+    sidebarNone: { view: "projects", screen: { kind: "new", target: "none" } },
+    loading: { loading: true },
+    threadsView: { view: "threads" },
+    noProjectMenu: { screen: { kind: "thread", id: firstNone() }, overlay: "menu", menuFor: firstNone() },
+    closeBlocked: { threads: base.threads.map(t => (t.id === firstNone() ? { ...t, status: "running" } : t)), screen: { kind: "thread", id: firstNone() }, overlay: "menu", menuFor: firstNone() },
+    closeApproval: { expanded: { ...S.expanded, billing: true }, screen: { kind: "thread", id: "t3" }, overlay: "menu", menuFor: "t3" },
+    closed: { scope: "closed" },
+    closedNoProjects: { hasProjects: false, scope: "closed", screen: { kind: "new", target: "none" } },
+    deleteDialog: { overlay: "delete", menuFor: firstNone() },
+    palette: { overlay: "palette" },
+    paletteQuery: { overlay: "palette", query: "wal" },
+  }[key] || {};
+  draft = key === "createFailed" ? "Summarise the tradeoffs of CRDTs vs OT for a notes app" : "";
+  set({ ...base, ...presets });
+}
+
+/* ============================== Tab 3: the app ============================== */
+function renderApp() {
+  return `<div class="app" id="app">${renderSidebar()}${renderMain()}${overlayHtml()}</div>`;
+}
+
+function statusLane(t) {
+  if (t.status === "running") return `<span class="lane" role="img" aria-label="Running"><span class="spin"></span></span>`;
+  if (t.status === "approval") return `<span class="lane" role="img" aria-label="Approval required" style="color:var(--primary)">${ic("alert", "sm")}</span>`;
+  if (t.status === "finished") return `<span class="lane" role="img" aria-label="Finished" style="color:var(--success)">${ic("check", "sm")}</span>`;
+  return `<span class="lane"></span>`;
+}
+const originChip = t => (t.projectId ? `<span class="chip ${project(t.projectId).c}">${project(t.projectId).chip}</span>` : `<span class="chip plain">${ic("inbox", "sm")}</span>`);
+function rowHtml(t, { indent = true, showOrigin = false } = {}) {
+  const active = S.screen.kind === "thread" && S.screen.id === t.id;
+  const label = S.renaming === t.id
+    ? `<input class="title" data-fk="rename" data-rename="${t.id}" value="${esc(t.title)}" style="background:var(--panel);border:0;outline:0;color:var(--ink);font:inherit;padding:3px 6px;border-radius:5px" />`
+    : `<span class="title fade">${esc(t.title)}</span>`;
+  return `<div class="row ${indent && !showOrigin ? "indent" : ""}" role="link" tabindex="0" data-open="${t.id}" aria-current="${active}">
+    ${showOrigin ? originChip(t) : statusLane(t)}${label}
+    ${showOrigin ? statusLane(t) : ""}
+    <span class="meta mono">${formatAge(t.ageMin)}</span>
+    <button class="icon-btn more ${S.menuFor === t.id && S.overlay === "menu" ? "open" : ""}" data-menu="${t.id}" aria-label="Thread options for ${esc(t.title)}" style="width:24px;height:24px">${ic("more", "sm")}</button>
+  </div>`;
+}
+function projectGroups() {
+  return projects().map(p => {
+    const list = threadsVisible().filter(t => t.projectId === p.id);
+    const open = S.expanded[p.id];
+    return `<div class="grp-head" data-toggle="${p.id}" role="button" tabindex="0" aria-expanded="${open}">
+      <span style="color:var(--muted)">${ic(open ? "down" : "right", "sm")}</span><span class="chip ${p.c}">${p.chip}</span><span class="name fade">${p.name}</span>
+      <span class="acts"><button class="icon-btn" data-newin="${p.id}" aria-label="New thread in ${p.name}" style="width:24px;height:24px">${ic("pen", "sm")}</button><button class="icon-btn" aria-label="Project options" style="width:24px;height:24px">${ic("more", "sm")}</button></span>
+    </div>${open ? (list.length ? list.map(t => rowHtml(t)).join("") : `<div class="empty-line mono">No ${S.scope} threads</div>`) : ""}`;
+  }).join("");
+}
+/*
+  The "No project" group is app-owned, not user-added: a bare icon instead of a project's filled letter chip, and no
+  "…" menu, since it cannot be renamed, opened in Explorer, or deleted. It renders only when it has a thread in scope.
+*/
+function noProjectGroup() {
+  const list = noProjectThreads();
+  if (!list.length) return "";
+  const open = S.expanded.none;
+  return `<div class="grp-head" data-toggle="none" role="button" tabindex="0" aria-expanded="${open}">
+      <span style="color:var(--muted)">${ic(open ? "down" : "right", "sm")}</span><span class="chip plain">${ic("inbox", "sm")}</span><span class="name">No project</span>
+      <span class="acts"><button class="icon-btn" data-act="newnone" aria-label="New thread without a project" style="width:24px;height:24px">${ic("plus", "sm")}</button></span>
+    </div>${open ? list.map(t => rowHtml(t)).join("") : ""}`;
+}
+const skeletonRows = () => `<div class="skel" style="width:70%"></div><div class="skel" style="width:52%"></div><div class="skel" style="width:61%"></div>`;
+
+function renderSidebar() {
+  const viewName = S.view === "threads" ? "Threads" : "Projects";
+  const anyThread = S.threads.some(threadIsVisible);
+  const showScope = anyThread || projects().length > 0;
+  let list;
+  if (S.loading) list = skeletonRows();
+  else if (S.view === "threads") list = byRecency(threadsVisible()).map(t => rowHtml(t, { showOrigin: true })).join("");
+  else list = noProjectGroup() + projectGroups();
+  if (!list && showScope) list = `<div class="empty-line flat mono">No ${S.scope} threads</div>`;
+  const undo = S.undo && !S.loading ? `<div class="undo-line" style="padding-left:8px">Closed “<span class="fade" style="max-width:130px">${esc(S.undo.title)}</span>” <button class="link" data-act="undo">Undo</button></div>` : "";
+  const scope = showScope ? `<div class="seg" role="radiogroup" aria-label="Thread scope"><button role="radio" aria-checked="${S.scope === "open"}" data-scope="open">Open</button><button role="radio" aria-checked="${S.scope === "closed"}" data-scope="closed">Closed</button></div>` : "";
+  return `<aside class="sb" aria-label="Sidebar">
+    <div class="sb-top"><button class="icon-btn" aria-label="Collapse sidebar">${ic("panelLeft")}</button><span class="logo"><span class="mark"></span>Mcode</span><span style="flex:1"></span><button class="icon-btn" aria-label="Back">${ic("back")}</button><button class="icon-btn" aria-label="Forward">${ic("fwd")}</button></div>
+    <div class="sb-search"><button class="search-box" data-act="palette">${ic("search", "sm")}Search</button>
+      <button class="icon-btn" data-act="addproject" aria-label="Add project">${ic("folderPlus")}</button>
+      <button class="icon-btn" data-act="newthread" aria-label="New thread (Ctrl+N)">${ic("pen")}</button></div>
+    <div class="sb-view"><button class="view-btn" data-act="cycleview" aria-label="Sidebar view: ${viewName}. Options: Threads, Projects">${viewName} ${ic("down", "sm")}</button>${scope}</div>
+    <div class="sb-list">${list}${undo}</div>
+    <div class="sb-foot"><button class="icon-btn" aria-label="Settings">${ic("settings")}</button><button class="icon-btn" aria-label="Pull requests">${ic("pr")}</button><button class="icon-btn" aria-label="Notifications">${ic("bell")}</button></div>
+  </aside>`;
+}
+
+function composer({ bottom = false } = {}) {
+  const ready = draft.trim().length > 0;
+  return `<div class="composer-wrap">
+    ${S.err === "create" ? `<div class="alert" role="alert"><span style="color:var(--error)">${ic("alert")}</span><div class="msg"><b>Couldn't start the thread</b><details><summary>Details</summary><span class="mono">EACCES: permission denied, mkdir '${folderPath("n" + S.nextId)}'</span></details></div><button class="btn" data-act="retry">Retry</button></div>` : ""}
+    <div class="composer">
+      <button class="icon-btn" aria-label="Add to composer">${ic("plus")}</button>
+      <textarea rows="1" data-fk="composer" placeholder="${bottom ? "Reply…" : "Do anything"}" aria-label="Message"></textarea>
+      <span class="model"><span style="color:var(--muted)">${ic("spark", "sm")}</span>GPT-5.6 Luna <span class="lvl">· High</span><span class="key">${ic("key", "sm")}</span></span>
+      <button class="send ${ready ? "ready" : ""}" data-act="send" aria-label="Send">${ic("up", "sm")}</button>
+    </div></div>`;
+}
+
+function renderMain() {
+  const t = current();
+  let header, body;
+  if (!t) {
+    const target = S.screen.target;
+    const crumb = target === "none" ? `<span class="chip plain">${ic("inbox", "sm")}</span><span class="muted">No project</span><span class="sep">›</span><span>New thread</span>`
+      : target ? `<span class="chip ${project(target).c}">${project(target).chip}</span><span>${project(target).name}</span><span class="sep">›</span><span>New thread</span>` : `${ic("folder", "sm")}<span>New thread</span>`;
+    header = `<div class="hdr"><span class="crumb">${crumb}</span>${target === "none" ? `<span class="right"><button class="icon-btn ${S.ovOpen ? "on" : ""}" data-act="ov" aria-label="Overview">${ic("panelRight")}</button></span>` : ""}</div>`;
+    body = `<div class="canvas">
+      ${newCanvasHeading(target)}
+      ${composer()}
+      ${S.overlay === "chooser" ? chooserHtml() : ""}
+    </div>`;
+  } else {
+    const crumb = t.projectId === null
+      ? `<span class="chip plain">${ic("inbox", "sm")}</span><span class="muted">No project</span><span class="sep">›</span><span class="fade">${esc(t.title)}</span>`
+      : `<span class="chip ${project(t.projectId).c}">${project(t.projectId).chip}</span><span class="muted">${project(t.projectId).name}</span><span class="sep">›</span><span class="fade">${esc(t.title)}</span>`;
+    header = `<div class="hdr"><span class="crumb">${crumb}</span><span class="right"><button class="icon-btn ${S.ovOpen ? "on" : ""}" data-act="ov" aria-label="Overview">${ic("panelRight")}</button></span></div>`;
+    const tail = t.status === "running" ? `<div class="running-line"><span class="spin"></span>Running</div>`
+      : t.status === "approval" ? `<div class="running-line"><span style="color:var(--primary)">${ic("alert", "sm")}</span>Approval required</div>`
+      : `<div class="footer-line mono">Worked for 9s</div>`;
+    body = `<div class="thread"><div class="col-rail">${t.messages.map(m => m.u
+      ? `<div class="u-msg">${esc(m.u)}</div>`
+      : `<p class="a-prose">${esc(m.a)}</p>${m.tool ? `<div class="tool">${ic("terminal", "sm")}<code class="mono">${esc(m.tool)}</code></div>` : ""}`).join("")}
+      ${tail}
+    </div></div><div class="bottom-composer"><div class="col-rail" style="max-width:760px">${composer({ bottom: true })}</div></div>`;
+  }
+  return `<section class="main" aria-label="Conversation">${header}${body}${S.ovOpen ? overviewHtml(t) : ""}</section>`;
+}
+
+/*
+  The project slot is amber with a dashed underline, which reads as "a project is chosen". "No project" must not reuse
+  that look, so its heading carries no slot: a neutral pill under it opens the same chooser.
+*/
+function newCanvasHeading(target) {
+  if (target === "none")
+    return `<h1 class="q" style="margin-bottom:12px">What should we work on?</h1>
+    <button class="noproj" id="slot" data-act="chooser">${ic("inbox", "sm")}No project${ic("down", "sm")}</button>`;
+  const text = target ? project(target).name : "choose a project";
+  return `<h1 class="q">What should we build in&nbsp;<button class="slot" id="slot" data-act="chooser">${esc(text)}</button>?</h1>`;
+}
+
+/*
+  The folder exists only once the thread does, so on the new-thread canvas "No project" shows no folder and
+  offers no new Terminal or Browser tab (both would open in it).
+*/
+function overviewHtml(t) {
+  const terminalsAndBrowser = (canAdd = true) => `<div class="ov-sec"><div class="ov-row">${ic("terminal", "sm ico")}<span class="k">Terminals</span><span class="v" style="color:var(--muted)">None</span>${canAdd ? `<button class="add" aria-label="New terminal">${ic("plus", "sm")}</button>` : ""}</div>
+      <div class="ov-row">${ic("globe", "sm ico")}<span class="k">Browser</span><span class="v" style="color:var(--muted)">No tabs</span>${canAdd ? `<button class="add" aria-label="New tab">${ic("plus", "sm")}</button>` : ""}</div></div>`;
+  if (!t) return `<div class="ov" role="dialog" aria-label="Overview">${terminalsAndBrowser(false)}</div>`;
+  if (t.projectId === null) return `<div class="ov" role="dialog" aria-label="Overview">
+    <div class="ov-sec"><div class="ov-row">${ic("folder", "sm ico")}<span class="k">Folder</span><span class="v mono fade">${threadFolder(t)}</span><button class="link" style="font-size:12px">Open</button></div></div>
+    ${terminalsAndBrowser()}
+    <div class="ov-sec"><div class="ov-row">${ic("gauge", "sm ico")}<span class="k">Usage</span><span class="v mono">12.4k tokens</span></div></div>
+  </div>`;
+  const p = project(t.projectId);
+  return `<div class="ov" role="dialog" aria-label="Overview">
+    <div class="ov-sec"><div class="ov-row">${ic("spark", "sm ico")}<span class="k">Actions</span><span class="v">Run dev · Test</span></div></div>
+    <div class="ov-sec"><div class="ov-row">${ic("laptop", "sm ico")}<span class="k">Local</span><span class="v fade">${p.name}</span></div>
+      <div class="ov-row">${ic("branch", "sm ico")}<span class="k">Branch</span><span class="v mono fade">${t.branch}</span></div>
+      <div class="ov-row">${ic("pr", "sm ico")}<span class="k">Pull request</span><span class="v" style="color:var(--muted)">None</span><button class="link" style="font-size:12px">Create</button></div></div>
+    <div class="ov-sec"><div class="ov-row">${ic("diff", "sm ico")}<span class="k">Changes</span><span class="v mono"><span class="plus-add">+42</span> <span class="minus-del">−7</span> · 3 files</span></div></div>
+    ${terminalsAndBrowser()}
+    <div class="ov-sec"><div class="ov-row">${ic("gauge", "sm ico")}<span class="k">Usage</span><span class="v mono">31.0k tokens</span></div></div>
+  </div>`;
+}
+
+/*
+  "No project" leads an empty search. Once the user types, it appears only while the text is the start of "no project"
+  ("no p"), and after the matching projects, so a search for "protocol" never lands on it.
+*/
+function chooserRows() {
+  const q = S.query.trim().toLowerCase();
+  const matches = projects().filter(p => p.name.includes(q)).map(p => ({ id: p.id, p }));
+  const none = { id: "none" };
+  if (!q) return [none, ...matches];
+  return "no project".startsWith(q) ? [...matches, none] : matches;
+}
+function chooserHtml() {
+  const rows = chooserRows();
+  const target = S.screen.target;
+  const check = id => (target === id ? ic("check", "sm") : "");
+  return `<div class="pop" id="chooser" data-stop style="width:300px" role="dialog" aria-label="Choose project">
+    <div class="search">${ic("search", "sm")}<input data-fk="chooser" data-q placeholder="Search projects" value="${esc(S.query)}" /></div>
+    ${rows.map((r, i) => `<button class="mi ${i === 0 ? "kb" : ""}" data-pick="${r.id}">${r.p ? `<span class="chip ${r.p.c}">${r.p.chip}</span><span class="lab">${r.p.name}</span>` : `<span class="chip plain">${ic("inbox", "sm")}</span><span class="lab">No project</span>`}${check(r.id)}</button>${i === 0 && r.id === "none" && rows.length > 1 ? '<div class="mdiv"></div>' : ""}`).join("")}
+    ${rows.length ? '<div class="mdiv"></div>' : ""}<button class="mi" data-act="addproject">${ic("plus", "sm ico")}<span class="lab">Add project</span><span class="hint">Folder ›</span></button>
+  </div>`;
+}
+
+function overlayHtml() {
+  if (S.overlay === "menu") {
+    const t = S.threads.find(x => x.id === S.menuFor); if (!t) return "";
+    const { x, y } = S.menuXY ?? { x: 240, y: 300 };
+    const reason = closeBlockReason(t);
+    const closeItem = t.closed
+      ? `<button class="mi" role="menuitem" data-act="restore">${ic("restore", "sm ico")}<span class="lab">Restore thread</span></button>`
+      : reason
+        ? `<button class="mi" role="menuitem" aria-disabled="true">${ic("x", "sm ico")}<span class="lab">Close thread</span><span class="hint">${reason}</span></button>`
+        : `<button class="mi" role="menuitem" data-act="close">${ic("x", "sm ico")}<span class="lab">Close thread</span></button>`;
+    return `<div class="pop" data-stop role="menu" aria-label="Thread options" style="left:${x}px;top:${y}px;width:236px">
+      <button class="mi" role="menuitem" data-act="rename">${ic("rename", "sm ico")}<span class="lab">Rename thread</span></button>
+      <button class="mi" role="menuitem">${ic("copy", "sm ico")}<span class="lab">Copy</span><span class="hint">Path, ID ›</span></button>
+      ${t.projectId ? `<button class="mi" role="menuitem">${ic("branch", "sm ico")}<span class="lab">Branch</span><span class="hint mono">${t.branch}</span></button><button class="mi" role="menuitem">${ic("settings", "sm ico")}<span class="lab">Project settings</span></button>` : ""}
+      <div class="mdiv"></div>
+      ${closeItem}
+      <button class="mi danger" role="menuitem" data-act="askdelete">${ic("trash", "sm ico")}<span class="lab">Delete thread</span></button>
+    </div>`;
+  }
+  if (S.overlay === "delete") {
+    const t = S.threads.find(x => x.id === S.menuFor); if (!t) return "";
+    const noProject = t.projectId === null;
+    const sharer = noProject ? folderSharer(t) : null;
+    const copy = !noProject ? "Deletes the thread."
+      : sharer ? `Deletes the thread. The folder stays while “${esc(sharer.title)}” uses it.`
+      : "Deletes the thread, its folder, and any files the agent wrote there.";
+    return `<div class="scrim" data-act="dismiss"><div class="dialog" role="alertdialog" aria-labelledby="dh" data-stop>
+      <h4 id="dh">Delete “${esc(t.title)}”?</h4>
+      <p>${copy}</p>
+      ${noProject ? `<div class="path mono">${threadFolder(t)}</div>` : ""}
+      <div class="acts"><button class="btn ghost" data-act="dismiss">Cancel</button><button class="btn danger" data-act="delete">${noProject && !sharer ? "Delete thread and folder" : "Delete thread"}</button></div>
+    </div></div>`;
+  }
+  if (S.overlay === "palette") {
+    const q = S.query.toLowerCase();
+    const cmds = [{ id: "newnone", label: "New thread without a project", icon: "inbox", isNew: true }, { id: "newthread", label: "New thread", key: "Ctrl N", icon: "pen" }]
+      .filter(c => !q || c.label.toLowerCase().includes(q));
+    const recents = byRecency(S.threads.filter(t => !t.closed && threadIsVisible(t))).filter(t => !q || t.title.toLowerCase().includes(q));
+    return `<div class="scrim" data-act="dismiss"><div class="palette" data-stop role="dialog" aria-label="Command palette">
+      <div class="in">${ic("search")}<input data-fk="palette" data-pq placeholder="Search threads, projects, branches, worktrees…" value="${esc(S.query)}" /></div>
+      <div class="body">
+        ${cmds.length ? `<div class="gh">Commands</div>${cmds.map(c => `<button class="mi" data-cmd="${c.id}">${ic(c.icon, "sm ico")}<span class="lab">${c.label} ${c.isNew ? pill("new", "New") : ""}</span><span class="hint mono">${c.key ?? ""}</span></button>`).join("")}` : ""}
+        ${recents.length ? `<div class="gh">${q ? "Matches" : "Recent"}</div>${recents.map(t => `<button class="mi" data-open="${t.id}">${originChip(t)}<span class="lab fade">${esc(t.title)}</span><span class="hint">${t.projectId ? project(t.projectId).name : "No project"}</span></button>`).join("")}` : ""}
+        ${!cmds.length && !recents.length ? `<div style="padding:20px;text-align:center;color:var(--muted)">No matches</div>` : ""}
+      </div>
+      <div class="foot"><span><kbd>↑</kbd> <kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Select</span><span><kbd>Esc</kbd> Close</span></div>
+    </div></div>`;
+  }
+  return "";
+}
+
+/* ============================== Sim bar ============================== */
+function renderBar() {
+  const tog = (k, label) => `<button class="opt" aria-pressed="${S[k]}" data-flip="${k}">${label}</button>`;
+  const t = current();
+  const where = t ? `thread:${t.id}` : `new:${S.screen.target ?? "unchosen"}`;
+  return `<div class="proto-bar" role="toolbar" aria-label="Sim">
+    <span class="grp"><span class="lbl">Sim</span>${tog("hasProjects", "Has projects")}${tog("failNext", "Fail next create")}${tog("loading", "Loading")}<button class="opt" aria-pressed="${t?.status === "running"}" data-act="togglerun" ${t ? "" : "disabled"}>Open thread running</button></span>
+    <span class="sep"></span>
+    <span class="state">${where} · view:${S.view} · no-project:${S.threads.filter(x => !x.projectId && !x.closed).length}</span>
+  </div>`;
+}
+
+/* ============================== Actions ============================== */
+function createNoProjectThread(text) {
+  if (S.failNext) { set({ err: "create" }); return; }
+  const id = "n" + S.nextId;
+  const title = text.length > 48 ? text.slice(0, 46).trimEnd() : text;
+  const t = { id, projectId: null, title, status: "running", closed: false, ageMin: 0, messages: [{ u: text }] };
+  draft = "";
+  set({ threads: [t, ...S.threads], nextId: S.nextId + 1, screen: { kind: "thread", id }, err: null, overlay: null, scope: "open", undo: null, ovOpen: false, expanded: { ...S.expanded, none: true } });
+  setTimeout(() => {
+    const th = S.threads.find(x => x.id === id); if (!th) return;
+    th.messages.push({ a: "Here's a first pass.", tool: "Wrote scratch.md" });
+    th.status = (S.screen.kind === "thread" && S.screen.id === id) ? "idle" : "finished";
+    render();
+  }, 1600);
+}
+function createProjectThread(pid, text) {
+  const id = "t" + S.nextId;
+  const t = { id, projectId: pid, title: text.slice(0, 46), status: "running", closed: false, ageMin: 0, branch: "mcode/new-thread", messages: [{ u: text }] };
+  draft = ""; S.expanded[pid] = true;
+  set({ threads: [t, ...S.threads], nextId: S.nextId + 1, screen: { kind: "thread", id }, overlay: null });
+  setTimeout(() => { const th = S.threads.find(x => x.id === id); if (!th) return; th.messages.push({ a: "Started on a new worktree branch." }); th.status = "idle"; render(); }, 1400);
+}
+function send() {
+  const text = draft.trim(); if (!text) return;
+  const t = current();
+  if (t) { t.messages.push({ u: text }); t.status = "running"; draft = ""; render(); setTimeout(() => { t.messages.push({ a: "Done." }); t.status = "idle"; render(); }, 1200); return; }
+  const target = S.screen.target;
+  if (target === "none") return createNoProjectThread(text);
+  if (target) return createProjectThread(target, text);
+  set({ overlay: "chooser", query: "" });
+}
+function newNone() { set({ tab: "app", screen: { kind: "new", target: "none" }, overlay: null, err: null, ovOpen: false }); document.querySelector('[data-fk="composer"]')?.focus(); }
+function addProject() {
+  const added = S.added.some(p => p.id === ADDED_PROJECT.id) ? S.added : [...S.added, ADDED_PROJECT];
+  set({ tab: "app", added, expanded: { ...S.expanded, [ADDED_PROJECT.id]: true }, screen: { kind: "new", target: ADDED_PROJECT.id }, overlay: null, query: "", err: null });
+  document.querySelector('[data-fk="composer"]')?.focus();
+}
+function pickTarget(id) { set({ screen: { kind: "new", target: id }, overlay: null, query: "" }); }
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-tab],[data-act],[data-goto],[data-flip],[data-open],[data-menu],[data-toggle],[data-scope],[data-pick],[data-cmd],[data-newin],[data-stop]");
+  if (!el) { if (S.overlay === "menu" || S.overlay === "chooser") set({ overlay: null, menuFor: null }); if (S.renaming) set({ renaming: null }); return; }
+  const d = el.dataset;
+  if (d.stop !== undefined && !d.act) return;
+  if (d.tab) return set({ tab: d.tab });
+  if (d.goto) { e.preventDefault(); return goto(d.goto); }
+  if (d.flip) { const patch = { [d.flip]: !S[d.flip] }; if (d.flip === "hasProjects" && S.hasProjects) patch.screen = { kind: "new", target: "none" }; return set(patch); }
+  if (d.menu) { e.stopPropagation(); const r = el.closest(".row").getBoundingClientRect(); const app = document.getElementById("app").getBoundingClientRect(); return set({ overlay: S.overlay === "menu" && S.menuFor === d.menu ? null : "menu", menuFor: d.menu, menuXY: { x: r.right - app.left - 24, y: r.top - app.top } }); }
+  if (d.open) return set({ screen: { kind: "thread", id: d.open }, overlay: null, query: "", err: null, ovOpen: false });
+  if (d.toggle) return set({ expanded: { ...S.expanded, [d.toggle]: !S.expanded[d.toggle] } });
+  if (d.scope) return set({ scope: d.scope, undo: null });
+  if (d.newin) { e.stopPropagation(); return set({ screen: { kind: "new", target: d.newin }, overlay: null }); }
+  if (d.pick) return pickTarget(d.pick);
+  if (d.cmd) return d.cmd === "newnone" ? newNone() : set({ screen: freshCanvas(), overlay: null, query: "" });
+  const t = S.threads.find(x => x.id === S.menuFor);
+  switch (d.act) {
+    case "theme": return set({ theme: S.theme === "dark" ? "light" : "dark" });
+    case "reset": draft = ""; return set({ ...initial(), tab: S.tab, theme: S.theme });
+    case "palette": return set({ overlay: "palette", query: "" });
+    case "newnone": return newNone();
+    case "addproject": return addProject();
+    case "newthread": return set({ screen: freshCanvas(), overlay: null, err: null });
+    case "chooser": e.stopPropagation(); return set({ overlay: S.overlay === "chooser" ? null : "chooser", query: "" });
+    case "cycleview": return set({ view: S.view === "threads" ? "projects" : "threads" });
+    case "send": return send();
+    case "retry": S.failNext = false; return send();
+    case "ov": return set({ ovOpen: !S.ovOpen });
+    case "togglerun": { const open = current(); if (!open) return; open.status = open.status === "running" ? "idle" : "running"; return render(); }
+    case "close": if (closeBlockReason(t)) return; t.closed = true; t.status = "idle"; return set({ overlay: null, undo: { id: t.id, title: t.title }, screen: S.screen.id === t.id ? freshCanvas() : S.screen });
+    case "undo": { const u = S.threads.find(x => x.id === S.undo.id); u.closed = false; return set({ undo: null }); }
+    case "restore": t.closed = false; return set({ overlay: null, scope: "open", screen: { kind: "thread", id: t.id } });
+    case "rename": return set({ overlay: null, renaming: t.id });
+    case "askdelete": return set({ overlay: "delete" });
+    case "delete": return set({ threads: S.threads.filter(x => x.id !== t.id), overlay: null, menuFor: null, screen: S.screen.id === t.id ? freshCanvas() : S.screen });
+    case "dismiss": if (e.target.closest("[data-stop]") && !el.matches("button")) return; return set({ overlay: null });
+  }
+});
+document.addEventListener("input", e => {
+  if (e.target.dataset.fk === "composer") { draft = e.target.value; autosize(e.target); e.target.closest(".composer").querySelector(".send").classList.toggle("ready", !!draft.trim()); }
+  if (e.target.dataset.pq !== undefined || e.target.dataset.q !== undefined) set({ query: e.target.value });
+});
+document.addEventListener("keydown", e => {
+  const typing = e.target.matches("input, textarea");
+  if (e.target.dataset.fk === "composer" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); return send(); }
+  if (e.target.dataset.fk === "chooser" && e.key === "Enter") { e.preventDefault(); const first = chooserRows()[0]; if (first) pickTarget(first.id); return; }
+  if (e.target.dataset.rename && (e.key === "Enter" || e.key === "Escape")) {
+    if (e.key === "Enter") S.threads.find(x => x.id === e.target.dataset.rename).title = e.target.value.trim() || "Untitled thread";
+    return set({ renaming: null });
+  }
+  if (e.key === "Escape" && S.overlay) return set({ overlay: null, query: "" });
+  if (e.key === "Escape" && S.ovOpen) return set({ ovOpen: false });
+  if (S.tab !== "app") return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); return set({ overlay: "palette", query: "" }); }
+  if (e.key === "Enter" && S.overlay === "palette") { const first = document.querySelector(".palette .mi"); first?.click(); return; }
+  if (!typing && e.key === "Enter" && e.target.dataset.open) return set({ screen: { kind: "thread", id: e.target.dataset.open }, overlay: null });
+});
+
+render();
+</script>
+</body>
+</html>
