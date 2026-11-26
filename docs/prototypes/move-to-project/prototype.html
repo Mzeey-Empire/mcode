@@ -170,7 +170,6 @@
   .slot:hover { border-bottom-style: solid; }
   .slot[disabled] { opacity: .5; cursor: default; }
   /* NewThreadTargetRail: a tray with ghost compact triggers, Workspace on the left and the branch on the right. */
-  .target { display: grid; gap: 6px; }
   .rail { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 3px 6px; border-radius: 12px; background: var(--panel); }
   [data-theme="light"] .rail { background: var(--page); }
   .rail .end { margin-left: auto; min-width: 0; display: flex; }
@@ -192,16 +191,15 @@
   .text-in, .path-row .path-v { height: 34px; padding: 0 10px; border-radius: 8px; background: var(--field); border: 1px solid var(--control-border); color: var(--ink); }
   .text-in:hover { border-color: var(--muted); }
   /* Inline code sits at the size and weight of the sentence around it. */
-  .result .mono, .notice .mono, .mi .mono { font-size: 12px; font-weight: 400; }
+  .notice .mono, .mi .mono { font-size: 12px; font-weight: 400; }
   .text-in { width: 100%; outline: 0; font: inherit; }
   .text-in:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   .path-row { display: flex; align-items: center; gap: 8px; }
   .path-row .btn { height: 34px; }
   .path-row .path-v { flex: 1; min-width: 0; display: flex; align-items: center; font-size: 12px; }
   [aria-invalid="true"]:is(.text-in, .path-v) { border-color: var(--error); }
-  .result { font-size: 12px; color: var(--muted); }
-  .result :is(.mono, .when) { color: var(--ink); }
-  .target .result + .result { margin-top: -4px; }
+  .move .foot .files-note { margin-right: auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }
+  .move .foot .files-note b { color: var(--ink); font-weight: 500; }
   .check { display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; }
   .check .box { width: 16px; height: 16px; border-radius: 5px; border: 1px solid var(--control-border); background: var(--field); display: grid; place-items: center; flex-shrink: 0; }
   .check[aria-checked="true"] .box { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
@@ -693,17 +691,14 @@ const threadList = ts => `<ul>${ts.map(o => `<li><span class="fade">${esc(o.titl
 function targetRail(mv, p) {
   const tt = (picker, icon, label, mono = true) => `<button class="tt" data-mvpicker="${picker}" aria-haspopup="listbox">${ic(icon, "sm")}<span class="${mono ? "mono" : ""} fade">${label}</span>${ic("down", "sm chev")}</button>`;
   const fixed = (icon, label, mono = true) => `<span class="tt static">${ic(icon, "sm")}<span class="${mono ? "mono" : ""}">${label}</span></span>`;
-  if (!p.git) return `<div class="target"><div class="rail">${fixed("laptop", "Local", false)}</div>
-    <span class="result">${esc(p.name)} is not a git repo, so the thread runs in <span class="mono">${esc(p.path)}</span></span>${filesLine(S.threads.find(x => x.id === mv.tid))}</div>`;
+  if (!p.git) return `<div class="rail">${fixed("laptop", "Local", false)}</div>`;
   const base = mv.base ?? p.branch, pr = mv.pr && p.prs.find(x => x.n === mv.pr);
-  const t = S.threads.find(x => x.id === mv.tid), slug = suggestedName(t);
-  /* Local runs in the project's own checkout, so its branch is shown, not switched. */
-  const [end, result] = mv.mode === "local" ? [fixed("branch", `On ${esc(p.branch)}`), `Runs in <span class="mono">${esc(p.path)}</span>`]
-    : mv.mode === "newwt" ? [tt("branch", pr ? "pr" : "branch", pr ? `From #${pr.n}` : `From ${esc(mv.origin ? `origin/${base}` : base)}`),
-      pr ? `Checks out <span class="mono">${esc(pr.head)}</span> in a new worktree` : `New branch <span class="mono">mcode/${esc(slug)}</span> in a new worktree`]
-    : [tt("worktree", "fork", mv.wt ? `On ${esc(mv.wt.branch)}` : "Choose a worktree", !!mv.wt), mv.wt ? `Runs in <span class="mono">${esc(mv.wt.path)}</span>` : ""];
-  return `<div class="target"><div class="rail">${tt("runs", MODE_ICON[mv.mode], MODE_LABEL[mv.mode], false)}<span class="end">${end}</span></div>
-    ${result ? `<span class="result">${result}</span>` : ""}${filesLine(t)}</div>`;
+  /* As in the composer, the rail says it all: no path line under it. Local runs in the project's own checkout, so its
+     branch is shown, not switched. */
+  const end = mv.mode === "local" ? fixed("branch", `On ${esc(p.branch)}`)
+    : mv.mode === "newwt" ? tt("branch", pr ? "pr" : "branch", pr ? `From #${pr.n}` : `From ${esc(mv.origin ? `origin/${base}` : base)}`)
+    : tt("worktree", "fork", mv.wt ? `On ${esc(mv.wt.branch)}` : "Choose a worktree", !!mv.wt);
+  return `<div class="rail">${tt("runs", MODE_ICON[mv.mode], MODE_LABEL[mv.mode], false)}<span class="end">${end}</span></div>`;
 }
 /* The app's names-only Workspace menu: Local carries the project folder, as it does when starting a thread. */
 function runsPicker(mv, p) {
@@ -728,13 +723,13 @@ function branchPicker(mv, p) {
     ${onPrs ? "" : `<button class="switch-row" role="switch" aria-checked="${mv.origin}" data-mvflip="origin"><span>Start from origin</span><span class="switch"><span class="knob"></span></span></button>`}
   </div>`;
 }
-/* The user only needs to know the old files will be deleted, and when, so it is one quiet line under where the thread
-   runs. Keeping them is the chooser's "New project from this folder" row, which says so. While another thread still
-   uses the folder there is no date yet: Mcode deletes it 7 days after the last one leaves. */
-function filesLine(t) {
-  if (!folderFiles(t).length) return "";
-  const when = sharersOf(t).length > 1 ? "once no thread uses it" : `on <span class="when">${DEADLINE}</span>`;
-  return `<span class="result">Files in the old folder are deleted ${when}</span>`;
+/* The user only needs to know the old files will be deleted, and when, so it sits beside the button that causes it.
+   Keeping them is the chooser's "New project from this folder" row, which says so. While another thread still uses
+   the folder there is no date yet: Mcode deletes it 7 days after the last one leaves. */
+function filesNote(mv, t) {
+  if (mv.dest !== "existing" || !mv.pid || !folderFiles(t).length) return "";
+  const when = sharersOf(t).length > 1 ? "once unused" : `<b>${DEADLINE}</b>`;
+  return `<span class="files-note">${ic("trash", "sm")}<span>Old files deleted ${when}</span></span>`;
 }
 /* A new project takes the whole folder, so every thread working in it comes along. A busy one has its own notice. */
 function sharersNotice(mv, t, busy) {
@@ -770,11 +765,10 @@ function moveDialogHtml() {
   else {
     const err = nameError(mv);
     const shownErr = err && !err.silent ? err : null;
-    const target = joinPath(mv.parent, mv.name.trim() || "…");
     form = `<div class="field"><label class="lab" for="mvname">Name</label><input id="mvname" class="text-in" data-fk="mvname" data-mvname value="${esc(mv.name)}" placeholder="Project name" ${shownErr ? 'aria-invalid="true" aria-describedby="mvname-err"' : ""} spellcheck="false" />
         ${shownErr ? `<span class="err" id="mvname-err">${ic("alert", "sm")}${esc(shownErr.msg)}</span>` : ""}</div>
       <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade" ${cross && failed ? 'aria-invalid="true"' : ""}>${esc(mv.parent)}</span><button class="btn outline" data-mvpicker="browse">${ic("folder")}Browse…</button></div>
-        ${shownErr ? "" : `<span class="result">Moves the folder and its files to <span class="mono">${esc(target)}</span></span>`}</div>
+</div>
       ${cross && failed ? outcome : ""}
       <button class="check" role="checkbox" aria-checked="${mv.git}" data-mvflip="git"><span class="box">${mv.git ? ic("check", "sm") : ""}</span><span>Start a git repo</span></button>`;
   }
@@ -812,7 +806,7 @@ function moveDialogHtml() {
     <div class="head"><span class="what">${ic("inbox", "sm")}<span class="fade">${esc(t.title)}</span></span><h4 id="mvh">Move to ${slotHtml(mv, locked)}</h4></div>
     <button class="x" ${locked ? "disabled" : 'data-act="mvcancel"'} aria-label="Close">${ic("x", "sm")}</button>
     <fieldset class="body" ${locked ? "disabled" : ""}>${form}${busyBox}${cross ? "" : outcome}${sharersNotice(mv, t, block?.busy)}</fieldset>
-    <div class="foot">
+    <div class="foot">${filesNote(mv, t)}
       <button class="btn outline" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
       <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ic(primaryIcon)}${primaryLabel}</button></div>
     ${picker}

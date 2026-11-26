@@ -23,14 +23,14 @@ const FLOWS = [
     ["Header title menu", "Move to project… under Rename thread.", "headerMenu"],
     ["Move dialog", "\"Move to choose a project\": click the slot.", "moveA"],
     ["Project chooser", "Search, project names, and New project from this folder.", "moveAPicker"],
-    ["Pick billing-api", "Runs Local, on main. Nothing else to decide.", "moveAPicked"],
+    ["Pick billing-api", "Local, on main. Nothing else to decide.", "moveAPicked"],
     ["Moved", "Row under billing-api, marker in the timeline.", "afterA"] ] },
   { name: "Drag onto a project", steps: [
     ["Drag the row", "Projects view: drop it on billing-api.", "dragOver"],
     ["Move dialog", "Opens with billing-api picked. Nothing moves until you confirm.", "moveAPicked"],
     ["Moved", "Row under billing-api.", "afterA"] ] },
   { name: "A thread with files, alone in its folder", steps: [
-    ["Move dialog", "A line under the target row: the old files are deleted on 3 Dec.", "moveAFilesAlone"],
+    ["Move dialog", "Beside Move thread: old files deleted 3 Dec.", "moveAFilesAlone"],
     ["Moved", "The marker keeps the old folder and its deadline.", "afterAFilesAlone"],
     ["After 7 days", "Folder removed; the marker says so.", "afterExpired"] ] },
   { name: "A thread whose fork still uses the folder", steps: [
