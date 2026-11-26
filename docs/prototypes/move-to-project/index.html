@@ -266,6 +266,7 @@
   .text-in { width: 100%; outline: 0; font: inherit; }
   .text-in:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   .path-row { display: flex; align-items: center; gap: 8px; }
+  .path-row .btn { height: 34px; }
   .path-row .path-v { flex: 1; min-width: 0; display: flex; align-items: center; font-size: 12px; }
   [aria-invalid="true"]:is(.text-in, .trigger, .path-v) { border-color: var(--error); }
   .result { font-size: 12px; color: var(--muted); }
@@ -313,7 +314,9 @@
   .ev-card .top { display: flex; align-items: center; gap: 8px; }
   .ev-card .top .grow { flex: 1; min-width: 0; }
   .ev-card .muted { color: var(--muted); }
-  .ev-card details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .ev-card details summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; display: flex; align-items: center; gap: 4px; }
+  .ev-card details summary::-webkit-details-marker { display: none; }
+  .ev-card details[open] > summary > .i { transform: rotate(90deg); }
   .ev-card .ev-files { color: var(--ink); font-size: 12px; }
   .ev-card blockquote { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--background); font-size: 12px; white-space: pre-wrap; }
   .path-line { display: block; margin: 4px 0; }
@@ -380,6 +383,7 @@ Object.assign(P, {
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   warning: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
   upChev: '<path d="m18 15-6-6-6 6"/>',
+  fork: '<circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/>',
 });
 
 /* ============================== Data ============================== */
@@ -461,7 +465,7 @@ const busyHint = (t, busy) => {
 };
 /* Several threads can share a folder, so the menu names the one that blocks the move. */
 const busyLine = (t, busy) => {
-  const state = busy.status === "running" ? "is running" : "needs approval";
+  const state = busy.status === "running" ? "is&nbsp;running" : "needs&nbsp;approval";
   return busy.id === t.id ? `This thread ${state}` : `“${esc(busy.title)}” ${state}`;
 };
 /* "2026-11-26-sqlite-wal-vs-rollback-7f3a" -> "sqlite-wal-vs-rollback": a project name has no use for the date or the id. */
@@ -495,7 +499,11 @@ function placePicker(stage) {
   const pop = stage.querySelector(".pop.in-dialog"), trigger = stage.querySelector(`[data-mvpicker="${S.mv.picker}"]`);
   if (!pop || !trigger) return;
   const box = pop.offsetParent.getBoundingClientRect(), r = trigger.getBoundingClientRect();
-  pop.style.top = `${r.bottom - box.top + 4}px`;
+  const foot = pop.offsetParent.querySelector(".foot")?.getBoundingClientRect();
+  /* A menu that would end part-way over the footer buttons opens above its trigger instead, when there is room. */
+  const below = r.bottom + 4, above = r.top - 4 - pop.offsetHeight;
+  const flip = foot && below + pop.offsetHeight > foot.top && above >= box.top + 8;
+  pop.style.top = `${(flip ? above : below) - box.top}px`;
 }
 function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; }
 
@@ -631,7 +639,7 @@ function goto(key) {
     moveBShared: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new" }) })),
     moveExistingWt: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "existingwt", base: "main" }) })),
     moveNonGit: () => set(at("n2", { overlay: "move", mv: newMv("n2", { pid: "docs" }) })),
-    moveB: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new" }) })),
+    moveB: () => set(at("n2", { overlay: "move", mv: newMv("n2", { dest: "new" }) })),
     moveBGit: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new", git: true }) })),
     moveBCollide: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new", name: "mcode" }) })),
     moveBusy: () => { S.threads.find(t => t.id === "f1").status = "running"; set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main" }) })); },
@@ -752,8 +760,8 @@ function moveMarker(ev) {
     <div class="top">${ic(gone ? "trash" : "clock", "sm")}<span class="grow">${gone
       ? `Mcode deleted the old folder on ${DEADLINE}.`
       : `${plural(ev.files.length, "earlier file stays", "earlier files stay")} in the old folder. Mcode deletes it on ${DEADLINE}.`}</span>${gone ? "" : `<button class="link" data-copy="${esc(ev.oldFolder)}">Copy path</button>`}</div>
-    ${gone ? `<div class="muted">Files in the old folder</div>` : ""}<div class="ev-files mono">${esc(ev.files.join("  ·  "))}</div>
-    ${gone && !ev.sent ? "" : `<details><summary>What the agent is told ${state}</summary><blockquote>${handoffNote(ev)}</blockquote></details>`}
+    ${gone ? `<div class="muted">Files that were in the old folder</div>` : ""}<div class="ev-files mono">${esc(ev.files.join("  ·  "))}</div>
+    ${gone && !ev.sent ? "" : `<details><summary>${ic("right", "sm")}What the agent is told ${state}</summary><blockquote>${handoffNote(ev)}</blockquote></details>`}
   </div></div>`;
 }
 function moveEventOf(t) { return t.messages.map(m => m.ev).filter(Boolean).at(-1); }
@@ -844,19 +852,21 @@ function notice({ tone, title, detail = "", more = "", openKey = "" }) {
 const threadList = ts => `<ul>${ts.map(o => `<li><span class="fade">${esc(o.title)}</span>${o.closed ? `<span class="k">Closed</span>` : ""}${busyReason(o) ? statusLane(o) : ""}</li>`).join("")}</ul>`;
 /* Runs in is one dropdown, as in the new-thread target; New worktree and Existing worktree each add the one field they need. */
 function runsIn(mv, p) {
-  if (!p.git) return `<div class="field"><span class="lab">Runs in</span><button class="trigger" aria-disabled="true">${ic("laptop", "sm")}<span class="lab">Local</span><span class="hint">Not a git repo</span></button></div>`;
-  const icon = mv.mode === "local" ? "laptop" : "tree";
+  /* The reason sits outside the dimmed control so it stays readable. */
+  if (!p.git) return `<div class="field"><span class="lab">Runs in</span><button class="trigger" aria-disabled="true" aria-describedby="runs-why">${ic("laptop", "sm")}<span class="lab">Local</span></button><span class="help" id="runs-why">${esc(p.name)} is not a git repo, so it runs Local.</span></div>`;
+  const icon = { local: "laptop", newwt: "tree", existingwt: "fork" }[mv.mode];
   const runs = `<div class="field"><span class="lab">Runs in</span><button class="trigger" data-mvpicker="runs" aria-haspopup="listbox">${ic(icon, "sm")}<span class="lab">${MODE_LABEL[mv.mode]}</span>${mv.mode === "local" ? `<span class="hint mono">${esc(p.branch)}</span>` : ""}${ic("down", "sm")}</button></div>`;
   const base = mv.base ?? p.branch;
-  if (mv.mode === "newwt") return runs + `<div class="field"><span class="lab">From</span><button class="trigger" data-mvpicker="branch" aria-haspopup="listbox">${ic("branch", "sm")}<span class="lab mono">${esc(mv.origin ? `origin/${base}` : base)}</span>${ic("down", "sm")}</button></div>`;
-  if (mv.mode === "existingwt") return runs + `<div class="field"><span class="lab">Worktree</span><button class="trigger" data-mvpicker="worktree" aria-haspopup="listbox">${ic("tree", "sm")}${mv.wt ? `<span class="lab mono fade">${esc(mv.wt.path)}</span><span class="hint mono">${esc(mv.wt.branch)}</span>` : `<span class="lab ph">Choose a worktree</span>`}${ic("down", "sm")}</button></div>`;
+  if (mv.mode === "newwt") return runs + `<div class="field"><span class="lab">From</span><button class="trigger" data-mvpicker="branch" aria-haspopup="listbox">${ic("branch", "sm")}<span class="lab mono">${esc(mv.origin ? `origin/${base}` : base)}</span>${ic("down", "sm")}</button>
+    <span class="result">New branch <span class="mono">mcode/${esc(suggestedName(S.threads.find(x => x.id === mv.tid)))}</span></span></div>`;
+  if (mv.mode === "existingwt") return runs + `<div class="field"><span class="lab">Worktree</span><button class="trigger" data-mvpicker="worktree" aria-haspopup="listbox">${ic("fork", "sm")}${mv.wt ? `<span class="lab mono fade">${esc(mv.wt.path)}</span><span class="hint mono">${esc(mv.wt.branch)}</span>` : `<span class="lab ph">Choose a worktree</span>`}${ic("down", "sm")}</button></div>`;
   return runs;
 }
 function runsPicker(mv, p) {
   const opts = [
     ["local", "laptop", `In <span class="mono">${esc(p.path)}</span> on <span class="mono">${esc(p.branch)}</span>, next to your own changes`],
     ["newwt", "tree", "A separate checkout on a new branch"],
-    ["existingwt", "tree", p.worktrees.length ? "A checkout you already have" : `${esc(p.name)} has no other worktrees`],
+    ["existingwt", "fork", p.worktrees.length ? "A checkout you already have" : `${esc(p.name)} has no other worktrees`],
   ];
   return listPicker("Runs in", opts.map(([m, icon, sub]) => {
     const off = m === "existingwt" && !p.worktrees.length;
@@ -865,18 +875,21 @@ function runsPicker(mv, p) {
 }
 /* As in the new-thread branch picker, Start from origin is a switch in the picker's footer and keeps the picker open. */
 function branchPicker(mv, p) {
-  const base = mv.base ?? p.branch;
-  return listPicker("Branches", p.branches.map(b => `<button class="mi" role="option" aria-selected="${base === b}" data-mvbase="${esc(b)}">${ic("branch", "sm ico")}<span class="lab mono">${esc(b)}</span>${base === b ? ic("check", "sm") : ""}</button>`).join("")
+  const base = mv.base ?? p.branch, q = mv.pq.trim().toLowerCase();
+  const rows = p.branches.filter(b => b.includes(q));
+  const row = b => `<button class="mi ${b === p.branch ? "two" : ""}" role="option" aria-selected="${base === b}" data-mvbase="${esc(b)}">${ic("branch", "sm ico")}<span class="lab"><span class="mono">${esc(b)}</span>${b === p.branch ? `<span class="sub">Checked out in <span class="mono">${esc(p.path)}</span></span>` : ""}</span>${base === b ? ic("check", "sm") : ""}</button>`;
+  return listPicker("Branches", `<div class="search">${ic("search", "sm")}<input data-fk="mvq" data-mvq placeholder="Search branches" value="${esc(mv.pq)}" /></div>`
+    + (rows.length ? rows.map(row).join("") : `<div style="padding:12px 8px;color:var(--muted)">No branch matches “${esc(mv.pq)}”.</div>`)
     + `<button class="switch-row" role="switch" aria-checked="${mv.origin}" data-mvflip="origin"><span>Start from origin</span><span class="switch"><span class="knob"></span></span></button>`);
 }
 /* Into an existing project the folder's files stay behind, so the deadline leads; the files and the threads that move ride behind the chevron. */
 function folderNotice(mv, t) {
   const files = folderFiles(t), others = sharersOf(t).slice(1);
   if (mv.dest === "existing" && files.length) {
-    const copied = files.length === 1 ? "It is not copied into the project. The agent is told where it is on its next turn." : "They are not copied into the project. The agent is told where they are on its next turn.";
-    return notice({ tone: "warning", title: `After the move, Mcode deletes this folder's ${plural(files.length, "file", "files")} on ${DEADLINE}.`,
-      detail: `<div>${copied}</div>`,
-      more: `<div><span class="k">Files in this folder</span><ul class="mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>${others.length ? `<div><span class="k">Moves too</span>${threadList(others)}</div>` : ""}`,
+    const copied = files.length === 1 ? "It is not copied into the project; the agent is told where it is on its next turn." : "They are not copied into the project; the agent is told where they are on its next turn.";
+    return notice({ tone: "warning", title: `After the move, Mcode deletes this folder's ${plural(files.length, "file", "files")} on ${DEADLINE}`,
+      detail: `<div>${copied} Choose New project to keep the files with the thread.</div>${others.length ? `<div><span class="k">Moves too</span>${threadList(others)}</div>` : ""}`,
+      more: `<div><span class="k">Files in this folder</span><ul class="mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>`,
       openKey: "showFiles" });
   }
   if (!others.length) return "";
@@ -898,10 +911,10 @@ function moveDialogHtml() {
   let outcome = "";
   if (failed) {
     const [lead, rest, details] = cross
-      ? [`Drive ${esc(mv.parent.slice(0, 2))} is full, so the folder couldn't be copied there.`, `Your files are still in the old folder and ${who} still in No project. Mcode removed the partial copy.`, "ENOSPC: no space left on device, copyfile 'bench.db'"]
+      ? [`Drive ${esc(mv.parent.slice(0, 2))} is full, so the folder couldn't be copied there`, `Your files are still in the old folder and ${who} still in No project; Mcode removed the partial copy. Free up space on ${esc(mv.parent.slice(0, 2))} and try again, or choose another location.`, "ENOSPC: no space left on device, copyfile 'bench.db'"]
       : mv.dest === "existing"
-        ? [n > 1 ? `Couldn't move the ${n} threads.` : "Couldn't move the thread.", `Nothing changed: ${who} still in No project and the files are untouched. Try again in a moment.`, "SQLITE_BUSY: database is locked (updating thread workspace)"]
-        : [`Couldn't move the folder to ${esc(mv.parent)}.`, `Nothing changed: ${who} still in No project. Close any app using files in the folder, then try again.`, "EBUSY: resource busy or locked, rename '…/2026-11-26-sqlite-wal-vs-rollback-7f3a'"];
+        ? [n > 1 ? `Couldn't move the ${n} threads` : "Couldn't move the thread", `Nothing changed: ${who} still in No project and the files are untouched. Try again in a moment.`, "SQLITE_BUSY: database is locked (updating thread workspace)"]
+        : [`Couldn't move the folder to ${esc(mv.parent)}`, `Nothing changed: ${who} still in No project. Close any app using files in the folder, then try again.`, "EBUSY: resource busy or locked, rename '…/2026-11-26-sqlite-wal-vs-rollback-7f3a'"];
     outcome = notice({ tone: "error", title: lead, detail: `<div>${rest}</div>`, more: `<span class="raw mono">${esc(details)}</span>`, openKey: "showRaw" });
   }
   let form;
@@ -915,8 +928,8 @@ function moveDialogHtml() {
     const target = joinPath(mv.parent, mv.name.trim() || "…");
     form = `<div class="field"><label class="lab" for="mvname">Name</label><input id="mvname" class="text-in" data-fk="mvname" data-mvname value="${esc(mv.name)}" placeholder="Project name" ${shownErr ? 'aria-invalid="true" aria-describedby="mvname-err"' : ""} spellcheck="false" />
         ${shownErr ? `<span class="err" id="mvname-err">${ic("alert", "sm")}${esc(shownErr.msg)}</span>` : ""}</div>
-      <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade" ${cross && failed ? 'aria-invalid="true"' : ""}>${esc(mv.parent)}</span>${cross && failed ? "" : `<button class="btn" data-mvpicker="browse">Browse…</button>`}</div>
-        ${shownErr || (cross && failed) ? "" : `<span class="result">Creates <span class="mono">${esc(target)}</span></span>`}</div>
+      <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade" ${cross && failed ? 'aria-invalid="true"' : ""}>${esc(mv.parent)}</span><button class="btn" data-mvpicker="browse">Browse…</button></div>
+        ${shownErr ? "" : `<span class="result">Moves the folder and its files to <span class="mono">${esc(target)}</span></span>`}</div>
       ${cross && failed ? outcome : ""}
       <button class="check" role="checkbox" aria-checked="${mv.git}" data-mvflip="git"><span class="box">${mv.git ? ic("check", "sm") : ""}</span><span>Start a git repo</span></button>`;
   }
@@ -931,18 +944,16 @@ function moveDialogHtml() {
     return `<div class="scrim"><div class="dialog move" role="alertdialog" aria-labelledby="mvh" data-stop>
       <div class="head"><h4 id="mvh">Project created</h4><p class="who">“${esc(t.title)}” now runs in the ${esc(p.name)} project.</p></div>
       <button class="x" data-act="mvdone" aria-label="Close">${ic("x", "sm")}</button>
-      <div class="body">${notice({ tone: "error", title: "Couldn't start a git repo: permission denied in the project folder.",
-        detail: `<div>The project works without git. Check you can write to <span class="mono nowrap">${esc(p.path)}</span>, then retry, or run git init later.</div>`,
+      <div class="body">${notice({ tone: "error", title: "Couldn't start a git repo",
+        detail: `<div>Permission was denied in the project folder. The project works without git. Check you can write to <span class="mono nowrap">${esc(p.path)}</span>, then retry, or run git init later.</div>`,
         more: `<span class="raw mono">${esc(p.path)}\ngit: 'init' failed: unable to create '.git/index.lock': Permission denied</span>`, openKey: "showRaw" })}</div>
       <div class="foot"><button class="btn ghost" data-act="mvgitretry">Retry git setup</button><button class="btn primary" data-act="mvdone">Done</button></div>
     </div></div>`;
   }
   const primaryLabel = locked ? (mv.dest === "new" && S.sim.crossDrive ? "Copying files…" : "Moving…")
-    : failed && cross ? "Choose another location"
     : failed ? "Try again"
     : mv.dest === "new" ? "Create project" : n > 1 ? `Move ${n} threads` : "Move thread";
   const primaryAttrs = locked ? 'aria-busy="true" aria-disabled="true"'
-    : failed && cross ? 'data-mvpicker="browse"'
     : `data-act="mvgo" ${block ? "disabled" : ""}`;
   const picker = mv.picker === "project" ? projectPicker(mv)
     : mv.picker === "runs" ? runsPicker(mv, project(mv.pid))
@@ -953,7 +964,7 @@ function moveDialogHtml() {
   return `<div class="scrim" ${locked ? "" : 'data-act="mvcancel"'}><div class="dialog move" role="dialog" aria-modal="true" aria-labelledby="mvh" data-stop ${locked ? 'aria-busy="true"' : ""}>
     <div class="head"><h4 id="mvh">Move to project</h4><p class="who fade">${esc(t.title)}</p></div>
     <button class="x" ${locked ? "disabled" : 'data-act="mvcancel"'} aria-label="Close">${ic("x", "sm")}</button>
-    <fieldset class="body" ${locked ? "disabled" : ""}>${dest}${form}${folderNotice(mv, t)}${cross ? "" : outcome}${busyBox}</fieldset>
+    <fieldset class="body" ${locked ? "disabled" : ""}>${dest}${form}${busyBox}${folderNotice(mv, t)}${cross ? "" : outcome}</fieldset>
     <div class="foot">
       <button class="btn ghost" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
       <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ""}${primaryLabel}</button></div>
@@ -1090,7 +1101,7 @@ document.addEventListener("input", e => {
 /* The browser opens the details itself; keep state in step so a re-render keeps it open. toggle does not bubble. */
 document.addEventListener("keydown", e => {
   if (e.target.dataset.fk === "composer" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); return send(); }
-  if (e.target.dataset.mvq !== undefined && e.key === "Enter") { e.preventDefault(); document.querySelector("[data-mvpick]")?.click(); return; }
+  if (e.target.dataset.mvq !== undefined && e.key === "Enter") { e.preventDefault(); document.querySelector("[data-mvpick], [data-mvbase]")?.click(); return; }
   if (e.key === "Escape") {
     if (S.overlay === "move") { if (S.mv.phase === "moving" || S.mv.phase === "gitfailed") return; if (S.mv.picker) return setMv({ picker: null }); return set({ overlay: null, mv: null }); }
     if (S.overlay) return set({ overlay: null, query: "" });
