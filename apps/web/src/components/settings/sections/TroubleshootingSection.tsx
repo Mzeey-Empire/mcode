@@ -6,6 +6,7 @@ import { Setting } from "../Setting";
 import { settingsPage } from "../setting-def";
 import { settingsValue } from "../setting-value";
 import { SettingsGroup } from "../SettingsGroup";
+import { CrashDumpsRow, crashDumpsAvailable } from "./CrashDumpsRow";
 
 function hardwareAccelerationBridge() {
   return typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
@@ -47,6 +48,14 @@ export const TROUBLESHOOTING = settingsPage("troubleshooting", {
     value: settingsValue((s) => s.diagnostics.recording, (recording) => ({ diagnostics: { recording } })),
     Control: DiagnosticsRecordingControl,
   },
+  crashDumps: {
+    label: "Crash dumps",
+    hint: "Saves a copy of Mcode's memory on this computer when it crashes, so the cause can be found. Dumps can contain your messages, code, and tokens. Applies after Mcode restarts.",
+    synonyms: "crash crashes dump dumps minidump crashpad report",
+    value: settingsValue((s) => s.diagnostics.crashDumps, (crashDumps) => ({ diagnostics: { crashDumps } })),
+    exists: crashDumpsAvailable,
+    Row: CrashDumpsRow,
+  },
   hardwareAcceleration: {
     label: "Hardware acceleration",
     hint: "Applies after Mcode restarts.",
@@ -61,11 +70,12 @@ export const TROUBLESHOOTING = settingsPage("troubleshooting", {
   },
 });
 
-/** Troubleshooting settings page: troubleshooting logs and hardware acceleration. */
+/** Troubleshooting settings page: troubleshooting logs, crash dumps, and hardware acceleration. */
 export function TroubleshootingSection() {
   return (
     <SettingsGroup>
       <Setting def={TROUBLESHOOTING.logs} />
+      <Setting def={TROUBLESHOOTING.crashDumps} />
       <Setting def={TROUBLESHOOTING.hardwareAcceleration} />
     </SettingsGroup>
   );

@@ -15,13 +15,19 @@ vi.mock("@/transport", async () => ({
 const ids = (query: string, index: readonly IndexedSetting[] = SETTINGS_INDEX) =>
   searchSettings(query, index).map((match) => match.entry.def.id);
 
+const DESKTOP_ONLY = new Set(["troubleshooting.hardwareAcceleration", "troubleshooting.crashDumps"]);
 const desktopIndex = SETTINGS_INDEX.map((entry) =>
-  entry.def.id === "troubleshooting.hardwareAcceleration" ? { ...entry, def: { ...entry.def, exists: () => true } } : entry,
+  DESKTOP_ONLY.has(entry.def.id) ? { ...entry, def: { ...entry.def, exists: () => true } } : entry,
 );
 
 describe("searchSettings over the real settings", () => {
   it("finds Hardware acceleration by its synonym gpu", () => {
     expect(ids("gpu", desktopIndex)[0]).toBe("troubleshooting.hardwareAcceleration");
+  });
+
+  it("finds Crash dumps by crash in the desktop index and not in the web index", () => {
+    expect(ids("crash", desktopIndex)[0]).toBe("troubleshooting.crashDumps");
+    expect(ids("crash")).not.toContain("troubleshooting.crashDumps");
   });
 
   it("never lists a setting that does not exist on this platform", () => {

@@ -20,7 +20,7 @@ const ALTERED: SettingsPatch = {
   appearance: { theme: "dark" },
   notifications: { enabled: false },
   externalApps: { defaultEditor: "vscode" },
-  diagnostics: { recording: false },
+  diagnostics: { recording: false, crashDumps: true },
   graphics: { hardwareAcceleration: true },
   updates: { channel: "nightly", checkInterval: "1day", autoDownload: false, autoInstallOnQuit: false, providerCliChecks: false },
   model: { defaults: { provider: "codex", id: "gpt-5", reasoning: "low", thinking: true }, utility: { provider: "claude", id: "claude-haiku-4-5" } },
