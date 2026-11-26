@@ -158,7 +158,7 @@ export function createNoProjectWorkspace(
   deps: { workspaceService: Pick<WorkspaceService, "createNoProject"> },
   params: WorkspaceThreadRpcParamsByMethod["workspace.createNoProject"],
 ) {
-  return deps.workspaceService.createNoProject(params.id, () => broadcast("workspace.orderChanged", {}));
+  return deps.workspaceService.createNoProject(params.id, params.nameHint, () => broadcast("workspace.orderChanged", {}));
 }
 
 async function deleteWorkspace(

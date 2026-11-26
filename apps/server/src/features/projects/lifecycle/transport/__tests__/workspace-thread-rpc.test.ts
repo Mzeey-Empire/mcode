@@ -90,8 +90,9 @@ it("refreshes connected clients only when a no-project workspace is created", as
   const id = crypto.randomUUID();
   try {
     const pushes = socket.clients.map(nextPush);
-    const workspace = await createNoProjectWorkspace({ workspaceService }, { id });
+    const workspace = await createNoProjectWorkspace({ workspaceService }, { id, nameHint: "Name this folder" });
     expect(workspace).toMatchObject({ id, kind: "no_project" });
+    expect(NodePath.basename(workspace.path)).toMatch(new RegExp(`^\\d{4}-\\d{2}-\\d{2}-name-this-folder-${id}$`));
     expect(await Promise.all(pushes)).toEqual([
       { channel: "workspace.orderChanged", data: {} },
       { channel: "workspace.orderChanged", data: {} },

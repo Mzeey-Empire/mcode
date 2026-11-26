@@ -717,7 +717,11 @@ export const WS_METHODS = lazySchema(() => ({
     result: WorkspaceCreateResultSchema(),
   },
   "workspace.createNoProject": {
-    params: z.object({ id: z.string().uuid() }),
+    params: z.object({
+      id: z.string().uuid(),
+      /** The start of the thread's first message, used only to name the folder. */
+      nameHint: z.string().max(200).optional(),
+    }),
     result: WorkspaceSchema(),
   },
   /** Rename a workspace without changing its filesystem path. */

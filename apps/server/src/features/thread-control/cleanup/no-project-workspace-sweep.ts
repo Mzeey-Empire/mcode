@@ -2,9 +2,9 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { WS_METHODS } from "@mcode/contracts/ws/methods";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { broadcast } from "../../../application/transport/push.js";
+import { noProjectIdFromFolderName } from "../../projects/lifecycle/no-project-folder-name.js";
 import { isWithinWorkspaceRoot, resolveNoProjectRoot } from "../../projects/lifecycle/workspace-path.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 
@@ -38,23 +38,23 @@ export class NoProjectWorkspaceSweep {
     const storedRoot = NodePath.join(this.mcodeDir, "no-project");
     try {
       const root = await resolveNoProjectRoot(storedRoot);
-      const idSchema = WS_METHODS()["workspace.createNoProject"].params.shape.id;
-      for (const id of await NodeFSPromises.readdir(root)) {
-        if (idSchema.safeParse(id).success) await this.removeOrphanedEntry(root, storedRoot, id);
+      for (const name of await NodeFSPromises.readdir(root)) {
+        const id = noProjectIdFromFolderName(name);
+        if (id !== null) await this.removeOrphanedEntry(root, storedRoot, name, id);
       }
     } catch (error) {
       if (!isMissing(error)) logger.warn("Could not read the No project root", { path: storedRoot, error });
     }
   }
 
-  private async removeOrphanedEntry(root: string, storedRoot: string, id: string): Promise<void> {
-    const path = NodePath.join(root, id);
+  private async removeOrphanedEntry(root: string, storedRoot: string, name: string, id: string): Promise<void> {
+    const path = NodePath.join(root, name);
     try {
       const entry = await NodeFSPromises.lstat(path);
       if (!entry.isSymbolicLink() && !entry.isDirectory()) return;
       // Creation inserts the row before making the folder, and cleanup deletes the row first.
       if (this.workspaces.findByIdIncludeDeleted(id)) return;
-      if (await this.hasRegisteredPath(path, NodePath.join(storedRoot, id))) return;
+      if (await this.hasRegisteredPath(path, NodePath.join(storedRoot, name))) return;
       if (entry.isSymbolicLink()) {
         await NodeFSPromises.unlink(path);
       } else {

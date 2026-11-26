@@ -10,6 +10,7 @@ import { createOwnedTestDatabase, type OwnedTestDatabase } from "../../testing/o
 import { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { FakeGitExecutor } from "../../git/execution/index.js";
+import { noProjectFolderName } from "../no-project-folder-name.js";
 import { WorkspaceService } from "../workspace-service.js";
 
 vi.mock("node:os", async (importOriginal) => {
@@ -33,6 +34,7 @@ describe("WorkspaceService.create", () => {
   let service: WorkspaceService;
 
   beforeEach(async () => {
+    vi.setSystemTime(new Date(2026, 0, 5, 12));
     directory = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "workspace-create-"));
     directory = await NodeFSPromises.realpath(directory);
     home = NodePath.join(directory, "home");
@@ -57,6 +59,7 @@ describe("WorkspaceService.create", () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
     vi.resetAllMocks();
     await owned.writer.barrier();
     reader.close(true);
@@ -76,13 +79,14 @@ describe("WorkspaceService.create", () => {
     const secondProject = await repo.create("Second", NodePath.join(directory, "second"));
     const id = crypto.randomUUID();
     const root = NodePath.join(directory, "no-project");
-    const first = await service.createNoProject(id);
+    const first = await service.createNoProject(id, "First task");
     const notes = NodePath.join(first.path, "notes.txt");
     await NodeFSPromises.writeFile(notes, "original notes");
-    await expect(service.createNoProject(id)).rejects.toThrow(/Workspace ID.*already exists/);
+    await expect(service.createNoProject(id, "Different task")).rejects.toThrow(/Workspace ID.*already exists/);
 
-    expect(first).toMatchObject({ id, path: NodePath.join(root, id), name: "No project", kind: "no_project", is_git_repo: false });
-    expect(await NodeFSPromises.readdir(root)).toEqual([id]);
+    const name = `2026-01-05-first-task-${id}`;
+    expect(first).toMatchObject({ id, path: NodePath.join(root, name), name: "No project", kind: "no_project", is_git_repo: false });
+    expect(await NodeFSPromises.readdir(root)).toEqual([name]);
     expect(await NodeFSPromises.readFile(notes, "utf8")).toBe("original notes");
     expect(service.list()).toContainEqual(first);
     expect(repo.findById(firstProject.id)?.sort_order).toBe(1);
@@ -92,7 +96,7 @@ describe("WorkspaceService.create", () => {
   });
 
   it("rejects Add project on the no-project root and its descendants", async () => {
-    const workspace = await service.createNoProject(crypto.randomUUID());
+    const workspace = await service.createNoProject(crypto.randomUUID(), undefined);
     const subfolder = NodePath.join(workspace.path, "subfolder");
     await NodeFSPromises.mkdir(subfolder);
     for (const path of [NodePath.dirname(workspace.path), workspace.path, subfolder]) {
@@ -103,14 +107,26 @@ describe("WorkspaceService.create", () => {
     expect(repo.listAll()).toEqual([workspace]);
   });
 
-  it("rolls back the new row when the UUID folder already exists", async () => {
+  it.each([
+    { hint: "../../etc", slug: "etc" },
+    { hint: "..\\..\\x", slug: "x" },
+  ])("keeps the folder under the no-project root for hint $hint", async ({ hint, slug }) => {
     const id = crypto.randomUUID();
-    const path = NodePath.join(directory, "no-project", id);
+    const workspace = await service.createNoProject(id, hint);
+
+    expect(workspace.path).toBe(NodePath.join(directory, "no-project", `2026-01-05-${slug}-${id}`));
+    expect((await NodeFSPromises.stat(workspace.path)).isDirectory()).toBe(true);
+  });
+
+  it("rolls back the new row when the named folder already exists", async () => {
+    const id = crypto.randomUUID();
+    const hint = "Previous thread";
+    const path = NodePath.join(directory, "no-project", noProjectFolderName(id, hint, new Date()));
     await NodeFSPromises.mkdir(path, { recursive: true });
     const notes = NodePath.join(path, "notes.txt");
     await NodeFSPromises.writeFile(notes, "previous thread notes");
 
-    await expect(service.createNoProject(id)).rejects.toThrow("No project folder still exists");
+    await expect(service.createNoProject(id, hint)).rejects.toThrow("No project folder still exists");
     expect(repo.findByIdIncludeDeleted(id)).toBeNull();
     expect(await NodeFSPromises.readFile(notes, "utf8")).toBe("previous thread notes");
   });
@@ -121,9 +137,9 @@ describe("WorkspaceService.create", () => {
   ])("rejects creation when the no-project leaf points to $target", async ({ target }, { skip }) => {
     const id = crypto.randomUUID();
     const root = NodePath.join(directory, "no-project");
-    const path = NodePath.join(root, id);
+    const path = NodePath.join(root, noProjectFolderName(id, undefined, new Date()));
     await NodeFSPromises.mkdir(root);
-    const linkTarget = target === "a sibling folder" ? (await service.createNoProject(crypto.randomUUID())).path : project;
+    const linkTarget = target === "a sibling folder" ? (await service.createNoProject(crypto.randomUUID(), undefined)).path : project;
     try {
       await NodeFSPromises.symlink(linkTarget, path, process.platform === "win32" ? "junction" : "dir");
     } catch {
@@ -131,7 +147,7 @@ describe("WorkspaceService.create", () => {
       return;
     }
 
-    await expect(service.createNoProject(id)).rejects.toThrow(/No project folder/);
+    await expect(service.createNoProject(id, undefined)).rejects.toThrow(/No project folder/);
     expect(repo.findByIdIncludeDeleted(id)).toBeNull();
   });
 
@@ -144,7 +160,7 @@ describe("WorkspaceService.create", () => {
       return;
     }
 
-    await expect(service.createNoProject(crypto.randomUUID())).rejects.toThrow("No project root");
+    await expect(service.createNoProject(crypto.randomUUID(), undefined)).rejects.toThrow("No project root");
     expect(await NodeFSPromises.readdir(project)).toEqual([]);
   });
 
@@ -263,5 +279,20 @@ describe("workspace.create parameters", () => {
     { path: "/project", name: "n".repeat(121) },
   ])("rejects empty or overlong parameters %#", (params) => {
     expect(schema.safeParse(params).success).toBe(false);
+  });
+});
+
+describe("workspace.createNoProject parameters", () => {
+  const schema = WS_METHODS()["workspace.createNoProject"].params;
+  const id = "56a6c168-2120-4fc7-82f9-46d161f44510";
+
+  it("accepts an omitted hint or preserves up to 200 characters", () => {
+    const nameHint = " " + "x".repeat(198) + " ";
+    expect(schema.parse({ id })).toEqual({ id });
+    expect(schema.parse({ id, nameHint })).toEqual({ id, nameHint });
+  });
+
+  it("rejects a hint longer than 200 characters", () => {
+    expect(schema.safeParse({ id, nameHint: "x".repeat(201) }).success).toBe(false);
   });
 });
