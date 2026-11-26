@@ -161,7 +161,7 @@ function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewPr
         aria-labelledby={headingId}
         aria-busy={moving || undefined}
         closeDisabled={moving}
-        className="sm:max-w-[62.5rem]"
+        className="sm:max-w-[50rem]"
       >
         <DialogHeader className="items-center pl-9 text-center">
           <span className="flex max-w-full min-w-0 items-center gap-2 text-body-small text-muted">

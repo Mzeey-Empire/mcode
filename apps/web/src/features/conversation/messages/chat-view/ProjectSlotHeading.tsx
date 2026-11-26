@@ -40,7 +40,8 @@ export function ProjectSlotHeading({
     <Heading
       id={id}
       aria-label={`${prefix} ${projectName ?? "a project"}${suffix}`}
-      className="flex min-w-0 max-w-full flex-wrap items-start justify-center text-3xl font-semibold tracking-[-0.02em] text-ink"
+      // In the move dialog the heading names one choice inside a small dialog, not the page, so it steps down a size.
+      className={cn("flex min-w-0 max-w-full flex-wrap items-start justify-center font-semibold tracking-[-0.02em] text-ink", pick ? "text-xl" : "text-3xl")}
     >
       <span>{prefix}&nbsp;</span>
       <ProjectSlot projectName={projectName} suffix={suffix} pick={pick} />
