@@ -30,7 +30,7 @@ const FLOWS = [
     ["Move dialog", "Opens with billing-api picked. Nothing moves until you confirm.", "moveAPicked"],
     ["Moved", "Row under billing-api.", "afterA"] ] },
   { name: "A thread with files, alone in its folder", steps: [
-    ["Move dialog", "Warns that Mcode deletes the 4 files on 3 Dec.", "moveAFilesAlone"],
+    ["Move dialog", "A line under the target row: the old files are deleted on 3 Dec.", "moveAFilesAlone"],
     ["Moved", "The marker keeps the old folder and its deadline.", "afterAFilesAlone"],
     ["After 7 days", "Folder removed; the marker says so.", "afterExpired"] ] },
   { name: "A thread whose fork still uses the folder", steps: [
