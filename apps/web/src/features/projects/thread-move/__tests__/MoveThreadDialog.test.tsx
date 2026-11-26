@@ -145,7 +145,7 @@ describe("MoveThreadDialog", () => {
     expect(screen.getByRole("button", { name: "Close dialog" })).toBeDisabled();
     expect(screen.getByTestId("new-thread-project-slot")).toBeDisabled();
     await user.keyboard("{Escape}");
-    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(await dialog()).toBeVisible();
 
     await act(async () => finish(movedTo(ALPHA.id)));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
