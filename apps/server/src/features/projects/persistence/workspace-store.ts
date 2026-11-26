@@ -14,6 +14,12 @@ import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
 
+const NO_PROJECT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+function noProjectRetentionDeadline(now: string): string {
+  return new Date(Date.parse(now) + NO_PROJECT_RETENTION_MS).toISOString();
+}
+
 function rowToWorkspace(row: WorkspaceRow): Workspace {
   return {
     id: row.id,
@@ -256,24 +262,57 @@ export class WorkspaceStore {
       )).all().map(({ id }) => id);
   }
 
-  /** Find old No project workspaces without any thread or startup that can still use them. */
-  findRemovableNoProject(createdBefore: string, retryUpdatedSince: string): Workspace[] {
+  /** Record a move after reassigning the thread, starting retention if the last live thread left. */
+  recordNoProjectMoveOut(id: string, now: string): void {
+    const noLiveThreads = notExists(this.orm.select({ id: threads.id }).from(threads)
+      .where(and(eq(threads.workspaceId, workspaces.id), isNull(threads.deletedAt))));
+    this.orm.update(workspaces)
+      .set({
+        movedOutAt: sql`coalesce(${workspaces.movedOutAt}, ${now})`,
+        retainUntil: sql`case when ${noLiveThreads} then ${noProjectRetentionDeadline(now)} else ${workspaces.retainUntil} end`,
+      })
+      .where(and(eq(workspaces.id, id), eq(workspaces.kind, "no_project")))
+      .run();
+  }
+
+  /** Start retention when cleanup has removed the last thread from a moved-out workspace. */
+  retainMovedOutNoProject(now: string): void {
+    this.orm.update(workspaces)
+      .set({ retainUntil: noProjectRetentionDeadline(now) })
+      .where(and(
+        eq(workspaces.kind, "no_project"),
+        isNotNull(workspaces.movedOutAt),
+        isNull(workspaces.retainUntil),
+        this.withoutThreadRows(),
+      ))
+      .run();
+  }
+
+  /** Find expired No project workspaces without any thread or startup that can still use them. */
+  findRemovableNoProject(createdBefore: string, retryUpdatedSince: string, now: string): Workspace[] {
     return this.orm.select().from(workspaces)
-      .where(this.removableNoProject(createdBefore, retryUpdatedSince)).all().map(rowToWorkspace);
+      .where(this.removableNoProject(createdBefore, retryUpdatedSince, now)).all().map(rowToWorkspace);
   }
 
   /** Recheck eligibility on the writer connection before deleting a swept workspace. */
-  deleteRemovableNoProject(id: string, createdBefore: string, retryUpdatedSince: string): boolean {
+  deleteRemovableNoProject(id: string, createdBefore: string, retryUpdatedSince: string, now: string): boolean {
     return runChanges(this.orm.delete(workspaces)
-      .where(and(eq(workspaces.id, id), this.removableNoProject(createdBefore, retryUpdatedSince)))).changes > 0;
+      .where(and(eq(workspaces.id, id), this.removableNoProject(createdBefore, retryUpdatedSince, now)))).changes > 0;
   }
 
-  private removableNoProject(createdBefore: string, retryUpdatedSince: string) {
+  private withoutThreadRows() {
+    return notExists(this.orm.select({ id: threads.id }).from(threads)
+      .where(eq(threads.workspaceId, workspaces.id)));
+  }
+
+  private removableNoProject(createdBefore: string, retryUpdatedSince: string, now: string) {
     return and(
       eq(workspaces.kind, "no_project"),
-      lt(workspaces.createdAt, createdBefore),
-      notExists(this.orm.select({ id: threads.id }).from(threads)
-        .where(eq(threads.workspaceId, workspaces.id))),
+      or(
+        and(isNull(workspaces.movedOutAt), lt(workspaces.createdAt, createdBefore)),
+        and(isNotNull(workspaces.movedOutAt), lt(workspaces.retainUntil, now)),
+      ),
+      this.withoutThreadRows(),
       notExists(this.orm.select({ id: threadStartups.startupId }).from(threadStartups)
         .where(and(eq(threadStartups.workspaceId, workspaces.id), or(
           inArray(threadStartups.state, ["pending", "running", "blocked"]),

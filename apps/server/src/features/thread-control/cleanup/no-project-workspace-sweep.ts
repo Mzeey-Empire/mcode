@@ -24,10 +24,12 @@ export class NoProjectWorkspaceSweep {
   /** Claim each workspace before touching files that a newly created thread could use. */
   async run(): Promise<void> {
     const now = Date.now();
+    const sweptAt = new Date(now).toISOString();
     const createdBefore = new Date(now - FIRST_THREAD_GRACE_MS).toISOString();
     const retryUpdatedSince = new Date(now - STARTUP_RETRY_RETENTION_MS).toISOString();
-    for (const workspace of this.workspaces.findRemovableNoProject(createdBefore, retryUpdatedSince)) {
-      if (!await this.workspaces.deleteRemovableNoProject(workspace.id, createdBefore, retryUpdatedSince)) continue;
+    await this.workspaces.retainMovedOutNoProject(sweptAt);
+    for (const workspace of this.workspaces.findRemovableNoProject(createdBefore, retryUpdatedSince, sweptAt)) {
+      if (!await this.workspaces.deleteRemovableNoProject(workspace.id, createdBefore, retryUpdatedSince, sweptAt)) continue;
       this.attachments.removeForThread(workspace.id);
       broadcast("workspace.deleted", { workspaceId: workspace.id });
     }

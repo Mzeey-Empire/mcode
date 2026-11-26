@@ -165,6 +165,16 @@ describe("openDatabase ledger guard", () => {
     expectUntouched(before);
   });
 
+  it("refuses the No project retention migration on a build at the previous floor", () => {
+    const retentionTag = "0113_curious_the_twelve";
+    const older = writeCatalogue(directory, "before-retention", { before: retentionTag });
+    const before = NodeFS.readFileSync(dbPath);
+    vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", older);
+
+    expect(refusalOf(dbPath).refusal).toEqual({ kind: "database-newer", databasePath: dbPath, raisedBy: retentionTag });
+    expectUntouched(before);
+  });
+
   it("refuses a database with newer receipts and no compatibility floor", () => {
     damage(dbPath, "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)", "from-the-future", catalogue.newestWhen + 1_000);
     damage(dbPath, "DELETE FROM mcode_schema_compatibility");

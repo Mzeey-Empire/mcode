@@ -38,6 +38,8 @@ export const workspaces = sqliteTable(
     isGitRepo: integer("is_git_repo").notNull().default(1),
     deletedAt: text("deleted_at"),
     iconPath: text("icon_path"),
+    movedOutAt: text("moved_out_at"),
+    retainUntil: text("retain_until"),
   },
   (table) => [
     index("idx_workspaces_sort_order").on(asc(table.sortOrder)),
