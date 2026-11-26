@@ -424,7 +424,7 @@ export class CodexLiveEventReducer {
         outputArtifactPath: event.outputArtifactPath,
         cancelled: event.cancelled,
         denied: event.denied,
-      }, event.subagentPresentation);
+      }, event.subagentPresentation, event.occurredAt);
     return [
       { kind: "tool-result", event },
       { kind: "feature-event", feature: "task-tool", event },

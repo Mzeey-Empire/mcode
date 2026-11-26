@@ -82,6 +82,8 @@ export interface BufferToolCallEvent {
   status?: Extract<AgentEvent, { type: "toolUse" }>["status"];
   backgroundTaskId?: string;
   phase?: Extract<AgentEvent, { type: "toolUse" }>["phase"];
+  /** Time the provider produced the tool-use event. */
+  occurredAt?: string;
   toolCallId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
@@ -104,6 +106,10 @@ export interface NarrativeRecoveryChanges {
 
 /** Bounds persisted shell commands while retaining enough text for readable expansion. */
 const MAX_PERSISTED_COMMAND_CHARS = 4096;
+
+function toolEventTime(occurredAt?: string): string {
+  return occurredAt ?? new Date().toISOString();
+}
 
 const NARRATIVE_INPUT_SUMMARIZERS: Record<string, (input: Record<string, unknown>) => string> = {
   read: fileInputSummary,
@@ -554,7 +560,9 @@ export class NarrativeTurnState {
     const shouldMergeDuplicate = this.shouldMergeDuplicateToolCall(existing, event);
     if (existing.status === "running" && event.backgroundTaskId !== undefined) existing.backgroundTaskId = event.backgroundTaskId;
     if ((event.status || event.phase) && isToolCallActive(existing.status)) {
-      if (event.status === "running" && !event.phase && existing.phase) existing.startedAt = new Date().toISOString();
+      if (event.status === "running" && !event.phase && existing.phase) {
+        existing.startedAt = toolEventTime(event.occurredAt);
+      }
       existing.phase = event.phase;
     }
     if (shouldMergeDuplicate) {
@@ -686,7 +694,7 @@ export class NarrativeTurnState {
       status: event.status ?? "running",
       backgroundTaskId: event.backgroundTaskId,
       phase: event.phase,
-      startedAt: new Date().toISOString(),
+      startedAt: toolEventTime(event.occurredAt),
       sortOrder,
       parentToolCallId,
       _rawToolInput: event.toolInput,
@@ -718,12 +726,13 @@ export class NarrativeTurnState {
       denied?: boolean;
     },
     subagentPresentation?: SubagentPresentation,
+    occurredAt?: string,
   ): void {
     this.assertThread(threadId);
     this.removeAgentFromStack(threadId, toolCallId);
     const toolCall = this.mutableBufferedToolCall(threadId, toolCallId);
     if (!toolCall) return;
-    this.applyToolCallOutput(toolCall, output, isError, outputMeta);
+    this.applyToolCallOutput(toolCall, output, isError, outputMeta, occurredAt);
     this.mergeToolCallInput(toolCall, toolInput);
     if (toolCall.toolName === "Agent") {
       const incomingPresentation = subagentPresentation
@@ -802,6 +811,7 @@ export class NarrativeTurnState {
       cancelled?: boolean;
       denied?: boolean;
     } | undefined,
+    occurredAt?: string,
   ): void {
     const outputLimit = resolveBrowserNarrativeTool(toolCall.toolName) ? 4_000 : 500;
     toolCall.outputSummary = output.slice(0, outputLimit);
@@ -809,7 +819,12 @@ export class NarrativeTurnState {
     this.applyOutputMetadata(toolCall, outputMeta);
     toolCall.status = toolCallResultStatus({ ...outputMeta, isError });
     toolCall.phase = outputMeta?.denied ? "denied" : undefined;
-    toolCall.completedAt = new Date().toISOString();
+    toolCall.completedAt = toolEventTime(occurredAt);
+    const { startedAt } = toolCall;
+    // An event-time result can precede a processing-time start, yielding a negative duration.
+    if (startedAt !== undefined && Date.parse(toolCall.completedAt) < Date.parse(startedAt)) {
+      toolCall.completedAt = startedAt;
+    }
   }
 
   private applyOutputMetadata(

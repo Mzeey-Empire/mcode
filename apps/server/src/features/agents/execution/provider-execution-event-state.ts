@@ -104,6 +104,10 @@ export class ProviderExecutionEventState {
     const runtime = this.validatedRuntimeEvent(draft, item);
     if (!runtime) return { kind: "rejected" };
     if (hasWriterOwnedExtension(runtime)) return { kind: "writer-owned" };
+    const event = runtime.event;
+    if (draft.providerTimestamp !== undefined && (event.type === "toolUse" || event.type === "toolResult")) {
+      return { kind: "parent", runtime: { ...runtime, event: { ...event, occurredAt: draft.providerTimestamp } } };
+    }
     return { kind: "parent", runtime };
   }
 

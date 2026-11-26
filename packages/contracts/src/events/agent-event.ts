@@ -116,6 +116,11 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       phase: ToolCallPhaseSchema.exclude(["denied"]).optional(),
       parentToolCallId: z.string().optional(),
       subagentPresentation: SubagentPresentationSchema().optional(),
+      /**
+       * Server-assigned time the provider produced this event. A tool's duration measures
+       * between these times, because the server and client can process its events late.
+       */
+      occurredAt: z.string().datetime({ offset: true }).optional(),
     }),
     z.object({
       type: z.literal(AgentEventType.ToolResult),
@@ -142,6 +147,8 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       cancelled: z.boolean().optional(),
       /** Server-assigned assistant message whose earlier, finished turn owns this background call. */
       persistedMessageId: z.string().optional(),
+      /** Server-assigned time the provider produced this result; see `toolUse.occurredAt`. */
+      occurredAt: z.string().datetime({ offset: true }).optional(),
     }),
     z.object({
       /**

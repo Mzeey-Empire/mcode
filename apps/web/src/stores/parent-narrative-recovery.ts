@@ -181,7 +181,9 @@ function recoveredNarrative(turn: AgentTurn, items: readonly ParentNarrativeReco
   })));
   const patch: Partial<ThreadRecord> = {
     toolCalls: tools.map((item) => {
-      const tool = recordToToolCall(item.record);
+      // The saved start is on the server's event clock, so a later live result measures from it as a reload does.
+      const savedStart = Date.parse(item.record.started_at);
+      const tool = { ...recordToToolCall(item.record), ...(Number.isFinite(savedStart) ? { eventStartedAt: savedStart } : {}) };
       return terminal && !held.has(tool.id) ? { ...tool, isComplete: true } : tool;
     }),
     thoughtSegments: thoughts.filter((item) => item.record.is_final_response !== 1).map(({ record }) => ({
