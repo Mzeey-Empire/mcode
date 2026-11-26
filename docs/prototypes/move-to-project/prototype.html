@@ -221,7 +221,6 @@
   .notice .nd .k { color: var(--muted); }
   .notice .nd ul { margin: 2px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; color: var(--ink); }
   .notice .nd li { display: flex; gap: 6px; align-items: center; min-width: 0; }
-  .notice .nd li .i { color: var(--muted); }
   .notice .raw { display: block; color: var(--ink); white-space: pre-wrap; word-break: break-all; }
   .notice .nowrap { white-space: nowrap; }
   .pop.in-dialog { position: absolute; z-index: 40; max-height: 300px; overflow-y: auto; }
@@ -430,7 +429,7 @@ function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.
 function newMv(tid, patch = {}) {
   const t = S.threads.find(x => x.id === tid);
   return { tid, dest: projects().length ? "existing" : "new", pid: null, mode: "local", base: null, origin: false, wt: null,
-    name: suggestedName(t), parent: defaultParent(), git: false, phase: "form", picker: null, pq: "", btab: "branches", pr: null, showFiles: false, showRaw: false, ...patch };
+    name: suggestedName(t), parent: defaultParent(), git: false, phase: "form", picker: null, pq: "", btab: "branches", pr: null, showRaw: false, ...patch };
 }
 function goto(key) {
   draft = "";
@@ -449,8 +448,8 @@ function goto(key) {
     moveA: () => set(at("n2", { overlay: "move", mv: newMv("n2") })),
     moveAPicker: () => set(at("n2", { overlay: "move", mv: newMv("n2", { picker: "project" }) })),
     moveAPicked: () => set(at("n2", { overlay: "move", mv: newMv("n2", { pid: "billing", base: "main" }) })),
-    moveAFiles: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", showFiles: true }) })),
-    moveAFilesAlone: () => { dropFork(); set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", showFiles: true }) })); },
+    moveAFiles: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main" }) })),
+    moveAFilesAlone: () => { dropFork(); set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main" }) })); },
     moveRunsMenu: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", picker: "runs" }) })),
     moveNewWt: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "newwt", base: "main", picker: "branch" }) })),
     moveNewWtPr: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "newwt", base: "main", picker: "branch", btab: "prs", pr: 412 }) })),
@@ -725,22 +724,13 @@ function branchPicker(mv, p) {
     ${onPrs ? "" : `<button class="switch-row" role="switch" aria-checked="${mv.origin}" data-mvflip="origin"><span>Start from origin</span><span class="switch"><span class="knob"></span></span></button>`}
   </div>`;
 }
-/* What the move leaves behind is a consequence of the chosen project, so it waits until one is picked; before that the
-   chooser's "Keeps the files" hint carries the difference. The title is the fact, the detail is why and what to do.
-   Alone, the move starts the 7 days, so it warns and offers the way to keep the files; while another thread still
-   uses the folder nothing is deleted, so it is only information. */
+/* The user only needs to know the old files will be deleted, and when, so it is one line plus the way to keep them.
+   It waits until a project is picked; before that the chooser's "Keeps the files" hint carries the difference. While
+   another thread still uses the folder there is no date yet: Mcode deletes it 7 days after the last one leaves. */
 function filesNotice(mv, t) {
-  const files = folderFiles(t), others = sharersOf(t).slice(1);
-  if (mv.dest !== "existing" || !mv.pid || !files.length) return "";
-  const n = plural(files.length, "file", "files");
-  const told = "Nothing is copied; the agent is told where they are on its next turn.";
-  const more = `<ul class="mono">${files.map(f => `<li>${ic("file", "sm")}${esc(f)}</li>`).join("")}</ul>`;
-  if (others.length) return notice({ tone: "info", more, openKey: "showFiles",
-    title: `${n} stay in the old folder`,
-    detail: `<div>${others.length === 1 ? `“${esc(others[0].title)}” still uses` : `${others.length} other threads still use`} it, so Mcode keeps it. ${told}</div>` });
-  return notice({ tone: "warning", more, openKey: "showFiles",
-    title: `${n} stay behind and are deleted on&nbsp;${DEADLINE.replace(" ", "&nbsp;")}`,
-    detail: `<div>${told}</div>`,
+  if (mv.dest !== "existing" || !mv.pid || !folderFiles(t).length) return "";
+  const when = sharersOf(t).length > 1 ? "once no thread uses it" : `on&nbsp;${DEADLINE.replace(" ", "&nbsp;")}`;
+  return notice({ tone: "warning", title: `Files in the old folder are deleted ${when}`,
     action: `<div><button type="button" class="btn outline sm" data-mvnew>${ic("folderPlus")}Keep them: make this folder a new project</button></div>` });
 }
 /* A new project takes the whole folder, so every thread working in it comes along. A busy one has its own notice. */
