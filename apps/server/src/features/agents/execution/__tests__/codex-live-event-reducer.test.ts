@@ -85,12 +85,12 @@ describe("ProviderExecutionEventState tool timing", () => {
       const startedAt = "2026-10-30T12:00:00.000Z";
       const completedAt = "2026-10-30T12:00:00.400Z";
       const toolUse = event("toolUse", {
-        toolCallId: "read", toolName: "Read", toolInput: { file_path: "a.txt" }, occurredAt: "2026-10-30T11:59:58.000Z",
+        toolCallId: "read", toolName: "Read", toolInput: { file_path: "a.txt" },
       });
       const started = prepareParent(state, timedRuntimeDraft(toolUse, 1, startedAt, providerId));
       vi.setSystemTime(new Date("2026-10-30T12:00:45.000Z"));
       const toolResult = event("toolResult", {
-        toolCallId: "read", output: "contents", isError: false, occurredAt: "2026-10-30T11:59:59.000Z",
+        toolCallId: "read", output: "contents", isError: false,
       });
       const completed = prepareParent(state, timedRuntimeDraft(toolResult, 2, completedAt, providerId));
 
@@ -102,6 +102,27 @@ describe("ProviderExecutionEventState tool timing", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("persists and publishes native Codex tool times despite delayed reads", () => {
+    const state = new ProviderExecutionEventState("codex", execution, { precedingMessageId: "user", planFeature: "none" });
+    state.startFromAdmission();
+    const startedAt = "2026-10-30T12:00:00.000Z";
+    const completedAt = "2026-10-30T12:00:00.400Z";
+    const toolUse = event("toolUse", {
+      toolCallId: "cmd-timed", toolName: "Bash", toolInput: { command: "echo hi" }, occurredAt: startedAt,
+    });
+    const toolResult = event("toolResult", {
+      toolCallId: "cmd-timed", output: "hi", isError: false, occurredAt: completedAt,
+    });
+    const started = prepareParent(state, timedRuntimeDraft(toolUse, 1, "2026-10-30T12:01:00.000Z"));
+    const completed = prepareParent(state, timedRuntimeDraft(toolResult, 2, "2026-10-30T12:01:00.400Z"));
+
+    expect(projectToolCall(state, 3)).toMatchObject({
+      id: "cmd-timed", status: "completed", started_at: startedAt, completed_at: completedAt,
+    });
+    expect(started.publication.event).toMatchObject({ type: "toolUse", occurredAt: startedAt });
+    expect(completed.publication.event).toMatchObject({ type: "toolResult", occurredAt: completedAt });
   });
 
   it("starts an approved command at the provider's permission grant time", () => {
@@ -125,21 +146,35 @@ describe("ProviderExecutionEventState tool timing", () => {
     }
   });
 
-  it("clamps an earlier provider result time to a start stamped at processing time", () => {
+  it("clamps a provider result time that precedes its start", () => {
+    const state = new ProviderExecutionEventState("codex", execution, { precedingMessageId: "user", planFeature: "none" });
+    state.startFromAdmission();
+    const toolUse = event("toolUse", { toolCallId: "read", toolName: "Read", toolInput: { file_path: "a.txt" } });
+    prepareParent(state, timedRuntimeDraft(toolUse, 1, "2026-10-30T12:00:30.000Z"));
+    const result = event("toolResult", { toolCallId: "read", output: "contents", isError: false });
+    prepareParent(state, timedRuntimeDraft(result, 2, "2026-10-30T13:00:00.400+01:00"));
+
+    expect(projectToolCall(state, 3)).toMatchObject({
+      id: "read", status: "completed", started_at: "2026-10-30T12:00:30.000Z", completed_at: "2026-10-30T12:00:30.000Z",
+    });
+  });
+
+  it("stamps a tool event without a provider time from its draft, the same on every preparation", () => {
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(new Date("2026-10-30T12:00:30.000Z"));
-      const state = new ProviderExecutionEventState("codex", execution, { precedingMessageId: "user", planFeature: "none" });
-      state.startFromAdmission();
+      const accepted = new ProviderExecutionEventState("claude", execution, { precedingMessageId: "user", planFeature: "none" });
+      accepted.startFromAdmission();
       const toolUse = event("toolUse", { toolCallId: "read", toolName: "Read", toolInput: { file_path: "a.txt" } });
-      prepareParent(state, runtimeDraft(toolUse, 1));
+      const draft = { ...runtimeDraft(toolUse, 1), sourceProviderId: "claude" };
+      vi.setSystemTime(new Date("2026-10-30T12:00:30.000Z"));
+      const first = prepareParent(accepted.fork(), draft);
       vi.setSystemTime(new Date("2026-10-30T12:00:45.000Z"));
-      const result = event("toolResult", { toolCallId: "read", output: "contents", isError: false });
-      prepareParent(state, timedRuntimeDraft(result, 2, "2026-10-30T13:00:00.400+01:00"));
+      const candidate = accepted.fork();
+      const second = prepareParent(candidate, draft);
 
-      expect(projectToolCall(state, 3)).toMatchObject({
-        id: "read", status: "completed", started_at: "2026-10-30T12:00:30.000Z", completed_at: "2026-10-30T12:00:30.000Z",
-      });
+      expect(second.publication).toEqual(first.publication);
+      expect(second.publication.event).toMatchObject({ type: "toolUse", occurredAt: "2026-09-30T10:00:00.000Z" });
+      expect(projectToolCall(candidate, 2, "claude")).toMatchObject({ started_at: "2026-09-30T10:00:00.000Z" });
     } finally {
       vi.useRealTimers();
     }

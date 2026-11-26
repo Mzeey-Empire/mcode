@@ -3,6 +3,7 @@ import type { CanonicalAgentEventEnvelope } from "@mcode/contracts/compat/agent-
 import { CodexCollaborationEventAdapter } from "../collaboration/adapters/codex-collaboration-event-adapter.js";
 import type { CodexCollaborationDurability } from "../collaboration/codex-collaboration-durability.js";
 import type { ProjectedCommittedProviderEvent } from "../execution/execution-worker-handler.js";
+import { withToolEventTime } from "../execution/tool-event-time.js";
 import { normalizeProviderEvent } from "../../providers/composition/provider-event-normalization.js";
 import type { ProviderEventProjection } from "../../providers/composition/provider-event-adapter.js";
 import type { ProviderEventIngressEvent } from "../../providers/composition/provider-event-ingress.js";
@@ -30,10 +31,11 @@ export class CanonicalCommittedProviderProjector {
       }
       const interpretation = this.interpret(outcome.event);
       if (interpretation.status !== "forward") continue;
+      const { providerTimestamp, payload: { item: { createdAt } } } = envelope;
       projected.push({
         providerId: outcome.event.providerId,
         sourceKind: "canonical-commit",
-        event: interpretation.event,
+        event: withToolEventTime(interpretation.event, { providerTimestamp, createdAt }),
         canonicalReceipt: outcome.event.canonicalReceipt,
       });
     }
