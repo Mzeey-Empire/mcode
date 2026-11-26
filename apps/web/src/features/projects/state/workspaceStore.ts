@@ -543,6 +543,20 @@ function buildOptimisticThreadPlaceholder(
 
 const pendingThreadCreationByPlaceholderId = new Map<string, PendingThreadCreation>();
 
+/**
+ * True when a placeholder row is still waiting to become this thread. The server can announce the thread
+ * before its create call returns; adding it then would show the thread twice until that call swaps the
+ * placeholder out, so the create result (or startup recovery) adds it instead.
+ */
+function isAwaitedByPlaceholder(threadId: string): boolean {
+  const startupId = useThreadStartupStore.getState().startupIdByThreadId[threadId];
+  if (!startupId) return false;
+  for (const pending of pendingThreadCreationByPlaceholderId.values()) {
+    if (pending.startupId === startupId) return true;
+  }
+  return false;
+}
+
 async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateAndSendResult> {
   return getTransport().createAndSendMessage({
     workspaceId: pending.workspaceId,
@@ -1536,7 +1550,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   },
 
   applyThreadCreated: (thread) => {
-    if (isDelegatedSubagent(thread)) return;
+    if (isDelegatedSubagent(thread) || isAwaitedByPlaceholder(thread.id)) return;
     set((state) => {
       if (state.threads.some((existing) => existing.id === thread.id)) return state;
       return { threads: [thread, ...state.threads] };
@@ -1827,6 +1841,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         return { threads: state.threads.filter((candidate) => candidate.id !== thread.id) };
       }
       const existing = state.threads.find((candidate) => candidate.id === thread.id);
+      if (!existing && isAwaitedByPlaceholder(thread.id)) return state;
       const lastActivity = existing && Date.parse(existing.last_activity_at) > Date.parse(thread.last_activity_at)
         ? existing.last_activity_at
         : thread.last_activity_at;
