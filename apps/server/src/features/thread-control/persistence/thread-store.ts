@@ -9,6 +9,7 @@ import { forgetThreadPullRequests, readLinks } from "../../pull-requests/links/p
 import { rankPullRequests, ThreadPullRequestSchema } from "@mcode/contracts/models/thread-pull-request";
 import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
 import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
+import { WorkspaceStore } from "../../projects/persistence/workspace-store.js";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
@@ -21,6 +22,7 @@ import { restartFailureNoticeSql } from "../attention/restart-failure-notice-sql
 import { type TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import type { DevinMode, ThreadMode, ThreadStatus, InteractionMode, OrchestrationMode, PermissionMode } from "@mcode/contracts/models/enums";
 import type { Thread, RecentThread } from "@mcode/contracts/models/thread";
+import type { Workspace } from "@mcode/contracts/models/workspace";
 import type { ReasoningLevel } from "@mcode/contracts/models/settings";
 import {
   canonicalAgentThreads,
@@ -448,6 +450,12 @@ export interface CompletedThreadRetentionRecord {
 /** Compare-and-set update for one completed thread's deletion deadline. */
 export interface CompletedThreadDeadlineUpdate extends CompletedThreadRetentionRecord {
   nextScheduledDeletionAt: string | null;
+}
+
+/** Whether an existing thread can leave its No project workspace. */
+export function isOpenNoProjectThread(thread: Thread | null, workspace: Workspace | null): thread is Thread {
+  return thread !== null && workspace?.kind === "no_project" && thread.deleted_at === null && thread.user_completed_at === null
+    && thread.status !== "archived" && thread.status !== "deleted";
 }
 
 /** Repository for thread lifecycle operations against SQLite. */
@@ -1241,6 +1249,70 @@ export class ThreadStore {
       const marker = messages.createProviderSwitch(id, `Switched from ${fromName} to ${toName}`,
         markerSequence ?? messages.getLatestSequenceIncludingInternal(id) + 1, { fromProvider, toProvider: settings.provider, handoffId });
       return { providersUsed, marker };
+    })();
+  }
+
+  /** Read the relocation state without exposing it in the thread summary. */
+  readRelocation(id: string) {
+    const row = this.orm.select({
+      workspaceId: threads.relocationWorkspaceId,
+      freshSession: threads.relocationFreshSession,
+      noteGeneration: threads.relocationNoteGeneration,
+      notePending: threads.relocationNotePending,
+    }).from(threads).where(eq(threads.id, id)).get();
+    return row?.workspaceId && row.noteGeneration !== null ? { ...row, workspaceId: row.workspaceId, noteGeneration: row.noteGeneration } : null;
+  }
+
+  /** Tie the hidden payload to the execution that can consume it on success. */
+  recordRelocationTurn(id: string, use: NonNullable<typeof threads.$inferSelect.relocationTurn>): void {
+    this.orm.update(threads).set({ relocationTurn: use }).where(eq(threads.id, id)).run();
+  }
+
+  /** Clear only the relocation state used by this completed execution. */
+  completeRelocationTurn(id: string, executionId: string): void {
+    const row = this.orm.select({
+      use: threads.relocationTurn,
+      noteGeneration: threads.relocationNoteGeneration,
+    }).from(threads).where(eq(threads.id, id)).get();
+    if (row?.use?.executionId !== executionId) return;
+    const { use, noteGeneration } = row;
+    this.orm.update(threads).set({
+      relocationTurn: null,
+      ...(use.freshSession ? { relocationFreshSession: false } : {}),
+      ...(use.noteGeneration !== null && use.noteGeneration === noteGeneration ? { relocationNotePending: false } : {}),
+    }).where(eq(threads.id, id)).run();
+  }
+
+  /** Change placement, retention, session ownership, and the timeline together. */
+  moveToProject(id: string, destination: Pick<Workspace, "id" | "path" | "is_git_repo">, branch: string, now: string) {
+    return this.db.transaction(() => {
+      const thread = this.findById(id);
+      const workspaces = new WorkspaceStore(this.db);
+      if (!isOpenNoProjectThread(thread, thread && workspaces.findById(thread.workspace_id))) {
+        return { status: "not-no-project" as const };
+      }
+      const project = workspaces.findById(destination.id);
+      if (project?.kind !== "project") return { status: "destination-missing" as const };
+      if (project.path !== destination.path || project.is_git_repo !== destination.is_git_repo) {
+        return { status: "failed" as const, error: "The destination project changed while the move was preparing." };
+      }
+      this.orm.update(threads).set({
+        workspaceId: project.id, mode: "direct", branch, checkoutState: "named",
+        worktreePath: null, worktreeManaged: 0, baseBranch: null, headSha: null,
+        sdkSessionId: null, updatedAt: now,
+        relocationWorkspaceId: thread.workspace_id, relocationFreshSession: true,
+        relocationNoteGeneration: sql`coalesce(${threads.relocationNoteGeneration}, 0) + 1`,
+        relocationNotePending: true, relocationTurn: null,
+      }).where(eq(threads.id, id)).run();
+      // The source workspace's retention sweep cascades through canonical threads.
+      this.orm.update(canonicalAgentThreads).set({ workspaceId: project.id })
+        .where(eq(canonicalAgentThreads.id, id)).run();
+      workspaces.recordNoProjectMoveOut(thread.workspace_id, now);
+      this.providerSessions.removeAll(id);
+      const marker = new MessageStore(this.db).createThreadMove(id, project.name, now);
+      const updated = this.findById(id);
+      if (!updated) throw new Error(`Moved thread not found: ${id}`);
+      return { status: "moved" as const, thread: updated, marker };
     })();
   }
 

@@ -18,7 +18,7 @@ import type { StoredAttachment } from "@mcode/contracts/models/attachment";
 import type { TurnOutcome } from "@mcode/contracts/models/turn-outcome";
 import { HtmlVisualSchema } from "@mcode/contracts/models/html-visual";
 import { PreviewAnnotationBundleSchema } from "@mcode/contracts/models/browser-preview";
-import { ProviderSwitchMarkerSchema, LegacyMessageProvenanceSchema, ParentAgentMessageProvenanceSchema, SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
+import { ProviderSwitchMarkerSchema, ThreadMoveMarkerSchema, LegacyMessageProvenanceSchema, ParentAgentMessageProvenanceSchema, SystemNoticeMetadataSchema } from "@mcode/contracts/models/message";
 import { SelectedTextCommentsSchema } from "@mcode/contracts/models/selected-text-comment";
 import { THREAD_GET_TRANSCRIPT_MAX_BYTES } from "@mcode/contracts/thread-control";
 import { messages, threads, toolCallRecords, turnSteers } from "../../../../runtime/persistence/sqlite/schema.js";
@@ -106,6 +106,10 @@ function parseVisual(value: string | null): HtmlVisual | null {
   return value === null ? null : HtmlVisualSchema().parse(parseJsonField(value));
 }
 
+function readThreadMove(value: string | null): Pick<Message, "threadMove"> {
+  return value === null ? {} : { threadMove: ThreadMoveMarkerSchema().parse(parseJsonField(value)) };
+}
+
 function rowToMessage(row: MessageRow): Message {
   const msg: Message = {
     id: row.id,
@@ -132,6 +136,7 @@ function rowToMessage(row: MessageRow): Message {
     outcomeExecutionId: row.outcomeExecutionId ?? null,
     systemNotice: parseSystemNotice(row.systemNotice),
     providerSwitch: row.providerSwitch === null ? null : ProviderSwitchMarkerSchema().parse(parseJsonField(row.providerSwitch)),
+    ...readThreadMove(row.threadMove),
     visual: parseVisual(row.visual),
     is_internal: row.isInternal === 1,
     ...(row.parentAgentProvenance
@@ -343,6 +348,18 @@ export class MessageStore {
     const row = this.orm.insert(messages).values({
       id: NodeCrypto.randomUUID(), threadId, role: "system", content, sequence,
       timestamp: new Date().toISOString(), providerSwitch: JSON.stringify(providerSwitch),
+    }).returning().get();
+    return rowToMessage(row);
+  }
+
+  /** Older builds can read a move marker as a plain system message. */
+  createThreadMove(threadId: string, projectName: string, timestamp: string): Message {
+    const threadMove = ThreadMoveMarkerSchema().parse({ projectName, target: "local" });
+    const row = this.orm.insert(messages).values({
+      id: NodeCrypto.randomUUID(), threadId, role: "system",
+      content: `Moved to ${projectName} · Local`,
+      sequence: this.getLatestSequenceIncludingInternal(threadId) + 1,
+      timestamp, threadMove: JSON.stringify(threadMove),
     }).returning().get();
     return rowToMessage(row);
   }

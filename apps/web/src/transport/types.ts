@@ -14,7 +14,7 @@ import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
 import type { TurnSteerParams, TurnSteerResult, ListHeldSteersResult, SettleUnknownSteerParams, SettleUnknownSteerResult } from "@mcode/contracts/models/turn-steer";
 import type { TurnRetryParams, TurnResumeScheduleParams, ScheduledTurnResume, TurnRetryResult, TurnResumeParams, TurnResumeResult } from "@mcode/contracts/models/turn-recovery";
 import type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult, FileChangedLines } from "@mcode/contracts/models/workspace-file";
-import type { FilesystemBrowseResult, WorkspaceCreateResult, CreateAndSendResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, SendMessageInput, CreateAndSendInput, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
+import type { FilesystemBrowseResult, WorkspaceCreateResult, CreateAndSendResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, SendMessageInput, CreateAndSendInput, ThreadCompletionResult, ThreadMoveInput, ThreadMoveResult } from "@mcode/contracts/ws/methods";
 import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import type { Workspace, WorkspaceEnrichment } from "@mcode/contracts/models/workspace";
 import type { WorkspaceEnvironmentDocument, WorkspaceEnvironmentReadResult, WorkspaceEnvironmentStorageMode, WorkspaceEnvironmentCommandTarget, WorkspaceEnvironmentAutomaticSetupSnapshot, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
@@ -422,6 +422,8 @@ export interface McodeTransport {
 
   // Thread mutations
   updateThreadTitle(threadId: string, title: string): Promise<boolean>;
+  /** Move one No project thread into an existing project. */
+  moveThreadToProject(input: ThreadMoveInput): Promise<ThreadMoveResult>;
   /** Persist per-thread composer settings (reasoning, mode, permission, copilot agent, context window, thinking). */
   updateThreadSettings(
     threadId: string,

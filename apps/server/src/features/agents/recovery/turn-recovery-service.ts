@@ -264,7 +264,8 @@ export class TurnRecoveryService {
     retry = true,
     onLateFailure?: (error: unknown) => void,
   ): Promise<TurnResumeResult> {
-    if (chooseResumePath(this.resumePathInput(target.thread)) === "native-session") {
+    if (!this.threadRepo.readRelocation(target.thread.id)?.freshSession
+      && chooseResumePath(this.resumePathInput(target.thread)) === "native-session") {
       return this.resumeNatively(target, dispatch, resendPrompt, prompt, retry, onLateFailure);
     }
     return { turnId: await this.dispatchSeededResume(target, retry ? target.executionId : undefined, dispatch, prompt), mode: "seeded-session" };

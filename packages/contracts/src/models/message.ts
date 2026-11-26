@@ -119,6 +119,12 @@ export const ProviderSwitchMarkerSchema = lazySchema(() => z.object({
 /** The provider switch a system message records. */
 export type ProviderSwitchMarker = z.infer<ReturnType<typeof ProviderSwitchMarkerSchema>>;
 
+/** The destination as it appeared when the thread moved. */
+export const ThreadMoveMarkerSchema = lazySchema(() => z.object({
+  projectName: z.string(),
+  target: z.literal("local"),
+}).strict());
+
 /** Content of the system message written when a context compaction ends; clients find it by this text. */
 export const CONTEXT_COMPACTED_NOTICE = "Context compacted";
 
@@ -159,6 +165,8 @@ export const MessageSchema = lazySchema(() =>
     systemNotice: SystemNoticeMetadataSchema().nullable().optional(),
     /** Set on the system message that marks a provider switch in the timeline. */
     providerSwitch: ProviderSwitchMarkerSchema().nullable().optional(),
+    /** Set on the system message that marks a move to a project. */
+    threadMove: ThreadMoveMarkerSchema().nullable().optional(),
     /** Set on the system message that shows an HTML visual in the timeline. */
     visual: HtmlVisualSchema().nullable().optional(),
     /** Where `visual` shows while its turn runs. Live only: never saved, so a reloaded visual has none. */

@@ -190,6 +190,16 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.commitProviderSwitch, input);
   }
 
+  /** Read session and note requirements for a thread that left No project. */
+  readRelocation(id: string): ReturnType<ThreadStore["readRelocation"]> {
+    return this.reader.readRelocation(id);
+  }
+
+  /** Commit the move and its timeline marker through the application writer. */
+  moveToProject(...input: Parameters<ThreadStore["moveToProject"]>): Promise<ReturnType<ThreadStore["moveToProject"]>> {
+    return this.writer.execute(threadWriteOperations.moveToProject, input);
+  }
+
   /** Publish planning changes after their transaction has committed. */
   publishPlanPhase(threadId: string): void {
     this.attention?.invalidate(threadId);

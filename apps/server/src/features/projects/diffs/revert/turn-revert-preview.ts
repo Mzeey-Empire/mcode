@@ -32,7 +32,7 @@ export function revertRange(ranges: TurnSnapshotRangeReader, input: RevertPrevie
   const start = from ? turns.findIndex((turn) => turn.messageIds.includes(from)) : end;
   if (start >= 0 && end >= 0 && start > end) throw new TurnRevertValidationError("fromMessageId is after messageId");
   if (start < 0 || end < 0 || turns.slice(start, end + 1).some((turn) => !turn.complete)) return { status: "unavailable", reason: "snapshot-expired" };
-  return ranges.turnSnapshotRange(input.threadId, input.messageId, from);
+  return ranges.revertSnapshotRange(input.threadId, input.messageId, from);
 }
 
 /** Preview through filtered Git classification, with a precondition over raw worktree evidence. */

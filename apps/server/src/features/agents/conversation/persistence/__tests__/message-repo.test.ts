@@ -36,6 +36,7 @@ function createTestDb(): Database {
       outcome TEXT,
       outcome_execution_id TEXT,
       provider_switch TEXT
+      ,thread_move TEXT
       ,system_notice TEXT
       ,visual TEXT
     );

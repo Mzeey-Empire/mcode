@@ -111,6 +111,8 @@ export interface DataOnlyParentTurnStartInput extends Omit<ParentTurnStartInput,
   resendOfSteerId?: string;
   /** Reverts included only in the provider prompt, claimed with the user-message projection. */
   revertNoticeIds?: readonly string[];
+  /** Relocation instructions prepared for this exact provider execution. */
+  relocationUse?: { freshSession: boolean; noteGeneration: number | null };
 }
 
 /** Values for one canonical event and checkpoint transaction. */
@@ -305,6 +307,9 @@ export class CanonicalParentTurnWrite {
         const message = projectParentUserMessage(this.messages, input.thread.id, input.userMessage);
         new PlanCommentStore(this.db).stampSent(input.thread.id, input.planCommentIds ?? [], message.id);
         markTurnRevertsAgentNotified(this.db, input.thread.id, input.revertNoticeIds ?? []);
+        if (input.relocationUse) {
+          this.threads.recordRelocationTurn(input.thread.id, { executionId: input.executionId, ...input.relocationUse });
+        }
         if (input.answeredPlanQuestionMessageId) {
           this.planAnswers.markAnswered(input.answeredPlanQuestionMessageId, input.thread.id);
         }
@@ -543,6 +548,7 @@ export class CanonicalParentTurnWrite {
   }
 
   private finalizeProjectionCompatibility(input: DataOnlyParentTurnFinishInput, projection: ParentTurnProjection): void {
+    if (input.outcome === "completed") this.threads.completeRelocationTurn(input.threadId, input.executionId);
     const fileEvidence = input.fileEvidence;
     const selectedTurnDiff = selectTerminalDiff(input, projection.message !== null);
     if (!projection.message) {

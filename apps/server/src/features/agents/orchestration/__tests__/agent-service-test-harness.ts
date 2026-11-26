@@ -270,6 +270,8 @@ export function createAgentServiceForTest(
     workers.owner,
     undefined,
     providerSwitch,
+    undefined,
+    new ToolCallRecordRepo(db, writer),
   );
   const runtimePersistence = new ThreadRuntimePersistence(threadRepo);
   const eventIngress = providerEventIngress ?? new ProviderEventIngress();

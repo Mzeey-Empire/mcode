@@ -4,7 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import { container } from "tsyringe";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { IAgentProvider, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
@@ -18,13 +18,24 @@ import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlit
 import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
+import { revertRange } from "../../../projects/diffs/revert/turn-revert-preview.js";
+import { TurnSnapshotRangeReader } from "../../../projects/diffs/snapshots/turn-snapshot-range.js";
+import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-executor.js";
+import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { ThreadControlMutationReservationService } from "../../../thread-control/authority/thread-control-mutation-reservation-service.js";
+import { ThreadMoveService } from "../../../thread-control/lifecycle/thread-move-service.js";
 import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { loadConversationTail } from "../../conversation/read-model/conversation-page.js";
 import { WorkerOwnedTurnRuntime } from "../../execution/worker-owned-turn-runtime.js";
 import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
 import { AgentService } from "../../orchestration/agent-service.js";
+import { TurnRuntimeController } from "../../orchestration/turn-runtime-controller.js";
+import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
+import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 
 const CLAUDE_MODEL = "claude-sonnet-4-6";
 const CODEX_MODEL = "gpt-5.5";
@@ -495,6 +506,294 @@ describe("provider switch on send", () => {
       expect(await container.resolve(HandoffStorage).readLatestHandoffAudit(threadId)).toContain("kind: switch");
     });
   });
+
+  it.each(["topic", "HEAD"])("uses the git project checkout returned by Git (%s)", async (branch) => {
+    const { project, move } = await relocationFixture({ gitBranch: branch });
+    expect(await move()).toMatchObject({ status: "moved", thread: {
+      workspace_id: project.id, mode: "direct", branch, checkout_state: "named", worktree_path: null,
+    } });
+  });
+
+  it("allows a revert from the first project turn and refuses old-checkout snapshots", async () => {
+    const { move } = await relocationFixture({ gitBranch: "topic" });
+    const messages = container.resolve(MessageRepo);
+    const before = await messages.create(threadId, "assistant", "Edited the original folder", 1);
+    expect(await move()).toMatchObject({ status: "moved" });
+    const after = await messages.create(threadId, "assistant", "Edited the project", 3);
+    const snapshots = container.resolve(TurnSnapshotRepo);
+    await snapshots.create({ threadId, messageId: before.id, refBefore: "old-before", refAfter: "old-after",
+      filesChanged: ["report.txt"], worktreePath: null });
+    await snapshots.create({ threadId, messageId: after.id, refBefore: "project-before", refAfter: "project-after",
+      filesChanged: ["report.txt"], worktreePath: null });
+    const ranges = container.resolve(TurnSnapshotRangeReader);
+    expect(revertRange(ranges, { threadId, messageId: before.id, scope: { kind: "turn" } }))
+      .toEqual({ status: "unavailable", reason: "snapshot-expired" });
+    expect(revertRange(ranges, { threadId, messageId: after.id, scope: { kind: "turn" } }))
+      .toMatchObject({ status: "ready", refBefore: "project-before", refAfter: "project-after" });
+    expect(revertRange(ranges, { threadId, messageId: after.id,
+      scope: { kind: "file", path: "report.txt", fromMessageId: before.id } }))
+      .toEqual({ status: "unavailable", reason: "snapshot-expired" });
+  });
+
+  it.each([
+    ["pendingApproval", "needs-approval"],
+    ["activeTurn", "running"],
+    ["planImplement", "running"],
+    ["stopping", "running"],
+    ["completing", "running"],
+    ["reopening", "running"],
+    ["cleaning", "running"],
+    ["moving", "running"],
+  ] as const)("refuses to move while %s owns the thread", async (holder, reason) => {
+    const { move, source } = await relocationFixture();
+    const reservations = container.resolve(ThreadControlMutationReservationService);
+    const token = reservations.reserve(threadId, holder);
+    if (!token) throw new Error("Expected an idle thread");
+    try {
+      expect(await move()).toEqual({ status: "busy", reason });
+      expect(thread().workspace_id).toBe(source.id);
+      expect(container.resolve(MessageRepo).listIncludingInternal(threadId)).toEqual([]);
+    } finally {
+      reservations.release(threadId, token);
+    }
+  });
+
+  it("blocks an admission during the move and rejects the old placement prepared before it", async () => {
+    const { project, move } = await relocationFixture({ gitBranch: "topic" });
+    const availability = container.resolve(ProviderAvailabilityService);
+    const preparing = deferred();
+    const allowAdmission = deferred();
+    vi.mocked(availability.assertUsable).mockImplementationOnce(() => {
+      preparing.resolve();
+      return allowAdmission.promise;
+    });
+    const staleSend = send(claude, "Started preparing before the move");
+    const staleResult = expect(staleSend).rejects.toMatchObject({ reason: "pending_mutation" });
+    await preparing.promise;
+
+    const readingBranch = deferred();
+    const releaseBranch = deferred();
+    const moving = move({ getCurrentBranchAt: async () => {
+      readingBranch.resolve();
+      await releaseBranch.promise;
+      return "topic";
+    } });
+    await readingBranch.promise;
+    try {
+      await expect(send(claude, "Started after the move held the reservation"))
+        .rejects.toMatchObject({ reason: "pending_mutation" });
+    } finally {
+      releaseBranch.resolve();
+      await moving;
+      allowAdmission.resolve();
+    }
+    expect(await moving).toMatchObject({ status: "moved", thread: { workspace_id: project.id } });
+    await staleResult;
+    expect(claude.sendTurn.mock.calls).toEqual([]);
+    expect(container.resolve(MessageRepo).listIncludingInternal(threadId).map((message) => message.role)).toEqual(["system"]);
+  });
+
+  it("rejects an admission prepared for the previous path of the same workspace", async () => {
+    const { source, project } = await relocationFixture();
+    await expect(container.resolve(TurnRuntimeController).sendMessage({
+      threadId, provider: "claude", model: CLAUDE_MODEL, content: "Use the workspace",
+    }, () => {
+      const newPath = NodePath.join(project.path, "converted");
+      NodeFS.mkdirSync(newPath);
+      writeFixture((db) => db.run("UPDATE workspaces SET path = ? WHERE id = ?", [newPath, source.id]));
+      return true;
+    })).rejects.toMatchObject({ reason: "pending_mutation" });
+    expect(claude.sendTurn.mock.calls).toEqual([]);
+    expect(container.resolve(MessageRepo).listIncludingInternal(threadId)).toEqual([]);
+  });
+
+  it("moves only the chosen thread and keeps the old folder while a busy fork uses it", async () => {
+    const { source, project, move } = await relocationFixture();
+    const threads = container.resolve(ThreadRepo);
+    const fork = await threads.create(source.id, "Fork", "direct", "", false, "claude", { parentThreadId: threadId });
+    const reservations = container.resolve(ThreadControlMutationReservationService);
+    const token = reservations.reserve(fork.id, "activeTurn");
+    if (!token) throw new Error("Expected an idle fork");
+    try {
+      expect(await move()).toMatchObject({ status: "moved", thread: { workspace_id: project.id } });
+      expect(threads.findById(fork.id)?.workspace_id).toBe(source.id);
+      expect(container.resolve(WorkspaceRepo).findRelocationSource(source.id)?.retainUntil).toBeNull();
+      await completeTurn(claude, "Find the old material", "Located it", "new-claude");
+      expect(lastRequest(claude).message).toContain(
+        `Files from earlier in this thread are in ${source.path}. Another thread still works in that folder, so copy what you need into this project and leave the originals in place.`,
+      );
+    } finally {
+      reservations.release(fork.id, token);
+    }
+  });
+
+  it("keeps the canonical conversation when the source workspace expires before another send", async () => {
+    const { source, move } = await relocationFixture();
+    await completeTurn(claude, "Remember the early work", "I will.", "old-claude");
+    const original = lastRequest(claude);
+    expect(await move()).toMatchObject({ status: "moved" });
+    const workspaces = container.resolve(WorkspaceRepo);
+    const sweepAt = (now: string) =>
+      workspaces.deleteRemovableNoProject(source.id, "2026-11-27T00:00:00.000Z", "2026-11-01T00:00:00.000Z", now);
+    expect(await sweepAt("2026-12-02T12:00:00.000Z")).toBe(false);
+    expect(await sweepAt("2026-12-04T12:00:00.000Z")).toBe(true);
+    const canonical = container.resolve(CanonicalAgentBoundary);
+    expect(canonical.loadTurn(original.turnId)).toMatchObject({ status: "Completed", threadId });
+    expect(canonical.loadUserMessage(original.turnId)?.content).toBe("Remember the early work");
+  });
+
+  it("rebinds a non-git thread, expires the source in seven days and starts clean across providers", async () => {
+    const { source, project, move } = await relocationFixture();
+    await completeTurn(claude, "Remember the report", "The report is ready.", "old-claude");
+    await completeTurn(codex, "Check the report", "It is complete.", "old-codex");
+    const reply = assistantRows().at(-1);
+    if (!reply || !databaseWriter || !database) throw new Error("Expected a saved conversation");
+
+    expect(await move()).toMatchObject({ status: "moved", thread: {
+      workspace_id: project.id, branch: "main", mode: "direct", sdk_session_id: null,
+    } });
+    expect(sessions().listForThread(threadId)).toEqual([]);
+    expect(container.resolve(WorkspaceRepo).findRelocationSource(source.id)?.retainUntil).toBe("2026-12-03T12:00:00.000Z");
+    const marker = loadConversationTail({ messageRepo: new MessageRepo(database, databaseWriter) }, { threadId, limit: 15 })
+      .messages.find((message) => message.threadMove);
+    expect(marker).toMatchObject({ role: "system", content: "Moved to Destination · Local",
+      threadMove: { projectName: "Destination", target: "local" } });
+
+    await completeTurn(codex, "What should I do now?", "Continue", "new-codex", terminalCount(), {
+      replyToMessageId: reply.id, interactionMode: "plan",
+    });
+    const first = lastRequest(codex);
+    expect(first).toMatchObject({ cwd: project.path, workspaceId: project.id, interactionMode: "plan" });
+    expect(first.resumeFrom).toBeUndefined();
+    expect(first.message).toContain("[mcode-handoff:begin boundary=");
+    expect(first.message).toContain("Remember the report");
+    expect(first.message).toContain("<reply-to role=\"assistant\"");
+    expect(first.message).toContain("[PLAN MODE]");
+    expect(first.message).toContain("What should I do now?");
+    expect(first.message).toContain(
+      `Files from earlier in this thread are in ${source.path}. Mcode deletes that folder on 2026-12-03. Copy what you need into this project.`,
+    );
+    expect(container.resolve(MessageRepo).listIncludingInternal(threadId).filter((message) => message.role === "user").at(-1)?.content)
+      .toBe("What should I do now?");
+    await completeTurn(claude, "Back on Claude", "Fresh context", "new-claude", terminalCount(), { interactionMode: "build" });
+    expect(lastRequest(claude).resumeFrom).toBeUndefined();
+    expect(lastRequest(claude).cwd).toBe(project.path);
+    expect(lastRequest(claude).message).not.toContain("Files from earlier in this thread");
+  });
+
+  it("retries the first turn with the relocation note after provider failure", async () => {
+    const { move, project, source } = await relocationFixture();
+    await move();
+    claude.sendTurn.mockRejectedValueOnce(new Error("Provider failed before completion"));
+    await send(claude, "Read the report");
+    await settled(1);
+    const failed = lastRequest(claude);
+    expect(failed.message).toContain(source.path);
+    claude.sendTurn.mockImplementationOnce(answer(claude, "Read it", "new-claude"));
+    await container.resolve(TurnRecoveryService).retryErroredTurn({ threadId, turnId: failed.turnId },
+      (command) => container.resolve(AgentService).sendMessage(command));
+    await settled(2);
+    expect(lastRequest(claude)).toMatchObject({ cwd: project.path });
+    expect(lastRequest(claude).resumeFrom).toBeUndefined();
+    expect(lastRequest(claude).message).toContain(source.path);
+  });
+
+  it("adds the note to a seeded recovery prompt after the first turn is interrupted", async () => {
+    const { move, project, source } = await relocationFixture();
+    await move();
+    claude.sendTurn.mockImplementationOnce(async (request) => {
+      await container.resolve(ThreadRepo).updateSdkSessionId(threadId, "claude", "interrupted-claude");
+      await submit("claude", request, 1, { type: "ended", threadId,
+        turnExecutionId: request.turnExecutionId, outcome: "interrupted" });
+    });
+    await send(claude, "Read the report after moving");
+    await settled(1);
+    const interrupted = lastRequest(claude);
+    claude.sendTurn.mockImplementationOnce(answer(claude, "Recovered", "recovered-claude"));
+    const recovery = await container.resolve(TurnRecoveryService).resumeTurn({ threadId, turnId: interrupted.turnId },
+      (command) => container.resolve(AgentService).sendMessage(command));
+    await settled(2);
+    expect(recovery.mode).toBe("seeded-session");
+    const request = lastRequest(claude);
+    expect(request.cwd).toBe(project.path);
+    expect(request.resumeFrom).toBeUndefined();
+    expect(request.message).toContain("[mcode-handoff:begin boundary=");
+    expect(request.message).toContain("Read the report after moving");
+    expect(request.message).toContain(source.path);
+  });
+
+  it("keeps a newer note generation pending and names the converted project's new path", async () => {
+    const { source, project, move } = await relocationFixture();
+    await move();
+    const converted = NodePath.join(project.path, "Converted");
+    const finish = deferred();
+    const dispatched = deferred();
+    claude.sendTurn.mockImplementationOnce(async (request) => {
+      dispatched.resolve();
+      await finish.promise;
+      await answer(claude, "Read it", "new-claude")(request);
+    });
+    const running = send(claude, "Read the old report");
+    await dispatched.promise;
+    try {
+      expect(lastRequest(claude).message).toContain(source.path);
+      NodeFS.renameSync(source.path, converted);
+      writeFixture((db) => {
+        db.run("UPDATE workspaces SET kind = 'project', path = ? WHERE id = ?", [converted, source.id]);
+        db.run("UPDATE threads SET relocation_note_generation = relocation_note_generation + 1, relocation_note_pending = 1 WHERE id = ?", [threadId]);
+      });
+    } finally {
+      finish.resolve();
+    }
+    await running;
+    await settled(1);
+    await completeTurn(claude, "Check again", "Checked", "new-claude");
+    expect(lastRequest(claude).resumeFrom).toBe("new-claude");
+    expect(lastRequest(claude).message).toContain(`Files from earlier in this thread are in ${converted}. Copy what you need into this project.`);
+    expect(lastRequest(claude).message).not.toContain("Mcode deletes");
+    await completeTurn(claude, "One last check", "Done", "new-claude");
+    expect(lastRequest(claude).message).toBe("One last check");
+  });
+
+  it.each(["empty", "gone"])("omits the relocation note when the old folder is %s", async (state) => {
+    const { source, move } = await relocationFixture({ empty: true });
+    await move();
+    if (state === "gone") NodeFS.rmdirSync(source.path);
+    await completeTurn(claude, "New request", "Done", "new-claude");
+    expect(lastRequest(claude).message).not.toContain("Files from earlier in this thread");
+  });
+
+  async function relocationFixture(options: { gitBranch?: string; empty?: boolean } = {}) {
+    if (!temporaryDirectory) throw new Error("Expected a test directory");
+    const workspaces = container.resolve(WorkspaceRepo);
+    const threads = container.resolve(ThreadRepo);
+    const sourcePath = NodePath.join(temporaryDirectory, "no-project");
+    NodeFS.mkdirSync(sourcePath);
+    if (!options.empty) NodeFS.writeFileSync(NodePath.join(sourcePath, "report.txt"), "Prior work");
+    const { workspace: source } = await workspaces.createNoProject(crypto.randomUUID(), sourcePath);
+    const moved = await threads.create(source.id, "Move me", "direct", "", false, "claude");
+    threadId = moved.id;
+    const destination = NodePath.join(temporaryDirectory, "destination");
+    NodeFS.mkdirSync(destination);
+    const project = await workspaces.create("Destination", destination, options.gitBranch !== undefined);
+    const executor = new FakeGitExecutor();
+    executor.setResponse(["rev-parse", "--abbrev-ref", "HEAD"], { stdout: options.gitBranch ?? "", stderr: "" });
+    const move = (git: Pick<GitRepositoryService, "getCurrentBranchAt"> = new GitRepositoryService(workspaces, executor)) =>
+      new ThreadMoveService(threads, workspaces, container.resolve(ThreadControlMutationReservationService),
+        git, container.resolve(TurnRuntimeController), () => new Date("2026-11-26T12:00:00.000Z"))
+        .moveToProject({ threadId, workspaceId: project.id, target: { kind: "local" } });
+    return { source, project, move };
+  }
+
+  function writeFixture(change: (db: Database) => void): void {
+    if (!process.env.MCODE_DB_PATH) throw new Error("Expected a test database");
+    const connection = new Database(process.env.MCODE_DB_PATH);
+    try {
+      connection.transaction(() => change(connection)).immediate();
+    } finally {
+      connection.close();
+    }
+  }
 
   function notices(): string[] {
     return container.resolve(MessageRepo).listIncludingInternal(threadId)

@@ -262,6 +262,12 @@ export class WorkspaceStore {
       )).all().map(({ id }) => id);
   }
 
+  /** Read the current location and retention of a folder referenced by a relocated thread. */
+  findRelocationSource(id: string) {
+    return this.orm.select({ path: workspaces.path, kind: workspaces.kind, retainUntil: workspaces.retainUntil })
+      .from(workspaces).where(and(eq(workspaces.id, id), isNull(workspaces.deletedAt))).get() ?? null;
+  }
+
   /** Record a move after reassigning the thread, starting retention if the last live thread left. */
   recordNoProjectMoveOut(id: string, now: string): void {
     const noLiveThreads = notExists(this.orm.select({ id: threads.id }).from(threads)

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { inject, injectable } from "tsyringe";
 import type { TurnSnapshot } from "@mcode/contracts/models/turn-snapshot";
@@ -27,6 +27,24 @@ export class TurnSnapshotRangeReader {
     const start = turns.findIndex((turn) => turn.messageIds.includes(fromMessageId));
     if (start < 0 || start > end) return { status: "unavailable", reason: "snapshot-expired" };
     return snapshotRange(turns.slice(start, end + 1).flatMap((turn) => turn.complete ? turn.rows : []));
+  }
+
+  /** A revert cannot use snapshots from the checkout a relocated thread left. */
+  revertSnapshotRange(threadId: string, messageId: string, fromMessageId?: string): TurnSnapshotRange {
+    const orm = drizzle(this.db);
+    const move = orm.select({ sequence: messages.sequence }).from(messages)
+      .where(and(eq(messages.threadId, threadId), isNotNull(messages.threadMove)))
+      .orderBy(desc(messages.sequence)).limit(1).get();
+    if (!move) return this.turnSnapshotRange(threadId, messageId, fromMessageId);
+    const anchors = fromMessageId ? [messageId, fromMessageId] : [messageId];
+    const beforeMove = orm.select({ id: messages.id }).from(messages)
+      .where(and(eq(messages.threadId, threadId), inArray(messages.id, anchors), lte(messages.sequence, move.sequence))).get();
+    if (beforeMove) return { status: "unavailable", reason: "snapshot-expired" };
+    const range = this.turnSnapshotRange(threadId, messageId, fromMessageId);
+    if (range.status === "ready" && range.rows.some((row) => row.message_sequence <= move.sequence)) {
+      return { status: "unavailable", reason: "snapshot-expired" };
+    }
+    return range;
   }
 
   /** Keep ordinals tied to message order even when snapshots disappear or attempts are replaced. */

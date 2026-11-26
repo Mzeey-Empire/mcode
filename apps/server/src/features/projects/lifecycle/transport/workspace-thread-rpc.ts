@@ -12,6 +12,7 @@ import type { CiWatcherService } from "../../../pull-requests/status/ci-watcher.
 import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { ThreadCompletionService } from "../../../thread-control/lifecycle/thread-completion-service.js";
 import type { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";
+import type { ThreadMoveService } from "../../../thread-control/lifecycle/thread-move-service.js";
 import type { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
 import type { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import type { ProjectActionService } from "../../environment/project-action-service.js";
@@ -56,6 +57,7 @@ export interface WorkspaceThreadRouterDeps {
   threadAttentionService: Pick<ThreadAttentionService, "listInteresting" | "acknowledgeSeen">;
   goalLifecycleService: Pick<GoalLifecycleService, "clear" | "get">;
   threadCompletionService: Pick<ThreadCompletionService, "cleanupBlockedCount" | "complete" | "reopen" | "retryCleanup">;
+  threadMoveService: Pick<ThreadMoveService, "moveToProject">;
   threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread">;
   threadRepo: Pick<ThreadRepo, "findById" | "listAllByWorkspace" | "listAll">;
   workspaceRepo: Pick<WorkspaceRepo, "findById" | "removeRecent" | "setPinned" | "touchLastOpened">;
@@ -68,6 +70,7 @@ export interface WorkspaceThreadRouterDeps {
 }
 
 const workspaceThreadHandlers = {
+  "thread.moveToProject": (deps, params) => deps.threadMoveService.moveToProject(params),
   "workspace.list": (deps) => deps.workspaceService.list(),
   "workspace.create": createWorkspace,
   "workspace.createNoProject": createNoProjectWorkspace,

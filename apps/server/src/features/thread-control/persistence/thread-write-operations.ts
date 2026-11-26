@@ -63,6 +63,14 @@ export const threadWriteOperations = {
   commitProviderSwitch: databaseWriteOperation("thread.commitProviderSwitch", z.tuple([
     z.string(), settings.extend({ provider: z.string() }), z.string().nullable(), z.string(), HandoffIdSchema(), z.number().int().positive().optional(),
   ]), z.object({ providersUsed: z.array(z.string()), marker: MessageSchema() })),
+  moveToProject: databaseWriteOperation("thread.moveToProject", z.tuple([
+    z.string(), z.object({ id: z.string(), path: z.string(), is_git_repo: z.boolean() }), z.string(), z.string().datetime(),
+  ]), z.discriminatedUnion("status", [
+    z.object({ status: z.literal("moved"), thread, marker: MessageSchema() }),
+    z.object({ status: z.literal("not-no-project") }),
+    z.object({ status: z.literal("destination-missing") }),
+    z.object({ status: z.literal("failed"), error: z.string() }),
+  ])),
   updateTitle: booleanByPair("thread.updateTitle"),
   updateCompactSummary: databaseWriteOperation("thread.updateCompactSummary", z.tuple([z.string(), z.string()]), z.void()),
   updateLineage: databaseWriteOperation("thread.updateLineage", z.tuple([z.string(), z.string(), z.string()]), z.boolean()),

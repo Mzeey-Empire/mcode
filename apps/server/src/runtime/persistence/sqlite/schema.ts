@@ -130,6 +130,12 @@ export const threads = sqliteTable(
     model: text("model"),
     worktreeManaged: integer("worktree_managed").notNull().default(1),
     sdkSessionId: text("sdk_session_id"),
+    relocationWorkspaceId: text("relocation_workspace_id"),
+    relocationFreshSession: integer("relocation_fresh_session", { mode: "boolean" }),
+    relocationNoteGeneration: integer("relocation_note_generation"),
+    relocationNotePending: integer("relocation_note_pending", { mode: "boolean" }),
+    relocationTurn: text("relocation_turn", { mode: "json" })
+      .$type<{ executionId: string; freshSession: boolean; noteGeneration: number | null }>(),
     lastContextTokens: integer("last_context_tokens"),
     contextWindow: integer("context_window"),
     provider: text("provider").notNull().default("claude"),
@@ -442,6 +448,7 @@ export const messages = sqliteTable(
     /** Bounded typed provider notice metadata for durable system messages. */
     systemNotice: text("system_notice"),
     providerSwitch: text("provider_switch"),
+    threadMove: text("thread_move"),
     /** JSON HtmlVisual shown by a system message in the timeline. */
     visual: text("visual"),
   },

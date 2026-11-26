@@ -1683,13 +1683,21 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Keep teardown private during pooled-session replacement or an explicit stop. */
   shouldSuppressTurnEnded(threadId: string): boolean {
     if (this.lifecycles.evictingPooledSession(threadId)) return true;
-    if (this.mutationReservations.get(threadId)?.state === "stopping") return true;
-    return false;
+    const state = this.mutationReservations.get(threadId)?.state;
+    return state === "stopping" || state === "moving";
   }
 
   /** Keep the previous pooled session's completion from ending the replacement turn. */
   shouldSuppressTurnComplete(threadId: string): boolean {
-    return this.lifecycles.evictingPooledSession(threadId);
+    return this.lifecycles.evictingPooledSession(threadId) || this.mutationReservations.get(threadId)?.state === "moving";
+  }
+
+  /** Evict all pooled native sessions while the caller holds the relocation reservation. */
+  async evictThreadProviderSessions(threadId: string): Promise<void> {
+    const providers = this.providerRegistry.resolveAll();
+    const results = await Promise.allSettled(providers.map((provider) => this.evictPooledSession(provider, `mcode-${threadId}`)));
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
   }
 
   private clearTurnDispatch(
