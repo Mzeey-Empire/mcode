@@ -23,6 +23,7 @@
     --primary: oklch(72% 0.170 75); --on-primary: oklch(15% 0.02 75);
     --success: oklch(78% 0.130 145); --error: oklch(78% 0.130 25); --destructive: oklch(65% 0.200 25);
     --focus: oklch(62% 0.190 264); --border: oklch(19% 0.003 260); --link: oklch(70% 0.140 260);
+    --field: oklch(24% 0.005 260); --control-border: oklch(50% 0.010 260); --warning: oklch(82% 0.110 92); --info: oklch(70% 0.140 260);
     --segment-on: color-mix(in oklch, oklch(95.5% 0.005 260) 12%, transparent);
     --segment-edge: color-mix(in oklch, oklch(95.5% 0.005 260) 14%, transparent);
     --scrim: oklch(0% 0 0 / 0.55); --shadow: 0 12px 32px oklch(0% 0 0 / 0.6), 0 0 0 1px oklch(25% 0.003 260);
@@ -35,6 +36,7 @@
     --primary: oklch(52% 0.170 75); --on-primary: oklch(99% 0.005 260);
     --success: oklch(52% 0.120 145); --error: oklch(52% 0.140 25); --destructive: oklch(57.7% 0.190 27.3);
     --focus: oklch(52% 0.170 264); --border: oklch(92.5% 0.005 260); --link: oklch(52% 0.140 260);
+    --field: oklch(95.5% 0.005 260); --control-border: oklch(65% 0.005 260); --warning: oklch(46% 0.100 92); --info: oklch(50% 0.160 260);
     --segment-on: oklch(99% 0.005 260); --segment-edge: oklch(0 0 0 / 0.08);
     --scrim: oklch(20% 0.005 260 / 0.25); --shadow: 0 12px 32px oklch(20% 0.01 260 / 0.14), 0 0 0 1px oklch(90% 0.005 260);
   }
@@ -231,76 +233,75 @@
   .grp-head .drop-hint { display: none; color: var(--muted); font-size: 11.5px; padding-right: 6px; }
   .grp-head.drop-over .drop-hint { display: inline; }
   .grp-head.drop-over .acts { display: none; }
-  .dialog.move { margin-top: 72px; width: 500px; max-width: calc(100% - 32px); padding: 0; display: flex; flex-direction: column; max-height: calc(100% - 96px); position: relative; }
-  .move .head { padding: 18px 18px 0; }
-  .move .head h4 { margin: 0; }
-  .move .head .who { color: var(--muted); margin: 2px 0 0; }
-  .move .body { padding: 14px 18px 4px; overflow-y: auto; display: grid; gap: 14px; border: 0; margin: 0; min-width: 0; }
-  /* Input edges meet 3:1 against the dialog in both themes (WCAG non-text contrast). */
-  .move { --field-edge: color-mix(in oklch, var(--muted) 70%, var(--raised)); }
-  /* While a move runs the whole form is a disabled fieldset: controls go quiet, notices stay readable. */
-  .move .body:disabled .seg button, .move .body:disabled .trigger, .move .body:disabled .text-in, .move .body:disabled .check, .move .body:disabled .btn, .move .body:disabled .link { color: var(--muted); cursor: default; }
-  .move .body:disabled .seg button[aria-checked="true"] { background: var(--selected); box-shadow: none; }
-  .path-line { display: block; margin: 4px 0; }
-  .move .foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 18px 18px; }
+  /* The prototype draws the app at about 0.8 scale (13px body), so the app's 16/14/12px type roles read as 13/12/11.5px here. */
+  .dialog.move { margin: auto 0; width: 500px; max-width: calc(100% - 32px); padding: 0; display: flex; flex-direction: column; max-height: calc(100% - 48px); position: relative; }
+  .move .head { padding: 18px 48px 0 20px; }
+  .move .head h4 { margin: 0; font-size: 14px; font-weight: 500; }
+  .move .head .who { color: var(--muted); font-size: 12px; margin: 2px 0 0; }
+  .move .x { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
+  .move .x:hover { background: var(--hover); color: var(--ink); }
+  .move .x[disabled] { opacity: .5; pointer-events: none; }
+  .move .body { padding: 16px 20px 20px; overflow-y: auto; display: grid; gap: 16px; border: 0; margin: 0; min-width: 0; }
+  /* While a move runs the form is a disabled fieldset; controls dim the way the app's disabled controls do, notices stay readable. */
+  .move .body:disabled :is(.seg, .trigger, .text-in, .path-v, .check, .btn) { opacity: .5; cursor: default; }
+  .move .foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); }
   .field { display: grid; gap: 6px; }
   .field > .lab { color: var(--muted); font-size: 12px; font-weight: 500; }
   .field .help { color: var(--muted); font-size: 12px; }
   .field .err { color: var(--error); font-size: 12px; display: flex; gap: 6px; align-items: center; }
   .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border-radius: 9px; }
   .seg.wide button { border-radius: 7px; padding: 6px 10px; text-align: center; }
-  .seg.wide button[aria-disabled="true"] { color: var(--muted); opacity: .55; cursor: not-allowed; }
-  .trigger { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--field-edge); text-align: left; }
-  .trigger:hover { background: var(--selected); }
+  .seg.wide button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+  /* Fields follow the app's field surface: field fill, control-border edge, muted edge on hover. */
+  .trigger, .text-in, .path-row .path-v { height: 34px; padding: 0 10px; border-radius: 8px; background: var(--field); border: 1px solid var(--control-border); color: var(--ink); }
+  .trigger { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; }
+  .trigger:hover, .text-in:hover { border-color: var(--muted); }
+  .trigger[aria-disabled="true"] { opacity: .5; cursor: default; border-color: var(--control-border); }
   .trigger .lab { flex: 1; min-width: 0; }
   .trigger .ph { color: var(--muted); }
   .trigger .hint { color: var(--muted); font-size: 12px; }
-  .inline-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
-  .inline-row .trigger { width: auto; height: 28px; padding: 0 8px; font-size: 12.5px; color: var(--ink); }
+  .trigger > .i:first-child { color: var(--muted); }
   /* Inline code sits at the size and weight of the sentence around it. */
-  .inline-row .mono, .result .mono, .help .mono, .check .mono, .note-box .txt .mono { font-size: 12px; font-weight: 400; }
-  .text-in { width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; border: 0; outline: 0; background: var(--panel); box-shadow: inset 0 0 0 1px var(--field-edge); color: var(--ink); font: inherit; }
+  .result .mono, .help .mono, .notice .mono, .trigger .mono, .mi .mono { font-size: 12px; font-weight: 400; }
+  .text-in { width: 100%; outline: 0; font: inherit; }
   .text-in:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   .path-row { display: flex; align-items: center; gap: 8px; }
-  .path-row .path-v { flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; padding: 0 10px; border-radius: 8px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--field-edge); font-size: 12px; }
-  .text-in[aria-invalid="true"], .trigger[aria-invalid="true"], .path-row .path-v[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--error); }
+  .path-row .path-v { flex: 1; min-width: 0; display: flex; align-items: center; font-size: 12px; }
+  [aria-invalid="true"]:is(.text-in, .trigger, .path-v) { border-color: var(--error); }
   .result { font-size: 12px; color: var(--muted); }
   .result .mono { color: var(--ink); }
-  /* A button centres its text; the label and its hint are one left-aligned column beside the box. */
-  .check { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; text-align: left; }
-  .check .box { width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--muted); display: grid; place-items: center; flex-shrink: 0; margin-top: 1px; }
-  .check[aria-checked="true"] .box { background: var(--primary); box-shadow: none; color: var(--on-primary); }
-  .check .txt { display: grid; gap: 2px; text-align: left; }
-  .check .sub { color: var(--muted); font-size: 12px; }
-  /* --note-indent is the icon (14px) plus the row gap (8px): the notice's text column. */
-  .note-box { --note-indent: 22px; display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--panel); font-size: 12.5px; }
-  .note-box .row1 { display: flex; gap: 8px; align-items: flex-start; }
-  .note-box .row1 .ico { color: var(--muted); margin-top: 1px; }
-  .note-box.warn .row1 .ico { color: var(--primary); }
-  .note-box.bad .row1 .ico { color: var(--error); }
-  .note-box .muted { color: var(--muted); }
-  .note-box .txt { display: grid; gap: 2px; min-width: 0; }
-  .note-box .txt .mono { white-space: nowrap; }
-  .note-box .txt .link { justify-self: start; font-size: 12px; }
-  .note-box strong { font-weight: 600; }
-  .note-box details ul.files { margin: 4px 0 0; color: var(--ink); }
-  .field .check { margin-top: 4px; }
-  .note-box ul.files { margin: 2px 0 0 var(--note-indent); padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12px; }
-  .note-box details { color: var(--muted); font-size: 12px; margin-left: var(--note-indent); }
-  .note-box details .mono { display: block; margin-top: 4px; color: var(--ink); white-space: pre-wrap; word-break: break-all; }
-  .sharers { margin: 2px 0 0 var(--note-indent); padding: 0; list-style: none; display: grid; gap: 2px; }
-  .sharers li { display: flex; gap: 6px; align-items: center; min-width: 0; }
-  .sharers .fade { min-width: 0; }
-  .sharers .tag { color: var(--muted); font-size: 11.5px; }
-  .pop.in-dialog { position: absolute; left: 18px; right: 18px; z-index: 40; max-height: 280px; overflow-y: auto; }
+  .check { display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; }
+  .check .box { width: 16px; height: 16px; border-radius: 5px; border: 1px solid var(--control-border); background: var(--field); display: grid; place-items: center; flex-shrink: 0; }
+  .check[aria-checked="true"] .box { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; height: 36px; padding: 0 8px; margin-top: 4px; border-top: 1px solid var(--border); border-radius: 0 0 7px 7px; }
+  .switch-row:hover { background: var(--hover); }
+  .switch { width: 30px; height: 17px; border-radius: 999px; border: 1px solid var(--control-border); background: var(--field); padding: 1px; flex-shrink: 0; }
+  .switch .knob { display: block; width: 13px; height: 13px; border-radius: 999px; background: var(--muted); transition: transform .12s; }
+  .switch-row[aria-checked="true"] .switch { background: var(--primary); border-color: var(--primary); }
+  .switch-row[aria-checked="true"] .knob { transform: translateX(13px); background: var(--on-primary); }
+  /* One notice for every message in the dialog, as the app's Notice: tone icon, title, detail under the title's column. */
+  .notice { display: grid; gap: 6px; padding: 12px 13px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); }
+  .notice .nh { display: flex; align-items: center; gap: 10px; min-height: 24px; }
+  .notice .nh .ti { flex: 1; min-width: 0; font-weight: 500; }
+  .notice .tone { flex-shrink: 0; }
+  .notice.info .tone { color: var(--info); }
+  .notice.warning .tone { color: var(--warning); }
+  .notice.error .tone { color: var(--error); }
+  .notice .disc { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; color: var(--muted); flex-shrink: 0; }
+  .notice .disc:hover { background: var(--hover); color: var(--ink); }
+  .notice .nd { padding-left: 26px; display: grid; gap: 8px; color: var(--muted); font-size: 12px; min-width: 0; }
+  .notice .nd .k { color: var(--muted); }
+  .notice .nd ul { margin: 2px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; color: var(--ink); }
+  .notice .nd li { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .notice .raw { display: block; color: var(--ink); white-space: pre-wrap; word-break: break-all; }
+  .notice .nowrap { white-space: nowrap; }
+  .pop.in-dialog { position: absolute; left: 20px; right: 20px; z-index: 40; max-height: 300px; overflow-y: auto; }
   .mi .sub { color: var(--muted); font-size: 12px; }
   .mi.two { height: auto; min-height: 38px; padding: 6px 8px; align-items: center; }
   .mi.two .lab { display: grid; gap: 1px; }
-  /* Disabled and busy states change colour roles, never opacity, so labels stay readable in both themes. */
-  .btn[disabled] { cursor: not-allowed; filter: none; color: var(--muted); }
-  .btn.primary[disabled] { background: var(--selected); color: var(--muted); }
-  .btn.ghost[disabled] { background: transparent; }
-  .btn[aria-busy="true"] { cursor: progress; filter: none; }
+  .mi[aria-disabled="true"] .sub { color: var(--muted); }
+  .btn[disabled] { opacity: .5; cursor: default; pointer-events: none; }
+  .btn[aria-busy="true"] { cursor: progress; }
   .btn .spin { border-color: currentColor; border-top-color: transparent; }
 
   .ev { margin: 6px 0 18px; display: grid; gap: 6px; }
@@ -315,6 +316,7 @@
   .ev-card details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   .ev-card .ev-files { color: var(--ink); font-size: 12px; }
   .ev-card blockquote { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--background); font-size: 12px; white-space: pre-wrap; }
+  .path-line { display: block; margin: 4px 0; }
   .ev-card blockquote .mono { font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
   .state-pill { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; font-size: 12px; background: var(--selected); color: var(--muted); margin-left: 6px; }
   .state-pill.ok { color: var(--success); }
@@ -375,6 +377,9 @@ Object.assign(P, {
   tree: '<path d="M6 3v12"/><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M15 6a9 9 0 0 0-9 9"/>',
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  warning: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  upChev: '<path d="m18 15-6-6-6 6"/>',
 });
 
 /* ============================== Data ============================== */
@@ -516,14 +521,14 @@ function renderMap() {
       <ul class="tree">
         <li><span class="node">Existing project</span>${go("moveA")}<ul>
           <li><span class="node">Project picker</span><span class="note">Registered projects only, with their paths.</span>${go("moveAPicker")}</li>
-          <li><span class="node">Runs in: Local / New worktree / Existing worktree</span><span class="note">Default Local, on the project's current branch. A project that is not a git repo runs Local only.</span>${go("moveNewWt", "new worktree ›")} ${go("moveExistingWt", "existing ›")} ${go("moveNonGit", "not git ›")}</li>
-          <li><span class="node">Earlier files notice</span><span class="note">Lists the folder's files, says that after the move Mcode deletes the folder on ${DEADLINE}, and that the agent is told where.</span>${go("moveAFiles")}</li>
+          <li><span class="node">Runs in</span><span class="note">A dropdown: Local (default, on the project's current branch), New worktree or Existing worktree. New worktree adds a From branch, whose picker has the Start from origin switch; Existing worktree adds a Worktree picker. A project that is not a git repo runs Local only.</span>${go("moveRunsMenu", "menu ›")} ${go("moveNewWt", "new worktree ›")} ${go("moveExistingWt", "existing ›")} ${go("moveNonGit", "not git ›")}</li>
+          <li><span class="node">Files notice</span><span class="note">A warning: after the move Mcode deletes the folder's files on ${DEADLINE}, they are not copied, and the agent is told where. The chevron shows the files and the threads that move too.</span>${go("moveAFiles")}</li>
         </ul></li>
         <li><span class="node">New project</span>${go("moveB")}<ul>
           <li><span class="node">Name, location, git</span><span class="note">Name from the folder, without date or id. Start a git repo is unchecked.</span>${go("moveBGit", "git on ›")}</li>
           <li><span class="node">Name or folder taken</span>${go("moveBCollide")}</li>
         </ul></li>
-        <li><span class="node">Shared folder</span><span class="note">Forks and children that share the folder move with it, and are listed.</span>${go("moveAFiles")}</li>
+        <li><span class="node">Shared folder</span><span class="note">Forks and children that share the folder move with it, and are listed.</span>${go("moveBShared")}</li>
         <li><span class="node">Moving, failed, git failed</span>${go("moveMoving", "moving ›")} ${go("moveFailed", "failed ›")} ${go("moveCross", "across drives ›")} ${go("moveGitFail", "git ›")}</li>
         <li><span class="node">No projects yet</span><span class="note">New project is the only choice.</span>${go("moveZero")}</li>
       </ul></div>
@@ -532,7 +537,6 @@ function renderMap() {
         <li><span class="node">Sidebar ${pill("chg", "Changed")}</span><span class="note">Rows leave No project and appear under the project, which expands. Selection stays.</span>${go("afterA")}</li>
         <li><span class="node">Header</span><span class="note">project › thread.</span></li>
         <li><span class="node">Timeline: move marker ${pill("new", "New")}</span><span class="note">Where it moved and how it runs, plus the earlier files and what the agent is told.</span>${go("afterAFiles")}</li>
-        <li><span class="node">Overview: Earlier files row ${pill("new", "New")}</span><span class="note">While the old folder exists. Copy path.</span>${go("afterAOverview")}</li>
         <li><span class="node">New project group</span>${go("afterB")}</li>
       </ul></div>
     <div class="col"><h3>Agent and cleanup</h3><div class="sub">Behind the screens.</div>
@@ -570,11 +574,11 @@ const FLOWS = [
   { name: "A thread with files and a fork", steps: [
     ["Move dialog", "Lists the 4 files and the fork that moves too.", "moveAFiles"],
     ["Moved", "The marker keeps the earlier folder and its deadline.", "afterAFiles"],
-    ["Overview", "Earlier files row while the folder exists.", "afterAOverview"],
     ["Next turn", "The note goes to the agent once.", "afterSent"],
     ["After 7 days", "Folder removed; the marker says so.", "afterExpired"] ] },
   { name: "Choose where it runs", steps: [
-    ["New worktree", "From a branch, Start from origin off.", "moveNewWt"],
+    ["Runs in", "Local, New worktree or Existing worktree.", "moveRunsMenu"],
+    ["New worktree", "Pick the From branch; Start from origin is in its picker.", "moveNewWt"],
     ["Existing worktree", "Pick one; Move waits until you do.", "moveExistingWt"],
     ["Not a git repo", "docs-site runs Local only.", "moveNonGit"] ] },
   { name: "Make it a new project", steps: [
@@ -605,7 +609,7 @@ function renderFlows() {
 function newMv(tid, patch = {}) {
   const t = S.threads.find(x => x.id === tid);
   return { tid, dest: projects().length ? "existing" : "new", pid: null, mode: "local", base: null, origin: false, wt: null,
-    name: suggestedName(t), parent: defaultParent(), git: false, phase: "form", picker: null, pq: "", showFiles: false, ...patch };
+    name: suggestedName(t), parent: defaultParent(), git: false, phase: "form", picker: null, pq: "", showFiles: false, showRaw: false, ...patch };
 }
 function goto(key) {
   draft = "";
@@ -622,7 +626,9 @@ function goto(key) {
     moveAPicker: () => set(at("n2", { overlay: "move", mv: newMv("n2", { picker: "project" }) })),
     moveAPicked: () => set(at("n2", { overlay: "move", mv: newMv("n2", { pid: "billing", base: "main" }) })),
     moveAFiles: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", showFiles: true }) })),
-    moveNewWt: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "newwt", base: "main" }) })),
+    moveRunsMenu: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", picker: "runs" }) })),
+    moveNewWt: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "newwt", base: "main", picker: "branch" }) })),
+    moveBShared: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new" }) })),
     moveExistingWt: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "existingwt", base: "main" }) })),
     moveNonGit: () => set(at("n2", { overlay: "move", mv: newMv("n2", { pid: "docs" }) })),
     moveB: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new" }) })),
@@ -640,7 +646,6 @@ function goto(key) {
     moveZero: () => { S.hasProjects = false; set(at("n1", { overlay: "move", mv: newMv("n1") })); },
     afterA: () => { moved("n2", "billing"); set(at("n2")); },
     afterAFiles: () => { moved("n1", "mcode"); set(at("n1")); },
-    afterAOverview: () => { moved("n1", "mcode"); set(at("n1", { ovOpen: true })); },
     afterSent: () => { moved("n1", "mcode"); draft = "Copy the benchmark into the repo and wire it into bun run bench."; set(at("n1")); send(); },
     afterExpired: () => { moved("n1", "mcode"); set(at("n1", { sim: { ...S.sim, expired: true } })); },
     afterB: () => { applyNew(newMv("n1", { dest: "new" })); set(at("n1")); },
@@ -738,7 +743,7 @@ function handoffNote(ev) {
 }
 function moveMarker(ev) {
   const p = project(ev.to);
-  const how = ev.kind === "new" ? `Made project <b>${esc(p.name)}</b>` : `Moved to <b>${esc(p.name)}</b> · ${MODE_LABEL[ev.mode]}${ev.mode === "newwt" ? ` from ${esc(ev.base)}` : ""}`;
+  const how = ev.kind === "new" ? `Created project <b>${esc(p.name)}</b>` : `Moved to <b>${esc(p.name)}</b> · ${MODE_LABEL[ev.mode]}${ev.mode === "newwt" ? ` from ${esc(ev.base)}` : ""}`;
   const line = `<div class="ev-line" role="note"><span class="mid">${ic("move", "sm")}${how}</span></div>`;
   if (ev.kind === "new" || !ev.files.length) return `<div class="ev">${line}</div>`;
   const gone = S.sim.expired;
@@ -747,7 +752,7 @@ function moveMarker(ev) {
     <div class="top">${ic(gone ? "trash" : "clock", "sm")}<span class="grow">${gone
       ? `Mcode deleted the old folder on ${DEADLINE}.`
       : `${plural(ev.files.length, "earlier file stays", "earlier files stay")} in the old folder. Mcode deletes it on ${DEADLINE}.`}</span>${gone ? "" : `<button class="link" data-copy="${esc(ev.oldFolder)}">Copy path</button>`}</div>
-    <div class="ev-files mono">${esc(ev.files.join("  ·  "))}</div>
+    ${gone ? `<div class="muted">Files in the old folder</div>` : ""}<div class="ev-files mono">${esc(ev.files.join("  ·  "))}</div>
     ${gone && !ev.sent ? "" : `<details><summary>What the agent is told ${state}</summary><blockquote>${handoffNote(ev)}</blockquote></details>`}
   </div></div>`;
 }
@@ -760,15 +765,12 @@ function overviewHtml(t) {
   if (t.projectId === null) return `<div class="ov" role="dialog" aria-label="Overview">
     <div class="ov-sec"><div class="ov-row">${ic("folder", "sm ico")}<span class="k">Folder</span><span class="v" style="color:var(--muted)">No project folder</span><button class="link" style="font-size:12px" data-copy="${esc(folderPath(t))}">Copy</button></div></div>${rest}</div>`;
   const p = project(t.projectId);
-  const ev = moveEventOf(t);
-  const earlier = ev && ev.kind === "existing" && ev.files.length && !S.sim.expired
-    ? `<div class="ov-sec"><div class="ov-row">${ic("clock", "sm ico")}<span class="k">Earlier files</span><span class="v">${plural(ev.files.length, "file", "files")} · Mcode deletes ${DEADLINE}</span><button class="link" style="font-size:12px" data-copy="${esc(ev.oldFolder)}">Copy path</button></div></div>` : "";
   const where = t.mode === "local" || !p.git
     ? `<div class="ov-row">${ic("laptop", "sm ico")}<span class="k">Local</span><span class="v mono fade">${esc(p.path)}</span></div>`
     : `<div class="ov-row">${ic("tree", "sm ico")}<span class="k">Worktree</span><span class="v mono fade">${esc(t.wtPath ?? p.path)}</span></div>`;
   const git = p.git ? `<div class="ov-row">${ic("branch", "sm ico")}<span class="k">Branch</span><span class="v mono fade">${esc(t.branch)}</span></div>
       <div class="ov-row">${ic("pr", "sm ico")}<span class="k">Pull request</span><span class="v" style="color:var(--muted)">None</span></div>` : "";
-  return `<div class="ov" role="dialog" aria-label="Overview"><div class="ov-sec">${where}${git}</div>${earlier}${rest}</div>`;
+  return `<div class="ov" role="dialog" aria-label="Overview"><div class="ov-sec">${where}${git}</div>${rest}</div>`;
 }
 
 /* ============================== Menus and palette ============================== */
@@ -777,7 +779,7 @@ function menuHtml() {
   const pos = S.menuXY ?? (() => { const r = document.querySelector(`[data-open="${t.id}"]`)?.getBoundingClientRect(); const a = document.getElementById("app")?.getBoundingClientRect(); return r && a ? { x: r.right - a.left - 24, y: r.top - a.top } : { x: 240, y: 300 }; })();
   const busy = busySharer(t);
   const moveItem = t.projectId === null && !t.closed
-    ? busy ? `<button class="mi two" role="menuitem" aria-disabled="true">${ic("move", "sm ico")}<span class="lab"><span>Move to project…</span><span class="sub fade">${busyLine(t, busy)}</span></span></button>`
+    ? busy ? `<button class="mi two" role="menuitem" aria-disabled="true">${ic("move", "sm ico")}<span class="lab"><span>Move to project…</span><span class="sub">${busyLine(t, busy)}</span></span></button>`
       : `<button class="mi" role="menuitem" data-act="openmove">${ic("move", "sm ico")}<span class="lab">Move to project…</span></button>` : "";
   const closeReason = busyReason(t);
   const closeItem = t.closed ? `<button class="mi" role="menuitem">${ic("restore", "sm ico")}<span class="lab">Restore thread</span></button>`
@@ -832,40 +834,53 @@ function projectPicker(mv) {
 function listPicker(kind, items) {
   return `<div class="pop in-dialog" data-stop role="listbox" aria-label="${kind}">${items}</div>`;
 }
+/* The app's Notice: tone icon, title, then detail under the title's column. `more` waits behind the chevron, keyed by an S.mv flag. */
+function notice({ tone, title, detail = "", more = "", openKey = "" }) {
+  const open = !!(openKey && S.mv[openKey]);
+  const disc = more ? `<button type="button" class="disc" data-mvopen="${openKey}" aria-expanded="${open}" aria-label="${open ? "Hide details" : "Show details"}">${ic(open ? "upChev" : "down", "sm")}</button>` : "";
+  const body = detail + (open ? more : "");
+  return `<div class="notice ${tone}" role="${tone === "error" ? "alert" : "status"}"><div class="nh">${ic({ info: "info", warning: "warning", error: "alert" }[tone], "tone")}<span class="ti">${title}</span>${disc}</div>${body ? `<div class="nd">${body}</div>` : ""}</div>`;
+}
+const threadList = ts => `<ul>${ts.map(o => `<li><span class="fade">${esc(o.title)}</span>${o.closed ? `<span class="k">Closed</span>` : ""}${busyReason(o) ? statusLane(o) : ""}</li>`).join("")}</ul>`;
+/* Runs in is one dropdown, as in the new-thread target; New worktree and Existing worktree each add the one field they need. */
 function runsIn(mv, p) {
-  if (!p.git) return `<div class="field"><span class="lab">Runs in</span><div class="inline-row">${ic("laptop", "sm")}<span style="color:var(--ink)">Local</span><span>· <span class="mono">${esc(p.path)}</span> is not a git repo</span></div></div>`;
-  const modes = ["local", "newwt", "existingwt"].map(m => `<button role="radio" aria-checked="${mv.mode === m}" data-mvmode="${m}">${MODE_LABEL[m]}</button>`).join("");
+  if (!p.git) return `<div class="field"><span class="lab">Runs in</span><button class="trigger" aria-disabled="true">${ic("laptop", "sm")}<span class="lab">Local</span><span class="hint">Not a git repo</span></button></div>`;
+  const icon = mv.mode === "local" ? "laptop" : "tree";
+  const runs = `<div class="field"><span class="lab">Runs in</span><button class="trigger" data-mvpicker="runs" aria-haspopup="listbox">${ic(icon, "sm")}<span class="lab">${MODE_LABEL[mv.mode]}</span>${mv.mode === "local" ? `<span class="hint mono">${esc(p.branch)}</span>` : ""}${ic("down", "sm")}</button></div>`;
   const base = mv.base ?? p.branch;
-  let help, detail = "";
-  if (mv.mode === "local") help = `Works in <span class="mono">${esc(p.path)}</span> on <span class="mono">${esc(p.branch)}</span>, next to your own changes.`;
-  else if (mv.mode === "newwt") {
-    help = "A separate checkout on a new branch, so your own checkout stays untouched.";
-    detail = `<div class="inline-row"><span>From</span><button class="trigger" data-mvpicker="branch">${ic("branch", "sm")}<span class="mono">${esc(base)}</span>${ic("down", "sm")}</button></div>
-      <button class="check" role="checkbox" aria-checked="${mv.origin}" data-mvflip="origin"><span class="box">${mv.origin ? ic("check", "sm") : ""}</span><span class="txt"><span>Start from <span class="mono">origin/${esc(base)}</span></span><span class="sub">Fetches first, so it starts from the latest remote. Local-only commits stay on your local branch.</span></span></button>`;
-  } else {
-    help = "Runs in a checkout you already have.";
-    detail = p.worktrees.length
-      ? `<button class="trigger" data-mvpicker="worktree">${ic("tree", "sm")}${mv.wt ? `<span class="lab mono fade">${esc(mv.wt.path)}</span><span class="hint mono">${esc(mv.wt.branch)}</span>` : `<span class="lab ph">Choose worktree</span>`}${ic("down", "sm")}</button>`
-      : `<div class="help">${esc(p.name)} has no other worktrees. Use New worktree instead.</div>`;
+  if (mv.mode === "newwt") return runs + `<div class="field"><span class="lab">From</span><button class="trigger" data-mvpicker="branch" aria-haspopup="listbox">${ic("branch", "sm")}<span class="lab mono">${esc(mv.origin ? `origin/${base}` : base)}</span>${ic("down", "sm")}</button></div>`;
+  if (mv.mode === "existingwt") return runs + `<div class="field"><span class="lab">Worktree</span><button class="trigger" data-mvpicker="worktree" aria-haspopup="listbox">${ic("tree", "sm")}${mv.wt ? `<span class="lab mono fade">${esc(mv.wt.path)}</span><span class="hint mono">${esc(mv.wt.branch)}</span>` : `<span class="lab ph">Choose a worktree</span>`}${ic("down", "sm")}</button></div>`;
+  return runs;
+}
+function runsPicker(mv, p) {
+  const opts = [
+    ["local", "laptop", `In <span class="mono">${esc(p.path)}</span> on <span class="mono">${esc(p.branch)}</span>, next to your own changes`],
+    ["newwt", "tree", "A separate checkout on a new branch"],
+    ["existingwt", "tree", p.worktrees.length ? "A checkout you already have" : `${esc(p.name)} has no other worktrees`],
+  ];
+  return listPicker("Runs in", opts.map(([m, icon, sub]) => {
+    const off = m === "existingwt" && !p.worktrees.length;
+    return `<button class="mi two" role="option" aria-selected="${mv.mode === m}" ${off ? 'aria-disabled="true"' : `data-mvmode="${m}"`}>${ic(icon, "sm ico")}<span class="lab"><span>${MODE_LABEL[m]}</span><span class="sub">${sub}</span></span>${mv.mode === m ? ic("check", "sm") : ""}</button>`;
+  }).join(""));
+}
+/* As in the new-thread branch picker, Start from origin is a switch in the picker's footer and keeps the picker open. */
+function branchPicker(mv, p) {
+  const base = mv.base ?? p.branch;
+  return listPicker("Branches", p.branches.map(b => `<button class="mi" role="option" aria-selected="${base === b}" data-mvbase="${esc(b)}">${ic("branch", "sm ico")}<span class="lab mono">${esc(b)}</span>${base === b ? ic("check", "sm") : ""}</button>`).join("")
+    + `<button class="switch-row" role="switch" aria-checked="${mv.origin}" data-mvflip="origin"><span>Start from origin</span><span class="switch"><span class="knob"></span></span></button>`);
+}
+/* Into an existing project the folder's files stay behind, so the deadline leads; the files and the threads that move ride behind the chevron. */
+function folderNotice(mv, t) {
+  const files = folderFiles(t), others = sharersOf(t).slice(1);
+  if (mv.dest === "existing" && files.length) {
+    const copied = files.length === 1 ? "It is not copied into the project. The agent is told where it is on its next turn." : "They are not copied into the project. The agent is told where they are on its next turn.";
+    return notice({ tone: "warning", title: `After the move, Mcode deletes this folder's ${plural(files.length, "file", "files")} on ${DEADLINE}.`,
+      detail: `<div>${copied}</div>`,
+      more: `<div><span class="k">Files in this folder</span><ul class="mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>${others.length ? `<div><span class="k">Moves too</span>${threadList(others)}</div>` : ""}`,
+      openKey: "showFiles" });
   }
-  return `<div class="field"><span class="lab" id="runs-lab">Runs in</span><div class="seg wide" role="radiogroup" aria-labelledby="runs-lab">${modes}</div><div class="help">${help}</div>${detail}</div>`;
-}
-function filesNotice(mv, t) {
-  const files = folderFiles(t);
-  if (!files.length) return "";
-  if (mv.dest === "new") return `<div class="note-box"><div class="row1">${ic("folder", "sm ico")}<span>The folder moves with its ${plural(files.length, "file", "files")}.</span></div></div>`;
-  const copied = files.length === 1 ? "It is not copied into the project. The agent is told where it is on its next turn." : "They are not copied into the project. The agent is told where they are on its next turn.";
-  return `<div class="note-box"><div class="row1">${ic("file", "sm ico")}<span class="txt"><span>This folder has ${plural(files.length, "file", "files")}. After the move, <strong>Mcode deletes it on ${DEADLINE}</strong>.</span>
-    <span class="muted">${copied}</span><button class="link" data-mvdest="new">Make it a new project instead</button></span></div>
-    <details data-mvfiles ${mv.showFiles ? "open" : ""}><summary>Files in this folder</summary><ul class="files mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></details></div>`;
-}
-/* A thread is listed under its name, aligned with the notice's text; a status mark follows it only while that thread is busy. */
-function sharersNotice(t) {
-  const others = sharersOf(t).slice(1);
   if (!others.length) return "";
-  const mark = o => (busyReason(o) ? statusLane(o) : "");
-  return `<div class="note-box"><div class="row1">${ic("link", "sm ico")}<span>${others.length === 1 ? "1 other thread shares this folder and moves too:" : `${others.length} other threads share this folder and move too:`}</span></div>
-    <ul class="sharers">${others.map(o => `<li><span class="fade">${esc(o.title)}</span>${o.closed ? `<span class="tag">Closed</span>` : ""}${mark(o)}</li>`).join("")}</ul></div>`;
+  return notice({ tone: "info", title: others.length === 1 ? "1 other thread shares this folder and moves too" : `${others.length} other threads share this folder and move too`, detail: threadList(others) });
 }
 function moveDialogHtml() {
   const mv = S.mv, t = S.threads.find(x => x.id === mv.tid);
@@ -887,8 +902,7 @@ function moveDialogHtml() {
       : mv.dest === "existing"
         ? [n > 1 ? `Couldn't move the ${n} threads.` : "Couldn't move the thread.", `Nothing changed: ${who} still in No project and the files are untouched. Try again in a moment.`, "SQLITE_BUSY: database is locked (updating thread workspace)"]
         : [`Couldn't move the folder to ${esc(mv.parent)}.`, `Nothing changed: ${who} still in No project. Close any app using files in the folder, then try again.`, "EBUSY: resource busy or locked, rename '…/2026-11-26-sqlite-wal-vs-rollback-7f3a'"];
-    outcome = `<div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span class="txt"><span>${lead}</span><span class="muted">${rest}</span></span></div>
-      <details><summary>Details</summary><span class="mono">${esc(details)}</span></details></div>`;
+    outcome = notice({ tone: "error", title: lead, detail: `<div>${rest}</div>`, more: `<span class="raw mono">${esc(details)}</span>`, openKey: "showRaw" });
   }
   let form;
   if (mv.dest === "existing") {
@@ -904,17 +918,23 @@ function moveDialogHtml() {
       <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade" ${cross && failed ? 'aria-invalid="true"' : ""}>${esc(mv.parent)}</span>${cross && failed ? "" : `<button class="btn" data-mvpicker="browse">Browse…</button>`}</div>
         ${shownErr || (cross && failed) ? "" : `<span class="result">Creates <span class="mono">${esc(target)}</span></span>`}</div>
       ${cross && failed ? outcome : ""}
-      <button class="check" role="checkbox" aria-checked="${mv.git}" data-mvflip="git"><span class="box">${mv.git ? ic("check", "sm") : ""}</span><span class="txt"><span>Start a git repo</span>${mv.git ? `<span class="sub">Runs git init. The files start uncommitted.</span>` : ""}</span></button>`;
+      <button class="check" role="checkbox" aria-checked="${mv.git}" data-mvflip="git"><span class="box">${mv.git ? ic("check", "sm") : ""}</span><span>Start a git repo</span></button>`;
   }
   const block = blockReason(mv, t);
-  const busyBox = block?.busy ? `<div class="note-box warn" role="status"><div class="row1">${ic("alert", "sm ico")}<span>“${esc(block.busy.title)}” is ${block.busy.status === "running" ? "running" : "waiting for approval"}. You can move once it stops.</span></div></div>` : "";
+  /* Info, not warning: nothing is at risk, the move only waits. The files warning stays the one warning in the dialog. */
+  const busyBox = block?.busy ? notice({ tone: "info",
+    title: `“${esc(block.busy.title)}” ${block.busy.status === "running" ? "is running" : "needs approval"}`,
+    detail: `<div>${block.busy.status === "running" ? "You can move once it stops." : "You can move once you answer it."}</div>` }) : "";
+  /* The project exists and the thread is in it, so Done is the next step; retrying git is optional. */
   if (mv.phase === "gitfailed") {
     const p = project(mv.createdId) ?? { name: mv.name, path: joinPath(mv.parent, mv.name) };
     return `<div class="scrim"><div class="dialog move" role="alertdialog" aria-labelledby="mvh" data-stop>
       <div class="head"><h4 id="mvh">Project created</h4><p class="who">“${esc(t.title)}” now runs in the ${esc(p.name)} project.</p></div>
-      <div class="body"><div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span class="txt"><span>Couldn't start a git repo: permission denied in the project folder.</span><span class="muted">The project works without git. Check you can write to <span class="mono">${esc(p.path)}</span>, then retry, or run git init later.</span></span></div>
-        <details><summary>Details</summary><span class="mono">${esc(p.path)}\ngit: 'init' failed: unable to create '.git/index.lock': Permission denied</span></details></div></div>
-      <div class="foot"><button class="btn ghost" data-act="mvdone">Done</button><button class="btn primary" data-act="mvgitretry">Retry git setup</button></div>
+      <button class="x" data-act="mvdone" aria-label="Close">${ic("x", "sm")}</button>
+      <div class="body">${notice({ tone: "error", title: "Couldn't start a git repo: permission denied in the project folder.",
+        detail: `<div>The project works without git. Check you can write to <span class="mono nowrap">${esc(p.path)}</span>, then retry, or run git init later.</div>`,
+        more: `<span class="raw mono">${esc(p.path)}\ngit: 'init' failed: unable to create '.git/index.lock': Permission denied</span>`, openKey: "showRaw" })}</div>
+      <div class="foot"><button class="btn ghost" data-act="mvgitretry">Retry git setup</button><button class="btn primary" data-act="mvdone">Done</button></div>
     </div></div>`;
   }
   const primaryLabel = locked ? (mv.dest === "new" && S.sim.crossDrive ? "Copying files…" : "Moving…")
@@ -925,13 +945,15 @@ function moveDialogHtml() {
     : failed && cross ? 'data-mvpicker="browse"'
     : `data-act="mvgo" ${block ? "disabled" : ""}`;
   const picker = mv.picker === "project" ? projectPicker(mv)
-    : mv.picker === "branch" ? listPicker("Branches", project(mv.pid).branches.map(b => `<button class="mi" role="option" data-mvbase="${esc(b)}"><span class="lab mono">${esc(b)}</span>${(mv.base ?? project(mv.pid).branch) === b ? ic("check", "sm") : ""}</button>`).join(""))
+    : mv.picker === "runs" ? runsPicker(mv, project(mv.pid))
+    : mv.picker === "branch" ? branchPicker(mv, project(mv.pid))
     : mv.picker === "worktree" ? listPicker("Worktrees", project(mv.pid).worktrees.map((w, i) => `<button class="mi two" role="option" data-mvwt="${i}"><span class="lab"><span class="mono">${esc(w.path)}</span><span class="sub mono">${esc(w.branch)}</span></span></button>`).join(""))
     : mv.picker === "browse" ? listPicker("Folders", PARENTS.map(f => `<button class="mi two" role="option" data-mvparent="${esc(f.path)}">${ic("folder", "sm ico")}<span class="lab"><span class="mono">${esc(f.path)}</span>${f.note ? `<span class="sub">${esc(f.note)}</span>` : ""}</span>${mv.parent === f.path ? ic("check", "sm") : ""}</button>`).join(""))
     : "";
   return `<div class="scrim" ${locked ? "" : 'data-act="mvcancel"'}><div class="dialog move" role="dialog" aria-modal="true" aria-labelledby="mvh" data-stop ${locked ? 'aria-busy="true"' : ""}>
     <div class="head"><h4 id="mvh">Move to project</h4><p class="who fade">${esc(t.title)}</p></div>
-    <fieldset class="body" ${locked ? "disabled" : ""}>${dest}${form}${filesNotice(mv, t)}${sharersNotice(t)}${cross ? "" : outcome}${busyBox}</fieldset>
+    <button class="x" ${locked ? "disabled" : 'data-act="mvcancel"'} aria-label="Close">${ic("x", "sm")}</button>
+    <fieldset class="body" ${locked ? "disabled" : ""}>${dest}${form}${folderNotice(mv, t)}${cross ? "" : outcome}${busyBox}</fieldset>
     <div class="foot">
       <button class="btn ghost" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
       <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ""}${primaryLabel}</button></div>
@@ -1018,7 +1040,7 @@ function send() {
 }
 let copiedTimer;
 document.addEventListener("click", e => {
-  const el = e.target.closest("[data-tab],[data-act],[data-goto],[data-sim],[data-open],[data-menu],[data-hmenu],[data-toggle],[data-scope],[data-cmd],[data-copy],[data-mvdest],[data-mvpicker],[data-mvpick],[data-mvmode],[data-mvflip],[data-mvbase],[data-mvwt],[data-mvparent],[data-stop]");
+  const el = e.target.closest("[data-tab],[data-act],[data-goto],[data-sim],[data-open],[data-menu],[data-hmenu],[data-toggle],[data-scope],[data-cmd],[data-copy],[data-mvdest],[data-mvpicker],[data-mvpick],[data-mvmode],[data-mvflip],[data-mvopen],[data-mvbase],[data-mvwt],[data-mvparent],[data-stop]");
   if (!el) { if (S.overlay === "menu") set({ overlay: null, menuFor: null }); return; }
   const d = el.dataset;
   if (el.matches("[disabled],[aria-disabled='true']")) return;
@@ -1028,6 +1050,7 @@ document.addEventListener("click", e => {
   if (d.mvpick) return setMv({ pid: d.mvpick, picker: null, mode: "local", base: project(d.mvpick).branch, wt: null, origin: false });
   if (d.mvmode) return setMv({ mode: d.mvmode, picker: null });
   if (d.mvflip) return setMv({ [d.mvflip]: !S.mv[d.mvflip] });
+  if (d.mvopen) return setMv({ [d.mvopen]: !S.mv[d.mvopen] });
   if (d.mvbase) return setMv({ base: d.mvbase, picker: null });
   if (d.mvwt) return setMv({ wt: project(S.mv.pid).worktrees[+d.mvwt], picker: null });
   if (d.mvparent) return setMv({ parent: d.mvparent, picker: null, phase: "form" });
@@ -1065,7 +1088,6 @@ document.addEventListener("input", e => {
   if (e.target.dataset.mvname !== undefined) setMv({ name: e.target.value });
 });
 /* The browser opens the details itself; keep state in step so a re-render keeps it open. toggle does not bubble. */
-document.addEventListener("toggle", e => { if (e.target.dataset?.mvfiles !== undefined && S.mv) S.mv.showFiles = e.target.open; }, true);
 document.addEventListener("keydown", e => {
   if (e.target.dataset.fk === "composer" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); return send(); }
   if (e.target.dataset.mvq !== undefined && e.key === "Enter") { e.preventDefault(); document.querySelector("[data-mvpick]")?.click(); return; }
