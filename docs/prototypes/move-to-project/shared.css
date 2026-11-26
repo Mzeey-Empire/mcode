@@ -1,0 +1,104 @@
+/* Shared by the site map, flows and prototype pages of the #2242 prototype. */
+/* Tokens copied from the running app's computed values (apps/web/src/index.css). */
+:root, [data-theme="dark"] {
+  --page: oklch(0% 0 0); --background: oklch(0% 0 0); --panel: oklch(13% 0.003 260);
+  --raised: oklch(17% 0.003 260);
+  --hover: color-mix(in oklch, oklch(95.5% 0.005 260) 5%, transparent);
+  --selected: color-mix(in oklch, oklch(95.5% 0.005 260) 12%, transparent);
+  --ink: oklch(95.5% 0.005 260); --muted: oklch(65% 0.005 260);
+  --primary: oklch(72% 0.170 75); --on-primary: oklch(15% 0.02 75);
+  --success: oklch(78% 0.130 145); --error: oklch(78% 0.130 25); --destructive: oklch(65% 0.200 25);
+  --focus: oklch(62% 0.190 264); --border: oklch(19% 0.003 260); --link: oklch(70% 0.140 260);
+  --field: oklch(24% 0.005 260); --control-border: oklch(50% 0.010 260); --warning: oklch(82% 0.110 92); --info: oklch(70% 0.140 260);
+  --segment-on: color-mix(in oklch, oklch(95.5% 0.005 260) 12%, transparent);
+  --segment-edge: color-mix(in oklch, oklch(95.5% 0.005 260) 14%, transparent);
+  --scrim: oklch(0% 0 0 / 0.55); --shadow: 0 12px 32px oklch(0% 0 0 / 0.6), 0 0 0 1px oklch(25% 0.003 260);
+}
+[data-theme="light"] {
+  --page: oklch(95.5% 0.005 260); --background: oklch(99% 0.005 260); --panel: oklch(96.5% 0.005 260);
+  --raised: oklch(99% 0.005 260);
+  --hover: oklch(95.5% 0.005 260); --selected: oklch(90% 0.005 260);
+  --ink: oklch(19% 0.005 260); --muted: oklch(47% 0.010 260);
+  --primary: oklch(52% 0.170 75); --on-primary: oklch(99% 0.005 260);
+  --success: oklch(52% 0.120 145); --error: oklch(52% 0.140 25); --destructive: oklch(57.7% 0.190 27.3);
+  --focus: oklch(52% 0.170 264); --border: oklch(92.5% 0.005 260); --link: oklch(52% 0.140 260);
+  --field: oklch(95.5% 0.005 260); --control-border: oklch(65% 0.005 260); --warning: oklch(46% 0.100 92); --info: oklch(50% 0.160 260);
+  --segment-on: oklch(99% 0.005 260); --segment-edge: oklch(0 0 0 / 0.08);
+  --scrim: oklch(20% 0.005 260 / 0.25); --shadow: 0 12px 32px oklch(20% 0.01 260 / 0.14), 0 0 0 1px oklch(90% 0.005 260);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--page); color: var(--ink); font: 400 13px/1.45 "Public Sans", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-ligatures: none; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 6px; }
+svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+svg.i.sm { width: 14px; height: 14px; }
+/* The app fades only text that overflows; render() marks those with .over. */
+.fade { overflow: hidden; white-space: nowrap; }
+.fade.over { mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent); }
+
+/* ---------- Prototype chrome (deliberately not Mcode styling) ---------- */
+.proto-top { position: fixed; inset: 0 0 auto 0; height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 12px;
+  background: #1b1b2e; color: #e8e8ff; font: 500 12px/1 system-ui, sans-serif; z-index: 50; border-bottom: 1px solid #2c2c4a; }
+.proto-top .tag { background: #ff5ac8; color: #1b1b2e; padding: 4px 7px; border-radius: 4px; font-weight: 700; letter-spacing: .04em; margin-right: 10px; }
+.proto-top .issue { margin-right: 12px; color: #b9b9e0; }
+.proto-top .tab { padding: 8px 12px; border-radius: 6px; color: #b9b9e0; text-decoration: none; }
+.proto-top .tab:hover { color: #fff; }
+.proto-top .tab[aria-current="page"] { background: #33335a; color: #fff; }
+.proto-top .spacer { flex: 1; }
+.proto-top .ghost { padding: 7px 10px; border-radius: 6px; color: #b9b9e0; border: 1px solid #3a3a60; }
+.stage { position: fixed; inset: 44px 0 0 0; overflow: auto; }
+/* On the prototype tab the variant bar gets its own strip, so it never covers the composer. */
+body.on-app .stage { bottom: 52px; }
+
+.proto-bar { position: fixed; inset: auto 0 0 0; height: 52px; z-index: 60; display: flex; align-items: center; justify-content: safe center; gap: 10px;
+  background: #1b1b2e; color: #e8e8ff; border-top: 1px solid #3a3a60; padding: 0 12px; font: 500 11.5px/1 system-ui, sans-serif; overflow-x: auto; white-space: nowrap; }
+.proto-bar .grp { display: flex; align-items: center; gap: 4px; }
+.proto-bar .lbl { color: #8f8fc0; margin-right: 2px; }
+.proto-bar .opt { padding: 6px 8px; border-radius: 6px; color: #c8c8ee; }
+.proto-bar .opt[aria-pressed="true"] { background: #ff5ac8; color: #1b1b2e; }
+.proto-bar .sep { width: 1px; align-self: stretch; background: #3a3a60; }
+.proto-bar .state { color: #8f8fc0; font: 400 11px/1.2 ui-monospace, monospace; }
+
+/* ---------- Doc tabs (site map, flows) ---------- */
+.doc { max-width: 1240px; margin: 0 auto; padding: 32px 32px 140px; }
+.doc h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.01em; }
+.doc h2 { font-size: 15px; margin: 32px 0 12px; }
+.doc p.lead { color: var(--muted); margin: 0 0 20px; max-width: 760px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 18px; color: var(--muted); font-size: 12px; }
+.pill { display: inline-flex; align-items: center; gap: 4px; font: 600 10px/1 system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; padding: 3px 6px; border-radius: 4px; vertical-align: 1px; }
+.pill.new { background: oklch(72% 0.17 75 / .18); color: var(--primary); }
+.pill.chg { background: oklch(70% 0.14 260 / .18); color: var(--link); }
+.pill.hide { background: oklch(65% 0.005 260 / .18); color: var(--muted); }
+.map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.col { background: var(--panel); border-radius: 12px; padding: 14px 14px 10px; }
+.col h3 { margin: 0 0 2px; font-size: 13px; }
+.col .sub { color: var(--muted); font-size: 11.5px; margin-bottom: 10px; }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul { padding-left: 14px; border-left: 1px solid var(--border); margin: 2px 0 4px 5px; }
+.tree li { padding: 3px 0; }
+.tree .node { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.tree .note { display: block; color: var(--muted); font-size: 11.5px; margin-top: 1px; }
+.doc a { color: var(--link); text-decoration: none; }
+.doc a:hover { text-decoration: underline; }
+.doc .link { color: var(--link); }
+.tree .go { font-size: 11.5px; }
+.tree .dim { color: var(--muted); }
+table.keep { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.keep th, table.keep td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.keep th { color: var(--muted); font-weight: 500; }
+.decided { margin: 0; padding: 0 0 0 20px; display: grid; gap: 6px; max-width: 900px; }
+
+.flows { display: grid; gap: 14px; }
+.flow { background: var(--panel); border-radius: 12px; padding: 14px; }
+.flow h3 { margin: 0 0 10px; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+.steps { display: flex; align-items: stretch; gap: 6px; overflow-x: auto; }
+.step { flex: 1 1 0; min-width: 170px; background: var(--background); border: 1px solid var(--border); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.doc a.step { color: var(--ink); text-decoration: none; }
+.step:hover { border-color: var(--muted); }
+.step .n { color: var(--muted); font-size: 11px; }
+.step .t { font-weight: 500; }
+.step .s { color: var(--muted); font-size: 11.5px; flex: 1; }
+.step .open { color: var(--link); font-size: 11.5px; }
+.arrow { align-self: center; color: var(--muted); }

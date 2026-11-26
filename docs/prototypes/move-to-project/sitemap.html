@@ -1,0 +1,73 @@
+<!doctype html>
+<!-- PROTOTYPE, throwaway. Issue #2242: every surface the move touches. Links open prototype.html at that state. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>#2242 Move to project · Site map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="shared.css" />
+<script src="shared.js"></script>
+</head>
+<body>
+<script>document.write(protoTop());</script>
+<main class="stage"><div class="doc">
+  <h1>Site map: move a No project thread into a project</h1>
+  <p class="lead">Issue #2242. A No project thread can move into an existing project, or its folder can become a new project. Every surface the move touches, and what happens to it. Click <span class="link">open ›</span> to jump to that state in the clickable prototype.</p>
+  <div class="legend"><span><span class="pill new">New</span> added for the move</span><span><span class="pill chg">Changed</span> existing surface gains a move case</span><span>Unmarked: unchanged</span></div>
+  <div class="map">
+    <div class="col"><h3>Entry points</h3><div class="sub">Only on an open No project thread.</div>
+      <ul class="tree">
+        <li><span class="node">Thread header title menu <span class="pill chg">Changed</span></span><span class="note">Move to project… after Rename thread.</span><a class="go" href="prototype.html#headerMenu">open ›</a></li>
+        <li><span class="node">Sidebar row menu <span class="pill chg">Changed</span></span><span class="note">Same item, same place.</span><a class="go" href="prototype.html#rowMenu">open ›</a></li>
+        <li><span class="node">Command palette <span class="pill chg">Changed</span></span><span class="note">"Move thread to project…" while a No project thread is open.</span><a class="go" href="prototype.html#paletteMove">open ›</a></li>
+        <li><span class="node">Drag onto a project <span class="pill new">New</span></span><span class="note">Projects view only. Dropping a No project row on a project opens the dialog with that project picked.</span><a class="go" href="prototype.html#dragOver">open ›</a></li>
+        <li><span class="node">Disabled while busy</span><span class="note">The thread is Running or needs approval: the item stays, disabled, and says why. Its fork being busy does not block it.</span><a class="go" href="prototype.html#menuBusy">open ›</a></li>
+        <li><span class="node dim">Not offered</span><span class="note">Project threads, closed threads (restore first), drafts, the No project group header.</span></li>
+      </ul></div>
+    <div class="col"><h3>Move dialog <span class="pill new">New</span></h3><div class="sub">Built from the composer's parts.</div>
+      <ul class="tree">
+        <li><span class="node">Heading: "Move to [project]"</span><span class="note">The dashed slot opens the project chooser: search, project names, then New project from this folder at the bottom.</span><a class="go" href="prototype.html#moveA">open ›</a> <a class="go" href="prototype.html#moveAPicker">chooser ›</a></li>
+        <li><span class="node">Existing project</span><a class="go" href="prototype.html#moveAPicked">open ›</a><ul>
+          <li><span class="node">Target row</span><span class="note">As when starting a thread. Workspace on the left: Local (default), New worktree or Existing worktree. The branch on the right: "On main", "From main", "From #412", or the worktree's branch. A line under it says where the thread will run. A project that is not a git repo runs Local only.</span><a class="go" href="prototype.html#moveRunsMenu">workspace ›</a> <a class="go" href="prototype.html#moveNewWt">new worktree ›</a> <a class="go" href="prototype.html#moveNewWtPr">from a PR ›</a> <a class="go" href="prototype.html#moveExistingWt">existing ›</a> <a class="go" href="prototype.html#moveNonGit">not git ›</a></li>
+          <li><span class="node">Only this thread moves</span><span class="note">Forks and children that work in the same folder stay in No project.</span></li>
+          <li><span class="node">Files notice</span><span class="note">Alone in its folder: a warning that Mcode deletes the files on 3 Dec. Another thread still uses the folder: information that Mcode keeps it. Either way the files are not copied and the agent is told where they are.</span><a class="go" href="prototype.html#moveAFilesAlone">alone ›</a> <a class="go" href="prototype.html#moveAFiles">shared ›</a></li>
+        </ul></li>
+        <li><span class="node">New project from this folder</span><a class="go" href="prototype.html#moveB">open ›</a><ul>
+          <li><span class="node">Name, location, git</span><span class="note">Name from the folder, without date or id. Start a git repo is unchecked.</span><a class="go" href="prototype.html#moveBGit">git on ›</a></li>
+          <li><span class="node">Name or folder taken</span><a class="go" href="prototype.html#moveBCollide">open ›</a></li>
+          <li><span class="node">Other threads in the folder</span><span class="note">The folder becomes the project, so every thread working in it moves with it. A busy one makes the move wait.</span><a class="go" href="prototype.html#moveBShared">open ›</a> <a class="go" href="prototype.html#moveBusy">busy ›</a></li>
+        </ul></li>
+        <li><span class="node">Moving, failed, git failed</span><a class="go" href="prototype.html#moveMoving">moving ›</a> <a class="go" href="prototype.html#moveFailed">failed ›</a> <a class="go" href="prototype.html#moveCross">across drives ›</a> <a class="go" href="prototype.html#moveGitFail">git ›</a></li>
+        <li><span class="node">No projects yet</span><span class="note">The slot reads "a new project" and the chooser holds only that row.</span><a class="go" href="prototype.html#moveZero">open ›</a> <a class="go" href="prototype.html#moveZeroPicker">chooser ›</a></li>
+      </ul></div>
+    <div class="col"><h3>After the move</h3><div class="sub">The thread keeps its history.</div>
+      <ul class="tree">
+        <li><span class="node">Sidebar <span class="pill chg">Changed</span></span><span class="note">The row leaves No project and appears under the project, which expands. Selection stays.</span><a class="go" href="prototype.html#afterA">open ›</a></li>
+        <li><span class="node">Header</span><span class="note">project › thread.</span></li>
+        <li><span class="node">Timeline: move marker <span class="pill new">New</span></span><span class="note">Where it moved and how it runs, plus the earlier files, whether the folder is kept, and what the agent is told.</span><a class="go" href="prototype.html#afterAFilesAlone">alone ›</a> <a class="go" href="prototype.html#afterAFiles">shared ›</a></li>
+        <li><span class="node">New project group</span><a class="go" href="prototype.html#afterB">open ›</a></li>
+      </ul></div>
+    <div class="col"><h3>Agent and cleanup</h3><div class="sub">Behind the screens.</div>
+      <ul class="tree">
+        <li><span class="node">Next turn</span><span class="note">Fresh provider session with a handoff from the thread's saved messages. The earlier-files note rides along once. While another thread uses the folder, the note says to copy and leave the originals.</span><a class="go" href="prototype.html#afterSent">open ›</a></li>
+        <li><span class="node">Old folder</span><span class="note">Kept while any No project thread uses it. Mcode deletes it, with its hidden workspace, 7 days after the last one leaves.</span><a class="go" href="prototype.html#afterExpired">expired ›</a></li>
+        <li><span class="node">New project</span><span class="note">The hidden workspace becomes the project, so the folder is not cleaned up.</span></li>
+      </ul></div>
+  </div>
+  <h2>Decided</h2>
+  <ol class="decided">
+    <li>Both destinations ship in v1: an existing project, or a new project made from the folder.</li>
+    <li>Mcode copies no files into an existing project. The next turn's handoff tells the agent where the old folder is. The note is enough.</li>
+    <li>The user picks how the thread runs in an existing project during the move: Local, New worktree or Existing worktree.</li>
+    <li>A new project is not a git repo unless the user ticks Start a git repo.</li>
+    <li>For a new project, the hidden workspace becomes the project.</li>
+    <li>Into an existing project only the chosen thread moves. The folder stays while another thread uses it, and Mcode deletes it 7 days after the last one leaves. A new project takes the folder, so every thread in it comes along.</li>
+    <li>The move waits while the thread is Running or needs approval. A new project also waits for the other threads in the folder.</li>
+    <li>In the Projects view, dragging a No project row onto a project opens the Move dialog with that project picked. A drop never moves the thread on its own.</li>
+    <li>The dialog reuses the composer's parts: the project slot heading, the project chooser, and the target row.</li>
+  </ol>
+</div></main>
+</body>
+</html>

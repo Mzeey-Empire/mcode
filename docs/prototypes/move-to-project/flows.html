@@ -1,0 +1,74 @@
+<!doctype html>
+<!-- PROTOTYPE, throwaway. Issue #2242: the move's flows, step by step. Each step opens prototype.html at that state. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>#2242 Move to project · Flows</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="shared.css" />
+<script src="shared.js"></script>
+</head>
+<body>
+<script>document.write(protoTop());</script>
+<main class="stage"><div class="doc">
+  <h1>Flows</h1>
+  <p class="lead">Each card opens the clickable prototype at that step. The Sim bar at the bottom of the prototype sets states that are hard to reach by hand.</p>
+  <div class="flows" id="flows"></div>
+</div></main>
+<script>
+/* [title, what happens, prototype preset] */
+const FLOWS = [
+  { name: "Move a thread into an existing project", steps: [
+    ["Header title menu", "Move to project… under Rename thread.", "headerMenu"],
+    ["Move dialog", "\"Move to choose a project\": click the slot.", "moveA"],
+    ["Project chooser", "Search, project names, and New project from this folder.", "moveAPicker"],
+    ["Pick billing-api", "Runs Local, on main. Nothing else to decide.", "moveAPicked"],
+    ["Moved", "Row under billing-api, marker in the timeline.", "afterA"] ] },
+  { name: "Drag onto a project", steps: [
+    ["Drag the row", "Projects view: drop it on billing-api.", "dragOver"],
+    ["Move dialog", "Opens with billing-api picked. Nothing moves until you confirm.", "moveAPicked"],
+    ["Moved", "Row under billing-api.", "afterA"] ] },
+  { name: "A thread with files, alone in its folder", steps: [
+    ["Move dialog", "Warns that Mcode deletes the 4 files on 3 Dec.", "moveAFilesAlone"],
+    ["Moved", "The marker keeps the old folder and its deadline.", "afterAFilesAlone"],
+    ["After 7 days", "Folder removed; the marker says so.", "afterExpired"] ] },
+  { name: "A thread whose fork still uses the folder", steps: [
+    ["Move dialog", "Only this thread moves. The files stay for the fork, so nothing is deleted.", "moveAFiles"],
+    ["Moved", "The fork stays in No project; the marker says the folder is kept.", "afterAFiles"],
+    ["Next turn", "The agent is told to copy what it needs and leave the originals.", "afterSent"] ] },
+  { name: "Choose where it runs", steps: [
+    ["Workspace", "Local, New worktree or Existing worktree.", "moveRunsMenu"],
+    ["New worktree", "\"From main\": pick the branch; Start from origin is in its picker.", "moveNewWt"],
+    ["From a pull request", "\"From #412\" checks out the PR's branch.", "moveNewWtPr"],
+    ["Existing worktree", "Pick one; Move waits until you do.", "moveExistingWt"],
+    ["Not a git repo", "docs-site runs Local only.", "moveNonGit"] ] },
+  { name: "Make it a new project", steps: [
+    ["Project chooser", "New project from this folder sits under the projects.", "moveAPicker"],
+    ["Move to a new project", "Name from the folder, location from your projects.", "moveB"],
+    ["Start a git repo", "Unchecked unless you tick it.", "moveBGit"],
+    ["Name taken", "Typing mcode shows the name is taken.", "moveBCollide"],
+    ["Fork comes along", "The folder becomes the project, so its fork moves too.", "moveBShared"],
+    ["Created", "New group, threads inside, Local.", "afterB"] ] },
+  { name: "Busy or failing", steps: [
+    ["This thread is running", "The item is disabled with the reason.", "menuBusy"],
+    ["Fork running", "A new project waits for it; an existing project does not.", "moveBusy"],
+    ["Moving", "Locked until it finishes.", "moveMoving"],
+    ["Failed", "Nothing changed; Try again.", "moveFailed"],
+    ["Across drives", "Copy failed; says what is left where.", "moveCross"],
+    ["git init failed", "Project made; retry git.", "moveGitFail"] ] },
+  { name: "Other ways in", steps: [
+    ["Sidebar row menu", "Same item.", "rowMenu"],
+    ["Command palette", "Move thread to project…", "paletteMove"],
+    ["No projects yet", "\"Move to a new project\".", "moveZero"],
+    ["Its chooser", "Only New project from this folder.", "moveZeroPicker"] ] },
+];
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const arrow = `<span class="arrow" aria-hidden="true"><svg class="i sm" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>`;
+document.getElementById("flows").innerHTML = FLOWS.map(f => `<section class="flow"><h3>${esc(f.name)}</h3><div class="steps">${
+  f.steps.map(([t, s, key], i) => `${i ? arrow : ""}<a class="step" href="prototype.html#${key}"><span class="n">Step ${i + 1}</span><span class="t">${esc(t)}</span><span class="s">${esc(s)}</span><span class="open">Open in prototype ›</span></a>`).join("")
+}</div></section>`).join("");
+</script>
+</body>
+</html>
