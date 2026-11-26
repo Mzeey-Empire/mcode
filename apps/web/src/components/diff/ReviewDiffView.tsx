@@ -31,6 +31,7 @@ import { FileActionBar } from "./FileActionBar";
 import { ReviewFileHeader } from "./ReviewFileHeader";
 import { DiffCommentEditor } from "./DiffCommentEditor";
 import { DiffPreview } from "./DiffPreview";
+import { useDiffSelection } from "./useDiffSelection";
 import { useReviewScrollSpy } from "./useReviewScrollSpy";
 
 /** Line-annotation payloads rendered inside a diff item. */
@@ -343,6 +344,10 @@ export function ReviewDiffView({
   const handleRef = useRef<CodeViewHandle<DiffRowMeta, undefined>>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const spy = useReviewScrollSpy(files, scrollerRef, id);
+  const { wrapperProps: selectionProps, onPostRender: drawSelection } = useDiffSelection(
+    scrollerRef,
+    renderMode,
+  );
   const bulkDiffExpand = useDiffStore((s) => s.bulkDiffExpand);
   const shikiTheme = useShikiTheme();
 
@@ -591,9 +596,12 @@ export function ReviewDiffView({
       itemMetrics: { diffHeaderHeight: REVIEW_FILE_HEADER_HEIGHT },
       hunkSeparators: "line-info-basic",
       unsafeCSS: DIFF_UNSAFE_CSS,
-      onPostRender: labelExpandButtons,
+      onPostRender: (node, instance, phase) => {
+        labelExpandButtons(node);
+        drawSelection(node, instance, phase);
+      },
     }),
-    [lineWrap, loadFileContents, renderMode, shikiTheme, source],
+    [drawSelection, lineWrap, loadFileContents, renderMode, shikiTheme, source],
   );
 
   const openDraft = useCallback(
@@ -690,7 +698,7 @@ export function ReviewDiffView({
     );
   };
 
-  return (
+  const codeView = (
     <CodeView
       ref={handleRef}
       containerRef={scrollerRef}
@@ -742,6 +750,12 @@ export function ReviewDiffView({
         </button>
       )}
     />
+  );
+  // CodeView forwards no DOM event props, so the selection handlers sit on a layout-neutral wrapper.
+  return (
+    <div className="contents" {...selectionProps}>
+      {codeView}
+    </div>
   );
 }
 
