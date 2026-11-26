@@ -78,13 +78,24 @@
   .model .lvl { color: var(--muted); font-weight: 400; }
   .send { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--selected); color: var(--muted); flex-shrink: 0; }
   .send.ready { background: var(--primary); color: var(--on-primary); }
-  .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; font-weight: 500; background: var(--selected); white-space: nowrap; }
-  .btn:hover { filter: brightness(1.1); }
+  /* The app's Button (components/ui/button.tsx): compact size, a variant per role, pressed as a 2px inset ring in the
+     variant's ink, focus as a 2px ring 2px outside. Ghost has no resting fill, so it presses with the selected fill. */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 8px;
+    border: 1px solid transparent; font-weight: 500; white-space: nowrap; transition: background-color .12s ease, color .12s ease; }
+  .btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 8px; }
+  .btn .i { width: 14px; height: 14px; }
   .btn.primary { background: var(--primary); color: var(--on-primary); }
-  .btn.ghost { background: transparent; }
+  .btn.primary:hover { background: var(--primary-hover); }
+  .btn.primary:active { background: var(--primary-hover); box-shadow: inset 0 0 0 2px var(--on-primary); }
+  .btn.outline { background: var(--background); border-color: var(--control-border); color: var(--ink); }
+  .btn.outline:hover { background: var(--hover); }
+  .btn.outline:active { background: var(--selected); box-shadow: inset 0 0 0 2px var(--ink); }
+  .btn.ghost { color: var(--ink); }
   .btn.ghost:hover { background: var(--hover); }
+  .btn.ghost:active { background: var(--selected); }
   .btn.sm { height: 24px; padding: 0 8px; gap: 5px; font-size: 12px; color: var(--muted); }
-  .btn.sm:hover { color: var(--ink); }
+  .btn.sm .i { width: 13px; height: 13px; }
+  .btn.sm:hover, .btn.outline.sm { color: var(--ink); }
 
   .thread { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 32px 12px; }
   .col-rail { max-width: 720px; margin: 0 auto; }
@@ -165,7 +176,12 @@
   .tt .chev { width: 12px; height: 12px; }
   .tt:not(.static):hover { background: var(--hover); color: var(--ink); }
   .tt.static { cursor: default; }
-  .move .foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); }
+  /* The app's DialogFooter: a tinted strip under a hairline, actions on the right. */
+  /* Before a project is picked there is nothing to show yet, so the heading sits straight on the footer. */
+  .move .body:empty { display: none; }
+  .move:has(.body:empty) .head { padding-bottom: 20px; }
+  .move .foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border);
+    background: color-mix(in oklch, var(--hover) 50%, transparent); border-radius: 0 0 14px 14px; }
   .field { display: grid; gap: 6px; }
   .field > .lab { color: var(--muted); font-size: 12px; font-weight: 500; }
   .field .err { color: var(--error); font-size: 12px; display: flex; gap: 6px; align-items: center; }
@@ -205,6 +221,7 @@
   .notice .nd .k { color: var(--muted); }
   .notice .nd ul { margin: 2px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; color: var(--ink); }
   .notice .nd li { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .notice .nd li .i { color: var(--muted); }
   .notice .raw { display: block; color: var(--ink); white-space: pre-wrap; word-break: break-all; }
   .notice .nowrap { white-space: nowrap; }
   .pop.in-dialog { position: absolute; z-index: 40; max-height: 300px; overflow-y: auto; }
@@ -247,8 +264,7 @@
   .toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--raised); box-shadow: var(--shadow); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; z-index: 35; display: flex; gap: 8px; align-items: center; }
 </style>
 </head>
-<body class="on-app">
-<script>document.write(protoTop('<button class="ghost" data-act="reset">Reset</button>'));</script>
+<body class="on-app" data-reset>
 <div class="stage" id="stage"></div>
 <div id="bar"></div>
 
@@ -660,11 +676,12 @@ function projectPicker(mv) {
 function listPicker(kind, items, width) {
   return `<div class="pop in-dialog" data-stop role="listbox" aria-label="${kind}" data-w="${width}">${items}</div>`;
 }
-/* The app's Notice: tone icon, title, then detail under the title's column. `more` waits behind the chevron, keyed by an S.mv flag. */
-function notice({ tone, title, detail = "", more = "", openKey = "" }) {
+/* The app's Notice: tone icon, title, then detail under the title's column. `more` waits behind the chevron, keyed by an
+   S.mv flag; `action` comes last, after whatever the chevron shows. */
+function notice({ tone, title, detail = "", more = "", openKey = "", action = "" }) {
   const open = !!(openKey && S.mv[openKey]);
   const disc = more ? `<button type="button" class="disc" data-mvopen="${openKey}" aria-expanded="${open}" aria-label="${open ? "Hide details" : "Show details"}">${ic(open ? "upChev" : "down", "sm")}</button>` : "";
-  const body = detail + (open ? more : "");
+  const body = detail + (open ? more : "") + action;
   return `<div class="notice ${tone}" role="${tone === "error" ? "alert" : "status"}"><div class="nh">${ic({ info: "info", warning: "warning", error: "alert" }[tone], "tone")}<span class="ti">${title}</span>${disc}</div>${body ? `<div class="nd">${body}</div>` : ""}</div>`;
 }
 const threadList = ts => `<ul>${ts.map(o => `<li><span class="fade">${esc(o.title)}</span>${o.closed ? `<span class="k">Closed</span>` : ""}${busyReason(o) ? statusLane(o) : ""}</li>`).join("")}</ul>`;
@@ -708,20 +725,23 @@ function branchPicker(mv, p) {
     ${onPrs ? "" : `<button class="switch-row" role="switch" aria-checked="${mv.origin}" data-mvflip="origin"><span>Start from origin</span><span class="switch"><span class="knob"></span></span></button>`}
   </div>`;
 }
-/* Into an existing project the folder's files stay behind. Alone, the thread's move starts the 7 days, so the deadline
-   leads as a warning; while another thread still uses the folder nothing is deleted, so it is only information. */
+/* What the move leaves behind is a consequence of the chosen project, so it waits until one is picked; before that the
+   chooser's "Keeps the files" hint carries the difference. The title is the fact, the detail is why and what to do.
+   Alone, the move starts the 7 days, so it warns and offers the way to keep the files; while another thread still
+   uses the folder nothing is deleted, so it is only information. */
 function filesNotice(mv, t) {
   const files = folderFiles(t), others = sharersOf(t).slice(1);
-  if (mv.dest !== "existing" || !files.length) return "";
+  if (mv.dest !== "existing" || !mv.pid || !files.length) return "";
   const n = plural(files.length, "file", "files");
-  const copied = `${files.length === 1 ? "It is" : "They are"} not copied into the project; the agent is told where on its next turn.`;
-  const more = `<div><span class="k">Files in this folder</span><ul class="mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>`;
+  const told = "Nothing is copied; the agent is told where they are on its next turn.";
+  const more = `<ul class="mono">${files.map(f => `<li>${ic("file", "sm")}${esc(f)}</li>`).join("")}</ul>`;
   if (others.length) return notice({ tone: "info", more, openKey: "showFiles",
-    title: `The ${n} stay in the old folder, which ${others.length === 1 ? `“${esc(others[0].title)}” still uses` : `${others.length} other threads still use`}`,
-    detail: `<div>${copied} Mcode keeps the folder until 7 days after the last thread leaves it.</div>` });
+    title: `${n} stay in the old folder`,
+    detail: `<div>${others.length === 1 ? `“${esc(others[0].title)}” still uses` : `${others.length} other threads still use`} it, so Mcode keeps it. ${told}</div>` });
   return notice({ tone: "warning", more, openKey: "showFiles",
-    title: `After the move, Mcode deletes the ${n} in the old folder on&nbsp;${DEADLINE.replace(" ", "&nbsp;")}`,
-    detail: `<div>${copied} To keep them with the thread, choose New project from this folder.</div>` });
+    title: `${n} stay behind and are deleted on&nbsp;${DEADLINE.replace(" ", "&nbsp;")}`,
+    detail: `<div>${told}</div>`,
+    action: `<div><button type="button" class="btn outline sm" data-mvnew>${ic("folderPlus")}Keep them: make this folder a new project</button></div>` });
 }
 /* A new project takes the whole folder, so every thread working in it comes along. A busy one has its own notice. */
 function sharersNotice(mv, t, busy) {
@@ -760,7 +780,7 @@ function moveDialogHtml() {
     const target = joinPath(mv.parent, mv.name.trim() || "…");
     form = `<div class="field"><label class="lab" for="mvname">Name</label><input id="mvname" class="text-in" data-fk="mvname" data-mvname value="${esc(mv.name)}" placeholder="Project name" ${shownErr ? 'aria-invalid="true" aria-describedby="mvname-err"' : ""} spellcheck="false" />
         ${shownErr ? `<span class="err" id="mvname-err">${ic("alert", "sm")}${esc(shownErr.msg)}</span>` : ""}</div>
-      <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade" ${cross && failed ? 'aria-invalid="true"' : ""}>${esc(mv.parent)}</span><button class="btn" data-mvpicker="browse">Browse…</button></div>
+      <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade" ${cross && failed ? 'aria-invalid="true"' : ""}>${esc(mv.parent)}</span><button class="btn outline" data-mvpicker="browse">${ic("folder")}Browse…</button></div>
         ${shownErr ? "" : `<span class="result">Moves the folder and its files to <span class="mono">${esc(target)}</span></span>`}</div>
       ${cross && failed ? outcome : ""}
       <button class="check" role="checkbox" aria-checked="${mv.git}" data-mvflip="git"><span class="box">${mv.git ? ic("check", "sm") : ""}</span><span>Start a git repo</span></button>`;
@@ -779,12 +799,13 @@ function moveDialogHtml() {
       <div class="body">${notice({ tone: "error", title: "Couldn't start a git repo",
         detail: `<div>Permission was denied in the project folder. The project works without git. Check you can write to <span class="mono nowrap">${esc(p.path)}</span>, then retry, or run git init later.</div>`,
         more: `<span class="raw mono">${esc(p.path)}\ngit: 'init' failed: unable to create '.git/index.lock': Permission denied</span>`, openKey: "showRaw" })}</div>
-      <div class="foot"><button class="btn ghost" data-act="mvgitretry">Retry git setup</button><button class="btn primary" data-act="mvdone">Done</button></div>
+      <div class="foot"><button class="btn outline" data-act="mvgitretry">${ic("restore")}Retry git setup</button><button class="btn primary" data-act="mvdone">Done</button></div>
     </div></div>`;
   }
   const primaryLabel = locked ? (mv.dest === "new" && S.sim.crossDrive ? "Copying files…" : "Moving…")
     : failed ? "Try again"
     : mv.dest === "new" ? "Create project" : "Move thread";
+  const primaryIcon = failed ? "restore" : mv.dest === "new" ? "folderPlus" : "move";
   const primaryAttrs = locked ? 'aria-busy="true" aria-disabled="true"'
     /* An open picker covers the notices under it, so the move waits until it closes. */
     : `data-act="mvgo" ${block || mv.picker ? "disabled" : ""}`;
@@ -799,8 +820,8 @@ function moveDialogHtml() {
     <button class="x" ${locked ? "disabled" : 'data-act="mvcancel"'} aria-label="Close">${ic("x", "sm")}</button>
     <fieldset class="body" ${locked ? "disabled" : ""}>${form}${busyBox}${cross ? "" : outcome}${filesNotice(mv, t)}${sharersNotice(mv, t, block?.busy)}</fieldset>
     <div class="foot">
-      <button class="btn ghost" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
-      <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ""}${primaryLabel}</button></div>
+      <button class="btn outline" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
+      <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ic(primaryIcon)}${primaryLabel}</button></div>
     ${picker}
   </div></div>`;
 }

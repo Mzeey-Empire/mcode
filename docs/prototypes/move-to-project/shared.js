@@ -8,7 +8,7 @@ function setTheme(theme) {
 }
 document.documentElement.dataset.theme = savedTheme();
 
-/* `extra` holds page-specific buttons, such as the prototype's Reset. */
+/* The prototype page marks its body data-reset to get a Reset button. */
 function protoTop(extra = "") {
   const here = location.pathname.split("/").pop();
   const tabs = PAGES.map(([href, label]) => `<a class="tab" href="${href}" ${href === here ? 'aria-current="page"' : ""}>${label}</a>`).join("");
@@ -16,4 +16,8 @@ function protoTop(extra = "") {
 }
 document.addEventListener("click", e => {
   if (e.target.closest("[data-theme-toggle]")) setTheme(savedTheme() === "dark" ? "light" : "dark");
+});
+document.addEventListener("DOMContentLoaded", () => {
+  const reset = document.body.hasAttribute("data-reset") ? '<button class="ghost" data-act="reset">Reset</button>' : "";
+  document.body.insertAdjacentHTML("afterbegin", protoTop(reset));
 });
