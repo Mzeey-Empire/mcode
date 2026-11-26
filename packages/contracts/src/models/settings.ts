@@ -209,8 +209,13 @@ export const SettingsSchema = lazySchema(() =>
     terminal: TerminalSettingsSchema().default(() =>
       getDefaultTerminalSettingsDocument().terminal),
 
-    /** Persist bounded diagnostic recordings for after-the-fact diagnosis. */
-    diagnostics: z.object({ recording: z.boolean().default(true) }).default({}),
+    /** Diagnostic recordings and local crash dumps. */
+    diagnostics: z.object({
+      /** Persist bounded diagnostic recordings for after-the-fact diagnosis. */
+      recording: z.boolean().default(true),
+      /** Save local crash dumps in installed builds. The desktop main process reads this at launch, so changes apply after a restart. */
+      crashDumps: z.boolean().default(false),
+    }).default({}),
 
     /** Notification settings. */
     notifications: z
@@ -521,7 +526,10 @@ export const PartialSettingsSchema = lazySchema(() =>
       })
       .strict()
       .optional(),
-    diagnostics: z.object({ recording: z.boolean().optional() }).optional(),
+    diagnostics: z.object({
+      recording: z.boolean().optional(),
+      crashDumps: z.boolean().optional(),
+    }).optional(),
     notifications: z
       .object({
         enabled: z.boolean().optional(),
