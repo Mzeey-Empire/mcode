@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Workspace } from "@mcode/contracts/models/workspace";
 import type { ThreadMoveInput } from "@mcode/contracts/ws/methods";
 import type { ComposerMode } from "@/features/conversation/composer/execution/composer-mode";
-import { useBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
+import { revalidateBranchTargets, useBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 import { useEffectiveBranch, type TargetBranch } from "@/features/conversation/composer/execution/useTargetBranch";
 import {
   newThreadTargetSelection,
@@ -66,6 +66,11 @@ function useMovePicks(workspaceId: string | undefined): { readonly picks: MovePi
 /** Whether the project's worktree list has loaded and is empty. A list that failed or is loading stays choosable. */
 function useHasNoWorktrees(workspaceId: string | undefined): boolean {
   const worktrees = useBranchTargets(workspaceId ? { workspaceId, purpose: "existing-worktree" } : null);
+  // A worktree made outside Mcode pushes no event, and "None yet" disables the row whose picker would otherwise
+  // refetch on open, so a cached empty list must be reread whenever a project is picked.
+  useEffect(() => {
+    if (workspaceId) revalidateBranchTargets({ workspaceId, purpose: "existing-worktree" });
+  }, [workspaceId]);
   return worktrees.status.kind === "ready" && worktrees.items.length === 0;
 }
 

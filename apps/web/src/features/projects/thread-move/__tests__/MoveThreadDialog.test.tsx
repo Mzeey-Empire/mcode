@@ -553,6 +553,27 @@ describe("MoveThreadDialog worktree targets", () => {
     expect(workspaceTrigger()).toHaveTextContent("Local");
   });
 
+  it("offers Existing worktree once a worktree made outside Mcode exists, without a reload", async () => {
+    worktreeRows = [];
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await user.click(workspaceTrigger());
+    await waitFor(async () => expect(await screen.findByRole("menuitemradio", { name: /^Existing worktree/ })).toHaveAttribute("aria-disabled", "true"));
+    await user.keyboard("{Escape}");
+    act(() => closeMoveThreadDialog());
+
+    // `git worktree add` outside Mcode pushes no event, so only a fresh read can find it.
+    worktreeRows = [ref("feat/reconnect-retry", { worktree: RETRY_WORKTREE })];
+    act(() => openMoveThreadDialog(THREAD.id));
+    await dialog();
+    await pickProject(user, "gitty");
+    await user.click(workspaceTrigger());
+
+    const row = await screen.findByRole("menuitemradio", { name: /^Existing worktree/ });
+    await waitFor(() => expect(row).not.toHaveAttribute("aria-disabled", "true"));
+    expect(row).not.toHaveTextContent("None yet");
+  });
+
   it("offers only Local for a project that is not a git repo", async () => {
     const user = await openDialog();
     await pickProject(user, "alpha");
