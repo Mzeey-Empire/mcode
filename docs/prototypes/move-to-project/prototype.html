@@ -247,10 +247,6 @@
   .ev-line::before, .ev-line::after { content: ""; height: 1px; flex: 1; background: var(--border); }
   .ev-line .mid { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
   .ev-line b { color: var(--ink); font-weight: 500; }
-  .ev-card { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--panel); font-size: 12.5px; }
-  .ev-card .top { display: flex; align-items: center; gap: 8px; }
-  .ev-card .top .grow { flex: 1; min-width: 0; }
-  .ev-card .muted { color: var(--muted); }
   .path-line { display: block; margin: 4px 0; }
   /* The light --success on the pill's fill is under 4.5:1; this darker green clears it. */
   .toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--raised); box-shadow: var(--shadow); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; z-index: 35; display: flex; gap: 8px; align-items: center; }
@@ -350,7 +346,7 @@ const initial = () => ({
   view: "projects", scope: "open", screen: { kind: "thread", id: "n1" },
   overlay: null, menuFor: null, menuXY: null, query: "", ovOpen: false, copied: null,
   threads: seedThreads(), expanded: { none: true, mcode: true, billing: false, docs: false }, nextId: 4,
-  sim: { failMove: false, crossDrive: false, failGit: false, expired: false },
+  sim: { failMove: false, crossDrive: false, failGit: false },
   mv: null, drag: null,
 });
 let S = initial();
@@ -467,7 +463,6 @@ function goto(key) {
     afterAFiles: () => { moved("n1", "mcode"); set(at("n1")); },
     afterAFilesAlone: () => { dropFork(); moved("n1", "mcode"); set(at("n1")); },
     afterSent: () => { moved("n1", "mcode"); draft = "Copy the benchmark into the repo and wire it into bun run bench."; set(at("n1")); send(); },
-    afterExpired: () => { dropFork(); moved("n1", "mcode"); set(at("n1", { sim: { ...S.sim, expired: true } })); },
     afterB: () => { applyNew(newMv("n1", { dest: "new" })); set(at("n1")); },
   };
   (presets[key] ?? (() => set({})))();
@@ -555,26 +550,13 @@ function renderMain() {
   return `<section class="main" aria-label="Conversation">${header}${body}${S.ovOpen ? overviewHtml(t) : ""}</section>`;
 }
 
-/* The move marker follows ProviderSwitchMarker: a quiet centred line. A move into an existing project with files adds a card.
-   What the agent is told about the old folder rides with the first turn as system info and stays out of the timeline. */
-/* The folder stays while another thread uses it; only the last thread out starts the 7 days. */
-/* The user only needs the folder's fate, not its contents: the agent already knows the files. */
-function keptLine(ev) {
-  if (!ev.heldBy.length) return `Mcode deletes the old folder on ${DEADLINE}.`;
-  const who = ev.heldBy.length === 1 ? `“${esc(ev.heldBy[0])}”` : `${ev.heldBy.length} other threads`;
-  return `The old folder stays while ${who} ${ev.heldBy.length === 1 ? "uses" : "use"} it.`;
-}
+/* The move marker follows ProviderSwitchMarker: one quiet centred line. The dialog already said when the old files go, and
+   what the agent is told about the old folder rides with the first turn as system info, so neither shows here. */
 function moveMarker(ev) {
   const p = project(ev.to);
   const how = ev.kind === "new" ? `Created project <b>${esc(p.name)}</b>` : `Moved to <b>${esc(p.name)}</b> · ${MODE_LABEL[ev.mode]}${ev.mode === "newwt" ? ` from ${esc(ev.base)}` : ""}`;
   const line = `<div class="ev-line" role="note"><span class="mid">${ic("move", "sm")}${how}</span></div>`;
-  if (ev.kind === "new" || !ev.files.length) return `<div class="ev">${line}</div>`;
-  const gone = S.sim.expired && !ev.heldBy.length;
-  return `<div class="ev">${line}<div class="ev-card">
-    <div class="top">${ic(gone ? "trash" : "clock", "sm")}<span class="grow">${gone
-      ? `Mcode deleted the old folder on ${DEADLINE}.`
-      : keptLine(ev)}</span>${gone ? "" : `<button class="btn ghost sm" data-copy="${esc(ev.oldFolder)}">${ic("copy", "sm")}Copy path</button>`}</div>
-  </div></div>`;
+  return `<div class="ev">${line}</div>`;
 }
 function moveEventOf(t) { return t.messages.map(m => m.ev).filter(Boolean).at(-1); }
 
@@ -857,7 +839,7 @@ function renderBar() {
   return `<div class="proto-bar" role="toolbar" aria-label="Sim">
     <span class="grp"><span class="lbl">Sim</span><button class="opt" aria-pressed="${S.hasProjects}" data-act="flipprojects">Has projects</button>
       <button class="opt" aria-pressed="${!!sharerRunning}" data-act="flipsharer" ${t && t.projectId === null && sharersOf(t).length > 1 ? "" : "disabled"}>Fork running</button>
-      ${sim("failMove", "Fail move")}${sim("crossDrive", "D: fails")}${sim("failGit", "Fail git init")}${sim("expired", "7 days passed")}</span>
+      ${sim("failMove", "Fail move")}${sim("crossDrive", "D: fails")}${sim("failGit", "Fail git init")}</span>
     <span class="sep"></span>
     <span class="state">${t ? `thread:${t.id} · ${t.projectId ?? "no-project"}` : "-"}${S.mv ? ` · move:${S.mv.dest}/${S.mv.phase}` : ""}</span>
   </div>`;
@@ -867,7 +849,7 @@ function renderBar() {
 function send() {
   const text = draft.trim(); const t = current(); if (!text || !t) return;
   const ev = moveEventOf(t);
-  const withNote = ev && ev.kind === "existing" && ev.files.length && !ev.sent && !(S.sim.expired && !ev.heldBy.length);
+  const withNote = ev && ev.kind === "existing" && ev.files.length && !ev.sent;
   if (withNote) for (const o of S.threads) { const e = moveEventOf(o); if (e && e.oldFolder === ev.oldFolder) e.sent = true; }
   t.messages.push({ u: text }); t.status = "running"; draft = ""; render();
   setTimeout(() => { t.messages.push(withNote ? { a: "Copied bench.ts and results.csv from the earlier folder into scripts/bench/, and added a bench script to package.json.", tool: "Copied 2 files · Edited package.json" } : { a: "Done." }); t.status = "idle"; render(); }, 1200);

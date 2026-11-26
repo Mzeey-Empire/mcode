@@ -31,11 +31,10 @@ const FLOWS = [
     ["Moved", "Row under billing-api.", "afterA"] ] },
   { name: "A thread with files, alone in its folder", steps: [
     ["Move dialog", "Beside Move thread: old files deleted 3 Dec.", "moveAFilesAlone"],
-    ["Moved", "The marker says when the old folder is deleted.", "afterAFilesAlone"],
-    ["After 7 days", "The marker says the old folder was deleted.", "afterExpired"] ] },
+    ["Moved", "Just the move line. Mcode deletes the old folder on 3 Dec.", "afterAFilesAlone"] ] },
   { name: "A thread whose fork still uses the folder", steps: [
     ["Move dialog", "Only this thread moves. The files stay for the fork, so nothing is deleted.", "moveAFiles"],
-    ["Moved", "The fork stays in No project; the marker says the folder is kept.", "afterAFiles"],
+    ["Moved", "The fork stays in No project and keeps the folder.", "afterAFiles"],
     ["Next turn", "System info tells the agent to copy what it needs and leave the originals. The timeline does not show it.", "afterSent"] ] },
   { name: "Choose where it runs", steps: [
     ["Workspace", "Local, New worktree or Existing worktree.", "moveRunsMenu"],
