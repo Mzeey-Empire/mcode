@@ -1,10 +1,11 @@
 import * as NodeURL from "node:url";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import {
   createClaudeProvider,
   createCodexProvider,
   createCopilotProvider,
   createCursorProvider,
-  createOpencodeProvider,
+  createOpenCodeProvider,
 } from "../factories.js";
 import type { ProviderConformanceRegistration } from "./types.js";
 
@@ -103,14 +104,17 @@ export const ENABLED_PROVIDER_CONFORMANCE: readonly ProviderConformanceRegistrat
   },
   {
     providerId: "opencode",
-    factory: createOpencodeProvider,
-    requiredProfiles: ["core", "build", "plan", "permissions", "session-eviction", "session-resume"],
+    factory: (input) => createOpenCodeProvider({
+      ...input,
+      opencode: { settings: { get: getDefaultSettings }, processScope: { create: () => null } },
+    }),
+    requiredProfiles: ["core", "build", "plan", "permissions", "session-eviction", "turn-diff", "session-resume"],
     fixtureFiles: [fixtureFile("opencode")],
     supportedVersions: [{
       component: "opencode-cli",
       oldestSupported: "legacy",
       currentTested: "v2",
-      source: "apps/server/src/features/providers/adapters/opencode/opencode-http-client.ts (OpenCodeRequestVersion) and opencode-cli.ts",
+      source: "packages/providers/src/private/opencode/opencode-http-client.ts (OpenCodeRequestVersion) and opencode-cli.ts",
     }],
   },
 ];

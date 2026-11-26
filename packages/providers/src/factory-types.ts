@@ -1,11 +1,12 @@
 import type { Provider } from "@mcode/agent-model";
-import type { IAgentProvider, IGoalCapable, ISessionEvictable, ICompletionCapable } from "@mcode/contracts/providers/interfaces";
+import type { IAgentProvider, IApprovalReviewCapable, IGoalCapable, ISessionEvictable, ICompletionCapable } from "@mcode/contracts/providers/interfaces";
 import type { ProviderCliFacts } from "@mcode/contracts/providers/provider-status";
 import type { Settings } from "@mcode/contracts/models/settings";
 import type { SkillInfo } from "@mcode/contracts/skills";
 import type { StoredAttachment } from "@mcode/contracts/models/attachment";
 import type { ProviderHostPorts } from "./host-ports.js";
 import type { CodexCanonicalEventRouting } from "./private/codex/codex-canonical-event-publisher.js";
+import type { OpenCodeProcessScope } from "./private/opencode/opencode-server-pool.js";
 
 /** Configuration validated by every inert Provider factory. */
 export interface ProviderFactoryConfiguration {
@@ -22,6 +23,7 @@ export interface ProviderFactoryInput {
   cursor?: CursorProviderPorts;
   devin?: DevinProviderPorts;
   copilot?: CopilotProviderPorts;
+  opencode?: OpenCodeProviderPorts;
 }
 
 /** Server-owned authorities required by the Claude Provider. */
@@ -90,6 +92,16 @@ export interface DevinProviderPorts {
   };
 }
 
+/** Server-owned authorities required by the OpenCode Provider. */
+export interface OpenCodeProviderPorts {
+  settings: {
+    get(): Settings;
+  };
+  processScope: {
+    create(): OpenCodeProcessScope | null;
+  };
+}
+
 /** Prepared Provider boundary returned without CLI inspection or process startup. */
 export interface ProviderBoundary {
   readonly id: "claude" | "codex" | "copilot" | "cursor" | "devin" | "opencode";
@@ -111,3 +123,6 @@ export type CursorProviderBoundary = IAgentProvider & ProviderBoundary & {
 
 /** Usable Devin Provider returned by its public factory. */
 export type DevinProviderBoundary = IAgentProvider & ProviderBoundary;
+
+/** Usable OpenCode Provider returned by its public factory. */
+export type OpenCodeProviderBoundary = IAgentProvider & ISessionEvictable & IApprovalReviewCapable & ProviderBoundary;

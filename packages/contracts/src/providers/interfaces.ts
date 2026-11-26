@@ -30,7 +30,7 @@ export const SUBAGENT_REPORTING: Record<ProviderId, { childTranscript: boolean; 
   devin: { childTranscript: false, childSteps: true },
   cursor: { childTranscript: false, childSteps: false },
   copilot: { childTranscript: true, childSteps: false },
-  // Child steps are proven by apps/server/src/features/providers/adapters/opencode/__tests__/fixtures/task-subagent.captured.json.
+  // Child steps are proven by packages/providers/src/private/opencode/__tests__/fixtures/task-subagent.captured.json.
   opencode: { childTranscript: false, childSteps: true },
   gemini: null,
 };

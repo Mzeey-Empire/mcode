@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Settings } from "@mcode/contracts/models/settings";
+import { getDefaultSettings, type Settings } from "@mcode/contracts/models/settings";
 import {
   createClaudeProvider,
   createCodexProvider,
   createCopilotProvider,
   createCursorProvider,
-  createOpencodeProvider,
+  createOpenCodeProvider,
   type ProviderFactoryInput,
   type ProviderHostPorts,
 } from "../index.js";
@@ -56,6 +56,7 @@ function createInput(): ProviderFactoryInput {
       },
     },
     copilot: { launch: { resolve: vi.fn(async () => ({ cliPath: "copilot", env: {} })) } },
+    opencode: { settings: { get: vi.fn(getDefaultSettings) }, processScope: { create: vi.fn(() => null) } },
     cursor: {
       settings: { get: vi.fn(() => ({} as Settings)) },
       skills: { list: vi.fn(async () => []) },
@@ -69,7 +70,7 @@ describe("Provider factories", () => {
     ["codex", createCodexProvider],
     ["copilot", createCopilotProvider],
     ["cursor", createCursorProvider],
-    ["opencode", createOpencodeProvider],
+    ["opencode", createOpenCodeProvider],
   ] as const)("creates an inert %s Provider boundary", (id, createProvider) => {
     const input = createInput();
 
@@ -110,12 +111,18 @@ describe("Provider factories", () => {
       );
     }
     if (id === "opencode") {
+      expect(provider.sendTurn).toBeTypeOf("function");
       expect(provider.descriptor.capabilities).toEqual([
         { name: "build", support: "supported" },
         { name: "plan", support: "supported" },
         { name: "permissions", support: "supported" },
         { name: "session-eviction", support: "supported" },
+        { name: "turn-diff", support: "supported" },
+        { name: "session-resume", support: "supported" },
+        { name: "turn-steer", support: "unsupported" },
       ]);
+      expect(input.opencode?.settings.get).not.toHaveBeenCalled();
+      expect(input.opencode?.processScope.create).not.toHaveBeenCalled();
     }
     const hostPortMethods = Object.entries(input.host)
       .filter(([name]) => name !== "runtime")
@@ -168,5 +175,12 @@ describe("Provider factories", () => {
     input.cursor = { settings: { get: vi.fn(() => ({} as Settings)) } } as never;
 
     expect(() => createCursorProvider(input)).toThrow("skills.list");
+  });
+
+  it("rejects missing OpenCode-specific ports", () => {
+    const input = createInput();
+    delete input.opencode;
+
+    expect(() => createOpenCodeProvider(input)).toThrow(TypeError);
   });
 });

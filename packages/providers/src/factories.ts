@@ -3,11 +3,12 @@ import type {
   ClaudeProviderBoundary,
   CursorProviderBoundary,
   DevinProviderBoundary,
-  ProviderBoundary,
+  OpenCodeProviderBoundary,
   ProviderFactoryInput,
   CopilotProviderBoundary,
 } from "./factory-types.js";
 import { createProviderBoundary } from "./private/factory.js";
+import { OPENCODE_SUPPORTED_CAPABILITIES, OpenCodeProvider } from "./private/opencode/opencode-provider.js";
 import { createCursorAcpProvider, createDevinAcpProvider } from "./private/protocols/acp.js";
 import { CodexProvider } from "./private/codex/codex-provider.js";
 import { ClaudeProvider } from "./private/claude/claude-provider.js";
@@ -53,8 +54,15 @@ export function createDevinProvider(input: ProviderFactoryInput): DevinProviderB
 }
 
 /** Prepares the OpenCode Provider boundary without inspecting or spawning its CLI. */
-export function createOpencodeProvider(input: ProviderFactoryInput): ProviderBoundary {
-  return createProviderBoundary("opencode", ["build", "plan", "permissions", "session-eviction"], input);
+export function createOpenCodeProvider(input: ProviderFactoryInput): OpenCodeProviderBoundary {
+  createProviderBoundary("opencode", OPENCODE_SUPPORTED_CAPABILITIES, input);
+  if (typeof input.opencode?.settings?.get !== "function") {
+    throw new TypeError("OpenCode Provider port settings.get is required");
+  }
+  if (typeof input.opencode.processScope?.create !== "function") {
+    throw new TypeError("OpenCode Provider port processScope.create is required");
+  }
+  return new OpenCodeProvider(input.host, input.opencode);
 }
 
 function validateCodexPorts(ports: NonNullable<ProviderFactoryInput["codex"]>): void {

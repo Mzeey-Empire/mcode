@@ -4,7 +4,7 @@ import { logger } from "@mcode/shared";
 import { CLAUDE_STATIC_MODELS } from "@mcode/contracts/providers/claude-static-fallback";
 import { discoveredClaudeEfforts, listClaudeModels as discoverModels, resetModelCache } from "../list-models.js";
 import { ClaudeOwnedProcess } from "../claude-process.js";
-import { mockShutdownHost } from "./helpers/mock-shutdown-host.js";
+import { mockShutdownHost } from "../../__tests__/helpers/mock-shutdown-host.js";
 import * as NodeOS from "node:os";
 
 const listClaudeModels = (options: Parameters<typeof discoverModels>[0]) => discoverModels(options,

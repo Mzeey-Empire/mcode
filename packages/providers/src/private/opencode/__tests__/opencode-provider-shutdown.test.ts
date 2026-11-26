@@ -1,17 +1,10 @@
-import "reflect-metadata";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { getDefaultSettings } from "@mcode/contracts/models/settings";
 import { type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
-import { mockShutdownHost } from "../../../composition/__tests__/helpers/mock-shutdown-host.js";
-import { stubEnvService } from "../../../../../runtime/environment/__tests__/stub-env-service.js";
-import { SettingsService } from "../../../../settings/settings-service.js";
-
-vi.mock("../../../../settings/settings-service.js", () => ({
-  SettingsService: class { get() { return getDefaultSettings(); } },
-}));
+import { mockShutdownHost } from "../../__tests__/helpers/mock-shutdown-host.js";
 
 function deferred() {
   let resolve!: () => void;
@@ -25,7 +18,10 @@ describe("OpenCodeProvider shutdown", () => {
     const probeReleased = deferred();
     const events: ProviderRuntimeEvent[] = [];
     const host = mockShutdownHost((event) => events.push(event));
-    const provider = new OpenCodeProvider(new SettingsService(), stubEnvService(), host);
+    const provider = new OpenCodeProvider(host, {
+      settings: { get: getDefaultSettings },
+      processScope: { create: () => null },
+    });
     const pool = new OpenCodeServerPool({
       spawn: () => { throw new Error("Unexpected native spawn after shutdown"); },
       waitForHealth: async () => {}, terminateTree: async () => {},

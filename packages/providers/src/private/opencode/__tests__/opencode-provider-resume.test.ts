@@ -1,4 +1,5 @@
-import "reflect-metadata";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { mockShutdownHost } from "../../__tests__/helpers/mock-shutdown-host.js";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
@@ -16,18 +17,18 @@ function testPool(): OpenCodeServerPool {
 }
 
 function testProvider(http: never, pool: OpenCodeServerPool) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
-  const envService = { getEnv: () => ({}) };
   const submitted: unknown[] = [];
-  const host = {
-    events: { submit: async (batch: unknown) => { submitted.push(batch); return { commit: {}, delivery: { ingress: "queued" } }; } },
-    processes: { open: () => { throw new Error("opencode-provider-resume.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("opencode-provider-resume.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
-    runtime: { platform: "win32" },
-    environment: { snapshot: () => ({}) },
-    browser: {},
-    grants: {},
+  const host = mockShutdownHost(() => {});
+  host.runtime = { ...host.runtime, platform: "win32" };
+  const submit = host.events.submit;
+  host.events.submit = async (batch) => {
+    submitted.push(batch);
+    return submit(batch);
   };
-  const provider = new OpenCodeProvider(settingsService as never, envService as never, host as never);
+  const provider = new OpenCodeProvider(host, {
+    settings: { get: getDefaultSettings },
+    processScope: { create: () => null },
+  });
   provider.configureTestSeams({
     pool,
     http: http as never,

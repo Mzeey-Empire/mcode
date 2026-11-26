@@ -1,5 +1,5 @@
-import "reflect-metadata";
-import { ProviderRuntimeEventSchema } from "@mcode/contracts/events/provider-runtime-event";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { mockShutdownHost } from "../../__tests__/helpers/mock-shutdown-host.js";
 import { describe, expect, it, vi } from "vitest";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { type TurnRequest } from "@mcode/contracts/providers/interfaces";
@@ -44,21 +44,15 @@ function setup(serveUrl: string, http: ReturnType<typeof fakeHttp>) {
   });
   const acquire = vi.spyOn(pool, "acquire");
   const probeCli = vi.fn(async () => ({ binaryPath: "opencode", version: "test" }));
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "" }, opencode: { serveUrl } } }) };
+  const settings = getDefaultSettings();
+  settings.provider.opencode.serveUrl = serveUrl;
   const events: string[] = [];
-  const host = {
-    processes: { open: () => { throw new Error("opencode-provider-attach.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("opencode-provider-attach.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree },
-    runtime: { platform: "linux" },
-    events: { submit: async (batch: import("@mcode/providers").ProviderEventBatch) => {
-      for (const draft of batch.events) {
-        if (draft.payload.type === "item.recorded" && draft.payload.item.payload.projection === "providerRuntimeEvent") {
-          events.push(ProviderRuntimeEventSchema().parse(draft.payload.item.payload.runtimeEvent).event.type);
-        }
-      }
-      return { commit: {}, delivery: { ingress: "queued" } };
-    } },
-  };
-  const provider = new OpenCodeProvider(settingsService as never, { getEnv: () => ({}) } as never, host as never);
+  const host = mockShutdownHost(({ event }) => events.push(event.type));
+  host.processes.terminateTree = terminateTree;
+  const provider = new OpenCodeProvider(host, {
+    settings: { get: () => settings },
+    processScope: { create: () => null },
+  });
   provider.configureTestSeams({
     pool, http, probeCli,
     idleConfirm: { intervalMs: 1, requiredPolls: 1, timeoutMs: 500, maxPollErrors: 2 },

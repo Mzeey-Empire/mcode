@@ -1,8 +1,6 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeNet from "node:net";
 import { logger } from "@mcode/shared";
-import { hostRuntime } from "@mcode/shared/node/host-runtime";
-import { WindowsProcessScopeFactory, type WindowsProcessScopeResult } from "../../../../runtime/process/containment/windows-process-scope.js";
 
 /** Isolation boundary: never share a server across working directories. */
 export type OpenCodePoolKey = Readonly<{ binaryPath: string; cwd: string; hostname: string }>;
@@ -33,13 +31,18 @@ export interface OpenCodePoolProcess {
   kill(signal?: number | NodeJS.Signals): boolean;
 }
 
-/** Injectable pool seams: spawning, health, termination, ports, and time. */
+interface OpenCodeProcessScopeResult {
+  readonly ok: boolean;
+  readonly error?: string;
+}
+
+/** Host-owned containment for a pooled OpenCode server and its descendants. */
 export interface OpenCodeProcessScope {
   readonly ready: boolean;
-  assign(pid: number): WindowsProcessScopeResult;
-  reconcile(pid: number): Promise<WindowsProcessScopeResult>;
-  terminate(exitCode?: number): WindowsProcessScopeResult;
-  waitForEmpty(timeoutMs: number): Promise<WindowsProcessScopeResult>;
+  assign(pid: number): OpenCodeProcessScopeResult;
+  reconcile(pid: number): Promise<OpenCodeProcessScopeResult>;
+  terminate(exitCode?: number): OpenCodeProcessScopeResult;
+  waitForEmpty(timeoutMs: number): Promise<OpenCodeProcessScopeResult>;
   close(): void;
 }
 
@@ -156,9 +159,6 @@ export class OpenCodeServerPool {
       }),
       waitForHealth: defaultWaitForHealth,
       findFreePort: defaultFindFreePort,
-      createScope: platform === "win32"
-        ? () => new WindowsProcessScopeFactory({ platform: "win32", architecture: hostRuntime.architecture }).create()
-        : () => null,
       waitForPortClosed: defaultWaitForPortClosed,
       now: () => Date.now(),
       env: () => ({ ...process.env }) as Record<string, string>,

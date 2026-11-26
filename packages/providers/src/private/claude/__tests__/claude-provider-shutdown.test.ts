@@ -9,7 +9,7 @@ import { ClaudeProvider } from "./helpers/provider-fixture.js";
 import { AnthropicOAuthUsageSource } from "../usage/oauth-usage-source.js";
 import { stubEnvService } from "./helpers/provider-fixture.js";
 import { stubJobObject } from "./helpers/provider-fixture.js";
-import { mockShutdownHost } from "./helpers/mock-shutdown-host.js";
+import { mockShutdownHost } from "../../__tests__/helpers/mock-shutdown-host.js";
 
 function deferred() {
   let resolve!: () => void;

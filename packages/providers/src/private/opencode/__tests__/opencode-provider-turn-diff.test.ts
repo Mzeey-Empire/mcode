@@ -1,21 +1,17 @@
-import "reflect-metadata";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { mockShutdownHost } from "../../__tests__/helpers/mock-shutdown-host.js";
 import { describe, expect, it, vi } from "vitest";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import type { ProviderTurnDiffUpdate, TurnRequest } from "@mcode/contracts/providers/interfaces";
 
 function testProvider(http: never, pool: OpenCodeServerPool) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
-  const envService = { getEnv: () => ({}) };
-  const host = {
-    events: { submit: async () => ({ commit: {}, delivery: { ingress: "queued" } }) },
-    processes: { open: () => { throw new Error("opencode-provider-turn-diff.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("opencode-provider-turn-diff.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
-    runtime: { platform: "win32" },
-    environment: { snapshot: () => ({}) },
-    browser: {},
-    grants: {},
-  };
-  const provider = new OpenCodeProvider(settingsService as never, envService as never, host as never);
+  const host = mockShutdownHost(() => {});
+  host.runtime = { ...host.runtime, platform: "win32" };
+  const provider = new OpenCodeProvider(host, {
+    settings: { get: getDefaultSettings },
+    processScope: { create: () => null },
+  });
   provider.configureTestSeams({
     pool,
     http: http as never,

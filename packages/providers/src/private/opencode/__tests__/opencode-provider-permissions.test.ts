@@ -1,4 +1,5 @@
-import "reflect-metadata";
+import { getDefaultSettings } from "@mcode/contracts/models/settings";
+import { mockShutdownHost } from "../../__tests__/helpers/mock-shutdown-host.js";
 import { describe, expect, it, vi } from "vitest";
 import * as NodeFS from "node:fs";
 import { z } from "zod";
@@ -6,7 +7,6 @@ import { ApprovalRequestBodySchema } from "@mcode/contracts/models/approval";
 import { OpenCodeProvider } from "../opencode-provider.js";
 import { OpenCodeServerPool } from "../opencode-server-pool.js";
 import { OpenCodeReplySessionNotFoundError } from "../opencode-http-client.js";
-import { ApprovalService } from "../../../../agents/approvals/approval-service.js";
 import { logger } from "@mcode/shared";
 import type { ApprovalRequestEnvelope } from "@mcode/contracts/models/approval";
 import type { TurnRequest } from "@mcode/contracts/providers/interfaces";
@@ -73,18 +73,18 @@ function fakeHttp(envelopes: unknown[], hooks?: { onPrompt?: () => void }): Fake
 }
 
 function testProvider(http: FakeHttp) {
-  const settingsService = { get: () => ({ provider: { cli: { opencode: "opencode" }, opencode: { serveUrl: "" } } }) };
-  const envService = { getEnv: () => ({}) };
   const submitted: unknown[] = [];
-  const host = {
-    events: { submit: async (batch: unknown) => { submitted.push(batch); return { commit: {}, delivery: { ingress: "queued" } }; } },
-    processes: { open: () => { throw new Error("opencode-provider-permissions.test.ts fixture does not support process sessions"); }, run: async () => { throw new Error("opencode-provider-permissions.test.ts fixture does not support process runs"); }, attach: () => {}, terminateTree: async () => {} },
-    runtime: { platform: "win32" },
-    environment: { snapshot: () => ({}) },
-    browser: {},
-    grants: {},
+  const host = mockShutdownHost(() => {});
+  host.runtime = { ...host.runtime, platform: "win32" };
+  const submit = host.events.submit;
+  host.events.submit = async (batch) => {
+    submitted.push(batch);
+    return submit(batch);
   };
-  const provider = new OpenCodeProvider(settingsService as never, envService as never, host as never);
+  const provider = new OpenCodeProvider(host, {
+    settings: { get: getDefaultSettings },
+    processScope: { create: () => null },
+  });
   provider.configureTestSeams({
     pool: testPool(),
     http: http as never,
@@ -573,13 +573,12 @@ describe("OpenCodeProvider notice dedup", () => {
     const resolved = vi.fn();
     provider.on("approval_request", requested);
     provider.on("approval_resolved", resolved);
-    const publishApprovalRequest = vi.fn();
-    const publishApprovalResolved = vi.fn();
-    const service = new ApprovalService({ resolveAll: () => [provider] });
-    service.start({ publishApprovalRequest, publishApprovalResolved, stopSession: async () => provider.stopSession(turnRequest().sessionId) });
-    await provider.sendTurn(turnRequest());
-    expect(requested.mock.calls[0]?.[0].body.subject).toEqual({ kind: "tool", toolName: "bash", preview: JSON.stringify({ action: "bash", resources: ["x".repeat(70_000)] }) });
-    expect(publishApprovalRequest.mock.calls).toEqual([]);
+    const turning = provider.sendTurn(turnRequest());
+    await vi.waitFor(() => expect(requested.mock.calls[0]?.[0].body.subject).toEqual({
+      kind: "tool", toolName: "bash", preview: JSON.stringify({ action: "bash", resources: ["x".repeat(70_000)] }),
+    }));
+    await provider.resolveApproval("per_large", { autoDeny: "too_large" });
+    await turning;
     expect(http.replyPermission.mock.calls.map((args) => args.slice(1, 5))).toEqual([["ses_1", "per_large", "reject", "v2"]]);
     expect(resolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "auto_denied", reason: "too_large" } }]]);
     expect(submittedEvents(submitted).filter((event) => event.type === "approvalDecided").map((event) => ({ subjectLabel: event.subjectLabel, outcome: event.outcome })))
@@ -591,13 +590,17 @@ describe("OpenCodeProvider notice dedup", () => {
     const http = fakeHttp([{ type: "permission.v2.asked", properties: { id: "per_large", sessionID: "ses_1", action: "bash", resources: ["x".repeat(70_000)] } }]);
     http.replyPermission.mockRejectedValueOnce(new Error("offline"));
     const { provider, submitted } = testProvider(http);
+    const requested = vi.fn();
     const resolved = vi.fn();
+    provider.on("approval_request", requested);
     provider.on("approval_resolved", resolved);
-    const publishApprovalResolved = vi.fn();
-    const service = new ApprovalService({ resolveAll: () => [provider] });
-    service.start({ publishApprovalRequest: vi.fn(), publishApprovalResolved, stopSession: async () => provider.stopSession(turnRequest().sessionId) });
-    await provider.sendTurn(turnRequest());
-    await vi.waitFor(() => expect(publishApprovalResolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "cancelled", reason: "unanswerable" } }]]));
+    const request = turnRequest();
+    const turning = provider.sendTurn(request);
+    await vi.waitFor(() => expect(requested.mock.calls).toHaveLength(1));
+    const result = await provider.resolveApproval("per_large", { autoDeny: "too_large" });
+    if (result.status !== "resolved") await provider.stopSession(request.sessionId);
+    await turning;
+    await vi.waitFor(() => expect(resolved.mock.calls).toEqual([[{ requestId: "per_large", threadId: "thread-1", outcome: { status: "cancelled", reason: "unanswerable" } }]]));
     expect(provider.listPendingApprovals()).toEqual([]);
     expect(http.abortSession.mock.calls.map((args) => args[1])).toEqual(["ses_1"]);
     expect(submittedEvents(submitted).filter((event) => event.type === "approvalDecided").map((event) => event.outcome))

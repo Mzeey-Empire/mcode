@@ -19,6 +19,7 @@ import { registerCursorProvider } from "../../features/providers/composition/cur
 import { registerCopilotProvider } from "../../features/providers/composition/copilot-provider-registration.js";
 import { createCopilotLaunchPort } from "../../features/providers/composition/copilot-launch.js";
 import { registerDevinProvider } from "../../features/providers/composition/devin-provider-registration.js";
+import { registerOpenCodeProvider } from "../../features/providers/composition/opencode-provider-registration.js";
 import { CursorAdminUsageSource } from "../../features/providers/adapters/cursor/usage/cursor-admin-usage-source.js";
 import { CursorCliUsageEmailResolver } from "../../features/providers/adapters/cursor/usage/cursor-cli-usage-email.js";
 
@@ -331,6 +332,22 @@ export async function setupContainer(mcodeDir: string, options: { createDatabase
     },
   });
   container.registerInstance("DevinProvider", devinProvider);
+
+  registerOpenCodeProvider(container, {
+    configuration: {
+      cliPath: cursorSettings.provider.cli.opencode?.trim() || "opencode",
+      idleSessionTtlMs: 10 * 60 * 1_000,
+    },
+    host: container.resolve("ProviderHostPorts"),
+    opencode: {
+      settings: { get: () => container.resolve(SettingsService).get() },
+      processScope: {
+        create: () => hostRuntime.platform === "win32"
+          ? new WindowsProcessScopeFactory({ platform: "win32", architecture: hostRuntime.architecture }).create()
+          : null,
+      },
+    },
+  });
 
   return container;
 }

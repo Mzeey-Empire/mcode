@@ -267,7 +267,7 @@ function hasSseDelimiterAcrossBoundary(incomplete: Uint8Array, value: Uint8Array
 
 function emitSseFrame(
   bytes: Uint8Array,
-  decoder: TextDecoder,
+  decoder: InstanceType<typeof TextDecoder>,
   onEnvelope: (envelope: unknown) => void,
 ): boolean {
   if (bytes.byteLength > MAX_SSE_BUFFER_BYTES) {
