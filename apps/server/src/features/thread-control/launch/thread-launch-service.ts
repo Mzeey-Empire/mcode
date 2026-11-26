@@ -115,18 +115,26 @@ export class ThreadLaunchService {
   }
 
   private async resolveCommit(repoPath: string, workspace: Extract<ThreadLaunchWorkspace, { type: "new_worktree" }>): Promise<string | LaunchRejection> {
-    if (workspace.startFromOrigin) {
-      try {
-        return await this.deps.repository.fetchOriginTrackingBranch(repoPath, workspace.baseRef);
-      } catch (error) {
-        if (!(error instanceof OriginFetchError)) throw error;
-        const missing = error.code === "no_origin" || error.code === "branch_missing";
-        return missing ? rejection("invalid_placement", error.message) : rejection("internal_error", error.message, true);
-      }
+    try {
+      const commit = await resolveWorktreeStartCommit(this.deps.repository, repoPath, workspace);
+      return commit ?? rejection("invalid_placement", `No local branch ${workspace.baseRef}`);
+    } catch (error) {
+      if (!(error instanceof OriginFetchError)) throw error;
+      const missing = error.code === "no_origin" || error.code === "branch_missing";
+      return missing ? rejection("invalid_placement", error.message) : rejection("internal_error", error.message, true);
     }
-    const commit = await this.deps.repository.resolveLocalBranchCommit(repoPath, workspace.baseRef);
-    return commit ?? rejection("invalid_placement", `No local branch ${workspace.baseRef}`);
   }
+}
+
+/** Resolve the commit selected for a new worktree without moving the local base branch. */
+export function resolveWorktreeStartCommit(
+  repository: Pick<GitRepositoryService, "fetchOriginTrackingBranch" | "resolveLocalBranchCommit">,
+  repoPath: string,
+  source: { baseRef: string; startFromOrigin: boolean },
+): Promise<string | null> {
+  return source.startFromOrigin
+    ? repository.fetchOriginTrackingBranch(repoPath, source.baseRef)
+    : repository.resolveLocalBranchCommit(repoPath, source.baseRef);
 }
 
 function requiresNewWorktreeApproval(

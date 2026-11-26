@@ -1021,7 +1021,8 @@ export class WorkspaceEnvironmentService {
     return attempt === "passed" || this.options.threadStartups?.findByThreadId(threadId)?.phase === "agent";
   }
 
-  private launchAutomaticSetup(thread: WorkspaceEnvironmentSetupThread): void {
+  /** Start an automatic Setup attempt already queued by the owning transaction. */
+  launchAutomaticSetup(thread: WorkspaceEnvironmentSetupThread): void {
     void this.startAutomaticSetup(thread).catch(async (error: unknown) => {
       logger.error("Automatic Project Setup could not persist its transition", { threadId: thread.id, error: error instanceof Error ? error.message : String(error) });
       await this.blockStartupSetup(thread.id, "SETUP_PERSISTENCE_FAILED", "Project Setup could not save its state");
@@ -1166,20 +1167,28 @@ export class WorkspaceEnvironmentService {
   private async settleStartupAfterDrain(threadId: string): Promise<void> {
     const startups = this.options.threadStartups;
     const startup = startups?.findByThreadId(threadId);
-    if (!startup || !this.isSettleableStartup(startup)) return;
+    if (!startup) return;
+    const snapshot = this.requireAutomaticRepository().snapshot(threadId);
+    if (!this.isSettleableStartup(startup, snapshot)) return;
     if (startup.cancellation === "requested") {
       await startups?.markCancelled(startup.startupId);
       return;
     }
-    if (startup.state === "interrupted"
-      || (!this.hasPendingAutomaticTurns(threadId) && !this.hasDispatchedAutomaticTurn(threadId))) {
+    if (startup.state === "interrupted") {
       await startups?.complete(startup.startupId);
+      return;
+    }
+    const hasTurn = snapshot.queuedTurns.some((turn) =>
+      ["queued", "released", "dispatching", "dispatched"].includes(turn.state));
+    if (!hasTurn) {
+      await startups?.complete(startup.startupId, "setup-only");
     }
   }
 
-  private isSettleableStartup(startup: ThreadStartup): boolean {
+  private isSettleableStartup(startup: ThreadStartup, snapshot: WorkspaceEnvironmentAutomaticSetupSnapshot): boolean {
     return startup.state === "interrupted"
-      || (startup.state === "running" && startup.phase === "agent");
+      || (startup.state === "running" && (startup.phase === "agent"
+        || (startup.phase === "setup" && snapshot.gate === "released-by-pass")));
   }
 
   /**
@@ -1204,15 +1213,6 @@ export class WorkspaceEnvironmentService {
       if (snapshot.gate === "blocked" && recoverable) continue;
       await this.settleStartupAfterDrain(startup.threadId);
     }
-  }
-
-  private hasDispatchedAutomaticTurn(threadId: string): boolean {
-    return this.requireAutomaticRepository().snapshot(threadId).queuedTurns.some((turn) => turn.state === "dispatched");
-  }
-
-  private hasPendingAutomaticTurns(threadId: string): boolean {
-    return this.requireAutomaticRepository().snapshot(threadId).queuedTurns
-      .some((turn) => turn.state === "queued" || turn.state === "released" || turn.state === "dispatching");
   }
 
   private async interruptActiveAutomaticSetups(): Promise<void> {

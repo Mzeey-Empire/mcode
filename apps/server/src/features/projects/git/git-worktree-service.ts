@@ -38,7 +38,7 @@ type WorktreeCreationRequest = {
   name: string;
   path: string;
   repoPath: string;
-  options: { branchless?: boolean; baseRef?: string; startPoint?: string };
+  options: { branchless?: boolean; baseRef?: string; startPoint?: string; exclusivePath?: boolean };
 };
 
 type WorktreeRemovalRequest = {
@@ -88,10 +88,12 @@ export class GitWorktreeService {
     repoPath: string,
     name: string,
     branchName?: string,
-    options: { branchless?: boolean; baseRef?: string; startPoint?: string } = {},
+    options: WorktreeCreationRequest["options"] = {},
   ): Promise<WorktreeInfo & { createdBranch: boolean; warnings: string[] }> {
     const request = this.createWorktreeRequest(repoPath, name, branchName, options);
     const createdBranch = await this.shouldCreateBranch(request);
+    // Git accepts an existing empty directory. Claim a move's recorded path with mkdir first.
+    if (options.exclusivePath) await NodeFSPromises.mkdir(request.path);
     await this.createGitWorktree(request, createdBranch);
     return {
       name: request.name,
@@ -101,6 +103,28 @@ export class GitWorktreeService {
       createdBranch,
       warnings: [],
     };
+  }
+
+  /** Remove only a linked checkout that still belongs to this repository and recorded branch. */
+  async removeProvisionedWorktree(
+    repoPath: string | undefined, worktreePath: string, branch: string,
+  ): Promise<"missing" | "unowned" | "removed"> {
+    const entry = await statIfPresent(worktreePath);
+    if (!entry) return "missing";
+    if (!entry.isDirectory() || !(await statIfPresent(NodePath.join(worktreePath, ".git")))?.isFile()) return "unowned";
+    if (!repoPath) throw new Error("Destination repository is unavailable");
+
+    const { stdout: expectedCommonDir } = await this.gitExecutor.exec([
+      "-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir",
+    ]);
+    const { stdout } = await this.gitExecutor.exec([
+      "-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir", "--symbolic-full-name", "HEAD",
+    ]);
+    const [commonDir, head] = stdout.trimEnd().split(/\r?\n/);
+    if (!commonDir || head !== `refs/heads/${branch}`
+      || NodePath.relative(expectedCommonDir.trimEnd(), commonDir) !== "") return "unowned";
+    await this.gitExecutor.exec(["-C", repoPath, "worktree", "remove", worktreePath], { timeout: 30_000 });
+    return "removed";
   }
 
   /** Remove a worktree and, when requested, its branch. */
@@ -207,7 +231,7 @@ export class GitWorktreeService {
     repoPath: string,
     name: string,
     branchName: string | undefined,
-    options: { branchless?: boolean; baseRef?: string; startPoint?: string },
+    options: WorktreeCreationRequest["options"],
   ): WorktreeCreationRequest {
     validateWorktreeName(name);
     if (!NodeFS.existsSync(repoPath)) throw new Error(`Repository path does not exist: ${repoPath}`);
@@ -215,7 +239,7 @@ export class GitWorktreeService {
     validateBranchName(branch);
     if (options.baseRef) validateBranchName(options.baseRef);
     const path = NodePath.join(ensureManagedWorktreeBaseDir(repoPath), name);
-    if (NodeFS.existsSync(path)) throw new Error(`Worktree directory already exists: ${path}`);
+    if (!options.exclusivePath && NodeFS.existsSync(path)) throw new Error(`Worktree directory already exists: ${path}`);
     return { branch, name, path, repoPath, options };
   }
 
@@ -383,6 +407,15 @@ function managedParentRemovalOutcome(error: unknown): "stop" | "continue" | "fai
 function errorCode(error: unknown): string {
   if (!error || typeof error !== "object" || !("code" in error)) return "";
   return String((error as NodeJS.ErrnoException).code);
+}
+
+async function statIfPresent(path: string) {
+  try {
+    return await NodeFSPromises.lstat(path);
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+    return null;
+  }
 }
 
 function gitErrorMessage(error: unknown): string {

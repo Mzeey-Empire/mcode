@@ -119,8 +119,15 @@ export const ProviderSwitchMarkerSchema = lazySchema(() => z.object({
 /** The provider switch a system message records. */
 export type ProviderSwitchMarker = z.infer<ReturnType<typeof ProviderSwitchMarkerSchema>>;
 
+/** The source details needed to label a new-worktree move on the timeline. */
+export const NewWorktreeMoveSourceSchema = lazySchema(() => z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("branch"), branch: z.string(), startFromOrigin: z.boolean() }),
+  z.strictObject({ kind: z.literal("pr"), pullRequestNumber: z.number().int().positive() }),
+]));
+
 const threadMoveMarker = lazySchema(() => z.discriminatedUnion("target", [
   z.strictObject({ projectName: z.string(), target: z.literal("local") }),
+  z.strictObject({ projectName: z.string(), target: z.literal("new-worktree"), source: NewWorktreeMoveSourceSchema() }),
   z.strictObject({ projectName: z.string(), target: z.literal("existing-worktree"), branch: z.string() }),
 ]));
 

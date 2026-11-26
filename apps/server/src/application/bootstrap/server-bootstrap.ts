@@ -524,6 +524,9 @@ const taskRepo = container.resolve(TaskRepo);
 const planQuestionAnswersRepo = container.resolve(PlanQuestionAnswersRepo);
 const planRepo = container.resolve(PlanRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
+const threadMoveService = new ThreadMoveService(threadRepo, workspaceRepo, container.resolve(ThreadControlMutationReservationService),
+  gitRepository, container.resolve(ThreadBranchingService), container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload,
+  { checkouts: gitWorktrees, startups: threadStartupService, setup: workspaceEnvironmentService });
 const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
 const modelCacheService = container.resolve(ModelCacheService);
@@ -1055,8 +1058,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   handoffCheckoutService,
   threadDeletionTeardownService,
   threadCompletionService,
-  threadMoveService: new ThreadMoveService(threadRepo, workspaceRepo, container.resolve(ThreadControlMutationReservationService),
-    gitRepository, container.resolve(ThreadBranchingService), container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload),
+  threadMoveService,
   threadMovePreflightService: new ThreadMovePreflightService(threadRepo, workspaceRepo),
   browserAutomationBroker,
   desktopHtmlPreviewRenderer,
@@ -1193,6 +1195,7 @@ async function bootstrapServer(): Promise<void> {
     await canonicalSink.materializeConversationDisplay();
     recordStartupCheckpoint("conversation display materialization completed");
 
+    await threadMoveService.recoverInterruptedMoves();
     await interruptThreadStartupsAtStartup();
     await projectActionService.recoverStaleRuns();
     cleanupWorker.start(process.env.MCODE_AGENT_RUNTIME === "1"

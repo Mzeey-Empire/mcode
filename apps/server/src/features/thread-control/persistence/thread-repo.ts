@@ -205,6 +205,21 @@ export class ThreadRepo {
     return this.reader.findCommittedProjectMove(...input);
   }
 
+  /** Save the move's ownership record before starting checkout creation. */
+  recordMoveWorktree(...input: Parameters<ThreadStore["recordMoveWorktree"]>): Promise<void> {
+    return this.writer.execute(threadWriteOperations.recordMoveWorktree, input);
+  }
+
+  /** Find interrupted worktree moves on startup. */
+  listProvisioningMoveWorktrees() {
+    return this.reader.listProvisioningMoveWorktrees();
+  }
+
+  /** Forget an interrupted move once its checkout has been inspected and handled. */
+  deleteProvisioningMoveWorktree(id: string): Promise<void> {
+    return this.writer.execute(threadWriteOperations.deleteProvisioningMoveWorktree, [id]);
+  }
+
   /** Publish planning changes after their transaction has committed. */
   publishPlanPhase(threadId: string): void {
     this.attention?.invalidate(threadId);

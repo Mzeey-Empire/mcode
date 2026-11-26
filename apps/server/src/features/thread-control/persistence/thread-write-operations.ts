@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { HandoffIdSchema, MessageSchema } from "@mcode/contracts/models/message";
+import { HandoffIdSchema, MessageSchema, NewWorktreeMoveSourceSchema } from "@mcode/contracts/models/message";
+import { ThreadStartupSchema } from "@mcode/contracts/thread-startup";
 import { AcknowledgeSeenResultSchema } from "@mcode/contracts/models/thread-attention";
 import { PlanPhaseSchema, ThreadSchema } from "@mcode/contracts/models/thread";
 import { ThreadModeSchema, ThreadStatusSchema } from "@mcode/contracts/models/enums";
@@ -27,6 +28,13 @@ const tripleInput = z.tuple([z.string(), z.string(), z.string()]);
 const threadByPair = (name: string) => databaseWriteOperation(name, pairInput, nullableThread);
 const threadMovePlacement = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local"), branch: z.string() }),
+  z.object({
+    kind: z.literal("new-worktree"),
+    moveId: z.string().uuid(),
+    branch: z.string(),
+    worktreePath: z.string(),
+    source: NewWorktreeMoveSourceSchema(),
+  }),
   z.object({
     kind: z.literal("existing-worktree"),
     branch: z.string(),
@@ -79,11 +87,16 @@ export const threadWriteOperations = {
   moveToProject: databaseWriteOperation("thread.moveToProject", z.tuple([
     z.string(), z.object({ id: z.string(), path: z.string(), is_git_repo: z.boolean() }), threadMovePlacement, z.string().datetime(),
   ]), z.discriminatedUnion("status", [
-    z.object({ status: z.literal("moved"), thread, marker: MessageSchema() }),
+    z.object({ status: z.literal("moved"), thread, marker: MessageSchema(), startup: ThreadStartupSchema().optional() }),
     z.object({ status: z.literal("not-no-project") }),
     z.object({ status: z.literal("destination-missing") }),
     z.object({ status: z.literal("failed"), cause: z.literal("other"), error: z.string() }),
   ])),
+  recordMoveWorktree: databaseWriteOperation("thread.recordMoveWorktree", z.tuple([z.object({
+    id: z.string().uuid(), threadId: z.string(), workspaceId: z.string(),
+    worktreePath: z.string(), branch: z.string(), createdAt: z.string().datetime(),
+  })]), z.void()),
+  deleteProvisioningMoveWorktree: databaseWriteOperation("thread.deleteProvisioningMoveWorktree", idInput, z.void()),
   updateTitle: booleanByPair("thread.updateTitle"),
   updateCompactSummary: databaseWriteOperation("thread.updateCompactSummary", z.tuple([z.string(), z.string()]), z.void()),
   updateLineage: databaseWriteOperation("thread.updateLineage", z.tuple([z.string(), z.string(), z.string()]), z.boolean()),

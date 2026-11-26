@@ -2,7 +2,7 @@ import { THREAD_STARTUP_TRANSCRIPT_MAX_CHARS, THREAD_STARTUP_TRANSCRIPT_MAX_ENTR
 import { ThreadStartupStore } from "./persistence/thread-startup-store.js";
 import type { z } from "zod";
 import type { Thread } from "@mcode/contracts/models/thread";
-import { ThreadStore } from "../thread-control/persistence/thread-store.js";
+import type { ThreadStore } from "../thread-control/persistence/thread-store.js";
 import type { threadWriteOperations } from "../thread-control/persistence/thread-write-operations.js";
 
 /** Complete serializable input for creating and binding a startup's thread. */
@@ -178,8 +178,8 @@ export class ThreadStartupStateStore {
     });
   }
 
-  /** Complete the final active phase and make the lifecycle terminal. */
-  complete(startupId: string): ThreadStartup {
+  /** Complete the lifecycle, skipping agent startup if Setup ran without a turn. */
+  complete(startupId: string, completion?: "setup-only"): ThreadStartup {
     const startup = this.require(startupId);
     const timestamp = this.now().toISOString();
     // An interrupted record completes when its remaining phases are resolved
@@ -199,12 +199,19 @@ export class ThreadStartupStateStore {
     }
     if (isTerminal(startup)) return startup;
     const activeIndex = this.activeIndex(startup);
-    if (activeIndex !== startup.steps.length - 1) throw new Error("Startup cannot complete before its final phase");
+    const lastIndex = startup.steps.length - 1;
+    const skipAgent = completion === "setup-only" && startup.steps[lastIndex].phase === "agent";
+    if (activeIndex !== lastIndex && !(skipAgent && startup.phase === "setup")) {
+      throw new Error("Startup cannot complete before its final phase");
+    }
     return this.persistNext(startup, {
       state: "completed",
-      steps: startup.steps.map((step, index) => index === activeIndex
-        ? { ...step, state: "completed", endedAt: timestamp }
-        : step),
+      phase: skipAgent ? "agent" : startup.phase,
+      steps: startup.steps.map((step, index) => {
+        if (skipAgent && index === lastIndex) return { ...step, state: "skipped", endedAt: timestamp };
+        if (index === activeIndex) return { ...step, state: "completed", endedAt: timestamp };
+        return step;
+      }),
     });
   }
 

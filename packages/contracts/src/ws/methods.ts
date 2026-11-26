@@ -203,6 +203,21 @@ export type ThreadCompletionResult = z.infer<ReturnType<typeof ThreadCompletionR
 export const ThreadMoveTargetSchema = lazySchema(() => z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local") }),
   z.object({
+    kind: z.literal("new-worktree"),
+    source: z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("branch"),
+        baseBranch: z.string().min(1),
+        startFromOrigin: z.boolean(),
+      }),
+      z.object({
+        kind: z.literal("pr"),
+        branch: z.string().min(1),
+        pullRequestNumber: z.number().int().positive(),
+      }),
+    ]),
+  }),
+  z.object({
     kind: z.literal("existing-worktree"),
     worktreePath: z.string().min(1),
     baseBranch: z.string().min(1).optional(),
