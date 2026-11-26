@@ -179,6 +179,8 @@
   .btn.primary { background: var(--primary); color: var(--on-primary); }
   .btn.ghost { background: transparent; }
   .btn.ghost:hover { background: var(--hover); }
+  .btn.sm { height: 24px; padding: 0 8px; gap: 5px; font-size: 12px; color: var(--muted); }
+  .btn.sm:hover { color: var(--ink); }
 
   .thread { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 32px 12px; }
   .col-rail { max-width: 720px; margin: 0 auto; }
@@ -236,7 +238,7 @@
   /* The prototype draws the app at about 0.8 scale (13px body), so the app's 16/14/12px type roles read as 13/12/11.5px here. */
   .dialog.move { margin: auto 0; width: 500px; max-width: calc(100% - 32px); padding: 0; display: flex; flex-direction: column; max-height: calc(100% - 48px); position: relative; }
   .move .head { padding: 18px 48px 0 20px; }
-  .move .head h4 { margin: 0; font-size: 14px; font-weight: 500; }
+  .move .head h4 { margin: 0; font-size: 16px; font-weight: 600; }
   .move .head .who { color: var(--muted); font-size: 12px; margin: 2px 0 0; }
   .move .x { position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); }
   .move .x:hover { background: var(--hover); color: var(--ink); }
@@ -297,6 +299,13 @@
   .notice .raw { display: block; color: var(--ink); white-space: pre-wrap; word-break: break-all; }
   .notice .nowrap { white-space: nowrap; }
   .pop.in-dialog { position: absolute; left: 20px; right: 20px; z-index: 40; max-height: 300px; overflow-y: auto; }
+  .pop.in-dialog.col { display: flex; flex-direction: column; overflow: hidden; }
+  .pop.in-dialog.col .list { overflow-y: auto; min-height: 0; flex: 1; }
+  .ptabs { display: flex; gap: 2px; padding: 0 4px 4px; }
+  .ptabs button { padding: 4px 8px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+  .ptabs button:hover { color: var(--ink); }
+  .ptabs button[aria-selected="true"] { background: var(--selected); color: var(--ink); }
+  .mi .tag { font-size: 11.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
   .mi .sub { color: var(--muted); font-size: 12px; }
   .mi.two { height: auto; min-height: 38px; padding: 6px 8px; align-items: center; }
   .mi.two .lab { display: grid; gap: 1px; }
@@ -316,7 +325,7 @@
   .ev-card .muted { color: var(--muted); }
   .ev-card details summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; display: flex; align-items: center; gap: 4px; }
   .ev-card details summary::-webkit-details-marker { display: none; }
-  .ev-card details[open] > summary > .i { transform: rotate(90deg); }
+  .ev-card details[open] > summary > .i { transform: rotate(180deg); }
   .ev-card .ev-files { color: var(--ink); font-size: 12px; }
   .ev-card blockquote { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--background); font-size: 12px; white-space: pre-wrap; }
   .path-line { display: block; margin: 4px 0; }
@@ -390,8 +399,9 @@ Object.assign(P, {
 const PROJECTS = [
   { id: "mcode", name: "mcode", chip: "MC", c: "c1", path: "~/src/mcode", git: true, branch: "main",
     branches: ["main", "feat/reconnect-retry", "fix/sidebar-fade"],
+    prs: [{ n: 412, title: "Retry the websocket reconnect with backoff", head: "feat/reconnect-retry" }, { n: 418, title: "Fade long sidebar titles at narrow widths", head: "fix/sidebar-fade" }],
     worktrees: [{ path: "~/src/mcode-wt/reconnect-retry", branch: "feat/reconnect-retry" }, { path: "~/src/mcode-wt/sidebar-fade", branch: "fix/sidebar-fade" }] },
-  { id: "billing", name: "billing-api", chip: "BA", c: "c2", path: "~/src/billing-api", git: true, branch: "main", branches: ["main", "chore/stripe-v18"], worktrees: [] },
+  { id: "billing", name: "billing-api", chip: "BA", c: "c2", path: "~/src/billing-api", git: true, branch: "main", branches: ["main", "chore/stripe-v18"], prs: [], worktrees: [] },
   { id: "docs", name: "docs-site", chip: "DS", c: "c3", path: "~/Documents/docs-site", git: false },
 ];
 const DEADLINE = "3 Dec";
@@ -500,10 +510,11 @@ function placePicker(stage) {
   if (!pop || !trigger) return;
   const box = pop.offsetParent.getBoundingClientRect(), r = trigger.getBoundingClientRect();
   const foot = pop.offsetParent.querySelector(".foot")?.getBoundingClientRect();
-  /* A menu that would end part-way over the footer buttons opens above its trigger instead, when there is room. */
-  const below = r.bottom + 4, above = r.top - 4 - pop.offsetHeight;
-  const flip = foot && below + pop.offsetHeight > foot.top && above >= box.top + 8;
-  pop.style.top = `${(flip ? above : below) - box.top}px`;
+  /* Always below, so the choices above the trigger stay in view. The list shrinks to end above the footer when that
+     still leaves a usable list; otherwise it keeps its height and covers the footer while open. */
+  const top = r.bottom + 4, room = foot ? foot.top - 8 - top : Infinity;
+  pop.style.top = `${top - box.top}px`;
+  if (room >= 180) pop.style.maxHeight = `${Math.min(room, 300)}px`;
 }
 function autosize(ta) { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; }
 
@@ -529,14 +540,14 @@ function renderMap() {
       <ul class="tree">
         <li><span class="node">Existing project</span>${go("moveA")}<ul>
           <li><span class="node">Project picker</span><span class="note">Registered projects only, with their paths.</span>${go("moveAPicker")}</li>
-          <li><span class="node">Runs in</span><span class="note">A dropdown: Local (default, on the project's current branch), New worktree or Existing worktree. New worktree adds a From branch, whose picker has the Start from origin switch; Existing worktree adds a Worktree picker. A project that is not a git repo runs Local only.</span>${go("moveRunsMenu", "menu ›")} ${go("moveNewWt", "new worktree ›")} ${go("moveExistingWt", "existing ›")} ${go("moveNonGit", "not git ›")}</li>
-          <li><span class="node">Files notice</span><span class="note">A warning: after the move Mcode deletes the folder's files on ${DEADLINE}, they are not copied, and the agent is told where. The chevron shows the files and the threads that move too.</span>${go("moveAFiles")}</li>
+          <li><span class="node">Runs in</span><span class="note">A dropdown: Local (default, on the project's current branch), New worktree or Existing worktree. New worktree adds a From field whose picker has Branches and Pull requests tabs, as when starting a thread; Start from origin sits under Branches. Existing worktree adds a Worktree picker. A project that is not a git repo runs Local only.</span>${go("moveRunsMenu", "menu ›")} ${go("moveNewWt", "new worktree ›")} ${go("moveNewWtPr", "from a PR ›")} ${go("moveExistingWt", "existing ›")} ${go("moveNonGit", "not git ›")}</li>
+          <li><span class="node">Files notice</span><span class="note">A warning: after the move Mcode deletes the folder's files on ${DEADLINE}, they are not copied, and the agent is told where. The chevron shows the files.</span>${go("moveAFiles")}</li>
         </ul></li>
         <li><span class="node">New project</span>${go("moveB")}<ul>
           <li><span class="node">Name, location, git</span><span class="note">Name from the folder, without date or id. Start a git repo is unchecked.</span>${go("moveBGit", "git on ›")}</li>
           <li><span class="node">Name or folder taken</span>${go("moveBCollide")}</li>
         </ul></li>
-        <li><span class="node">Shared folder</span><span class="note">Forks and children that share the folder move with it, and are listed.</span>${go("moveBShared")}</li>
+        <li><span class="node">Shared folder</span><span class="note">Forks and children that share the folder move with it, and are listed in their own notice.</span>${go("moveBShared")}</li>
         <li><span class="node">Moving, failed, git failed</span>${go("moveMoving", "moving ›")} ${go("moveFailed", "failed ›")} ${go("moveCross", "across drives ›")} ${go("moveGitFail", "git ›")}</li>
         <li><span class="node">No projects yet</span><span class="note">New project is the only choice.</span>${go("moveZero")}</li>
       </ul></div>
@@ -580,13 +591,14 @@ const FLOWS = [
     ["Move dialog", "Opens with billing-api picked. Nothing moves until you confirm.", "moveAPicked"],
     ["Moved", "Row under billing-api.", "afterA"] ] },
   { name: "A thread with files and a fork", steps: [
-    ["Move dialog", "Lists the 4 files and the fork that moves too.", "moveAFiles"],
+    ["Move dialog", "Warns about the 4 files and lists the fork that moves too.", "moveAFiles"],
     ["Moved", "The marker keeps the earlier folder and its deadline.", "afterAFiles"],
     ["Next turn", "The note goes to the agent once.", "afterSent"],
     ["After 7 days", "Folder removed; the marker says so.", "afterExpired"] ] },
   { name: "Choose where it runs", steps: [
     ["Runs in", "Local, New worktree or Existing worktree.", "moveRunsMenu"],
     ["New worktree", "Pick the From branch; Start from origin is in its picker.", "moveNewWt"],
+    ["From a pull request", "The Pull requests tab checks out the PR's branch.", "moveNewWtPr"],
     ["Existing worktree", "Pick one; Move waits until you do.", "moveExistingWt"],
     ["Not a git repo", "docs-site runs Local only.", "moveNonGit"] ] },
   { name: "Make it a new project", steps: [
@@ -617,7 +629,7 @@ function renderFlows() {
 function newMv(tid, patch = {}) {
   const t = S.threads.find(x => x.id === tid);
   return { tid, dest: projects().length ? "existing" : "new", pid: null, mode: "local", base: null, origin: false, wt: null,
-    name: suggestedName(t), parent: defaultParent(), git: false, phase: "form", picker: null, pq: "", showFiles: false, showRaw: false, ...patch };
+    name: suggestedName(t), parent: defaultParent(), git: false, phase: "form", picker: null, pq: "", btab: "branches", pr: null, showFiles: false, showRaw: false, ...patch };
 }
 function goto(key) {
   draft = "";
@@ -636,6 +648,7 @@ function goto(key) {
     moveAFiles: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", showFiles: true }) })),
     moveRunsMenu: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", picker: "runs" }) })),
     moveNewWt: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "newwt", base: "main", picker: "branch" }) })),
+    moveNewWtPr: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "newwt", base: "main", picker: "branch", btab: "prs", pr: 412 }) })),
     moveBShared: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new" }) })),
     moveExistingWt: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", mode: "existingwt", base: "main" }) })),
     moveNonGit: () => set(at("n2", { overlay: "move", mv: newMv("n2", { pid: "docs" }) })),
@@ -759,9 +772,9 @@ function moveMarker(ev) {
   return `<div class="ev">${line}<div class="ev-card">
     <div class="top">${ic(gone ? "trash" : "clock", "sm")}<span class="grow">${gone
       ? `Mcode deleted the old folder on ${DEADLINE}.`
-      : `${plural(ev.files.length, "earlier file stays", "earlier files stay")} in the old folder. Mcode deletes it on ${DEADLINE}.`}</span>${gone ? "" : `<button class="link" data-copy="${esc(ev.oldFolder)}">Copy path</button>`}</div>
+      : `${plural(ev.files.length, "earlier file stays", "earlier files stay")} in the old folder. Mcode deletes it on ${DEADLINE}.`}</span>${gone ? "" : `<button class="btn ghost sm" data-copy="${esc(ev.oldFolder)}">${ic("copy", "sm")}Copy path</button>`}</div>
     ${gone ? `<div class="muted">Files that were in the old folder</div>` : ""}<div class="ev-files mono">${esc(ev.files.join("  ·  "))}</div>
-    ${gone && !ev.sent ? "" : `<details><summary>${ic("right", "sm")}What the agent is told ${state}</summary><blockquote>${handoffNote(ev)}</blockquote></details>`}
+    ${gone && !ev.sent ? "" : `<details><summary>${ic("down", "sm")}What the agent is told ${state}</summary><blockquote>${handoffNote(ev)}</blockquote></details>`}
   </div></div>`;
 }
 function moveEventOf(t) { return t.messages.map(m => m.ev).filter(Boolean).at(-1); }
@@ -856,9 +869,11 @@ function runsIn(mv, p) {
   if (!p.git) return `<div class="field"><span class="lab">Runs in</span><button class="trigger" aria-disabled="true" aria-describedby="runs-why">${ic("laptop", "sm")}<span class="lab">Local</span></button><span class="help" id="runs-why">${esc(p.name)} is not a git repo, so it runs Local.</span></div>`;
   const icon = { local: "laptop", newwt: "tree", existingwt: "fork" }[mv.mode];
   const runs = `<div class="field"><span class="lab">Runs in</span><button class="trigger" data-mvpicker="runs" aria-haspopup="listbox">${ic(icon, "sm")}<span class="lab">${MODE_LABEL[mv.mode]}</span>${mv.mode === "local" ? `<span class="hint mono">${esc(p.branch)}</span>` : ""}${ic("down", "sm")}</button></div>`;
-  const base = mv.base ?? p.branch;
-  if (mv.mode === "newwt") return runs + `<div class="field"><span class="lab">From</span><button class="trigger" data-mvpicker="branch" aria-haspopup="listbox">${ic("branch", "sm")}<span class="lab mono">${esc(mv.origin ? `origin/${base}` : base)}</span>${ic("down", "sm")}</button>
-    <span class="result">New branch <span class="mono">mcode/${esc(suggestedName(S.threads.find(x => x.id === mv.tid)))}</span></span></div>`;
+  const base = mv.base ?? p.branch, pr = mv.pr && p.prs.find(x => x.n === mv.pr);
+  if (mv.mode === "newwt") return runs + `<div class="field"><span class="lab">From</span><button class="trigger" data-mvpicker="branch" aria-haspopup="listbox">${ic(pr ? "pr" : "branch", "sm")}${pr
+      ? `<span class="lab fade">${esc(pr.title)}</span><span class="hint mono">#${pr.n}</span>`
+      : `<span class="lab mono">${esc(mv.origin ? `origin/${base}` : base)}</span>`}${ic("down", "sm")}</button>
+    <span class="result">${pr ? `Checks out <span class="mono">${esc(pr.head)}</span>` : `New branch <span class="mono">mcode/${esc(suggestedName(S.threads.find(x => x.id === mv.tid)))}</span>`}</span></div>`;
   if (mv.mode === "existingwt") return runs + `<div class="field"><span class="lab">Worktree</span><button class="trigger" data-mvpicker="worktree" aria-haspopup="listbox">${ic("fork", "sm")}${mv.wt ? `<span class="lab mono fade">${esc(mv.wt.path)}</span><span class="hint mono">${esc(mv.wt.branch)}</span>` : `<span class="lab ph">Choose a worktree</span>`}${ic("down", "sm")}</button></div>`;
   return runs;
 }
@@ -873,26 +888,35 @@ function runsPicker(mv, p) {
     return `<button class="mi two" role="option" aria-selected="${mv.mode === m}" ${off ? 'aria-disabled="true"' : `data-mvmode="${m}"`}>${ic(icon, "sm ico")}<span class="lab"><span>${MODE_LABEL[m]}</span><span class="sub">${sub}</span></span>${mv.mode === m ? ic("check", "sm") : ""}</button>`;
   }).join(""));
 }
-/* As in the new-thread branch picker, Start from origin is a switch in the picker's footer and keeps the picker open. */
+/* The new-thread target picker: Branches and Pull requests tabs, text rows with a "current" tag, and Start from origin
+   as a switch under the Branches list that keeps the picker open. Search and the switch stay put; only the rows scroll. */
 function branchPicker(mv, p) {
-  const base = mv.base ?? p.branch, q = mv.pq.trim().toLowerCase();
-  const rows = p.branches.filter(b => b.includes(q));
-  const row = b => `<button class="mi ${b === p.branch ? "two" : ""}" role="option" aria-selected="${base === b}" data-mvbase="${esc(b)}">${ic("branch", "sm ico")}<span class="lab"><span class="mono">${esc(b)}</span>${b === p.branch ? `<span class="sub">Checked out in <span class="mono">${esc(p.path)}</span></span>` : ""}</span>${base === b ? ic("check", "sm") : ""}</button>`;
-  return listPicker("Branches", `<div class="search">${ic("search", "sm")}<input data-fk="mvq" data-mvq placeholder="Search branches" value="${esc(mv.pq)}" /></div>`
-    + (rows.length ? rows.map(row).join("") : `<div style="padding:12px 8px;color:var(--muted)">No branch matches “${esc(mv.pq)}”.</div>`)
-    + `<button class="switch-row" role="switch" aria-checked="${mv.origin}" data-mvflip="origin"><span>Start from origin</span><span class="switch"><span class="knob"></span></span></button>`);
+  const base = mv.base ?? p.branch, q = mv.pq.trim().toLowerCase(), onPrs = mv.btab === "prs";
+  const none = what => `<div style="padding:12px 8px;color:var(--muted)">No ${what} matches “${esc(mv.pq)}”.</div>`;
+  const branchRows = p.branches.filter(b => b.includes(q)).map(b => `<button class="mi" role="option" aria-selected="${!mv.pr && base === b}" data-mvbase="${esc(b)}"><span class="lab mono fade">${esc(b)}</span>${b === p.branch ? `<span class="tag">current</span>` : ""}${!mv.pr && base === b ? ic("check", "sm") : ""}</button>`);
+  const prRows = p.prs.filter(x => `${x.title} ${x.head} #${x.n}`.toLowerCase().includes(q)).map(x => `<button class="mi two" role="option" aria-selected="${mv.pr === x.n}" data-mvpr="${x.n}"><span class="lab"><span class="fade">${esc(x.title)}</span><span class="sub mono">#${x.n} · ${esc(x.head)}</span></span>${mv.pr === x.n ? ic("check", "sm") : ""}</button>`);
+  const rows = onPrs ? prRows : branchRows;
+  return `<div class="pop in-dialog col" data-stop role="dialog" aria-label="Start from">
+    <div class="search">${ic("search", "sm")}<input data-fk="mvq" data-mvq placeholder="${onPrs ? "Search pull requests" : "Search branches"}" value="${esc(mv.pq)}" /></div>
+    <div class="ptabs" role="tablist"><button role="tab" aria-selected="${!onPrs}" data-mvtab="branches">Branches</button><button role="tab" aria-selected="${onPrs}" data-mvtab="prs">Pull requests</button></div>
+    <div class="list" role="listbox">${rows.length ? rows.join("") : none(onPrs ? "pull request" : "branch")}</div>
+    ${onPrs ? "" : `<button class="switch-row" role="switch" aria-checked="${mv.origin}" data-mvflip="origin"><span>Start from origin</span><span class="switch"><span class="knob"></span></span></button>`}
+  </div>`;
 }
-/* Into an existing project the folder's files stay behind, so the deadline leads; the files and the threads that move ride behind the chevron. */
-function folderNotice(mv, t) {
-  const files = folderFiles(t), others = sharersOf(t).slice(1);
-  if (mv.dest === "existing" && files.length) {
-    const copied = files.length === 1 ? "It is not copied into the project; the agent is told where it is on its next turn." : "They are not copied into the project; the agent is told where they are on its next turn.";
-    return notice({ tone: "warning", title: `After the move, Mcode deletes this folder's ${plural(files.length, "file", "files")} on ${DEADLINE}`,
-      detail: `<div>${copied} Choose New project to keep the files with the thread.</div>${others.length ? `<div><span class="k">Moves too</span>${threadList(others)}</div>` : ""}`,
-      more: `<div><span class="k">Files in this folder</span><ul class="mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>`,
-      openKey: "showFiles" });
-  }
-  if (!others.length) return "";
+/* Into an existing project the folder's files stay behind, so the deadline leads and the file list waits behind the chevron. */
+function filesNotice(mv, t) {
+  const files = folderFiles(t);
+  if (mv.dest !== "existing" || !files.length) return "";
+  const copied = files.length === 1 ? "It is not copied into the project; the agent is told where it is on its next turn." : "They are not copied into the project; the agent is told where they are on its next turn.";
+  return notice({ tone: "warning", title: `After the move, Mcode deletes the ${plural(files.length, "file", "files")} in this thread's folder on ${DEADLINE}`,
+    detail: `<div>${copied} Choose New project to keep the files with the thread.</div>`,
+    more: `<div><span class="k">Files in this folder</span><ul class="mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>`,
+    openKey: "showFiles" });
+}
+/* When the busy thread is the only other sharer, the busy notice already says it moves too, so this one stays out. */
+function sharersNotice(t, busy) {
+  const others = sharersOf(t).slice(1);
+  if (!others.length || (others.length === 1 && busy?.id === others[0].id)) return "";
   return notice({ tone: "info", title: others.length === 1 ? "1 other thread shares this folder and moves too" : `${others.length} other threads share this folder and move too`, detail: threadList(others) });
 }
 function moveDialogHtml() {
@@ -913,7 +937,7 @@ function moveDialogHtml() {
     const [lead, rest, details] = cross
       ? [`Drive ${esc(mv.parent.slice(0, 2))} is full, so the folder couldn't be copied there`, `Your files are still in the old folder and ${who} still in No project; Mcode removed the partial copy. Free up space on ${esc(mv.parent.slice(0, 2))} and try again, or choose another location.`, "ENOSPC: no space left on device, copyfile 'bench.db'"]
       : mv.dest === "existing"
-        ? [n > 1 ? `Couldn't move the ${n} threads` : "Couldn't move the thread", `Nothing changed: ${who} still in No project and the files are untouched. Try again in a moment.`, "SQLITE_BUSY: database is locked (updating thread workspace)"]
+        ? [n > 1 ? `Couldn't move the ${n} threads` : "Couldn't move the thread", `Mcode's database was busy, so nothing changed: ${who} still in No project and the files are untouched. Try again in a moment.`, "SQLITE_BUSY: database is locked (updating thread workspace)"]
         : [`Couldn't move the folder to ${esc(mv.parent)}`, `Nothing changed: ${who} still in No project. Close any app using files in the folder, then try again.`, "EBUSY: resource busy or locked, rename '…/2026-11-26-sqlite-wal-vs-rollback-7f3a'"];
     outcome = notice({ tone: "error", title: lead, detail: `<div>${rest}</div>`, more: `<span class="raw mono">${esc(details)}</span>`, openKey: "showRaw" });
   }
@@ -937,7 +961,7 @@ function moveDialogHtml() {
   /* Info, not warning: nothing is at risk, the move only waits. The files warning stays the one warning in the dialog. */
   const busyBox = block?.busy ? notice({ tone: "info",
     title: `“${esc(block.busy.title)}” ${block.busy.status === "running" ? "is running" : "needs approval"}`,
-    detail: `<div>${block.busy.status === "running" ? "You can move once it stops." : "You can move once you answer it."}</div>` }) : "";
+    detail: `<div>${block.busy.id === t.id ? "" : "It shares this folder and moves too. "}${block.busy.status === "running" ? "You can move once it stops." : "You can move once you answer it."}</div>` }) : "";
   /* The project exists and the thread is in it, so Done is the next step; retrying git is optional. */
   if (mv.phase === "gitfailed") {
     const p = project(mv.createdId) ?? { name: mv.name, path: joinPath(mv.parent, mv.name) };
@@ -964,7 +988,7 @@ function moveDialogHtml() {
   return `<div class="scrim" ${locked ? "" : 'data-act="mvcancel"'}><div class="dialog move" role="dialog" aria-modal="true" aria-labelledby="mvh" data-stop ${locked ? 'aria-busy="true"' : ""}>
     <div class="head"><h4 id="mvh">Move to project</h4><p class="who fade">${esc(t.title)}</p></div>
     <button class="x" ${locked ? "disabled" : 'data-act="mvcancel"'} aria-label="Close">${ic("x", "sm")}</button>
-    <fieldset class="body" ${locked ? "disabled" : ""}>${dest}${form}${busyBox}${folderNotice(mv, t)}${cross ? "" : outcome}</fieldset>
+    <fieldset class="body" ${locked ? "disabled" : ""}>${dest}${form}${busyBox}${cross ? "" : outcome}${filesNotice(mv, t)}${sharersNotice(t, block?.busy)}</fieldset>
     <div class="foot">
       <button class="btn ghost" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
       <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ""}${primaryLabel}</button></div>
@@ -985,11 +1009,12 @@ function applyExisting(mv) {
   const p = project(mv.pid);
   const oldFolder = folderPath(lead), files = [...folderFiles(lead)];
   const slug = suggestedName(lead);
-  const branch = !p.git ? null : mv.mode === "local" ? p.branch : mv.mode === "newwt" ? `mcode/${slug}` : mv.wt.branch;
+  const pr = mv.mode === "newwt" && mv.pr ? p.prs.find(x => x.n === mv.pr) : null;
+  const branch = !p.git ? null : mv.mode === "local" ? p.branch : pr ? pr.head : mv.mode === "newwt" ? `mcode/${slug}` : mv.wt.branch;
   const wtPath = mv.mode === "newwt" ? `~/src/mcode-wt/${slug}` : mv.mode === "existingwt" ? mv.wt.path : null;
   for (const o of sharersOf(lead)) {
     o.projectId = p.id; o.mode = p.git ? mv.mode : "local"; o.branch = branch; o.wtPath = wtPath;
-    o.messages = [...o.messages, { ev: { kind: "existing", to: p.id, mode: o.mode, base: mv.base ?? p.branch, oldFolder, files, sent: false } }];
+    o.messages = [...o.messages, { ev: { kind: "existing", to: p.id, mode: o.mode, base: pr ? `#${pr.n}` : mv.base ?? p.branch, oldFolder, files, sent: false } }];
   }
   S.expanded = { ...S.expanded, [p.id]: true };
 }
@@ -1051,18 +1076,20 @@ function send() {
 }
 let copiedTimer;
 document.addEventListener("click", e => {
-  const el = e.target.closest("[data-tab],[data-act],[data-goto],[data-sim],[data-open],[data-menu],[data-hmenu],[data-toggle],[data-scope],[data-cmd],[data-copy],[data-mvdest],[data-mvpicker],[data-mvpick],[data-mvmode],[data-mvflip],[data-mvopen],[data-mvbase],[data-mvwt],[data-mvparent],[data-stop]");
+  const el = e.target.closest("[data-tab],[data-act],[data-goto],[data-sim],[data-open],[data-menu],[data-hmenu],[data-toggle],[data-scope],[data-cmd],[data-copy],[data-mvdest],[data-mvpicker],[data-mvpick],[data-mvmode],[data-mvflip],[data-mvopen],[data-mvtab],[data-mvpr],[data-mvbase],[data-mvwt],[data-mvparent],[data-stop]");
   if (!el) { if (S.overlay === "menu") set({ overlay: null, menuFor: null }); return; }
   const d = el.dataset;
   if (el.matches("[disabled],[aria-disabled='true']")) return;
   if (d.copy) { clearTimeout(copiedTimer); copiedTimer = setTimeout(() => set({ copied: null }), 1600); return set({ copied: "path" }); }
   if (d.mvdest) return setMv({ dest: d.mvdest, picker: null });
   if (d.mvpicker) return setMv({ picker: S.mv.picker === d.mvpicker ? null : d.mvpicker, pq: "" });
-  if (d.mvpick) return setMv({ pid: d.mvpick, picker: null, mode: "local", base: project(d.mvpick).branch, wt: null, origin: false });
+  if (d.mvpick) return setMv({ pid: d.mvpick, picker: null, mode: "local", base: project(d.mvpick).branch, pr: null, wt: null, origin: false });
   if (d.mvmode) return setMv({ mode: d.mvmode, picker: null });
   if (d.mvflip) return setMv({ [d.mvflip]: !S.mv[d.mvflip] });
   if (d.mvopen) return setMv({ [d.mvopen]: !S.mv[d.mvopen] });
-  if (d.mvbase) return setMv({ base: d.mvbase, picker: null });
+  if (d.mvbase) return setMv({ base: d.mvbase, pr: null, picker: null });
+  if (d.mvtab) return setMv({ btab: d.mvtab, pq: "" });
+  if (d.mvpr) return setMv({ pr: +d.mvpr, picker: null });
   if (d.mvwt) return setMv({ wt: project(S.mv.pid).worktrees[+d.mvwt], picker: null });
   if (d.mvparent) return setMv({ parent: d.mvparent, picker: null, phase: "form" });
   if (d.stop !== undefined && !d.act) { if (S.mv?.picker && !e.target.closest(".pop")) setMv({ picker: null }); return; }
@@ -1101,7 +1128,7 @@ document.addEventListener("input", e => {
 /* The browser opens the details itself; keep state in step so a re-render keeps it open. toggle does not bubble. */
 document.addEventListener("keydown", e => {
   if (e.target.dataset.fk === "composer" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); return send(); }
-  if (e.target.dataset.mvq !== undefined && e.key === "Enter") { e.preventDefault(); document.querySelector("[data-mvpick], [data-mvbase]")?.click(); return; }
+  if (e.target.dataset.mvq !== undefined && e.key === "Enter") { e.preventDefault(); document.querySelector("[data-mvpick], [data-mvbase], [data-mvpr]")?.click(); return; }
   if (e.key === "Escape") {
     if (S.overlay === "move") { if (S.mv.phase === "moving" || S.mv.phase === "gitfailed") return; if (S.mv.picker) return setMv({ picker: null }); return set({ overlay: null, mv: null }); }
     if (S.overlay) return set({ overlay: null, query: "" });
