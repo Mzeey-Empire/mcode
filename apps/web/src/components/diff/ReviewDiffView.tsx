@@ -226,6 +226,83 @@ function patchCacheVersion(comparisonVersion: string | number, ignoreWhitespace:
   return ignoreWhitespace ? `${comparisonVersion}:ignore-whitespace` : comparisonVersion;
 }
 
+interface PatchState {
+  /** Comparison identity without its revision; see useComparisonPatches. */
+  readonly comparison: string;
+  /** Comparison identity with its revision; `byPath` and `failed` belong to it. */
+  readonly scope: string;
+  readonly byPath: Readonly<Record<string, string>>;
+  readonly failed: ReadonlySet<string>;
+  /** Patches from earlier revisions of the same comparison, shown until each refetch lands. */
+  readonly stale: Readonly<Record<string, string>>;
+}
+
+/**
+ * Per-file patch state for one comparison. Patch contents are scoped to the
+ * comparison identity: a revision bump or a source/id/thread switch must
+ * refetch rather than relabel the previous identity's bytes under the new
+ * metadata. A revision bump of the same comparison keeps showing the previous
+ * patches while they refetch, so the diff and its highlighting do not blank out
+ * on every workspace change; a different comparison starts empty.
+ */
+function useComparisonPatches({
+  files,
+  threadId,
+  source,
+  id,
+  cacheVersion,
+  comparisonScope,
+  patchScope,
+}: {
+  readonly files: readonly ReviewFileChange[];
+  readonly threadId: string;
+  readonly source: DiffSource;
+  readonly id: string;
+  readonly cacheVersion: string | number;
+  readonly comparisonScope: string;
+  readonly patchScope: string;
+}) {
+  const seedPatches = (): Record<string, string> => {
+    const cache = useDiffStore.getState().inlineDiffCache;
+    const seeded: Record<string, string> = {};
+    for (const file of files) {
+      const cached = cache[inlineDiffCacheKey(threadId, source, id, file.path, cacheVersion)];
+      if (cached !== undefined) seeded[file.path] = cached;
+    }
+    return seeded;
+  };
+  // A failed load is kept apart from an empty patch so the file reads as
+  // failed and can be retried, never as "No diff content".
+  const [patchState, setPatchState] = useState<PatchState>(() => ({
+    comparison: comparisonScope,
+    scope: patchScope,
+    byPath: seedPatches(),
+    failed: EMPTY_FAILED,
+    stale: EMPTY_PATCHES,
+  }));
+  if (patchState.scope !== patchScope) {
+    const sameComparison = patchState.comparison === comparisonScope;
+    setPatchState({
+      comparison: comparisonScope,
+      scope: patchScope,
+      byPath: seedPatches(),
+      failed: EMPTY_FAILED,
+      stale: sameComparison ? { ...patchState.stale, ...patchState.byPath } : EMPTY_PATCHES,
+    });
+  }
+  const current = patchState.scope === patchScope;
+  const patches = useMemo(
+    () => (current ? { ...patchState.stale, ...patchState.byPath } : EMPTY_PATCHES),
+    [current, patchState.stale, patchState.byPath],
+  );
+  return {
+    patches,
+    freshPatches: current ? patchState.byPath : EMPTY_PATCHES,
+    failedPatches: current ? patchState.failed : EMPTY_FAILED,
+    setPatchState,
+  };
+}
+
 /** Props for the Review comparison diff surface. */
 interface ReviewDiffViewProps {
   readonly files: ReviewFileChange[];
@@ -270,32 +347,12 @@ export function ReviewDiffView({
   const shikiTheme = useShikiTheme();
 
 
-  // Patch contents are scoped to the comparison identity: a revision bump or
-  // a source/id/thread switch must refetch rather than relabel the previous
-  // identity's bytes under the new metadata.
   const cacheVersion = patchCacheVersion(comparisonVersion, ignoreWhitespace);
-  const patchScope = `${threadId}:${source}:${id}:${cacheVersion}`;
-  const seedPatches = (): Record<string, string> => {
-    const cache = useDiffStore.getState().inlineDiffCache;
-    const seeded: Record<string, string> = {};
-    for (const file of files) {
-      const cached = cache[inlineDiffCacheKey(threadId, source, id, file.path, cacheVersion)];
-      if (cached !== undefined) seeded[file.path] = cached;
-    }
-    return seeded;
-  };
-  // A failed load is kept apart from an empty patch so the file reads as
-  // failed and can be retried, never as "No diff content".
-  const [patchState, setPatchState] = useState(() => ({
-    scope: patchScope,
-    byPath: seedPatches(),
-    failed: EMPTY_FAILED,
-  }));
-  if (patchState.scope !== patchScope) {
-    setPatchState({ scope: patchScope, byPath: seedPatches(), failed: EMPTY_FAILED });
-  }
-  const patches = patchState.scope === patchScope ? patchState.byPath : EMPTY_PATCHES;
-  const failedPatches = patchState.scope === patchScope ? patchState.failed : EMPTY_FAILED;
+  const comparisonScope = `${threadId}:${source}:${id}:${ignoreWhitespace ? "ignore-whitespace" : ""}`;
+  const patchScope = `${comparisonScope}:${cacheVersion}`;
+  const { patches, freshPatches, failedPatches, setPatchState } = useComparisonPatches({
+    files, threadId, source, id, cacheVersion, comparisonScope, patchScope,
+  });
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set((bulkDiffExpand?.expand ?? defaultFilesExpanded) ? files.map((f) => f.path) : []),
   );
@@ -334,16 +391,18 @@ export function ReviewDiffView({
   // Reusing the parsed object keeps each CodeView item's render target
   // identical across unrelated state changes; a fresh object under the same
   // cacheKey makes pierre's virtualizer commit a diff its layout pass never
-  // prepared.
+  // prepared. The cache is keyed by comparison, not revision: a refetch that
+  // returns identical patch text keeps its cacheKey, so pierre reuses the
+  // highlighting it already computed instead of starting over.
   const diffCache = useRef(new FileDiffCache()).current;
   const fileDiffs = useMemo(() => {
     const out: Record<string, FileDiffMetadata> = {};
     for (const [path, patch] of Object.entries(patches)) {
-      const fileDiff = diffCache.get(patchScope, path, patch);
+      const fileDiff = diffCache.get(comparisonScope, path, patch);
       if (fileDiff) out[path] = fileDiff;
     }
     return out;
-  }, [patches, patchScope, diffCache]);
+  }, [patches, comparisonScope, diffCache]);
 
   // Lazy-load the patch for every expanded file missing one. In-flight keys
   // dedupe requests: each resolution changes `patches`, which re-runs this
@@ -353,7 +412,7 @@ export function ReviewDiffView({
     const transport = getTransport();
     const scope = patchScope;
     for (const file of files) {
-      if (!effectiveExpanded.has(file.path) || patches[file.path] !== undefined || failedPatches.has(file.path)) continue;
+      if (!effectiveExpanded.has(file.path) || freshPatches[file.path] !== undefined || failedPatches.has(file.path)) continue;
       const path = file.path;
       const pendingKey = `${scope} ${path}`;
       if (pendingPatches.current.has(pendingKey)) continue;
@@ -380,7 +439,7 @@ export function ReviewDiffView({
         })
         .finally(() => pendingPatches.current.delete(pendingKey));
     }
-  }, [effectiveExpanded, failedPatches, files, patchScope, patches, source, id, threadId, cacheVersion, ignoreWhitespace]);
+  }, [effectiveExpanded, failedPatches, files, patchScope, freshPatches, setPatchState, source, id, threadId, cacheVersion, ignoreWhitespace]);
 
   const retryPatch = useCallback((path: string) => {
     setPatchState((prev) => {
@@ -389,7 +448,7 @@ export function ReviewDiffView({
       failed.delete(path);
       return { ...prev, failed };
     });
-  }, []);
+  }, [setPatchState]);
 
   // Bulk expand/collapse arrives as a store command; subscriptions run outside
   // the render pass, unlike an effect watching the nonce.
