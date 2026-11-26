@@ -199,8 +199,8 @@ describe("TroubleshootingSection crash dumps", () => {
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
     expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: false } }]);
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("Delete saved crash dumps?");
-    expect(dialog).toHaveTextContent(`2.5 MB of crash dumps are saved in ${directory}`);
+    expect(dialog).toHaveTextContent("Delete 2.5 MB of crash dumps?");
+    expect(dialog).toHaveTextContent(`Saved in ${directory}`);
     expect(deleteCrashDumps).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -255,7 +255,7 @@ describe("TroubleshootingSection crash dumps", () => {
     await screen.findByText("0 B");
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
-    expect(await screen.findByRole("dialog")).toHaveTextContent(`2.5 MB of crash dumps are saved in ${directory}`);
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Delete 2.5 MB of crash dumps?");
   });
 
   it("shows a failed mount load as an alert and clears it once a later read succeeds", async () => {
@@ -287,7 +287,7 @@ describe("TroubleshootingSection crash dumps", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("Crash dump is locked by another process");
-    await waitFor(() => expect(dialog).toHaveTextContent(`1.0 MB of crash dumps are saved in ${directory}`));
+    await waitFor(() => expect(dialog).toHaveTextContent("Delete 1.0 MB of crash dumps?"));
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

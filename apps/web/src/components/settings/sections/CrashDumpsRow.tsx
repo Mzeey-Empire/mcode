@@ -40,8 +40,8 @@ function DeleteCrashDumpsDialog({ state, error, onDelete, onKeep }: { readonly s
     <Dialog open onOpenChange={(open) => !open && onKeep()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete saved crash dumps?</DialogTitle>
-          <DialogDescription>{formatAttachmentByteSize(state.totalBytes)} of crash dumps are saved in {state.directory}.</DialogDescription>
+          <DialogTitle>Delete {formatAttachmentByteSize(state.totalBytes)} of crash dumps?</DialogTitle>
+          <DialogDescription>Saved in {state.directory}</DialogDescription>
         </DialogHeader>
         {error ? <FieldError role="alert">{error}</FieldError> : null}
         <DialogFooter>
