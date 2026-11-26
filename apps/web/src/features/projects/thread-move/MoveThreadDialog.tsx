@@ -163,7 +163,8 @@ function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewPr
         closeDisabled={moving}
         className="sm:max-w-[50rem]"
       >
-        <DialogHeader className="items-center pl-9 text-center">
+        {/* min-w-0 lets the one-line title fade at the dialog's edge instead of widening the dialog's grid column. */}
+        <DialogHeader className="min-w-0 items-center pl-9 text-center">
           <span className="flex max-w-full min-w-0 items-center gap-2 text-body-small text-muted">
             <InboxIcon aria-hidden className="size-3.5 shrink-0" />
             <span className="min-w-0 text-fade">{title}</span>
