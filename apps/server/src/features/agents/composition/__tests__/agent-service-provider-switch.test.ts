@@ -3,10 +3,11 @@ import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Database } from "bun:sqlite";
 import { container } from "tsyringe";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
+import type { BackgroundCallKind } from "@mcode/contracts/models/tool-call-record";
 import type { IAgentProvider, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
 import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
@@ -27,6 +28,7 @@ import { ThreadControlMutationReservationService } from "../../../thread-control
 import { ThreadMoveService } from "../../../thread-control/lifecycle/thread-move-service.js";
 import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { BackgroundCommandStore } from "../../background/background-command-store.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { loadConversationTail } from "../../conversation/read-model/conversation-page.js";
@@ -36,6 +38,7 @@ import { AgentService } from "../../orchestration/agent-service.js";
 import { TurnRuntimeController } from "../../orchestration/turn-runtime-controller.js";
 import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
+import { AgentWorkloadService } from "../../workload/agent-workload.js";
 
 const CLAUDE_MODEL = "claude-sonnet-4-6";
 const CODEX_MODEL = "gpt-5.5";
@@ -558,6 +561,24 @@ describe("provider switch on send", () => {
     }
   });
 
+  it.each(["command", "subagent"] as const)("refuses to move while a background %s runs", async (kind) => {
+    const { move, source } = await relocationFixture();
+    await completeTurnWithBackground(kind);
+
+    expect(await move()).toEqual({ status: "busy", reason: "background" });
+    expect(thread()).toMatchObject({ workspace_id: source.id, sdk_session_id: "background-session" });
+    expect(container.resolve(MessageRepo).listIncludingInternal(threadId).map((message) => message.role))
+      .toEqual(["user", "assistant"]);
+  });
+
+  it("moves once the background command has finished", async () => {
+    const { move, project, backgroundCommands } = await relocationFixture();
+    await completeTurnWithBackground("command", "finished");
+    expect(backgroundCommands.list(threadId)).toMatchObject([{ toolCallId: "background", status: "completed" }]);
+
+    expect(await move()).toMatchObject({ status: "moved", thread: { workspace_id: project.id } });
+  });
+
   it("blocks an admission during the move and rejects the old placement prepared before it", async () => {
     const { project, move } = await relocationFixture({ gitBranch: "topic" });
     const availability = container.resolve(ProviderAvailabilityService);
@@ -778,11 +799,16 @@ describe("provider switch on send", () => {
     const project = await workspaces.create("Destination", destination, options.gitBranch !== undefined);
     const executor = new FakeGitExecutor();
     executor.setResponse(["rev-parse", "--abbrev-ref", "HEAD"], { stdout: options.gitBranch ?? "", stderr: "" });
+    const backgroundCommands = container.resolve(BackgroundCommandStore);
+    const agentWorkload = new AgentWorkloadService(container.resolve(AgentService).runtimeAccess(),
+      container.resolve(CanonicalAgentBoundary), runtime.progress);
+    onTestFinished(agentWorkload.observeCommittedEvents());
     const move = (git: Pick<GitRepositoryService, "getCurrentBranchAt"> = new GitRepositoryService(workspaces, executor)) =>
       new ThreadMoveService(threads, workspaces, container.resolve(ThreadControlMutationReservationService),
-        git, container.resolve(TurnRuntimeController), () => new Date("2026-11-26T12:00:00.000Z"))
+        git, container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload,
+        () => new Date("2026-11-26T12:00:00.000Z"))
         .moveToProject({ threadId, workspaceId: project.id, target: { kind: "local" } });
-    return { source, project, move };
+    return { source, project, move, backgroundCommands };
   }
 
   function writeFixture(change: (db: Database) => void): void {
@@ -840,6 +866,24 @@ describe("provider switch on send", () => {
     await settled(finishedBefore + 1);
   }
 
+  async function completeTurnWithBackground(kind: BackgroundCallKind, state: "running" | "finished" = "running") {
+    claude.sendTurn.mockImplementationOnce(async (request) => {
+      const common = { threadId, turnExecutionId: request.turnExecutionId, toolCallId: "background" };
+      const tool = kind === "command"
+        ? { toolName: "Bash", toolInput: { command: "bun run build" } }
+        : { toolName: "Agent", toolInput: { prompt: "Review the build" } };
+      await submit("claude", request, 1, { ...common, type: "toolUse", ...tool });
+      await submit("claude", request, 2, { ...common, type: "toolBackgrounded", kind, label: "Build work" });
+      let nextSequence = 3;
+      if (state === "finished") {
+        await submit("claude", request, nextSequence++, { ...common, type: "toolResult", output: "Done", isError: false });
+      }
+      await answer(claude, "Started the build work.", "background-session", nextSequence)(request);
+    });
+    await send(claude, "Run the build work");
+    await settled(1);
+  }
+
   /** Wait until the thread has finished `count` turns and holds no active execution. */
   async function settled(count: number): Promise<void> {
     await waitFor(() => terminalCount() >= count && runtime.owner.current(threadId) === undefined);
@@ -863,16 +907,16 @@ describe("provider switch on send", () => {
   }
 
   /** The provider's reply for one turn: it records its session, streams the reply, completes and ends. */
-  function answer(provider: FakeProvider, reply: string, sessionId: string): SendTurn {
+  function answer(provider: FakeProvider, reply: string, sessionId: string, firstSequence = 1): SendTurn {
     return async (request) => {
       await container.resolve(ThreadRepo).updateSdkSessionId(request.threadId, provider.id, sessionId);
       const common = { threadId: request.threadId, turnExecutionId: request.turnExecutionId };
-      await submit(provider.id, request, 1, { ...common, type: "textDelta", delta: reply, isFinalResponse: true });
-      await submit(provider.id, request, 2, {
+      await submit(provider.id, request, firstSequence, { ...common, type: "textDelta", delta: reply, isFinalResponse: true });
+      await submit(provider.id, request, firstSequence + 1, {
         ...common, type: "turnComplete", providerId: provider.id, reason: "end_turn", costUsd: null,
         tokensIn: 1, tokensOut: 1, totalProcessedTokens: 2, contextWindow: undefined, cacheReadTokens: undefined,
       });
-      await submit(provider.id, request, 3, { ...common, type: "ended" });
+      await submit(provider.id, request, firstSequence + 2, { ...common, type: "ended" });
     };
   }
 

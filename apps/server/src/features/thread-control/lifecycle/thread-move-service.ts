@@ -1,6 +1,8 @@
 import type { ThreadMoveInput, ThreadMoveResult } from "@mcode/contracts/ws/methods";
 import { broadcast } from "../../../application/transport/push.js";
+import type { BackgroundCommandStore } from "../../agents/background/background-command-store.js";
 import type { TurnRuntimeController } from "../../agents/orchestration/turn-runtime-controller.js";
+import type { AgentWorkload } from "../../agents/workload/agent-workload.js";
 import type { GitRepositoryService } from "../../projects/git/git-repository-service.js";
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import type { ThreadControlMutationReservationService } from "../authority/thread-control-mutation-reservation-service.js";
@@ -15,6 +17,8 @@ export class ThreadMoveService {
     private readonly reservations: ThreadControlMutationReservationService,
     private readonly git: Pick<GitRepositoryService, "getCurrentBranchAt">,
     private readonly runtime: Pick<TurnRuntimeController, "evictThreadProviderSessions">,
+    private readonly backgroundCommands: Pick<BackgroundCommandStore, "list">,
+    private readonly agentWorkload: Pick<AgentWorkload, "backgroundSubagentThreadIds">,
     private readonly now = () => new Date(),
   ) {}
 
@@ -43,6 +47,10 @@ export class ThreadMoveService {
     if (project?.kind !== "project") return { status: "destination-missing" };
     const branch = project.is_git_repo ? await this.git.getCurrentBranchAt(project.path) : "main";
     if (!branch) return { status: "failed", error: "The project root has no current branch" };
+    if (this.backgroundCommands.list(threadId, { running: true }).length > 0
+      || this.agentWorkload.backgroundSubagentThreadIds().has(threadId)) {
+      return { status: "busy", reason: "background" };
+    }
     await this.runtime.evictThreadProviderSessions(threadId);
     const result = await this.threads.moveToProject(threadId, project, branch, this.now().toISOString());
     if (result.status !== "moved") return result;

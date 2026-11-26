@@ -1054,7 +1054,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   threadDeletionTeardownService,
   threadCompletionService,
   threadMoveService: new ThreadMoveService(threadRepo, workspaceRepo, container.resolve(ThreadControlMutationReservationService),
-    gitRepository, container.resolve(TurnRuntimeController)),
+    gitRepository, container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload),
   browserAutomationBroker,
   desktopHtmlPreviewRenderer,
   mcodeMcpServer,

@@ -218,7 +218,7 @@ export type ThreadMoveInput = z.infer<ReturnType<typeof ThreadMoveInputSchema>>;
 /** Updated thread summary or the reason the move could not commit. */
 export const ThreadMoveResultSchema = lazySchema(() => z.discriminatedUnion("status", [
   z.object({ status: z.literal("moved"), thread: ThreadSchema() }),
-  z.object({ status: z.literal("busy"), reason: z.enum(["running", "needs-approval"]) }),
+  z.object({ status: z.literal("busy"), reason: z.enum(["running", "needs-approval", "background"]) }),
   z.object({ status: z.literal("not-no-project") }),
   z.object({ status: z.literal("destination-missing") }),
   z.object({ status: z.literal("failed"), error: z.string() }),
