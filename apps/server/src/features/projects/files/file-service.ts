@@ -6,7 +6,7 @@
 
 import { injectable, inject, delay } from "tsyringe";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
-import { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, type WorkspaceFileList, type WorkspaceFileChanges, type FileReadResult } from "@mcode/contracts/models/workspace-file";
+import { FILE_LIST_MAX_PATHS, FILE_VIEW_TEXT_MAX_BYTES, FILE_CHANGES_MAX_ENTRIES, WORKSPACE_IMAGE_MAX_BYTES, type WorkspaceFileList, type WorkspaceFileChanges, type FileReadResult, type FileChangedLines } from "@mcode/contracts/models/workspace-file";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { WorkspaceRepo } from "../persistence/workspace-repo.js";
@@ -137,18 +137,27 @@ export class FileService {
       if (threadId) query.set("threadId", threadId);
       return { kind: "image", path, size, mime, url: `/workspace-images/${encodeURIComponent(workspaceId)}?${query}` };
     }
-    const [bytes, changedLines] = await Promise.all([
-      readWorkspaceFileBytes(fullPath, FILE_VIEW_TEXT_MAX_BYTES), this.readChangedLines(cwd, path),
-    ]);
+    const bytes = await readWorkspaceFileBytes(fullPath, FILE_VIEW_TEXT_MAX_BYTES);
     const oversized = bytes.length > FILE_VIEW_TEXT_MAX_BYTES;
     const text = decodeText(bytes, oversized);
     if (text && oversized) return { kind: "too-large", path, size: Math.max(size, bytes.length), limit: FILE_VIEW_TEXT_MAX_BYTES };
     return text === null
       ? { kind: "binary", path, size: Math.max(size, bytes.length) }
-      : { kind: "text", path, size: bytes.length, ...text, changedLines };
+      : { kind: "text", path, size: bytes.length, ...text };
   }
 
-  private async readChangedLines(cwd: string, path: string): Promise<Array<[number, number]> | null> {
+  /**
+   * Returns the line ranges of a file that changed relative to HEAD. It is a
+   * separate call from `read` because `git diff` costs a process spawn that the
+   * file text should never wait for; callers that only need text skip it.
+   */
+  async changedLines(workspaceId: string, relativePath: string, threadId?: string): Promise<FileChangedLines> {
+    const cwd = this.resolveWorkingDir(workspaceId, threadId);
+    const { path } = validateWorkspaceFilePath(cwd, relativePath, this.hostRuntime.platform);
+    return this.readChangedLines(cwd, path);
+  }
+
+  private async readChangedLines(cwd: string, path: string): Promise<FileChangedLines> {
     if (!await this.isGitWorkTree(cwd)) return null;
     let pending = "";
     let added = false;

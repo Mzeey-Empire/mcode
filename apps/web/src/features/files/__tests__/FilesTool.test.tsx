@@ -13,6 +13,7 @@ const transport = {
   listWorkspaceFiles: vi.mocked(mockTransport.listWorkspaceFiles),
   getWorkspaceFileChanges: vi.mocked(mockTransport.getWorkspaceFileChanges),
   readFileContent: vi.mocked(mockTransport.readFileContent),
+  getFileChangedLines: vi.mocked(mockTransport.getFileChangedLines),
   refreshWorkspaceFiles: vi.mocked(mockTransport.refreshWorkspaceFiles),
 };
 
@@ -22,6 +23,7 @@ beforeEach(() => {
   vi.mocked(mockTransport.listWorkspaceFiles).mockReset();
   vi.mocked(mockTransport.getWorkspaceFileChanges).mockReset();
   vi.mocked(mockTransport.readFileContent).mockReset();
+  vi.mocked(mockTransport.getFileChangedLines).mockReset();
   vi.mocked(mockTransport.refreshWorkspaceFiles).mockReset();
 });
 vi.mock("@/hooks/useOpenInApps", () => ({ useOpenInApps: () => [] }));
@@ -40,8 +42,8 @@ const WORKSPACE = "ws-1";
 const PATHS = ["src/a.ts", "src/b.ts", "README.md"];
 const NO_CHANGES: WorkspaceFileChanges = { git: true, truncated: false, entries: [] };
 
-function textFile(path: string, changedLines: [number, number][] | null): Extract<FileReadResult, { kind: "text" }> {
-  return { kind: "text", path, size: 20, encoding: "utf-8", content: "one\ntwo\nthree", changedLines };
+function textFile(path: string): Extract<FileReadResult, { kind: "text" }> {
+  return { kind: "text", path, size: 20, encoding: "utf-8", content: "one\ntwo\nthree" };
 }
 
 function setBodyWidth(width: number) {
@@ -57,7 +59,8 @@ beforeEach(() => {
   useFilesTabsStore.setState({ scopes: {} });
   transport.listWorkspaceFiles.mockResolvedValue({ paths: PATHS, truncated: false });
   transport.getWorkspaceFileChanges.mockResolvedValue(NO_CHANGES);
-  transport.readFileContent.mockImplementation((_ws: string, path: string) => Promise.resolve(textFile(path, null)));
+  transport.readFileContent.mockImplementation((_ws: string, path: string) => Promise.resolve(textFile(path)));
+  transport.getFileChangedLines.mockResolvedValue(null);
   transport.refreshWorkspaceFiles.mockResolvedValue(undefined);
 });
 
@@ -132,13 +135,44 @@ describe("FilesTool freshness", () => {
     expect(screen.queryByLabelText("Modified")).toBeNull();
 
     transport.getWorkspaceFileChanges.mockResolvedValue({ ...NO_CHANGES, entries: [{ path: "src/a.ts", mark: "M" }] });
-    transport.readFileContent.mockImplementation((_ws: string, path: string) => Promise.resolve(textFile(path, [[2, 2]])));
+    transport.getFileChangedLines.mockResolvedValue([[2, 2]]);
     act(() => pushEmitter.emit("files.changed", { workspaceId: WORKSPACE, changedPaths: ["src/a.ts"] }));
 
     await waitFor(() => expect(screen.getByTestId("code-file-view").querySelector('[data-line="2"]')?.hasAttribute("data-changed")).toBe(true));
     expect(screen.getByTestId("code-file-view").querySelector('[data-line="1"]')?.hasAttribute("data-changed")).toBe(false);
     const tree = screen.getByTestId("files-docked-tree");
     await waitFor(() => expect(within(tree).getByLabelText("Modified")).toBeTruthy());
+  });
+
+  it("shows the file text while git is still computing its changed lines", async () => {
+    setBodyWidth(900);
+    let answer: (lines: [number, number][]) => void = () => {};
+    transport.getFileChangedLines.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");
+    renderTool();
+
+    const view = await screen.findByTestId("code-file-view");
+    expect(view.querySelectorAll("[data-line]")).toHaveLength(3);
+    expect(view.querySelector("[data-changed]")).toBeNull();
+
+    await act(async () => answer([[2, 2]]));
+    await waitFor(() => expect(view.querySelector('[data-line="2"]')?.hasAttribute("data-changed")).toBe(true));
+  });
+
+  it("keeps the last changed-line bars when a refresh fails", async () => {
+    setBodyWidth(900);
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    transport.getFileChangedLines.mockResolvedValue([[2, 2]]);
+    useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");
+    renderTool();
+    const view = await screen.findByTestId("code-file-view");
+    await waitFor(() => expect(view.querySelector('[data-line="2"]')?.hasAttribute("data-changed")).toBe(true));
+
+    transport.getFileChangedLines.mockRejectedValue(new Error("git failed"));
+    act(() => pushEmitter.emit("files.changed", { workspaceId: WORKSPACE, changedPaths: ["src/a.ts"] }));
+
+    await waitFor(() => expect(error).toHaveBeenCalledWith("[files] Failed to load changed lines", expect.any(Error)));
+    expect(screen.getByTestId("code-file-view").querySelector('[data-line="2"]')?.hasAttribute("data-changed")).toBe(true);
   });
 
   it("caps the tree drag at the widest width that still docks", async () => {
@@ -156,7 +190,7 @@ describe("FilesTool freshness", () => {
 
   it("numbers a file that ends in a newline without a phantom last line", async () => {
     setBodyWidth(900);
-    transport.readFileContent.mockResolvedValue({ ...textFile("src/a.ts", null), content: "one\ntwo\n" });
+    transport.readFileContent.mockResolvedValue({ ...textFile("src/a.ts"), content: "one\ntwo\n" });
     useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");
     renderTool();
     const view = await screen.findByTestId("code-file-view");
@@ -257,7 +291,7 @@ describe("FilesTool markdown", () => {
   it("renders README.md as markdown and opens a linked project file as a tab", async () => {
     setBodyWidth(900);
     transport.readFileContent.mockImplementation((_ws: string, path: string) =>
-      Promise.resolve(path === "README.md" ? { ...textFile(path, null), content: "# Readme\n\nSee [b](src/b.ts)." } : textFile(path, null)),
+      Promise.resolve(path === "README.md" ? { ...textFile(path), content: "# Readme\n\nSee [b](src/b.ts)." } : textFile(path)),
     );
     useFilesTabsStore.getState().openFile(WORKSPACE, "README.md");
     renderTool();
@@ -275,7 +309,7 @@ describe("FilesTool markdown", () => {
   it("enables Find only once markdown shows as source, and highlights matches there", async () => {
     setBodyWidth(900);
     transport.readFileContent.mockImplementation((_ws: string, path: string) =>
-      Promise.resolve({ ...textFile(path, null), content: "# Readme\n\nneedle in a haystack" }),
+      Promise.resolve({ ...textFile(path), content: "# Readme\n\nneedle in a haystack" }),
     );
     useFilesTabsStore.getState().openFile(WORKSPACE, "README.md");
     renderTool();

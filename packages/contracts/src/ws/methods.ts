@@ -12,7 +12,7 @@ import { AcknowledgeSeenResultSchema, ThreadAttentionSchema } from "../models/th
 import { AgentProgressPositionSchema, AgentThreadIdSchema } from "../compat/agent-model.js";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
 import { PROJECT_ICON_PATH_MAX_CHARS, PROJECT_ICON_RESOLVE_MAX_IDS, PROJECT_ICON_CANDIDATES_MAX_LIMIT, ProjectIconSchema } from "../models/project-icon.js";
-import { WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema } from "../models/workspace-file.js";
+import { WorkspaceFileListSchema, WorkspaceFileChangesSchema, FileReadResultSchema, FileChangedLinesSchema } from "../models/workspace-file.js";
 import {
   WorkspaceEnvironmentReadResultSchema,
   WorkspaceEnvironmentReadInputSchema,
@@ -1309,6 +1309,14 @@ export const WS_METHODS = lazySchema(() => ({
       as: z.literal("text").optional(),
     }),
     result: FileReadResultSchema(),
+  },
+  "file.changedLines": {
+    params: z.object({
+      workspaceId: z.string(),
+      relativePath: z.string(),
+      threadId: z.string().optional(),
+    }),
+    result: FileChangedLinesSchema(),
   },
   "file.refresh": {
     params: z.object({

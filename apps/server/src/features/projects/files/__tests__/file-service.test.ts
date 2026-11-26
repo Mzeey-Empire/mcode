@@ -188,7 +188,7 @@ describe("FileService viewer", () => {
     NodeFS.mkdirSync(NodePath.join(root, "src"));
     NodeFS.writeFileSync(NodePath.join(root, "src/a..b.ts"), "legal");
     await expect(service.read("workspace-1", "src\\a..b.ts")).resolves.toEqual({
-      kind: "text", path: "src/a..b.ts", size: 5, encoding: "utf-8", content: "legal", changedLines: null,
+      kind: "text", path: "src/a..b.ts", size: 5, encoding: "utf-8", content: "legal",
     });
   });
 
@@ -206,7 +206,7 @@ describe("FileService viewer", () => {
     const content = "x".repeat(1024 * 1024);
     NodeFS.writeFileSync(NodePath.join(root, "large.txt"), content);
     await expect(service.read("workspace-1", "large.txt")).resolves.toEqual({
-      kind: "text", path: "large.txt", size: 1048576, encoding: "utf-8", content, changedLines: null,
+      kind: "text", path: "large.txt", size: 1048576, encoding: "utf-8", content,
     });
     expect(() => service.validateMentionPath("workspace-1", "large.txt")).toThrow("too large for injection");
   });
@@ -223,7 +223,7 @@ describe("FileService viewer", () => {
     const { root, service } = fixture();
     const content = "x".repeat(2 * 1024 * 1024);
     NodeFS.writeFileSync(NodePath.join(root, "limit.txt"), content);
-    await expect(service.read("workspace-1", "limit.txt")).resolves.toEqual({ kind: "text", path: "limit.txt", size: 2097152, encoding: "utf-8", content, changedLines: null });
+    await expect(service.read("workspace-1", "limit.txt")).resolves.toEqual({ kind: "text", path: "limit.txt", size: 2097152, encoding: "utf-8", content });
     NodeFS.writeFileSync(NodePath.join(root, "large.bin"), Buffer.alloc(3 * 1024 * 1024));
     await expect(service.read("workspace-1", "large.bin")).resolves.toEqual({ kind: "binary", path: "large.bin", size: 3145728 });
   });
@@ -236,7 +236,7 @@ describe("FileService viewer", () => {
   ])("decodes %s from its BOM", async (path, bytes, encoding, content) => {
     const { root, service } = fixture();
     NodeFS.writeFileSync(NodePath.join(root, path), bytes);
-    await expect(service.read("workspace-1", path)).resolves.toEqual({ kind: "text", path, size: bytes.length, encoding, content, changedLines: null });
+    await expect(service.read("workspace-1", path)).resolves.toEqual({ kind: "text", path, size: bytes.length, encoding, content });
   });
 
   it.each([Buffer.from([65, 0, 66]), Buffer.from([0xc3, 0x28])])("detects binary bytes %j", async (bytes) => {
@@ -253,7 +253,7 @@ describe("FileService viewer", () => {
       url: "/workspace-images/workspace-1?path=a+b.svg&use=file&threadId=thread-1",
     });
     await expect(service.read("workspace-1", "a b.svg", undefined, "text")).resolves.toEqual({
-      kind: "text", path: "a b.svg", size: 6, encoding: "utf-8", content: "<svg/>", changedLines: null,
+      kind: "text", path: "a b.svg", size: 6, encoding: "utf-8", content: "<svg/>",
     });
   });
 
@@ -315,7 +315,7 @@ describe("FileService viewer", () => {
     const { root } = fixture();
     NodeFS.writeFileSync(NodePath.join(root, "file.txt"), "content");
     const { service } = makeService({ root, exec: vi.fn().mockRejectedValue(new Error("Git permission denied")) });
-    await expect(service.read("workspace-1", "file.txt")).rejects.toThrow("Git permission denied");
+    await expect(service.changedLines("workspace-1", "file.txt")).rejects.toThrow("Git permission denied");
   });
 
   it("returns null for unborn HEAD without interpreting localized diff errors", async () => {
@@ -327,8 +327,6 @@ describe("FileService viewer", () => {
       return { stdout: root, stderr: "" };
     });
     const { service } = makeService({ root, exec });
-    await expect(service.read("workspace-1", "file.txt")).resolves.toEqual({
-      kind: "text", path: "file.txt", size: 7, encoding: "utf-8", content: "content", changedLines: null,
-    });
+    await expect(service.changedLines("workspace-1", "file.txt")).resolves.toBeNull();
   });
 });

@@ -40,7 +40,7 @@ const LINE_COUNT = 10_000;
 const CONTENT = Array.from({ length: LINE_COUNT }, (_, line) => `line ${line} ${line % 100 === 0 ? "needle" : "hay"}`).join("\n");
 
 function bigFile(): FileReadResult {
-  return { kind: "text", path: PATH, size: CONTENT.length, encoding: "utf-8", content: CONTENT, changedLines: null };
+  return { kind: "text", path: PATH, size: CONTENT.length, encoding: "utf-8", content: CONTENT };
 }
 
 async function openFind() {

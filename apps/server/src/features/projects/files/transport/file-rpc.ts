@@ -11,7 +11,7 @@ type FileRpcParamsByMethod = {
 
 /** Defines the services required to route validated file RPC calls. */
 export interface FileRouterDeps {
-  fileService: Pick<FileService, "list" | "read" | "changes" | "refresh">;
+  fileService: Pick<FileService, "list" | "read" | "changedLines" | "changes" | "refresh">;
 }
 
 type FileHandlerMap = {
@@ -26,6 +26,8 @@ const fileHandlers: FileHandlerMap = {
   "file.changes": (deps, params) => deps.fileService.changes(params.workspaceId, params.threadId),
   "file.read": (deps, params) =>
     deps.fileService.read(params.workspaceId, params.relativePath, params.threadId, params.as),
+  "file.changedLines": (deps, params) =>
+    deps.fileService.changedLines(params.workspaceId, params.relativePath, params.threadId),
   "file.refresh": async (deps, params) => {
     const delta = await deps.fileService.refresh(params.workspaceId, params.threadId);
     if (delta === null) return;

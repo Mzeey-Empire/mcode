@@ -44,7 +44,7 @@ const LINES = Array.from({ length: 30 }, (_, i) => `const line${i + 1} = ${i + 1
 const NO_CHANGES: WorkspaceFileChanges = { git: true, truncated: false, entries: [] };
 
 function textFile(path: string): FileReadResult {
-  return { kind: "text", path, size: 400, encoding: "utf-8", content: LINES.join("\n"), changedLines: null };
+  return { kind: "text", path, size: 400, encoding: "utf-8", content: LINES.join("\n") };
 }
 
 function renderTool(threadId: string | null = THREAD) {

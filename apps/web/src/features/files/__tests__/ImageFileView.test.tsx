@@ -44,7 +44,7 @@ function openImage(path: string, mime: string) {
   transport.readFileContent.mockImplementation((_ws: string, readPath: string, _thread?: string, as?: "text") =>
     Promise.resolve(
       as === "text"
-        ? { kind: "text", path: readPath, size: SVG_SOURCE.length, encoding: "utf-8", content: SVG_SOURCE, changedLines: null }
+        ? { kind: "text", path: readPath, size: SVG_SOURCE.length, encoding: "utf-8", content: SVG_SOURCE }
         : imageFile(readPath, mime),
     ),
   );

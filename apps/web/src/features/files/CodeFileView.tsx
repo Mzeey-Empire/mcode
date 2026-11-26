@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, type ClipboardEvent, type Reac
 import { Plus } from "lucide-react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { DraftFileComment } from "@mcode/contracts/models/next-message-draft";
-import type { FileReadResult } from "@mcode/contracts/models/workspace-file";
+import type { FileChangedLines, FileReadResult } from "@mcode/contracts/models/workspace-file";
 import {
   editDraftFileComment,
   setDraftFileCommentEditor,
@@ -50,10 +50,12 @@ export interface CodeFileViewProps {
   readonly workspaceId?: string;
   /** Find matches to paint in a text file, or null while the find bar is closed. */
   readonly find?: FindHighlight | null;
+  /** Changed-line ranges for the margin bars. Null until git answers, and for files git has no diff for. */
+  readonly changedLines?: FileChangedLines;
 }
 
 /** The Files body for one open file: code, or the state that explains why there is none. */
-export function CodeFileView({ path, state, onOpenInEditor, onCloseTab, find = null, ...commentScope }: CodeFileViewProps) {
+export function CodeFileView({ path, state, onOpenInEditor, onCloseTab, find = null, changedLines = null, ...commentScope }: CodeFileViewProps) {
   if (state.status === "loading") return <StateLine>Loading…</StateLine>;
   if (state.status === "missing") {
     return (
@@ -63,18 +65,20 @@ export function CodeFileView({ path, state, onOpenInEditor, onCloseTab, find = n
     );
   }
   if (state.status === "failed") return <StateMessage text={state.message} />;
-  return <ReadResultView path={path} result={state.result} onOpenInEditor={onOpenInEditor} find={find} commentScope={commentScope} />;
+  return <ReadResultView path={path} result={state.result} changedLines={changedLines} onOpenInEditor={onOpenInEditor} find={find} commentScope={commentScope} />;
 }
 
 function ReadResultView({
   path,
   result,
+  changedLines,
   onOpenInEditor,
   commentScope,
   find,
 }: {
   readonly path: string;
   readonly result: FileReadResult;
+  readonly changedLines: FileChangedLines;
   readonly onOpenInEditor: (line?: number) => void;
   readonly commentScope: Pick<CodeFileViewProps, "threadId" | "scopeId" | "workspaceId">;
   readonly find: FindHighlight | null;
@@ -89,7 +93,7 @@ function ReadResultView({
       return <StateMessage text={`Binary file · ${formatFileSize(result.size)}`}>{openButton}</StateMessage>;
     case "text":
       if (result.content.length === 0) return <StateLine>Empty file</StateLine>;
-      return <CodeLines path={path} content={result.content} changedLines={result.changedLines} find={find} {...commentScope} />;
+      return <CodeLines path={path} content={result.content} changedLines={changedLines} find={find} {...commentScope} />;
   }
 }
 

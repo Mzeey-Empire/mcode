@@ -72,7 +72,7 @@ beforeEach(() => {
   transport.getWorkingTreeDiff.mockResolvedValue(patch("FIRST_VERSION"));
   transport.getBranchDiff.mockResolvedValue(patch("NEW_BRANCH"));
   transport.readFileAtRef.mockResolvedValue("before\n");
-  transport.readFileContent.mockResolvedValue({ kind: "text", path: "file.txt", size: 6, encoding: "utf-8", content: "after\n", changedLines: [[1, 1]] });
+  transport.readFileContent.mockResolvedValue({ kind: "text", path: "file.txt", size: 6, encoding: "utf-8", content: "after\n" });
 });
 
 afterEach(cleanup);

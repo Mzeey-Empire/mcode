@@ -47,7 +47,7 @@ vi.mock("@tanstack/react-virtual", async () => {
 });
 
 function textFile(path: string): FileReadResult {
-  return { kind: "text", path, size: 800, encoding: "utf-8", content: LINES.join("\n"), changedLines: null };
+  return { kind: "text", path, size: 800, encoding: "utf-8", content: LINES.join("\n") };
 }
 
 function lineText(line: number): Node {
