@@ -249,7 +249,17 @@
   .move .head { padding: 18px 18px 0; }
   .move .head h4 { margin: 0; }
   .move .head .who { color: var(--muted); margin: 2px 0 0; }
-  .move .body { padding: 14px 18px 4px; overflow-y: auto; display: grid; gap: 14px; }
+  .move .body { padding: 14px 18px 4px; overflow-y: auto; display: grid; gap: 14px; border: 0; margin: 0; min-width: 0; }
+  /* Input edges meet 3:1 against the dialog in both themes (WCAG non-text contrast). */
+  .move { --field-edge: color-mix(in oklch, var(--muted) 70%, var(--raised)); }
+  .move .text-in, .move .trigger, .move .path-v { box-shadow: inset 0 0 0 1px var(--field-edge); }
+  .move .text-in[aria-invalid="true"], .move .path-v[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--error); }
+  /* While a move runs the whole form is a disabled fieldset: controls go quiet, notices stay readable. */
+  .move .body:disabled .seg button, .move .body:disabled .trigger, .move .body:disabled .text-in, .move .body:disabled .check, .move .body:disabled .btn, .move .body:disabled .link { color: var(--muted); cursor: default; }
+  .move .body:disabled .seg button[aria-checked="true"] { background: transparent; box-shadow: inset 0 0 0 1px var(--field-edge); }
+  .seg.wide button[aria-disabled="true"] { color: var(--muted); opacity: .55; }
+  .path-line { display: block; margin: 4px 0; }
+  .result .mono { font-weight: 400; }
   .move .foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 18px 18px; }
   .field { display: grid; gap: 6px; }
   .field > .lab { color: var(--muted); font-size: 12px; font-weight: 500; }
@@ -462,6 +472,11 @@ const busyHint = (t, busy) => {
   const who = busy.folderOf ? "Fork" : "Original thread";
   return busy.status === "running" ? `${who} running` : `${who} needs approval`;
 };
+/* Several threads can share a folder, so the menu names the one that blocks the move. */
+const busyLine = (t, busy) => {
+  const state = busy.status === "running" ? "is running" : "needs approval";
+  return busy.id === t.id ? `This thread ${state}` : `“${esc(busy.title)}” ${state}`;
+};
 /* "2026-11-26-sqlite-wal-vs-rollback-7f3a" -> "sqlite-wal-vs-rollback": a project name has no use for the date or the id. */
 const suggestedName = t => folderOwner(t).folder.replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/-[0-9a-f]{4}$/, "");
 const defaultParent = () => (projects().length ? "~/src" : "~");
@@ -511,7 +526,7 @@ function renderMap() {
         <li><span class="node">Thread header title menu ${pill("chg", "Changed")}</span><span class="note">Move to project… after Rename thread.</span>${go("headerMenu")}</li>
         <li><span class="node">Sidebar row menu ${pill("chg", "Changed")}</span><span class="note">Same item, same place.</span>${go("rowMenu")}</li>
         <li><span class="node">Command palette ${pill("chg", "Changed")}</span><span class="note">"Move thread to project…" while a No project thread is open.</span>${go("paletteMove")}</li>
-        <li><span class="node">Disabled while busy</span><span class="note">Any thread sharing the folder is Running or needs approval: the item stays, disabled, with the reason.</span>${go("menuBusy")}</li>
+        <li><span class="node">Disabled while busy</span><span class="note">Any thread sharing the folder is Running or needs approval: the item stays, disabled, and names the thread that blocks it.</span>${go("menuBusy")}</li>
         <li><span class="node dim">Not offered</span><span class="note">Project threads, closed threads (restore first), drafts, the No project group header. No drag onto a project in v1.</span></li>
       </ul></div>
     <div class="col"><h3>Move dialog ${pill("new", "New")}</h3><div class="sub">One dialog, two destinations.</div>
@@ -519,7 +534,7 @@ function renderMap() {
         <li><span class="node">Existing project</span>${go("moveA")}<ul>
           <li><span class="node">Project picker</span><span class="note">Registered projects only, with their paths.</span>${go("moveAPicker")}</li>
           <li><span class="node">Runs in: Local / New worktree / Existing worktree</span><span class="note">Default Local, on the project's current branch. A project that is not a git repo runs Local only.</span>${go("moveNewWt", "new worktree ›")} ${go("moveExistingWt", "existing ›")} ${go("moveNonGit", "not git ›")}</li>
-          <li><span class="node">Earlier files notice</span><span class="note">Lists the folder's files, says Mcode deletes the folder on ${DEADLINE} and the agent is told where.</span>${go("moveAFiles")}</li>
+          <li><span class="node">Earlier files notice</span><span class="note">Lists the folder's files, says that after the move Mcode deletes the folder on ${DEADLINE}, and that the agent is told where.</span>${go("moveAFiles")}</li>
         </ul></li>
         <li><span class="node">New project</span>${go("moveB")}<ul>
           <li><span class="node">Name, location, git</span><span class="note">Name from the folder, without date or id. Start a git repo is unchecked.</span>${go("moveBGit", "git on ›")}</li>
@@ -562,7 +577,7 @@ const FLOWS = [
   { name: "Move a thread into an existing project", steps: [
     ["Header title menu", "Move to project… under Rename thread.", "headerMenu"],
     ["Move dialog", "Existing project is selected; pick a project.", "moveA"],
-    ["Pick mcode", "Runs in Local, on main. Nothing else to decide.", "moveAPicked"],
+    ["Pick billing-api", "Runs in Local, on main. Nothing else to decide.", "moveAPicked"],
     ["Moved", "Row under mcode, marker in the timeline.", "afterA"] ] },
   { name: "A thread with files and a fork", steps: [
     ["Move dialog", "Lists the 4 files and the fork that moves too.", "moveAFiles"],
@@ -577,7 +592,7 @@ const FLOWS = [
   { name: "Make it a new project", steps: [
     ["New project", "Name from the folder, location from your projects.", "moveB"],
     ["Start a git repo", "Unchecked unless you tick it.", "moveBGit"],
-    ["Name taken", "Type mcode to see both errors.", "moveBCollide"],
+    ["Name taken", "Typing mcode shows the name is taken.", "moveBCollide"],
     ["Created", "New group, thread inside, Local.", "afterB"] ] },
   { name: "Busy or failing", steps: [
     ["A sharer is running", "The item is disabled with the reason.", "menuBusy"],
@@ -726,7 +741,9 @@ function renderMain() {
 
 /* The move marker follows ProviderSwitchMarker: a quiet centred line. A move into an existing project with files adds a card. */
 function handoffNote(ev) {
-  return `Files from earlier in this thread are in <span class="mono">${esc(ev.oldFolder)}</span>. Mcode deletes that folder on ${DEADLINE}. Copy what you need into this project.`;
+  /* The path gets its own line and breaks only after a slash, so a narrow window never splits a folder name. */
+  const path = esc(ev.oldFolder).replaceAll("/", "/<wbr>");
+  return `Files from earlier in this thread are in<span class="mono path-line">${path}</span>Mcode deletes that folder on ${DEADLINE}. Copy what you need into this project.`;
 }
 function moveMarker(ev) {
   const p = project(ev.to);
@@ -754,7 +771,7 @@ function overviewHtml(t) {
   const p = project(t.projectId);
   const ev = moveEventOf(t);
   const earlier = ev && ev.kind === "existing" && ev.files.length && !S.sim.expired
-    ? `<div class="ov-sec"><div class="ov-row">${ic("clock", "sm ico")}<span class="k">Earlier files</span><span class="v">${plural(ev.files.length, "file", "files")} · deleted ${DEADLINE}</span><button class="link" style="font-size:12px" data-copy="${esc(ev.oldFolder)}">Copy path</button></div></div>` : "";
+    ? `<div class="ov-sec"><div class="ov-row">${ic("clock", "sm ico")}<span class="k">Earlier files</span><span class="v">${plural(ev.files.length, "file", "files")} · deletes ${DEADLINE}</span><button class="link" style="font-size:12px" data-copy="${esc(ev.oldFolder)}">Copy path</button></div></div>` : "";
   const where = t.mode === "local" || !p.git
     ? `<div class="ov-row">${ic("laptop", "sm ico")}<span class="k">Local</span><span class="v mono fade">${esc(p.path)}</span></div>`
     : `<div class="ov-row">${ic("tree", "sm ico")}<span class="k">Worktree</span><span class="v mono fade">${esc(t.wtPath ?? p.path)}</span></div>`;
@@ -769,7 +786,7 @@ function menuHtml() {
   const pos = S.menuXY ?? (() => { const r = document.querySelector(`[data-open="${t.id}"]`)?.getBoundingClientRect(); const a = document.getElementById("app")?.getBoundingClientRect(); return r && a ? { x: r.right - a.left - 24, y: r.top - a.top } : { x: 240, y: 300 }; })();
   const busy = busySharer(t);
   const moveItem = t.projectId === null && !t.closed
-    ? busy ? `<button class="mi" role="menuitem" aria-disabled="true">${ic("move", "sm ico")}<span class="lab">Move to project…</span><span class="hint">${busyHint(t, busy)}</span></button>`
+    ? busy ? `<button class="mi two" role="menuitem" aria-disabled="true">${ic("move", "sm ico")}<span class="lab"><span>Move to project…</span><span class="sub fade">${busyLine(t, busy)}</span></span></button>`
       : `<button class="mi" role="menuitem" data-act="openmove">${ic("move", "sm ico")}<span class="lab">Move to project…</span></button>` : "";
   const closeReason = busyReason(t);
   const closeItem = t.closed ? `<button class="mi" role="menuitem">${ic("restore", "sm ico")}<span class="lab">Restore thread</span></button>`
@@ -825,14 +842,14 @@ function listPicker(kind, items, top) {
   return `<div class="pop in-dialog" data-stop role="listbox" aria-label="${kind}" style="top:${top}px">${items}</div>`;
 }
 function runsIn(mv, p) {
-  if (!p.git) return `<div class="field"><span class="lab">Runs in</span><div class="inline-row">${ic("laptop", "sm")}<span style="color:var(--ink)">Local</span><span>· ${esc(p.path)} is not a git repo</span></div></div>`;
+  if (!p.git) return `<div class="field"><span class="lab">Runs in</span><div class="inline-row">${ic("laptop", "sm")}<span style="color:var(--ink)">Local</span><span>· <span class="mono">${esc(p.path)}</span> is not a git repo</span></div></div>`;
   const modes = ["local", "newwt", "existingwt"].map(m => `<button role="radio" aria-checked="${mv.mode === m}" data-mvmode="${m}">${MODE_LABEL[m]}</button>`).join("");
   const base = mv.base ?? p.branch;
   let help, detail = "";
   if (mv.mode === "local") help = `Works in <span class="mono">${esc(p.path)}</span> on <span class="mono">${esc(p.branch)}</span>, next to your own changes.`;
   else if (mv.mode === "newwt") {
-    help = "A separate checkout on a new branch, so your own checkout stays untouched.";
-    detail = `<div class="inline-row"><span>From</span><button class="trigger" data-mvpicker="branch">${ic("branch", "sm")}<span class="mono">${esc(base)}</span>${ic("down", "sm")}</button>
+    help = `A separate checkout on a new branch, so your own checkout stays untouched. Start from <span class="mono">origin/${esc(base)}</span> fetches first, so the branch also has commits you haven't pulled.`;
+    detail = `<div class="inline-row" style="gap:16px"><span style="margin-right:-8px">From</span><button class="trigger" data-mvpicker="branch">${ic("branch", "sm")}<span class="mono">${esc(base)}</span>${ic("down", "sm")}</button>
       <button class="check" role="checkbox" aria-checked="${mv.origin}" data-mvflip="origin" style="align-items:center"><span class="box">${mv.origin ? ic("check", "sm") : ""}</span><span style="color:var(--ink)">Start from <span class="mono">origin/${esc(base)}</span></span></button></div>`;
   } else {
     help = "Runs in a checkout you already have.";
@@ -847,7 +864,7 @@ function filesNotice(mv, t) {
   if (!files.length) return "";
   if (mv.dest === "new") return `<div class="note-box"><div class="row1">${ic("folder", "sm ico")}<span>The folder moves with its ${plural(files.length, "file", "files")}.</span></div></div>`;
   const copied = files.length === 1 ? "It is not copied into the project. The agent is told where it is on its next turn." : "They are not copied into the project. The agent is told where they are on its next turn.";
-  return `<div class="note-box"><div class="row1">${ic("file", "sm ico")}<span class="txt"><span>This folder has ${plural(files.length, "file", "files")}. Mcode deletes it on ${DEADLINE}.</span>
+  return `<div class="note-box"><div class="row1">${ic("file", "sm ico")}<span class="txt"><span>This folder has ${plural(files.length, "file", "files")}. After the move, Mcode deletes it on ${DEADLINE}.</span>
     <span class="muted">${copied}</span><button class="link" data-mvdest="new">Make it a new project instead</button></span></div>
     ${mv.showFiles ? `<ul class="files mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul><button class="link note-link" data-mvflip="showFiles">Hide files</button>`
       : `<button class="link note-link" data-mvflip="showFiles">Show files</button>`}</div>`;
@@ -869,6 +886,20 @@ function moveDialogHtml() {
       <button role="radio" aria-checked="${mv.dest === "existing"}" ${noProjects ? 'aria-disabled="true"' : 'data-mvdest="existing"'}>Existing project</button>
       <button role="radio" aria-checked="${mv.dest === "new"}" data-mvdest="new">New project</button></div>
       ${noProjects ? `<span class="help">No projects yet, so the folder becomes a new one.</span>` : ""}</div>`;
+  /* A failed move names what failed and what is left where; across drives the fix is another location, so that error sits under Location. */
+  const cross = S.sim.crossDrive && mv.dest === "new" && mv.parent.includes("\\");
+  const failed = mv.phase === "failed";
+  const who = n > 1 ? "the threads are" : "the thread is";
+  let outcome = "";
+  if (failed) {
+    const [lead, rest, details] = cross
+      ? [`Drive ${esc(mv.parent.slice(0, 2))} is full, so the folder couldn't be copied there.`, `Your files are still in the old folder and ${who} still in No project. Mcode removed the partial copy.`, "ENOSPC: no space left on device, copyfile 'bench.db'"]
+      : mv.dest === "existing"
+        ? [n > 1 ? `Couldn't move the ${n} threads.` : "Couldn't move the thread.", `Nothing changed: ${who} still in No project and the files are untouched. Try again in a moment.`, "SQLITE_BUSY: database is locked (updating thread workspace)"]
+        : [`Couldn't move the folder to ${esc(mv.parent)}.`, `Nothing changed: ${who} still in No project. Close any app using files in the folder, then try again.`, "EBUSY: resource busy or locked, rename '…/2026-11-26-sqlite-wal-vs-rollback-7f3a'"];
+    outcome = `<div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span class="txt"><span>${lead}</span><span class="muted">${rest}</span></span></div>
+      <details><summary>Details</summary><span class="mono">${esc(details)}</span></details></div>`;
+  }
   let form;
   if (mv.dest === "existing") {
     const p = mv.pid && project(mv.pid);
@@ -880,30 +911,18 @@ function moveDialogHtml() {
     const target = joinPath(mv.parent, mv.name.trim() || "…");
     form = `<div class="field"><label class="lab" for="mvname">Name</label><input id="mvname" class="text-in" data-fk="mvname" data-mvname value="${esc(mv.name)}" placeholder="Project name" ${shownErr ? 'aria-invalid="true" aria-describedby="mvname-err"' : ""} spellcheck="false" />
         ${shownErr ? `<span class="err" id="mvname-err">${ic("alert", "sm")}${esc(shownErr.msg)}</span>` : ""}</div>
-      <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade">${esc(mv.parent)}</span><button class="btn" data-mvpicker="browse">Browse…</button></div>
-        ${shownErr ? "" : `<span class="result">Creates <span class="mono">${esc(target)}</span></span>`}</div>
+      <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade" ${cross && failed ? 'aria-invalid="true"' : ""}>${esc(mv.parent)}</span><button class="btn" data-mvpicker="browse">Browse…</button></div>
+        ${shownErr || (cross && failed) ? "" : `<span class="result">Creates <span class="mono">${esc(target)}</span></span>`}</div>
+      ${cross && failed ? outcome : ""}
       <button class="check" role="checkbox" aria-checked="${mv.git}" data-mvflip="git"><span class="box">${mv.git ? ic("check", "sm") : ""}</span><span class="txt"><span>Start a git repo</span>${mv.git ? `<span class="sub">Runs git init. The files start uncommitted.</span>` : ""}</span></button>`;
   }
   const block = blockReason(mv, t);
   const busyBox = block?.busy ? `<div class="note-box warn" role="status"><div class="row1">${ic("alert", "sm ico")}<span>“${esc(block.busy.title)}” is ${block.busy.status === "running" ? "running" : "waiting for approval"}. You can move once it stops.</span></div></div>` : "";
-  /* A failed move names what failed and what is left where; across drives the fix is another location, not a retry. */
-  const cross = S.sim.crossDrive && mv.dest === "new" && mv.parent.includes("\\");
-  const failed = mv.phase === "failed";
-  let outcome = "";
-  if (failed) {
-    const [lead, rest, details] = cross
-      ? [`Drive ${esc(mv.parent.slice(0, 2))} is full, so the folder couldn't be copied there.`, "Your files are still in the old folder and the thread is still in No project. Mcode removed the partial copy.", "ENOSPC: no space left on device, copyfile 'bench.db'"]
-      : mv.dest === "existing"
-        ? ["Couldn't move the thread.", "Nothing changed: it's still in No project and its files are untouched. Try again in a moment.", "SQLITE_BUSY: database is locked (updating thread workspace)"]
-        : [`Couldn't move the folder to ${esc(mv.parent)}.`, "Nothing changed: the thread is still in No project. Close any app using files in the folder, then try again.", "EBUSY: resource busy or locked, rename '…/2026-11-26-sqlite-wal-vs-rollback-7f3a'"];
-    outcome = `<div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span class="txt"><span>${lead}</span><span class="muted">${rest}</span></span></div>
-      <details><summary>Details</summary><span class="mono">${esc(details)}</span></details></div>`;
-  }
   if (mv.phase === "gitfailed") {
     const p = project(mv.createdId) ?? { name: mv.name, path: joinPath(mv.parent, mv.name) };
     return `<div class="scrim"><div class="dialog move" role="alertdialog" aria-labelledby="mvh" data-stop>
       <div class="head"><h4 id="mvh">Project created</h4><p class="who">“${esc(t.title)}” now runs in the ${esc(p.name)} project.</p></div>
-      <div class="body"><div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span>Couldn't start a git repo. The project works without one; you can retry now or run git init later.</span></div>
+      <div class="body"><div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span class="txt"><span>Couldn't start a git repo: permission denied in the project folder.</span><span class="muted">The project works without git. Check you can write to the folder, then retry, or run git init later.</span></span></div>
         <details><summary>Details</summary><span class="mono">${esc(p.path)}\ngit: 'init' failed: unable to create '.git/index.lock': Permission denied</span></details></div></div>
       <div class="foot"><button class="btn ghost" data-act="mvdone">Done</button><button class="btn primary" data-act="mvgitretry">Retry git setup</button></div>
     </div></div>`;
@@ -922,7 +941,7 @@ function moveDialogHtml() {
     : "";
   return `<div class="scrim" ${locked ? "" : 'data-act="mvcancel"'}><div class="dialog move" role="dialog" aria-modal="true" aria-labelledby="mvh" data-stop ${locked ? 'aria-busy="true"' : ""}>
     <div class="head"><h4 id="mvh">Move to project</h4><p class="who fade">${esc(t.title)}</p></div>
-    <div class="body" ${locked ? 'style="pointer-events:none"' : ""}>${dest}${form}${busyBox}${filesNotice(mv, t)}${sharersNotice(t)}${outcome}</div>
+    <fieldset class="body" ${locked ? "disabled" : ""}>${dest}${form}${filesNotice(mv, t)}${sharersNotice(t)}${cross ? "" : outcome}${busyBox}</fieldset>
     <div class="foot">
       <button class="btn ghost" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
       <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ""}${primaryLabel}</button></div>
