@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ClipboardEvent, type ReactNode, type RefObject } from "react";
 import { Plus } from "lucide-react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { DraftFileComment } from "@mcode/contracts/models/next-message-draft";
 import type { FileReadResult } from "@mcode/contracts/models/workspace-file";
 import {
@@ -20,6 +20,7 @@ import { FILE_COMMENT_CARD_CLASS, FILE_COMMENT_ROW_CLASS, FileCommentEditor } fr
 import { useFilesTabsStore } from "./filesTabsStore";
 import { splitPieces, type FindMatch, type FindResult, type LineHighlight, type LinePiece } from "./find-in-file";
 import type { FindHighlight } from "./useFindInFile";
+import { selectedCodeText, selectionRowIndexes, withPinnedRows } from "./code-selection";
 
 const LINE_HEIGHT = 20;
 const OVERSCAN = 20;
@@ -170,6 +171,24 @@ function usePendingJump(scopeId: string, path: string, rows: readonly CodeRow[],
   }, [jump, path, rows, scopeId, scrollToIndex]);
 }
 
+/**
+ * Row indexes the virtualizer must keep mounted because they hold an end of the
+ * text selection; see code-selection.ts. Read through a ref so a drag, which
+ * fires selectionchange on every move, never re-renders the view.
+ */
+function useSelectionPinnedRows(viewportRef: RefObject<HTMLDivElement | null>): RefObject<readonly number[]> {
+  const pinned = useRef<readonly number[]>([]);
+  useEffect(() => {
+    const onSelectionChange = () => {
+      const viewport = viewportRef.current;
+      pinned.current = viewport ? selectionRowIndexes(document.getSelection(), viewport) : [];
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+  }, [viewportRef]);
+  return pinned;
+}
+
 interface IndexedMatch extends FindMatch {
   readonly index: number;
 }
@@ -222,6 +241,11 @@ export function CodeLines({
     () => `calc(${GUTTER_PX + CODE_END_PAD_PX}px + ${lines.reduce((widest, line) => Math.max(widest, line.length), 0)}ch)`,
     [lines],
   );
+  const pinnedRows = useSelectionPinnedRows(viewportRef);
+  const rangeExtractor = useCallback(
+    (range: Range) => withPinnedRows(defaultRangeExtractor(range), pinnedRows.current, range.count),
+    [pinnedRows],
+  );
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: rows.length,
     getScrollElement: () => viewportRef.current,
@@ -229,8 +253,15 @@ export function CodeLines({
     estimateSize: (index) => (rows[index]?.kind === "line" || rows[index] === undefined ? LINE_HEIGHT : COMMENT_ROW_ESTIMATE),
     getItemKey: (index) => rowKey(rows[index], index),
     overscan: OVERSCAN,
+    rangeExtractor,
     useFlushSync: false,
   });
+  const copySelection = (event: ClipboardEvent<HTMLDivElement>) => {
+    const text = selectedCodeText(document.getSelection(), event.currentTarget, lines);
+    if (text === null) return;
+    event.preventDefault();
+    event.clipboardData.setData("text/plain", text);
+  };
   const scrollToIndex = useCallback((index: number) => virtualizer.scrollToIndex(index, { align: "center" }), [virtualizer]);
   usePendingJump(scopeId, path, rows, scrollToIndex);
   const openEditor = (index: number) => {
@@ -266,6 +297,7 @@ export function CodeLines({
       data-testid="code-file-view"
       data-code-viewport=""
       tabIndex={0}
+      onCopy={copySelection}
       className="@container min-h-0 flex-1 overflow-auto bg-background py-3 font-mono text-code-small outline-none"
     >
       <div className="relative min-w-full" style={{ height: virtualizer.getTotalSize(), minWidth: trackMinWidth }}>
@@ -286,13 +318,14 @@ export function CodeLines({
           return (
             <div
               key={item.key}
+              data-index={item.index}
               data-line={lineNumber}
               data-changed={changed.has(lineNumber) || undefined}
               className="group absolute inset-x-0 flex whitespace-pre hover:bg-hover"
               style={{ top: item.start, height: LINE_HEIGHT, boxShadow: changed.has(lineNumber) ? CHANGED_LINE_SHADOW : undefined }}
             >
               <LineGutter lineNumber={lineNumber} commentable={threadId !== null} onComment={() => openEditor(row.index)} />
-              <span className="pr-4 text-ink">
+              <span data-line-text="" className="pr-4 text-ink">
                 <LineContent
                   text={lines[row.index] ?? ""}
                   tokens={tokens?.[row.index]}
