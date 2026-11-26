@@ -810,6 +810,11 @@ interface WorkspaceState {
   setAutoCompleteOverride: (threadId: string, value: boolean | null) => Promise<void>;
   /** Apply a server-authoritative completion lifecycle push. */
   applyThreadLifecycle: (thread: Thread) => void;
+  /**
+   * Apply a No project thread's move into a project. The row changes workspace in place, and when it is the open
+   * thread the active workspace follows it, as opening a thread in that project would.
+   */
+  applyThreadMovedToProject: (thread: Thread) => void;
   applyThreadActivity: (threadId: string, at: string) => void;
   /** Apply a server-saved worktree path to a thread already in the store. Null clears the path. */
   applyThreadWorktreePath: (threadId: string, worktreePath: string | null) => void;
@@ -1858,6 +1863,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       useTerminalStore.getState().clearThread(thread.id);
       useDiffStore.getState().clearRightPanel(thread.workspace_id, thread.id);
     }
+  },
+
+  applyThreadMovedToProject: (thread) => {
+    get().applyThreadLifecycle(thread);
+    if (get().activeThreadId === thread.id) get().setActiveWorkspace(thread.workspace_id);
   },
 
   applyThreadPullRequests: (threadId, prs) => {
