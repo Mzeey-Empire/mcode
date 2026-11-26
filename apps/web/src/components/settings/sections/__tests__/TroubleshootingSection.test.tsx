@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.hoisted so the refs exist inside the vi.mock factory below.
 const { saves, persisted } = vi.hoisted(() => ({
-  saves: [] as { partial: unknown; resolve: () => void }[],
+  saves: [] as { partial: unknown; resolve: (failure?: string) => void }[],
   persisted: {
     graphics: { hardwareAcceleration: false } as Record<string, unknown>,
     diagnostics: {} as Record<string, unknown>,
@@ -16,7 +16,7 @@ vi.mock("@/stores/settingsStore", () => {
       return persisted;
     },
     update: (partial: unknown) =>
-      new Promise<void>((resolve) => {
+      new Promise<string | void>((resolve) => {
         saves.push({ partial, resolve });
       }),
   };
@@ -103,6 +103,207 @@ describe("TroubleshootingSection hardware acceleration", () => {
     render(<TroubleshootingSection />);
     expect(await screen.findByRole("switch", { name: "Hardware acceleration" })).toBeChecked();
     expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
+  });
+});
+
+describe("TroubleshootingSection crash dumps", () => {
+  const relaunch = vi.fn(() => Promise.resolve());
+  const directory = "/home/dev/.config/Mcode/Crashpad";
+  const dumps = { enabledAtLaunch: false, directory, totalBytes: 2_621_440 };
+  const getCrashDumps = vi.fn();
+  const deleteCrashDumps = vi.fn();
+
+  function stubDesktopBridge(app: Record<string, unknown> = { getCrashDumps, deleteCrashDumps, relaunch }): void {
+    vi.stubGlobal("desktopBridge", { app });
+  }
+
+  // The row loads its state in an effect; rendering inside an async act lets that load settle before the test acts.
+  async function renderLoaded(): Promise<void> {
+    await act(async () => {
+      render(<TroubleshootingSection />);
+    });
+    expect(getCrashDumps).toHaveBeenCalledTimes(1);
+  }
+
+  async function toggleAndResolveSettingsSave(toggle: HTMLElement, failure?: string): Promise<void> {
+    fireEvent.click(toggle);
+    await act(async () => {
+      saves[0]?.resolve(failure);
+    });
+  }
+
+  beforeEach(() => {
+    saves.length = 0;
+    relaunch.mockClear();
+    getCrashDumps.mockReset().mockResolvedValue(dumps);
+    deleteCrashDumps.mockReset().mockResolvedValue({ ...dumps, totalBytes: 0 });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    persisted.diagnostics = {};
+  });
+
+  it("is off by default and saves the setting when switched on", async () => {
+    stubDesktopBridge();
+    render(<TroubleshootingSection />);
+    const toggle = await screen.findByRole("switch", { name: "Crash dumps" });
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: true } }]));
+  });
+
+  it("is absent when the bridge lacks any crash dump call", () => {
+    stubDesktopBridge({ getCrashDumps, relaunch });
+    const { unmount } = render(<TroubleshootingSection />);
+    expect(screen.queryByRole("switch", { name: "Crash dumps" })).toBeNull();
+    unmount();
+
+    stubDesktopBridge({ getCrashDumps, deleteCrashDumps });
+    render(<TroubleshootingSection />);
+    expect(screen.queryByRole("switch", { name: "Crash dumps" })).toBeNull();
+  });
+
+  it("offers a restart that relaunches when the saved value differs from the launch value", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    stubDesktopBridge();
+    render(<TroubleshootingSection />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restart" }));
+    expect(relaunch).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a restart after switching off a setting that was on at launch", async () => {
+    getCrashDumps.mockResolvedValue({ ...dumps, enabledAtLaunch: true });
+    stubDesktopBridge();
+    render(<TroubleshootingSection />);
+    expect(await screen.findByRole("button", { name: "Restart" })).toBeInTheDocument();
+  });
+
+  it("offers no restart when the saved value matches the launch value", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    getCrashDumps.mockResolvedValue({ ...dumps, enabledAtLaunch: true });
+    stubDesktopBridge();
+    await renderLoaded();
+    expect(screen.getByRole("switch", { name: "Crash dumps" })).toBeChecked();
+    expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
+  });
+
+  it("shows neither the dump folder nor the saved size once the state loads", async () => {
+    stubDesktopBridge();
+    await renderLoaded();
+
+    expect(screen.queryByText(directory)).toBeNull();
+    expect(screen.queryByLabelText(directory)).toBeNull();
+    expect(document.body).not.toHaveTextContent("Crashpad");
+    expect(document.body).not.toHaveTextContent("2.5 MB");
+  });
+
+  it("asks before deleting when switched off with dumps saved, and Delete removes them", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    stubDesktopBridge();
+    await renderLoaded();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: false } }]);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("Delete crash dumps?");
+    expect(dialog).toHaveTextContent("Removes 2.5 MB. This can't be undone.");
+    expect(deleteCrashDumps).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(deleteCrashDumps).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the dumps when Keep is chosen", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    stubDesktopBridge();
+    await renderLoaded();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    await screen.findByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(deleteCrashDumps).not.toHaveBeenCalled();
+  });
+
+  it("opens no dialog when switched off with no dumps saved", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    getCrashDumps.mockResolvedValue({ ...dumps, totalBytes: 0 });
+    stubDesktopBridge();
+    await renderLoaded();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: false } }]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens no dialog when switched on with dumps already saved", async () => {
+    stubDesktopBridge();
+    await renderLoaded();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: true } }]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers delete from the size read after the switch-off save, not the size loaded at mount", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    getCrashDumps.mockResolvedValueOnce({ ...dumps, totalBytes: 0 });
+    stubDesktopBridge();
+    await renderLoaded();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Removes 2.5 MB. This can't be undone.");
+  });
+
+  it("shows a failed mount load as an alert and clears it once a later read succeeds", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    getCrashDumps.mockRejectedValueOnce(new Error("Error invoking remote method: EACCES crashpad"));
+    stubDesktopBridge();
+    render(<TroubleshootingSection />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't read the crash dumps folder. Reopen this page to try again.");
+    expect(alert).not.toHaveTextContent("EACCES");
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Removes 2.5 MB. This can't be undone.");
+    expect(screen.queryByRole("alert", { hidden: true })).toBeNull();
+  });
+
+  it("keeps the dialog open on a failed delete, shows the remaining size, and closes on a retry that succeeds", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    getCrashDumps
+      .mockResolvedValueOnce(dumps)
+      .mockResolvedValueOnce(dumps)
+      .mockResolvedValueOnce({ ...dumps, totalBytes: 1_048_576 });
+    deleteCrashDumps.mockRejectedValueOnce(new Error("Error invoking remote method: EBUSY crash dump is locked"));
+    stubDesktopBridge();
+    await renderLoaded();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    const deleteAlert = await within(dialog).findByRole("alert");
+    expect(deleteAlert).toHaveTextContent("Couldn't delete every crash dump. Close anything using them, then try again.");
+    expect(deleteAlert).not.toHaveTextContent("EBUSY");
+    await waitFor(() => expect(dialog).toHaveTextContent("Removes 1.0 MB. This can't be undone."));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(deleteCrashDumps).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens no dialog when the switch-off save fails", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    stubDesktopBridge();
+    await renderLoaded();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }), "Could not save settings");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 
