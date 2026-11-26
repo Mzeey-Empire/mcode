@@ -175,6 +175,53 @@ describe("FilesTool freshness", () => {
     expect(screen.getByTestId("code-file-view").querySelector('[data-line="2"]')?.hasAttribute("data-changed")).toBe(true);
   });
 
+  describe("when changed-line answers arrive out of order", () => {
+    /** Each getFileChangedLines call waits for the test to answer it. */
+    function holdChangedLines() {
+      const answers: ((lines: [number, number][]) => void)[] = [];
+      transport.getFileChangedLines.mockImplementation(() => new Promise((resolve) => { answers.push(resolve); }));
+      return answers;
+    }
+    const isChanged = (line: number) =>
+      screen.getByTestId("code-file-view").querySelector(`[data-line="${line}"]`)?.hasAttribute("data-changed");
+
+    it("keeps the bars of the newest request when an older one answers last", async () => {
+      setBodyWidth(900);
+      const answers = holdChangedLines();
+      useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");
+      renderTool();
+      await screen.findByTestId("code-file-view");
+      await waitFor(() => expect(answers).toHaveLength(1));
+      act(() => pushEmitter.emit("files.changed", { workspaceId: WORKSPACE, changedPaths: ["src/a.ts"] }));
+      await waitFor(() => expect(answers).toHaveLength(2));
+
+      await act(async () => answers[1]!([[2, 2]]));
+      await act(async () => answers[0]!([[1, 1]]));
+
+      expect(isChanged(2)).toBe(true);
+      expect(isChanged(1)).toBe(false);
+    });
+
+    it("drops the answer of a request made before the path was closed and reopened", async () => {
+      setBodyWidth(900);
+      const answers = holdChangedLines();
+      useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");
+      renderTool();
+      await screen.findByTestId("code-file-view");
+      await waitFor(() => expect(answers).toHaveLength(1));
+      await act(async () => useFilesTabsStore.getState().closeFile(WORKSPACE, "src/a.ts"));
+      await act(async () => useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts"));
+      await screen.findByTestId("code-file-view");
+      await waitFor(() => expect(answers).toHaveLength(2));
+
+      await act(async () => answers[1]!([[2, 2]]));
+      await act(async () => answers[0]!([[1, 1]]));
+
+      expect(isChanged(2)).toBe(true);
+      expect(isChanged(1)).toBe(false);
+    });
+  });
+
   it("caps the tree drag at the widest width that still docks", async () => {
     setBodyWidth(900);
     useFilesTabsStore.getState().openFile(WORKSPACE, "src/a.ts");

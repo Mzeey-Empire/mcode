@@ -100,6 +100,10 @@ function useFileReads(scope: FilesScope, openPaths: readonly string[]) {
   const [reads, setReads] = useState<Readonly<Record<string, FileReadState>>>({});
   const [changedLines, setChangedLines] = useState<Readonly<Record<string, FileChangedLines>>>({});
   const requested = useRef(new Set<string>());
+  // Overlapping reads of one path (a refresh, or a close and reopen) answer in any order, so only the
+  // newest changed-lines request per path may set its bars.
+  const newestLinesRequest = useRef(new Map<string, number>());
+  const requestCount = useRef(0);
 
   const read = useCallback(
     (path: string) => {
@@ -116,11 +120,13 @@ function useFileReads(scope: FilesScope, openPaths: readonly string[]) {
           if (requested.current.has(path)) setReads((current) => ({ ...current, [path]: next }));
         });
       // Changed lines cost a git process, so they arrive on their own and never hold the text back.
+      const request = ++requestCount.current;
+      newestLinesRequest.current.set(path, request);
       transport
         .getFileChangedLines(scope.workspaceId, path, threadId)
         .then(
           (lines) => {
-            if (!requested.current.has(path)) return;
+            if (newestLinesRequest.current.get(path) !== request) return;
             setChangedLines((current) => (sameChangedLines(current[path], lines) ? current : { ...current, [path]: lines }));
           },
           // The bars are decoration; a failed diff keeps the last bars rather than blanking the margin.
@@ -133,7 +139,10 @@ function useFileReads(scope: FilesScope, openPaths: readonly string[]) {
   useEffect(() => {
     for (const path of openPaths) if (!requested.current.has(path)) read(path);
     const closed = [...requested.current].filter((path) => !openPaths.includes(path));
-    for (const path of closed) requested.current.delete(path);
+    for (const path of closed) {
+      requested.current.delete(path);
+      newestLinesRequest.current.delete(path);
+    }
     if (closed.length > 0) setChangedLines((current) => omitPaths(current, closed));
   }, [openPaths, read]);
 
