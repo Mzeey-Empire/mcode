@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import type { Thread } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { worktreePresence } from "@/features/projects/state/worktree-listing";
 import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
 import type { ComposerMode } from "./composer-mode";
 import { newThreadComposerMode, selectNewThreadMode } from "./new-thread-mode";
@@ -82,8 +83,8 @@ export function useComposerExecutionTarget({
   const selectedWorktree = useWorkspaceStore((state) => state.selectedWorktree);
   const branchExecMode = useWorkspaceStore((state) => state.branchExecMode);
   const branchWorktreePath = useWorkspaceStore((state) => state.branchWorktreePath);
-  const worktrees = useWorkspaceStore((state) => state.worktrees);
-  const worktreesLoadedForWorkspace = useWorkspaceStore((state) => state.worktreesLoadedForWorkspace);
+  const worktreeListing = useWorkspaceStore((state) => state.worktreeListing);
+  const worktrees = worktreeListing.worktrees;
   const loadWorktrees = useWorkspaceStore((state) => state.loadWorktrees);
   const initBranchMode = useWorkspaceStore((state) => state.initBranchMode);
   const setBranchExecMode = useWorkspaceStore((state) => state.setBranchExecMode);
@@ -101,12 +102,7 @@ export function useComposerExecutionTarget({
   }, [branchWorktreePath, worktrees]);
   const branchWorktreeIsDetached = isDetachedWorktree(branchSelectedWorktree);
   const { newThreadBranch, forkBranch } = useFlowBranches({ activeThread, branchFromMessageId, isNewThread, workspaceId });
-  const isStaleWorktree = useMemo(() => {
-    if (!activeThread?.worktree_path || activeThread.mode !== "worktree") return false;
-    if (worktreesLoadedForWorkspace !== activeThread.workspace_id) return false;
-    const normalizePath = (path: string) => path.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-    return !worktrees.some((worktree) => normalizePath(worktree.path) === normalizePath(activeThread.worktree_path!));
-  }, [activeThread, worktrees, worktreesLoadedForWorkspace]);
+  const isStaleWorktree = activeThread ? worktreePresence(worktreeListing, activeThread) === "missing" : false;
 
   const setMode = useCallback((mode: ComposerMode) => selectNewThreadMode(workspaceId, mode), [workspaceId]);
 

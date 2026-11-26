@@ -143,6 +143,19 @@ describe("ws-events thread.lifecycleChanged", () => {
       .toEqual([["external", "unopened"]]);
   });
 
+  it("records a worktree path saved after the thread arrived, and its later removal", () => {
+    useWorkspaceStore.setState({ threads: [makeThread({ worktree_path: null }), makeThread({ id: "thread-2", worktree_path: null })] });
+    startPushListeners();
+    const paths = () => useWorkspaceStore.getState().threads.map((thread) => thread.worktree_path);
+
+    pushEmitter.emit("thread.worktreeChanged", { threadId: "thread-1", worktreePath: "/repo-wt" });
+    expect(paths()).toEqual(["/repo-wt", null]);
+
+    pushEmitter.emit("thread.worktreeChanged", { threadId: "thread-1", worktreePath: null });
+    pushEmitter.emit("thread.worktreeChanged", { threadId: "thread-2" });
+    expect(paths()).toEqual([null, null]);
+  });
+
   it("applies a server-authoritative completion push", () => {
     useWorkspaceStore.setState({ threads: [makeThread()] });
     startPushListeners();

@@ -152,7 +152,7 @@ export function useNewThreadTargetSelection(workspaceId: string | undefined, mod
 export function useForkTargetSelection(sourceThread: ForkSourceThread | undefined, mode: ComposerMode): ComposerTargetSelectionState {
   const branch = useForkTargetBranch(sourceThread);
   const branchWorktreePath = useWorkspaceStore((state) => state.branchWorktreePath);
-  const worktrees = useWorkspaceStore((state) => state.worktrees);
+  const worktrees = useWorkspaceStore((state) => state.worktreeListing.worktrees);
   const setBranchTargetBranch = useWorkspaceStore((state) => state.setBranchTargetBranch);
   const setBranchWorktreePath = useWorkspaceStore((state) => state.setBranchWorktreePath);
   const worktree = useMemo(() => {

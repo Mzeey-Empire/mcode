@@ -12,7 +12,7 @@ export const mockWorkspaceState = {
   threads: [] as Thread[],
   prUrlsByThreadId: {} as Record<string, string>,
   checksById: {} as Record<string, unknown>,
-  worktreesLoadedForWorkspace: null as string | null,
+  loadWorktrees: vi.fn(async (_workspaceId: string) => {}),
 };
 
 /** Thread records served by the mocked `useThreadStore`. */

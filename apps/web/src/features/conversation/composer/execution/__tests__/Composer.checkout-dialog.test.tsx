@@ -10,6 +10,7 @@ import { type PreviewAnnotationPayloadV2 } from "@mcode/contracts/models/browser
 import { type SelectedTextComment } from "@mcode/contracts/models/selected-text-comment";
 import { Composer } from "../../Composer";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { emptyWorktreeListing } from "@/features/projects/state/worktree-listing";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { usePreviewDesignModeStore } from "@/features/preview/state/previewDesignModeStore";
 import { useQueueStore } from "@/stores/queueStore";
@@ -284,7 +285,7 @@ function seedComposerState(
     selectedWorktree: mode === "existing-worktree"
       ? { name: "existing", path: "/repo/.worktrees/existing", branch: "feature/base" }
       : null,
-    worktrees: [],
+    worktreeListing: emptyWorktreeListing(workspace.id),
   });
   return workspace;
 }

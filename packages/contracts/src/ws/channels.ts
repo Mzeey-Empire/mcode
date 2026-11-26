@@ -116,6 +116,11 @@ export const WS_CHANNELS = {
   "thread.created": z.object({
     thread: ThreadSchema(),
   }),
+  /** A thread's worktree path was saved after `thread.created`, or cleared (null). */
+  "thread.worktreeChanged": z.object({
+    threadId: z.string(),
+    worktreePath: z.string().nullable(),
+  }),
   "thread.activity": z.object({
     threadId: z.string(),
     at: z.string().datetime(),

@@ -217,6 +217,7 @@ import {
 } from "@/lib/thread-switch-telemetry";
 import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
 import { ChatView } from "../ChatView";
+import { emptyWorktreeListing } from "@/features/projects/state/worktree-listing";
 import { transcriptShown } from "@/transport/launch-marks";
 import { KEPT_ALIVE_THREAD_COUNT } from "../chat-view/useChatViewState";
 
@@ -288,8 +289,7 @@ function defaultWorkspaceState(overrides: Partial<{
     branchRemote: null,
     startFromOrigin: false,
     selectedWorktree: null,
-    worktrees: [],
-    worktreesLoadedForWorkspace: null,
+    worktreeListing: emptyWorktreeListing(null),
     checksById: {},
     error: null,
   };

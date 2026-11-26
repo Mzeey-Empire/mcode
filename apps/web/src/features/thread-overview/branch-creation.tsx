@@ -40,7 +40,6 @@ function updateThreadToNamedBranch(threadId: string, branch: string): void {
     checksById: Object.fromEntries(
       Object.entries(state.checksById).filter(([candidateId]) => candidateId !== threadId),
     ) as typeof state.checksById,
-    worktreesLoadedForWorkspace: null,
   }));
 }
 
@@ -82,6 +81,7 @@ function CreateThreadBranchDialogSession({
       const result = await getTransport().createBranch(thread.workspace_id, name, thread.id);
       const nextBranch = result.branch || name;
       updateThreadToNamedBranch(thread.id, nextBranch);
+      void useWorkspaceStore.getState().loadWorktrees(thread.workspace_id);
       onOpenChange(false);
       onCreated(nextBranch);
     } catch (err) {

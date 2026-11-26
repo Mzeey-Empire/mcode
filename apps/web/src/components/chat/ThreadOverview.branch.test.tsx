@@ -103,7 +103,7 @@ describe("ThreadOverview branch create and commit", () => {
       checkout_state: "named",
       base_branch: "release",
     });
-    expect(mockWorkspaceState.worktreesLoadedForWorkspace).toBeNull();
+    expect(mockWorkspaceState.loadWorktrees).toHaveBeenCalledWith("ws-1");
     expect(screen.queryByTestId("create-pr-dialog")).not.toBeInTheDocument();
   });
 

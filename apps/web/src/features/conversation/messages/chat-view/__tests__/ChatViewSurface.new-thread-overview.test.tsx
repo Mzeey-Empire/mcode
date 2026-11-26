@@ -8,6 +8,7 @@ import { type GitRef } from "@mcode/contracts/git";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { emptyWorktreeListing } from "@/features/projects/state/worktree-listing";
 import { rememberComposerMode } from "@/lib/composer-mode-preference";
 import { useDiffStore } from "@/stores/diffStore";
 import { OVERVIEW_CANVAS_RESERVE_CSS } from "@/lib/composer-layout";
@@ -104,7 +105,7 @@ function seedWorkspace() {
     activeWorkspaceId: WORKSPACE_ID,
     threads: [],
     activeThreadId: null,
-    worktrees: [],
+    worktreeListing: emptyWorktreeListing(WORKSPACE_ID),
   });
 }
 

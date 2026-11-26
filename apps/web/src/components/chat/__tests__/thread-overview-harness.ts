@@ -121,7 +121,7 @@ export function resetThreadOverviewState(): void {
   mockWorkspaceState.threads = [branchlessThread()];
   mockWorkspaceState.prUrlsByThreadId = {};
   mockWorkspaceState.checksById = {};
-  mockWorkspaceState.worktreesLoadedForWorkspace = "ws-1";
+  mockWorkspaceState.loadWorktrees.mockClear();
   resetTransport();
   mockGetRightPanelVisible.mockReset().mockReturnValue(false);
   invalidateBranchTargets("ws-1");

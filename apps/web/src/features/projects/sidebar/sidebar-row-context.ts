@@ -1,5 +1,6 @@
 import type { Thread, Workspace } from "@/transport/types";
 import type { ThreadMenuActions } from "./thread-menu";
+import type { WorktreeListing } from "../state/worktree-listing";
 
 /** An inline thread rename in progress. */
 export interface InlineEditState {
@@ -21,8 +22,7 @@ export interface SidebarProviderAvailability {
  */
 export interface SidebarRowContext {
   readonly inlineEdit: InlineEditState | null;
-  readonly worktreesLoadedFor: string | null;
-  readonly validWorktreePaths: ReadonlySet<string>;
+  readonly worktreeListing: WorktreeListing;
   readonly availableProviders: readonly SidebarProviderAvailability[];
   onToggleProject(workspaceId: string, section: "recent" | "older"): void;
   onToggleShowMore(workspaceId: string): void;
