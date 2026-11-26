@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, type ClipboardEvent, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type ClipboardEvent, type ReactNode, type RefObject } from "react";
 import { Plus } from "lucide-react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import type { DraftFileComment } from "@mcode/contracts/models/next-message-draft";
@@ -182,7 +182,8 @@ function usePendingJump(scopeId: string, path: string, rows: readonly CodeRow[],
  */
 function useSelectionPinnedRows(viewportRef: RefObject<HTMLDivElement | null>): RefObject<readonly number[]> {
   const pinned = useRef<readonly number[]>([]);
-  useEffect(() => {
+  // A layout effect, so the listener exists in the same commit that mounts the rows it pins.
+  useLayoutEffect(() => {
     const onSelectionChange = () => {
       const viewport = viewportRef.current;
       pinned.current = viewport ? selectionRowIndexes(document.getSelection(), viewport) : [];
