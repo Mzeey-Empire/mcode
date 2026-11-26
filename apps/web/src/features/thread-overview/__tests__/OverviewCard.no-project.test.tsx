@@ -42,11 +42,12 @@ describe("Overview card for a No project thread", () => {
     useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {}, snapshotsByThread: {}, diffRevisionByScope: {} });
   });
 
-  it("shows the folder the thread works in and none of the project or git rows", async () => {
+  it("shows a Folder row without its path, and none of the project or git rows", async () => {
     const card = await openCard(seed(noProjectWorkspace));
 
     const folder = within(card).getByTestId("thread-overview-folder");
-    expect(within(folder).getByTestId("thread-overview-folder-path")).toHaveTextContent(FOLDER);
+    expect(folder).toHaveTextContent("Folder");
+    expect(card).not.toHaveTextContent(FOLDER);
     expect(within(card).queryByRole("button", { name: "Open Project settings" })).toBeNull();
     expect(mockTransport.getRemoteUrl).not.toHaveBeenCalled();
     expect(mockTransport.getReviewComparison).not.toHaveBeenCalled();

@@ -25,17 +25,17 @@ function FolderEntry() {
   return (
     <div data-testid="thread-overview-folder" className={cn(OVERVIEW_ROW_CLASS, "flex items-center pr-1")}>
       <OverviewRowIcon><Folder /></OverviewRowIcon>
-      <span className="shrink-0 font-medium">Folder</span>
-      <span data-testid="thread-overview-folder-path" className="min-w-0 flex-1 text-fade font-mono text-caption text-muted">{dirPath}</span>
-      <CopyButton text={dirPath} label="Copy folder path" className="shrink-0" />
-      <IconButton aria-label="Open folder" className="shrink-0" onClick={() => openFolder(dirPath)}>
+      {/* The path stays out of view; Copy and Open cover the people who need it. */}
+      <span className="flex-1 font-medium">Folder</span>
+      <CopyButton text={dirPath} label="Copy folder path" />
+      <IconButton aria-label="Open folder" onClick={() => openFolder(dirPath)}>
         <FolderOpen aria-hidden />
       </IconButton>
     </div>
   );
 }
 
-/** Shows the No project thread's working folder with copy and open actions. */
+/** Gives the No project thread's working folder copy and open actions. */
 export function FolderEntryBlock({ subject }: { subject: OverviewSubject }) {
   return subject.kind === "thread" ? <FolderEntry /> : null;
 }
