@@ -34,6 +34,7 @@ const QUICK_ACTION_IDS = new Set([
   "thread.new",
   "thread.newNoProject",
   "thread.search",
+  "thread.moveToProject",
   "workspace.new",
   "terminal.toggle",
   "settings.open",
@@ -83,7 +84,8 @@ export function RootView() {
       return {
         value: `cmd:${cmd.id}`,
         title: cmd.title,
-        description: binding ? formatKeybinding(binding.key, isMac) : undefined,
+        description: cmd.disabledReason ?? (binding ? formatKeybinding(binding.key, isMac) : undefined),
+        disabled: cmd.disabledReason !== undefined,
         searchTerms: [cmd.title.toLowerCase(), cmd.category.toLowerCase()],
       };
     });

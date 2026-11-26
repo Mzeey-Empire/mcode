@@ -13,6 +13,11 @@ export interface CommandDefinition {
   handler: () => void;
   /** In a No project thread, hides the command from the palette and blocks it from keybindings and direct calls. */
   projectOnly?: boolean;
+  /**
+   * Why the command cannot run right now. The palette still lists it, greyed out with this text, and
+   * `executeCommand` refuses it, so a keybinding cannot reach what the palette disables.
+   */
+  disabledReason?: string;
 }
 
 const commands = new Map<string, CommandDefinition>();
@@ -79,7 +84,7 @@ export function isCommandAvailable(command: CommandDefinition, inNoProjectThread
  */
 export function executeCommand(id: string): boolean {
   const cmd = commands.get(id);
-  if (!cmd) return false;
+  if (!cmd || cmd.disabledReason !== undefined) return false;
   if (cmd.projectOnly) {
     const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
     if (!isCommandAvailable(cmd, isNoProjectWorkspaceId(workspaces, activeWorkspaceId))) return false;

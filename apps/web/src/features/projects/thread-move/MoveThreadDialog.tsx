@@ -16,15 +16,24 @@ import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import { useSidebarUiStore } from "../sidebar/sidebar-ui-store";
 import { isNoProjectWorkspace } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { MoveThreadCommand } from "./MoveThreadCommand";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
 import { PreflightFailedNotice } from "./PreflightFailedNotice";
 import { useMoveTarget, type MoveTargetState } from "./useMoveTarget";
 import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMovePreflight";
 
-/** The global move dialog. It mounts once and opens for the thread {@link openMoveThreadDialog} names. */
+/**
+ * The global move dialog. It mounts once and opens for the thread {@link openMoveThreadDialog} names. It also
+ * mounts the palette entry, so the entry lives and dies with the dialog it opens.
+ */
 export function MoveThreadDialogHost() {
   const threadId = useMoveThreadStore((state) => state.threadId);
-  return threadId === null ? null : <MoveThreadDialog key={threadId} threadId={threadId} />;
+  return (
+    <>
+      <MoveThreadCommand />
+      {threadId === null ? null : <MoveThreadDialog key={threadId} threadId={threadId} />}
+    </>
+  );
 }
 
 interface MoveFailure {

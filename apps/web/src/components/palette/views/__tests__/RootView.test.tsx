@@ -30,8 +30,8 @@ vi.mock("@/components/ui/command", () => ({
   CommandGroup: ({ heading, children }: { heading: string; children: React.ReactNode }) => (
     <section aria-label={heading}>{children}</section>
   ),
-  CommandItem: ({ children, onSelect }: { children: React.ReactNode; onSelect?: () => void }) => (
-    <button type="button" onClick={onSelect}>{children}</button>
+  CommandItem: ({ children, onSelect, disabled }: { children: React.ReactNode; onSelect?: () => void; disabled?: boolean }) => (
+    <button type="button" disabled={disabled} onClick={onSelect}>{children}</button>
   ),
 }));
 
@@ -90,6 +90,29 @@ describe("RootView", () => {
 
     expect(screen.getByText("Implement v3")).toBeInTheDocument();
     expect(screen.queryByText("Implement v2")).toBeNull();
+  });
+
+  it("lists Move thread to project as a quick action and runs it", async () => {
+    mocks.palette.query = "";
+    const open = vi.fn();
+    registerCommand({ id: "thread.moveToProject", title: "Move thread to project…", category: "Thread", handler: open });
+
+    render(<RootView />);
+
+    const quick = screen.getByRole("region", { name: "Quick actions" });
+    fireEvent.click(within(quick).getByRole("button", { name: "Move thread to project…" }));
+    await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+  });
+
+  it("lists a command with a disabled reason greyed out and says why", () => {
+    mocks.palette.query = "";
+    registerCommand({ id: "thread.moveToProject", title: "Move thread to project…", category: "Thread", handler: () => undefined, disabledReason: "This thread is running" });
+
+    render(<RootView />);
+
+    const item = screen.getByRole("button", { name: /^Move thread to project…/ });
+    expect(item).toBeDisabled();
+    expect(item).toHaveTextContent("This thread is running");
   });
 
   it("offers New thread without a project as a quick action, and runs it", async () => {
