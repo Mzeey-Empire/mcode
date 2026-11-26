@@ -35,6 +35,7 @@ import { isCurrentComposerProviderNotice } from "../notices/provider-notices";
 import { TURN_REVERT_NOTICE_KINDS, TurnRevertReceipt } from "../turn-revert/TurnRevertReceipt";
 import { HtmlVisualFrame } from "../html-visual/HtmlVisualFrame";
 import { ProviderSwitchMarker } from "../provider-switch/ProviderSwitchMarker";
+import { ThreadMoveMarker } from "../thread-move/ThreadMoveMarker";
 import { DelegatedTaskWakeUp } from "./DelegatedTaskWakeUp";
 
 /** Text may still arrive while the turn runs, even after its own text stream ended at a boundary. */
@@ -736,6 +737,7 @@ const LEGACY_HANDOFF_ANCHOR_MARKER = "<!-- mcode-handoff";
 /** Renders a system message, including security notices and HTML visuals. */
 function SystemMessageContent({ message }: Pick<MessageBubbleProps, "message">) {
   if (message.providerSwitch) return <ProviderSwitchMarker providerSwitch={message.providerSwitch} />;
+  if (message.threadMove) return <ThreadMoveMarker threadMove={message.threadMove} />;
   if (message.visual) return <HtmlVisualFrame visual={message.visual} />;
   return <SystemNoticeContent message={message} />;
 }
