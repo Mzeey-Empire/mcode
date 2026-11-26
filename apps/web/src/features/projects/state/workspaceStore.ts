@@ -828,9 +828,9 @@ interface WorkspaceState {
   beginNoProjectThread: () => void;
   /**
    * Makes a hidden No project workspace under a fresh id for one first send, so a retry or an overlapping send
-   * never shares a folder. Selects it only when the user is still on that canvas.
+   * never shares a folder. Selects it only when the user is still on that canvas. `nameHint` names the folder.
    */
-  activateNoProjectWorkspace: () => Promise<Workspace>;
+  activateNoProjectWorkspace: (nameHint?: string) => Promise<Workspace>;
   /** Opens a persisted new-thread draft in the composer, restoring its target config. */
   openThreadDraft: (workspaceId: string, draftId: string) => void;
   /** Deletes a draft entity and unbinds it when it is the open one. */
@@ -1969,9 +1969,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     set({ activeDraftId: null, newThreadTarget: NO_PROJECT_NEW_THREAD_TARGET });
   },
 
-  activateNoProjectWorkspace: async () => {
+  activateNoProjectWorkspace: async (nameHint) => {
     const draftId = get().activeDraftId;
-    const workspace = await getTransport().createNoProjectWorkspace(crypto.randomUUID());
+    const workspace = await getTransport().createNoProjectWorkspace(crypto.randomUUID(), nameHint);
     set((state) => ({
       workspaces: state.workspaces.some((item) => item.id === workspace.id)
         ? state.workspaces.map((item) => (item.id === workspace.id ? workspace : item))

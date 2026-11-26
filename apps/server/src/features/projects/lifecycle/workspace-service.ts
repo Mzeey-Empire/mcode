@@ -18,6 +18,7 @@ import { logger } from "@mcode/shared";
 import type { GitExecutor } from "../git/execution/index.js";
 import { ApplicationDatabaseWriter } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { projectLifecycleWriteOperations } from "./project-lifecycle-write-operations.js";
+import { noProjectFolderName } from "./no-project-folder-name.js";
 import { isTooBroadFolder, isWithinWorkspaceRoot, resolveNoProjectRoot } from "./workspace-path.js";
 import { TerminalBackend, TERMINAL_BACKEND_TOKEN } from "../../terminal/backends/terminal-backend.js";
 
@@ -75,10 +76,11 @@ export class WorkspaceService {
   }
 
   /** Create the isolated workspace for a no-project thread with a fresh UUID. */
-  async createNoProject(id: string, onInserted?: () => void): Promise<Workspace> {
-    const path = NodePath.join(this.noProjectRoot, id);
-    if (NodePath.dirname(path) !== this.noProjectRoot || NodePath.basename(path) !== id) {
-      throw new Error("Invalid no-project workspace ID");
+  async createNoProject(id: string, nameHint: string | undefined, onInserted?: () => void): Promise<Workspace> {
+    const name = noProjectFolderName(id, nameHint, new Date());
+    const path = NodePath.join(this.noProjectRoot, name);
+    if (NodePath.dirname(path) !== this.noProjectRoot || NodePath.basename(path) !== name) {
+      throw new Error("Invalid no-project folder name");
     }
     if (this.workspaceRepo.findByIdIncludeDeleted(id)) {
       throw new Error(`Workspace ID already exists: ${id}`);
@@ -94,8 +96,8 @@ export class WorkspaceService {
       await this.workspaceRepo.hardDelete(id);
       throw new Error("No project folder still exists from an earlier creation.", { cause: error });
     }
-    if (await NodeFSPromises.realpath(path) !== NodePath.join(root, id)) {
-      throw new Error("No project folder does not match its workspace ID");
+    if (await NodeFSPromises.realpath(path) !== NodePath.join(root, name)) {
+      throw new Error("No project folder does not match its expected path");
     }
     onInserted?.();
     return workspace;

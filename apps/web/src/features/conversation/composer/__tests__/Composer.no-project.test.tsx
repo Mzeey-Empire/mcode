@@ -166,6 +166,8 @@ describe("Composer on the No project target", () => {
 
     await waitFor(() => expect(mockTransport.createAndSendMessage).toHaveBeenCalledOnce());
     expect(mockTransport.createNoProjectWorkspace).toHaveBeenCalledOnce();
+    // The typed message names the folder.
+    expect(vi.mocked(mockTransport.createNoProjectWorkspace).mock.calls[0]![1]).toBe("Build this");
     const [hiddenId] = createdWorkspaceIds() as [string];
     expect(vi.mocked(mockTransport.createNoProjectWorkspace).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(mockTransport.createAndSendMessage).mock.invocationCallOrder[0]!);

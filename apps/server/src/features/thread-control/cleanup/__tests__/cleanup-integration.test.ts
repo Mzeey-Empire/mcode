@@ -168,7 +168,7 @@ describe("Cleanup integration", () => {
   }
 
   it("purges an expired no-project thread and removes its populated workspace", async () => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), undefined);
     await NodeFSPromises.writeFile(NodePath.join(workspace.path, "notes.txt"), "thread notes");
     ageWorkspace(workspace.id);
     const thread = await threadRepo.create(workspace.id, "Expired", "direct", "");
@@ -182,7 +182,7 @@ describe("Cleanup integration", () => {
   });
 
   it("keeps a shared no-project folder until the last thread is purged", async () => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), undefined);
     ageWorkspace(workspace.id);
     const first = await threadRepo.create(workspace.id, "First", "direct", "");
     const second = await threadRepo.create(workspace.id, "Second", "direct", "");
@@ -202,7 +202,7 @@ describe("Cleanup integration", () => {
   });
 
   it("unlinks an orphan junction without touching its target", async ({ skip }) => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), undefined);
     ageWorkspace(workspace.id);
     const outside = NodePath.join(NodePath.dirname(db.filename), "outside");
     await NodeFSPromises.mkdir(outside);
@@ -222,8 +222,8 @@ describe("Cleanup integration", () => {
     expect(await NodeFSPromises.readFile(NodePath.join(outside, "keep.txt"), "utf8")).toBe("outside data");
   });
 
-  it("removes a leftover folder from an earlier sweep that deleted only the row", async () => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+  it("removes a named orphan folder from an earlier sweep that deleted only the row", async () => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), "Old notes");
     await NodeFSPromises.writeFile(NodePath.join(workspace.path, "notes.txt"), "old notes");
     await workspaceRepo.hardDelete(workspace.id);
 
@@ -232,9 +232,34 @@ describe("Cleanup integration", () => {
     await expect(NodeFSPromises.lstat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("removes a named orphan while keeping folders the app could never name", async () => {
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), "Old notes");
+    await workspaceRepo.hardDelete(workspace.id);
+    const root = NodePath.dirname(workspace.path);
+    const fiveWordName = `2026-01-05-one-two-three-four-five-${crypto.randomUUID()}`;
+    const impossibleDateName = `2026-02-30-notes-${crypto.randomUUID()}`;
+    await NodeFSPromises.mkdir(NodePath.join(root, fiveWordName));
+    await NodeFSPromises.mkdir(NodePath.join(root, impossibleDateName));
+
+    await worker.poll();
+
+    expect((await NodeFSPromises.readdir(root)).sort()).toEqual([fiveWordName, impossibleDateName]);
+  });
+
+  it.each(["notes", "56a6c168-2120-4fc7-82f9-46d161f44510"])("leaves an unrecognized directory alone (%s)", async (name) => {
+    const directory = NodePath.join(NodePath.dirname(db.filename), "no-project", name);
+    await NodeFSPromises.mkdir(directory, { recursive: true });
+    const file = NodePath.join(directory, "keep.txt");
+    await NodeFSPromises.writeFile(file, "keep me");
+
+    await worker.poll();
+
+    expect(await NodeFSPromises.readFile(file, "utf8")).toBe("keep me");
+  });
+
   it("keeps a directory whose ID belongs to a soft-deleted project", async () => {
     const workspace = await workspaceRepo.create("Project", NodePath.join(NodePath.dirname(db.filename), "project"));
-    const directory = NodePath.join(NodePath.dirname(db.filename), "no-project", workspace.id);
+    const directory = NodePath.join(NodePath.dirname(db.filename), "no-project", `2026-01-05-project-${workspace.id}`);
     await NodeFSPromises.mkdir(directory, { recursive: true });
     await workspaceRepo.softDelete(workspace.id);
     const file = NodePath.join(directory, "keep.txt");
@@ -245,8 +270,9 @@ describe("Cleanup integration", () => {
     expect(await NodeFSPromises.readFile(file, "utf8")).toBe("project data");
   });
 
-  it.each(["client-app", "uuid", "nested"])("keeps a registered project under the managed root (%s)", async (location) => {
-    const entry = NodePath.join(NodePath.dirname(db.filename), "no-project", location === "client-app" ? location : crypto.randomUUID());
+  it.each(["client-app", "named", "nested"])("keeps a registered project under the managed root (%s)", async (location) => {
+    const name = location === "client-app" ? location : `2026-01-05-project-${crypto.randomUUID()}`;
+    const entry = NodePath.join(NodePath.dirname(db.filename), "no-project", name);
     const directory = location === "nested" ? NodePath.join(entry, "project") : entry;
     await NodeFSPromises.mkdir(directory, { recursive: true });
     const workspace = await workspaceRepo.create("Project", directory);
@@ -261,7 +287,7 @@ describe("Cleanup integration", () => {
   });
 
   it("keeps an empty no-project workspace during the first-thread grace period", async () => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), "Starting a thread");
 
     await worker.poll();
     expect(workspaceRepo.findById(workspace.id)?.path).toBe(workspace.path);
@@ -274,7 +300,7 @@ describe("Cleanup integration", () => {
   });
 
   it.each([false, true])("keeps a retryable pre-thread failure updated within seven days (seen: %s)", async (seen) => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), undefined);
     ageWorkspace(workspace.id);
     const { reader, writer } = persistenceRuntime;
     const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
@@ -299,7 +325,7 @@ describe("Cleanup integration", () => {
   });
 
   it.each(["AGENT_FAILED", "thread_deleted"])("removes the workspace after deleting the thread for %s", async (code) => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), undefined);
     ageWorkspace(workspace.id);
     const thread = await threadRepo.create(workspace.id, "Failed start", "direct", "");
     const { reader, writer } = persistenceRuntime;
@@ -324,7 +350,7 @@ describe("Cleanup integration", () => {
   });
 
   it("sweeps the workspace after deleting the thread made by a successful retry", async () => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), undefined);
     ageWorkspace(workspace.id);
     const { reader, writer } = persistenceRuntime;
     const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
@@ -355,7 +381,7 @@ describe("Cleanup integration", () => {
   });
 
   it.each(["failed", "interrupted"])("sweeps the workspace when a thread-less %s startup expires", async (state) => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), undefined);
     ageWorkspace(workspace.id);
     const { reader, writer } = persistenceRuntime;
     const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
@@ -381,7 +407,7 @@ describe("Cleanup integration", () => {
   });
 
   it.each(["failed", "interrupted"])("sweeps a deleted no-project thread's folder after a %s thread phase", async (state) => {
-    const workspace = await workspaceService.createNoProject(crypto.randomUUID());
+    const workspace = await workspaceService.createNoProject(crypto.randomUUID(), undefined);
     ageWorkspace(workspace.id);
     await NodeFSPromises.writeFile(NodePath.join(workspace.path, "notes.txt"), "thread notes");
     const thread = await threadRepo.create(workspace.id, "Unfinished start", "direct", "");

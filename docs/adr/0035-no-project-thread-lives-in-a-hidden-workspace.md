@@ -15,9 +15,14 @@ picking a project, which the UI calls **No project**.
 
 A No project thread belongs to a hidden workspace row with
 `kind = 'no_project'`. The row is named "No project", is not a git repository,
-and owns its own folder at `<mcodeDir>/no-project/<workspaceId>/`. Forks,
-delegated children and launched threads of that thread share the row and the
-folder, as they share a project today.
+and owns its own folder at `<mcodeDir>/no-project/<date>-<words>-<workspaceId>/`.
+The date is the local day it was made and the words are up to four from the
+start of the first message, so a person browsing the folder can tell threads
+apart; the id at the end keeps every name unique and lets cleanup recognise
+the folders it made. The UI does not show the folder's path at rest: the
+overview offers a copy action whose tooltip shows it, and the header's Open in
+opens the folder. Forks, delegated children and launched threads of that thread
+share the row and the folder, as they share a project today.
 
 - **Creating.** The client calls `workspace.createNoProject` with an id it
   generated, then starts the thread with the usual `agent.createAndSend` in
@@ -35,9 +40,10 @@ folder, as they share a project today.
   use the workspace before deleting the row, then the folder. A thread-less
   failed or interrupted first send keeps its folder for up to seven days
   for a retry. Deleting the thread created by a successful retry immediately
-  releases the folder for cleanup. Later sweeps remove leftover UUID-named
-  folders and links under the managed root when no workspace row claims them
-  by id or path.
+  releases the folder for cleanup. Later sweeps remove leftover folders and
+  links under the managed root whose names have exactly that shape, when no
+  workspace row claims them by id or path. Anything else under the root is
+  left alone.
 - **Older builds.** An older build would list hidden rows as projects. The
   migration that adds `kind` is a contract step that raises the compatibility
   floor ([ADR 0030](0030-shared-database-with-ledger-guard-and-compatibility-floor.md))

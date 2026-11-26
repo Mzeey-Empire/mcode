@@ -139,7 +139,7 @@ export function useComposerSubmissionController({
       }
       // The hidden workspace is made before the draft clears, so a failure here leaves the draft and text as they
       // are; the retry is a new attempt with a new workspace.
-      const noProjectWorkspace = await createNoProjectWorkspaceForSend(noProject);
+      const noProjectWorkspace = await createNoProjectWorkspaceForSend(noProject, preparedSubmission.trimmed);
       if (!noProjectWorkspace) return;
       // Only an existing-thread Send can be confirmed by its messageId later;
       // new-thread and branch Sends settle on their dispatch result alone.
@@ -295,10 +295,11 @@ export function useComposerSubmissionController({
  * Makes the hidden workspace one No project send runs in. Returns an empty result for any other send, and null,
  * after showing the failure, when the workspace could not be made.
  */
-async function createNoProjectWorkspaceForSend(noProject: boolean): Promise<{ workspaceId?: string } | null> {
+async function createNoProjectWorkspaceForSend(noProject: boolean, message: string): Promise<{ workspaceId?: string } | null> {
   if (!noProject) return {};
   try {
-    return { workspaceId: (await useWorkspaceStore.getState().activateNoProjectWorkspace()).id };
+    // The server names the folder from the first few words and caps the hint at 200 characters.
+    return { workspaceId: (await useWorkspaceStore.getState().activateNoProjectWorkspace(message.slice(0, 200))).id };
   } catch (error) {
     showDispatchFailure(error, false);
     return null;

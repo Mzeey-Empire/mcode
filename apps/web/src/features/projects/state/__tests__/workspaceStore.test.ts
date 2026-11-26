@@ -843,9 +843,9 @@ describe("workspaceStore No project target", () => {
     it("asks the server for a fresh id, adds the returned row and makes it active on the canvas", async () => {
       useWorkspaceStore.getState().beginNoProjectThread();
 
-      const workspace = await useWorkspaceStore.getState().activateNoProjectWorkspace();
+      const workspace = await useWorkspaceStore.getState().activateNoProjectWorkspace("Sketch a schema");
 
-      expect(mockTransport.createNoProjectWorkspace).toHaveBeenCalledExactlyOnceWith(workspace.id);
+      expect(mockTransport.createNoProjectWorkspace).toHaveBeenCalledExactlyOnceWith(workspace.id, "Sketch a schema");
       const state = useWorkspaceStore.getState();
       expect(state.activeWorkspaceId).toBe(workspace.id);
       expect(state.workspaces.map((item) => item.id)).toEqual([PROJECT.id, workspace.id]);

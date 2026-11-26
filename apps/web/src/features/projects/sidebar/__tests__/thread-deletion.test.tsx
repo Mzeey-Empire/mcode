@@ -37,13 +37,13 @@ describe("ThreadDeleteDialog for a No project thread", () => {
     useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
   });
 
-  it("says the folder goes with a thread that has it to itself, and names the folder", async () => {
+  it("says the folder goes with a thread that has it to itself, without showing its path", async () => {
     seed([createMockThread({ id: "t-1", title: "Sketch a schema", workspace_id: HIDDEN.id })]);
 
     const onConfirm = renderDialog("t-1", "Sketch a schema");
 
     expect(await screen.findByText("Deletes the thread, its folder, and any files the agent wrote there.")).toBeInTheDocument();
-    expect(screen.getByText(HIDDEN.path)).toHaveClass("font-mono");
+    expect(document.body).not.toHaveTextContent(HIDDEN.path);
     await userEvent.setup().click(screen.getByRole("button", { name: "Delete thread and folder" }));
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });

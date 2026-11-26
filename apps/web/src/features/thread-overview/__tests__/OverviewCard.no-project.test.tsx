@@ -42,11 +42,12 @@ describe("Overview card for a No project thread", () => {
     useDiffStore.setState({ rightPanelByThread: {}, rightPanelFallbackByWorkspace: {}, snapshotsByThread: {}, diffRevisionByScope: {} });
   });
 
-  it("shows the folder the thread works in and none of the project or git rows", async () => {
+  it("shows a Folder row without its path, and none of the project or git rows", async () => {
     const card = await openCard(seed(noProjectWorkspace));
 
     const folder = within(card).getByTestId("thread-overview-folder");
-    expect(within(folder).getByTestId("thread-overview-folder-path")).toHaveTextContent(FOLDER);
+    expect(folder).toHaveTextContent("Folder");
+    expect(card).not.toHaveTextContent(FOLDER);
     expect(within(card).queryByRole("button", { name: "Open Project settings" })).toBeNull();
     expect(mockTransport.getRemoteUrl).not.toHaveBeenCalled();
     expect(mockTransport.getReviewComparison).not.toHaveBeenCalled();
@@ -67,15 +68,22 @@ describe("Overview card for a No project thread", () => {
     expect(within(card).queryByTestId(testId)).toBeNull();
   });
 
-  it("opens the folder in the file manager and copies its path", async () => {
+  it("copies the folder's path", async () => {
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
     const card = await openCard(seed(noProjectWorkspace));
 
-    await user.click(within(card).getByRole("button", { name: "Open folder" }));
-    expect(mockTransport.openIn).toHaveBeenCalledWith("explorer", FOLDER);
     await user.click(within(card).getByRole("button", { name: "Copy folder path" }));
     expect(writeText).toHaveBeenCalledWith(FOLDER);
+  });
+
+  it("shows the full folder path in the Copy tooltip when the pointer rests on it", async () => {
+    const user = userEvent.setup();
+    const card = await openCard(seed(noProjectWorkspace));
+
+    await user.hover(within(card).getByRole("button", { name: "Copy folder path" }));
+
+    expect(await screen.findByText(FOLDER)).toBeVisible();
   });
 
   it("leaves a project thread's card as it was, with project settings and no folder row", async () => {

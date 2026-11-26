@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { type ComponentProps, type ReactNode, useEffect, useState } from "react";
 import { Check, Copy, X } from "lucide-react";
 import { Button } from "./button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
 
 /** Copies text with success or failure feedback and a keyboard-accessible action. */
-export function CopyButton({ text, label, className }: {
+export function CopyButton({ text, label, tooltip, tooltipSide, className }: {
   text: string;
   label: string;
+  /** Tooltip before a copy; defaults to the label. The Copied and failure messages replace it. */
+  tooltip?: ReactNode;
+  /** Pins the tooltip to one side, so a tall tooltip and the short Copied message do not land on different sides. */
+  tooltipSide?: ComponentProps<typeof TooltipContent>["side"];
   className?: string;
 }) {
   const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
@@ -29,13 +33,14 @@ export function CopyButton({ text, label, className }: {
   const Icon = status === "copied" ? Check : status === "failed" ? X : Copy;
   return (
     <Tooltip>
-      <TooltipTrigger render={
+      {/* A click closes a tooltip by default, which would hide the Copied and Copy failed messages it swaps in. */}
+      <TooltipTrigger closeOnClick={false} render={
         <Button type="button" variant="ghost" size="icon-compact" aria-label={label} onClick={() => void copy()} className={className}>
           <Icon aria-hidden="true" className="size-3.5" />
           <span className="sr-only" role="status">{status === "idle" ? "" : message}</span>
         </Button>
       } />
-      <TooltipContent>{message}</TooltipContent>
+      <TooltipContent side={tooltipSide}>{status === "idle" ? (tooltip ?? label) : message}</TooltipContent>
     </Tooltip>
   );
 }
