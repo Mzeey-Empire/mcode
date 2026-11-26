@@ -19,6 +19,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { isThreadExecuting } from "@/stores/threadStore";
 import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import type { Thread } from "@/transport/types";
+import { isNoProjectWorkspaceId } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { closeBlockedReason, lifecycleActionBlocked, useCompletionStore } from "./completion-store";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
@@ -154,6 +155,7 @@ const NO_ITEMS: readonly ContextMenuItem[] = [];
 
 function ThreadMenuContent({ target, actions, leadingItems = NO_ITEMS, ...placement }: { target: ThreadMenuTarget; actions: ThreadMenuActions; leadingItems?: readonly ContextMenuItem[] } & ContentPlacement) {
   const thread = useWorkspaceStore((s) => s.threads.find((candidate) => candidate.id === target.threadId));
+  const noProject = useWorkspaceStore((s) => isNoProjectWorkspaceId(s.workspaces, thread?.workspace_id ?? null));
   if (!thread) return null;
   return (
     <DropdownMenuContent sideOffset={4} className="min-w-40" {...placement}>
@@ -163,10 +165,10 @@ function ThreadMenuContent({ target, actions, leadingItems = NO_ITEMS, ...placem
       <CloseThreadItem thread={thread} renaming={actions.renamingThreadId === thread.id} />
       <DropdownMenuSeparator />
       <DropdownMenuItem label="Rename thread" onClick={() => actions.onRename(target)} />
-      <AutoCloseSubmenu thread={thread} />
+      {noProject ? null : <AutoCloseSubmenu thread={thread} />}
       <DropdownMenuSeparator />
-      <CopySubmenu target={target} thread={thread} />
-      <DropdownMenuItem label="Project settings" onClick={() => actions.onOpenProjectSettings(target, thread.workspace_id)} />
+      <CopySubmenu target={target} thread={thread} noProject={noProject} />
+      {noProject ? null : <DropdownMenuItem label="Project settings" onClick={() => actions.onOpenProjectSettings(target, thread.workspace_id)} />}
       <DropdownMenuSeparator />
       <DropdownMenuItem label="Delete" destructive onClick={() => actions.onDelete(target)} />
     </DropdownMenuContent>
@@ -228,18 +230,20 @@ function AutoCloseSubmenu({ thread }: { thread: Thread }) {
   );
 }
 
-function CopySubmenu({ target, thread }: { target: ThreadMenuTarget; thread: Thread }) {
+function CopySubmenu({ target, thread, noProject }: { target: ThreadMenuTarget; thread: Thread; noProject: boolean }) {
   const branch = isDetachedCheckout(thread) ? null : thread.branch;
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger label="Copy" />
       <DropdownMenuSubContent className="min-w-32">
         <DropdownMenuItem label="Path" onClick={() => void navigator.clipboard.writeText(target.worktreePath ?? target.workspacePath)} />
-        <DropdownMenuItem
-          label="Branch"
-          disabledReason={branch === null ? "No branch" : null}
-          onClick={() => { if (branch !== null) void navigator.clipboard.writeText(branch); }}
-        />
+        {noProject ? null : (
+          <DropdownMenuItem
+            label="Branch"
+            disabledReason={branch === null ? "No branch" : null}
+            onClick={() => { if (branch !== null) void navigator.clipboard.writeText(branch); }}
+          />
+        )}
         <DropdownMenuItem label="Thread ID" onClick={() => void navigator.clipboard.writeText(target.threadId)} />
       </DropdownMenuSubContent>
     </DropdownMenuSub>

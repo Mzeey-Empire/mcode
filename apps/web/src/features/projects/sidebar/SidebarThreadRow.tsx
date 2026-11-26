@@ -25,6 +25,7 @@ import { draftHasNoSendableContent, useComposerDraftStore } from "@/stores/compo
 import type { Thread, Workspace } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { selectThreadIndex } from "../state/thread-index";
+import { isNoProjectWorkspace } from "../state/project-workspaces";
 import { IDLE_CLEANUP_RETRY, useRowLifecycleStore } from "./row-lifecycle-store";
 import type { SidebarItem, ThreadTreeLine } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
@@ -111,6 +112,7 @@ function ThreadRow({ thread, workspace, depth, treeLine, showProject, ctx }: { t
     <ThreadRowVisual
       {...handlers}
       workspaceName={workspace?.name ?? ""}
+      noProject={isNoProjectWorkspace(workspace)}
       thread={thread}
       depth={depth}
       treeLine={treeLine}
@@ -185,6 +187,7 @@ interface ThreadRowLifecycleActions {
 
 interface ThreadRowVisualProps {
   workspaceName: string;
+  noProject: boolean;
   thread: WorkspaceThread;
   depth: number;
   treeLine: ThreadTreeLine;
@@ -353,7 +356,7 @@ function ThreadRowVisual(props: ThreadRowVisualProps) {
       {variant === "grouped" && <GroupedThreadRowBody {...props} revealed={revealed} />}
     </ThreadRowSurface>
   );
-  return <ThreadRowPreview isEditing={props.isEditing} row={row} workspaceName={props.workspaceName} thread={thread} />;
+  return <ThreadRowPreview isEditing={props.isEditing} row={row} workspaceName={props.workspaceName} noProject={props.noProject} thread={thread} />;
 }
 
 type ThreadRowBodyProps = ThreadRowVisualProps & { revealed: boolean };
@@ -373,13 +376,14 @@ function FlatThreadRowBody(props: ThreadRowBodyProps) {
           workspaceId={thread.workspace_id}
           name={props.workspaceName}
           size={16}
+          noProject={props.noProject}
           className={presentation.titleTone === "receded" ? RECEDED_BADGE_CLASS : undefined}
         />
         <span className={cn("text-fade min-w-0 flex-1", presentation.scaffoldDim)}>{props.workspaceName}</span>
         <ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={narrow} fallback={<ThreadRowTime thread={thread} />} />} />
       </div>
       <ThreadRowTitleLine {...props} className="mt-2" />
-      <ThreadRowMetaLine thread={thread} presentation={presentation} chip={<ThreadPullRequestChip thread={thread} />} />
+      <ThreadRowMetaLine thread={thread} presentation={presentation} noProject={props.noProject} chip={<ThreadPullRequestChip thread={thread} />} />
     </div>
   );
 }
@@ -397,6 +401,7 @@ function GroupedThreadRowBody(props: ThreadRowBodyProps) {
       <ThreadRowMetaLine
         thread={thread}
         presentation={presentation}
+        noProject={props.noProject}
         chip={<ThreadPullRequestChip thread={thread} />}
         trailing={<ThreadRowTrailingSlot {...props} status={<ThreadRowStatus {...props} iconOnly={statusIconOnly} fallback={<ThreadRowTime thread={thread} />} />} />}
       />
@@ -404,14 +409,14 @@ function GroupedThreadRowBody(props: ThreadRowBodyProps) {
   );
 }
 
-function ThreadRowMetaLine({ thread, presentation, chip, trailing }: Pick<ThreadRowVisualProps, "thread" | "presentation"> & { chip: React.ReactNode; trailing?: React.ReactNode }) {
+function ThreadRowMetaLine({ thread, presentation, noProject, chip, trailing }: Pick<ThreadRowVisualProps, "thread" | "presentation" | "noProject"> & { chip: React.ReactNode; trailing?: React.ReactNode }) {
   return (
     // A scaffold row dims its content but never its status, so the dim skips the trailing slot.
     // The PR chip sits before the status so every row's status and actions end at the provider mark.
     <div data-testid="thread-line-branch" className="mt-0.5 flex h-4 min-w-0 items-center gap-1 text-caption text-muted">
       <div className={cn("flex min-w-0 flex-1 items-center gap-1", presentation.scaffoldDim)}>
-        <ThreadModeIcon thread={thread} stale={presentation.isStaleWorktree} />
-        <ThreadRowBranch thread={thread} stale={presentation.isStaleWorktree} />
+        {noProject ? null : <ThreadModeIcon thread={thread} stale={presentation.isStaleWorktree} />}
+        {noProject ? null : <ThreadRowBranch thread={thread} stale={presentation.isStaleWorktree} />}
       </div>
       {/* The chip renders nothing on a row with no PR; empty:hidden then drops its gap. */}
       <div className={cn("flex shrink-0 items-center pl-1 empty:hidden", presentation.scaffoldDim)}>{chip}</div>
@@ -427,7 +432,7 @@ function ClosedThreadRowBody(props: ThreadRowBodyProps) {
   const { thread, presentation, lifecycle } = props;
   return (
     <>
-      {props.showProject && <ProjectIcon workspaceId={thread.workspace_id} name={props.workspaceName} size={16} />}
+      {props.showProject && <ProjectIcon workspaceId={thread.workspace_id} name={props.workspaceName} size={16} noProject={props.noProject} />}
       {props.isEditing
         ? <ThreadRowTitleInput {...props} />
         : (
@@ -992,10 +997,11 @@ function ThreadRowPreview({
   isEditing,
   row,
   workspaceName,
+  noProject,
   thread,
-}: { isEditing: boolean; row: React.ReactElement<React.HTMLAttributes<HTMLElement>>; workspaceName: string; thread: WorkspaceThread }) {
+}: { isEditing: boolean; row: React.ReactElement<React.HTMLAttributes<HTMLElement>>; workspaceName: string; noProject: boolean; thread: WorkspaceThread }) {
   const handle = useContext(ThreadPreviewHandleContext);
-  const payload = useMemo(() => ({ thread, workspaceName }), [thread, workspaceName]);
+  const payload = useMemo(() => ({ thread, workspaceName, noProject }), [thread, workspaceName, noProject]);
   if (isEditing || !handle) return row;
   return (
     <TooltipTrigger

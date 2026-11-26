@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockWorkspace } from "@mcode/contracts/testing";
 import type { Workspace } from "@/transport/types";
@@ -71,5 +71,19 @@ describe("RootView", () => {
 
     expect(screen.getByText("Implement v3")).toBeInTheDocument();
     expect(screen.queryByText("Implement v2")).toBeNull();
+  });
+
+  it("offers New thread without a project as a quick action, and runs it", async () => {
+    mocks.palette.query = "";
+    const begin = vi.fn();
+    registerCommand({ id: "thread.newNoProject", title: "New thread without a project", category: "Thread", handler: begin });
+    registerCommand({ id: "plan.implement", title: "Implement v2", category: "Plan", handler: () => undefined });
+
+    render(<RootView />);
+
+    const quick = screen.getByRole("region", { name: "Quick actions" });
+    expect(within(quick).queryByText("Implement v2")).toBeNull();
+    fireEvent.click(within(quick).getByText("New thread without a project"));
+    await waitFor(() => expect(begin).toHaveBeenCalledTimes(1));
   });
 });

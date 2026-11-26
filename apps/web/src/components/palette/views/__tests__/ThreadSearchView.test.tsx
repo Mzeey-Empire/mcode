@@ -8,7 +8,7 @@ import { threadAttentionStore } from "@/features/thread-attention/thread-attenti
 import type { ThreadStartup } from "@mcode/contracts/thread-startup";
 import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 
-import type { RecentThread } from "@/transport/types";
+import type { RecentThread, Thread } from "@/transport/types";
 
 const hoisted = vi.hoisted(() => ({
   setActiveWorkspace: vi.fn(),
@@ -35,16 +35,37 @@ const thread = createMockThread({
   user_completed_at: "2026-08-12T08:00:00.000Z",
 });
 
+const noProjectWorkspace = createMockWorkspace({
+  id: "ws-none",
+  name: "No project",
+  path: "C:/mcode/no-project/abc",
+  kind: "no_project",
+  is_git_repo: false,
+});
+
+const noProjectThread = createMockThread({
+  id: "thread-none",
+  workspace_id: noProjectWorkspace.id,
+  title: "Sketch a schema",
+  branch: "main",
+  updated_at: new Date().toISOString(),
+});
+
+let searchResults: Thread[] = [thread];
+let searchWorkspaces = [workspace];
+let storeWorkspaces = [workspace];
+let recentResults: RecentThread[] = [];
+
 vi.mock("@/stores/recentThreadsStore", () => ({
   useRecentThreadsStore: (selector: (state: unknown) => unknown) =>
-    selector({ threads: [], loading: false, fetch: vi.fn() }),
+    selector({ threads: recentResults, loading: false, fetch: vi.fn() }),
 }));
 
 vi.mock("@/stores/sidebarSearchStore", () => ({
   useSidebarSearchStore: (selector: (state: unknown) => unknown) =>
     selector({
-      serverResults: [thread],
-      serverWorkspaces: [workspace],
+      serverResults: searchResults,
+      serverWorkspaces: searchWorkspaces,
       isSearching: false,
       searchError: false,
       setQuery: hoisted.setSearchQuery,
@@ -62,7 +83,7 @@ vi.mock("@/stores/sidebarSearchStore", () => ({
 vi.mock("@/features/projects/state/workspaceStore", () => ({
   useWorkspaceStore: (selector: (state: unknown) => unknown) =>
     selector({
-      workspaces: [workspace],
+      workspaces: storeWorkspaces,
       threads: [thread],
       checksById: {},
       pendingStartupByThreadId: {},
@@ -113,6 +134,10 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  searchResults = [thread];
+  searchWorkspaces = [workspace];
+  storeWorkspaces = [workspace];
+  recentResults = [];
   act(() => {
     useSidebarUiStore.setState({ scope: "active" });
     useCommandPaletteStore.getState().open({ intent: "threadSearch" });
@@ -137,6 +162,29 @@ describe("ThreadSearchView", () => {
     expect(screen.getByText("now")).toBeInTheDocument();
     expect(screen.queryByText("quiet-lantern")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Provider, codex")).not.toBeInTheDocument();
+  });
+
+  it("labels a No project result No project, with no branch, never Unknown project", () => {
+    searchResults = [noProjectThread];
+    searchWorkspaces = [noProjectWorkspace];
+    storeWorkspaces = [workspace, noProjectWorkspace];
+
+    render(<Command shouldFilter={false}><ThreadSearchView /></Command>);
+
+    expect(screen.getByLabelText("Project, No project")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown project")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Branch,/)).not.toBeInTheDocument();
+  });
+
+  it("labels a recent No project thread No project, with no branch", () => {
+    useCommandPaletteStore.getState().setQuery("");
+    storeWorkspaces = [workspace, noProjectWorkspace];
+    recentResults = [{ ...noProjectThread, status: "active", workspace_name: noProjectWorkspace.name, workspace_path: noProjectWorkspace.path }];
+
+    render(<Command shouldFilter={false}><ThreadSearchView /></Command>);
+
+    expect(screen.getByLabelText("Project, No project")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Branch,/)).not.toBeInTheDocument();
   });
 
   it("shows the sidebar lane marker for the thread's row state", () => {

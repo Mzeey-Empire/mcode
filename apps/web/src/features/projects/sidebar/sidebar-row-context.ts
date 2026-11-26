@@ -27,6 +27,8 @@ export interface SidebarRowContext {
   onToggleProject(workspaceId: string, section: "recent" | "older"): void;
   onToggleShowMore(workspaceId: string): void;
   onCreateThread(workspaceId: string): void;
+  /** Starts a thread on the No project target, from the No project group's "+". */
+  onCreateNoProjectThread(): void;
   onDeleteProject(workspaceId: string): void;
   onRenameProject(workspace: Workspace): void;
   onInlineEditChange(title: string): void;

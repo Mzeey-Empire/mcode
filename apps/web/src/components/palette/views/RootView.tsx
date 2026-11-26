@@ -31,6 +31,7 @@ const ROOT_HINTS: readonly PaletteHint[] = [
 
 const QUICK_ACTION_IDS = new Set([
   "thread.new",
+  "thread.newNoProject",
   "thread.search",
   "workspace.new",
   "terminal.toggle",

@@ -16,6 +16,7 @@ import { ScopeBar } from "./ScopeBar";
 import { SidebarList } from "./SidebarList";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
 import { useSidebarUiStore, type SidebarScope, type SidebarView } from "./sidebar-ui-store";
+import type { SidebarModel } from "./sidebar-model";
 import { useSidebarModel } from "./use-sidebar-model";
 import { useSidebarMotion } from "./sidebar-motion";
 
@@ -62,6 +63,13 @@ function useWorkspaceLoading(): void {
   useEffect(() => () => useRowLifecycleStore.getState().reset(), []);
 }
 
+/** With no projects, the add-project well fills an empty Active list. In Closed it yields to the "No closed threads" line once any thread exists. */
+function showDropWell(model: SidebarModel, hasProjects: boolean, hasThreads: boolean): boolean {
+  if (hasProjects) return false;
+  const listEmpty = model.items.every((item) => item.kind === "empty" || item.kind === "end-spacer");
+  return listEmpty && (!hasThreads || model.scope === "active");
+}
+
 /**
  * The Projects sidebar: view and scope header, and the one virtual list of derived items, plus the
  * menus and dialogs its rows open.
@@ -72,11 +80,12 @@ export function ProjectSidebar() {
   const shown = useSidebarMotion(model, cause, selectedThreadId);
   const { ctx, overlays } = useProjectTreeMenus();
   const hasProjects = useWorkspaceStore((s) => s.workspaces.some(isProjectWorkspace));
+  const hasThreads = useWorkspaceStore((s) => s.threads.length > 0);
   const error = useWorkspaceStore((s) => s.error);
   useWorkspaceLoading();
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
-      <SidebarListHeader scope={model.scope} showScope={hasProjects} />
+      <SidebarListHeader scope={model.scope} showScope={hasProjects || hasThreads} />
       <CompletionUndoLine onOpen={ctx.onSelectThread} flying={shown.flying} />
       <SidebarList
         items={shown.items}
@@ -85,7 +94,7 @@ export function ProjectSidebar() {
         olderIds={model.olderIds}
         ctx={ctx}
         flip={cause === "push"}
-        overlay={hasProjects ? null : <div className="absolute inset-y-0 right-1.5 left-0"><ProjectDropWell /></div>}
+        overlay={showDropWell(model, hasProjects, hasThreads) ? <div className="absolute inset-y-0 right-1.5 left-0"><ProjectDropWell /></div> : null}
       />
       {error && <p className="px-1.5 py-1 text-xs text-destructive">{error}</p>}
       {overlays}

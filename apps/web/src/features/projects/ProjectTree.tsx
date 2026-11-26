@@ -214,17 +214,22 @@ function useRowFacts() {
 function useThreadAndDraftActions() {
   const setPrimarySurface = useUiStore((s) => s.setPrimarySurface);
   const beginNewThread = useWorkspaceStore((s) => s.beginNewThread);
+  const beginNoProjectThread = useWorkspaceStore((s) => s.beginNoProjectThread);
   const openThreadDraft = useWorkspaceStore((s) => s.openThreadDraft);
   const discardThreadDraft = useWorkspaceStore((s) => s.discardThreadDraft);
   const createThread = useCallback((workspaceId: string) => {
     setPrimarySurface("chat");
     beginNewThread(workspaceId);
   }, [beginNewThread, setPrimarySurface]);
+  const createNoProjectThread = useCallback(() => {
+    setPrimarySurface("chat");
+    beginNoProjectThread();
+  }, [beginNoProjectThread, setPrimarySurface]);
   const openDraft = useCallback((workspaceId: string, draftId: string) => {
     setPrimarySurface("chat");
     openThreadDraft(workspaceId, draftId);
   }, [openThreadDraft, setPrimarySurface]);
-  return { createThread, openDraft, discardDraft: discardThreadDraft };
+  return { createThread, createNoProjectThread, openDraft, discardDraft: discardThreadDraft };
 }
 
 /**
@@ -265,6 +270,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
     onToggleProject: toggleProject,
     onToggleShowMore: toggleShowMore,
     onCreateThread: actions.createThread,
+    onCreateNoProjectThread: actions.createNoProjectThread,
     onDeleteProject: projects.openDelete,
     onRenameProject: projects.openRename,
     onInlineEditChange: rename.change,
@@ -283,7 +289,7 @@ export function useProjectTreeMenus(): { ctx: SidebarRowContext; overlays: React
   }), [
     worktreeListing, availableProviders,
     rename.inlineEdit, rename.change, rename.commit, rename.cancel,
-    toggleProject, toggleShowMore, actions.createThread, actions.openDraft, actions.discardDraft,
+    toggleProject, toggleShowMore, actions.createThread, actions.createNoProjectThread, actions.openDraft, actions.discardDraft,
     projects.openDelete, projects.openRename, clicks.click, clicks.doubleClick, clicks.select,
     menus.openThreadMenu, menus.openDraftMenu, reopenThread, retryThreadCleanup, threadMenuActions,
   ]);

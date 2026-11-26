@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  NO_PROJECT_GROUP_KEY,
   PROJECT_ROW_CAP,
   deriveSidebarModel,
   reconcileItems,
@@ -23,6 +24,7 @@ function inputs(overrides: Partial<Omit<SidebarInputs, "ui">> & { ui?: Partial<S
   return {
     facts: [],
     projectOrder: ["ws-a", "ws-b"],
+    noProjectWorkspaceIds: new Set(),
     draftsByWorkspace: new Map(),
     needsUserIds: new Set(),
     needsUserEndedAt: new Map(),
@@ -241,6 +243,86 @@ describe("deriveSidebarModel", () => {
     const items = deriveSidebarModel(inputs({ facts: [fact("a")], ui: { view: "threads" } })).items;
 
     expect(threadItem(items, "a")?.treeLine).toBe("none");
+  });
+});
+
+describe("deriveSidebarModel No project group", () => {
+  const hidden = new Set(["ws-h1", "ws-h2"]);
+  const noProjectInputs = (overrides: Parameters<typeof inputs>[0] = {}) => inputs({ noProjectWorkspaceIds: hidden, ...overrides });
+
+  it("lists threads from every hidden workspace under one group above the projects, newest first", () => {
+    const facts = [
+      fact("a", { activityMs: NOW - 500 }),
+      fact("n-old", { workspaceId: "ws-h1", activityMs: NOW - 3000 }),
+      fact("n-new", { workspaceId: "ws-h2", activityMs: NOW - 1000 }),
+    ];
+    const items = deriveSidebarModel(noProjectInputs({ facts })).items;
+
+    expect(keys(items)).toEqual([
+      `project:${NO_PROJECT_GROUP_KEY}`,
+      "thread:n-new",
+      "thread:n-old",
+      "project:ws-a",
+      "thread:a",
+      "project:ws-b",
+      "end-spacer",
+    ]);
+  });
+
+  it("has no group while no thread is in scope, even with a draft waiting", () => {
+    const drafts = new Map([[NO_PROJECT_GROUP_KEY, ["d1"]]]);
+    const open = deriveSidebarModel(noProjectInputs({ facts: [fact("a")], draftsByWorkspace: drafts })).items;
+    const closedOnly = [fact("n-closed", { workspaceId: "ws-h1", completedMs: NOW - 1000 })];
+    const openWithClosedThread = deriveSidebarModel(noProjectInputs({ facts: closedOnly })).items;
+
+    expect(keys(open)).not.toContain(`project:${NO_PROJECT_GROUP_KEY}`);
+    expect(keys(open)).not.toContain("draft:d1");
+    expect(keys(openWithClosedThread)).not.toContain(`project:${NO_PROJECT_GROUP_KEY}`);
+  });
+
+  it("files a No project draft under the group's threads", () => {
+    const facts = [fact("n1", { workspaceId: "ws-h1" })];
+    const items = deriveSidebarModel(noProjectInputs({ facts, draftsByWorkspace: new Map([[NO_PROJECT_GROUP_KEY, ["d1"]]]) })).items;
+
+    expect(keys(items).slice(0, 3)).toEqual([`project:${NO_PROJECT_GROUP_KEY}`, "draft:d1", "thread:n1"]);
+  });
+
+  it("lists closed No project threads under the group in Closed", () => {
+    const facts = [
+      fact("n-closed", { workspaceId: "ws-h1", completedMs: NOW - 1000 }),
+      fact("n-open", { workspaceId: "ws-h1" }),
+      fact("a-closed", { completedMs: NOW - 2000 }),
+    ];
+    const items = deriveSidebarModel(noProjectInputs({ facts, ui: { scope: "completed" } })).items;
+
+    expect(keys(items)).toEqual([`project:${NO_PROJECT_GROUP_KEY}`, "thread:n-closed", "project:ws-a", "thread:a-closed", "end-spacer"]);
+  });
+
+  it("hides the group's rows when it is collapsed but keeps the selected thread under it", () => {
+    const facts = [fact("n1", { workspaceId: "ws-h1", activityMs: NOW - 1000 }), fact("n2", { workspaceId: "ws-h1", activityMs: NOW - 2000 })];
+    const collapsedUi = { collapsedProjects: new Set([NO_PROJECT_GROUP_KEY, "ws-a", "ws-b"]) };
+
+    const items = deriveSidebarModel(noProjectInputs({ facts, selectedThreadId: "n2", ui: collapsedUi })).items;
+
+    expect(items[0]).toMatchObject({ kind: "project", workspaceId: NO_PROJECT_GROUP_KEY, collapsed: true, count: 2 });
+    expect(threadKeys(items)).toEqual(["n2"]);
+  });
+
+  it("mixes No project threads into the Threads view by recency", () => {
+    const facts = [
+      fact("a", { activityMs: NOW - 3000 }),
+      fact("n1", { workspaceId: "ws-h1", activityMs: NOW - 1000 }),
+      fact("b", { workspaceId: "ws-b", activityMs: NOW - 2000 }),
+    ];
+
+    expect(threadKeys(deriveSidebarModel(noProjectInputs({ facts, ui: { view: "threads" } })).items)).toEqual(["n1", "b", "a"]);
+  });
+
+  it("puts an Older No project thread in its own group under the bar, and none above it", () => {
+    const facts = [fact("a"), fact("n-old", { workspaceId: "ws-h1", activityMs: NOW - 20 * DAY })];
+    const items = deriveSidebarModel(noProjectInputs({ facts, ui: { olderOpen: true } })).items;
+
+    expect(keys(items)).toEqual(["project:ws-a", "thread:a", "project:ws-b", "older-bar", `older-project:${NO_PROJECT_GROUP_KEY}`, "thread:n-old", "end-spacer"]);
   });
 });
 
