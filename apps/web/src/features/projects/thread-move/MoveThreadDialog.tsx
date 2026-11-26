@@ -12,6 +12,7 @@ import { useDefaultBranchTarget } from "@/features/conversation/composer/executi
 import { basename } from "@/lib/path";
 import { getTransport } from "@/transport";
 import { rpcFailureMessage } from "@/transport/rpc-failure-message";
+import { useSidebarUiStore } from "../sidebar/sidebar-ui-store";
 import { isNoProjectWorkspace } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
@@ -105,6 +106,8 @@ function useMoveFlow(threadId: string): MoveFlow {
       const result = await getTransport().moveThreadToProject({ threadId, workspaceId: picked.id, target: { kind: "local" } });
       if (result.status === "moved") {
         applyMoved(result.thread);
+        // Only the window that moved the thread opens the project; others keep their layout.
+        useSidebarUiStore.getState().expandProject(result.thread.workspace_id);
         closeMoveThreadDialog();
         return;
       }

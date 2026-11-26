@@ -26,6 +26,8 @@ interface SidebarUiActions {
   /** Opens Older without the rise, for revealing a thread selected from outside the sidebar. */
   openOlder(): void;
   toggleProject(workspaceId: string, section: "recent" | "older"): void;
+  /** Opens a project in the recent list, for revealing a thread the user just placed there. */
+  expandProject(workspaceId: string): void;
   toggleShowMore(workspaceId: string): void;
   freeze(snapshot: FrozenOrder): void;
   unfreeze(): void;
@@ -98,6 +100,10 @@ export const useSidebarUiStore = create<SidebarUiState & SidebarUiActions>()(
         set((state) => section === "older"
           ? { collapsedOlderProjects: toggled(state.collapsedOlderProjects, workspaceId) }
           : { expandedProjects: toggled(state.expandedProjects, workspaceId) }),
+      expandProject: (workspaceId) =>
+        set((state) => state.expandedProjects.has(workspaceId)
+          ? state
+          : { expandedProjects: new Set([...state.expandedProjects, workspaceId]) }),
       toggleShowMore: (workspaceId) => set((state) => ({ showMore: toggled(state.showMore, workspaceId) })),
       freeze: (snapshot) => set({ frozen: snapshot }),
       unfreeze: () => set({ frozen: null }),

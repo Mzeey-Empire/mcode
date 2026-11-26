@@ -16,6 +16,7 @@ import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { useThreadStore } from "@/stores/threadStore";
 import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
 import { pushEmitter } from "@/transport/ws-transport";
+import { useSidebarUiStore } from "../../sidebar/sidebar-ui-store";
 import { useWorkspaceStore } from "../../state/workspaceStore";
 import { MoveThreadDialogHost } from "../MoveThreadDialog";
 import { closeMoveThreadDialog, openMoveThreadDialog } from "../move-thread-store";
@@ -130,6 +131,7 @@ describe("MoveThreadDialog", () => {
     expect(useWorkspaceStore.getState().threads[0]?.workspace_id).toBe(ALPHA.id);
     expect(useWorkspaceStore.getState().activeThreadId).toBe(THREAD.id);
     expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(ALPHA.id);
+    expect(useSidebarUiStore.getState().expandedProjects.has(ALPHA.id)).toBe(true);
   });
 
   it("holds the dialog still while the move runs", async () => {
