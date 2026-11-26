@@ -5,10 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FieldError } from "@/components/ui/field-error";
 import { Switch } from "@/components/ui/switch";
-import { TooltipTrigger } from "@/components/ui/tooltip";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { CrashDumpsState } from "@/transport/desktop-bridge";
-import { PathTooltipRoot, usePathTooltip } from "../PathLine";
 import { SettingRowFrame } from "../Setting";
 import type { SettingRowProps } from "../setting-def";
 
@@ -57,13 +55,13 @@ function DeleteCrashDumpsDialog({ state, error, onDelete, onKeep }: { readonly s
 
 /**
  * The Crash dumps row: a switch, a Restart button once the saved value differs from the one this launch
- * started with, and where the dumps are kept with their size. Switching off while dumps exist offers to delete them.
+ * started with. Switching off while dumps exist offers to delete them, and only that dialog shows their size: the
+ * row never shows the folder path.
  */
 export function CrashDumpsRow({ def, variant }: SettingRowProps) {
   const bridge = crashDumpsBridge();
   const saved = useSettingsStore((s) => s.settings.diagnostics?.crashDumps ?? false);
   const updateSettings = useSettingsStore((s) => s.update);
-  const pathTooltip = usePathTooltip();
   const [state, setState] = useState<CrashDumpsState | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -124,24 +122,15 @@ export function CrashDumpsRow({ def, variant }: SettingRowProps) {
   }
 
   const needsRestart = state !== null && state.enabledAtLaunch !== saved;
-  const status = state && (
-    <span className="mt-1 flex min-w-0 items-baseline gap-3">
-      <span className="shrink-0 text-caption text-muted"><span className="font-mono text-ink">{formatAttachmentByteSize(state.totalBytes)}</span> saved</span>
-      <TooltipTrigger handle={pathTooltip} payload={state.directory} render={
-        <span aria-label={state.directory} className="min-w-0 break-all font-mono text-caption text-muted [font-variant-ligatures:none]">{state.directory}</span>
-      } />
-    </span>
-  );
 
   return (
     <>
-      <SettingRowFrame def={def} variant={variant} hint={<>{def.hint}{status}{loadError ? <LoadError message={loadError} /> : null}</>}>
+      <SettingRowFrame def={def} variant={variant} hint={<>{def.hint}{loadError ? <LoadError message={loadError} /> : null}</>}>
         <div className="flex items-center justify-end gap-3">
           {needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge?.relaunch?.()}>Restart</Button>}
           <Switch aria-label="Crash dumps" checked={saved} onCheckedChange={(value) => void handleCheckedChange(value)} />
         </div>
       </SettingRowFrame>
-      <PathTooltipRoot handle={pathTooltip} />
       {confirmingDelete && state && <DeleteCrashDumpsDialog state={state} error={deleteError} onDelete={() => void handleDelete()} onKeep={handleKeep} />}
     </>
   );
