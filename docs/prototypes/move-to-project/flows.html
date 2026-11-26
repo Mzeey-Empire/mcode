@@ -36,7 +36,7 @@ const FLOWS = [
   { name: "A thread whose fork still uses the folder", steps: [
     ["Move dialog", "Only this thread moves. The files stay for the fork, so nothing is deleted.", "moveAFiles"],
     ["Moved", "The fork stays in No project; the marker says the folder is kept.", "afterAFiles"],
-    ["Next turn", "The agent is told to copy what it needs and leave the originals.", "afterSent"] ] },
+    ["Next turn", "System info tells the agent to copy what it needs and leave the originals. The timeline does not show it.", "afterSent"] ] },
   { name: "Choose where it runs", steps: [
     ["Workspace", "Local, New worktree or Existing worktree.", "moveRunsMenu"],
     ["New worktree", "\"From main\": pick the branch; Start from origin is in its picker.", "moveNewWt"],

@@ -251,17 +251,9 @@
   .ev-card .top { display: flex; align-items: center; gap: 8px; }
   .ev-card .top .grow { flex: 1; min-width: 0; }
   .ev-card .muted { color: var(--muted); }
-  .ev-card details summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; display: flex; align-items: center; gap: 4px; }
-  .ev-card details summary::-webkit-details-marker { display: none; }
-  .ev-card details[open] > summary > .i { transform: rotate(180deg); }
   .ev-card .ev-files { color: var(--ink); font-size: 12px; }
-  .ev-card blockquote { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--background); font-size: 12px; white-space: pre-wrap; }
   .path-line { display: block; margin: 4px 0; }
-  .ev-card blockquote .mono { font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
-  .state-pill { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; font-size: 12px; background: var(--selected); color: var(--muted); margin-left: 6px; }
-  .state-pill.ok { color: var(--success); }
   /* The light --success on the pill's fill is under 4.5:1; this darker green clears it. */
-  [data-theme="light"] .state-pill.ok { color: oklch(45% 0.110 145); }
   .toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--raised); box-shadow: var(--shadow); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; z-index: 35; display: flex; gap: 8px; align-items: center; }
 </style>
 </head>
@@ -564,15 +556,8 @@ function renderMain() {
   return `<section class="main" aria-label="Conversation">${header}${body}${S.ovOpen ? overviewHtml(t) : ""}</section>`;
 }
 
-/* The move marker follows ProviderSwitchMarker: a quiet centred line. A move into an existing project with files adds a card. */
-function handoffNote(ev) {
-  /* The path gets its own line and breaks only after a slash, so a narrow window never splits a folder name. */
-  const path = esc(ev.oldFolder).replaceAll("/", "/<wbr>");
-  /* Another thread still works in the folder, so the agent copies and leaves the originals for it. */
-  const after = ev.heldBy.length ? "Another thread still works in that folder, so copy what you need into this project and leave the originals in place."
-    : `Mcode deletes that folder on ${DEADLINE}. Copy what you need into this project.`;
-  return `Files from earlier in this thread are in<span class="mono path-line">${path}</span>${after}`;
-}
+/* The move marker follows ProviderSwitchMarker: a quiet centred line. A move into an existing project with files adds a card.
+   What the agent is told about the old folder rides with the first turn as system info and stays out of the timeline. */
 /* The folder stays while another thread uses it; only the last thread out starts the 7 days. */
 function keptLine(ev) {
   const files = plural(ev.files.length, "earlier file stays", "earlier files stay");
@@ -586,13 +571,11 @@ function moveMarker(ev) {
   const line = `<div class="ev-line" role="note"><span class="mid">${ic("move", "sm")}${how}</span></div>`;
   if (ev.kind === "new" || !ev.files.length) return `<div class="ev">${line}</div>`;
   const gone = S.sim.expired && !ev.heldBy.length;
-  const state = gone ? `<span class="state-pill ok">Sent</span>` : ev.sent ? `<span class="state-pill ok">Sent to the agent</span>` : `<span class="state-pill">Goes with the next turn</span>`;
   return `<div class="ev">${line}<div class="ev-card">
     <div class="top">${ic(gone ? "trash" : "clock", "sm")}<span class="grow">${gone
       ? `Mcode deleted the old folder on ${DEADLINE}.`
       : keptLine(ev)}</span>${gone ? "" : `<button class="btn ghost sm" data-copy="${esc(ev.oldFolder)}">${ic("copy", "sm")}Copy path</button>`}</div>
     ${gone ? `<div class="muted">Files that were in the old folder</div>` : ""}<div class="ev-files mono">${esc(ev.files.join("  ·  "))}</div>
-    ${gone && !ev.sent ? "" : `<details><summary>${ic("down", "sm")}What the agent is told ${state}</summary><blockquote>${handoffNote(ev)}</blockquote></details>`}
   </div></div>`;
 }
 function moveEventOf(t) { return t.messages.map(m => m.ev).filter(Boolean).at(-1); }

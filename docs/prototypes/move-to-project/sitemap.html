@@ -45,12 +45,12 @@
       <ul class="tree">
         <li><span class="node">Sidebar <span class="pill chg">Changed</span></span><span class="note">The row leaves No project and appears under the project, which expands. Selection stays.</span><a class="go" href="prototype.html#afterA">open ›</a></li>
         <li><span class="node">Header</span><span class="note">project › thread.</span></li>
-        <li><span class="node">Timeline: move marker <span class="pill new">New</span></span><span class="note">Where it moved and how it runs, plus the earlier files, whether the folder is kept, and what the agent is told.</span><a class="go" href="prototype.html#afterAFilesAlone">alone ›</a> <a class="go" href="prototype.html#afterAFiles">shared ›</a></li>
+        <li><span class="node">Timeline: move marker <span class="pill new">New</span></span><span class="note">Where it moved and how it runs, plus the earlier files and whether the folder is kept. What the agent is told is not shown.</span><a class="go" href="prototype.html#afterAFilesAlone">alone ›</a> <a class="go" href="prototype.html#afterAFiles">shared ›</a></li>
         <li><span class="node">New project group</span><a class="go" href="prototype.html#afterB">open ›</a></li>
       </ul></div>
     <div class="col"><h3>Agent and cleanup</h3><div class="sub">Behind the screens.</div>
       <ul class="tree">
-        <li><span class="node">Next turn</span><span class="note">Fresh provider session with a handoff from the thread's saved messages. The earlier-files note rides along once. While another thread uses the folder, the note says to copy and leave the originals.</span><a class="go" href="prototype.html#afterSent">open ›</a></li>
+        <li><span class="node">Next turn</span><span class="note">Fresh provider session with a handoff from the thread's saved messages. The first turn after the move carries a note as system info, not shown in the timeline: where the old folder is, and either when Mcode deletes it or, while another thread uses it, to copy what it needs and leave the originals.</span><a class="go" href="prototype.html#afterSent">open ›</a></li>
         <li><span class="node">Old folder</span><span class="note">Kept while any No project thread uses it. Mcode deletes it, with its hidden workspace, 7 days after the last one leaves.</span><a class="go" href="prototype.html#afterExpired">expired ›</a></li>
         <li><span class="node">New project</span><span class="note">The hidden workspace becomes the project, so the folder is not cleaned up.</span></li>
       </ul></div>
@@ -58,7 +58,7 @@
   <h2>Decided</h2>
   <ol class="decided">
     <li>Both destinations ship in v1: an existing project, or a new project made from the folder.</li>
-    <li>Mcode copies no files into an existing project. The next turn's handoff tells the agent where the old folder is. The note is enough.</li>
+    <li>Mcode copies no files into an existing project. The first turn after the move tells the agent where the old folder is, as system info the user does not see. The note is enough.</li>
     <li>The user picks how the thread runs in an existing project during the move: Local, New worktree or Existing worktree.</li>
     <li>A new project is not a git repo unless the user ticks Start a git repo.</li>
     <li>For a new project, the hidden workspace becomes the project.</li>
