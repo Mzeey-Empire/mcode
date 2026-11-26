@@ -567,16 +567,22 @@ describe("OpenCodeProvider notice dedup", () => {
   });
 
   it("emits oversized resources intact and records an acknowledged automatic denial", async () => {
-    const http = fakeHttp([{ type: "permission.v2.asked", properties: { id: "per_large", sessionID: "ses_1", action: "bash", resources: ["x".repeat(70_000)] } }]);
+    const resources = ["x".repeat(70_000)];
+    const http = fakeHttp([{ type: "permission.v2.asked", properties: { id: "per_large", sessionID: "ses_1", action: "bash", resources } }]);
     const { provider, submitted } = testProvider(http);
-    const requested = vi.fn();
+    const requested = vi.fn<(request: ApprovalRequestEnvelope) => void>();
     const resolved = vi.fn();
     provider.on("approval_request", requested);
     provider.on("approval_resolved", resolved);
     const turning = provider.sendTurn(turnRequest());
-    await vi.waitFor(() => expect(requested.mock.calls[0]?.[0].body.subject).toEqual({
-      kind: "tool", toolName: "bash", preview: JSON.stringify({ action: "bash", resources: ["x".repeat(70_000)] }),
+    await vi.waitFor(() => expect(requested.mock.calls).toHaveLength(1));
+    const body = requested.mock.calls[0]?.[0].body;
+    expect(body).toEqual(expect.objectContaining({
+      subject: { kind: "tool", toolName: "bash", preview: JSON.stringify({ action: "bash", resources }) },
     }));
+    const parsed = ApprovalRequestBodySchema().safeParse(body);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues).toContainEqual(expect.objectContaining({ code: "too_big" }));
     await provider.resolveApproval("per_large", { autoDeny: "too_large" });
     await turning;
     expect(http.replyPermission.mock.calls.map((args) => args.slice(1, 5))).toEqual([["ses_1", "per_large", "reject", "v2"]]);
@@ -590,13 +596,16 @@ describe("OpenCodeProvider notice dedup", () => {
     const http = fakeHttp([{ type: "permission.v2.asked", properties: { id: "per_large", sessionID: "ses_1", action: "bash", resources: ["x".repeat(70_000)] } }]);
     http.replyPermission.mockRejectedValueOnce(new Error("offline"));
     const { provider, submitted } = testProvider(http);
-    const requested = vi.fn();
+    const requested = vi.fn<(request: ApprovalRequestEnvelope) => void>();
     const resolved = vi.fn();
     provider.on("approval_request", requested);
     provider.on("approval_resolved", resolved);
     const request = turnRequest();
     const turning = provider.sendTurn(request);
     await vi.waitFor(() => expect(requested.mock.calls).toHaveLength(1));
+    const parsed = ApprovalRequestBodySchema().safeParse(requested.mock.calls[0]?.[0].body);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues).toContainEqual(expect.objectContaining({ code: "too_big" }));
     const result = await provider.resolveApproval("per_large", { autoDeny: "too_large" });
     if (result.status !== "resolved") await provider.stopSession(request.sessionId);
     await turning;

@@ -1,25 +1,36 @@
 import { describe, expect, it, vi } from "vitest";
 import { SessionRuntime, type ProtocolAdapter } from "../session-runtime.js";
 import { diag } from "@mcode/shared/diagnostics";
-import type { ProviderSessionOccupancyPort } from "../../host-ports.js";
+import type { ProviderSessionKey, ProviderSessionOccupancyPort } from "../../host-ports.js";
+
+function occupancyKeyId(key: ProviderSessionKey): string {
+  return JSON.stringify([key.providerId, key.threadId]);
+}
 
 function epochOccupancy() {
-  const records = new Map<string, { epoch: number; open: boolean }>();
+  const records = new Map<string, { epoch: number; lastActivityAt: number | null }>();
+  let nextEpoch = 1;
   const occupancy: ProviderSessionOccupancyPort = {
     openSession(key) {
-      const id = JSON.stringify([key.providerId, key.threadId]);
-      const previous = records.get(id);
-      if (previous?.open) return previous.epoch;
-      const epoch = (previous?.epoch ?? 0) + 1;
-      records.set(id, { epoch, open: true });
+      const id = occupancyKeyId(key);
+      const current = records.get(id);
+      if (current) return current.epoch;
+      const epoch = nextEpoch++;
+      records.set(id, { epoch, lastActivityAt: null });
       return epoch;
     },
     closeSession(key, epoch) {
-      const record = records.get(JSON.stringify([key.providerId, key.threadId]));
-      if (record?.epoch === epoch) record.open = false;
+      const id = occupancyKeyId(key);
+      if (records.get(id)?.epoch === epoch) records.delete(id);
     },
-    nativeChanged: () => {},
-    read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }),
+    nativeChanged(key) {
+      const record = records.get(occupancyKeyId(key));
+      if (record) record.lastActivityAt = Date.now();
+    },
+    read(key) {
+      const record = records.get(occupancyKeyId(key));
+      return { held: false, lastActivityAt: record?.lastActivityAt ?? null, lastUserTurnAt: null };
+    },
   };
   return { records, occupancy };
 }
@@ -27,13 +38,8 @@ function epochOccupancy() {
 describe("SessionRuntime", () => {
   it("replays an 80 minute turn, background work, and TTL after task completion", async () => {
     vi.useFakeTimers({ now: 0 });
-    let lastActivityAt: number | null = null;
-    const occupancy = {
-      openSession: () => 1,
-      closeSession: () => { lastActivityAt = null; },
-      nativeChanged: () => { lastActivityAt = Date.now(); },
-      read: () => ({ held: false, lastActivityAt, lastUserTurnAt: null }),
-    } satisfies ProviderSessionOccupancyPort;
+    const key = { providerId: "claude", threadId: "thread" };
+    const { records, occupancy } = epochOccupancy();
     const state = { busy: true, tasks: [{ taskId: "bench", label: "Benchmark", startedAt: 0 }] };
     const runtime = new SessionRuntime({
       spawn: async () => ({ state, pids: [] }),
@@ -43,22 +49,23 @@ describe("SessionRuntime", () => {
       close: () => {},
       isStale: () => false,
     }, {
-      providerId: "claude", occupancy, idleTtlMs: 600_000,
+      providerId: key.providerId, occupancy, idleTtlMs: 600_000,
       jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} },
       envService: { getEnv: () => ({}) },
     });
     try {
-      await runtime.acquire({ sessionId: "session", threadId: "thread", cwd: ".", permissionMode: "default" });
+      await runtime.acquire({ sessionId: "session", threadId: key.threadId, cwd: ".", permissionMode: "default" });
       await vi.advanceTimersByTimeAsync(80 * 60_000);
       state.busy = false;
       await vi.advanceTimersByTimeAsync(60_000);
       expect(runtime.size).toBe(1);
       state.tasks = [];
-      occupancy.nativeChanged();
+      occupancy.nativeChanged(key);
       await vi.advanceTimersByTimeAsync(600_000);
       expect(runtime.size).toBe(1);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(runtime.size).toBe(0);
+      expect(records.get(occupancyKeyId(key))).toBeUndefined();
     } finally {
       await runtime.shutdown();
       vi.useRealTimers();
@@ -67,6 +74,7 @@ describe("SessionRuntime", () => {
 
   it("closes occupancy for a spawn that finishes between a stop request and its teardown", async () => {
     const { records, occupancy } = epochOccupancy();
+    const openSession = vi.spyOn(occupancy, "openSession");
     let finishSpawn!: (result: { state: string; pids: number[] }) => void;
     const spawned = new Promise<{ state: string; pids: number[] }>((resolve) => { finishSpawn = resolve; });
     let spawnCalled!: () => void;
@@ -84,7 +92,9 @@ describe("SessionRuntime", () => {
       finishSpawn({ state: "racing", pids: [] });
       const stopping = runtime.stop("racing");
       await Promise.allSettled([acquiring, stopping]);
-      expect(records.get(JSON.stringify(["test", "thread"]))).toEqual({ epoch: 1, open: false });
+      const key = { providerId: "test", threadId: "thread" };
+      expect(openSession.mock.calls).toEqual([[key]]);
+      expect(records.has(occupancyKeyId(key))).toBe(false);
     } finally {
       await runtime.shutdown();
     }
@@ -111,19 +121,19 @@ describe("SessionRuntime", () => {
       envService: { getEnv: () => ({}) },
     });
     const request = { threadId: "thread", cwd: ".", permissionMode: "default" };
-    const keyId = JSON.stringify(["test", "thread"]);
+    const keyId = occupancyKeyId({ providerId: "test", threadId: "thread" });
     try {
       await runtime.acquire({ ...request, sessionId: "old" });
       const stopping = runtime.stop("old");
       await closing;
-      expect(records.get(keyId)?.open).toBe(false);
+      expect(records.has(keyId)).toBe(false);
       await runtime.acquire({ ...request, sessionId: "replacement" });
       const lateStop = runtime.stop("old");
       releaseClose();
       await Promise.all([stopping, lateStop]);
-      expect(records.get(keyId)?.open).toBe(true);
+      expect(records.has(keyId)).toBe(true);
       await runtime.stop("replacement");
-      expect(records.get(keyId)?.open).toBe(false);
+      expect(records.has(keyId)).toBe(false);
     } finally {
       releaseClose();
       await runtime.shutdown();

@@ -335,7 +335,7 @@ export async function setupContainer(mcodeDir: string, options: { createDatabase
 
   registerOpenCodeProvider(container, {
     configuration: {
-      cliPath: cursorSettings.provider.cli.opencode?.trim() || "opencode",
+      cliPath: "opencode",
       idleSessionTtlMs: 10 * 60 * 1_000,
     },
     host: container.resolve("ProviderHostPorts"),
