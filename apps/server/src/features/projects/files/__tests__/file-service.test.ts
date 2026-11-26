@@ -303,6 +303,14 @@ describe("FileService viewer", () => {
     await expect(service.changes("workspace-1")).resolves.toEqual({ git: false, entries: [], truncated: false });
   });
 
+  it("reads text without waiting for a Git diff that never settles", async () => {
+    const { root } = fixture();
+    NodeFS.writeFileSync(NodePath.join(root, "file.txt"), "content");
+    const exec = vi.fn((args: string[]) => args[0] === "diff" ? new Promise<never>(() => undefined) : Promise.resolve({ stdout: "" }));
+    const { service } = makeService({ root, exec });
+    await expect(service.read("workspace-1", "file.txt")).resolves.toMatchObject({ kind: "text", content: "content" });
+  });
+
   it("surfaces unexpected Git failures instead of silently removing change bars", async () => {
     const { root } = fixture();
     NodeFS.writeFileSync(NodePath.join(root, "file.txt"), "content");
