@@ -23,6 +23,7 @@ vi.mock("@/features/conversation", async (importOriginal) => ({
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "../../state/workspaceStore";
+import { NO_PROJECT_GROUP_KEY } from "../sidebar-model";
 import { useSidebarUiStore } from "../sidebar-ui-store";
 import { useCompletionStore } from "../completion-store";
 import { ProjectSidebar } from "../ProjectSidebar";
@@ -31,11 +32,11 @@ import { threadAttentionStore } from "@/features/thread-attention/thread-attenti
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
 const WITH_PR = [createMockThreadPullRequest({ number: 7, state: "open", url: "https://github.com/o/r/pull/7" })];
 
-function seedThread(overrides: Partial<Thread>): void {
+function seedThread(overrides: Partial<Thread>, workspace = WORKSPACE): void {
   useWorkspaceStore.setState({
-    workspaces: [WORKSPACE],
-    threads: [createMockThread({ id: "t1", workspace_id: "ws-1", title: "Menu thread", mode: "worktree", branch: "feat/menu", checkout_state: "named", pull_requests: WITH_PR, last_activity_at: new Date().toISOString(), ...overrides })],
-    activeWorkspaceId: "ws-1",
+    workspaces: [workspace],
+    threads: [createMockThread({ id: "t1", workspace_id: workspace.id, title: "Menu thread", mode: "worktree", branch: "feat/menu", checkout_state: "named", pull_requests: WITH_PR, last_activity_at: new Date().toISOString(), ...overrides })],
+    activeWorkspaceId: workspace.id,
     activeThreadId: null,
     loadWorkspaces: vi.fn().mockResolvedValue(undefined),
   });
@@ -191,5 +192,20 @@ describe("SidebarList thread menu", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Close thread" }));
 
     expect(mockTransport.completeThread).toHaveBeenCalledWith("t1", expect.any(Number));
+  });
+
+  it("disables Move to project while a No project thread is waiting on background work", async () => {
+    const workspace = createMockWorkspace({ id: "no-project", name: "No project", kind: "no_project", is_git_repo: false });
+    seedThread({ mode: "direct", pull_requests: [] }, workspace);
+    useSidebarUiStore.setState({ expandedProjects: new Set([NO_PROJECT_GROUP_KEY]) });
+    act(() => threadAttentionStore.getState().apply(createMockThreadAttention({
+      threadId: "t1",
+      descendants: "running",
+    })));
+    await openThreadMenu();
+
+    const move = await screen.findByRole("menuitem", { name: /^Move to project…/ });
+    expect(move).toHaveAttribute("aria-disabled", "true");
+    expect(move).toHaveAccessibleDescription("Work is still running in the background");
   });
 });

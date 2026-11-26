@@ -179,6 +179,7 @@ describe("MoveThreadDialog", () => {
   it.each<[RefusedMove, string]>([
     [{ status: "busy", reason: "running" }, "This thread is running."],
     [{ status: "busy", reason: "needs-approval" }, "This thread needs approval."],
+    [{ status: "busy", reason: "background" }, "This thread has work running in the background."],
   ])("shows %j as the failed state with its cause", async (refusal, cause) => {
     vi.mocked(mockTransport.moveThreadToProject).mockResolvedValue(refusal);
     const user = await openDialog();
@@ -190,6 +191,7 @@ describe("MoveThreadDialog", () => {
     expect(alert).toHaveTextContent(cause);
     expect(alert).toHaveTextContent("Nothing changed: the thread is still in No project.");
     expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+    expect(useWorkspaceStore.getState().threads[0]?.workspace_id).toBe(HIDDEN.id);
   });
 
   it("asks for another project when the chosen one is gone, instead of retrying it", async () => {

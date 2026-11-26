@@ -36,9 +36,16 @@ const NOTHING_CHANGED = "Nothing changed: the thread is still in No project.";
 function describeRefusal(result: Exclude<ThreadMoveResult, { status: "moved" }>): MoveFailure {
   switch (result.status) {
     case "busy":
-      return result.reason === "running"
-        ? { detail: `This thread is running. ${NOTHING_CHANGED} You can move it once it stops.`, raw: null, retryable: true }
-        : { detail: `This thread needs approval. ${NOTHING_CHANGED} You can move it once you answer it.`, raw: null, retryable: true };
+      switch (result.reason) {
+        case "running":
+          return { detail: `This thread is running. ${NOTHING_CHANGED} You can move it once it stops.`, raw: null, retryable: true };
+        case "needs-approval":
+          return { detail: `This thread needs approval. ${NOTHING_CHANGED} You can move it once you answer it.`, raw: null, retryable: true };
+        case "background":
+          return { detail: `This thread has work running in the background. ${NOTHING_CHANGED} You can move it once that work stops.`, raw: null, retryable: true };
+        default:
+          throw new Error(`Unhandled move block reason: ${result.reason satisfies never}`);
+      }
     case "destination-missing":
       return { detail: `That project is no longer in Mcode. ${NOTHING_CHANGED} Choose another project.`, raw: null, retryable: false };
     case "not-no-project":

@@ -196,7 +196,8 @@ function CloseThreadItem({ thread, renaming }: { thread: WorkspaceThread; renami
 function MoveToProjectItem({ thread }: { thread: WorkspaceThread }) {
   const activity = useThreadActivity(thread.id, { preparing: thread.clientPreparing === true, createFailed: thread.clientError != null });
   const rowState = useThreadRowState(thread.id, thread.clientPreparing === true, thread.clientError != null);
-  const block = moveBlock(activity.turnRunning, rowState.kind === "needs-you" && rowState.label === "Approval required");
+  const awaitingApproval = rowState.kind === "needs-you" && rowState.label === "Approval required";
+  const block = moveBlock(activity.turnRunning, awaitingApproval, rowState.kind === "waiting");
   const reason = block ? MOVE_BLOCK_REASON[block] : undefined;
   return (
     <DropdownMenuItem
@@ -209,9 +210,10 @@ function MoveToProjectItem({ thread }: { thread: WorkspaceThread }) {
   );
 }
 
-function moveBlock(running: boolean, awaitingApproval: boolean): MoveBlock | null {
+function moveBlock(running: boolean, awaitingApproval: boolean, backgroundRunning: boolean): MoveBlock | null {
   if (awaitingApproval) return "needs-approval";
-  return running ? "running" : null;
+  if (running) return "running";
+  return backgroundRunning ? "background" : null;
 }
 
 function closeThread(threadId: string): void {

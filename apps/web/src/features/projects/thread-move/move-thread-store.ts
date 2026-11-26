@@ -15,13 +15,14 @@ export function closeMoveThreadDialog(): void {
   useMoveThreadStore.setState({ threadId: null });
 }
 
-/** What keeps a thread from moving right now. The server enforces both, so the menu only explains them. */
-export type MoveBlock = "running" | "needs-approval";
+/** Why the thread menu blocks a move. */
+export type MoveBlock = "running" | "needs-approval" | "background";
 
 /** The menu's second line for a thread that cannot move yet. */
 export const MOVE_BLOCK_REASON: Readonly<Record<MoveBlock, string>> = {
   running: "This thread is running",
   "needs-approval": "This thread needs approval",
+  background: "Work is still running in the background",
 };
 
 /**
