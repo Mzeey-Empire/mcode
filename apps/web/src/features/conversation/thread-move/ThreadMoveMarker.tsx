@@ -9,11 +9,12 @@ export function ThreadMoveMarker({ threadMove }: { readonly threadMove: ThreadMo
   return (
     <div className="flex items-center gap-3 py-2" role="note" aria-label={`Moved to ${threadMove.projectName} · Local`}>
       <div className="h-px flex-1 bg-border" aria-hidden="true" />
-      <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted">
-        <FolderInput size={12} aria-hidden="true" />
-        <span>
-          Moved to <span className="font-medium text-ink">{threadMove.projectName}</span> · Local
-        </span>
+      <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-xs text-muted">
+        <FolderInput size={12} className="shrink-0" aria-hidden="true" />
+        <span className="shrink-0">Moved to</span>{" "}
+        {/* A project name can outgrow a narrow timeline, so only the name gives way. */}
+        <span className="min-w-0 overflow-hidden font-medium text-ink text-fade">{threadMove.projectName}</span>{" "}
+        <span className="shrink-0">· Local</span>
       </div>
       <div className="h-px flex-1 bg-border" aria-hidden="true" />
     </div>
