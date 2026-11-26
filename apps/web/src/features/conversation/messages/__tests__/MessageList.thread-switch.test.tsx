@@ -1,4 +1,4 @@
-import { createMockMessage } from "@mcode/contracts/testing";
+import { createMockMessage, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
 import { render, act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { StrictMode, useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -45,6 +45,7 @@ let hasMoreMessagesValue = false;
 let hasNewerMessagesValue = false;
 let runningThreadIdsValue = new Set<string>();
 let recordOverridesByThread: Record<string, Record<string, unknown>> = {};
+let workspaceRowsValue: { workspaces: unknown[]; threads: unknown[] } = { workspaces: [], threads: [] };
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 
 function buildMockRecord(threadId = currentThreadIdValue) {
@@ -153,7 +154,7 @@ vi.mock("@/stores/thread-selectors", () => ({
 
 vi.mock("@/features/projects/state/workspaceStore", () => ({
   useWorkspaceStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ activeThreadId: activeThreadIdValue, threads: [] }),
+    selector({ activeThreadId: activeThreadIdValue, ...workspaceRowsValue }),
   ),
 }));
 
@@ -222,6 +223,7 @@ beforeEach(() => {
   currentThreadIdValue = "thread-A";
   runningThreadIdsValue = new Set();
   recordOverridesByThread = {};
+  workspaceRowsValue = { workspaces: [], threads: [] };
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
     return Number.parseFloat(this.firstElementChild instanceof HTMLElement ? this.firstElementChild.style.height : "0") || 800;
   });
@@ -1146,6 +1148,25 @@ describe("MessageList thread switch", () => {
 
     expect(getByTestId("turn-changes-bar")).toHaveTextContent("child-only.ts");
     expect(queryByText("parent-only.ts")).toBeNull();
+  });
+
+  it("leaves out the changes bar in a No project thread, which has no Review to open", () => {
+    workspaceRowsValue = {
+      workspaces: [createMockWorkspace({ id: "ws-hidden", kind: "no_project", is_git_repo: false })],
+      threads: [createMockThread({ id: "thread-A", workspace_id: "ws-hidden" })],
+    };
+    recordOverridesByThread = {
+      "thread-A": {
+        messages: [{ id: "answer", sequence: 1, thread_id: "thread-A", role: "assistant", content: "Wrote it" }],
+        persistedFilesChanged: { answer: ["notes.md"] },
+        latestTurnWithChanges: "answer",
+      },
+    };
+
+    const { queryByTestId, getByText } = render(<MessageList displayThreadId="thread-A" />);
+
+    expect(getByText("Wrote it")).toBeInTheDocument();
+    expect(queryByTestId("turn-changes-bar")).toBeNull();
   });
 
   it("renders leading transcript content before the queued user message", () => {

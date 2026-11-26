@@ -7,3 +7,8 @@ import type { Thread } from "@/transport";
 export type OverviewSubject =
   | { readonly kind: "new-thread"; readonly workspaceId: string; readonly readOnly?: boolean }
   | { readonly kind: "thread"; readonly thread: Thread };
+
+/** The workspace the subject's thread runs in, or will run in. */
+export function overviewSubjectWorkspaceId(subject: OverviewSubject): string {
+  return subject.kind === "thread" ? subject.thread.workspace_id : subject.workspaceId;
+}

@@ -485,6 +485,24 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     expect(screen.queryByRole("group", { name: "Workspace" })).not.toBeInTheDocument();
   });
 
+  it("gives a preparing No project thread no card and no reserve until its folder exists", async () => {
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.testid === "thread-preparing-shell" ? new DOMRect(0, 0, 1400, 900) : realRect.call(this);
+    });
+    onTestFinished(() => { vi.restoreAllMocks(); });
+    const hidden = createMockWorkspace({ id: "ws-hidden", name: "No project", kind: "no_project", is_git_repo: false });
+    const preparing = { ...makeThread({ workspace_id: hidden.id }), clientPreparing: true };
+    setupWorkspaceMock({ ...defaultWorkspaceState({ threads: [preparing] }), workspaces: [hidden], activeWorkspaceId: hidden.id });
+
+    await renderChatView();
+
+    const shell = screen.getByTestId("thread-preparing-shell");
+    expect(within(shell).queryByTestId("thread-overview-card")).toBeNull();
+    expect(within(shell).queryByTestId("header-overview-toggle")).toBeNull();
+    expect(within(shell).getByTestId("chat-composer-stage")).not.toHaveStyle({ paddingRight: OVERVIEW_CANVAS_RESERVE_CSS });
+  });
+
   it("keeps an empty selected thread free of starter suggestions", async () => {
     await renderChatView();
 
@@ -572,6 +590,20 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(breadcrumb).toHaveTextContent(/Test Project\s*\/\s*My Thread$/);
     expect(within(breadcrumb).getByTestId("chat-header-title")).toHaveTextContent("My Thread");
+  });
+
+  it("names a No project thread with plain text and the inbox mark, never a project link", async () => {
+    const hidden = createMockWorkspace({ id: "ws-hidden", name: "No project", kind: "no_project", is_git_repo: false });
+    const thread = makeThread({ workspace_id: hidden.id });
+    setupWorkspaceMock({ ...defaultWorkspaceState({ threads: [thread], activeThreadId: thread.id }), workspaces: [hidden], activeWorkspaceId: hidden.id });
+
+    await renderChatView();
+
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumb).toHaveTextContent(/No project\s*\/\s*My Thread$/);
+    expect(within(breadcrumb).getByTestId("no-project-mark")).toBeInTheDocument();
+    expect(within(breadcrumb).queryByRole("link")).toBeNull();
+    expect(within(breadcrumb).getAllByRole("button")).toEqual([within(breadcrumb).getByTestId("chat-header-title")]);
   });
 
   it("enters edit mode on double click", async () => {

@@ -54,6 +54,19 @@ describe("PanelEmptyState — scope filter", () => {
   });
 });
 
+describe("PanelEmptyState — No project thread", () => {
+  it("offers no Review and no Project settings, because the folder has no repository or project", () => {
+    render(<PanelEmptyState scope="no-project-thread" openTabs={[]} onOpen={vi.fn()} />);
+    expect(screen.getAllByRole("button").map((button) => button.getAttribute("data-testid"))).toEqual([
+      "panel-card-preview",
+      "panel-card-terminal",
+      "panel-card-files",
+      "panel-card-tasks",
+      "panel-card-subagents",
+    ]);
+  });
+});
+
 describe("PanelEmptyState — cardinality filter", () => {
   it("drops a type once it is open", () => {
     render(

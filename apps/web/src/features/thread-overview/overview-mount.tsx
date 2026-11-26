@@ -1,5 +1,6 @@
 import { Popover, PopoverContent, type PopoverRootChangeEventDetails } from "@/components/ui/popover";
 import { OVERVIEW_CARD_INSET, OVERVIEW_CARD_TOP } from "@/lib/composer-layout";
+import { useIsNoProjectWorkspace } from "@/features/projects/state/workspace-selectors";
 import { useOverviewStore, type OverviewSubjectKey } from "@/stores/overviewStore";
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -8,7 +9,7 @@ import { OverviewEntryStateProviders } from "./overview-entry-state";
 import { useOverviewLayer } from "./overview-layer";
 import type { OverviewPresentationState } from "./overview-presentation";
 import { getOverviewEntries } from "./overview-registry";
-import type { OverviewSubject } from "./overview-subject";
+import { overviewSubjectWorkspaceId, type OverviewSubject } from "./overview-subject";
 import type { ThreadOverviewCiDot } from "./overview-state";
 import { OverviewToggleButton } from "./overview-toggle-button";
 
@@ -73,7 +74,8 @@ export function OverviewMount({ subject, subjectKey, presentation: { dockable, p
   }, [subjectKey]);
   const anchor = useMemo(() => (layer ? dockedCornerAnchor(layer) : toggleRef), [layer]);
 
-  const entries = getOverviewEntries(subject);
+  const noProject = useIsNoProjectWorkspace(overviewSubjectWorkspaceId(subject));
+  const entries = getOverviewEntries(subject, noProject);
   const dockedCard = presentation === "docked" ? (
     <OverviewCard
       subject={subject}

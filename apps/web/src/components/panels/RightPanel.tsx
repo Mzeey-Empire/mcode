@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, use
 import { useShallow } from "zustand/shallow";
 import type { BrowserTabSet } from "@mcode/contracts/models/browser-tab";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { useIsNoProjectWorkspace } from "@/features/projects/state/workspace-selectors";
 import { useBrowserThreadActing } from "@/features/preview/state/useBrowserActing";
 import { useUiStore } from "@/stores/uiStore";
 import {
@@ -26,7 +27,7 @@ import {
 } from "./ActivityRail";
 import { PanelHeader, PanelHeaderSlotScope, PanelToggleButton, type PanelHeaderElements } from "./shell/PanelHeader";
 import { windowChromeKind } from "@/components/shell/window-chrome";
-import type { PanelScope } from "@/lib/panel-tabs";
+import { resolvePanelScope, type PanelScope } from "@/lib/panel-tabs";
 import { DiffPanel } from "@/components/diff";
 import {
   BROWSER_AUTOMATION_WARM_TARGET_LIMIT,
@@ -975,7 +976,7 @@ export function RightPanel() {
   } = panelState;
   // Plan is creatable only in a thread; threadless the panel runs
   // against the workspace root and offers just Browser/Terminal/Files.
-  const panelScope: PanelScope = activeThreadId ? "thread" : "threadless";
+  const panelScope = resolvePanelScope(activeThreadId, useIsNoProjectWorkspace(activeWorkspaceId));
   // The whole panel record (visibility included) is per-thread, falling back to
   // the workspace record for the threadless shell and uncustomized threads. See
   // ADR-0012.

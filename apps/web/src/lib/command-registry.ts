@@ -1,3 +1,6 @@
+import { isNoProjectWorkspaceId } from "@/features/projects/state/project-workspaces";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+
 /** Definition of a command in the registry. */
 export interface CommandDefinition {
   /** Unique identifier (e.g., "thread.new", "sidebar.toggle"). */
@@ -8,6 +11,8 @@ export interface CommandDefinition {
   category: string;
   /** Function to execute when the command is invoked. */
   handler: () => void;
+  /** In a No project thread, hides the command from the palette and blocks it from keybindings and direct calls. */
+  projectOnly?: boolean;
 }
 
 const commands = new Map<string, CommandDefinition>();
@@ -63,13 +68,22 @@ export function getAllCommands(): CommandDefinition[] {
   return Array.from(commands.values());
 }
 
+/** Returns false only for a projectOnly command in a No project thread. */
+export function isCommandAvailable(command: CommandDefinition, inNoProjectThread: boolean): boolean {
+  return !(command.projectOnly && inNoProjectThread);
+}
+
 /**
  * Execute a command by ID.
- * Returns true if the command was found and executed, false otherwise.
+ * Returns true if the command was found, available and executed, false otherwise.
  */
 export function executeCommand(id: string): boolean {
   const cmd = commands.get(id);
   if (!cmd) return false;
+  if (cmd.projectOnly) {
+    const { workspaces, activeWorkspaceId } = useWorkspaceStore.getState();
+    if (!isCommandAvailable(cmd, isNoProjectWorkspaceId(workspaces, activeWorkspaceId))) return false;
+  }
   cmd.handler();
   return true;
 }

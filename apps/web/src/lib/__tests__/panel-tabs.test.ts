@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PANEL_TAB_TYPES, shownTabTypes } from "../panel-tabs";
+import { PANEL_TAB_TYPES, resolvePanelScope, shownTabTypes } from "../panel-tabs";
 import { rightPanelToolInstance, type RightPanelTool } from "@/stores/diffStore";
 
 /** Pull just the ids out of a result for terse assertions. */
@@ -45,6 +45,31 @@ describe("shownTabTypes — scope filter", () => {
     ]);
   });
 
+});
+
+describe("resolvePanelScope", () => {
+  it("names the scope from the thread and the workspace kind", () => {
+    expect(resolvePanelScope(null, false)).toBe("threadless");
+    expect(resolvePanelScope("thread-1", false)).toBe("thread");
+    expect(resolvePanelScope("thread-1", true)).toBe("no-project-thread");
+  });
+});
+
+describe("shownTabTypes — No project thread", () => {
+  it("keeps the thread tools and drops the git and project-settings ones", () => {
+    expect(ids(shownTabTypes("no-project-thread", []))).toEqual([
+      "preview",
+      "terminal",
+      "files",
+      "tasks",
+      "subagents",
+    ]);
+  });
+
+  it("changes nothing for a project thread", () => {
+    expect(ids(shownTabTypes("thread", []))).toContain("changes");
+    expect(ids(shownTabTypes("thread", []))).toContain("environment");
+  });
 });
 
 describe("shownTabTypes — cardinality filter", () => {

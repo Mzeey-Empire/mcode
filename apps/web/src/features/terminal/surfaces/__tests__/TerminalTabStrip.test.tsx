@@ -1,4 +1,6 @@
+import { createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -41,9 +43,25 @@ function renderStrip(threadId: string | null, terminals: readonly TerminalInstan
   );
 }
 
+describe("TerminalTabStrip in a No project thread", () => {
+  it("opens a shell straight from + without loading Project Actions", async () => {
+    const user = userEvent.setup();
+    useWorkspaceStore.setState({ workspaces: [createMockWorkspace({ id: "workspace-1", kind: "no_project", is_git_repo: false })] });
+    transport.readWorkspaceEnvironment.mockReturnValue(new Promise(() => {}));
+    renderStrip("thread-1");
+
+    await user.click(screen.getByTestId("panel-tab-add"));
+
+    expect(createTerminalForScope).toHaveBeenCalledWith("scope-1");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(transport.readWorkspaceEnvironment).not.toHaveBeenCalled();
+  });
+});
+
 describe("TerminalTabStrip", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useWorkspaceStore.setState({ workspaces: [] });
     transport.listWorkspaceActionRuns.mockResolvedValue([]);
     transport.readWorkspaceEnvironment.mockResolvedValue({
       document: { version: "0.0.1", actions: [] },

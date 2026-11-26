@@ -6,7 +6,7 @@ import { clearCommands, registerCommand } from "@/lib/command-registry";
 
 const mocks = vi.hoisted(() => ({
   palette: { query: ">", close: () => undefined },
-  workspace: { workspaces: [] as Workspace[], setActiveWorkspace: () => undefined, setActiveThread: () => undefined },
+  workspace: { workspaces: [] as Workspace[], activeWorkspaceId: null as string | null, setActiveWorkspace: () => undefined, setActiveThread: () => undefined },
   recent: { threads: [], fetch: () => undefined },
 }));
 
@@ -42,6 +42,7 @@ describe("RootView", () => {
     cleanup();
     clearCommands();
     mocks.workspace.workspaces = [];
+    mocks.workspace.activeWorkspaceId = null;
     mocks.palette.query = ">";
   });
 
@@ -57,6 +58,24 @@ describe("RootView", () => {
     const recent = screen.getByRole("region", { name: "Recent Projects" });
     expect(within(recent).getByText("fixture-repo")).toBeInTheDocument();
     expect(within(recent).queryByText("No project")).toBeNull();
+  });
+
+  it("leaves out a project-only command while a No project thread is active", () => {
+    mocks.workspace.workspaces = [
+      createMockWorkspace({ id: "ws-project", name: "mcode" }),
+      createMockWorkspace({ id: "ws-hidden", name: "No project", kind: "no_project", is_git_repo: false }),
+    ];
+    registerCommand({ id: "changes.toggle", title: "Toggle Changes Panel", category: "View", handler: () => undefined, projectOnly: true });
+    registerCommand({ id: "files.toggle", title: "Toggle Files", category: "View", handler: () => undefined });
+
+    mocks.workspace.activeWorkspaceId = "ws-hidden";
+    const { rerender } = render(<RootView />);
+    expect(screen.getByText("Toggle Files")).toBeInTheDocument();
+    expect(screen.queryByText("Toggle Changes Panel")).toBeNull();
+
+    mocks.workspace.activeWorkspaceId = "ws-project";
+    rerender(<RootView />);
+    expect(screen.getByText("Toggle Changes Panel")).toBeInTheDocument();
   });
 
   it("renames an open action when its command is registered again with a new title", () => {

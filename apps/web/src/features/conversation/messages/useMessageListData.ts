@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
+import { useIsNoProjectThread, useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
 import { useThreadStore } from "@/stores/threadStore";
 import { getCanonicalLifecycleTurn, getThreadRuntimePhase, isThreadStopPending } from "@/stores/thread-lifecycle";
 import { getThreadRecord, useThreadRecord } from "../state";
@@ -203,9 +203,11 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const canonicalResponseText = canonicalLifecycleProjection
     ? { streamingText: canonicalLifecycleProjection.streamingText, responseTextIsStreaming: false }
     : { streamingText: canonicalProjection?.streamingText ?? streamingText, responseTextIsStreaming };
+  // A No project folder has no Review tab for the turn changes bar to open, so the bar is left out.
+  const noProject = useIsNoProjectThread(renderedThreadId);
   const persistedFilesChanged = useThreadStore(
     useShallow((state) => {
-      if (!renderedThreadId) return EMPTY_FILES_CHANGED;
+      if (!renderedThreadId || noProject) return EMPTY_FILES_CHANGED;
       const record = getThreadRecord(state.records, renderedThreadId);
       if (record.messages.length === 0) return EMPTY_FILES_CHANGED;
       const filesByMessageId: Record<string, string[]> = {};

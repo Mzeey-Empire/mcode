@@ -3,6 +3,7 @@ import { Button, IconButton } from "@/components/ui/button";
 import { ActionMenuGlyph } from "@/features/projects/actions/ActionRunMenu";
 import { ThreadActionRunMenu, useThreadActionRunHandlers } from "@/features/projects/actions/ThreadActionRunMenu";
 import { useProjectActions } from "@/features/projects/actions/useProjectActions";
+import { useIsNoProjectWorkspace } from "@/features/projects/state/workspace-selectors";
 import { createOverviewEntryState } from "@/features/thread-overview/overview-entry-state";
 import {
   OVERVIEW_ROW_CLASS,
@@ -12,7 +13,7 @@ import {
   ThreadOverviewTooltipButton,
 } from "@/features/thread-overview/overview-row";
 import { useOverviewContext } from "@/features/thread-overview/overview-state";
-import type { OverviewSubject } from "@/features/thread-overview/overview-subject";
+import { overviewSubjectWorkspaceId, type OverviewSubject } from "@/features/thread-overview/overview-subject";
 import { showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
 import { useDiffStore } from "@/stores/diffStore";
@@ -186,6 +187,8 @@ function ThreadProjectSettingsButton() {
 
 /** Project settings shortcut beside the Overview title, for a thread or a new thread. */
 export function OverviewProjectSettingsButton({ subject }: { subject: OverviewSubject }) {
+  const noProject = useIsNoProjectWorkspace(overviewSubjectWorkspaceId(subject));
+  if (noProject) return null;
   return subject.kind === "thread"
     ? <ThreadProjectSettingsButton />
     : <ProjectSettingsButton onOpen={() => openNewThreadProjectSettings(subject.workspaceId)} />;

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { projectWorkspaces } from "@/features/projects/state/project-workspaces";
+import { useIsNoProjectWorkspace } from "@/features/projects/state/workspace-selectors";
 import { useRecentThreadsStore } from "@/stores/recentThreadsStore";
-import { executeCommand, getCommandsSnapshot, subscribeCommands } from "@/lib/command-registry";
+import { executeCommand, getCommandsSnapshot, isCommandAvailable, subscribeCommands } from "@/lib/command-registry";
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import {
@@ -49,6 +50,7 @@ export function RootView() {
   const query = useCommandPaletteStore((s) => s.query);
   const close = useCommandPaletteStore((s) => s.close);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const noProjectThread = useIsNoProjectWorkspace(useWorkspaceStore((s) => s.activeWorkspaceId));
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const setActiveThread = useWorkspaceStore((s) => s.setActiveThread);
 
@@ -70,7 +72,7 @@ export function RootView() {
   const effectiveQuery = actionOnly ? query.slice(1).trimStart() : query;
 
   const groups = useMemo<PaletteGroup[]>(() => {
-    const commands = registered.filter((c) => !HIDDEN_COMMANDS.has(c.id));
+    const commands = registered.filter((c) => !HIDDEN_COMMANDS.has(c.id) && isCommandAvailable(c, noProjectThread));
 
     const visibleCommands = actionOnly || effectiveQuery
       ? commands
@@ -142,7 +144,7 @@ export function RootView() {
     }
 
     return filterCommandPaletteGroups(result, effectiveQuery);
-  }, [effectiveQuery, actionOnly, recentThreads, workspaces, registered]);
+  }, [effectiveQuery, actionOnly, recentThreads, workspaces, noProjectThread, registered]);
 
   const handleSelect = (value: string) => {
     if (value.startsWith("cmd:")) {

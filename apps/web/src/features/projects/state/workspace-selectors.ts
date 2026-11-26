@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { Workspace } from "@mcode/contracts/models/workspace";
 import { useShallow } from "zustand/shallow";
-import { projectWorkspaces } from "./project-workspaces";
+import { isNoProjectWorkspaceId, projectWorkspaces } from "./project-workspaces";
 import { useWorkspaceStore } from "./workspaceStore";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 
@@ -72,4 +72,16 @@ export function useParentThreadExists(parentThreadId: string | null | undefined)
 export function useProjectWorkspaces(): Workspace[] {
   const workspaces = useWorkspaceStore((state) => state.workspaces);
   return useMemo(() => projectWorkspaces(workspaces), [workspaces]);
+}
+
+/** Whether `workspaceId` is a hidden No project row, so project-only surfaces stay out of its threads. False before the row loads. */
+export function useIsNoProjectWorkspace(workspaceId: string | null | undefined): boolean {
+  return useWorkspaceStore((state) => isNoProjectWorkspaceId(state.workspaces, workspaceId ?? null));
+}
+
+/** Whether `threadId` belongs to a hidden No project row. False for an unknown thread or before the row loads. */
+export function useIsNoProjectThread(threadId: string | null | undefined): boolean {
+  return useWorkspaceStore((state) =>
+    isNoProjectWorkspaceId(state.workspaces, getWorkspaceThread(state.threads, threadId)?.workspace_id ?? null),
+  );
 }
