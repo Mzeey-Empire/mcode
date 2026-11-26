@@ -56,7 +56,6 @@ function diffTextOf(file: FileDiffMetadata): string {
   return text;
 }
 
-/** A unified row's index in the diff is the first number of its `data-line-index`. */
 function unifiedIndexOf(row: HTMLElement): number {
   return Number(row.dataset.lineIndex?.split(",")[0]);
 }

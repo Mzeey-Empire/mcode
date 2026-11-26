@@ -29,7 +29,8 @@ export type WorkspaceFileChanges = z.infer<ReturnType<typeof WorkspaceFileChange
 
 /**
  * 1-based inclusive line ranges of one file that changed relative to HEAD, or
- * null when the path is untracked, newly added, or outside a git work tree.
+ * null when nothing changed, the path is untracked or newly added, the work
+ * tree has no HEAD commit, or the workspace is not a git work tree.
  */
 export const FileChangedLinesSchema = lazySchema(() =>
   z.array(z.tuple([z.number().int().positive(), z.number().int().positive()])).nullable(),

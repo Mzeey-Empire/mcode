@@ -56,7 +56,6 @@ export class BrowserSelection {
 /** Replaces the document's selection with the double. Pair with {@link restoreBrowserSelection}. */
 export function installBrowserSelection() {
   const browser = new BrowserSelection();
-  // The double implements only the members the selection code reads.
   vi.spyOn(document, "getSelection").mockReturnValue(browser as unknown as Selection);
   // jsdom has no composed ranges, and the code under test feature-detects them on the prototype.
   Object.defineProperty(Selection.prototype, "getComposedRanges", {
@@ -78,7 +77,6 @@ function rowElement(index: number, lines: readonly string[]) {
   row.dataset.lineIndex = `${index},${index}`;
   row.dataset.lineType = "context";
   const line = lines[index]!;
-  // Pierre wraps tokens in spans, so a row holds several text nodes.
   for (const part of [line.slice(0, 10), line.slice(10)]) {
     const token = document.createElement("span");
     token.textContent = part;

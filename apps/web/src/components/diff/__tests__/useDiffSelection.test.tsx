@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { FileDiff, parseDiffFromFile, type FileDiffMetadata } from "@pierre/diffs";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { useRef } from "react";
@@ -17,7 +16,6 @@ import {
   showRows,
 } from "./pierre-dom";
 
-/** A new file, so every unified row is one line of LINES. */
 function addedFile(): FileDiffMetadata {
   return parseDiffFromFile(
     { name: "a.txt", contents: "" },
@@ -25,7 +23,6 @@ function addedFile(): FileDiffMetadata {
   );
 }
 
-/** What Pierre hands onPostRender: the rendered item's instance. */
 function instanceOf(fileDiff: FileDiffMetadata) {
   const instance = new FileDiff();
   instance.fileDiff = fileDiff;

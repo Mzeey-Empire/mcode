@@ -36,7 +36,6 @@ interface Ends {
   readonly focus: number;
 }
 
-/** One end of the browser's selection as an offset into the text. */
 interface End {
   /** False for a point between rows, which is where an unmounted row leaves one. */
   readonly inRow: boolean;
@@ -45,7 +44,6 @@ interface End {
 
 interface MountedRow {
   readonly element: HTMLElement;
-  /** Zero-based line of the text this row shows. */
   readonly line: number;
 }
 
@@ -108,7 +106,6 @@ function isCaret(anchor: End, focus: End) {
   return anchor.offset === focus.offset && anchor.inRow && focus.inRow;
 }
 
-/** Whether the browser already shows the selection between `anchor` and `focus`. */
 function isDrawn(
   selection: Selection | null,
   range: StaticRange | undefined,
@@ -124,7 +121,6 @@ function isDrawn(
   );
 }
 
-/** Whether an end lies past the mounted rows, so the drawn selection holds only part of it. */
 function isClipped({ anchor, focus }: Ends, mounted: Mounted) {
   return Math.min(anchor, focus) < mounted.start || Math.max(anchor, focus) > mounted.end;
 }

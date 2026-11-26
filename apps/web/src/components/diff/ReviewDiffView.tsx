@@ -228,13 +228,10 @@ function patchCacheVersion(comparisonVersion: string | number, ignoreWhitespace:
 }
 
 interface PatchState {
-  /** Comparison identity without its revision; see useComparisonPatches. */
   readonly comparison: string;
-  /** Comparison identity with its revision; `byPath` and `failed` belong to it. */
   readonly scope: string;
   readonly byPath: Readonly<Record<string, string>>;
   readonly failed: ReadonlySet<string>;
-  /** Patches from earlier revisions of the same comparison, shown until each refetch lands. */
   readonly stale: Readonly<Record<string, string>>;
 }
 
@@ -396,9 +393,7 @@ export function ReviewDiffView({
   // Reusing the parsed object keeps each CodeView item's render target
   // identical across unrelated state changes; a fresh object under the same
   // cacheKey makes pierre's virtualizer commit a diff its layout pass never
-  // prepared. The cache is keyed by comparison, not revision: a refetch that
-  // returns identical patch text keeps its cacheKey, so pierre reuses the
-  // highlighting it already computed instead of starting over.
+  // prepared.
   const diffCache = useRef(new FileDiffCache()).current;
   const fileDiffs = useMemo(() => {
     const out: Record<string, FileDiffMetadata> = {};

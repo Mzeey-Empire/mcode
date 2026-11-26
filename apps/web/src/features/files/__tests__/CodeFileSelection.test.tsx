@@ -11,7 +11,6 @@ const PATH = "src/a.ts";
 const LINES = Array.from({ length: 40 }, (_, i) => `const line${i + 1} = ${i + 1};`);
 const NO_CHANGES: WorkspaceFileChanges = { git: true, truncated: false, entries: [] };
 
-/** The rows the fake virtualizer treats as on screen; the component's range extractor may add more. */
 const visible = vi.hoisted(() => ({ start: 0, end: 9 }));
 
 vi.mock("@/transport", async () => ({ ...(await vi.importActual("@/transport")), getTransport: () => mockTransport }));
@@ -69,7 +68,6 @@ function select(start: { line: number; offset: number }, end: { line: number; of
 async function openFile() {
   useFilesTabsStore.getState().openFile(WORKSPACE, PATH);
   const view = render(<FilesTool workspaceId={WORKSPACE} threadId={null} scopeId={WORKSPACE} />);
-  // The first render loads the file list and then the file; under a loaded test run that can pass the 1 s default.
   const viewport = await screen.findByTestId("code-file-view", undefined, { timeout: 5000 });
   return { viewport, rerender: () => view.rerender(<FilesTool workspaceId={WORKSPACE} threadId={null} scopeId={WORKSPACE} />) };
 }

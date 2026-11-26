@@ -6,7 +6,6 @@ const numbered = (from: number, to: number) =>
   Array.from({ length: to - from + 1 }, (_, index) => `line ${from + index}`);
 
 const OLD_FILE = `${numbered(1, 30).join("\n")}\n`;
-// Line 5 becomes two lines, and lines 16 to 18 go.
 const NEW_FILE = `${[
   ...numbered(1, 4),
   "line 5 changed",

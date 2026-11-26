@@ -16,13 +16,12 @@ export function unifiedDiffText(diff: FileDiffMetadata): string {
   const put = (index: number, line: string | undefined) => {
     if (index >= 0 && index < rows.length) rows[index] = withoutLineEnding(line);
   };
-  // Index into `additionLines` of the first new-file line that no earlier row has used.
-  let additionCursor = 0;
+  let nextAdditionLineIndex = 0;
   let unifiedCursor = 0;
   const fillCollapsed = (until: number) => {
     if (diff.isPartial) return;
     for (let offset = 0; unifiedCursor + offset < until; offset++) {
-      put(unifiedCursor + offset, additionLines[additionCursor + offset]);
+      put(unifiedCursor + offset, additionLines[nextAdditionLineIndex + offset]);
     }
   };
 
@@ -46,7 +45,7 @@ export function unifiedDiffText(diff: FileDiffMetadata): string {
     unifiedCursor = hunk.unifiedLineStart + hunk.unifiedLineCount;
     // A hunk with no new-file lines is positioned after the line its header names, not on it.
     const startsAt = hunk.additionStart - (hunk.additionCount === 0 ? 0 : 1);
-    additionCursor = startsAt + hunk.additionCount;
+    nextAdditionLineIndex = startsAt + hunk.additionCount;
   }
   fillCollapsed(rows.length);
   return rows.join("\n");

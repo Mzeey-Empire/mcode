@@ -8,9 +8,7 @@
  * unmounted, so copy rebuilds the text from the file's lines instead of the DOM.
  */
 
-/** Set on every rendered row: its index in the virtualizer's row list. */
 const ROW_INDEX_ATTRIBUTE = "data-index";
-/** Set on the element holding one code line's text, without its gutter. */
 const LINE_TEXT_ATTRIBUTE = "data-line-text";
 
 /** A selection end inside a code line: zero-based line index and character offset. */
@@ -43,8 +41,7 @@ export function selectionRowIndexes(selection: Selection | null, viewport: HTMLE
   return indexes;
 }
 
-/** Characters of `text` before a DOM point; a point in the gutter counts as 0, one in the end padding as the whole line. */
-function offsetWithin(text: HTMLElement, node: Node, offset: number): number {
+function clampedTextOffset(text: HTMLElement, node: Node, offset: number): number {
   const range = document.createRange();
   range.selectNodeContents(text);
   const position = range.comparePoint(node, offset);
@@ -58,7 +55,7 @@ function linePoint(node: Node, offset: number): LinePoint | null {
   const row = elementOf(node)?.closest("[data-line]");
   const text = row?.querySelector<HTMLElement>(`[${LINE_TEXT_ATTRIBUTE}]`);
   if (!row || !text) return null;
-  return { line: Number(row.getAttribute("data-line")) - 1, offset: offsetWithin(text, node, offset) };
+  return { line: Number(row.getAttribute("data-line")) - 1, offset: clampedTextOffset(text, node, offset) };
 }
 
 /** The file text between two selection ends, including lines whose rows are not mounted. */

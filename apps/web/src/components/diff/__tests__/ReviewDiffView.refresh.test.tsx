@@ -169,12 +169,10 @@ describe("ReviewDiffView refresh", () => {
     view.rerender(<ReviewDiffView {...props} cacheVersion={2} />);
     await waitFor(() => expect(transport.getWorkingTreeDiff).toHaveBeenCalledTimes(2));
 
-    // Mid-refetch the file still shows its diff, not a loading row.
     expect(renderedItem().fileDiff.cacheKey).toBe(before.fileDiff.cacheKey);
     expect(renderedItem().annotations).toEqual([]);
 
     await act(async () => resolveRefetch(patch("FIRST_VERSION")));
-    // Pierre keys its highlight cache by cacheKey; an identical patch must keep it.
     expect(renderedItem().fileDiff.cacheKey).toBe(before.fileDiff.cacheKey);
   });
 

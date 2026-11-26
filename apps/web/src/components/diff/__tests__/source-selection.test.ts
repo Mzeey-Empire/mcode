@@ -17,7 +17,6 @@ import {
 
 const unifiedIndexOf = (row: HTMLElement) => Number(row.dataset.lineIndex?.split(",")[0]);
 
-/** Offset of `column` in row `index` of the whole text, with real newlines between lines. */
 function offsetOf(index: number, column: number) {
   return LINES.slice(0, index).reduce((total, line) => total + line.length + 1, 0) + column;
 }
@@ -48,7 +47,6 @@ describe("SourceSelection", () => {
     selection.sync(root, TEXT);
 
     showRows(content, range(10, 19));
-    // The browser has already lost its selection with the rewritten rows; this is what the class repairs.
     expect(browser.toString()).toBe("");
     selection.render(root, TEXT);
     showRows(content, held);
