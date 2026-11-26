@@ -126,9 +126,9 @@ export function CrashDumpsRow({ def, variant }: SettingRowProps) {
   const needsRestart = state !== null && state.enabledAtLaunch !== saved;
   const status = state && (
     <span className="mt-1 flex min-w-0 items-baseline gap-3">
-      <span className="shrink-0 font-mono text-caption text-ink">{formatAttachmentByteSize(state.totalBytes)} saved</span>
+      <span className="shrink-0 text-caption text-muted"><span className="font-mono text-ink">{formatAttachmentByteSize(state.totalBytes)}</span> saved</span>
       <TooltipTrigger handle={pathTooltip} payload={state.directory} render={
-        <span aria-label={state.directory} className="text-fade font-mono text-caption text-muted [font-variant-ligatures:none]">{state.directory}</span>
+        <span aria-label={state.directory} className="min-w-0 break-all font-mono text-caption text-muted [font-variant-ligatures:none]">{state.directory}</span>
       } />
     </span>
   );
