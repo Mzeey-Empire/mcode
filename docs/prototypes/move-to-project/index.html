@@ -186,7 +186,7 @@
   .alert .msg { flex: 1; }
   .alert .msg b { color: var(--error); font-weight: 600; }
   .alert details { color: var(--muted); font-size: 12px; margin-top: 3px; }
-  .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; font-weight: 500; background: var(--selected); }
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 8px; font-weight: 500; background: var(--selected); white-space: nowrap; }
   .btn:hover { filter: brightness(1.1); }
   .btn.primary { background: var(--primary); color: var(--on-primary); }
   .btn.danger { background: var(--destructive); color: white; }
@@ -203,12 +203,13 @@
   .running-line { display: flex; gap: 8px; align-items: center; color: var(--muted); margin: 4px 0 16px; }
   .bottom-composer { padding: 6px 32px 18px; }
 
-  .ov { position: absolute; top: 50px; right: 12px; width: 312px; background: var(--raised); border-radius: 14px; box-shadow: var(--shadow); padding: 6px; z-index: 5; }
+  .ov { position: absolute; top: 50px; right: 12px; width: 336px; background: var(--raised); border-radius: 14px; box-shadow: var(--shadow); padding: 6px; z-index: 5; }
   .ov-sec + .ov-sec { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
   .ov-row { display: flex; align-items: center; gap: 9px; min-height: 32px; padding: 4px 8px; border-radius: 8px; }
   .ov-row:hover { background: var(--hover); }
   .ov-row .k { color: var(--muted); width: 74px; flex-shrink: 0; }
-  .ov-row .v { flex: 1; min-width: 0; }
+  .ov-row .v { flex: 1; min-width: 0; white-space: nowrap; }
+  .ov-row .link { white-space: nowrap; }
   .ov-row .add { color: var(--muted); }
   .ov-row .ico { color: var(--muted); }
   .plus-add { color: var(--success); } .minus-del { color: var(--error); }
@@ -219,7 +220,7 @@
   .mi { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 8px; border-radius: 7px; text-align: left; }
   .mi:hover, .mi.kb { background: var(--hover); }
   .mi .lab { flex: 1; min-width: 0; }
-  .mi .hint { color: var(--muted); font-size: 11.5px; }
+  .mi .hint { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
   .mi.danger { color: var(--error); }
   .mi[aria-disabled="true"] { color: var(--muted); }
   .mi .ico { color: var(--muted); }
@@ -250,15 +251,14 @@
   .move .head .who { color: var(--muted); margin: 2px 0 0; }
   .move .body { padding: 14px 18px 4px; overflow-y: auto; display: grid; gap: 14px; }
   .move .foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 18px 18px; }
-  .move .foot .left { margin-right: auto; color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
   .field { display: grid; gap: 6px; }
   .field > .lab { color: var(--muted); font-size: 12px; font-weight: 500; }
   .field .help { color: var(--muted); font-size: 12px; }
   .field .err { color: var(--error); font-size: 12px; display: flex; gap: 6px; align-items: center; }
   .seg.wide { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border-radius: 9px; }
   .seg.wide button { border-radius: 7px; padding: 6px 10px; text-align: center; }
-  .seg.wide button[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
-  .trigger { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; background: var(--panel); text-align: left; }
+  .seg.wide button[aria-disabled="true"] { cursor: not-allowed; }
+  .trigger { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--border); text-align: left; }
   .trigger:hover { background: var(--selected); }
   .trigger .lab { flex: 1; min-width: 0; }
   .trigger .ph { color: var(--muted); }
@@ -266,34 +266,47 @@
   .trigger[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--error); }
   .inline-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
   .inline-row .trigger { width: auto; height: 28px; padding: 0 8px; font-size: 12.5px; color: var(--ink); }
-  .text-in { width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; border: 0; outline: 0; background: var(--panel); color: var(--ink); font: inherit; }
+  /* Inline code sits at the size and weight of the sentence around it. */
+  .inline-row .mono, .result .mono, .help .mono { font-size: 12px; font-weight: 400; }
+  .text-in { width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; border: 0; outline: 0; background: var(--panel); box-shadow: inset 0 0 0 1px var(--border); color: var(--ink); font: inherit; }
   .text-in:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
   .text-in[aria-invalid="true"] { box-shadow: inset 0 0 0 1px var(--error); }
   .path-row { display: flex; align-items: center; gap: 8px; }
-  .path-row .path-v { flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; padding: 0 10px; border-radius: 8px; background: var(--panel); font-size: 12px; }
+  .path-row .path-v { flex: 1; min-width: 0; height: 34px; display: flex; align-items: center; padding: 0 10px; border-radius: 8px; background: var(--panel); box-shadow: inset 0 0 0 1px var(--border); font-size: 12px; }
   .result { font-size: 12px; color: var(--muted); }
   .result .mono { color: var(--ink); }
-  .check { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; }
+  /* A button centres its text; the label and its hint are one left-aligned column beside the box. */
+  .check { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; text-align: left; }
   .check .box { width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--muted); display: grid; place-items: center; flex-shrink: 0; margin-top: 1px; }
   .check[aria-checked="true"] .box { background: var(--primary); box-shadow: none; color: var(--on-primary); }
-  .check .sub { display: block; color: var(--muted); font-size: 12px; }
-  .note-box { display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--panel); font-size: 12.5px; }
+  .check .txt { display: grid; gap: 2px; text-align: left; }
+  .check .sub { color: var(--muted); font-size: 12px; }
+  /* --note-indent is the icon (14px) plus the row gap (8px): the notice's text column. */
+  .note-box { --note-indent: 22px; display: grid; gap: 6px; padding: 10px 12px; border-radius: 10px; background: var(--panel); font-size: 12.5px; }
   .note-box .row1 { display: flex; gap: 8px; align-items: flex-start; }
   .note-box .row1 .ico { color: var(--muted); margin-top: 1px; }
   .note-box.warn .row1 .ico { color: var(--primary); }
   .note-box.bad .row1 .ico { color: var(--error); }
   .note-box .muted { color: var(--muted); }
-  .note-box ul.files { margin: 2px 0 0 24px; padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12px; }
-  .note-box details { color: var(--muted); font-size: 12px; margin-left: 24px; }
+  .note-box .txt { display: grid; gap: 2px; min-width: 0; }
+  .note-box .txt .link, .note-box .note-link { justify-self: start; font-size: 12px; }
+  .note-box .note-link { margin-left: var(--note-indent); }
+  .note-box ul.files { margin: 2px 0 0 var(--note-indent); padding: 0; list-style: none; display: grid; gap: 2px; font-size: 12px; }
+  .note-box details { color: var(--muted); font-size: 12px; margin-left: var(--note-indent); }
   .note-box details .mono { display: block; margin-top: 4px; color: var(--ink); white-space: pre-wrap; word-break: break-all; }
-  .sharers { margin: 2px 0 0 24px; padding: 0; list-style: none; display: grid; gap: 2px; }
-  .sharers li { display: flex; gap: 6px; align-items: center; }
+  .sharers { margin: 2px 0 0 var(--note-indent); padding: 0; list-style: none; display: grid; gap: 2px; }
+  .sharers li { display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .sharers .fade { min-width: 0; }
   .sharers .tag { color: var(--muted); font-size: 11.5px; }
   .pop.in-dialog { position: absolute; left: 18px; right: 18px; z-index: 40; max-height: 280px; overflow-y: auto; }
   .mi .sub { color: var(--muted); font-size: 11.5px; }
   .mi.two { height: auto; min-height: 38px; padding: 6px 8px; align-items: center; }
   .mi.two .lab { display: grid; gap: 1px; }
-  .btn[disabled] { opacity: .5; cursor: not-allowed; filter: none; }
+  /* Disabled and busy states change colour roles, never opacity, so labels stay readable in both themes. */
+  .btn[disabled] { cursor: not-allowed; filter: none; color: var(--muted); }
+  .btn.primary[disabled] { background: var(--selected); color: var(--muted); }
+  .btn.ghost[disabled] { background: transparent; }
+  .btn[aria-busy="true"] { cursor: progress; filter: none; }
   .btn .spin { border-color: currentColor; border-top-color: transparent; }
 
   .ev { margin: 6px 0 18px; display: grid; gap: 6px; }
@@ -306,7 +319,9 @@
   .ev-card .top .grow { flex: 1; min-width: 0; }
   .ev-card .muted { color: var(--muted); }
   .ev-card details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .ev-card .ev-files { color: var(--ink); font-size: 11.5px; }
   .ev-card blockquote { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--background); font-size: 12px; white-space: pre-wrap; }
+  .ev-card blockquote .mono { font-size: 12px; font-weight: 400; overflow-wrap: anywhere; }
   .state-pill { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; font-size: 11px; background: var(--selected); color: var(--muted); margin-left: 6px; }
   .state-pill.ok { color: var(--success); }
   .toast { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); background: var(--raised); box-shadow: var(--shadow); border-radius: 10px; padding: 8px 12px; font-size: 12.5px; z-index: 35; display: flex; gap: 8px; align-items: center; }
@@ -366,6 +381,7 @@ Object.assign(P, {
   info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   tree: '<path d="M6 3v12"/><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M15 6a9 9 0 0 0-9 9"/>',
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 });
 
 /* ============================== Data ============================== */
@@ -439,6 +455,13 @@ const sharersOf = t => {
 };
 const busyReason = t => ({ running: "Running", approval: "Approval required" }[t.status] ?? null);
 const busySharer = t => sharersOf(t).find(o => busyReason(o));
+/* The hint names the blocker: the thread itself, or another thread sharing its folder. */
+/* Name the blocker by its relation: from a fork, the thread it shares a folder with is the one it branched from. */
+const busyHint = (t, busy) => {
+  if (busy.id === t.id) return busyReason(busy);
+  const who = busy.folderOf ? "Fork" : "Original thread";
+  return busy.status === "running" ? `${who} running` : `${who} needs approval`;
+};
 /* "2026-11-26-sqlite-wal-vs-rollback-7f3a" -> "sqlite-wal-vs-rollback": a project name has no use for the date or the id. */
 const suggestedName = t => folderOwner(t).folder.replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/-[0-9a-f]{4}$/, "");
 const defaultParent = () => (projects().length ? "~/src" : "~");
@@ -496,7 +519,7 @@ function renderMap() {
         <li><span class="node">Existing project</span>${go("moveA")}<ul>
           <li><span class="node">Project picker</span><span class="note">Registered projects only, with their paths.</span>${go("moveAPicker")}</li>
           <li><span class="node">Runs in: Local / New worktree / Existing worktree</span><span class="note">Default Local, on the project's current branch. A project that is not a git repo runs Local only.</span>${go("moveNewWt", "new worktree ›")} ${go("moveExistingWt", "existing ›")} ${go("moveNonGit", "not git ›")}</li>
-          <li><span class="node">Earlier files notice</span><span class="note">Lists the folder's files, says they stay until ${DEADLINE} and the agent is told where.</span>${go("moveAFiles")}</li>
+          <li><span class="node">Earlier files notice</span><span class="note">Lists the folder's files, says Mcode deletes the folder on ${DEADLINE} and the agent is told where.</span>${go("moveAFiles")}</li>
         </ul></li>
         <li><span class="node">New project</span>${go("moveB")}<ul>
           <li><span class="node">Name, location, git</span><span class="note">Name from the folder, without date or id. Start a git repo is unchecked.</span>${go("moveBGit", "git on ›")}</li>
@@ -605,7 +628,11 @@ function goto(key) {
     moveMoving: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", phase: "moving" }) })),
     moveFailed: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", phase: "failed" }) })),
     moveCross: () => set(at("n1", { overlay: "move", sim: { ...S.sim, crossDrive: true }, mv: newMv("n1", { dest: "new", parent: "D:\\work", phase: "failed" }) })),
-    moveGitFail: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new", git: true, phase: "gitfailed" }) })),
+    moveGitFail: () => {
+      S.sim.failGit = true;
+      const createdId = applyNew(newMv("n1", { dest: "new", git: true }));
+      set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new", git: true, phase: "gitfailed", createdId }) }));
+    },
     moveZero: () => { S.hasProjects = false; set(at("n1", { overlay: "move", mv: newMv("n1") })); },
     afterA: () => { moved("n2", "billing"); set(at("n2")); },
     afterAFiles: () => { moved("n1", "mcode"); set(at("n1")); },
@@ -685,19 +712,21 @@ function renderMain() {
   const t = current();
   if (!t) return `<section class="main"></section>`;
   const header = `<div class="hdr"><span class="crumb">${crumbOf(t)}</span><span class="right"><button class="icon-btn ${S.ovOpen ? "on" : ""}" data-act="ov" aria-label="Overview">${ic("panelRight")}</button></span></div>`;
+  const inFlight = t.status === "running" || t.status === "approval";
   const tail = t.status === "running" ? `<div class="running-line"><span class="spin"></span>Running</div>`
-    : t.status === "approval" ? `<div class="running-line"><span style="color:var(--primary)">${ic("alert", "sm")}</span>Approval required</div>`
-    : `<div class="footer-line mono">Worked for 9s</div>`;
-  const body = `<div class="thread"><div class="col-rail">${t.messages.map(m => m.ev ? moveMarker(m.ev)
+    : t.status === "approval" ? `<div class="running-line"><span style="color:var(--primary)">${ic("alert", "sm")}</span>Approval required</div>` : "";
+  /* Each finished turn closes with its own footer, directly after its last assistant message; a move marker never sits between them. */
+  const turnFooter = (i, msgs) => (msgs[i + 1]?.a === undefined && !(inFlight && i === msgs.length - 1) ? `<div class="footer-line mono">Worked for 9s</div>` : "");
+  const body = `<div class="thread"><div class="col-rail">${t.messages.map((m, i, msgs) => m.ev ? moveMarker(m.ev)
     : m.u ? `<div class="u-msg">${esc(m.u)}</div>`
-    : `<p class="a-prose">${esc(m.a)}</p>${m.tool ? `<div class="tool">${ic("terminal", "sm")}<code class="mono">${esc(m.tool)}</code></div>` : ""}`).join("")}
+    : `<p class="a-prose">${esc(m.a)}</p>${m.tool ? `<div class="tool">${ic("terminal", "sm")}<code class="mono">${esc(m.tool)}</code></div>` : ""}${turnFooter(i, msgs)}`).join("")}
     ${tail}</div></div><div class="bottom-composer"><div class="col-rail" style="max-width:760px">${composer()}</div></div>`;
   return `<section class="main" aria-label="Conversation">${header}${body}${S.ovOpen ? overviewHtml(t) : ""}</section>`;
 }
 
 /* The move marker follows ProviderSwitchMarker: a quiet centred line. A move into an existing project with files adds a card. */
 function handoffNote(ev) {
-  return `Files from earlier in this thread are in ${ev.oldFolder} until ${DEADLINE}. Copy what you need into this project.`;
+  return `Files from earlier in this thread are in <span class="mono">${esc(ev.oldFolder)}</span>. Mcode deletes that folder on ${DEADLINE}. Copy what you need into this project.`;
 }
 function moveMarker(ev) {
   const p = project(ev.to);
@@ -705,13 +734,13 @@ function moveMarker(ev) {
   const line = `<div class="ev-line" role="note"><span class="mid">${ic("move", "sm")}${how}</span></div>`;
   if (ev.kind === "new" || !ev.files.length) return `<div class="ev">${line}</div>`;
   const gone = S.sim.expired;
-  const state = gone && !ev.sent ? `<span class="state-pill">Not sent: folder removed</span>` : ev.sent ? `<span class="state-pill ok">Sent with the next turn</span>` : `<span class="state-pill">Goes with the next turn</span>`;
+  const state = gone ? `<span class="state-pill ok">Sent</span>` : ev.sent ? `<span class="state-pill ok">Sent with the next turn</span>` : `<span class="state-pill">Goes with the next turn</span>`;
   return `<div class="ev">${line}<div class="ev-card">
     <div class="top">${ic(gone ? "trash" : "clock", "sm")}<span class="grow">${gone
-      ? `The earlier folder was removed on ${DEADLINE}.`
-      : `${plural(ev.files.length, "earlier file stays", "earlier files stay")} in the old folder until ${DEADLINE}.`}</span>${gone ? "" : `<button class="link" data-copy="${esc(ev.oldFolder)}">Copy path</button>`}</div>
-    ${gone ? "" : `<div class="muted mono" style="font-size:11.5px">${esc(ev.files.join("  ·  "))}</div>`}
-    <details><summary>What the agent is told ${state}</summary><blockquote>${esc(handoffNote(ev))}</blockquote></details>
+      ? `Mcode deleted the old folder on ${DEADLINE}.`
+      : `${plural(ev.files.length, "earlier file stays", "earlier files stay")} in the old folder. Mcode deletes it on ${DEADLINE}.`}</span>${gone ? "" : `<button class="link" data-copy="${esc(ev.oldFolder)}">Copy path</button>`}</div>
+    ${gone ? "" : `<div class="ev-files mono">${esc(ev.files.join("  ·  "))}</div>`}
+    ${gone && !ev.sent ? "" : `<details><summary>What the agent is told ${state}</summary><blockquote>${handoffNote(ev)}</blockquote></details>`}
   </div></div>`;
 }
 function moveEventOf(t) { return t.messages.map(m => m.ev).filter(Boolean).at(-1); }
@@ -725,7 +754,7 @@ function overviewHtml(t) {
   const p = project(t.projectId);
   const ev = moveEventOf(t);
   const earlier = ev && ev.kind === "existing" && ev.files.length && !S.sim.expired
-    ? `<div class="ov-sec"><div class="ov-row">${ic("clock", "sm ico")}<span class="k">Earlier files</span><span class="v">${plural(ev.files.length, "file", "files")} · until ${DEADLINE}</span><button class="link" style="font-size:12px" data-copy="${esc(ev.oldFolder)}">Copy path</button></div></div>` : "";
+    ? `<div class="ov-sec"><div class="ov-row">${ic("clock", "sm ico")}<span class="k">Earlier files</span><span class="v">${plural(ev.files.length, "file", "files")} · deleted ${DEADLINE}</span><button class="link" style="font-size:12px" data-copy="${esc(ev.oldFolder)}">Copy path</button></div></div>` : "";
   const where = t.mode === "local" || !p.git
     ? `<div class="ov-row">${ic("laptop", "sm ico")}<span class="k">Local</span><span class="v mono fade">${esc(p.path)}</span></div>`
     : `<div class="ov-row">${ic("tree", "sm ico")}<span class="k">Worktree</span><span class="v mono fade">${esc(t.wtPath ?? p.path)}</span></div>`;
@@ -740,13 +769,13 @@ function menuHtml() {
   const pos = S.menuXY ?? (() => { const r = document.querySelector(`[data-open="${t.id}"]`)?.getBoundingClientRect(); const a = document.getElementById("app")?.getBoundingClientRect(); return r && a ? { x: r.right - a.left - 24, y: r.top - a.top } : { x: 240, y: 300 }; })();
   const busy = busySharer(t);
   const moveItem = t.projectId === null && !t.closed
-    ? busy ? `<button class="mi" role="menuitem" aria-disabled="true">${ic("move", "sm ico")}<span class="lab">Move to project…</span><span class="hint">${busyReason(busy)}</span></button>`
+    ? busy ? `<button class="mi" role="menuitem" aria-disabled="true">${ic("move", "sm ico")}<span class="lab">Move to project…</span><span class="hint">${busyHint(t, busy)}</span></button>`
       : `<button class="mi" role="menuitem" data-act="openmove">${ic("move", "sm ico")}<span class="lab">Move to project…</span></button>` : "";
   const closeReason = busyReason(t);
   const closeItem = t.closed ? `<button class="mi" role="menuitem">${ic("restore", "sm ico")}<span class="lab">Restore thread</span></button>`
     : closeReason ? `<button class="mi" role="menuitem" aria-disabled="true">${ic("x", "sm ico")}<span class="lab">Close thread</span><span class="hint">${closeReason}</span></button>`
     : `<button class="mi" role="menuitem">${ic("x", "sm ico")}<span class="lab">Close thread</span></button>`;
-  return `<div class="pop" data-stop role="menu" aria-label="Thread options" style="left:${pos.x}px;top:${pos.y}px;width:248px">
+  return `<div class="pop" data-stop role="menu" aria-label="Thread options" style="left:${pos.x}px;top:${pos.y}px;width:272px">
     <button class="mi" role="menuitem">${ic("rename", "sm ico")}<span class="lab">Rename thread</span></button>
     ${moveItem}
     <button class="mi" role="menuitem">${ic("copy", "sm ico")}<span class="lab">Copy</span><span class="hint">Path, ID ›</span></button>
@@ -757,7 +786,7 @@ function menuHtml() {
 function paletteHtml() {
   const q = S.query.toLowerCase(), t = current();
   const cmds = [
-    ...(t && t.projectId === null && !t.closed ? [{ id: "move", label: "Move thread to project…", icon: "move", hint: busySharer(t) ? busyReason(busySharer(t)) : "" }] : []),
+    ...(t && t.projectId === null && !t.closed ? [{ id: "move", label: "Move thread to project…", icon: "move", hint: busySharer(t) ? busyHint(t, busySharer(t)) : "" }] : []),
     { id: "newthread", label: "New thread", key: "Ctrl N", icon: "pen" },
   ].filter(c => !q || c.label.toLowerCase().includes(q));
   return `<div class="scrim" data-act="dismiss"><div class="palette" data-stop role="dialog" aria-label="Command palette">
@@ -779,13 +808,9 @@ function nameError(mv) {
 function blockReason(mv, t) {
   const busy = busySharer(t);
   if (busy) return { busy };
-  if (mv.dest === "existing") {
-    if (!mv.pid) return { quiet: "Choose a project" };
-    if (mv.mode === "existingwt" && !mv.wt) return { quiet: "Choose a worktree" };
-    return null;
-  }
-  const err = nameError(mv);
-  return err ? { quiet: err.msg } : null;
+  /* An unfilled field already says so (placeholder or error), so the footer adds no hint of its own. */
+  if (mv.dest === "existing") return !mv.pid || (mv.mode === "existingwt" && !mv.wt) ? { incomplete: true } : null;
+  return nameError(mv) ? { incomplete: true } : null;
 }
 function projectPicker(mv) {
   const q = mv.pq.trim().toLowerCase();
@@ -802,29 +827,38 @@ function listPicker(kind, items, top) {
 function runsIn(mv, p) {
   if (!p.git) return `<div class="field"><span class="lab">Runs in</span><div class="inline-row">${ic("laptop", "sm")}<span style="color:var(--ink)">Local</span><span>· ${esc(p.path)} is not a git repo</span></div></div>`;
   const modes = ["local", "newwt", "existingwt"].map(m => `<button role="radio" aria-checked="${mv.mode === m}" data-mvmode="${m}">${MODE_LABEL[m]}</button>`).join("");
-  let detail;
-  if (mv.mode === "local") detail = `<div class="inline-row">${ic("branch", "sm")}<span>On</span><span class="mono" style="color:var(--ink)">${esc(p.branch)}</span><span>· runs in ${esc(p.path)}</span></div>`;
-  else if (mv.mode === "newwt") detail = `<div class="inline-row"><span>From</span><button class="trigger" data-mvpicker="branch">${ic("branch", "sm")}<span class="mono">${esc(mv.base ?? p.branch)}</span>${ic("down", "sm")}</button>
-      <button class="check" role="checkbox" aria-checked="${mv.origin}" data-mvflip="origin" style="align-items:center"><span class="box">${mv.origin ? ic("check", "sm") : ""}</span><span style="color:var(--ink)">Start from origin</span></button></div>`;
-  else detail = p.worktrees.length
-    ? `<button class="trigger" data-mvpicker="worktree">${ic("tree", "sm")}${mv.wt ? `<span class="lab mono fade">${esc(mv.wt.path)}</span><span class="hint mono">${esc(mv.wt.branch)}</span>` : `<span class="lab ph">Choose worktree</span>`}${ic("down", "sm")}</button>`
-    : `<div class="help">${esc(p.name)} has no other worktrees. Use New worktree instead.</div>`;
-  return `<div class="field"><span class="lab" id="runs-lab">Runs in</span><div class="seg wide" role="radiogroup" aria-labelledby="runs-lab">${modes}</div>${detail}</div>`;
+  const base = mv.base ?? p.branch;
+  let help, detail = "";
+  if (mv.mode === "local") help = `Works in <span class="mono">${esc(p.path)}</span> on <span class="mono">${esc(p.branch)}</span>, next to your own changes.`;
+  else if (mv.mode === "newwt") {
+    help = "A separate checkout on a new branch, so your own checkout stays untouched.";
+    detail = `<div class="inline-row"><span>From</span><button class="trigger" data-mvpicker="branch">${ic("branch", "sm")}<span class="mono">${esc(base)}</span>${ic("down", "sm")}</button>
+      <button class="check" role="checkbox" aria-checked="${mv.origin}" data-mvflip="origin" style="align-items:center"><span class="box">${mv.origin ? ic("check", "sm") : ""}</span><span style="color:var(--ink)">Start from <span class="mono">origin/${esc(base)}</span></span></button></div>`;
+  } else {
+    help = "Runs in a checkout you already have.";
+    detail = p.worktrees.length
+      ? `<button class="trigger" data-mvpicker="worktree">${ic("tree", "sm")}${mv.wt ? `<span class="lab mono fade">${esc(mv.wt.path)}</span><span class="hint mono">${esc(mv.wt.branch)}</span>` : `<span class="lab ph">Choose worktree</span>`}${ic("down", "sm")}</button>`
+      : `<div class="help">${esc(p.name)} has no other worktrees. Use New worktree instead.</div>`;
+  }
+  return `<div class="field"><span class="lab" id="runs-lab">Runs in</span><div class="seg wide" role="radiogroup" aria-labelledby="runs-lab">${modes}</div><div class="help">${help}</div>${detail}</div>`;
 }
 function filesNotice(mv, t) {
   const files = folderFiles(t);
   if (!files.length) return "";
   if (mv.dest === "new") return `<div class="note-box"><div class="row1">${ic("folder", "sm ico")}<span>The folder moves with its ${plural(files.length, "file", "files")}.</span></div></div>`;
-  return `<div class="note-box"><div class="row1">${ic("file", "sm ico")}<span>This thread made ${plural(files.length, "file", "files")}. Mcode doesn't copy them; they stay in the old folder until ${DEADLINE}, and the agent is told where on its next turn.
-    <button class="link" data-mvdest="new">Make it a new project instead</button></span></div>
-    ${mv.showFiles ? `<ul class="files mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul><button class="link" style="margin-left:24px;justify-self:start;font-size:12px" data-mvflip="showFiles">Hide files</button>`
-      : `<button class="link" style="margin-left:24px;justify-self:start;font-size:12px" data-mvflip="showFiles">Show files</button>`}</div>`;
+  const copied = files.length === 1 ? "It is not copied into the project. The agent is told where it is on its next turn." : "They are not copied into the project. The agent is told where they are on its next turn.";
+  return `<div class="note-box"><div class="row1">${ic("file", "sm ico")}<span class="txt"><span>This folder has ${plural(files.length, "file", "files")}. Mcode deletes it on ${DEADLINE}.</span>
+    <span class="muted">${copied}</span><button class="link" data-mvdest="new">Make it a new project instead</button></span></div>
+    ${mv.showFiles ? `<ul class="files mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul><button class="link note-link" data-mvflip="showFiles">Hide files</button>`
+      : `<button class="link note-link" data-mvflip="showFiles">Show files</button>`}</div>`;
 }
+/* A thread is listed under its name, aligned with the notice's text; a status mark follows it only while that thread is busy. */
 function sharersNotice(t) {
   const others = sharersOf(t).slice(1);
   if (!others.length) return "";
-  return `<div class="note-box"><div class="row1">${ic("branch", "sm ico")}<span>${others.length === 1 ? "This thread shares its folder with one more, which moves too:" : `This thread shares its folder with ${others.length} more, which move too:`}</span></div>
-    <ul class="sharers">${others.map(o => `<li>${statusLane(o)}<span class="fade">${esc(o.title)}</span>${o.closed ? `<span class="tag">Closed</span>` : ""}</li>`).join("")}</ul></div>`;
+  const mark = o => (busyReason(o) ? statusLane(o) : "");
+  return `<div class="note-box"><div class="row1">${ic("link", "sm ico")}<span>${others.length === 1 ? "1 other thread shares this folder and moves too:" : `${others.length} other threads share this folder and move too:`}</span></div>
+    <ul class="sharers">${others.map(o => `<li><span class="fade">${esc(o.title)}</span>${o.closed ? `<span class="tag">Closed</span>` : ""}${mark(o)}</li>`).join("")}</ul></div>`;
 }
 function moveDialogHtml() {
   const mv = S.mv, t = S.threads.find(x => x.id === mv.tid);
@@ -842,36 +876,45 @@ function moveDialogHtml() {
       ${p ? runsIn(mv, p) : ""}`;
   } else {
     const err = nameError(mv);
+    const shownErr = err && !err.silent ? err : null;
     const target = joinPath(mv.parent, mv.name.trim() || "…");
-    form = `<div class="field"><label class="lab" for="mvname">Name</label><input id="mvname" class="text-in" data-fk="mvname" data-mvname value="${esc(mv.name)}" ${err && !err.silent ? 'aria-invalid="true" aria-describedby="mvname-err"' : ""} spellcheck="false" />
-        ${err && !err.silent ? `<span class="err" id="mvname-err">${ic("alert", "sm")}${esc(err.msg)}</span>` : ""}</div>
+    form = `<div class="field"><label class="lab" for="mvname">Name</label><input id="mvname" class="text-in" data-fk="mvname" data-mvname value="${esc(mv.name)}" placeholder="Project name" ${shownErr ? 'aria-invalid="true" aria-describedby="mvname-err"' : ""} spellcheck="false" />
+        ${shownErr ? `<span class="err" id="mvname-err">${ic("alert", "sm")}${esc(shownErr.msg)}</span>` : ""}</div>
       <div class="field"><span class="lab">Location</span><div class="path-row"><span class="path-v mono fade">${esc(mv.parent)}</span><button class="btn" data-mvpicker="browse">Browse…</button></div>
-        <span class="result">Creates <span class="mono">${esc(target)}</span></span></div>
-      <button class="check" role="checkbox" aria-checked="${mv.git}" data-mvflip="git"><span class="box">${mv.git ? ic("check", "sm") : ""}</span><span>Start a git repo${mv.git ? `<span class="sub">Runs git init. The files start uncommitted.</span>` : ""}</span></button>`;
+        ${shownErr ? "" : `<span class="result">Creates <span class="mono">${esc(target)}</span></span>`}</div>
+      <button class="check" role="checkbox" aria-checked="${mv.git}" data-mvflip="git"><span class="box">${mv.git ? ic("check", "sm") : ""}</span><span class="txt"><span>Start a git repo</span>${mv.git ? `<span class="sub">Runs git init. The files start uncommitted.</span>` : ""}</span></button>`;
   }
   const block = blockReason(mv, t);
   const busyBox = block?.busy ? `<div class="note-box warn" role="status"><div class="row1">${ic("alert", "sm ico")}<span>“${esc(block.busy.title)}” is ${block.busy.status === "running" ? "running" : "waiting for approval"}. You can move once it stops.</span></div></div>` : "";
+  /* A failed move names what failed and what is left where; across drives the fix is another location, not a retry. */
+  const cross = S.sim.crossDrive && mv.dest === "new" && mv.parent.includes("\\");
+  const failed = mv.phase === "failed";
   let outcome = "";
-  if (mv.phase === "failed") {
-    const cross = S.sim.crossDrive && mv.dest === "new";
-    outcome = `<div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span>${cross
-      ? `Couldn't copy the folder to ${esc(mv.parent)}. Your files are still in the old folder, and the thread is still in No project.<br><span class="muted">A partial copy is left at <span class="mono">${esc(joinPath(mv.parent, mv.name))}</span>. Delete it before you try again.</span>`
-      : `Couldn't move the folder. Nothing changed; the thread is still in No project.`}</span></div>
-      <details><summary>Details</summary><span class="mono">${cross ? "ENOSPC: no space left on device, copyfile 'bench.db'" : "EBUSY: resource busy or locked, rename '…/2026-11-26-sqlite-wal-vs-rollback-7f3a'"}</span></details></div>`;
+  if (failed) {
+    const [lead, rest, details] = cross
+      ? [`Drive ${esc(mv.parent.slice(0, 2))} is full, so the folder couldn't be copied there.`, "Your files are still in the old folder and the thread is still in No project. Mcode removed the partial copy.", "ENOSPC: no space left on device, copyfile 'bench.db'"]
+      : mv.dest === "existing"
+        ? ["Couldn't move the thread.", "Nothing changed: it's still in No project and its files are untouched. Try again in a moment.", "SQLITE_BUSY: database is locked (updating thread workspace)"]
+        : [`Couldn't move the folder to ${esc(mv.parent)}.`, "Nothing changed: the thread is still in No project. Close any app using files in the folder, then try again.", "EBUSY: resource busy or locked, rename '…/2026-11-26-sqlite-wal-vs-rollback-7f3a'"];
+    outcome = `<div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span class="txt"><span>${lead}</span><span class="muted">${rest}</span></span></div>
+      <details><summary>Details</summary><span class="mono">${esc(details)}</span></details></div>`;
   }
   if (mv.phase === "gitfailed") {
     const p = project(mv.createdId) ?? { name: mv.name, path: joinPath(mv.parent, mv.name) };
     return `<div class="scrim"><div class="dialog move" role="alertdialog" aria-labelledby="mvh" data-stop>
-      <div class="head"><h4 id="mvh">Project created</h4><p class="who">“${esc(t.title)}” now runs in <span class="mono">${esc(p.path)}</span>.</p></div>
+      <div class="head"><h4 id="mvh">Project created</h4><p class="who">“${esc(t.title)}” now runs in the ${esc(p.name)} project.</p></div>
       <div class="body"><div class="note-box bad" role="alert"><div class="row1">${ic("alert", "sm ico")}<span>Couldn't start a git repo. The project works without one; you can retry now or run git init later.</span></div>
-        <details><summary>Details</summary><span class="mono">git: 'init' failed: unable to create '.git/index.lock': Permission denied</span></details></div></div>
-      <div class="foot"><button class="btn ghost" data-act="mvdone">Done</button><button class="btn primary" data-act="mvgitretry">Retry git init</button></div>
+        <details><summary>Details</summary><span class="mono">${esc(p.path)}\ngit: 'init' failed: unable to create '.git/index.lock': Permission denied</span></details></div></div>
+      <div class="foot"><button class="btn ghost" data-act="mvdone">Done</button><button class="btn primary" data-act="mvgitretry">Retry git setup</button></div>
     </div></div>`;
   }
   const primaryLabel = locked ? (mv.dest === "new" && S.sim.crossDrive ? "Copying files…" : "Moving…")
-    : mv.phase === "failed" ? "Try again"
+    : failed && cross ? "Choose another location"
+    : failed ? "Try again"
     : mv.dest === "new" ? "Create project" : n > 1 ? `Move ${n} threads` : "Move thread";
-  const disabled = locked || !!block;
+  const primaryAttrs = locked ? 'aria-busy="true" aria-disabled="true"'
+    : failed && cross ? 'data-mvpicker="browse"'
+    : `data-act="mvgo" ${block ? "disabled" : ""}`;
   const picker = mv.picker === "project" ? projectPicker(mv)
     : mv.picker === "branch" ? listPicker("Branches", project(mv.pid).branches.map(b => `<button class="mi" role="option" data-mvbase="${esc(b)}"><span class="lab mono">${esc(b)}</span>${(mv.base ?? project(mv.pid).branch) === b ? ic("check", "sm") : ""}</button>`).join(""), 250)
     : mv.picker === "worktree" ? listPicker("Worktrees", project(mv.pid).worktrees.map((w, i) => `<button class="mi two" role="option" data-mvwt="${i}"><span class="lab"><span class="mono">${esc(w.path)}</span><span class="sub mono">${esc(w.branch)}</span></span></button>`).join(""), 250)
@@ -879,10 +922,10 @@ function moveDialogHtml() {
     : "";
   return `<div class="scrim" ${locked ? "" : 'data-act="mvcancel"'}><div class="dialog move" role="dialog" aria-modal="true" aria-labelledby="mvh" data-stop ${locked ? 'aria-busy="true"' : ""}>
     <div class="head"><h4 id="mvh">Move to project</h4><p class="who fade">${esc(t.title)}</p></div>
-    <div class="body" ${locked ? 'style="opacity:.6;pointer-events:none"' : ""}>${dest}${form}${busyBox}${filesNotice(mv, t)}${sharersNotice(t)}${outcome}</div>
-    <div class="foot">${block?.quiet && !locked ? `<span class="left">${esc(block.quiet)}</span>` : ""}
+    <div class="body" ${locked ? 'style="pointer-events:none"' : ""}>${dest}${form}${busyBox}${filesNotice(mv, t)}${sharersNotice(t)}${outcome}</div>
+    <div class="foot">
       <button class="btn ghost" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
-      <button class="btn primary" data-act="mvgo" ${disabled ? "disabled" : ""}>${locked ? `<span class="spin"></span>` : ""}${primaryLabel}</button></div>
+      <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ""}${primaryLabel}</button></div>
     ${picker}
   </div></div>`;
 }
@@ -978,7 +1021,7 @@ document.addEventListener("click", e => {
   if (d.mvflip) return setMv({ [d.mvflip]: !S.mv[d.mvflip] });
   if (d.mvbase) return setMv({ base: d.mvbase, picker: null });
   if (d.mvwt) return setMv({ wt: project(S.mv.pid).worktrees[+d.mvwt], picker: null });
-  if (d.mvparent) return setMv({ parent: d.mvparent, picker: null });
+  if (d.mvparent) return setMv({ parent: d.mvparent, picker: null, phase: "form" });
   if (d.stop !== undefined && !d.act) { if (S.mv?.picker && !e.target.closest(".pop")) setMv({ picker: null }); return; }
   if (d.tab) return set({ tab: d.tab });
   if (d.goto) { e.preventDefault(); return goto(d.goto); }
