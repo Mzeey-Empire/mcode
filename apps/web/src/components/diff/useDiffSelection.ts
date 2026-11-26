@@ -12,7 +12,7 @@ import {
   useEffect,
   useRef,
 } from "react";
-import { unifiedDiffText } from "./diff-text";
+import { type DiffText, unifiedDiffText } from "./diff-text";
 import { holdsSelection, SourceSelection } from "./source-selection";
 
 interface ActiveSelection {
@@ -25,7 +25,7 @@ interface CachedText {
   readonly hunks: FileDiffMetadata["hunks"];
   readonly additionLines: readonly string[];
   readonly deletionLines: readonly string[];
-  readonly text: string;
+  readonly text: DiffText;
 }
 
 const cachedTexts = new WeakMap<FileDiffMetadata, CachedText>();
@@ -34,7 +34,7 @@ const cachedTexts = new WeakMap<FileDiffMetadata, CachedText>();
  * Hydrating a diff mutates its metadata in place and swaps its line arrays, so the text is keyed on
  * those arrays and not on the metadata object alone.
  */
-function diffTextOf(file: FileDiffMetadata): string {
+function diffTextOf(file: FileDiffMetadata): DiffText {
   const cached = cachedTexts.get(file);
   if (
     cached &&
@@ -117,14 +117,14 @@ export function useDiffSelection(
       if (state.press) selection.press(state.press.extending);
       state.active = { file, selection };
     }
-    state.active.selection.sync(holder, diffTextOf(file));
+    state.active.selection.sync(holder, diffTextOf(file).text);
   }, [diffRoots, enabled, roots, state]);
 
   const release = useCallback(() => {
     state.press = undefined;
     const active = state.active;
     const root = active && diffRoots().find((candidate) => roots.get(candidate) === active.file);
-    if (active && root) active.selection.release(root, diffTextOf(active.file));
+    if (active && root) active.selection.release(root, diffTextOf(active.file).text);
   }, [diffRoots, roots, state]);
 
   const onPointerDown = useCallback(
@@ -145,7 +145,8 @@ export function useDiffSelection(
           ? event.target.closest("diffs-container")?.shadowRoot
           : undefined;
       if (!enabled || !active || !root || roots.get(root) !== active.file) return;
-      const copied = active.selection.copy(root, diffTextOf(active.file));
+      const { text, unknown } = diffTextOf(active.file);
+      const copied = active.selection.copy(root, text, unknown);
       if (copied === undefined) return;
       event.clipboardData.setData("text/plain", copied);
       event.preventDefault();
@@ -165,7 +166,7 @@ export function useDiffSelection(
       roots.set(root, file);
       // Only the active file's host draws it, so a host reused for another file leaves the selection alone.
       if (enabled && state.active?.file === file) {
-        state.active.selection.render(root, diffTextOf(file));
+        state.active.selection.render(root, diffTextOf(file).text);
       }
     },
     [enabled, roots, state],

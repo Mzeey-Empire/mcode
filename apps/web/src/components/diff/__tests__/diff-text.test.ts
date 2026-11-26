@@ -46,15 +46,16 @@ describe("unifiedDiffText", () => {
   it("lists a patch-only diff's rows and leaves the collapsed rows before them empty", () => {
     const diff = parsePartial();
 
-    const rows = unifiedDiffText(diff).split("\n");
+    const { text, unknown } = unifiedDiffText(diff);
 
     expect(diff.isPartial).toBe(true);
-    expect(rows).toEqual([
+    expect(text.split("\n")).toEqual([
       ...Array<string>(4).fill(""),
       ...CHANGED_ROWS,
       ...Array<string>(10).fill(""),
       ...DELETED_ROWS,
     ]);
+    expect([...unknown]).toEqual([0, 1, 2, 3, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
   });
 
   it("fills collapsed rows with the new file's lines once the diff is hydrated", () => {
@@ -63,10 +64,11 @@ describe("unifiedDiffText", () => {
       newFile: { name: "a.txt", contents: NEW_FILE },
     });
 
-    const rows = unifiedDiffText(diff).split("\n");
+    const { text, unknown } = unifiedDiffText(diff);
 
     expect(diff.isPartial).toBe(false);
-    expect(rows).toEqual([
+    expect(unknown.size).toBe(0);
+    expect(text.split("\n")).toEqual([
       ...numbered(1, 4),
       ...CHANGED_ROWS,
       ...numbered(6, 15),
@@ -81,7 +83,7 @@ describe("unifiedDiffText", () => {
       { name: "a.txt", contents: NEW_FILE },
     );
 
-    const rows = unifiedDiffText(diff).split("\n");
+    const rows = unifiedDiffText(diff).text.split("\n");
 
     expect(rows).toHaveLength(diff.unifiedLineCount);
     expect(rows.slice(0, 4)).toEqual(numbered(1, 4));
@@ -96,6 +98,6 @@ describe("unifiedDiffText", () => {
       { name: "crlf.txt", contents: "one\r\n2\r\nthree" },
     );
 
-    expect(unifiedDiffText(diff)).toBe("one\ntwo\n2\nthree");
+    expect(unifiedDiffText(diff).text).toBe("one\ntwo\n2\nthree");
   });
 });

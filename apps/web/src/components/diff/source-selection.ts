@@ -440,16 +440,28 @@ export class SourceSelection {
     this.#draw(root, mounted);
   }
 
-  /** The text to copy when the browser's own copy would miss part of it, else `undefined`. */
-  copy(root: ShadowRoot, text: string) {
+  /**
+   * The text to copy for the kept selection, else `undefined` when the browser's selection is not one this
+   * tracks. It is rebuilt from the text whether or not the selection's ends are mounted, so a selection
+   * copies the same wherever the scroll is; rows in `unknown` have no text to copy and leave no line.
+   */
+  copy(root: ShadowRoot, text: string, unknown: ReadonlySet<number>) {
     this.#use(text);
     const mounted = this.#read(root, false);
     if (!mounted || !this.#ends) return undefined;
     const start = Math.min(this.#ends.anchor, this.#ends.focus);
     const end = Math.max(this.#ends.anchor, this.#ends.focus);
     if (start === end) return undefined;
-    const whole = start === 0 && end === text.length;
-    if (!whole && start >= mounted.start && end <= mounted.end) return undefined;
-    return text.slice(start, end);
+    return this.#slice(start, end, unknown);
+  }
+
+  #slice(start: number, end: number, unknown: ReadonlySet<number>) {
+    const kept: string[] = [];
+    for (let line = this.#lineAt(start); line <= this.#lineAt(end); line++) {
+      if (unknown.has(line)) continue;
+      const from = Math.max(start, this.#starts[line]!);
+      kept.push(this.#text.slice(from, Math.min(end, this.#lineEnd(line))));
+    }
+    return kept.join("\n");
   }
 }

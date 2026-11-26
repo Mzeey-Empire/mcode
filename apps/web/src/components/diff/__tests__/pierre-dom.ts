@@ -142,6 +142,19 @@ export function showRows(content: HTMLElement, indices: readonly number[], lines
   content.replaceChildren(...indices.map((index) => rowElement(index, lines)));
 }
 
+/** As {@link showRows}, with the separator Pierre puts in the column where rows are collapsed between two mounted ones. */
+export function showRowsWithSeparators(content: HTMLElement, indices: readonly number[]) {
+  showRows(content, indices);
+  indices.forEach((index, position) => {
+    const skipped = index - (indices[position - 1] ?? index - 1) - 1;
+    if (skipped <= 0) return;
+    const separator = document.createElement("div");
+    separator.dataset.separator = "line-info-basic";
+    separator.textContent = `${skipped} unmodified lines`;
+    content.querySelector(`[data-line-index^="${index},"]`)?.before(separator);
+  });
+}
+
 export function range(from: number, to: number) {
   return Array.from({ length: to - from + 1 }, (_, index) => from + index);
 }

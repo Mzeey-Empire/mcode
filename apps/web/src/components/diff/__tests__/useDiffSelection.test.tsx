@@ -97,6 +97,21 @@ describe.each(ENGINES)("useDiffSelection with %s", (engine) => {
     expect(copied.get("text/plain")).toBe(TEXT.slice(start, end));
   });
 
+  it("copies the rebuilt text while every row that holds the selection is mounted", () => {
+    const { host, content, rewrite } = setup("unified");
+    rewrite(range(0, 9));
+    select(browser, content, [2, 4], [7, 3]);
+    document.dispatchEvent(new Event("selectionchange"));
+    const copied = new Map<string, string>();
+    const clipboardData = { setData: (type: string, value: string) => copied.set(type, value) };
+
+    fireEvent.copy(host, { clipboardData });
+
+    const start = LINES.slice(0, 2).join("\n").length + 1 + 4;
+    const end = LINES.slice(0, 7).join("\n").length + 1 + 3;
+    expect(copied.get("text/plain")).toBe(TEXT.slice(start, end));
+  });
+
   it("leaves the browser's own selection alone in side-by-side mode", () => {
     const { content, rewrite } = setup("side-by-side");
     rewrite(range(0, 9));

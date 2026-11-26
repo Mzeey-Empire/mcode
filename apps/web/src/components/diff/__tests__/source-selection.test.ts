@@ -14,8 +14,10 @@ import {
   restoreBrowserSelection,
   select,
   showRows,
+  showRowsWithSeparators,
 } from "./pierre-dom";
 
+const NO_UNKNOWN: ReadonlySet<number> = new Set();
 const unifiedIndexOf = (row: HTMLElement) => Number(row.dataset.lineIndex?.split(",")[0]);
 
 function offsetOf(index: number, column: number) {
@@ -78,15 +80,65 @@ describe.each(ENGINES)("SourceSelection with %s", (engine) => {
     showRows(content, range(4, 13));
     selection.render(root, TEXT);
 
-    expect(selection.copy(root, TEXT)).toBe(TEXT.slice(offsetOf(2, 4), offsetOf(7, 3)));
+    expect(selection.copy(root, TEXT, NO_UNKNOWN)).toBe(TEXT.slice(offsetOf(2, 4), offsetOf(7, 3)));
   });
 
-  it("leaves the copy to the browser while the mounted rows hold the whole selection", () => {
+  it("copies the rebuilt text while the mounted rows hold the whole selection", () => {
     showRows(content, range(0, 9));
     select(browser, content, [2, 4], [7, 3]);
     selection.sync(root, TEXT);
 
-    expect(selection.copy(root, TEXT)).toBeUndefined();
+    expect(selection.copy(root, TEXT, NO_UNKNOWN)).toBe(TEXT.slice(offsetOf(2, 4), offsetOf(7, 3)));
+  });
+
+  it("leaves the copy to the browser when its selection is not one the class tracks", () => {
+    showRows(content, range(0, 9));
+    select(browser, content, [2, 4], [2, 4]);
+    selection.sync(root, TEXT);
+
+    expect(selection.copy(root, TEXT, NO_UNKNOWN)).toBeUndefined();
+  });
+
+  describe("across a gap of collapsed rows", () => {
+    const from = [3, 2] as const;
+    const to = [9, 5] as const;
+    const gap = [2, 3, 4, 8, 9, 10];
+
+    /** The copy with both ends mounted, then with the start's row scrolled out. */
+    function copies(unknown: ReadonlySet<number>) {
+      showRowsWithSeparators(content, gap);
+      select(browser, content, from, to);
+      selection.sync(root, TEXT);
+      const bothMounted = selection.copy(root, TEXT, unknown);
+      showRowsWithSeparators(content, [4, 8, 9, 10]);
+      selection.render(root, TEXT);
+      return [bothMounted, selection.copy(root, TEXT, unknown)];
+    }
+
+    it("copies the collapsed rows' text wherever the scroll is, and never a separator label", () => {
+      const expected = TEXT.slice(offsetOf(3, 2), offsetOf(9, 5));
+
+      const [bothMounted, startScrolledOut] = copies(NO_UNKNOWN);
+
+      expect(bothMounted).toBe(expected);
+      expect(startScrolledOut).toBe(expected);
+      expect(expected).toContain(LINES[6]);
+    });
+
+    it("leaves out the rows whose text is unknown, without a blank line for them", () => {
+      const expected = [
+        LINES[3]!.slice(2),
+        LINES[4],
+        LINES[8],
+        LINES[9]!.slice(0, 5),
+      ].join("\n");
+
+      const [bothMounted, startScrolledOut] = copies(new Set([5, 6, 7]));
+
+      expect(bothMounted).toBe(expected);
+      expect(startScrolledOut).toBe(expected);
+      expect(expected).not.toContain("unmodified");
+    });
   });
 
   it("keeps both ends on their rows across a gap of collapsed rows", () => {
