@@ -100,10 +100,14 @@ _Avoid_: using "project" in code or schema; reserve it for user-facing copy.
 Where a thread runs when the user starts it without choosing a project. Each
 such thread gets a hidden workspace (`kind = 'no_project'`, named "No project")
 whose folder Mcode creates under its data directory. The folder is not a git
-repository. Forks and delegated threads share it, and it is removed with the
-last thread that uses it. The user sees a "No project" group, never the hidden
-workspace, and a thread never moves between No project and a project. See
-[ADR 0035](docs/adr/0035-no-project-thread-lives-in-a-hidden-workspace.md).
+repository. Forks and delegated threads share it. The user sees a "No project"
+group, never the hidden workspace. The user can move an open No project thread
+into a project. Only that thread moves. Its forks and children stay in the
+folder. A folder no thread ever left is removed with its last thread. Once a
+thread has moved out, Mcode keeps the folder 7 days after the last thread
+leaves, so the moved thread's agent can copy files from it. See
+[ADR 0035](docs/adr/0035-no-project-thread-lives-in-a-hidden-workspace.md) and
+[ADR 0036](docs/adr/0036-move-a-no-project-thread-into-a-project.md).
 _Avoid_: "chat" for these threads; they are threads like any other.
 
 ### Project icon
