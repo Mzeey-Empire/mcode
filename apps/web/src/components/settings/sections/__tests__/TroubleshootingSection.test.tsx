@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.hoisted so the refs exist inside the vi.mock factory below.
@@ -245,6 +245,53 @@ describe("TroubleshootingSection crash dumps", () => {
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
     expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: true } }]);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers delete from the size read after the switch-off save, not the size loaded at mount", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    getCrashDumps.mockResolvedValueOnce({ ...dumps, totalBytes: 0 });
+    stubDesktopBridge();
+    render(<TroubleshootingSection />);
+    await screen.findByText("0 B");
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent(`2.5 MB of crash dumps are saved in ${directory}`);
+  });
+
+  it("shows a failed mount load as an alert and clears it once a later read succeeds", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    getCrashDumps.mockRejectedValueOnce(new Error("Crash dump folder is unreadable"));
+    stubDesktopBridge();
+    render(<TroubleshootingSection />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Crash dump folder is unreadable");
+    expect(screen.queryByText("2.5 MB")).toBeNull();
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    expect(await screen.findByText("2.5 MB")).toBeInTheDocument();
+    expect(screen.queryByRole("alert", { hidden: true })).toBeNull();
+  });
+
+  it("keeps the dialog open on a failed delete, shows the remaining size, and closes on a retry that succeeds", async () => {
+    persisted.diagnostics = { crashDumps: true };
+    getCrashDumps
+      .mockResolvedValueOnce(dumps)
+      .mockResolvedValueOnce(dumps)
+      .mockResolvedValueOnce({ ...dumps, totalBytes: 1_048_576 });
+    deleteCrashDumps.mockRejectedValueOnce(new Error("Crash dump is locked by another process"));
+    stubDesktopBridge();
+    render(<TroubleshootingSection />);
+    await screen.findByText("2.5 MB");
+
+    await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Crash dump is locked by another process");
+    await waitFor(() => expect(dialog).toHaveTextContent(`1.0 MB of crash dumps are saved in ${directory}`));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(deleteCrashDumps).toHaveBeenCalledTimes(2);
   });
 
   it("opens no dialog when the switch-off save fails", async () => {

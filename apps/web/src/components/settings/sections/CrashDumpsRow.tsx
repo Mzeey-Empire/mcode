@@ -1,7 +1,9 @@
+import { CircleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { formatAttachmentByteSize } from "@/components/chat/attachment-display";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FieldError } from "@/components/ui/field-error";
 import { Switch } from "@/components/ui/switch";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { CrashDumpsState } from "@/transport/desktop-bridge";
@@ -19,7 +21,21 @@ export function crashDumpsAvailable(): boolean {
   return Boolean(bridge?.getCrashDumps && bridge.deleteCrashDumps && bridge.relaunch);
 }
 
-function DeleteCrashDumpsDialog({ state, onDelete, onKeep }: { readonly state: CrashDumpsState; readonly onDelete: () => void; readonly onKeep: () => void }) {
+function failureMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+/** FieldError's look as a span, because the row hint is a paragraph and FieldError is one too. */
+function LoadError({ message }: { readonly message: string }) {
+  return (
+    <span role="alert" className="mt-1 flex items-center gap-1 text-caption text-error">
+      <CircleAlert className="size-4 shrink-0" aria-hidden />
+      {message}
+    </span>
+  );
+}
+
+function DeleteCrashDumpsDialog({ state, error, onDelete, onKeep }: { readonly state: CrashDumpsState; readonly error: string | null; readonly onDelete: () => void; readonly onKeep: () => void }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onKeep()}>
       <DialogContent>
@@ -27,6 +43,7 @@ function DeleteCrashDumpsDialog({ state, onDelete, onKeep }: { readonly state: C
           <DialogTitle>Delete saved crash dumps?</DialogTitle>
           <DialogDescription>{formatAttachmentByteSize(state.totalBytes)} of crash dumps are saved in {state.directory}.</DialogDescription>
         </DialogHeader>
+        {error ? <FieldError role="alert">{error}</FieldError> : null}
         <DialogFooter>
           <Button variant="outline" onClick={onKeep}>Keep</Button>
           <Button variant="destructive" onClick={onDelete}>Delete</Button>
@@ -47,26 +64,60 @@ export function CrashDumpsRow({ def, variant }: SettingRowProps) {
   const pathTooltip = usePathTooltip();
   const [state, setState] = useState<CrashDumpsState | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void bridge?.getCrashDumps?.().then((loaded) => {
-      if (!cancelled) setState(loaded);
-    });
+    void bridge?.getCrashDumps?.().then(
+      (loaded) => {
+        if (!cancelled) setState(loaded);
+      },
+      (error: unknown) => {
+        if (!cancelled) setLoadError(failureMessage(error, "Could not read crash dumps."));
+      },
+    );
     return () => {
       cancelled = true;
     };
   }, [bridge]);
 
+  async function refresh(): Promise<CrashDumpsState | undefined> {
+    try {
+      const fresh = await bridge?.getCrashDumps?.();
+      if (fresh) {
+        setState(fresh);
+        setLoadError(null);
+      }
+      return fresh;
+    } catch (error) {
+      setLoadError(failureMessage(error, "Could not read crash dumps."));
+      return undefined;
+    }
+  }
+
   async function handleCheckedChange(value: boolean) {
     const saveFailure = await updateSettings({ diagnostics: { crashDumps: value } });
-    if (saveFailure !== undefined) return;
-    if (!value && state !== null && state.totalBytes > 0) setConfirmingDelete(true);
+    if (saveFailure !== undefined || value) return;
+    // The state loaded at mount can predate the click or a crash since, so the offer reads fresh sizes.
+    const fresh = await refresh();
+    if (fresh && fresh.totalBytes > 0) setConfirmingDelete(true);
   }
 
   async function handleDelete() {
-    const next = await bridge?.deleteCrashDumps?.();
-    if (next) setState(next);
+    try {
+      const next = await bridge?.deleteCrashDumps?.();
+      if (next) setState(next);
+      setDeleteError(null);
+      setConfirmingDelete(false);
+    } catch (error) {
+      setDeleteError(failureMessage(error, "Could not delete crash dumps."));
+      await refresh();
+    }
+  }
+
+  function handleKeep() {
+    setDeleteError(null);
     setConfirmingDelete(false);
   }
 
@@ -80,14 +131,14 @@ export function CrashDumpsRow({ def, variant }: SettingRowProps) {
 
   return (
     <>
-      <SettingRowFrame def={def} variant={variant} hint={<>{def.hint}{status}</>}>
+      <SettingRowFrame def={def} variant={variant} hint={<>{def.hint}{status}{loadError ? <LoadError message={loadError} /> : null}</>}>
         <div className="flex items-center justify-end gap-3">
           {needsRestart && <Button variant="secondary" size="compact" onClick={() => void bridge?.relaunch?.()}>Restart</Button>}
           <Switch aria-label="Crash dumps" checked={saved} onCheckedChange={(value) => void handleCheckedChange(value)} />
         </div>
       </SettingRowFrame>
       <PathTooltipRoot handle={pathTooltip} />
-      {confirmingDelete && state && <DeleteCrashDumpsDialog state={state} onDelete={() => void handleDelete()} onKeep={() => setConfirmingDelete(false)} />}
+      {confirmingDelete && state && <DeleteCrashDumpsDialog state={state} error={deleteError} onDelete={() => void handleDelete()} onKeep={handleKeep} />}
     </>
   );
 }
