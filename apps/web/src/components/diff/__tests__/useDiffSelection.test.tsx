@@ -6,6 +6,7 @@ import { type DiffSelection, useDiffSelection } from "../useDiffSelection";
 import {
   type BrowserSelection,
   LINES,
+  type SelectionEngine,
   TEXT,
   highlightedText,
   installBrowserSelection,
@@ -52,11 +53,13 @@ function setup(renderMode: "unified" | "side-by-side") {
   return { host, content, rewrite };
 }
 
-describe("useDiffSelection", () => {
+const ENGINES: readonly SelectionEngine[] = ["composed-ranges", "shadow-root-selection"];
+
+describe.each(ENGINES)("useDiffSelection with %s", (engine) => {
   let browser: BrowserSelection;
 
   beforeEach(() => {
-    browser = installBrowserSelection();
+    browser = installBrowserSelection(engine);
   });
 
   afterEach(() => {

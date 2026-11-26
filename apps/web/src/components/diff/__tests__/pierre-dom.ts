@@ -7,9 +7,13 @@ export const LINES = Array.from(
 );
 export const TEXT = LINES.join("\n");
 
+/** What `ShadowRoot.getSelection()` reports when the selection lies outside that root. */
+const EMPTY_SELECTION = { rangeCount: 0 } as unknown as Selection;
+
 /**
  * Chromium keeps a selection whose ends are in a shadow root; jsdom drops it (rangeCount stays 0),
- * so tests stand in a selection that holds a live Range and reports snapshots as `getComposedRanges` does.
+ * so tests stand in a selection that holds a live Range. This base reports it as an engine without
+ * composed ranges does: through `rangeCount` and `getRangeAt`, and through `within` for a shadow root.
  */
 export class BrowserSelection {
   #range: Range | undefined;
@@ -17,6 +21,15 @@ export class BrowserSelection {
 
   get direction() {
     return this.#range && !this.#range.collapsed ? (this.#backward ? "backward" : "forward") : "none";
+  }
+
+  get rangeCount() {
+    return this.#range ? 1 : 0;
+  }
+
+  getRangeAt(index: number) {
+    if (!this.#range || index !== 0) throw new DOMException("no such range", "IndexSizeError");
+    return this.#range.cloneRange();
   }
 
   setBaseAndExtent(anchorNode: Node, anchorOffset: number, focusNode: Node, focusOffset: number) {
@@ -34,17 +47,23 @@ export class BrowserSelection {
     this.#range = range;
   }
 
-  getComposedRanges() {
+  /** The selection's range as a snapshot, which is what `getComposedRanges` reports. */
+  snapshot() {
     const range = this.#range;
-    if (!range) return [];
-    return [
-      new StaticRange({
-        startContainer: range.startContainer,
-        startOffset: range.startOffset,
-        endContainer: range.endContainer,
-        endOffset: range.endOffset,
-      }),
-    ];
+    if (!range) return undefined;
+    return new StaticRange({
+      startContainer: range.startContainer,
+      startOffset: range.startOffset,
+      endContainer: range.endContainer,
+      endOffset: range.endOffset,
+    });
+  }
+
+  /** `ShadowRoot.getSelection()`: the selection while it lies in `root`, else nothing. */
+  within(root: ShadowRoot): Selection {
+    const range = this.#range;
+    const inside = range && root.contains(range.startContainer) && root.contains(range.endContainer);
+    return inside ? (this as unknown as Selection) : EMPTY_SELECTION;
   }
 
   /** The text the browser would highlight and copy. */
@@ -53,22 +72,43 @@ export class BrowserSelection {
   }
 }
 
-/** Replaces the document's selection with the double. Pair with {@link restoreBrowserSelection}. */
-export function installBrowserSelection() {
-  const browser = new BrowserSelection();
+class ComposedBrowserSelection extends BrowserSelection {
+  getComposedRanges() {
+    const range = this.snapshot();
+    return range ? [range] : [];
+  }
+}
+
+/** Which API an engine reports a selection across a shadow root with. */
+export type SelectionEngine = "composed-ranges" | "shadow-root-selection";
+
+function define(target: object, name: string, value: unknown) {
+  Object.defineProperty(target, name, { value, configurable: true, writable: true });
+}
+
+/**
+ * Replaces the document's selection with the double. Pair with {@link restoreBrowserSelection}.
+ * `"shadow-root-selection"` is Chromium before 137: no `getComposedRanges`, but `ShadowRoot.getSelection`.
+ */
+export function installBrowserSelection(engine: SelectionEngine = "composed-ranges") {
+  const browser =
+    engine === "composed-ranges" ? new ComposedBrowserSelection() : new BrowserSelection();
   vi.spyOn(document, "getSelection").mockReturnValue(browser as unknown as Selection);
-  // jsdom has no composed ranges, and the code under test feature-detects them on the prototype.
-  Object.defineProperty(Selection.prototype, "getComposedRanges", {
-    value: () => [],
-    configurable: true,
-    writable: true,
-  });
+  // The code under test feature-detects these on the prototypes.
+  if (engine === "composed-ranges") {
+    define(Selection.prototype, "getComposedRanges", () => []);
+  } else {
+    define(ShadowRoot.prototype, "getSelection", function (this: ShadowRoot) {
+      return browser.within(this);
+    });
+  }
   return browser;
 }
 
 export function restoreBrowserSelection() {
   vi.restoreAllMocks();
   Reflect.deleteProperty(Selection.prototype, "getComposedRanges");
+  Reflect.deleteProperty(ShadowRoot.prototype, "getSelection");
 }
 
 function rowElement(index: number, lines: readonly string[]) {
@@ -149,7 +189,7 @@ export function highlightedText(
 
 /** The unified rows that the selection's two ends sit in. */
 export function endpointRows(browser: BrowserSelection) {
-  const [selected] = browser.getComposedRanges();
+  const selected = browser.snapshot();
   const rowOf = (node: Node | undefined) =>
     Number(node?.parentElement?.closest<HTMLElement>("[data-line-index]")?.dataset.lineIndex?.split(",")[0]);
   return [rowOf(selected?.startContainer), rowOf(selected?.endContainer)];

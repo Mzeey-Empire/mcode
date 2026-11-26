@@ -94,12 +94,48 @@ function samePoint(a: Point, b: Point) {
   return a.node === b.node && a.offset === b.offset;
 }
 
-function composedRangeOf(selection: Selection | null, root: ShadowRoot) {
-  return selection?.getComposedRanges({ shadowRoots: [root] })[0];
+/** Chromium before 137 has `ShadowRoot.getSelection` but not `getComposedRanges`. */
+type ShadowRootWithSelection = ShadowRoot & { getSelection?: () => Selection | null };
+
+function snapshotOf(selection: Selection | null | undefined) {
+  if (!selection || selection.rangeCount === 0) return undefined;
+  const range = selection.getRangeAt(0);
+  return new StaticRange({
+    startContainer: range.startContainer,
+    startOffset: range.startOffset,
+    endContainer: range.endContainer,
+    endOffset: range.endOffset,
+  });
+}
+
+/**
+ * The browser's selection as one range with its nodes inside `root` when it lies there, read through
+ * `getComposedRanges`, else through `ShadowRoot.getSelection`. `undefined` when the engine has neither,
+ * which leaves it to keep its own selection and copy.
+ */
+export function selectionRangeIn(
+  root: ShadowRoot,
+): { readonly range: StaticRange | undefined } | undefined {
+  if (typeof Selection !== "undefined" && "getComposedRanges" in Selection.prototype) {
+    return { range: document.getSelection()?.getComposedRanges({ shadowRoots: [root] })[0] };
+  }
+  const { getSelection } = root as ShadowRootWithSelection;
+  if (typeof getSelection !== "function") return undefined;
+  return { range: snapshotOf(getSelection.call(root)) };
+}
+
+function rangeIn(root: ShadowRoot) {
+  return selectionRangeIn(root)?.range;
 }
 
 function isInside(root: ShadowRoot, range: StaticRange) {
   return root.contains(range.startContainer) && root.contains(range.endContainer);
+}
+
+/** Whether the browser's selection has both ends inside `root`. */
+export function holdsSelection(root: ShadowRoot) {
+  const range = rangeIn(root);
+  return range !== undefined && isInside(root, range);
 }
 
 function isCaret(anchor: End, focus: End) {
@@ -272,17 +308,6 @@ export class SourceSelection {
     return { node: row.element, offset: row.element.childNodes.length };
   }
 
-  /** The browser's selection as one range; `undefined` in an engine that cannot report one across a shadow root. */
-  #composedRange(root: ShadowRoot): { readonly range: StaticRange | undefined } | undefined {
-    try {
-      return { range: document.getSelection()?.getComposedRanges({ shadowRoots: [root] })[0] };
-    } catch {
-      // Engines without composed ranges keep their own selection and copy.
-      this.#ends = undefined;
-      return undefined;
-    }
-  }
-
   /** Whether the browser still holds what a render drew clipped to the mounted rows, which is not the ends. */
   #holdsClippedDraw(range: StaticRange | undefined, afterRender: boolean) {
     const parked = this.#parked;
@@ -298,9 +323,12 @@ export class SourceSelection {
    * (`afterRender`) keeps every end its unmounted row left between rows.
    */
   #read(root: ShadowRoot, afterRender: boolean) {
-    const composed = this.#composedRange(root);
-    if (!composed) return undefined;
-    const { range } = composed;
+    const read = selectionRangeIn(root);
+    if (!read) {
+      this.#ends = undefined;
+      return undefined;
+    }
+    const { range } = read;
     if (this.#holdsClippedDraw(range, afterRender)) return this.#mounted(root);
     if (range && !isInside(root, range)) {
       this.#ends = undefined;
@@ -374,7 +402,7 @@ export class SourceSelection {
     if (!mounted || !ends) return;
     const { anchor, focus } = this.#pointsOf(ends, mounted);
     const selection = document.getSelection();
-    const range = composedRangeOf(selection, root);
+    const range = rangeIn(root);
     if (this.#pressed && samePoint(anchor, focus)) {
       // Chromium stops extending a drag once a script collapses its selection, so a drag whose
       // ends are both unmounted keeps what the browser has left of it.
@@ -386,7 +414,7 @@ export class SourceSelection {
     if (!isClipped(ends, mounted)) return;
     // A projected endpoint can become an interior point when its DOM row survives the next render.
     this.#parked = {
-      range: drawn ? range : composedRangeOf(selection, root),
+      range: drawn ? range : rangeIn(root),
       clippedByRender: true,
     };
   }

@@ -13,7 +13,7 @@ import {
   useRef,
 } from "react";
 import { unifiedDiffText } from "./diff-text";
-import { SourceSelection } from "./source-selection";
+import { holdsSelection, SourceSelection } from "./source-selection";
 
 interface ActiveSelection {
   readonly file: FileDiffMetadata;
@@ -60,18 +60,6 @@ function unifiedIndexOf(row: HTMLElement): number {
   return Number(row.dataset.lineIndex?.split(",")[0]);
 }
 
-function supportsComposedRanges(): boolean {
-  return typeof Selection !== "undefined" && "getComposedRanges" in Selection.prototype;
-}
-
-function rootHoldingSelection(roots: readonly ShadowRoot[]): ShadowRoot | undefined {
-  const range = document.getSelection()?.getComposedRanges({ shadowRoots: [...roots] })[0];
-  if (!range) return undefined;
-  return roots.find(
-    (root) => root.contains(range.startContainer) && root.contains(range.endContainer),
-  );
-}
-
 /** What the Review diff scroller needs to keep a text selection across Pierre's row virtualization. */
 export interface DiffSelection {
   /** Props for the element that wraps the scroller. */
@@ -115,8 +103,8 @@ export function useDiffSelection(
   );
 
   const track = useCallback(() => {
-    if (!enabled || !supportsComposedRanges()) return;
-    const holder = rootHoldingSelection(diffRoots());
+    if (!enabled) return;
+    const holder = diffRoots().find(holdsSelection);
     if (!holder) {
       // A file item that unmounts moves the selection out of every diff too, so only a press ends it.
       if (state.press) state.active = undefined;

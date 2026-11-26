@@ -4,6 +4,7 @@ import { SourceSelection } from "../source-selection";
 import {
   type BrowserSelection,
   LINES,
+  type SelectionEngine,
   TEXT,
   endpointRows,
   highlightedText,
@@ -21,14 +22,17 @@ function offsetOf(index: number, column: number) {
   return LINES.slice(0, index).reduce((total, line) => total + line.length + 1, 0) + column;
 }
 
-describe("SourceSelection", () => {
+const ENGINES: readonly SelectionEngine[] = ["composed-ranges", "shadow-root-selection"];
+
+// Electron 35's Chromium (134) predates `getComposedRanges`, so the desktop app runs the second engine.
+describe.each(ENGINES)("SourceSelection with %s", (engine) => {
   let browser: BrowserSelection;
   let selection: SourceSelection;
   let root: ShadowRoot;
   let content: HTMLElement;
 
   beforeEach(() => {
-    browser = installBrowserSelection();
+    browser = installBrowserSelection(engine);
     selection = new SourceSelection(unifiedIndexOf);
     ({ root, content } = mountDiffHost());
   });
