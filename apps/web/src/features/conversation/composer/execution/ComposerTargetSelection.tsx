@@ -37,19 +37,23 @@ function ForkTargetSelection({ sourceThread, mode }: { sourceThread: ForkSourceT
   return <TargetTriggers selection={useForkTargetSelection(sourceThread, mode)} />;
 }
 
+/** Which side of its trigger a picker opens on. The composer sits at the window's foot, so it defaults to above. */
+export type TargetPickerSide = "top" | "bottom";
+
 /** The branch or worktree trigger, and the base branch trigger a detached worktree adds, for a selection a host built. */
-export function TargetTriggers({ selection }: { selection: ComposerTargetSelectionState }) {
+export function TargetTriggers({ selection, side = "top" }: { selection: ComposerTargetSelectionState; side?: TargetPickerSide }) {
   const { workspaceId, contextThreadId, target, baseBranch } = selection;
   if (!workspaceId) return null;
   return (
     <>
-      <TargetTrigger pick={target} workspaceId={workspaceId} threadId={contextThreadId} testId="composer-branch-trigger" />
+      <TargetTrigger pick={target} workspaceId={workspaceId} threadId={contextThreadId} testId="composer-branch-trigger" side={side} />
       {baseBranch ? (
         <TargetTrigger
           pick={baseBranch}
           workspaceId={workspaceId}
           threadId={contextThreadId}
           testId="composer-base-branch-trigger"
+          side={side}
         />
       ) : null}
     </>
@@ -61,9 +65,10 @@ interface TargetTriggerProps {
   workspaceId: string;
   threadId: string | undefined;
   testId: string;
+  side: TargetPickerSide;
 }
 
-function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerProps) {
+function TargetTrigger({ pick, workspaceId, threadId, testId, side }: TargetTriggerProps) {
   const [open, setOpen] = useState(false);
   const Icon = pick.list === "worktrees" ? GitFork : GitBranch;
   return (
@@ -84,7 +89,7 @@ function TargetTrigger({ pick, workspaceId, threadId, testId }: TargetTriggerPro
         }
       />
       {/* Triggers are right-pinned and grow leftward, so end alignment keeps the panel still when the label changes. */}
-      <PopoverContent align="end" side="top" sideOffset={4} className={PICKER_PANEL_CLASS}>
+      <PopoverContent align="end" side={side} sideOffset={4} className={PICKER_PANEL_CLASS}>
         <BranchTargetPicker
           workspaceId={workspaceId}
           threadId={threadId}

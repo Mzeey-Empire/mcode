@@ -220,11 +220,12 @@ function MoveTargetRail({ workspace, target }: { workspace: Workspace; target: M
         folder={basename(workspace.path)}
         unavailable={target.unavailable}
         onModeChange={target.setMode}
+        side="bottom"
       />
       {workspace.is_git_repo && target.mode === "direct" ? <LocalBranchLabel workspaceId={workspace.id} /> : null}
       {workspace.is_git_repo && target.mode !== "direct" ? (
         <div className="ml-auto flex min-w-0 items-center gap-1">
-          <TargetTriggers selection={target.selection} />
+          <TargetTriggers selection={target.selection} side="bottom" />
         </div>
       ) : null}
     </div>

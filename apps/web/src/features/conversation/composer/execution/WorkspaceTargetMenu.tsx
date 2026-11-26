@@ -29,6 +29,8 @@ export interface WorkspaceTargetMenuProps {
   readonly modes?: readonly ComposerMode[];
   /** Dims these modes' rows and says why, such as Existing worktree in a project with no worktrees. */
   readonly unavailable?: Readonly<Partial<Record<ComposerMode, UnavailableMode>>>;
+  /** Which side the menu opens on. Defaults to above, for the composer at the window's foot. */
+  readonly side?: "top" | "bottom";
   readonly className?: string;
 }
 
@@ -37,7 +39,7 @@ export interface WorkspaceTargetMenuProps {
  * the mode; the branch trigger beside it then picks the branch or worktree. A project that is not a
  * git repo can only run Local, so it gets a static label instead of a menu.
  */
-export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, modes, unavailable, className }: WorkspaceTargetMenuProps) {
+export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, modes, unavailable, side = "top", className }: WorkspaceTargetMenuProps) {
   if (!isGitRepo) {
     const { Icon, label } = COMPOSER_MODE_OPTIONS.direct;
     return (
@@ -66,7 +68,7 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, mod
           </Button>
         }
       />
-      <DropdownMenuContent align="start" side="top" className="w-[28.8rem]">
+      <DropdownMenuContent align="start" side={side} className="w-[28.8rem]">
         <WorkspaceModeMenuGroup mode={mode} folder={folder} onModeChange={onModeChange} modes={modes} unavailable={unavailable} />
       </DropdownMenuContent>
     </DropdownMenu>
