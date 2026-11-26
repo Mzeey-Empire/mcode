@@ -37,7 +37,8 @@ function ForkTargetSelection({ sourceThread, mode }: { sourceThread: ForkSourceT
   return <TargetTriggers selection={useForkTargetSelection(sourceThread, mode)} />;
 }
 
-function TargetTriggers({ selection }: { selection: ComposerTargetSelectionState }) {
+/** The branch or worktree trigger, and the base branch trigger a detached worktree adds, for a selection a host built. */
+export function TargetTriggers({ selection }: { selection: ComposerTargetSelectionState }) {
   const { workspaceId, contextThreadId, target, baseBranch } = selection;
   if (!workspaceId) return null;
   return (

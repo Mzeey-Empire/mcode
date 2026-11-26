@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/notice";
 import { ProjectSlotHeading } from "@/features/conversation/messages/chat-view/ProjectSlotHeading";
+import { TargetTriggers } from "@/features/conversation/composer/execution/ComposerTargetSelection";
 import { WorkspaceTargetMenu } from "@/features/conversation/composer/execution/WorkspaceTargetMenu";
 import { newThreadTargetLabel, targetLabelText } from "@/features/conversation/composer/execution/new-thread-target-copy";
 import { useDefaultBranchTarget } from "@/features/conversation/composer/execution/targets/useBranchTargets";
@@ -17,6 +18,7 @@ import { isNoProjectWorkspace } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
 import { PreflightFailedNotice } from "./PreflightFailedNotice";
+import { useMoveTarget, type MoveTargetState } from "./useMoveTarget";
 import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMovePreflight";
 
 /** The global move dialog. It mounts once and opens for the thread {@link openMoveThreadDialog} names. */
@@ -80,6 +82,8 @@ function formatRemovalDate(deadline: string): string {
 
 interface MoveFlow {
   readonly picked: Workspace | undefined;
+  /** Where the thread will run in the picked project, and the request that says so. */
+  readonly target: MoveTargetState;
   readonly moving: boolean;
   readonly failure: MoveFailure | null;
   readonly pick: (workspace: Workspace) => void;
@@ -91,6 +95,7 @@ function useMoveFlow(threadId: string): MoveFlow {
   const applyMoved = useWorkspaceStore((state) => state.applyThreadMovedToProject);
   const [pickedId, setPickedId] = useState<string | null>(null);
   const picked = useWorkspaceStore((state) => state.workspaces.find((candidate) => candidate.id === pickedId && candidate.kind === "project"));
+  const target = useMoveTarget(picked);
   const [moving, setMoving] = useState(false);
   const [failure, setFailure] = useState<MoveFailure | null>(null);
 
@@ -100,11 +105,11 @@ function useMoveFlow(threadId: string): MoveFlow {
   };
 
   const move = async () => {
-    if (!picked) return;
+    if (!picked || !target.request) return;
     setMoving(true);
     setFailure(null);
     try {
-      const result = await getTransport().moveThreadToProject({ threadId, workspaceId: picked.id, target: { kind: "local" } });
+      const result = await getTransport().moveThreadToProject({ threadId, workspaceId: picked.id, target: target.request });
       if (result.status === "moved") {
         applyMoved(result.thread);
         useSidebarUiStore.getState().expandProject(result.thread.workspace_id);
@@ -120,7 +125,7 @@ function useMoveFlow(threadId: string): MoveFlow {
     setMoving(false);
   };
 
-  return { picked, moving, failure, pick, move: () => void move() };
+  return { picked, target, moving, failure, pick, move: () => void move() };
 }
 
 function MoveThreadDialog({ threadId }: { threadId: string }) {
@@ -183,7 +188,7 @@ function MoveBody({ flow, preflight }: { flow: MoveFlow; preflight: MovePrefligh
   if (!picked && !failure) return null;
   return (
     <div className="grid gap-4">
-      {picked ? <MoveTargetRail workspace={picked} /> : null}
+      {picked ? <MoveTargetRail workspace={picked} target={flow.target} /> : null}
       {picked && preflight.read.status === "failed" ? <PreflightFailedNotice onRetry={preflight.retry} /> : null}
       {failure ? <Notice tone="error" title={failure.unconfirmed ? "Couldn't confirm the move" : "Couldn't move the thread"} detail={failure.detail} more={failure.raw ?? undefined} /> : null}
     </div>
@@ -198,7 +203,7 @@ function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; prefligh
     <DialogFooter>
       <FilesNote preflight={preflightOf(preflight.read)} picked={picked !== undefined} />
       <Button type="button" variant="outline" disabled={moving} onClick={closeMoveThreadDialog}>Cancel</Button>
-      <Button type="button" loading={moving} disabled={picked === undefined || chooserOpen || preflight.read.status !== "ready"} onClick={flow.move}>
+      <Button type="button" loading={moving} disabled={picked === undefined || flow.target.request === null || chooserOpen || preflight.read.status !== "ready"} onClick={flow.move}>
         {retrying ? <RotateCcw aria-hidden data-icon="inline-start" /> : <FolderInput aria-hidden data-icon="inline-start" />}
         {moving ? "Moving…" : retrying ? "Try again" : "Move thread"}
       </Button>
@@ -206,27 +211,35 @@ function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; prefligh
   );
 }
 
-const keepLocal = () => undefined;
-
-function MoveTargetRail({ workspace }: { workspace: Workspace }) {
-  const branch = useDefaultBranchTarget(workspace.is_git_repo ? { workspaceId: workspace.id } : null);
-  const label = branch ? newThreadTargetLabel({ mode: "direct", branch: branch.name }) : null;
+function MoveTargetRail({ workspace, target }: { workspace: Workspace; target: MoveTargetState }) {
   return (
     <div data-testid="move-target-rail" className="flex min-w-0 items-center gap-1 rounded-xl bg-page px-2 py-0.5">
       <WorkspaceTargetMenu
-        mode="direct"
+        mode={target.mode}
         isGitRepo={workspace.is_git_repo}
         folder={basename(workspace.path)}
-        modes={["direct"]}
-        onModeChange={keepLocal}
+        unavailable={target.unavailable}
+        onModeChange={target.setMode}
       />
-      {label ? (
-        <span className="ml-auto flex min-w-0 items-center gap-2 px-2 font-code text-caption text-muted">
-          <GitBranch aria-hidden className="size-3.5 shrink-0" />
-          <span className="min-w-0 text-fade">{targetLabelText(label)}</span>
-        </span>
+      {workspace.is_git_repo && target.mode === "direct" ? <LocalBranchLabel workspaceId={workspace.id} /> : null}
+      {workspace.is_git_repo && target.mode !== "direct" ? (
+        <div className="ml-auto flex min-w-0 items-center gap-1">
+          <TargetTriggers selection={target.selection} />
+        </div>
       ) : null}
     </div>
+  );
+}
+
+function LocalBranchLabel({ workspaceId }: { workspaceId: string }) {
+  const branch = useDefaultBranchTarget({ workspaceId });
+  const label = branch ? newThreadTargetLabel({ mode: "direct", branch: branch.name }) : null;
+  if (!label) return null;
+  return (
+    <span className="ml-auto flex min-w-0 items-center gap-2 px-2 font-code text-caption text-muted">
+      <GitBranch aria-hidden className="size-3.5 shrink-0" />
+      <span className="min-w-0 text-fade">{targetLabelText(label)}</span>
+    </span>
   );
 }
 

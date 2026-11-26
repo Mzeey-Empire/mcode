@@ -17,7 +17,8 @@ export interface TargetBranch {
 /** The parent thread fields a fork's branch comes from. */
 export type ForkSourceThread = Pick<Thread, "id" | "workspace_id" | "branch" | "base_branch">;
 
-interface DefaultBranchContext {
+/** The checkout whose default branch an empty pick follows. */
+export interface DefaultBranchContext {
   readonly workspaceId: string;
   readonly threadId?: string;
 }
@@ -28,7 +29,11 @@ function useIsGitWorkspace(workspaceId: string | undefined): boolean {
   );
 }
 
-function useEffectiveBranch(picked: string, pickedRemote: string | null, context: DefaultBranchContext | null): TargetBranch {
+/**
+ * The branch a target sends: `picked` when set, else the default branch of `context`. A host that keeps its own
+ * picks, such as the move dialog, calls this with them. Pass no context to fetch nothing.
+ */
+export function useEffectiveBranch(picked: string, pickedRemote: string | null, context: DefaultBranchContext | null): TargetBranch {
   const fallback = useDefaultBranchTarget(picked === "" ? context : null);
   if (picked !== "") return { name: picked, remote: pickedRemote, unknown: null };
   if (fallback) return { name: fallback.name, remote: fallback.remote, unknown: null };
