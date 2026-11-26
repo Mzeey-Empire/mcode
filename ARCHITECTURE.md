@@ -158,12 +158,7 @@ The [migration guide](docs/internals/persistence/db-migrations.md) defines the m
 
 The shared [`IAgentProvider` interface](packages/contracts/src/providers/interfaces.ts) accepts a `TurnRequest` through `sendTurn`. It exposes runtime events, stop and shutdown operations, model discovery, and capability-specific extensions. Provider descriptors let callers make explicit capability decisions before dispatch.
 
-The registered runtime implementations are split between two locations:
-
-- Claude, Codex, Copilot, Cursor, and Devin implementations live privately in [`packages/providers`](packages/providers/src/private) and enter the server through usable public factories.
-- OpenCode remains in [`server-local adapters`](apps/server/src/features/providers/adapters).
-
-The OpenCode factory resolves the server-local `OpenCodeProvider`, a usable runtime adapter. Gemini is a coming-soon catalog entry.
+The registered Claude, Codex, Copilot, Cursor, Devin, and OpenCode implementations live privately in [`packages/providers`](packages/providers/src/private). The server composes them through the package's public factories. Gemini is a coming-soon catalog entry.
 
 The six registered providers use different transports.
 

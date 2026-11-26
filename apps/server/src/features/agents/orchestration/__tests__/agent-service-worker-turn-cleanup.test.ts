@@ -25,7 +25,6 @@ import { ThreadControlMutationReservationService } from "../../../thread-control
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
 import { SubagentRosterService } from "../../collaboration/subagent-roster-service.js";
-import { SessionRuntime } from "../../../providers/runtime/session-runtime.js";
 import { runShutdownPhases } from "../../../../runtime/lifecycle/shutdown-phases.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
 import { TurnRuntimeController } from "../turn-runtime-controller.js";
@@ -583,14 +582,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     const descendants = vi.spyOn(SubagentRosterService.prototype, "stopDescendants").mockImplementation(hang);
     fixture.provider.stopSession.mockImplementation(hang);
     vi.spyOn(fixture.provider, "fenceCanonicalTurnEvents").mockImplementation(hang);
-    const sessions = new SessionRuntime({ spawn: async () => ({ state: {}, pids: [] }), isBusy: () => false,
-      interrupt: async () => undefined, close: hang, isStale: () => false }, {
-      providerId: "codex",
-      occupancy: new SessionOccupancyRegistry({ now: Date.now }),
-      jobObject: { isWindowsJob: false, assign: () => true, setDescription: () => undefined },
-      envService: { getEnv: () => ({}) },
-    });
-    await sessions.acquire({ sessionId: "hanging-adapter", threadId: fixture.thread.id, cwd: fixture.directory, permissionMode: "default" });
+    const hangingProvider = { shutdown: hang };
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let watchdogExpired = false;
     setTimeout(() => { watchdogExpired = true; }, SERVER_SHUTDOWN_DEADLINE_MS);
@@ -598,7 +590,7 @@ describe("AgentService cleanup through production worker composition", { timeout
     const shutdown = runShutdownPhases({
       stopServices: async () => {
         await fixture.service.stopAll();
-        await sessions.shutdown();
+        await hangingProvider.shutdown();
       },
       persist: (saveAttemptsUntil) => fixture.workers.close({ attemptsUntil: saveAttemptsUntil }),
       onServicesOverrun: () => undefined,

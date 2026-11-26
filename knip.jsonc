@@ -240,11 +240,11 @@
       "types"
     ],
     // Existing exports outside the retirement rows; decide removal or API retention in the follow-up.
-    "apps/server/src/features/providers/adapters/opencode/opencode-provider.ts": [
+    "packages/providers/src/private/opencode/opencode-provider.ts": [
       "exports"
     ],
     // Existing types outside the retirement rows; decide removal or API retention in the follow-up.
-    "apps/server/src/features/providers/adapters/opencode/{opencode-event-mapper.ts,opencode-resume-cursor.ts}": [
+    "packages/providers/src/private/opencode/{opencode-event-mapper.ts,opencode-resume-cursor.ts}": [
       "types"
     ],
     // Existing types outside the retirement rows; decide removal or API retention in the follow-up.

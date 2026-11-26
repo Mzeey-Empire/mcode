@@ -1,5 +1,5 @@
-import sdkMetadata from "../../../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
-import type { ProviderHostPorts } from "@mcode/providers";
+import sdkMetadata from "../../../../node_modules/@anthropic-ai/claude-agent-sdk/package.json" with { type: "json" };
+import type { ProviderHostPorts } from "../../../host-ports.js";
 import { ProviderRuntimeEventSchema, type ProviderRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
 
 /** Supplies the complete provider host contract without external processes or credentials. */

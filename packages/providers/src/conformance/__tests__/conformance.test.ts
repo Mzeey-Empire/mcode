@@ -6,7 +6,7 @@ import { createClaudeProvider } from "../../factories.js";
 import { fixtureHost } from "../../private/claude/__tests__/helpers/provider-fixture.js";
 import { CodexEventMapper } from "../../private/codex/codex-event-mapper.js";
 import { mapCopilotEvent, type CopilotTurnState } from "../../private/copilot/copilot-event-mapper.js";
-import { mapOpenCodeEnvelope } from "../../../../../apps/server/src/features/providers/adapters/opencode/opencode-event-mapper.js";
+import { mapOpenCodeEnvelope } from "../../private/opencode/opencode-event-mapper.js";
 import { SYNTHETIC_PLAN_MARKDOWN, type SyntheticPlanTrace } from "../synthetic-plan-trace.js";
 const planReplay = vi.hoisted(() => ({ requests: [] as Array<{ toolName: string; input: { plan: string } }> }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: ({ prompt, options }: { prompt: AsyncIterable<unknown>; options: Options }) => {

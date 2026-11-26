@@ -2,12 +2,11 @@ import { SUBAGENT_REPORTING } from "@mcode/contracts/providers/interfaces";
 import * as NodeEvents from "node:events";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
-import { inject, injectable } from "tsyringe";
 import { z } from "zod";
 import { logger } from "@mcode/shared";
 import type { ProviderStatusFacts } from "@mcode/contracts/providers/provider-status";
 import type { AgentEvent } from "@mcode/contracts/events/agent-event";
-import type { ApprovalReviewSupport, IAgentProvider, IApprovalReviewCapable, ISessionEvictable, ProviderId, ProviderTurnDiffUpdate, TurnRequest, NativePlanFileRef } from "@mcode/contracts/providers/interfaces";
+import type { ApprovalReviewSupport, IAgentProvider, IApprovalReviewCapable, ISessionEvictable, ProviderTurnDiffUpdate, TurnRequest, NativePlanFileRef } from "@mcode/contracts/providers/interfaces";
 import type { ApprovalResponse, ApprovalRespondResult, ApprovalOutcome, ApprovalOrigin, ApprovalRequestBody, ApprovalQuestion, ApprovalRequestEnvelope, ApprovalAnswers } from "@mcode/contracts/models/approval";
 import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
 import type { ProviderIdentity } from "@mcode/contracts/compat/agent-model";
@@ -16,26 +15,23 @@ import type { NativePlanFileOutcome } from "@mcode/contracts/models/plan";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
 import { lazySchema } from "@mcode/contracts/utils/lazySchema";
 import { providerRuntimeEvent } from "@mcode/contracts/events/provider-runtime-event";
-import type { ProviderHostPorts } from "@mcode/providers";
+import type { ProviderHostPorts } from "../../host-ports.js";
+import type { OpenCodeProviderPorts } from "../../factory-types.js";
+import { OpenCodeNativeTurnDiff } from "./opencode-native-turn-diff.js";
+import { SessionResumeUnavailableError } from "../../provider-turn-error.js";
+import { approvalChoice, approvalOutcome } from "../../approval-scope.js";
+import { approvalReceipt } from "../../approvals/approval-receipt.js";
+import { captureOwnedPlanFile, deleteOwnedPlanFile } from "../../plan/owned-plan-file.js";
+import { describeOpenCodeAuth } from "../status/provider-auth-checks.js";
 import {
-  OpenCodeNativeTurnDiff,
-  SessionResumeUnavailableError,
-  approvalChoice,
-  approvalOutcome,
-  approvalReceipt,
   createCliStatusRunner,
   readCliStatusVersion,
   resolveCliStatusBinary,
-  describeOpenCodeAuth,
-  captureOwnedPlanFile,
-  deleteOwnedPlanFile,
-} from "@mcode/providers";
-import { SettingsService } from "../../../settings/settings-service.js";
-import { EnvService } from "../../../../runtime/environment/env-service.js";
+} from "../status/cli-status-runner.js";
 import {
   CanonicalLiveEventPublisher,
   type CanonicalLiveEventRouting,
-} from "../../composition/canonical-live-event-publisher.js";
+} from "../canonical-live-event-publisher.js";
 import { OpenCodeServerPool, type OpenCodePoolKey } from "./opencode-server-pool.js";
 import {
   defaultOpenCodeHttpClient,
@@ -53,7 +49,8 @@ import {
 import { formatOpenCodeResumeCursor, parseOpenCodeResumeCursor } from "./opencode-resume-cursor.js";
 import { probeOpenCodeCli } from "./opencode-cli.js";
 
-const OPENCODE_SUPPORTED_CAPABILITIES = ["build", "plan", "permissions", "session-eviction", "turn-diff", "session-resume"] as const;
+/** Capabilities supported by OpenCode without version negotiation. */
+export const OPENCODE_SUPPORTED_CAPABILITIES = ["build", "plan", "permissions", "session-eviction", "turn-diff", "session-resume"] as const;
 
 /** Visible notice when a missing upstream session forces a fresh start. */
 const OPENCODE_SESSION_INVALIDATED_SUBTYPE = "sdk_session_invalidated";
@@ -397,9 +394,8 @@ function partRoleOf(
  * worktree gets its own. Turns stream over per-turn SSE into canonical
  * events; stop aborts the upstream session while the server stays warm.
  */
-@injectable()
 export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentProvider, ISessionEvictable, IApprovalReviewCapable {
-  readonly id: ProviderId = "opencode";
+  readonly id = "opencode";
   readonly subagentReporting = SUBAGENT_REPORTING.opencode;
   readonly descriptor = Object.freeze({
     id: "opencode" as const,
@@ -423,16 +419,16 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   private idleConfirm: OpenCodeIdleConfirm = { ...DEFAULT_IDLE_CONFIRM };
 
   constructor(
-    @inject(SettingsService) private readonly settingsService: SettingsService,
-    @inject(EnvService) private readonly envService: EnvService,
-    @inject("ProviderHostPorts") private readonly host: ProviderHostPorts,
+    private readonly host: ProviderHostPorts,
+    private readonly ports: OpenCodeProviderPorts,
   ) {
     super();
     this.canonicalEventPublisher = new CanonicalLiveEventPublisher("unbounded", this.id, this.host.events);
     this.pool = OpenCodeServerPool.withDefaults({
       platform: this.host.runtime.platform,
       terminateTree: (pid) => this.host.processes.terminateTree(pid),
-      env: () => ({ ...this.envService.getEnv() }),
+      env: () => ({ ...this.host.environment.snapshot() }),
+      createScope: () => this.ports.processScope.create(),
     });
     this.http = defaultOpenCodeHttpClient;
     this.probeCli = probeOpenCodeCli;
@@ -475,13 +471,13 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
    * credentials this machine cannot see, so it reads as unknown.
    */
   async describeStatus(): Promise<ProviderStatusFacts> {
-    if (this.settingsService.get().provider.opencode.serveUrl) return { auth: { state: "unknown" } };
-    const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.host.runtime.platform, env: this.envService.getEnv() });
+    if (this.ports.settings.get().provider.opencode.serveUrl) return { auth: { state: "unknown" } };
+    const run = createCliStatusRunner({ runProcess: this.host.processes.run, platform: this.host.runtime.platform, env: this.host.environment.snapshot() });
     const cliPath = this.cliPath();
     return { ...await describeOpenCodeAuth(run, cliPath), cli: {
       installed: await readCliStatusVersion(run, cliPath),
       managedBy: "user",
-      resolvedPath: await resolveCliStatusBinary(cliPath, this.envService.getEnv()),
+      resolvedPath: await resolveCliStatusBinary(cliPath, this.host.environment.snapshot()),
       npmPackage: "opencode-ai",
     } };
   }
@@ -698,7 +694,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
   }
 
   private cliPath(): string {
-    return this.settingsService.get().provider.cli.opencode?.trim() || "opencode";
+    return this.ports.settings.get().provider.cli.opencode?.trim() || "opencode";
   }
 
   /**
@@ -707,7 +703,7 @@ export class OpenCodeProvider extends NodeEvents.EventEmitter implements IAgentP
    * pool spawns or reuses the serve child keyed by this directory.
    */
   private async acquireServeLease(cwd: string): Promise<OpenCodeServeLease> {
-    const serveUrl = this.settingsService.get().provider.opencode.serveUrl;
+    const serveUrl = this.ports.settings.get().provider.opencode.serveUrl;
     if (serveUrl) return { kind: "attached", endpoint: { baseUrl: serveUrl, directory: cwd } };
     const probe = await this.probeCli(this.cliPath(), this.host.runtime.platform);
     const key: OpenCodePoolKey = { binaryPath: probe.binaryPath, cwd, hostname: OPENCODE_SERVE_HOSTNAME };

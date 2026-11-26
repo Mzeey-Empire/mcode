@@ -1,4 +1,0 @@
-export {
-  CanonicalLiveEventPublisher,
-  type CanonicalLiveEventRouting,
-} from "@mcode/providers/server-compat/canonical-live-event-publisher";

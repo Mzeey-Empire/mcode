@@ -7,7 +7,7 @@ const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: mockQuery }));
 
 import { ClaudeProvider, stubEnvService, stubJobObject } from "./helpers/provider-fixture.js";
-import { mockShutdownHost } from "./helpers/mock-shutdown-host.js";
+import { mockShutdownHost } from "../../__tests__/helpers/mock-shutdown-host.js";
 
 const USER_EXECUTION_ID = "55555555-5555-4555-8555-555555555555";
 const PROVIDER_EXECUTION_ID = "66666666-6666-4666-8666-666666666666";

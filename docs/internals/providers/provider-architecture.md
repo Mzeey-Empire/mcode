@@ -44,7 +44,7 @@ array from `spawn` and the runtime's JobObject/taskkill become best-effort
 no-ops for that Provider. Document that limitation.
 
 OpenCode uses
-[`OpenCodeServerPool`](../../../apps/server/src/features/providers/adapters/opencode/opencode-server-pool.ts)
+[`OpenCodeServerPool`](../../../packages/providers/src/private/opencode/opencode-server-pool.ts)
 instead. Its pool key includes the executable, working directory, and hostname.
 Sessions in one worktree share a server, while another worktree gets a separate
 server. Reference counting and idle eviction belong to that pool, so it does

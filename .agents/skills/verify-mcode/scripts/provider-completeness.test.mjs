@@ -350,8 +350,8 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.ok(calls[8].args.includes("src/transport/ws-events.test.ts"));
   NodeAssertStrict.ok(calls[9].args.includes("src/__tests__/codex/codex-provider-permission.test.ts"));
   NodeAssertStrict.deepEqual(calls[10].args.slice(-2), [
-    "src/features/providers/adapters/opencode/__tests__/opencode-provider-turn-diff.test.ts",
-    "src/features/providers/adapters/opencode/__tests__/opencode-provider-approval-review.test.ts",
+    "src/private/opencode/__tests__/opencode-provider-turn-diff.test.ts",
+    "src/private/opencode/__tests__/opencode-provider-approval-review.test.ts",
   ]);
   NodeAssertStrict.deepEqual(receipt.focusedGates.map(({ control, rows, limitation }) => ({ control, rows, limitation })), [
     { control: "apps/server focused integration tests", rows: ["empty", "interruption"], limitation: undefined },
@@ -364,7 +364,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     { control: "apps/web focused component tests", rows: ["fullAccessControl", "fileSurfaces"], limitation: undefined },
     { control: "apps/web focused permission handoff tests", rows: ["strictReviewNoticeOnly", "realProviderRequestCard"], limitation: undefined },
     { control: "packages/providers focused permission handoff tests", rows: ["providerResponseSettlementRemoval"], limitation: undefined },
-    { control: "apps/server focused OpenCode adapter tests", rows: ["opencodeNativeDiff", "opencodeReviewUnavailable"], limitation: "OpenCode reports approval review unavailable for every input, so Automatic resolves to manual; it never reports required, so the managed block is proven only by the provider-neutral server-approval-review-policy gate." },
+    { control: "packages/providers focused OpenCode adapter tests", rows: ["opencodeNativeDiff", "opencodeReviewUnavailable"], limitation: "OpenCode reports approval review unavailable for every input, so Automatic resolves to manual; it never reports required, so the managed block is proven only by the provider-neutral server-approval-review-policy gate." },
   ]);
   for (const row of ["empty", "invalidationDelta", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "nonGitScope", "noDeltaSilent", "frozenRetryDecision", "staleRetryReview", "staleRetryDiff", "strictReviewNoticeOnly", "realProviderRequestCard", "providerResponseSettlementRemoval", "opencodeNativeDiff", "opencodeReviewUnavailable"]) {
     NodeAssertStrict.equal(receipt.matrix[row], undefined, `${row} only belongs to its focused-test owner`);

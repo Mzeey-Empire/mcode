@@ -2,7 +2,6 @@ import { Lifecycle, type DependencyContainer } from "tsyringe";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { SessionOccupancyRegistry } from "../../session-occupancy/session-occupancy-registry.js";
 
-import { OpenCodeProvider } from "../adapters/opencode/opencode-provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
 import { createProviderHostPorts, PROVIDER_TURN_PORT, type HostTurnSink } from "./provider-host-ports.js";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
@@ -30,14 +29,6 @@ export function registerProviderAdapters(container: DependencyContainer): void {
     PROVIDER_EVENT_INGRESS_DIAGNOSTIC_SINK,
     { useValue: logProviderEventIngressDiagnostic },
   );
-  container.register(
-    OpenCodeProvider,
-    { useClass: OpenCodeProvider },
-    { lifecycle: Lifecycle.Singleton },
-  );
-  container.register("IAgentProvider", {
-    useFactory: (c) => c.resolve(OpenCodeProvider),
-  });
   container.register(
     ProviderRegistry,
     { useClass: ProviderRegistry },
