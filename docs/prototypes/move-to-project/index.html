@@ -309,7 +309,7 @@
   .pop .gl { color: var(--muted); font-size: 11.5px; font-weight: 500; padding: 6px 8px 4px; }
   .static-val { display: flex; align-items: center; gap: 8px; height: 34px; color: var(--ink); }
   .static-val .i { color: var(--muted); }
-  .mi .tag { font-size: 11.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; flex-shrink: 0; }
+  .mi .tag { font-size: 11.5px; color: var(--muted); flex-shrink: 0; }
   .mi .sub { color: var(--muted); font-size: 12px; }
   .mi.two { height: auto; min-height: 38px; padding: 6px 8px; align-items: center; }
   .mi.two .lab { display: grid; gap: 1px; }
@@ -910,7 +910,7 @@ function filesNotice(mv, t) {
   const files = folderFiles(t);
   if (mv.dest !== "existing" || !files.length) return "";
   const copied = files.length === 1 ? "It is not copied into the project; the agent is told where it is on its next turn." : "They are not copied into the project; the agent is told where they are on its next turn.";
-  return notice({ tone: "warning", title: `After the move, Mcode deletes the thread's ${plural(files.length, "file", "files")} on ${DEADLINE}`,
+  return notice({ tone: "warning", title: `After the move, Mcode deletes the ${plural(files.length, "file", "files")} in the old folder on&nbsp;${DEADLINE.replace(" ", "&nbsp;")}`,
     detail: `<div>${copied} Choose New project to keep the files with the thread.</div>`,
     more: `<div><span class="k">Files in this folder</span><ul class="mono">${files.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>`,
     openKey: "showFiles" });
