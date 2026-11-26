@@ -200,7 +200,7 @@ describe("TroubleshootingSection crash dumps", () => {
     expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: false } }]);
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Delete 2.5 MB of crash dumps?");
-    expect(dialog).toHaveTextContent(`Saved in ${directory}`);
+    expect(dialog).toHaveTextContent("This can't be undone.");
     expect(deleteCrashDumps).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));

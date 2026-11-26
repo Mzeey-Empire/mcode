@@ -41,7 +41,7 @@ function DeleteCrashDumpsDialog({ state, error, onDelete, onKeep }: { readonly s
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete {formatAttachmentByteSize(state.totalBytes)} of crash dumps?</DialogTitle>
-          <DialogDescription>Saved in {state.directory}</DialogDescription>
+          <DialogDescription>This can't be undone.</DialogDescription>
         </DialogHeader>
         {error ? <FieldError role="alert">{error}</FieldError> : null}
         <DialogFooter>
