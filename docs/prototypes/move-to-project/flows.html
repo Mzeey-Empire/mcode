@@ -31,8 +31,8 @@ const FLOWS = [
     ["Moved", "Row under billing-api.", "afterA"] ] },
   { name: "A thread with files, alone in its folder", steps: [
     ["Move dialog", "Beside Move thread: old files deleted 3 Dec.", "moveAFilesAlone"],
-    ["Moved", "The marker keeps the old folder and its deadline.", "afterAFilesAlone"],
-    ["After 7 days", "Folder removed; the marker says so.", "afterExpired"] ] },
+    ["Moved", "The marker says when the old folder is deleted.", "afterAFilesAlone"],
+    ["After 7 days", "The marker says the old folder was deleted.", "afterExpired"] ] },
   { name: "A thread whose fork still uses the folder", steps: [
     ["Move dialog", "Only this thread moves. The files stay for the fork, so nothing is deleted.", "moveAFiles"],
     ["Moved", "The fork stays in No project; the marker says the folder is kept.", "afterAFiles"],
