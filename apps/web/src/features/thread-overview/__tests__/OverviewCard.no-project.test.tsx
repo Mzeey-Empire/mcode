@@ -68,15 +68,22 @@ describe("Overview card for a No project thread", () => {
     expect(within(card).queryByTestId(testId)).toBeNull();
   });
 
-  it("opens the folder in the file manager and copies its path", async () => {
+  it("copies the folder's path", async () => {
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
     const card = await openCard(seed(noProjectWorkspace));
 
-    await user.click(within(card).getByRole("button", { name: "Open folder" }));
-    expect(mockTransport.openIn).toHaveBeenCalledWith("explorer", FOLDER);
     await user.click(within(card).getByRole("button", { name: "Copy folder path" }));
     expect(writeText).toHaveBeenCalledWith(FOLDER);
+  });
+
+  it("shows the full folder path in the Copy tooltip when the pointer rests on it", async () => {
+    const user = userEvent.setup();
+    const card = await openCard(seed(noProjectWorkspace));
+
+    await user.hover(within(card).getByRole("button", { name: "Copy folder path" }));
+
+    expect(await screen.findByText(FOLDER)).toBeVisible();
   });
 
   it("leaves a project thread's card as it was, with project settings and no folder row", async () => {

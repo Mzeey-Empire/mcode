@@ -11,6 +11,11 @@ const call: ToolCall = {
   output: "hello", isError: false, isComplete: false,
 };
 
+// The tooltip repeats the same words while it is open, so read the button's own announcement.
+function copyStatus(label: string): HTMLElement {
+  return within(screen.getByRole("button", { name: label })).getByRole("status");
+}
+
 async function openShellPanel(toggle: HTMLElement): Promise<void> {
   await act(async () => {
     fireEvent.click(toggle);
@@ -130,7 +135,8 @@ describe("Shell transcript controls", () => {
     expect(await navigator.clipboard.readText()).toBe(command);
     await user.click(screen.getByRole("button", { name: "Copy output" }));
     expect(await navigator.clipboard.readText()).toBe(output);
-    expect(screen.getAllByText("Copied")).toHaveLength(2);
+    expect(copyStatus("Copy command")).toHaveTextContent("Copied");
+    expect(copyStatus("Copy output")).toHaveTextContent("Copied");
   });
 
   it("reports a clipboard failure without claiming success and lets the user retry", async () => {
@@ -139,11 +145,10 @@ describe("Shell transcript controls", () => {
     render(<ShellToolCallRow toolCall={call} />);
     await user.click(screen.getByRole("button", { name: /^Running command/ }));
     await user.click(screen.getByRole("button", { name: "Copy output" }));
-    await waitFor(() => expect(screen.getByText("Copy failed. Try again.")).toBeInTheDocument());
-    expect(screen.queryByText("Copied")).not.toBeInTheDocument();
+    await waitFor(() => expect(copyStatus("Copy output")).toHaveTextContent("Copy failed. Try again."));
     await user.click(screen.getByRole("button", { name: "Copy output" }));
     expect(await navigator.clipboard.readText()).toBe(call.output);
-    expect(screen.getByText("Copied")).toBeInTheDocument();
+    expect(copyStatus("Copy output")).toHaveTextContent("Copied");
     write.mockRestore();
   });
 
