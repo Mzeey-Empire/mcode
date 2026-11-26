@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
-import { type FileReadResult, type WorkspaceFileChanges, type WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
+import { type FileChangedLines, type FileReadResult, type WorkspaceFileChanges, type WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 import { getTransport, pushEmitter } from "@/transport";
 import { refreshWorkspaceFiles, useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -39,6 +39,8 @@ export interface FilesData {
   readonly listError: string | null;
   readonly changes: WorkspaceFileChanges | null;
   readonly reads: Readonly<Record<string, FileReadState>>;
+  /** Changed-line bars per open path. A path is absent until git reports ranges for it, and keeps the last answer while a refresh is pending or fails. */
+  readonly changedLines: Readonly<Record<string, FileChangedLines>>;
 }
 
 // The transport rejects requests still in flight when the socket drops, so the loaders wait for
@@ -80,17 +82,36 @@ function useFileChanges(scope: FilesScope, revision: number, connected: boolean)
   return changes;
 }
 
+function omitPaths<T>(record: Readonly<Record<string, T>>, paths: readonly string[]): Readonly<Record<string, T>> {
+  if (!paths.some((path) => path in record)) return record;
+  const next = { ...record };
+  for (const path of paths) delete next[path];
+  return next;
+}
+
+/** Absent and null both mean "no bars", so an unchanged answer must not cost the open file a re-render. */
+function sameChangedLines(previous: FileChangedLines | undefined, next: FileChangedLines): boolean {
+  if (!previous || !next) return !previous && !next;
+  return previous.length === next.length && previous.every(([start, end], index) => start === next[index]?.[0] && end === next[index]?.[1]);
+}
+
 function useFileReads(scope: FilesScope, openPaths: readonly string[]) {
   // FilesTool is keyed by scope, so reads never carry over from another checkout.
   const [reads, setReads] = useState<Readonly<Record<string, FileReadState>>>({});
+  const [changedLines, setChangedLines] = useState<Readonly<Record<string, FileChangedLines>>>({});
   const requested = useRef(new Set<string>());
-
+  // Overlapping reads of one path (a refresh, or a close and reopen) answer in any order, so only the
+  // newest changed-lines request per path may set its bars.
+  const newestLinesRequest = useRef(new Map<string, number>());
+  const requestCount = useRef(0);
 
   const read = useCallback(
     (path: string) => {
       requested.current.add(path);
-      getTransport()
-        .readFileContent(scope.workspaceId, path, scope.threadId ?? undefined)
+      const transport = getTransport();
+      const threadId = scope.threadId ?? undefined;
+      transport
+        .readFileContent(scope.workspaceId, path, threadId)
         .then(
           (result): FileReadState => ({ status: "ready", result }),
           readFailure,
@@ -98,17 +119,34 @@ function useFileReads(scope: FilesScope, openPaths: readonly string[]) {
         .then((next) => {
           if (requested.current.has(path)) setReads((current) => ({ ...current, [path]: next }));
         });
+      // Changed lines cost a git process, so they arrive on their own and never hold the text back.
+      const request = ++requestCount.current;
+      newestLinesRequest.current.set(path, request);
+      transport
+        .getFileChangedLines(scope.workspaceId, path, threadId)
+        .then(
+          (lines) => {
+            if (newestLinesRequest.current.get(path) !== request) return;
+            setChangedLines((current) => (sameChangedLines(current[path], lines) ? current : { ...current, [path]: lines }));
+          },
+          // The bars are decoration; a failed diff keeps the last bars rather than blanking the margin.
+          (error: unknown) => console.error("[files] Failed to load changed lines", error),
+        );
     },
     [scope.workspaceId, scope.threadId],
   );
 
-
   useEffect(() => {
     for (const path of openPaths) if (!requested.current.has(path)) read(path);
-    for (const path of requested.current) if (!openPaths.includes(path)) requested.current.delete(path);
+    const closed = [...requested.current].filter((path) => !openPaths.includes(path));
+    for (const path of closed) {
+      requested.current.delete(path);
+      newestLinesRequest.current.delete(path);
+    }
+    if (closed.length > 0) setChangedLines((current) => omitPaths(current, closed));
   }, [openPaths, read]);
 
-  return { reads, read };
+  return { reads, changedLines, read };
 }
 
 function useFilesChanged(scope: FilesScope, onChanged: (paths: readonly string[] | "all") => void): void {
@@ -157,12 +195,12 @@ export function useFilesData(scope: FilesScope, openPaths: readonly string[]): F
   const connected = useConnectionStore((state) => state.status === "connected");
   const { list, error } = useFileList(scope, revision, connected);
   const changes = useFileChanges(scope, revision, connected);
-  const { reads, read } = useFileReads(scope, openPaths);
+  const { reads, changedLines, read } = useFileReads(scope, openPaths);
   useFilesChanged(scope, (paths) => {
     setRevision((current) => current + 1);
     for (const path of openPaths) if (paths === "all" || paths.includes(path)) read(path);
   });
-  return { list, listError: error, changes, reads: withLoading(reads, openPaths) };
+  return { list, listError: error, changes, reads: withLoading(reads, openPaths), changedLines };
 }
 
 function withLoading(

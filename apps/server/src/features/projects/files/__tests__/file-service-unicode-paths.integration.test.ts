@@ -71,8 +71,9 @@ describe("FileService unicode paths (real git)", () => {
     const files = makeService(folder);
 
     await expect(files.read("workspace-1", "plain.txt")).resolves.toEqual({
-      kind: "text", path: "plain.txt", size: 6, encoding: "utf-8", content: "plain\n", changedLines: null,
+      kind: "text", path: "plain.txt", size: 6, encoding: "utf-8", content: "plain\n",
     });
+    await expect(files.changedLines("workspace-1", "plain.txt")).resolves.toBeNull();
     await expect(files.changes("workspace-1")).resolves.toEqual({ git: false, entries: [], truncated: false });
   });
 
@@ -112,8 +113,9 @@ describe("FileService unicode paths (real git)", () => {
     NodeFS.writeFileSync(NodePath.join(root, "tracked.txt"), "one\nchanged\nthree\n");
 
     await expect(service.read("workspace-1", "tracked.txt")).resolves.toEqual({
-      kind: "text", path: "tracked.txt", size: 18, encoding: "utf-8", content: "one\nchanged\nthree\n", changedLines: [[2, 2]],
+      kind: "text", path: "tracked.txt", size: 18, encoding: "utf-8", content: "one\nchanged\nthree\n",
     });
+    await expect(service.changedLines("workspace-1", "tracked.txt")).resolves.toEqual([[2, 2]]);
   });
 
   it("lists a tracked non-ASCII path verbatim and round-trips read + mention validation", async () => {
@@ -124,7 +126,8 @@ describe("FileService unicode paths (real git)", () => {
     const listed = await service.list("workspace-1");
 
     expect(listed).toEqual({ paths: ["café.ts"], truncated: false });
-    await expect(service.read("workspace-1", "café.ts")).resolves.toEqual({ kind: "text", path: "café.ts", size: 15, encoding: "utf-8", content: "fixture content", changedLines: null });
+    await expect(service.read("workspace-1", "café.ts")).resolves.toEqual({ kind: "text", path: "café.ts", size: 15, encoding: "utf-8", content: "fixture content" });
+    await expect(service.changedLines("workspace-1", "café.ts")).resolves.toBeNull();
     for (const path of listed.paths) {
       expect(() => service.validateMentionPath("workspace-1", path)).not.toThrow();
     }
@@ -136,7 +139,8 @@ describe("FileService unicode paths (real git)", () => {
     const listed = await service.list("workspace-1");
 
     expect(listed).toEqual({ paths: ["new üntracked.ts"], truncated: false });
-    await expect(service.read("workspace-1", "new üntracked.ts")).resolves.toEqual({ kind: "text", path: "new üntracked.ts", size: 9, encoding: "utf-8", content: "untracked", changedLines: null });
+    await expect(service.read("workspace-1", "new üntracked.ts")).resolves.toEqual({ kind: "text", path: "new üntracked.ts", size: 9, encoding: "utf-8", content: "untracked" });
+    await expect(service.changedLines("workspace-1", "new üntracked.ts")).resolves.toBeNull();
   });
 
   it("lists names with spaces and non-ASCII names inside subdirectories", async () => {
@@ -196,7 +200,8 @@ describe("FileService unicode paths (real git)", () => {
       const listed = await service.list("workspace-1");
 
       expect(listed.paths).toEqual([newlineName]);
-      await expect(service.read("workspace-1", newlineName)).resolves.toMatchObject({ kind: "text", content: "newline content", changedLines: null });
+      await expect(service.read("workspace-1", newlineName)).resolves.toMatchObject({ kind: "text", content: "newline content" });
+      await expect(service.changedLines("workspace-1", newlineName)).resolves.toBeNull();
     },
   );
 
@@ -209,7 +214,8 @@ describe("FileService unicode paths (real git)", () => {
     edited.splice(11, 4, "changed 12\n", "changed 13\n", "changed 14\n", "changed 15\n");
     NodeFS.writeFileSync(NodePath.join(root, "tracked.txt"), edited.join(""));
     gitIn(root, "add", "tracked.txt");
-    await expect(service.read("workspace-1", "tracked.txt")).resolves.toMatchObject({ kind: "text", content: edited.join(""), changedLines: [[12, 15]] });
+    await expect(service.read("workspace-1", "tracked.txt")).resolves.toMatchObject({ kind: "text", content: edited.join("") });
+    await expect(service.changedLines("workspace-1", "tracked.txt")).resolves.toEqual([[12, 15]]);
     await expect(service.changes("workspace-1")).resolves.toEqual({ git: true, entries: [{ path: "tracked.txt", mark: "M" }], truncated: false });
   });
 
@@ -228,18 +234,18 @@ describe("FileService unicode paths (real git)", () => {
       { path: "added.txt", mark: "A" }, { path: "new näme.txt", mark: "A" }, { path: "untracked.txt", mark: "A" },
     ], truncated: false });
     for (const path of ["untracked.txt", "added.txt"]) {
-      await expect(service.read("workspace-1", path)).resolves.toMatchObject({ kind: "text", changedLines: null });
+      await expect(service.changedLines("workspace-1", path)).resolves.toBeNull();
     }
   });
 
   it("returns null without HEAD and handles single-line hunks and pure deletions", async () => {
     NodeFS.writeFileSync(NodePath.join(root, "lines.txt"), "one\ntwo\nthree\n");
     gitIn(root, "add", "lines.txt");
-    await expect(service.read("workspace-1", "lines.txt")).resolves.toMatchObject({ kind: "text", changedLines: null });
+    await expect(service.changedLines("workspace-1", "lines.txt")).resolves.toBeNull();
     gitIn(root, "commit", "-m", "baseline");
     NodeFS.writeFileSync(NodePath.join(root, "lines.txt"), "one\nchanged\nthree\n");
-    await expect(service.read("workspace-1", "lines.txt")).resolves.toMatchObject({ kind: "text", changedLines: [[2, 2]] });
+    await expect(service.changedLines("workspace-1", "lines.txt")).resolves.toEqual([[2, 2]]);
     NodeFS.writeFileSync(NodePath.join(root, "lines.txt"), "one\nthree\n");
-    await expect(service.read("workspace-1", "lines.txt")).resolves.toMatchObject({ kind: "text", changedLines: [] });
+    await expect(service.changedLines("workspace-1", "lines.txt")).resolves.toEqual([]);
   });
 });

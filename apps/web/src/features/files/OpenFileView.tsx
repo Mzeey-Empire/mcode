@@ -1,3 +1,4 @@
+import type { FileChangedLines } from "@mcode/contracts/models/workspace-file";
 import { CodeFileView, CodeLines } from "./CodeFileView";
 import { fileViewKind } from "./file-view-kind";
 import type { FileViewMode, ImageScale } from "./filesTabsStore";
@@ -25,6 +26,8 @@ export interface OpenFileViewProps {
   readonly onCloseTab: () => void;
   /** Find matches to paint where the body shows lines, or null while the find bar is closed. */
   readonly find: FindHighlight | null;
+  /** Margin bars for a text file; null while git has not answered. */
+  readonly changedLines: FileChangedLines;
 }
 
 /** The Files body for the active tab, chosen by {@link fileViewKind}. */
@@ -61,6 +64,7 @@ export function OpenFileView(props: OpenFileViewProps) {
       scopeId={props.scopeId}
       workspaceId={props.workspaceId}
       find={props.find}
+      changedLines={props.changedLines}
     />
   );
 }

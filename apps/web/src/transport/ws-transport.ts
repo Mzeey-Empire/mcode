@@ -1,6 +1,6 @@
 import type { DiffStats } from "@mcode/contracts/models/diff-stats";
 import { reportLaunchMark, reportLaunchResponse } from "./launch-marks";
-import type { FileReadResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
+import type { FileChangedLines, FileReadResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
 import type { FilesystemBrowseResult, WorkspaceCreateResult, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
 import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
@@ -1251,6 +1251,8 @@ export function createWsTransport(
       rpc<WorkspaceFileChanges>("file.changes", { workspaceId, threadId }),
     readFileContent: (workspaceId, relativePath, threadId?, as?) =>
       rpc<FileReadResult>("file.read", { workspaceId, relativePath, threadId, as }),
+    getFileChangedLines: (workspaceId, relativePath, threadId?) =>
+      rpc<FileChangedLines>("file.changedLines", { workspaceId, relativePath, threadId }),
     refreshWorkspaceFiles: (workspaceId, threadId?) =>
       rpc<void>("file.refresh", { workspaceId, threadId }),
 

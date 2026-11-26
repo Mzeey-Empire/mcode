@@ -259,6 +259,7 @@ function FilesBody({
           onOpenInEditor={(line) => actions.openInEditor(activePath, line)}
           onCloseTab={() => useFilesTabsStore.getState().closeFile(scopeId, activePath)}
           find={findHighlight}
+          changedLines={data.changedLines[activePath] ?? null}
         />
       </div>
     </>

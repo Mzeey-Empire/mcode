@@ -72,10 +72,17 @@ beforeEach(() => {
   transport.getWorkingTreeDiff.mockResolvedValue(patch("FIRST_VERSION"));
   transport.getBranchDiff.mockResolvedValue(patch("NEW_BRANCH"));
   transport.readFileAtRef.mockResolvedValue("before\n");
-  transport.readFileContent.mockResolvedValue({ kind: "text", path: "file.txt", size: 6, encoding: "utf-8", content: "after\n", changedLines: [[1, 1]] });
+  transport.readFileContent.mockResolvedValue({ kind: "text", path: "file.txt", size: 6, encoding: "utf-8", content: "after\n" });
 });
 
 afterEach(cleanup);
+
+function renderedItem(): { fileDiff: { cacheKey?: string }; annotations: unknown[] } {
+  const items = JSON.parse(screen.getByTestId("items").textContent ?? "[]") as { fileDiff: { cacheKey?: string }; annotations: unknown[] }[];
+  const item = items[0];
+  if (!item) throw new Error("No diff item rendered");
+  return item;
+}
 
 describe("ReviewDiffView refresh", () => {
   it("shows a failed file load as failed, not empty, and retries it", async () => {
@@ -149,6 +156,24 @@ describe("ReviewDiffView refresh", () => {
     );
     expect(transport.getWorkingTreeDiff.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(screen.getByTestId("items").textContent).not.toContain("FIRST_VERSION");
+  });
+
+  it("keeps the shown diff and its highlight key while a revision bump refetches an unchanged patch", async () => {
+    const view = render(<ReviewDiffView {...props} />);
+    await waitFor(() => expect(screen.getByTestId("items").textContent).toContain("FIRST_VERSION"));
+    const before = renderedItem();
+
+    let resolveRefetch: (value: string) => void = () => {};
+    transport.getWorkingTreeDiff.mockImplementationOnce(() => new Promise<string>((resolve) => { resolveRefetch = resolve; }));
+    act(() => useDiffStore.getState().bumpDiffRevision("thread-fixture"));
+    view.rerender(<ReviewDiffView {...props} cacheVersion={2} />);
+    await waitFor(() => expect(transport.getWorkingTreeDiff).toHaveBeenCalledTimes(2));
+
+    expect(renderedItem().fileDiff.cacheKey).toBe(before.fileDiff.cacheKey);
+    expect(renderedItem().annotations).toEqual([]);
+
+    await act(async () => resolveRefetch(patch("FIRST_VERSION")));
+    expect(renderedItem().fileDiff.cacheKey).toBe(before.fileDiff.cacheKey);
   });
 
   it("rereads the patch without whitespace changes when hiding them, at the same comparison version", async () => {

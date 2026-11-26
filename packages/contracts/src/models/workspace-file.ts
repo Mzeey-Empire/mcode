@@ -27,6 +27,17 @@ export const WorkspaceFileChangesSchema = lazySchema(() => z.object({
 /** Bounded change marks for one workspace or thread checkout. */
 export type WorkspaceFileChanges = z.infer<ReturnType<typeof WorkspaceFileChangesSchema>>;
 
+/**
+ * 1-based inclusive line ranges of one file that changed relative to HEAD, or
+ * null when nothing changed, the path is untracked or newly added, the work
+ * tree has no HEAD commit, or the workspace is not a git work tree.
+ */
+export const FileChangedLinesSchema = lazySchema(() =>
+  z.array(z.tuple([z.number().int().positive(), z.number().int().positive()])).nullable(),
+);
+/** Changed-line ranges for the Files view margin. */
+export type FileChangedLines = z.infer<ReturnType<typeof FileChangedLinesSchema>>;
+
 /** Viewer content or the reason a file cannot be displayed as text. */
 export const FileReadResultSchema = lazySchema(() => {
   const file = { path: z.string(), size: z.number().int().nonnegative() };
@@ -34,7 +45,6 @@ export const FileReadResultSchema = lazySchema(() => {
     z.object({
       ...file, kind: z.literal("text"), encoding: z.enum(["utf-8", "utf-16le", "utf-16be"]),
       content: z.string(),
-      changedLines: z.array(z.tuple([z.number().int().positive(), z.number().int().positive()])).nullable(),
     }),
     z.object({ ...file, kind: z.literal("image"), mime: z.string(), url: z.string() }),
     z.object({ ...file, kind: z.literal("binary") }),

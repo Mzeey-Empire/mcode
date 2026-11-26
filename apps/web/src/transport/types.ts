@@ -13,7 +13,7 @@ import type { HandoffAuditMetadata } from "@mcode/contracts/handoff";
 import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
 import type { TurnSteerParams, TurnSteerResult, ListHeldSteersResult, SettleUnknownSteerParams, SettleUnknownSteerResult } from "@mcode/contracts/models/turn-steer";
 import type { TurnRetryParams, TurnResumeScheduleParams, ScheduledTurnResume, TurnRetryResult, TurnResumeParams, TurnResumeResult } from "@mcode/contracts/models/turn-recovery";
-import type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult } from "@mcode/contracts/models/workspace-file";
+import type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult, FileChangedLines } from "@mcode/contracts/models/workspace-file";
 import type { FilesystemBrowseResult, WorkspaceCreateResult, CreateAndSendResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, SendMessageInput, CreateAndSendInput, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
 import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import type { Workspace, WorkspaceEnrichment } from "@mcode/contracts/models/workspace";
@@ -492,6 +492,7 @@ export interface McodeTransport {
   listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<WorkspaceFileList>;
   getWorkspaceFileChanges(workspaceId: string, threadId?: string): Promise<WorkspaceFileChanges>;
   readFileContent(workspaceId: string, relativePath: string, threadId?: string, as?: "text"): Promise<FileReadResult>;
+  getFileChangedLines(workspaceId: string, relativePath: string, threadId?: string): Promise<FileChangedLines>;
   refreshWorkspaceFiles(workspaceId: string, threadId?: string): Promise<void>;
 
   // Open-in app actions
