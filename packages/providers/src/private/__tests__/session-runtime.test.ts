@@ -25,6 +25,46 @@ function epochOccupancy() {
 }
 
 describe("SessionRuntime", () => {
+  it("replays an 80 minute turn, background work, and TTL after task completion", async () => {
+    vi.useFakeTimers({ now: 0 });
+    let lastActivityAt: number | null = null;
+    const occupancy = {
+      openSession: () => 1,
+      closeSession: () => { lastActivityAt = null; },
+      nativeChanged: () => { lastActivityAt = Date.now(); },
+      read: () => ({ held: false, lastActivityAt, lastUserTurnAt: null }),
+    } satisfies ProviderSessionOccupancyPort;
+    const state = { busy: true, tasks: [{ taskId: "bench", label: "Benchmark", startedAt: 0 }] };
+    const runtime = new SessionRuntime({
+      spawn: async () => ({ state, pids: [] }),
+      isBusy: (state) => state.busy,
+      backgroundTasks: (state) => state.tasks,
+      interrupt: () => {},
+      close: () => {},
+      isStale: () => false,
+    }, {
+      providerId: "claude", occupancy, idleTtlMs: 600_000,
+      jobObject: { isWindowsJob: false, assign: () => false, setDescription: () => {} },
+      envService: { getEnv: () => ({}) },
+    });
+    try {
+      await runtime.acquire({ sessionId: "session", threadId: "thread", cwd: ".", permissionMode: "default" });
+      await vi.advanceTimersByTimeAsync(80 * 60_000);
+      state.busy = false;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(runtime.size).toBe(1);
+      state.tasks = [];
+      occupancy.nativeChanged();
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(runtime.size).toBe(1);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(runtime.size).toBe(0);
+    } finally {
+      await runtime.shutdown();
+      vi.useRealTimers();
+    }
+  });
+
   it("closes occupancy for a spawn that finishes between a stop request and its teardown", async () => {
     const { records, occupancy } = epochOccupancy();
     let finishSpawn!: (result: { state: string; pids: number[] }) => void;

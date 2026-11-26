@@ -1,8 +1,7 @@
-import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { SessionRuntime } from "../session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../session-runtime.js";
-import { SessionOccupancyRegistry } from "../../../session-occupancy/session-occupancy-registry.js";
+import type { ProviderSessionOccupancyPort } from "../../host-ports.js";
 
 /** Per-session state for the fake adapter. */
 interface FakeState {
@@ -41,12 +40,21 @@ class FakeAdapter implements ProtocolAdapter<FakeState> {
   }
 }
 
-const jobObject = { isWindowsJob: false, assign: vi.fn(), setDescription: vi.fn() } as unknown as import("../../../../runtime/process/containment/job-object.js").JobObject;
-const envService = { getEnv: () => ({ MCODE_TEST: "1" }) } as unknown as import("../../../../runtime/environment/env-service.js").EnvService;
+const jobObject = { isWindowsJob: false, assign: () => false, setDescription: () => {} };
+const envService = { getEnv: () => ({ MCODE_TEST: "1" }) };
+
+function unheldOccupancy(): ProviderSessionOccupancyPort {
+  return {
+    openSession: () => 1,
+    closeSession: () => {},
+    nativeChanged: () => {},
+    read: () => ({ held: false, lastActivityAt: null, lastUserTurnAt: null }),
+  };
+}
 
 function makeRuntime(adapter: FakeAdapter, idleTtlMs = 1000): SessionRuntime<FakeState> {
   return new SessionRuntime<FakeState>(adapter, {
-    providerId: "fake", occupancy: new SessionOccupancyRegistry({ now: Date.now }), jobObject, envService, idleTtlMs,
+    providerId: "fake", occupancy: unheldOccupancy(), jobObject, envService, idleTtlMs,
   });
 }
 
