@@ -50,7 +50,7 @@ export const TROUBLESHOOTING = settingsPage("troubleshooting", {
   },
   crashDumps: {
     label: "Crash dumps",
-    hint: "Saved on this computer when Mcode crashes. Can include your messages, code, and tokens. Applies after Mcode restarts.",
+    hint: "Stays on this computer. Can include your messages, code, and tokens. Applies after Mcode restarts.",
     synonyms: "crash crashes dump dumps minidump crashpad report",
     value: settingsValue((s) => s.diagnostics.crashDumps, (crashDumps) => ({ diagnostics: { crashDumps } })),
     exists: crashDumpsAvailable,

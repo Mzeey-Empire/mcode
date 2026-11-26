@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { FieldError } from "@/components/ui/field-error";
 import { Switch } from "@/components/ui/switch";
+import { TooltipTrigger } from "@/components/ui/tooltip";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { CrashDumpsState } from "@/transport/desktop-bridge";
-import { PathLine, PathTooltipRoot, usePathTooltip } from "../PathLine";
+import { PathTooltipRoot, usePathTooltip } from "../PathLine";
 import { SettingRowFrame } from "../Setting";
 import type { SettingRowProps } from "../setting-def";
 
@@ -21,9 +22,10 @@ export function crashDumpsAvailable(): boolean {
   return Boolean(bridge?.getCrashDumps && bridge.deleteCrashDumps && bridge.relaunch);
 }
 
-function failureMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
+// Fixed text, never the rejection's message: Electron prefixes IPC failures with "Error invoking remote method"
+// and appends raw errno text, which tells the user nothing they can act on.
+const READ_FAILED = "Couldn't read the crash dumps folder. Reopen this page to try again.";
+const DELETE_FAILED = "Couldn't delete every crash dump. Close anything using them, then try again.";
 
 /** FieldError's look as a span, because the row hint is a paragraph and FieldError is one too. */
 function LoadError({ message }: { readonly message: string }) {
@@ -40,8 +42,8 @@ function DeleteCrashDumpsDialog({ state, error, onDelete, onKeep }: { readonly s
     <Dialog open onOpenChange={(open) => !open && onKeep()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete {formatAttachmentByteSize(state.totalBytes)} of crash dumps?</DialogTitle>
-          <DialogDescription>This can't be undone.</DialogDescription>
+          <DialogTitle>Delete crash dumps?</DialogTitle>
+          <DialogDescription>Removes {formatAttachmentByteSize(state.totalBytes)}. This can't be undone.</DialogDescription>
         </DialogHeader>
         {error ? <FieldError role="alert">{error}</FieldError> : null}
         <DialogFooter>
@@ -73,8 +75,8 @@ export function CrashDumpsRow({ def, variant }: SettingRowProps) {
       (loaded) => {
         if (!cancelled) setState(loaded);
       },
-      (error: unknown) => {
-        if (!cancelled) setLoadError(failureMessage(error, "Could not read crash dumps."));
+      () => {
+        if (!cancelled) setLoadError(READ_FAILED);
       },
     );
     return () => {
@@ -90,8 +92,8 @@ export function CrashDumpsRow({ def, variant }: SettingRowProps) {
         setLoadError(null);
       }
       return fresh;
-    } catch (error) {
-      setLoadError(failureMessage(error, "Could not read crash dumps."));
+    } catch {
+      setLoadError(READ_FAILED);
       return undefined;
     }
   }
@@ -110,8 +112,8 @@ export function CrashDumpsRow({ def, variant }: SettingRowProps) {
       if (next) setState(next);
       setDeleteError(null);
       setConfirmingDelete(false);
-    } catch (error) {
-      setDeleteError(failureMessage(error, "Could not delete crash dumps."));
+    } catch {
+      setDeleteError(DELETE_FAILED);
       await refresh();
     }
   }
@@ -124,8 +126,10 @@ export function CrashDumpsRow({ def, variant }: SettingRowProps) {
   const needsRestart = state !== null && state.enabledAtLaunch !== saved;
   const status = state && (
     <span className="mt-1 flex min-w-0 items-baseline gap-3">
-      <span className="shrink-0 font-mono text-caption text-ink">{formatAttachmentByteSize(state.totalBytes)}</span>
-      <PathLine path={state.directory} tooltip={pathTooltip} />
+      <span className="shrink-0 font-mono text-caption text-ink">{formatAttachmentByteSize(state.totalBytes)} saved</span>
+      <TooltipTrigger handle={pathTooltip} payload={state.directory} render={
+        <span aria-label={state.directory} className="text-fade font-mono text-caption text-muted [font-variant-ligatures:none]">{state.directory}</span>
+      } />
     </span>
   );
 

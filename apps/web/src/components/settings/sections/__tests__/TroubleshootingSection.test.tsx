@@ -176,7 +176,7 @@ describe("TroubleshootingSection crash dumps", () => {
     getCrashDumps.mockResolvedValue({ ...dumps, enabledAtLaunch: true });
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    await screen.findByText("2.5 MB");
+    await screen.findByText("2.5 MB saved");
     expect(screen.getByRole("switch", { name: "Crash dumps" })).toBeChecked();
     expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
   });
@@ -186,7 +186,7 @@ describe("TroubleshootingSection crash dumps", () => {
     render(<TroubleshootingSection />);
     expect(screen.queryByLabelText(directory)).toBeNull();
 
-    expect(await screen.findByText("2.5 MB")).toBeInTheDocument();
+    expect(await screen.findByText("2.5 MB saved")).toBeInTheDocument();
     expect(screen.getByLabelText(directory)).toBeInTheDocument();
   });
 
@@ -194,27 +194,27 @@ describe("TroubleshootingSection crash dumps", () => {
     persisted.diagnostics = { crashDumps: true };
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    await screen.findByText("2.5 MB");
+    await screen.findByText("2.5 MB saved");
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
     expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: false } }]);
     const dialog = await screen.findByRole("dialog");
-    expect(dialog).toHaveTextContent("Delete 2.5 MB of crash dumps?");
-    expect(dialog).toHaveTextContent("This can't be undone.");
+    expect(dialog).toHaveTextContent("Delete crash dumps?");
+    expect(dialog).toHaveTextContent("Removes 2.5 MB. This can't be undone.");
     expect(deleteCrashDumps).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    expect(await screen.findByText("0 B")).toBeInTheDocument();
+    expect(await screen.findByText("0 B saved")).toBeInTheDocument();
     expect(deleteCrashDumps).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.queryByText("2.5 MB")).toBeNull();
+    expect(screen.queryByText("2.5 MB saved")).toBeNull();
   });
 
   it("keeps the dumps when Keep is chosen", async () => {
     persisted.diagnostics = { crashDumps: true };
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    await screen.findByText("2.5 MB");
+    await screen.findByText("2.5 MB saved");
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
     await screen.findByRole("dialog");
@@ -222,7 +222,7 @@ describe("TroubleshootingSection crash dumps", () => {
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(deleteCrashDumps).not.toHaveBeenCalled();
-    expect(screen.getByText("2.5 MB")).toBeInTheDocument();
+    expect(screen.getByText("2.5 MB saved")).toBeInTheDocument();
   });
 
   it("opens no dialog when switched off with no dumps saved", async () => {
@@ -230,7 +230,7 @@ describe("TroubleshootingSection crash dumps", () => {
     getCrashDumps.mockResolvedValue({ ...dumps, totalBytes: 0 });
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    await screen.findByText("0 B");
+    await screen.findByText("0 B saved");
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
     expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: false } }]);
@@ -240,7 +240,7 @@ describe("TroubleshootingSection crash dumps", () => {
   it("opens no dialog when switched on with dumps already saved", async () => {
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    await screen.findByText("2.5 MB");
+    await screen.findByText("2.5 MB saved");
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
     expect(saves.map((save) => save.partial)).toEqual([{ diagnostics: { crashDumps: true } }]);
@@ -252,22 +252,24 @@ describe("TroubleshootingSection crash dumps", () => {
     getCrashDumps.mockResolvedValueOnce({ ...dumps, totalBytes: 0 });
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    await screen.findByText("0 B");
+    await screen.findByText("0 B saved");
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
-    expect(await screen.findByRole("dialog")).toHaveTextContent("Delete 2.5 MB of crash dumps?");
+    expect(await screen.findByRole("dialog")).toHaveTextContent("Removes 2.5 MB. This can't be undone.");
   });
 
   it("shows a failed mount load as an alert and clears it once a later read succeeds", async () => {
     persisted.diagnostics = { crashDumps: true };
-    getCrashDumps.mockRejectedValueOnce(new Error("Crash dump folder is unreadable"));
+    getCrashDumps.mockRejectedValueOnce(new Error("Error invoking remote method: EACCES crashpad"));
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Crash dump folder is unreadable");
-    expect(screen.queryByText("2.5 MB")).toBeNull();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't read the crash dumps folder. Reopen this page to try again.");
+    expect(alert).not.toHaveTextContent("EACCES");
+    expect(screen.queryByText("2.5 MB saved")).toBeNull();
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
-    expect(await screen.findByText("2.5 MB")).toBeInTheDocument();
+    expect(await screen.findByText("2.5 MB saved")).toBeInTheDocument();
     expect(screen.queryByRole("alert", { hidden: true })).toBeNull();
   });
 
@@ -277,17 +279,19 @@ describe("TroubleshootingSection crash dumps", () => {
       .mockResolvedValueOnce(dumps)
       .mockResolvedValueOnce(dumps)
       .mockResolvedValueOnce({ ...dumps, totalBytes: 1_048_576 });
-    deleteCrashDumps.mockRejectedValueOnce(new Error("Crash dump is locked by another process"));
+    deleteCrashDumps.mockRejectedValueOnce(new Error("Error invoking remote method: EBUSY crash dump is locked"));
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    await screen.findByText("2.5 MB");
+    await screen.findByText("2.5 MB saved");
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Crash dump is locked by another process");
-    await waitFor(() => expect(dialog).toHaveTextContent("Delete 1.0 MB of crash dumps?"));
+    const deleteAlert = await within(dialog).findByRole("alert");
+    expect(deleteAlert).toHaveTextContent("Couldn't delete every crash dump. Close anything using them, then try again.");
+    expect(deleteAlert).not.toHaveTextContent("EBUSY");
+    await waitFor(() => expect(dialog).toHaveTextContent("Removes 1.0 MB. This can't be undone."));
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -298,7 +302,7 @@ describe("TroubleshootingSection crash dumps", () => {
     persisted.diagnostics = { crashDumps: true };
     stubDesktopBridge();
     render(<TroubleshootingSection />);
-    await screen.findByText("2.5 MB");
+    await screen.findByText("2.5 MB saved");
 
     await toggleAndResolveSettingsSave(screen.getByRole("switch", { name: "Crash dumps" }), "Could not save settings");
     expect(screen.queryByRole("dialog")).toBeNull();
