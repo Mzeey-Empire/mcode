@@ -182,6 +182,12 @@
   /* Before a project is picked there is nothing to show yet, so the heading sits straight on the footer. */
   .move .body:empty { display: none; }
   .move:has(.body:empty) .head { padding-bottom: 20px; }
+  /* A determinate bar that moves only when a file lands, so nothing repaints while it waits. */
+  .copy { display: grid; gap: 6px; }
+  .copy-top { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--muted); }
+  .copy-top .mono { font-size: 12px; color: var(--ink); }
+  .copy .bar { height: 4px; border-radius: 2px; background: var(--selected); overflow: hidden; }
+  .copy .bar span { display: block; height: 100%; border-radius: 2px; background: var(--primary); }
   .move .foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border);
     background: color-mix(in oklch, var(--hover) 50%, transparent); border-radius: 0 0 14px 14px; }
   .field { display: grid; gap: 6px; }
@@ -449,6 +455,7 @@ function goto(key) {
     moveBGit: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new", git: true }) })),
     moveBCollide: () => set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new", name: "mcode" }) })),
     moveBusy: () => { thread("f1").status = "running"; set(at("n1", { overlay: "move", mv: newMv("n1", { dest: "new" }) })); },
+    moveCopying: () => set(at("n2", { overlay: "move", mv: newMv("n2", { dest: "new", parent: "D:\\work", phase: "moving", copied: 31 }) })),
     moveMoving: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", phase: "moving" }) })),
     moveFailed: () => set(at("n1", { overlay: "move", mv: newMv("n1", { pid: "mcode", base: "main", phase: "failed" }) })),
     moveCross: () => set(at("n1", { overlay: "move", sim: { ...S.sim, crossDrive: true }, mv: newMv("n1", { dest: "new", parent: "D:\\work", phase: "failed" }) })),
@@ -711,7 +718,7 @@ function moveDialogHtml() {
   const locked = mv.phase === "moving";
   const n = mv.dest === "new" ? sharersOf(t).length : 1;
   /* A failed move names what failed and what is left where; across drives the fix is another location, so that error sits under Location. */
-  const cross = S.sim.crossDrive && mv.dest === "new" && mv.parent.includes("\\");
+  const cross = S.sim.crossDrive && mv.dest === "new" && onOtherDrive(mv.parent);
   const failed = mv.phase === "failed";
   const who = n > 1 ? "the threads are" : "the thread is";
   let outcome = "";
@@ -752,7 +759,7 @@ function moveDialogHtml() {
       <div class="foot"><button class="btn outline" data-act="mvgitretry">${ic("restore")}Retry git setup</button><button class="btn primary" data-act="mvdone">Done</button></div>
     </div></div>`;
   }
-  const primaryLabel = locked ? (mv.dest === "new" && S.sim.crossDrive ? "Copying files…" : "Moving…")
+  const primaryLabel = locked ? (mv.copied != null ? "Copying files…" : "Moving…")
     : failed ? "Try again"
     : mv.dest === "new" ? "Create project" : "Move thread";
   const primaryIcon = failed ? "restore" : mv.dest === "new" ? "folderPlus" : "move";
@@ -768,7 +775,7 @@ function moveDialogHtml() {
   return `<div class="scrim" ${locked ? "" : 'data-act="mvcancel"'}><div class="dialog move" role="dialog" aria-modal="true" aria-labelledby="mvh" data-stop ${locked ? 'aria-busy="true"' : ""}>
     <div class="head"><span class="what">${ic("inbox", "sm")}<span class="fade">${esc(t.title)}</span></span><h4 id="mvh">Move to ${slotHtml(mv, locked)}</h4></div>
     <button class="x" ${locked ? "disabled" : 'data-act="mvcancel"'} aria-label="Close">${ic("x", "sm")}</button>
-    <fieldset class="body" ${locked ? "disabled" : ""}>${form}${busyBox}${cross ? "" : outcome}${sharersNotice(mv, t, block?.busy)}</fieldset>
+    <fieldset class="body" ${locked ? "disabled" : ""}>${form}${copyProgress(mv)}${busyBox}${cross ? "" : outcome}${sharersNotice(mv, t, block?.busy)}</fieldset>
     <div class="foot">${filesNote(mv, t)}
       <button class="btn outline" ${locked ? "disabled" : 'data-act="mvcancel"'}>Cancel</button>
       <button class="btn primary" ${primaryAttrs}>${locked ? `<span class="spin"></span>` : ic(primaryIcon)}${primaryLabel}</button></div>
@@ -813,17 +820,38 @@ function applyNew(mv) {
   S.expanded = { ...S.expanded, [id]: true };
   return id;
 }
+/* On the same drive the folder is renamed into place, which is instant. On another drive every file is copied first,
+   which can take a while, so the dialog shows how far it has got. With "D: fails" the copy stops partway, as a full
+   drive would. */
 function runMove() {
   const mv = S.mv;
-  setMv({ phase: "moving", picker: null });
-  setTimeout(() => {
+  const copying = mv.dest === "new" && onOtherDrive(mv.parent);
+  setMv({ phase: "moving", picker: null, copied: copying ? 0 : null });
+  const finish = () => {
     if (S.overlay !== "move") return;
-    if (S.sim.failMove || (S.sim.crossDrive && mv.dest === "new" && mv.parent.includes("\\"))) return setMv({ phase: "failed" });
+    if (S.sim.failMove || (S.sim.crossDrive && copying)) return setMv({ phase: "failed" });
     if (mv.dest === "existing") { applyExisting(mv); return set({ overlay: null, mv: null }); }
     const id = applyNew(mv);
     if (mv.git && S.sim.failGit) return setMv({ phase: "gitfailed", createdId: id });
     set({ overlay: null, mv: null });
-  }, 1300);
+  };
+  if (!copying) return setTimeout(finish, 1300);
+  const stopAt = S.sim.crossDrive ? Math.round(COPY_MB * 0.7) : COPY_MB;
+  const tick = setInterval(() => {
+    if (S.overlay !== "move" || S.mv?.phase !== "moving") return clearInterval(tick);
+    const copied = Math.min(stopAt, S.mv.copied + 2);
+    setMv({ copied });
+    if (copied >= stopAt) { clearInterval(tick); setTimeout(finish, 300); }
+  }, 100);
+}
+const onOtherDrive = path => /^[A-Z]:\\/.test(path);
+const COPY_MB = 48;
+function copyProgress(mv) {
+  if (mv.phase !== "moving" || mv.copied == null) return "";
+  const pct = Math.round((mv.copied / COPY_MB) * 100);
+  return `<div class="copy" role="progressbar" aria-label="Copying files" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
+    <div class="copy-top"><span>Copying files</span><span class="mono">${mv.copied} of ${COPY_MB} MB</span></div>
+    <div class="bar"><span style="width:${pct}%"></span></div></div>`;
 }
 function openMove(tid, patch = {}) {
   const t = S.threads.find(x => x.id === tid);
