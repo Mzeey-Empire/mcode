@@ -43,9 +43,12 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  closeDisabled = false,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /** Dims the close button while the dialog's work cannot be abandoned. */
+  closeDisabled?: boolean
 }) {
   return (
     <DialogPortal>
@@ -64,6 +67,7 @@ function DialogContent({
         {showCloseButton && (
           <DialogPrimitive.Close
             data-slot="dialog-close"
+            disabled={closeDisabled}
             render={
               <Button
                 variant="ghost"

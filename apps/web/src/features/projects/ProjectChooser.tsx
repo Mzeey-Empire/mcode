@@ -20,6 +20,23 @@ export interface ProjectChooserProps {
   readonly triggerTooltip?: string;
   /** Which side of the trigger the chooser opens on. */
   readonly side?: "top" | "bottom";
+  /** Picks a project for something other than the composer, such as the move dialog. */
+  readonly pick?: ProjectChooserPick;
+}
+
+/**
+ * Turns the chooser into a plain project picker: it lists only projects, hands the choice to `onSelect`,
+ * and never touches the composer or the Add project palette.
+ */
+export interface ProjectChooserPick {
+  /** The project already picked, shown as selected. */
+  readonly selectedWorkspaceId: string | null;
+  /** Called with the chosen project after the chooser closes. */
+  readonly onSelect: (workspace: Workspace) => void;
+  /** Reports the chooser opening or closing, so a host can hold its own actions while it is open. */
+  readonly onOpenChange?: (open: boolean) => void;
+  /** Stops the chooser opening, for a host whose choice is locked in. */
+  readonly disabled?: boolean;
 }
 
 const SOURCES_META = PALETTE_SOURCES.map((source) => source.shortTitle).join(", ");
@@ -33,7 +50,7 @@ const NO_PROJECT_LABEL = "No project";
 const NO_PROJECT_ROW_KEY = "no-project";
 
 /** Starts a new-thread composer in the selected target. Add project opens the palette's Sources view. */
-export function ProjectChooser({ trigger, triggerTooltip, side = "bottom" }: ProjectChooserProps) {
+export function ProjectChooser({ trigger, triggerTooltip, side = "bottom", pick }: ProjectChooserProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const projects = useProjectWorkspaces();
@@ -45,10 +62,12 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom" }: Pro
   const setOpenAndResetQuery = (next: boolean) => {
     setOpen(next);
     if (!next) setQuery("");
+    pick?.onOpenChange?.(next);
   };
 
   const chooseItem = (item: ChooserItem) => {
     if (item.kind === "no-project") beginNoProjectThread();
+    else if (pick) pick.onSelect(item.workspace);
     else beginNewThread(item.workspace.id);
     setOpenAndResetQuery(false);
   };
@@ -59,7 +78,7 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom" }: Pro
     queueMicrotask(() => useCommandPaletteStore.getState().open({ intent: "addProject" }));
   };
 
-  const popoverTrigger = <PopoverTrigger render={trigger} />;
+  const popoverTrigger = <PopoverTrigger render={trigger} disabled={pick?.disabled} />;
   return (
     <Popover open={open} onOpenChange={setOpenAndResetQuery}>
       {triggerTooltip ? (
@@ -72,19 +91,24 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom" }: Pro
         role="dialog"
         aria-label="Choose project"
         side={side}
-        align="start"
+        align={pick ? "center" : "start"}
         sideOffset={12}
         className="flex w-[min(92vw,30rem)] flex-col gap-px p-[0.6rem]"
       >
         <ChooserList
           projects={projects}
-          selectedKey={onNoProject ? NO_PROJECT_ROW_KEY : activeWorkspaceId ?? undefined}
+          selectedKey={pick ? pick.selectedWorkspaceId ?? undefined : onNoProject ? NO_PROJECT_ROW_KEY : activeWorkspaceId ?? undefined}
           query={query}
           onQueryChange={setQuery}
           onSelect={chooseItem}
+          projectsOnly={pick !== undefined}
         />
-        <div aria-hidden className="mx-0.5 mb-1 h-px shrink-0 bg-border" />
-        <AddProjectRow onClick={addProject} />
+        {pick ? null : (
+          <>
+            <div aria-hidden className="mx-0.5 mb-1 h-px shrink-0 bg-border" />
+            <AddProjectRow onClick={addProject} />
+          </>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -96,10 +120,15 @@ interface ChooserListProps {
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
   readonly onSelect: (item: ChooserItem) => void;
+  /** Leaves the No project row out, for a host that picks only among projects. */
+  readonly projectsOnly: boolean;
 }
 
-function ChooserList({ projects, selectedKey, query, onQueryChange, onSelect }: ChooserListProps) {
-  const items = useMemo(() => chooserItems(projects, query), [projects, query]);
+function ChooserList({ projects, selectedKey, query, onQueryChange, onSelect, projectsOnly }: ChooserListProps) {
+  const items = useMemo(
+    () => (projectsOnly ? projectItems(projects, query) : chooserItems(projects, query)),
+    [projects, query, projectsOnly],
+  );
   return (
     <Picker
       query={query}
@@ -111,6 +140,7 @@ function ChooserList({ projects, selectedKey, query, onQueryChange, onSelect }: 
       selectedKey={selectedKey}
       renderItem={chooserRow}
       onSelect={onSelect}
+      noMatchLabel={projectsOnly ? (needle) => `No project matches “${needle}”.` : undefined}
     />
   );
 }
@@ -121,6 +151,10 @@ function chooserRow(item: ChooserItem): PickerRow {
   }
   const { workspace } = item;
   return { key: workspace.id, name: workspace.name, icon: <ProjectIcon workspaceId={workspace.id} name={workspace.name} size={16} />, group: "projects" };
+}
+
+function projectItems(projects: readonly Workspace[], query: string): readonly ChooserItem[] {
+  return filterProjects(projects, query).map((workspace): ChooserItem => ({ kind: "project", workspace }));
 }
 
 function chooserItems(projects: readonly Workspace[], query: string): readonly ChooserItem[] {

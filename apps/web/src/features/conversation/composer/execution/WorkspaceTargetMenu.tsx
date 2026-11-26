@@ -19,6 +19,8 @@ export interface WorkspaceTargetMenuProps {
   /** The project folder's name, shown in mono beside Local. */
   readonly folder: string;
   readonly onModeChange: (mode: ComposerMode) => void;
+  /** Limits the menu to these modes, for a host that cannot offer a worktree. Defaults to every mode. */
+  readonly modes?: readonly ComposerMode[];
   readonly className?: string;
 }
 
@@ -27,7 +29,7 @@ export interface WorkspaceTargetMenuProps {
  * the mode; the branch trigger beside it then picks the branch or worktree. A project that is not a
  * git repo can only run Local, so it gets a static label instead of a menu.
  */
-export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, className }: WorkspaceTargetMenuProps) {
+export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, modes, className }: WorkspaceTargetMenuProps) {
   if (!isGitRepo) {
     const { Icon, label } = COMPOSER_MODE_OPTIONS.direct;
     return (
@@ -57,24 +59,24 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, cla
         }
       />
       <DropdownMenuContent align="start" side="top" className="w-[28.8rem]">
-        <WorkspaceModeMenuGroup mode={mode} folder={folder} onModeChange={onModeChange} />
+        <WorkspaceModeMenuGroup mode={mode} folder={folder} onModeChange={onModeChange} modes={modes} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
 /** Props for {@link WorkspaceModeMenuGroup}. */
-export type WorkspaceModeMenuGroupProps = Pick<WorkspaceTargetMenuProps, "mode" | "folder" | "onModeChange">;
+export type WorkspaceModeMenuGroupProps = Pick<WorkspaceTargetMenuProps, "mode" | "folder" | "onModeChange" | "modes">;
 
 /**
  * The "Workspace" menu rows for a git project, shared by the rail trigger and the Overview row so
  * both list the same names, order and folder meta. Render inside a `DropdownMenuContent`.
  */
-export function WorkspaceModeMenuGroup({ mode, folder, onModeChange }: WorkspaceModeMenuGroupProps) {
+export function WorkspaceModeMenuGroup({ mode, folder, onModeChange, modes }: WorkspaceModeMenuGroupProps) {
   return (
     <DropdownMenuGroup>
       <DropdownMenuGroupLabel>Workspace</DropdownMenuGroupLabel>
-      {composerModeOptions(true).map((option) => (
+      {composerModeOptions(true).filter((option) => modes === undefined || modes.includes(option.mode)).map((option) => (
         <DropdownMenuItem
           key={option.mode}
           label={option.label}

@@ -34,6 +34,13 @@ describe("WorkspaceTargetMenu", () => {
     expect(screen.getByRole("menuitemradio", { name: /Local/ })).toHaveAttribute("aria-checked", "false");
   });
 
+  it("lists only the modes a host allows", async () => {
+    render(<WorkspaceTargetMenu mode="direct" isGitRepo folder="mcode" modes={["direct"]} onModeChange={vi.fn()} />);
+    await openMenu();
+
+    expect(screen.getAllByRole("menuitemradio").map((row) => row.textContent)).toEqual(["Localmcode"]);
+  });
+
   it("shows the project folder inside the Local row", async () => {
     renderMenu("direct");
     await openMenu();
