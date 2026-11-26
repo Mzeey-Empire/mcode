@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ContextMenuItem } from "@/components/ui/context-menu";
+import { commandsOf, useBackgroundCommandStore } from "@/features/background-commands/backgroundCommandStore";
 import { isDetachedCheckout } from "@/lib/checkout-label";
 import { startupHolds, useThreadActivity } from "@/features/thread-attention/thread-activity";
 import { useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
@@ -197,7 +198,10 @@ function MoveToProjectItem({ thread }: { thread: WorkspaceThread }) {
   const activity = useThreadActivity(thread.id, { preparing: thread.clientPreparing === true, createFailed: thread.clientError != null });
   const rowState = useThreadRowState(thread.id, thread.clientPreparing === true, thread.clientError != null);
   const awaitingApproval = rowState.kind === "needs-you" && rowState.label === "Approval required";
-  const block = moveBlock(activity.turnRunning, awaitingApproval, rowState.kind === "waiting");
+  // Waiting covers subagents and awaited commands. An unawaited command shows only in the command list, which is
+  // loaded for the open thread; for any other thread the server's refusal explains it in the dialog.
+  const commandRunning = useBackgroundCommandStore((state) => commandsOf(state.loads.get(thread.id))?.some((command) => command.status === "running") ?? false);
+  const block = moveBlock(activity.turnRunning, awaitingApproval, rowState.kind === "waiting" || commandRunning);
   const reason = block ? MOVE_BLOCK_REASON[block] : undefined;
   return (
     <DropdownMenuItem

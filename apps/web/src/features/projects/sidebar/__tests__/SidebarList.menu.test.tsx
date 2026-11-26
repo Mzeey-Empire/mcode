@@ -1,4 +1,4 @@
-import { createMockThread, createMockThreadAttention, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockBackgroundCommand, createMockThread, createMockThreadAttention, createMockThreadPullRequest, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { cleanup, act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
@@ -28,6 +28,7 @@ import { useSidebarUiStore } from "../sidebar-ui-store";
 import { useCompletionStore } from "../completion-store";
 import { ProjectSidebar } from "../ProjectSidebar";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { useBackgroundCommandStore } from "@/features/background-commands/backgroundCommandStore";
 
 const WORKSPACE = createMockWorkspace({ id: "ws-1", name: "Alpha", path: "/alpha" });
 const WITH_PR = [createMockThreadPullRequest({ number: 7, state: "open", url: "https://github.com/o/r/pull/7" })];
@@ -207,5 +208,23 @@ describe("SidebarList thread menu", () => {
     const move = await screen.findByRole("menuitem", { name: /^Move to project…/ });
     expect(move).toHaveAttribute("aria-disabled", "true");
     expect(move).toHaveAccessibleDescription("Work is still running in the background");
+  });
+
+  it("disables Move to project while the open thread's unawaited command still runs", async () => {
+    const workspace = createMockWorkspace({ id: "no-project", name: "No project", kind: "no_project", is_git_repo: false });
+    seedThread({ mode: "direct", pull_requests: [] }, workspace);
+    useSidebarUiStore.setState({ expandedProjects: new Set([NO_PROJECT_GROUP_KEY]) });
+    // The open thread's command panel has already loaded its list.
+    useBackgroundCommandStore.setState({ loads: new Map([["t1", { kind: "ready", commands: [
+      createMockBackgroundCommand({ toolCallId: "sleep", label: "sleep 120", status: "running", awaited: false }),
+    ] }]]) });
+    try {
+      await openThreadMenu();
+
+      const move = await screen.findByRole("menuitem", { name: /^Move to project…/, description: "Work is still running in the background" });
+      expect(move).toHaveAttribute("aria-disabled", "true");
+    } finally {
+      act(() => useBackgroundCommandStore.getState().clearThread("t1"));
+    }
   });
 });
