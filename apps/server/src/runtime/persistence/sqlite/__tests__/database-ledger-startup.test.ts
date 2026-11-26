@@ -167,7 +167,12 @@ describe("openDatabase ledger guard", () => {
 
   it("refuses the No project retention migration on a build at the previous floor", () => {
     const retentionTag = "0113_curious_the_twelve";
+    const retentionBuild = writeCatalogue(directory, "with-retention", { before: "0114_thread_relocation" });
     const older = writeCatalogue(directory, "before-retention", { before: retentionTag });
+    NodeFS.rmSync(dbPath);
+    vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", retentionBuild);
+    openDatabase({ dbPath }).close(true);
+
     const before = NodeFS.readFileSync(dbPath);
     vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", older);
 
@@ -181,6 +186,16 @@ describe("openDatabase ledger guard", () => {
     const before = NodeFS.readFileSync(dbPath);
 
     expect(refusalOf(dbPath).refusal).toEqual({ kind: "database-newer", databasePath: dbPath, raisedBy: null });
+    expectUntouched(before);
+  });
+
+  it("refuses the thread move worktrees migration on a build at the previous floor", () => {
+    const moveTag = "0115_thread_move_worktrees";
+    const older = writeCatalogue(directory, "before-worktree-moves", { before: moveTag });
+    const before = NodeFS.readFileSync(dbPath);
+    vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", older);
+
+    expect(refusalOf(dbPath).refusal).toEqual({ kind: "database-newer", databasePath: dbPath, raisedBy: moveTag });
     expectUntouched(before);
   });
 

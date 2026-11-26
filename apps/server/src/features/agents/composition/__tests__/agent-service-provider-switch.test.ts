@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
@@ -11,6 +12,7 @@ import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { BackgroundCallKind } from "@mcode/contracts/models/tool-call-record";
 import type { IAgentProvider, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
 import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ThreadMoveInput } from "@mcode/contracts/ws/methods";
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 import { resolveHandoffDir } from "@mcode/shared";
 
@@ -26,6 +28,7 @@ import { TurnSnapshotRangeReader } from "../../../projects/diffs/snapshots/turn-
 import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-executor.js";
 import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { ThreadBranchingService } from "../../../projects/worktrees/thread-branching-service.js";
 import { ThreadControlMutationReservationService } from "../../../thread-control/authority/thread-control-mutation-reservation-service.js";
 import { ThreadMoveService } from "../../../thread-control/lifecycle/thread-move-service.js";
 import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
@@ -725,6 +728,47 @@ describe("provider switch on send", () => {
     expect(lastRequest(claude).message).not.toContain("Files from earlier in this thread");
   });
 
+  it.each(["named", "detached"] as const)("sends the next turn from the moved thread's %s worktree", async (checkout) => {
+    const { project, move } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const worktreePath = NodePath.resolve(NodeFS.realpathSync.native(project.path), "..", "checkout");
+    if (checkout === "detached") {
+      git(project.path, "worktree", "add", "--detach", worktreePath, "main");
+    } else {
+      git(project.path, "worktree", "add", "-b", "feature", worktreePath, "main");
+    }
+
+    const result = await move(undefined, { kind: "existing-worktree", worktreePath, baseBranch: "main" });
+    if (result.status === "failed") throw new Error(result.error);
+    const branch = checkout === "named" ? "feature" : "main";
+    expect(result).toMatchObject({ status: "moved", thread: {
+      workspace_id: project.id, mode: "worktree", branch, worktree_managed: false,
+      checkout_state: checkout === "named" ? "named" : "branchless",
+      base_branch: checkout === "named" ? null : "main",
+    } });
+    const marker = container.resolve(MessageRepo).listIncludingInternal(threadId).find((message) => message.threadMove);
+    expect(marker?.threadMove).toEqual({ projectName: "Destination", target: "existing-worktree", branch });
+
+    await completeTurn(claude, "Check the checkout", "Checked", "new-claude");
+    const { cwd } = lastRequest(claude);
+    expect(NodeFS.realpathSync.native(cwd)).toBe(worktreePath);
+    expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe(checkout === "named" ? "feature" : "HEAD");
+    expect(thread().branch).toBe(branch);
+  });
+
+  it("refuses a worktree registered to a different repository", async () => {
+    const { source, project, move } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const otherRepo = NodePath.resolve(NodeFS.realpathSync.native(project.path), "..", "other-repository");
+    NodeFS.mkdirSync(otherRepo);
+    initRepository(otherRepo);
+    const worktreePath = NodePath.resolve(otherRepo, "..", "other-checkout");
+    git(otherRepo, "worktree", "add", "-b", "feature", worktreePath, "main");
+
+    expect(await move(undefined, { kind: "existing-worktree", worktreePath })).toMatchObject({ status: "failed" });
+    expect(thread()).toMatchObject({ workspace_id: source.id, mode: "direct", worktree_path: null });
+  });
+
   it("retries the first turn with the relocation note after provider failure", async () => {
     const { move, project, source } = await relocationFixture();
     await move();
@@ -893,12 +937,24 @@ describe("provider switch on send", () => {
     const agentWorkload = new AgentWorkloadService(container.resolve(AgentService).runtimeAccess(),
       container.resolve(CanonicalAgentBoundary), runtime.progress);
     onTestFinished(agentWorkload.observeCommittedEvents());
-    const move = (git: Pick<GitRepositoryService, "getCurrentBranchAt"> = new GitRepositoryService(workspaces, executor)) =>
+    const move = (
+      git: Pick<GitRepositoryService, "getCurrentBranchAt"> = new GitRepositoryService(workspaces, executor),
+      target: ThreadMoveInput["target"] = { kind: "local" },
+    ) =>
       new ThreadMoveService(threads, workspaces, container.resolve(ThreadControlMutationReservationService),
-        git, container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload,
+        git, container.resolve(ThreadBranchingService), container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload,
         () => new Date("2026-11-26T12:00:00.000Z"))
-        .moveToProject({ threadId, workspaceId: project.id, target: { kind: "local" } });
+        .moveToProject({ threadId, workspaceId: project.id, target });
     return { source, project, move, backgroundCommands };
+  }
+
+  function initRepository(path: string): void {
+    git(path, "init", "-b", "main");
+    git(path, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "initial");
+  }
+
+  function git(path: string, ...args: string[]): string {
+    return NodeChildProcess.execFileSync("git", ["-C", path, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   }
 
   function writeFixture(change: (db: Database) => void): void {

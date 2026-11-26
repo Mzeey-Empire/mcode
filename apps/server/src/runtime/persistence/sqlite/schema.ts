@@ -93,6 +93,18 @@ export const workspaceWorktrees = sqliteTable(
   ],
 );
 
+/** Keeps a move's planned Git checkout durable until the thread is rebound. */
+export const threadMoveWorktrees = sqliteTable("thread_move_worktrees", {
+  id: text("id").primaryKey().notNull(),
+  threadId: text("thread_id").notNull(),
+  workspaceId: text("workspace_id").notNull(),
+  worktreePath: text("worktree_path").notNull(),
+  branch: text("branch").notNull(),
+  state: text("state", { enum: ["provisioning", "bound"] }).notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const threads = sqliteTable(
   "threads",
   {

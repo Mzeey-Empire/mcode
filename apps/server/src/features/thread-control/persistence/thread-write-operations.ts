@@ -25,6 +25,19 @@ const booleanById = (name: string) => databaseWriteOperation(name, idInput, bool
 const booleanByPair = (name: string) => databaseWriteOperation(name, pairInput, booleanOutput);
 const tripleInput = z.tuple([z.string(), z.string(), z.string()]);
 const threadByPair = (name: string) => databaseWriteOperation(name, pairInput, nullableThread);
+const threadMovePlacement = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("local"), branch: z.string() }),
+  z.object({
+    kind: z.literal("existing-worktree"),
+    branch: z.string(),
+    worktreePath: z.string(),
+    checkoutState: z.enum(["named", "branchless"]),
+    baseBranch: z.string().nullable(),
+  }),
+]);
+
+/** Validated destination checkout for a thread move transaction. */
+export type ThreadMovePlacement = z.infer<typeof threadMovePlacement>;
 
 /** Allowlisted complete thread lifecycle operations on the shared writer. */
 export const threadWriteOperations = {
@@ -64,7 +77,7 @@ export const threadWriteOperations = {
     z.string(), settings.extend({ provider: z.string() }), z.string().nullable(), z.string(), HandoffIdSchema(), z.number().int().positive().optional(),
   ]), z.object({ providersUsed: z.array(z.string()), marker: MessageSchema() })),
   moveToProject: databaseWriteOperation("thread.moveToProject", z.tuple([
-    z.string(), z.object({ id: z.string(), path: z.string(), is_git_repo: z.boolean() }), z.string(), z.string().datetime(),
+    z.string(), z.object({ id: z.string(), path: z.string(), is_git_repo: z.boolean() }), threadMovePlacement, z.string().datetime(),
   ]), z.discriminatedUnion("status", [
     z.object({ status: z.literal("moved"), thread, marker: MessageSchema() }),
     z.object({ status: z.literal("not-no-project") }),

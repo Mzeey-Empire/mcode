@@ -39,6 +39,7 @@ import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.
 import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
 import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
 import { ThreadProviderSessionStore } from "./thread-provider-session-store.js";
+import type { ThreadMovePlacement } from "./thread-write-operations.js";
 import { advanceThreadActivity } from "./thread-activity.js";
 
 type ThreadRow = typeof threads.$inferSelect & {
@@ -1284,7 +1285,17 @@ export class ThreadStore {
   }
 
   /** Change placement, retention, session ownership, and the timeline together. */
-  moveToProject(id: string, destination: Pick<Workspace, "id" | "path" | "is_git_repo">, branch: string, now: string) {
+  moveToProject(id: string, destination: Pick<Workspace, "id" | "path" | "is_git_repo">, placement: ThreadMovePlacement, now: string) {
+    const checkout = placement.kind === "existing-worktree"
+      ? {
+        mode: "worktree" as const, checkoutState: placement.checkoutState,
+        worktreePath: placement.worktreePath, baseBranch: placement.baseBranch,
+      }
+      : { mode: "direct" as const, checkoutState: "named" as const, worktreePath: null, baseBranch: null };
+    const markerTarget = placement.kind === "existing-worktree"
+      ? { target: placement.kind, branch: placement.branch }
+      : { target: placement.kind };
+
     return this.db.transaction(() => {
       const thread = this.findById(id);
       const workspaces = new WorkspaceStore(this.db);
@@ -1297,8 +1308,7 @@ export class ThreadStore {
         return { status: "failed" as const, cause: "other" as const, error: "The destination project changed while the move was preparing." };
       }
       this.orm.update(threads).set({
-        workspaceId: project.id, mode: "direct", branch, checkoutState: "named",
-        worktreePath: null, worktreeManaged: 0, baseBranch: null, headSha: null,
+        workspaceId: project.id, branch: placement.branch, ...checkout, worktreeManaged: 0, headSha: null,
         sdkSessionId: null, updatedAt: now,
         relocationWorkspaceId: thread.workspace_id, relocationFreshSession: true,
         relocationNoteGeneration: sql`coalesce(${threads.relocationNoteGeneration}, 0) + 1`,
@@ -1309,7 +1319,7 @@ export class ThreadStore {
         .where(eq(canonicalAgentThreads.id, id)).run();
       workspaces.recordNoProjectMoveOut(thread.workspace_id, now);
       this.providerSessions.removeAll(id);
-      const marker = new MessageStore(this.db).createThreadMove(id, project.name, now);
+      const marker = new MessageStore(this.db).createThreadMove(id, { projectName: project.name, ...markerTarget }, now);
       const updated = this.findById(id);
       if (!updated) throw new Error(`Moved thread not found: ${id}`);
       return { status: "moved" as const, thread: updated, marker };
