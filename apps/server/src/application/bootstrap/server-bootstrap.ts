@@ -154,6 +154,7 @@ import { SettleActionObserver } from "../../features/projects/environment/settle
 import { AGENT_TURN_COMMAND_PORT } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { ThreadControlMutationReservationService } from "../../features/thread-control/authority/thread-control-mutation-reservation-service.js";
 import { ThreadMoveService } from "../../features/thread-control/lifecycle/thread-move-service.js";
+import { ThreadMovePreflightService } from "../../features/thread-control/lifecycle/thread-move-preflight.js";
 import { ScopedPreGrantService } from "../../features/agents/permissions/scoped-pre-grant.js";
 import { PlanFileWriter } from "../../features/agents/planning/plan-file-writer.js";
 import { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
@@ -1055,6 +1056,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   threadCompletionService,
   threadMoveService: new ThreadMoveService(threadRepo, workspaceRepo, container.resolve(ThreadControlMutationReservationService),
     gitRepository, container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload),
+  threadMovePreflightService: new ThreadMovePreflightService(threadRepo, workspaceRepo),
   browserAutomationBroker,
   desktopHtmlPreviewRenderer,
   mcodeMcpServer,

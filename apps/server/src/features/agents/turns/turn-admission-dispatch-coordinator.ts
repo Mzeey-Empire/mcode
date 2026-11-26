@@ -1,5 +1,4 @@
 import * as NodeFS from "node:fs";
-import * as NodeFSPromises from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
@@ -59,6 +58,7 @@ import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 import { fastModeDefault } from "@mcode/shared";
 import { buildFencedHandoff, loadHandoffMessages, targetInputCharacterCap } from "../../handoff/v2/index.js";
 import type { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
+import { folderHasFiles } from "../../projects/files/folder-has-files.js";
 
 
 /** Automatic setup dispatch contract exposed to the turn command facade. */
@@ -1189,7 +1189,7 @@ export class TurnAdmissionDispatchCoordinator {
     if (!relocation?.notePending) return null;
     const source = this.workspaces.findRelocationSource(relocation.workspaceId);
     if (!source) return null;
-    const hasFiles = await hasRelocationFiles(source.path).catch((error: unknown) => {
+    const hasFiles = await folderHasFiles(source.path).catch((error: unknown) => {
       if (!(error instanceof Error) || !("code" in error) || (error.code !== "EACCES" && error.code !== "EPERM")) throw error;
       logger.warn("Could not read the relocation note's folder", { path: source.path, code: error.code });
       return false;
@@ -1381,20 +1381,6 @@ export class TurnAdmissionDispatchCoordinator {
 /** Return whether a provider receives the internal thread-control lease. */
 export function supportsInternalThreadControl(provider: ProviderId): boolean {
   return provider === "claude" || provider === "codex" || provider === "cursor" || provider === "copilot";
-}
-
-async function hasRelocationFiles(path: string): Promise<boolean> {
-  try {
-    const dir = await NodeFSPromises.opendir(path);
-    try {
-      return await dir.read() !== null;
-    } finally {
-      await dir.close();
-    }
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) return false;
-    throw error;
-  }
 }
 
 function escapeXml(value: string): string {
