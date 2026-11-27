@@ -14,6 +14,7 @@ type CleanupCheckpoint = Parameters<WorkspaceMoveStore["sourceCleanup"]>[1];
 export type WorkspaceMoveDeleteOptions = WorkspaceMoveRenameOptions & { unlink?: typeof NodeFSPromises.unlink };
 
 type CleanupAction = "rename" | "check" | "remove-remnant" | "finish" | "keep";
+type CleanupSide = "source" | "copy";
 type CleanupOutcome = { cleanup: "done" } | { cleanup: "kept" | "pending"; cleanupError: string };
 type MoveCleanup = {
   move: WorkspaceMove;
@@ -67,7 +68,7 @@ async function prepareTombstone({ move, checkpoint, options }: MoveCleanup): Pro
     case "keep":
       throw new KeepFolder("Source or tombstone no longer has the expected move marker");
     case "remove-remnant":
-      await removeEmptyMoveFolder(tombstone, move.id, options);
+      await removeEmptyMoveFolder(tombstone, move.id, options, "source");
       return null;
     case "rename":
       return renameSource(move, tombstone, checkpoint, options);
@@ -101,12 +102,12 @@ async function renameSource(
   const state = await inspectMoveFolder(tombstone, move.id);
   if (state === "owned") return tombstone;
   if (state !== "marker-only") throw new KeepFolder("The renamed source lost its move marker");
-  await removeEmptyMoveFolder(tombstone, move.id, options);
+  await removeEmptyMoveFolder(tombstone, move.id, options, "source");
   return null;
 }
 
 async function deleteCheckedEntries(
-  { move, readManifest, checkpoint, options }: MoveCleanup, root: string, side: "source" | "copy",
+  { move, readManifest, checkpoint, options }: MoveCleanup, root: string, side: CleanupSide,
 ): Promise<void> {
   const recorded = readManifest();
   if (!recorded) throw new KeepFolder("The move manifest is missing or invalid");
@@ -123,12 +124,12 @@ async function deleteCheckedEntries(
     throw new KeepFolder("The published copy is missing manifest entries");
   }
   if (!move.deleteStagingStarted) await beginDeleteStaging(staging, checkpoint);
-  await stageAndDeleteEntries(root, staging, manifest, present, options);
+  await stageAndDeleteEntries(root, staging, manifest, present, options, side);
   const folders = manifest.filter((entry) => entry.kind === "folder" && present.has(entry.path));
   folders.sort((left, right) => right.path.length - left.path.length);
-  for (const { path } of folders) await removeEmptyDirectory(NodePath.join(root, path), options.platform);
-  await removeEmptyDirectory(staging, options.platform);
-  await removeEmptyMoveFolder(root, move.id, options);
+  for (const { path } of folders) await removeEmptyDirectory(NodePath.join(root, path), options.platform, side);
+  await removeEmptyDirectory(staging, options.platform, side);
+  await removeEmptyMoveFolder(root, move.id, options, side);
 }
 
 async function beginDeleteStaging(staging: string, checkpoint: MoveCleanup["checkpoint"]): Promise<void> {
@@ -143,6 +144,7 @@ async function beginDeleteStaging(staging: string, checkpoint: MoveCleanup["chec
 
 async function stageAndDeleteEntries(
   root: string, staging: string, manifest: WorkspaceMoveManifest, present: Set<string>, options: WorkspaceMoveDeleteOptions,
+  side: CleanupSide,
 ): Promise<void> {
   for (const [index, entry] of manifest.entries()) {
     if (entry.kind === "folder" || !present.has(entry.path)) continue;
@@ -154,7 +156,8 @@ async function stageAndDeleteEntries(
       await assertRecordedParent(path);
       await renameWorkspaceFolder(path, slot, options);
     } catch (error) {
-      if (error instanceof DatabaseWriteOutcomeUnknown || isMoveRenameBlocked(error, options.platform)) throw error;
+      if (error instanceof DatabaseWriteOutcomeUnknown || isMoveRenameBlocked(error, options.platform)
+        || (side === "source" && isCleanupBlockedCode(moveErrorCode(error)))) throw error;
       throw new KeepFolder(`Could not stage ${entry.path}: ${moveError(error)}`);
     }
     await deleteStagedEntry(slot, path, entry, options);
@@ -243,7 +246,7 @@ async function deleteStagedEntry(
   throw new KeepFolder(`Staged entry changed since the copy: ${entry.path}`);
 }
 
-async function removeEmptyMoveFolder(root: string, moveId: string, options: WorkspaceMoveDeleteOptions): Promise<void> {
+async function removeEmptyMoveFolder(root: string, moveId: string, options: WorkspaceMoveDeleteOptions, side: CleanupSide): Promise<void> {
   await assertRecordedParent(root);
   const state = await inspectMoveFolder(root, moveId);
   if (state !== "marker-only" && state !== "empty" && state !== "missing") {
@@ -253,10 +256,10 @@ async function removeEmptyMoveFolder(root: string, moveId: string, options: Work
     const unlink = options.unlink ?? NodeFSPromises.unlink;
     await unlink(markerPath(root, moveId));
   }
-  await removeEmptyDirectory(root, options.platform);
+  await removeEmptyDirectory(root, options.platform, side);
 }
 
-async function removeEmptyDirectory(path: string, platform: NodeJS.Platform): Promise<void> {
+async function removeEmptyDirectory(path: string, platform: NodeJS.Platform, side: CleanupSide): Promise<void> {
   try {
     await assertRecordedParent(path);
     const entry = await moveEntry(path);
@@ -267,9 +270,14 @@ async function removeEmptyDirectory(path: string, platform: NodeJS.Platform): Pr
     const code = moveErrorCode(error);
     if (code === "ENOENT") return;
     if (code === "ENOTEMPTY" || code === "EEXIST") throw new KeepFolder(`Folder contains new entries: ${path}`);
-    if (platform !== "win32" && ["EACCES", "EPERM", "EBUSY"].includes(code ?? "")) {
+    // A blocked POSIX rollback releases its fence by keeping the copy. Expired sources can be retried.
+    if (side === "copy" && platform !== "win32" && isCleanupBlockedCode(code)) {
       throw new KeepFolder(`Could not remove ${path}: ${moveError(error)}`);
     }
     throw error;
   }
+}
+
+function isCleanupBlockedCode(code: string | undefined): boolean {
+  return code === "EACCES" || code === "EPERM" || code === "EBUSY";
 }

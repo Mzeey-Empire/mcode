@@ -1200,21 +1200,21 @@ describe("retained cross-drive source", () => {
     expect(NodeFS.existsSync(tombstone)).toBe(false);
   });
 
-  it("retries a blocked entry rename on the next sweep", async () => {
+  it.each([["win32", "EBUSY"], ["linux", "EACCES"]] as const)("retries a blocked entry rename on %s", async (platform, code) => {
     const f = await fixture();
     const { operationId, tombstone } = await completedCopy(f);
     let locked = true;
     const cleanup = atExpiry(f, {
-      platform: "win32",
+      platform,
       rename: async (from, to) => {
-        if (locked && NodePath.dirname(to) === NodePath.join(tombstone, ".mcode-delete")) throw errno("EBUSY");
+        if (locked && NodePath.dirname(to) === NodePath.join(tombstone, ".mcode-delete")) throw errno(code);
         await NodeFSPromises.rename(from, to);
       },
       sleep: async () => undefined,
     });
 
     await sweepAt(f, cleanup, EXPIRED);
-    expect(f.store.find(operationId)).toMatchObject({ cleanup: "pending", cleanupError: expect.stringContaining("EBUSY") });
+    expect(f.store.find(operationId)).toMatchObject({ cleanup: "pending", cleanupError: expect.stringContaining(code) });
     expect(f.readNotes(tombstone)).toBe("keep these files");
 
     locked = false;
@@ -1224,22 +1224,27 @@ describe("retained cross-drive source", () => {
     expect(f.readNotes(f.destination)).toBe("keep these files");
   });
 
-  it("keeps an expired POSIX source when its entry cannot be renamed", async () => {
+  it.skipIf(process.platform === "win32")("retries removing an empty directory after its parent becomes writable", async () => {
     const f = await fixture();
-    const { operationId, tombstone } = await completedCopy(f);
-    const cleanup = atExpiry(f, {
-      platform: "linux",
-      rename: async (from, to) => {
-        if (NodePath.dirname(to) === NodePath.join(tombstone, ".mcode-delete")) throw errno("EACCES");
-        await NodeFSPromises.rename(from, to);
-      },
-    });
+    const readOnly = addReadOnlyDirectory(f.source, "empty folder");
+    let retained: string | undefined;
+    try {
+      const { operationId, tombstone } = await completedCopy(f);
+      retained = tombstone;
+      const cleanup = atExpiry(f);
+      await sweepAt(f, cleanup, EXPIRED);
 
-    await sweepAt(f, cleanup, EXPIRED);
-
-    expect(f.store.find(operationId)).toMatchObject({ cleanup: "kept", tombstonePath: tombstone });
-    expect(f.readNotes(tombstone)).toBe("keep these files");
-    expect(f.readNotes(f.destination)).toBe("keep these files");
+      expect(f.store.find(operationId)).toMatchObject({ cleanup: "pending", tombstonePath: tombstone });
+      expect(NodeFS.readdirSync(NodePath.join(tombstone, readOnly.entry))).toEqual([]);
+      readOnly.restorePermissions(tombstone);
+      await sweepAt(f, cleanup, EXPIRED);
+      expect(f.store.find(operationId)).toMatchObject({ cleanup: "done", cleanupError: null });
+      expect(NodeFS.existsSync(tombstone)).toBe(false);
+      expect(f.readNotes(f.destination)).toBe("keep these files");
+    } finally {
+      readOnly.restorePermissions(f.source, f.destination);
+      if (retained) readOnly.restorePermissions(retained);
+    }
   });
 
   it.each(["new-file", "same-size", "missing-manifest"] as const)("keeps a tombstone with %s and leaves a Git failure intact", async (change) => {
