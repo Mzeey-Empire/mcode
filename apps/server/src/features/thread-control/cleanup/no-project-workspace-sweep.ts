@@ -20,9 +20,8 @@ export class NoProjectWorkspaceSweep {
     @inject(WorkspaceRepo) private readonly workspaces: WorkspaceRepo,
     @inject(AttachmentService) private readonly attachments: Pick<AttachmentService, "removeForThread">,
     @inject("McodeDir") private readonly mcodeDir: string,
-    // A class token is always constructible, so `isOptional` only takes effect on a string alias.
-    @inject("WorkspaceMoveRetention", { isOptional: true })
-    private readonly moves?: Pick<WorkspaceMoveService, "cleanExpiredSources" | "protectsFolder">,
+    @inject("WorkspaceMoveRetention")
+    private readonly moves: Pick<WorkspaceMoveService, "cleanExpiredSources" | "protectsFolder">,
   ) {}
 
   /** Claim each workspace before touching files that a newly created thread could use. */
@@ -37,7 +36,7 @@ export class NoProjectWorkspaceSweep {
       this.attachments.removeForThread(workspace.id);
       broadcast("workspace.deleted", { workspaceId: workspace.id });
     }
-    await this.moves?.cleanExpiredSources(sweptAt);
+    await this.moves.cleanExpiredSources(sweptAt);
     await this.removeOrphanedEntries();
   }
 
@@ -74,7 +73,7 @@ export class NoProjectWorkspaceSweep {
   }
 
   private async hasRegisteredPath(path: string, storedPath: string): Promise<boolean> {
-    if (this.moves?.protectsFolder(path)) return true;
+    if (this.moves.protectsFolder(path)) return true;
     for (const registeredPath of this.workspaces.listPathsIncludeDeleted()) {
       if (isWithinWorkspaceRoot(path, registeredPath) || isWithinWorkspaceRoot(storedPath, registeredPath)) return true;
       // Older registrations can use a filesystem alias or Windows short path.

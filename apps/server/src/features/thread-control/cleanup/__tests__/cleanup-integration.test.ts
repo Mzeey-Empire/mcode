@@ -36,6 +36,10 @@ import { ThreadStartupService } from "../../../thread-startup/thread-startup-ser
 
 const TEST_HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const noWorkspaceMoveRetention = {
+  cleanExpiredSources: async () => undefined,
+  protectsFolder: () => false,
+};
 
 const WT_BASE = NodePath.join(getMcodeDir(), "worktrees", "integration-test");
 
@@ -122,7 +126,7 @@ describe("Cleanup integration", () => {
       TEST_HOST_RUNTIME,
       undefined,
       0,
-      new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, mcodeDir),
+      new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, mcodeDir, noWorkspaceMoveRetention),
     );
 
     workspaceService = new WorkspaceService(
@@ -282,7 +286,7 @@ describe("Cleanup integration", () => {
     const file = NodePath.join(directory, "keep.txt");
     await NodeFSPromises.writeFile(file, "project data");
 
-    const sweep = new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, NodePath.dirname(db.filename));
+    const sweep = new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, NodePath.dirname(db.filename), noWorkspaceMoveRetention);
     await sweep.run();
 
     expect(await NodeFSPromises.readFile(file, "utf8")).toBe("project data");
@@ -309,7 +313,7 @@ describe("Cleanup integration", () => {
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date(movedAt));
-      sweep = new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, NodePath.dirname(db.filename));
+      sweep = new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, NodePath.dirname(db.filename), noWorkspaceMoveRetention);
     });
 
     afterEach(() => {
