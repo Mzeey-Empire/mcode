@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useState } from "react";
 import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
 import type { WorkspaceMoveFrame } from "@mcode/contracts/ws/workspace-move";
 import { getTransport, pushEmitter } from "@/transport";
@@ -47,6 +47,11 @@ function readStatusWithRetry(
 
 export interface NewProjectRunControls {
   readonly run: NewProjectRun;
+  /**
+   * Whether the look for an unfinished move has ended, with a move or without one. Until then the form must not send
+   * a request: the server refuses it while that move runs, and the answer that says so would arrive late.
+   */
+  readonly lookedUp: boolean;
   /** Asks the server to turn the folder into a project. Also what Try again runs. */
   readonly create: (values: NewProjectValues, initGit: boolean) => void;
   /** Runs git init again on a project that was created without it. */
@@ -66,13 +71,19 @@ export interface NewProjectRunControls {
 export function useNewProjectRun(threadId: string): NewProjectRunControls {
   const [run, dispatch] = useReducer(newProjectRunReducer, FORM_RUN);
 
+  const [lookedUpThreadId, setLookedUpThreadId] = useState<string | null>(null);
+
   useEffect(() => {
     let current = true;
+    const settle = () => { if (current) setLookedUpThreadId(threadId); };
     getTransport().readWorkspaceMoveStatus({ threadId }).then(
-      (frame) => { if (current && frame) dispatch({ type: "adopted", frame }); },
+      (frame) => {
+        if (current && frame) dispatch({ type: "adopted", frame });
+        settle();
+      },
       // No unfinished move is the common case, and a failed read leaves the form, which the server then refuses
       // with its own reason if a move does run.
-      () => {},
+      settle,
     );
     return () => { current = false; };
   }, [threadId]);
@@ -112,7 +123,7 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
     );
   };
 
-  return { run, create, retryGit, reset: () => dispatch({ type: "reset" }) };
+  return { run, lookedUp: lookedUpThreadId === threadId, create, retryGit, reset: () => dispatch({ type: "reset" }) };
 }
 
 async function requestCreation(threadId: string, values: NewProjectValues, initGit: boolean): Promise<NewProjectRunAction> {

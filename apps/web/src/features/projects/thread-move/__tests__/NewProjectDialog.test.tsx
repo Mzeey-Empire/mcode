@@ -528,6 +528,26 @@ describe("New project from this folder", () => {
       expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     });
 
+    it("keeps Create project off until the look for a running move ends, then follows that move to its result", async () => {
+      // The look is held rather than slept on, so the test decides when it ends.
+      let endLookup: (found: WorkspaceMoveFrame) => void = () => {};
+      vi.mocked(mockTransport.readWorkspaceMoveStatus).mockImplementation((input) =>
+        "threadId" in input ? new Promise((resolve) => { endLookup = resolve; }) : Promise.resolve(frame(1)));
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+
+      expect(createButton()).toBeDisabled();
+      await user.click(createButton());
+      expect(mockTransport.createProjectFromFolder).not.toHaveBeenCalled();
+
+      await act(async () => endLookup(frame(1)));
+      expect(createButton()).toHaveTextContent("Moving…");
+      push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't move the folder to sqlite-wal-vs-rollback");
+      expect(mockTransport.createProjectFromFolder).not.toHaveBeenCalled();
+    });
+
     it("keeps the newer result when an older status read lands after a pushed frame", async () => {
       let answerStatus: (read: WorkspaceMoveFrame) => void = () => {};
       const user = await openNewProject();

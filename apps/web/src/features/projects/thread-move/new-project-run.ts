@@ -126,7 +126,9 @@ function followUp(run: NewProjectRun, action: FollowUpAction): NewProjectRun {
     case "frame":
       return applyFrame(run, action.frame);
     case "adopted":
-      return run.kind === "form" ? runOfFrame(action.frame) : run;
+      // The lookup finds a move that was already running, so it is followed from whatever the run shows by now. A
+      // run that already follows that operation keeps whichever frame is newer.
+      return followedOperation(run) === action.frame.operationId ? applyFrame(run, action.frame) : runOfFrame(action.frame);
     case "git-retrying":
       return run.kind === "git-failed" ? { ...run, retrying: true } : run;
     case "git-retried":

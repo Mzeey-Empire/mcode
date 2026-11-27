@@ -27,8 +27,9 @@ export interface NewProjectMove {
   /** One thread in the folder that cannot move yet. The server refuses the move until it stops. */
   readonly busy: BusyThread | null;
   /**
-   * Whether the request is worth sending: the folder has been checked, the form is complete, the client sees no
-   * problem, and no thread is busy. Without the check the dialog cannot say which other threads move along.
+   * Whether the request is worth sending: the folder has been checked, the look for an unfinished move has ended,
+   * the form is complete, the client sees no problem, and no thread is busy. Without the check the dialog cannot say
+   * which other threads move along.
    */
   readonly canCreate: boolean;
   /** Threads in the folder, this one included. */
@@ -103,7 +104,7 @@ function refusedProblem(run: NewProjectRun, values: NewProjectValues): FieldProb
 
 export function useNewProjectMove(threadId: string, read: MovePreflightRead): NewProjectMove {
   const preflight = preflightOf(read);
-  const { run, create, retryGit, reset } = useNewProjectRun(threadId);
+  const { run, lookedUp, create, retryGit, reset } = useNewProjectRun(threadId);
   const { values, setValues } = useNewProjectValues(preflight);
   const [initGit, setInitGit] = useState(false);
   const workspaces = useWorkspaceStore((state) => state.workspaces);
@@ -123,7 +124,7 @@ export function useNewProjectMove(threadId: string, read: MovePreflightRead): Ne
     run,
     sharers,
     busy,
-    canCreate: read.status === "ready" && (run.kind === "form" || run.kind === "failed") && live === null && isSubmittable(values, projectNames),
+    canCreate: read.status === "ready" && lookedUp && (run.kind === "form" || run.kind === "failed") && live === null && isSubmittable(values, projectNames),
     threadCount: 1 + (sharers?.count ?? 0),
     setValues,
     setInitGit,

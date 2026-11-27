@@ -38,12 +38,19 @@ describe("newProjectRunReducer", () => {
     expect(newProjectRunReducer(before, { type: "frame", frame: frame(5, { status: "created", workspaceId: "ws" }, "op-2") })).toBe(before);
   });
 
-  it("adopts a finished move found at open, and only from the form", () => {
+  it("adopts a move found at open from whatever the run shows by then", () => {
     const created = frame(4, { status: "created", workspaceId: "ws-1" });
 
     expect(run({ type: "adopted", frame: created })).toEqual({ kind: "created", workspaceId: "ws-1" });
-    const moving = run(...STARTED);
-    expect(newProjectRunReducer(moving, { type: "adopted", frame: created })).toBe(moving);
+    expect(run({ type: "submitted" }, { type: "adopted", frame: frame(1) })).toEqual({ kind: "moving", operationId: "op-1", revision: 1 });
+    expect(run({ type: "submitted" }, { type: "failed", error: "unfinished", outcome: "unconfirmed" }, { type: "adopted", frame: frame(1) }))
+      .toEqual({ kind: "moving", operationId: "op-1", revision: 1 });
+  });
+
+  it("does not let an adopted frame replace a newer one of the operation the run follows", () => {
+    const afterTwo = run(...STARTED, { type: "frame", frame: frame(2) });
+
+    expect(newProjectRunReducer(afterTwo, { type: "adopted", frame: frame(1) })).toBe(afterTwo);
   });
 
   it.each([
