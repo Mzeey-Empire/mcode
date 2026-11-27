@@ -30,6 +30,7 @@ import { RealGitExecutor } from "../../../projects/git/execution/real-git-execut
 import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import { getManagedWorktreeBaseDir } from "../../../projects/git/managed-worktree-paths.js";
+import { moveThreadToProject } from "../../../projects/lifecycle/transport/workspace-thread-rpc.js";
 import { ProjectActionService } from "../../../projects/environment/project-action-service.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
@@ -874,6 +875,34 @@ describe("provider switch on send", () => {
       ]),
     }));
     expect(environment.getAutomaticSetup({ threadId }).gate).toBe("released-by-pass");
+  });
+
+  it.each(["local", "new-worktree"] as const)("registers a checkout watcher only for a worktree move (%s)", async (kind) => {
+    const { project, service, environment } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    git(project.path, "branch", "review-base");
+    const watched = new Map<string, string>();
+    const result = await moveThreadToProject({
+      threadMoveService: service(),
+      gitWatcherService: {
+        watchThreadWorktree: async (id, path) => { watched.set(id, path); },
+      },
+    }, {
+      threadId, workspaceId: project.id,
+      target: kind === "local" ? { kind } : { kind, source: { kind: "branch", baseBranch: "review-base", startFromOrigin: false } },
+    });
+    if (result.status !== "moved") throw new Error(JSON.stringify(result));
+    if (kind === "local") {
+      expect(result.thread).toMatchObject({ mode: "direct", worktree_path: null });
+      expect([...watched]).toEqual([]);
+    } else {
+      await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId }).gate).toBe("not-required"));
+      const path = result.thread.worktree_path;
+      if (!path) throw new Error("Expected a worktree");
+      expect([...watched]).toEqual([[threadId, path]]);
+      expect(result.thread).toMatchObject({ mode: "worktree", checkout_state: "branchless", base_branch: "review-base" });
+      expect(git(path, "rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD");
+    }
   });
 
   it("removes the detached worktree when the rebind transaction fails", async () => {
