@@ -585,6 +585,28 @@ describe("MoveThreadDialog worktree targets", () => {
     expect(await sentTarget()).toEqual({ kind: "local" });
   });
 
+  it("locks the target rail while the move runs, so it keeps naming where the thread is going", async () => {
+    vi.mocked(mockTransport.moveThreadToProject).mockReturnValue(new Promise(() => {}));
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "New worktree");
+    await user.click(moveButton());
+    expect(await screen.findByRole("button", { name: "Moving…" })).toBeVisible();
+
+    expect(workspaceTrigger()).toBeDisabled();
+    expect(screen.getByTestId("composer-branch-trigger")).toBeDisabled();
+    await user.click(workspaceTrigger());
+    await user.click(screen.getByTestId("composer-branch-trigger"));
+    expect(screen.queryByRole("menuitemradio")).toBeNull();
+    expect(screen.queryByRole("option")).toBeNull();
+    expect(workspaceTrigger()).toHaveTextContent("New worktree");
+    expect(mockTransport.moveThreadToProject).toHaveBeenCalledExactlyOnceWith({
+      threadId: THREAD.id,
+      workspaceId: GIT_PROJECT.id,
+      target: { kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin: false } },
+    });
+  });
+
   it("starts over for another project instead of carrying a worktree across", async () => {
     const user = await openDialog();
     await pickProject(user, "gitty");

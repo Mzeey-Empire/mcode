@@ -187,7 +187,7 @@ function MoveBody({ flow, preflight }: { flow: MoveFlow; preflight: MovePrefligh
   if (!picked && !failure) return null;
   return (
     <div className="grid gap-4">
-      {picked ? <MoveTargetRail workspace={picked} target={flow.target} /> : null}
+      {picked ? <MoveTargetRail workspace={picked} target={flow.target} locked={flow.moving} /> : null}
       {picked && preflight.read.status === "failed" ? <PreflightFailedNotice onRetry={preflight.retry} /> : null}
       {failure ? <Notice tone="error" title={failure.unconfirmed ? "Couldn't confirm the move" : "Couldn't move the thread"} detail={failure.detail} more={failure.raw ?? undefined} /> : null}
     </div>
@@ -210,9 +210,13 @@ function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; prefligh
   );
 }
 
-function MoveTargetRail({ workspace, target }: { workspace: Workspace; target: MoveTargetState }) {
+/**
+ * The request captured the target when Move was pressed, so the rail is locked while it runs: a changed rail would
+ * name a destination the thread is not going to.
+ */
+function MoveTargetRail({ workspace, target, locked }: { workspace: Workspace; target: MoveTargetState; locked: boolean }) {
   return (
-    <div data-testid="move-target-rail" className="flex min-w-0 items-center gap-1 rounded-xl bg-page px-2 py-0.5">
+    <fieldset disabled={locked} data-testid="move-target-rail" className="flex min-w-0 items-center gap-1 rounded-xl bg-page px-2 py-0.5">
       {/* Its menus open downward: the rail sits under the 'Move to' heading, which an upward menu would cover. */}
       <WorkspaceTargetMenu
         mode={target.mode}
@@ -228,7 +232,7 @@ function MoveTargetRail({ workspace, target }: { workspace: Workspace; target: M
           <TargetTriggers selection={target.selection} side="bottom" />
         </div>
       ) : null}
-    </div>
+    </fieldset>
   );
 }
 
