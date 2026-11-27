@@ -108,7 +108,7 @@ export class GitWorktreeService {
     };
   }
 
-  /** Remove a claimed checkout only if its path and recorded Git identity still match. */
+  /** Remove a move's checkout only if Git created it for the move and its recorded identity still matches. */
   async removeProvisionedWorktree(
     repoPath: string | undefined, move: ProvisionedMoveCheckout,
   ): Promise<"unclaimed" | "missing" | "unowned" | "removed"> {
@@ -116,7 +116,9 @@ export class GitWorktreeService {
     const { worktreePath } = move;
     const entry = await statIfPresent(worktreePath);
     if (!entry) return "missing";
-    if (!entry.isDirectory() || !(await statIfPresent(NodePath.join(worktreePath, ".git")))?.isFile()) return "unowned";
+    if (!entry.isDirectory()) return "unowned";
+    if (!move.checkoutCreated) return removeClaimedDirectory(worktreePath);
+    if (!(await statIfPresent(NodePath.join(worktreePath, ".git")))?.isFile()) return "unowned";
     if (!repoPath) throw new Error("Destination repository is unavailable");
 
     const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]);
@@ -379,7 +381,7 @@ function normalizeWorktreePath(path: string): string {
   return identityPath.replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
 }
 
-type ProvisionedMoveCheckout = { worktreePath: string; branch: string; detachedCommit: string | null; pathClaimed: boolean };
+type ProvisionedMoveCheckout = { worktreePath: string; branch: string; detachedCommit: string | null; pathClaimed: boolean; checkoutCreated: boolean };
 
 function matchesProvisionedCheckout(output: string, { worktreePath, branch, detachedCommit }: ProvisionedMoveCheckout): boolean {
   const realPath = NodeFS.realpathSync.native(worktreePath);
@@ -433,6 +435,19 @@ async function statIfPresent(path: string) {
   } catch (error) {
     if (errorCode(error) !== "ENOENT") throw error;
     return null;
+  }
+}
+
+async function removeClaimedDirectory(path: string): Promise<"removed" | "missing" | "unowned"> {
+  // Another Git client can use the empty directory between mkdir and worktree add.
+  try {
+    await NodeFSPromises.rmdir(path);
+    return "removed";
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ENOENT") return "missing";
+    if (code === "ENOTEMPTY" || code === "EEXIST" || code === "ENOTDIR") return "unowned";
+    throw error;
   }
 }
 

@@ -24,7 +24,7 @@ import type { ThreadMovePlacement } from "../persistence/thread-write-operations
 
 type NewWorktreeSource = Extract<ThreadMoveInput["target"], { kind: "new-worktree" }>["source"];
 type NewWorktreePlacement = Extract<ThreadMovePlacement, { kind: "new-worktree" }>;
-type WorktreeRecord = Pick<ThreadMoveWorktree, "id" | "threadId" | "worktreePath" | "branch" | "detachedCommit" | "pathClaimed">;
+type WorktreeRecord = Pick<ThreadMoveWorktree, "id" | "threadId" | "worktreePath" | "branch" | "detachedCommit" | "pathClaimed" | "state">;
 type CommittedMove = Extract<Awaited<ReturnType<ThreadRepo["moveToProject"]>>, { status: "moved" }>;
 
 /** Coordinates a move with the same reservation that guards turn admission. */
@@ -121,15 +121,17 @@ export class ThreadMoveService {
       : { branch: source.branch, detachedCommit: null, options: { baseRef: startPoint } };
     const plan = { id: moveId, threadId, workspaceId: project.id, worktreePath, branch, detachedCommit };
     await this.threads.recordMoveWorktree({ ...plan, createdAt: this.now().toISOString() });
-    const move = { ...plan, pathClaimed: false };
+    const move: WorktreeRecord = { ...plan, pathClaimed: false, state: "provisioning" };
     try {
       await this.newWorktrees.checkouts.createWorktree(project.path, name, branch, {
         ...options,
         onPathClaimed: async () => {
-          await this.threads.markMoveWorktreePathClaimed(moveId, this.now().toISOString());
           move.pathClaimed = true;
+          await this.threads.markMoveWorktreePathClaimed(moveId, this.now().toISOString());
         },
       });
+      await this.threads.markMoveWorktreeCreated(moveId, this.now().toISOString());
+      move.state = "checkout-created";
       const placement: NewWorktreePlacement = {
         kind: "new-worktree", moveId, branch, worktreePath,
         source: source.kind === "pr"
@@ -169,7 +171,9 @@ export class ThreadMoveService {
   private async cleanupProvisioning(move: WorktreeRecord, repoPath: string | undefined): Promise<void> {
     try {
       if (this.threads.findById(move.threadId)?.worktree_path === move.worktreePath) return;
-      const outcome = await this.newWorktrees.checkouts.removeProvisionedWorktree(repoPath, move);
+      const outcome = await this.newWorktrees.checkouts.removeProvisionedWorktree(repoPath, {
+        ...move, checkoutCreated: move.state === "checkout-created",
+      });
       await this.threads.deleteProvisioningMoveWorktree(move.id);
       if (outcome === "unowned") {
         logger.warn("Interrupted move left an unrelated path untouched", { moveId: move.id, worktreePath: move.worktreePath });

@@ -102,7 +102,7 @@ export const threadMoveWorktrees = sqliteTable("thread_move_worktrees", {
   branch: text("branch").notNull(),
   detachedCommit: text("detached_commit"),
   pathClaimed: integer("path_claimed", { mode: "boolean" }).notNull().default(false),
-  state: text("state", { enum: ["provisioning", "bound"] }).notNull(),
+  state: text("state", { enum: ["provisioning", "checkout-created", "bound"] }).notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

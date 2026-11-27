@@ -210,9 +210,14 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.recordMoveWorktree, input);
   }
 
-  /** Save proof that the move exclusively created its checkout directory. */
+  /** Save proof that mkdir succeeded for the checkout directory. */
   markMoveWorktreePathClaimed(...input: Parameters<ThreadStore["markMoveWorktreePathClaimed"]>): Promise<void> {
     return this.writer.execute(threadWriteOperations.markMoveWorktreePathClaimed, input);
+  }
+
+  /** Save proof that Git created the move's checkout. */
+  markMoveWorktreeCreated(...input: Parameters<ThreadStore["markMoveWorktreeCreated"]>): Promise<void> {
+    return this.writer.execute(threadWriteOperations.markMoveWorktreeCreated, input);
   }
 
   listProvisioningMoveWorktrees() {

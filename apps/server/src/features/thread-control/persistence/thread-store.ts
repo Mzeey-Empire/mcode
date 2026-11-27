@@ -1363,7 +1363,7 @@ export class ThreadStore {
     }).run();
   }
 
-  /** Record the exclusive directory claim before Git writes to the checkout. */
+  /** Record that mkdir succeeded, so an empty directory can be cleaned up. */
   markMoveWorktreePathClaimed(id: string, now: string): void {
     const result = runChanges(this.orm.update(threadMoveWorktrees)
       .set({ pathClaimed: true, updatedAt: now })
@@ -1371,16 +1371,24 @@ export class ThreadStore {
     if (result.changes !== 1) throw new Error("The move's worktree record is missing");
   }
 
+  /** Record checkout ownership after Git successfully creates the worktree. */
+  markMoveWorktreeCreated(id: string, now: string): void {
+    const result = runChanges(this.orm.update(threadMoveWorktrees)
+      .set({ state: "checkout-created", updatedAt: now })
+      .where(and(eq(threadMoveWorktrees.id, id), eq(threadMoveWorktrees.state, "provisioning"), eq(threadMoveWorktrees.pathClaimed, true))));
+    if (result.changes !== 1) throw new Error("The move's worktree record is missing");
+  }
+
   /** Read worktree moves that have yet to commit their thread binding. */
   listProvisioningMoveWorktrees(): ThreadMoveWorktree[] {
     return this.orm.select().from(threadMoveWorktrees)
-      .where(eq(threadMoveWorktrees.state, "provisioning")).all();
+      .where(ne(threadMoveWorktrees.state, "bound")).all();
   }
 
   /** Discard a provisioning record after its checkout has been handled. */
   deleteProvisioningMoveWorktree(id: string): void {
     this.orm.delete(threadMoveWorktrees).where(and(
-      eq(threadMoveWorktrees.id, id), eq(threadMoveWorktrees.state, "provisioning"),
+      eq(threadMoveWorktrees.id, id), ne(threadMoveWorktrees.state, "bound"),
     )).run();
   }
 
@@ -1390,8 +1398,7 @@ export class ThreadStore {
       .set({ state: "bound", updatedAt: now })
       .where(and(
         eq(threadMoveWorktrees.id, moveId), eq(threadMoveWorktrees.threadId, threadId),
-        eq(threadMoveWorktrees.workspaceId, workspaceId), eq(threadMoveWorktrees.state, "provisioning"),
-        eq(threadMoveWorktrees.pathClaimed, true),
+        eq(threadMoveWorktrees.workspaceId, workspaceId), eq(threadMoveWorktrees.state, "checkout-created"),
         eq(threadMoveWorktrees.worktreePath, worktreePath), eq(threadMoveWorktrees.branch, branch),
       )));
     if (bound.changes !== 1) throw new Error("The move's worktree record is missing");

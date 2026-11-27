@@ -954,6 +954,60 @@ describe("provider switch on send", () => {
     }
   });
 
+  it("keeps a matching detached checkout that another Git client adds after mkdir", async () => {
+    const { project, move, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const commit = git(project.path, "rev-parse", "HEAD");
+    const mkdir = NodeFSPromises.mkdir;
+    let occupied: { id: string; worktreePath: string } | undefined;
+    const claim = vi.spyOn(NodeFSPromises, "mkdir").mockImplementation(async (path, options) => {
+      const result = await mkdir(path, options);
+      if (typeof path === "string" && NodePath.basename(path).startsWith("move-")) {
+        const [plan] = threads.listProvisioningMoveWorktrees();
+        if (plan?.worktreePath !== path) throw new Error("Checkout creation started before the move was recorded");
+        git(project.path, "worktree", "add", "--detach", path, commit);
+        occupied = plan;
+      }
+      return result;
+    });
+    try {
+      expect(await move(undefined, LOCAL_BRANCH_MOVE)).toMatchObject({ status: "failed" });
+    } finally {
+      claim.mockRestore();
+    }
+    if (!occupied) throw new Error("The other client did not create the checkout");
+    expectNoMoveRecord(occupied.id);
+    expect(git(occupied.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+  });
+
+  it("on restart keeps a matching detached checkout created by another Git client in the claimed folder", async () => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const commit = git(project.path, "rev-parse", "HEAD");
+    const plan = await interruptedMove(threads, project, "main", commit);
+    NodeFS.mkdirSync(plan.worktreePath, { recursive: true });
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
+    git(project.path, "worktree", "add", "--detach", plan.worktreePath, commit);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+  });
+
+  it("on restart removes an empty directory claimed before Git created a checkout", async () => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const plan = await interruptedMove(threads, project, "planned");
+    NodeFS.mkdirSync(plan.worktreePath, { recursive: true });
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(false);
+  });
+
   it.each(["folder", "file", "worktree", "foreign worktree", "absent"] as const)(
     "after a stop before creation, forgets the record and preserves a %s at the path", async (occupant) => {
       const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
@@ -987,6 +1041,7 @@ describe("provider switch on send", () => {
     const plan = await interruptedMove(threads, project, "planned");
     await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
     git(project.path, "worktree", "add", "-b", plan.branch, plan.worktreePath, "main");
+    await threads.markMoveWorktreeCreated(plan.id, MOVE_AT);
 
     await service().recoverInterruptedMoves();
 
@@ -1002,12 +1057,13 @@ describe("provider switch on send", () => {
     const plan = await interruptedMove(threads, project, "planned");
     await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
     git(project.path, "worktree", "add", "-b", plan.branch, plan.worktreePath, "main");
+    await threads.markMoveWorktreeCreated(plan.id, MOVE_AT);
     const evidence = NodePath.join(plan.worktreePath, "uncommitted.txt");
     NodeFS.writeFileSync(evidence, "Keep my changes");
 
     await service().recoverInterruptedMoves();
     expect(NodeFS.readFileSync(evidence, "utf8")).toBe("Keep my changes");
-    expect(database?.query("SELECT state FROM thread_move_worktrees WHERE id = ?").get(plan.id)).toEqual({ state: "provisioning" });
+    expect(database?.query("SELECT state FROM thread_move_worktrees WHERE id = ?").get(plan.id)).toEqual({ state: "checkout-created" });
 
     NodeFS.unlinkSync(evidence);
     await service().recoverInterruptedMoves();
@@ -1025,6 +1081,7 @@ describe("provider switch on send", () => {
     }
     const commit = git(project.path, "rev-parse", "HEAD");
     git(project.path, "worktree", "add", "--detach", plan.worktreePath, commit);
+    await threads.markMoveWorktreeCreated(plan.id, MOVE_AT);
 
     await service().recoverInterruptedMoves();
 
