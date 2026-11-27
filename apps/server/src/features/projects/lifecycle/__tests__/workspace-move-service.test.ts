@@ -609,12 +609,14 @@ describe("cross-drive project creation", () => {
     NodeFS.writeFileSync(NodePath.join(f.source, "large.bin"), payload);
     let clock = NOW.getTime();
     const reports: { time: number; frame: WorkspaceMoveFrame; status: WorkspaceMoveFrame | null }[] = [];
+    const afterCopy: WorkspaceMoveFrame[] = [];
     const done = Promise.withResolvers<WorkspaceMoveFrame>();
     const service = f.makeService({
       rename: crossDriveRename(f),
       now: () => new Date(clock += 40),
       publishProgress(frame) {
         if (frame.phase === "copying") reports.push({ time: clock, frame, status: service.status({ threadId: f.fork.id }) });
+        if (frame.phase === "copied" || frame.phase === "published") afterCopy.push(frame);
         if (frame.result) done.resolve(frame);
       },
     });
@@ -632,6 +634,10 @@ describe("cross-drive project creation", () => {
       expect(report.time - previous.time).toBeGreaterThanOrEqual(100);
       expect(report.frame.revision).toBeGreaterThan(previous.frame.revision);
       expect(report.frame.copiedBytes).toBeGreaterThan(previous.frame.copiedBytes ?? 0);
+    }
+    expect(afterCopy.map((frame) => frame.phase)).toEqual(["copied", "published"]);
+    for (const frame of afterCopy) {
+      expect(frame).toMatchObject({ copiedBytes: payload.length + 16, totalBytes: payload.length + 16 });
     }
     expect(service.status(start)?.result).toEqual({ status: "created", workspaceId: f.id });
     expect(NodeFS.readFileSync(NodePath.join(f.destination, "large.bin")).equals(payload)).toBe(true);

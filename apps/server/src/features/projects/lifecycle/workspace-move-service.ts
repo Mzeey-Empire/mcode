@@ -131,12 +131,16 @@ function interruptedMoveFailure(move: WorkspaceMove): MoveFailure {
   };
 }
 
+/** A dialog that opens after the last byte still needs the totals to draw a full bar until the move ends. */
+const PHASES_WITH_BYTES = new Set<WorkspaceMove["phase"]>(["copying", "copied", "published"]);
+
 function moveFrame(move: WorkspaceMove): WorkspaceMoveFrame {
   const result = visibleMoveResult(move);
+  const showsBytes = PHASES_WITH_BYTES.has(move.phase);
   return {
     operationId: move.id, revision: move.revision, phase: move.phase,
-    copiedBytes: move.phase === "copying" ? move.copiedBytes : null,
-    totalBytes: move.phase === "copying" ? move.totalBytes : null,
+    copiedBytes: showsBytes ? move.copiedBytes : null,
+    totalBytes: showsBytes ? move.totalBytes : null,
     ...(result ? { result } : {}),
   };
 }
