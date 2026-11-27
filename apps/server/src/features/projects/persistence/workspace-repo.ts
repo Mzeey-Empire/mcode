@@ -32,7 +32,6 @@ export class WorkspaceRepo {
     return this.reader.findThreadlessNoProjectFailureIds(workspaceId);
   }
 
-  /** Find No project workspaces eligible for the sweep. */
   findRemovableNoProject(createdBefore: string, retryUpdatedSince: string, now: string): ReturnType<WorkspaceStore["findRemovableNoProject"]> {
     return this.reader.findRemovableNoProject(createdBefore, retryUpdatedSince, now);
   }
