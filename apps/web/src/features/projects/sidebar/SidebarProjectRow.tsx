@@ -122,7 +122,6 @@ interface ProjectHeaderProps {
   item: ProjectItem;
   ctx: SidebarRowContext;
   isDragging?: boolean;
-  /** A No project thread is over this header: it shows where a drop would open the move dialog. */
   moveTarget?: boolean;
   sortableListeners?: DraggableSyntheticListeners;
   sortableAttributes?: SortableAttributes;
@@ -272,7 +271,6 @@ function ProjectWorkspaceRow({
   );
 }
 
-/** Takes the place of the row's actions while a thread is over the header. A drop opens the dialog; it never moves the thread. */
 function MoveDropHint() {
   return <span className="shrink-0 pr-1 text-caption whitespace-nowrap text-muted">Move to project…</span>;
 }

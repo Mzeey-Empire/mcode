@@ -2,10 +2,6 @@ import { useDraggable, type DragEndEvent } from "@dnd-kit/core";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import { useMoveBlock } from "../thread-move/use-move-block";
 
-/**
- * What a sidebar drag carries. The sidebar has one drag context, so this is how a project header dragged to
- * reorder is told apart from a No project thread dragged to move.
- */
 export type SidebarDragData =
   | { readonly type: "project"; readonly workspaceId: string }
   | { readonly type: "thread"; readonly threadId: string };
@@ -23,7 +19,6 @@ export function sidebarDragData(item: { readonly data: { readonly current?: Reco
   return null;
 }
 
-/** Whether a thread, not a project header, is being dragged. */
 export function isThreadDrag(active: { readonly data: { readonly current?: Record<string, unknown> } } | null): boolean {
   return sidebarDragData(active)?.type === "thread";
 }
@@ -53,5 +48,4 @@ export function useThreadMoveDrag(thread: Pick<WorkspaceThread, "id" | "clientPr
   return { setNodeRef, onPointerDown: draggable ? listeners?.onPointerDown : undefined, isDragging };
 }
 
-/** The dragged row's look in place: muted, with a dashed outline, so it reads as lifted out of the list. */
 export const DRAGGED_THREAD_ROW_CLASS = "outline-1 -outline-offset-1 outline-dashed outline-muted [&_[data-title-line]_*]:text-muted";

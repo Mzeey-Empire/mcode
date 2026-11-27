@@ -95,7 +95,6 @@ describe("RootView", () => {
   it("lists Move thread to project first among the quick actions and runs it", async () => {
     mocks.palette.query = "";
     const open = vi.fn();
-    // Registered after New thread, so only the quick action order can put it first.
     registerCommand({ id: "thread.new", title: "New thread", category: "Thread", handler: () => undefined });
     registerCommand({ id: "thread.moveToProject", title: "Move thread to project…", category: "Thread", handler: open });
 

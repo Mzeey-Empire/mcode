@@ -30,8 +30,6 @@ const ROOT_HINTS: readonly PaletteHint[] = [
   ...PALETTE_LIST_HINTS,
 ];
 
-// Listed in this order. Move thread to project leads: it acts on the open thread, and it is only registered
-// while that thread can move, so it never pushes the general actions down for other threads.
 const QUICK_ACTION_ORDER = [
   "thread.moveToProject",
   "thread.new",

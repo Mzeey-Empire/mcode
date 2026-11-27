@@ -85,7 +85,6 @@ const PRIMARY = { button: 0, isPrimary: true, pointerId: 1 };
 
 type Point = { clientX: number; clientY: number };
 
-/** Presses the target, then moves past the drag threshold to `to`. */
 async function pressAndMove(target: HTMLElement, to: Point): Promise<void> {
   await act(async () => { fireEvent.pointerDown(target, { ...PRIMARY, clientX: 10, clientY: 10 }); });
   await movePointer({ clientX: 10, clientY: 40 });

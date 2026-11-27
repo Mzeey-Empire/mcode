@@ -196,7 +196,6 @@ interface ThreadRowLifecycleActions {
 interface ThreadRowVisualProps {
   workspaceName: string;
   noProject: boolean;
-  /** An open No project thread that is not being renamed or closed: its grouped row can be dragged onto a project header. */
   movable: boolean;
   thread: WorkspaceThread;
   depth: number;
@@ -345,7 +344,6 @@ function ThreadRowVisual(props: ThreadRowVisualProps) {
   const [revealed, setRevealed] = useState(false);
   const { thread, presentation } = props;
   const variant: ThreadRowVariant = presentation.closedRow ? "closed" : props.showProject ? "flat" : "grouped";
-  // Only the Projects view has project headers to drop on, so the flat Threads view and closed rows never drag.
   const Surface = props.movable && variant === "grouped" ? MovableThreadRowSurface : ThreadRowSurface;
   const row = (
     <Surface
@@ -586,10 +584,6 @@ function assignRef<T>(ref: ForwardedRef<T>, node: T | null): void {
   else if (ref) ref.current = node;
 }
 
-/**
- * The row of an open No project thread. It drags by pointer onto a project header, which opens the move
- * dialog with that project picked. A thread whose move would be refused stays a plain row.
- */
 const MovableThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(function MovableThreadRowSurface({ className, onPointerDown, ...props }, ref) {
   const drag = useThreadMoveDrag(props.thread);
   const { setNodeRef } = drag;

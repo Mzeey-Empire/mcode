@@ -192,7 +192,6 @@ function useSidebarDrag(controllerRef: React.RefObject<VirtualViewport | null>) 
   const onDragEnd = useCallback((event: DragEndEvent) => {
     endDrag();
     if (isThreadDrag(event.active)) {
-      // A drop only opens the dialog with the project picked; the move itself is the dialog's Move button.
       const drop = threadDropOnProject(event);
       if (drop) openMoveThreadDialog(drop.threadId, drop.workspaceId);
       return;

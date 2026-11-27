@@ -99,10 +99,6 @@ interface MoveFlow {
   readonly move: () => void;
 }
 
-/**
- * The dialog's one choice and the one request it can make, with how that request ended. A drop on a project
- * header starts with that project picked; the user can still choose another.
- */
 function useMoveFlow(threadId: string, initialProjectId: string | null): MoveFlow {
   const applyMoved = useWorkspaceStore((state) => state.applyThreadMovedToProject);
   const [pickedId, setPickedId] = useState<string | null>(initialProjectId);
