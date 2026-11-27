@@ -3,6 +3,7 @@ import { reportLaunchMark, reportLaunchResponse } from "./launch-marks";
 import type { FileChangedLines, FileReadResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
 import type { FilesystemBrowseResult, WorkspaceCreateResult, ThreadCompletionResult, ThreadMovePreflight, ThreadMoveResult } from "@mcode/contracts/ws/methods";
+import type { CreateProjectFromFolderResult, WorkspaceMoveFrame, WorkspaceMoveRetryGitResult } from "@mcode/contracts/ws/workspace-move";
 import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import type { TurnRevertPreview, TurnRevertResult } from "@mcode/contracts/models/turn-revert";
 import type {
@@ -1097,6 +1098,9 @@ export function createWsTransport(
       rpc<boolean>("thread.updateTitle", { threadId, title }),
     moveThreadToProject: (input) => rpc<ThreadMoveResult>("thread.moveToProject", input),
     readThreadMovePreflight: (threadId) => rpc<ThreadMovePreflight | null>("thread.moveToProjectPreflight", { threadId }),
+    createProjectFromFolder: (input) => rpc<CreateProjectFromFolderResult>("thread.createProjectFromFolder", input),
+    readWorkspaceMoveStatus: (input) => rpc<WorkspaceMoveFrame | null>("workspace.move.status", input),
+    retryWorkspaceMoveGit: (operationId) => rpc<WorkspaceMoveRetryGitResult>("workspace.move.retryGit", { operationId }),
     updateThreadSettings: (threadId, settings) =>
       rpc<boolean>("thread.updateSettings", {
         threadId,

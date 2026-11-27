@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from "react";
-import { ChevronRightIcon, InboxIcon, PlusIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, InboxIcon, PlusIcon } from "lucide-react";
 import type { Workspace } from "@mcode/contracts/models/workspace";
 import { PALETTE_SOURCES } from "@/components/palette/palette-sources";
 import { Picker, type PickerRow } from "@/components/ui/picker";
@@ -33,6 +33,18 @@ export interface ProjectChooserPick {
   readonly onSelect: (workspace: Workspace) => void;
   readonly onOpenChange?: (open: boolean) => void;
   readonly disabled?: boolean;
+  /**
+   * Offers one more choice after the projects: turning the thing being placed into a project of its own. With no
+   * projects to list it is the only row.
+   */
+  readonly newProject?: ProjectChooserNewProject;
+}
+
+export interface ProjectChooserNewProject {
+  /** Whether it is the current choice. A chosen row shows a check in place of its hint. */
+  readonly selected: boolean;
+  /** Called after the chooser closes. */
+  readonly onSelect: () => void;
 }
 
 const SOURCES_META = PALETTE_SOURCES.map((source) => source.shortTitle).join(", ");
@@ -68,6 +80,11 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom", pick 
     setOpenAndResetQuery(false);
   };
 
+  const chooseNewProject = () => {
+    pick?.newProject?.onSelect();
+    setOpenAndResetQuery(false);
+  };
+
   const addProject = () => {
     setOpenAndResetQuery(false);
     // Opened after the popover closes, so its focus return to the trigger cannot pull focus out of the palette.
@@ -89,22 +106,25 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom", pick 
         side={side}
         align={pick ? "center" : "start"}
         sideOffset={12}
-        className="flex w-[min(92vw,30rem)] flex-col gap-px p-[0.6rem]"
+        className={cn("flex flex-col gap-px p-[0.6rem]", newProjectHintShown(pick, projects) ? "w-[min(92vw,36rem)]" : "w-[min(92vw,30rem)]")}
       >
-        <ChooserList
-          projects={projects}
-          selectedKey={pick ? pick.selectedWorkspaceId ?? undefined : onNoProject ? NO_PROJECT_ROW_KEY : activeWorkspaceId ?? undefined}
-          query={query}
-          onQueryChange={setQuery}
-          onSelect={chooseItem}
-          projectsOnly={pick !== undefined}
-        />
+        {newProjectStandsAlone(pick, projects) ? null : (
+          <ChooserList
+            projects={projects}
+            selectedKey={selectedChooserKey(pick, onNoProject, activeWorkspaceId)}
+            query={query}
+            onQueryChange={setQuery}
+            onSelect={chooseItem}
+            projectsOnly={pick !== undefined}
+          />
+        )}
         {pick ? null : (
           <>
             <div aria-hidden className="mx-0.5 mb-1 h-px shrink-0 bg-border" />
             <AddProjectRow onClick={addProject} />
           </>
         )}
+        {pick?.newProject ? <NewProjectSection selected={pick.newProject.selected} hasProjects={projects.length > 0} onClick={chooseNewProject} /> : null}
       </PopoverContent>
     </Popover>
   );
@@ -138,6 +158,24 @@ function ChooserList({ projects, selectedKey, query, onQueryChange, onSelect, pr
       noMatchLabel={projectsOnly ? (needle) => `No project matches “${needle}”.` : undefined}
     />
   );
+}
+
+function newProjectStandsAlone(pick: ProjectChooserPick | undefined, projects: readonly Workspace[]): boolean {
+  return pick?.newProject !== undefined && projects.length === 0;
+}
+
+/**
+ * Whether the new-project row carries its "Keeps the files" hint beside the projects. The label and the hint need
+ * more width than the project names do, so the popover widens rather than fading the label.
+ */
+function newProjectHintShown(pick: ProjectChooserPick | undefined, projects: readonly Workspace[]): boolean {
+  return pick?.newProject !== undefined && projects.length > 0;
+}
+
+/** The row to mark: the host's pick when it has one, otherwise where the new-thread composer already is. */
+function selectedChooserKey(pick: ProjectChooserPick | undefined, onNoProject: boolean, activeWorkspaceId: string | null): string | undefined {
+  if (pick) return pick.selectedWorkspaceId ?? undefined;
+  return onNoProject ? NO_PROJECT_ROW_KEY : activeWorkspaceId ?? undefined;
 }
 
 function chooserRow(item: ChooserItem): PickerRow {
@@ -182,6 +220,35 @@ function AddProjectRow({ onClick }: { readonly onClick: () => void }) {
       <span className="min-w-0 flex-1 text-fade text-label text-ink">Add project</span>
       <span className="shrink-0 text-caption text-muted">{SOURCES_META}</span>
       <ChevronRightIcon aria-hidden className="size-[1.2rem] shrink-0 text-muted" />
+    </button>
+  );
+}
+
+const NEW_PROJECT_LABEL = "New project from this folder";
+
+function NewProjectSection({ selected, hasProjects, onClick }: { readonly selected: boolean; readonly hasProjects: boolean; readonly onClick: () => void }) {
+  return (
+    <>
+      {hasProjects ? <div aria-hidden className="mx-0.5 my-1 h-px shrink-0 bg-border" /> : null}
+      <NewProjectRow selected={selected} showHint={hasProjects} onClick={onClick} />
+    </>
+  );
+}
+
+function NewProjectRow({ selected, showHint, onClick }: { readonly selected: boolean; readonly showHint: boolean; readonly onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-current={selected || undefined}
+      onClick={onClick}
+      className={cn(
+        "flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left hover:bg-hover active:bg-selected",
+        FOCUS_RING_CLASS,
+      )}
+    >
+      <PlusIcon aria-hidden className="size-[1.4rem] shrink-0 text-ink" />
+      <span className="min-w-0 flex-1 text-fade text-label text-ink">{NEW_PROJECT_LABEL}</span>
+      {selected ? <CheckIcon aria-hidden className="size-[1.4rem] shrink-0 text-ink" /> : showHint ? <span className="shrink-0 text-caption text-muted">Keeps the files</span> : null}
     </button>
   );
 }

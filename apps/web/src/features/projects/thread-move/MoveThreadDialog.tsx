@@ -1,5 +1,5 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
-import { FolderInput, GitBranch, InboxIcon, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
+import { FolderInput, FolderPlus, GitBranch, InboxIcon, RotateCcw, Trash2 } from "lucide-react";
 import type { ThreadMovePreflight, ThreadMoveResult } from "@mcode/contracts/ws/methods";
 import type { Workspace } from "@mcode/contracts/models/workspace";
 import { Button } from "@/components/ui/button";
@@ -14,13 +14,19 @@ import { basename } from "@/lib/path";
 import { getTransport } from "@/transport";
 import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import { useSidebarUiStore } from "../sidebar/sidebar-ui-store";
-import { isNoProjectWorkspace } from "../state/project-workspaces";
+import { isNoProjectWorkspace, isProjectWorkspace } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { GitFailedDialog } from "./GitFailedDialog";
 import { MoveThreadCommand } from "./MoveThreadCommand";
+import { NewProjectForm } from "./NewProjectForm";
+import { BusyNotice, MoveFailureNotice, ResultUnknownNotice, SharersNotice } from "./NewProjectNotices";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
+import { destinationPath } from "./new-project-fields";
+import { endsAtClose, followsMove, isPastForm, type NewProjectRun } from "./new-project-run";
 import { PreflightFailedNotice } from "./PreflightFailedNotice";
 import { useMoveTarget, type MoveTargetState } from "./useMoveTarget";
 import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMovePreflight";
+import { useNewProjectMove, type NewProjectMove } from "./useNewProjectMove";
 
 /**
  * The global move dialog. It mounts once and opens for the thread {@link openMoveThreadDialog} names. It also
@@ -90,18 +96,26 @@ function formatRemovalDate(deadline: string): string {
   return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(new Date(deadline));
 }
 
+type Destination = "existing" | "new-project";
+
 interface MoveFlow {
+  readonly destination: Destination;
   readonly picked: Workspace | undefined;
   readonly target: MoveTargetState;
   readonly moving: boolean;
   readonly failure: MoveFailure | null;
   readonly pick: (workspace: Workspace) => void;
+  readonly chooseNewProject: () => void;
   readonly move: () => void;
 }
 
-function useMoveFlow(threadId: string, initialProjectId: string | null): MoveFlow {
+function useMoveFlow(threadId: string, initialProjectId: string | null, newProject: NewProjectMove): MoveFlow {
   const applyMoved = useWorkspaceStore((state) => state.applyThreadMovedToProject);
+  const projectCount = useWorkspaceStore((state) => state.workspaces.filter(isProjectWorkspace).length);
   const [pickedId, setPickedId] = useState<string | null>(initialProjectId);
+  const [chosen, setChosen] = useState<Destination | null>(null);
+  // With no project to choose, the folder becoming one is the only move there is. A move that has begun is that one too.
+  const destination: Destination = isPastForm(newProject.run) ? "new-project" : chosen ?? (projectCount === 0 && initialProjectId === null ? "new-project" : "existing");
   const picked = useWorkspaceStore((state) => state.workspaces.find((candidate) => candidate.id === pickedId && candidate.kind === "project"));
   const target = useMoveTarget(picked);
   const [moving, setMoving] = useState(false);
@@ -109,11 +123,18 @@ function useMoveFlow(threadId: string, initialProjectId: string | null): MoveFlo
 
   const pick = (workspace: Workspace) => {
     setPickedId(workspace.id);
+    setChosen("existing");
+    setFailure(null);
+    newProject.reset();
+  };
+
+  const chooseNewProject = () => {
+    setChosen("new-project");
     setFailure(null);
   };
 
   const move = async () => {
-    if (!picked || !target.request) return;
+    if (destination !== "existing" || !picked || !target.request) return;
     setMoving(true);
     setFailure(null);
     try {
@@ -133,34 +154,67 @@ function useMoveFlow(threadId: string, initialProjectId: string | null): MoveFlo
     setMoving(false);
   };
 
-  return { picked, target, moving, failure, pick, move: () => void move() };
+  return { destination, picked, target, moving, failure, pick, chooseNewProject, move: () => void move() };
 }
 
 function MoveThreadDialog({ threadId, initialProjectId }: { threadId: string; initialProjectId: string | null }) {
   const thread = useWorkspaceStore((state) => state.threads.find((candidate) => candidate.id === threadId));
   const threadInNoProject = useWorkspaceStore((state) => isNoProjectWorkspace(state.workspaces.find((candidate) => candidate.id === thread?.workspace_id)));
-  const flow = useMoveFlow(threadId, initialProjectId);
   const preflight = useMovePreflight(threadId);
+  const newProject = useNewProjectMove(threadId, preflight.read);
+  const flow = useMoveFlow(threadId, initialProjectId, newProject);
 
-  // The thread left No project, here or on another client, or was deleted: there is nothing left to move.
-  const stale = !thread || !threadInNoProject;
+  // The thread left No project, here or on another client, or was deleted: there is nothing left to move. A
+  // new-project move turns the thread's workspace into a project before its last frame arrives, so leaving No
+  // project only means the move is over once nothing is following it.
+  const stale = !thread || (!threadInNoProject && !followsMove(newProject.run));
   useEffect(() => {
     if (stale) closeMoveThreadDialog();
   }, [stale]);
   if (stale) return null;
-  return <MoveThreadDialogView title={thread.title} flow={flow} preflight={preflight} />;
+  const { run } = newProject;
+  if (run.kind === "git-failed" || run.kind === "git-started") return <GitFailedAlert threadTitle={thread.title} newProject={newProject} run={run} />;
+  const closeOnly = endsAtClose(run) || flow.failure?.unconfirmed === true;
+  return <MoveThreadDialogView title={thread.title} flow={flow} preflight={preflight} newProject={newProject} closeOnly={closeOnly} />;
+}
+
+interface GitFailedAlertProps {
+  readonly threadTitle: string;
+  readonly newProject: NewProjectMove;
+  readonly run: Extract<NewProjectRun, { kind: "git-failed" | "git-started" }>;
+}
+
+function GitFailedAlert({ threadTitle, newProject, run }: GitFailedAlertProps) {
+  const workspace = useWorkspaceStore((state) => state.workspaces.find((candidate) => candidate.id === run.workspaceId));
+  const { values } = newProject;
+  // The path the user typed is how they know the folder; a dialog opened on a finished move has only the server's.
+  const typedPath = values.name !== "" && values.location.trim() !== "" ? destinationPath(values) : null;
+  return (
+    <GitFailedDialog
+      threadTitle={threadTitle}
+      projectName={workspace?.name ?? values.name}
+      projectPath={typedPath ?? workspace?.path ?? values.name}
+      git={run.kind === "git-started" ? { kind: "started" } : { kind: "failed", error: run.error, retrying: run.retrying }}
+      onRetry={newProject.retryGit}
+      onDone={closeMoveThreadDialog}
+    />
+  );
 }
 
 interface MoveThreadDialogViewProps {
   readonly title: string;
   readonly flow: MoveFlow;
   readonly preflight: MovePreflightState;
+  readonly newProject: NewProjectMove;
+  readonly closeOnly: boolean;
 }
+
+const NEW_PROJECT_SLOT = "a new project";
 
 type TargetPicker = "workspace" | "target" | "baseBranch";
 type TargetPickerOpenChange = (picker: TargetPicker, open: boolean) => void;
 
-function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewProps) {
+function MoveThreadDialogView({ title, flow, preflight, newProject, closeOnly }: MoveThreadDialogViewProps) {
   const headingId = useId();
   const [chooserOpen, setChooserOpen] = useState(false);
   const [openTargetPickers, setOpenTargetPickers] = useState<ReadonlySet<TargetPicker>>(() => new Set());
@@ -172,10 +226,19 @@ function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewPr
       return next;
     });
   };
-  const { picked, moving } = flow;
+  const intoNewProject = flow.destination === "new-project";
+  const picked = intoNewProject ? undefined : flow.picked;
+  const moving = flow.moving || newProject.run.kind === "moving";
+  const popupRef = useRef<HTMLDivElement>(null);
+  const nameFieldRef = useRef<HTMLInputElement>(null);
+  // With no project to pick, the form is the only task. Otherwise focus stays on the dialog itself: the first
+  // control is the project slot, and focusing it would draw its ring and open its tooltip over the thread title.
+  const initialFocus = () => (intoNewProject && !moving ? nameFieldRef.current : null) ?? popupRef.current ?? false;
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !moving) closeMoveThreadDialog(); }}>
       <DialogContent
+        ref={popupRef}
+        initialFocus={initialFocus}
         aria-labelledby={headingId}
         aria-busy={moving || undefined}
         closeDisabled={moving}
@@ -190,28 +253,37 @@ function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewPr
           <ProjectSlotHeading
             as="h2"
             id={headingId}
-            projectName={picked?.name}
+            projectName={intoNewProject ? NEW_PROJECT_SLOT : picked?.name}
             prefix="Move to"
             suffix=""
             pick={{
               selectedWorkspaceId: picked?.id ?? null,
               onSelect: (workspace) => { setOpenTargetPickers(new Set()); flow.pick(workspace); },
               onOpenChange: setChooserOpen,
-              disabled: moving || flow.failure?.unconfirmed,
+              disabled: moving || closeOnly,
+              newProject: {
+                selected: intoNewProject,
+                onSelect: () => { setOpenTargetPickers(new Set()); flow.chooseNewProject(); },
+              },
             }}
           />
         </DialogHeader>
-        <MoveBody flow={flow} preflight={preflight} onPickerOpenChange={onPickerOpenChange} />
-        <MoveFooter flow={flow} preflight={preflight} pickerOpen={chooserOpen || openTargetPickers.size > 0} />
+        {intoNewProject
+          ? <NewProjectBody newProject={newProject} preflight={preflight} moving={moving} nameFieldRef={nameFieldRef} />
+          : <ExistingProjectBody picked={picked} flow={flow} preflight={preflight} onPickerOpenChange={onPickerOpenChange} />}
+        <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen} targetPickerOpen={openTargetPickers.size > 0} newProject={newProject} closeOnly={closeOnly} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function MoveBody({ flow, preflight, onPickerOpenChange }: {
-  flow: MoveFlow; preflight: MovePreflightState; onPickerOpenChange: TargetPickerOpenChange;
+function ExistingProjectBody({ picked, flow, preflight, onPickerOpenChange }: {
+  picked: Workspace | undefined;
+  flow: MoveFlow;
+  preflight: MovePreflightState;
+  onPickerOpenChange: TargetPickerOpenChange;
 }) {
-  const { picked, failure } = flow;
+  const { failure } = flow;
   if (!picked && !failure) return null;
   return (
     <div className="grid gap-4">
@@ -222,17 +294,93 @@ function MoveBody({ flow, preflight, onPickerOpenChange }: {
   );
 }
 
-function MoveFooter({ flow, preflight, pickerOpen }: { flow: MoveFlow; preflight: MovePreflightState; pickerOpen: boolean }) {
+interface NewProjectBodyProps {
+  readonly newProject: NewProjectMove;
+  readonly preflight: MovePreflightState;
+  readonly moving: boolean;
+  readonly nameFieldRef: Ref<HTMLInputElement>;
+}
+
+/** What the folder check found: the threads that move along, or that the check failed. */
+function FolderCheckNotice({ newProject, preflight }: { newProject: NewProjectMove; preflight: MovePreflightState }) {
+  const { sharers, busy } = newProject;
+  if (newProject.retryLookup) return <PreflightFailedNotice onRetry={newProject.retryLookup} />;
+  if (preflight.read.status === "failed") return <PreflightFailedNotice onRetry={preflight.retry} />;
+  // When the only other thread is the busy one, its own notice already says everything the sharers notice would.
+  const shown = sharers !== null && !(sharers.count === 1 && busy !== null && !busy.isOpenThread);
+  return shown ? <SharersNotice titles={sharers.titles} count={sharers.count} /> : null;
+}
+
+/** How a move that did not finish cleanly ended, or null while there is nothing to say. */
+function MoveOutcomeNotice({ newProject }: { newProject: NewProjectMove }) {
+  const { run, values, threadCount } = newProject;
+  if (run.kind === "result-unknown") return <ResultUnknownNotice />;
+  if (run.kind !== "failed" && run.kind !== "rollback-pending") return null;
+  return <MoveFailureNotice failure={run} projectName={values.name.trim()} threadCount={threadCount} />;
+}
+
+function NewProjectBody({ newProject, preflight, moving, nameFieldRef }: NewProjectBodyProps) {
+  const { run, values, busy } = newProject;
+  return (
+    <div className="grid gap-4">
+      {endsAtClose(run) ? null : (
+        <NewProjectForm
+          values={values}
+          initGit={newProject.initGit}
+          messages={newProject.messages}
+          nameFieldRef={nameFieldRef}
+          locked={moving}
+          onChange={newProject.setValues}
+          onInitGitChange={newProject.setInitGit}
+        />
+      )}
+      {busy ? <BusyNotice busy={busy} /> : null}
+      <MoveOutcomeNotice newProject={newProject} />
+      <FolderCheckNotice newProject={newProject} preflight={preflight} />
+    </div>
+  );
+}
+
+interface MoveFooterProps {
+  readonly flow: MoveFlow;
+  readonly preflight: MovePreflightState;
+  readonly chooserOpen: boolean;
+  readonly targetPickerOpen: boolean;
+  readonly newProject: NewProjectMove;
+  readonly closeOnly: boolean;
+}
+
+function MoveFooter({ closeOnly, newProject, ...existing }: MoveFooterProps) {
+  if (closeOnly) return <DialogFooter showCloseButton />;
+  if (existing.flow.destination === "new-project") return <NewProjectFooter newProject={newProject} chooserOpen={existing.chooserOpen} />;
+  return <ExistingProjectFooter {...existing} />;
+}
+
+function ExistingProjectFooter({ flow, preflight, chooserOpen, targetPickerOpen }: Omit<MoveFooterProps, "newProject" | "closeOnly">) {
   const { picked, moving, failure } = flow;
-  if (failure?.unconfirmed) return <DialogFooter showCloseButton />;
   const retrying = failure !== null && picked !== undefined;
   return (
     <DialogFooter>
       <FilesNote preflight={preflightOf(preflight.read)} picked={picked !== undefined} />
       <Button type="button" variant="outline" disabled={moving} onClick={closeMoveThreadDialog}>Cancel</Button>
-      <Button type="button" loading={moving} disabled={picked === undefined || flow.target.request === null || pickerOpen || preflight.read.status !== "ready"} onClick={flow.move}>
+      <Button type="button" loading={moving} disabled={picked === undefined || flow.target.request === null || chooserOpen || targetPickerOpen || preflight.read.status !== "ready"} onClick={flow.move}>
         {retrying ? <RotateCcw aria-hidden data-icon="inline-start" /> : <FolderInput aria-hidden data-icon="inline-start" />}
         {moving ? "Moving…" : retrying ? "Try again" : "Move thread"}
+      </Button>
+    </DialogFooter>
+  );
+}
+
+function NewProjectFooter({ newProject, chooserOpen }: { newProject: NewProjectMove; chooserOpen: boolean }) {
+  const { run } = newProject;
+  const moving = run.kind === "moving";
+  const retrying = run.kind === "failed";
+  return (
+    <DialogFooter>
+      <Button type="button" variant="outline" disabled={moving} onClick={closeMoveThreadDialog}>Cancel</Button>
+      <Button type="button" loading={moving} disabled={!newProject.canCreate || chooserOpen} onClick={newProject.create}>
+        {retrying ? <RotateCcw aria-hidden data-icon="inline-start" /> : <FolderPlus aria-hidden data-icon="inline-start" />}
+        {moving ? "Moving…" : retrying ? "Try again" : "Create project"}
       </Button>
     </DialogFooter>
   );
