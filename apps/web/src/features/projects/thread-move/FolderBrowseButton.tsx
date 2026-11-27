@@ -9,7 +9,6 @@ import { getTransport } from "@/transport";
 
 const PARENT_ROW_KEY = "..";
 
-/** One row of the listing: the folder above, or a folder inside. */
 type FolderRowItem = { readonly kind: "parent"; readonly path: string } | { readonly kind: "folder"; readonly name: string };
 
 /** A listing read for one request key; a null result is a read that failed. */
@@ -51,15 +50,10 @@ function folderItems(result: FilesystemBrowseResult | null, query: string): read
 }
 
 interface FolderBrowserProps {
-  /** Where the listing starts: the Location as typed, or `~`. */
   readonly startPath: string;
   readonly onPick: (path: string) => void;
 }
 
-/**
- * The server's folder browser, for a client with no native folder dialog. Choosing a folder opens it; "Use this
- * folder" picks the one on show. Every listing comes from the server, which resolves `~` and lists its own disk.
- */
 function FolderBrowser({ startPath, onPick }: FolderBrowserProps) {
   const [path, setPath] = useState(startPath);
   const [query, setQuery] = useState("");
@@ -97,7 +91,6 @@ function FolderBrowser({ startPath, onPick }: FolderBrowserProps) {
 }
 
 interface FolderBrowseButtonProps {
-  /** The Location as typed, so the browser opens where the user already is. */
   readonly startPath: string;
   readonly disabled: boolean;
   readonly onPick: (path: string) => void;

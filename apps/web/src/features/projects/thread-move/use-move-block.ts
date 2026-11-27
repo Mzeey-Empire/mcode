@@ -45,10 +45,8 @@ export function useMoveBlock(thread: BlockableThread): MoveBlock | null {
   return moveBlockOf(activity.turnRunning, isAwaitingApproval(rowState), rowState.kind === "waiting" || commandRunning || commandsUnknown);
 }
 
-/**
- * The verdict of {@link useMoveBlock}, read once outside React. It cannot load a command list, so a list that has
- * not arrived counts as nothing running here; the server's refusal then explains it.
- */
+// Unlike useMoveBlock this cannot load a command list, so a list that has not arrived counts as nothing running;
+// the server's refusal then explains it.
 function readMoveBlock(thread: BlockableThread): MoveBlock | null {
   const preparing = thread.clientPreparing === true;
   const createFailed = thread.clientError != null;
@@ -58,7 +56,6 @@ function readMoveBlock(thread: BlockableThread): MoveBlock | null {
   return moveBlockOf(activity.turnRunning, isAwaitingApproval(rowState), rowState.kind === "waiting" || commandRunning);
 }
 
-// Every store a thread's block reads from. A change in any of them can change a verdict.
 const BLOCK_STORES = [useThreadStore, threadAttentionStore, useThreadStartupStore, useWorkspaceStore, useBackgroundCommandStore] as const;
 
 function subscribeToBlockStores(onChange: () => void): () => void {

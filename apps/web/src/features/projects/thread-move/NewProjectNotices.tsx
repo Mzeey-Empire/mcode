@@ -8,11 +8,9 @@ import type { NewProjectRun } from "./new-project-run";
 export interface BusyThread {
   readonly title: string;
   readonly reason: MoveBlock;
-  /** The thread the dialog is open for, which needs no "it works in this folder" sentence. */
   readonly isOpenThread: boolean;
 }
 
-/** Info, not a warning: nothing is at risk, the move only waits. */
 export function BusyNotice({ busy }: { readonly busy: BusyThread }) {
   const wait = {
     running: "You can move once it stops.",
@@ -45,7 +43,6 @@ export function SharersNotice({ titles, count }: { readonly titles: readonly str
   );
 }
 
-/** The folder's whole move ended in `failed` or `rollback-pending`. */
 export type FolderMoveFailure = Extract<NewProjectRun, { kind: "failed" | "rollback-pending" }>;
 
 const FILE_IN_USE = /EBUSY|EPERM|EACCES|resource busy|permission denied|being used by another process/i;
@@ -54,7 +51,6 @@ function stillInNoProject(threadCount: number): string {
   return threadCount > 1 ? "the threads are still in No project" : "the thread is still in No project";
 }
 
-// A request that never answered may still have committed, so this cannot promise that nothing changed.
 function unconfirmedDetail(threadCount: number): string {
   return `Mcode could not confirm the move. ${threadCount > 1 ? "The threads stay" : "The thread stays"} in No project here until Mcode hears that it moved.`;
 }
@@ -85,7 +81,6 @@ interface MoveFailureNoticeProps {
 
 /** What went wrong with the folder move, what is left where, and the server's own words behind a disclosure. */
 export function MoveFailureNotice({ failure, projectName, threadCount }: MoveFailureNoticeProps) {
-  // The name, not the Location: a path wraps the title onto several lines, and the Location stays in its field above.
   const title = projectName === "" ? "Couldn't move the folder" : `Couldn't move the folder to ${projectName}`;
   const detail = failure.kind === "failed" ? failedDetail(failure, threadCount) : rollbackPendingDetail(failure.folder);
   return <Notice tone="error" title={title} detail={detail} more={failure.error} />;

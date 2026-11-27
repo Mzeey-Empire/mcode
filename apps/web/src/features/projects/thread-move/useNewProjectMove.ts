@@ -16,7 +16,6 @@ export interface FolderSharers {
   readonly titles: readonly string[];
 }
 
-/** Everything the "New project from this folder" choice shows and does. */
 export interface NewProjectMove {
   readonly values: NewProjectValues;
   readonly initGit: boolean;
@@ -85,10 +84,6 @@ function refusedProblem(run: NewProjectRun, values: NewProjectValues): FieldProb
   return run.kind === "form" && run.refusal?.kind === "field" && sameValues(run.refusal.values, values) ? run.refusal.problem : null;
 }
 
-/**
- * The new-project choice for the thread the dialog is open on: what the user typed, what the server suggested, who
- * else is in the folder and whether any of them must stop first, and the move itself.
- */
 export function useNewProjectMove(threadId: string, preflight: ThreadMovePreflight | null): NewProjectMove {
   const { run, create, retryGit, reset } = useNewProjectRun(threadId);
   const { values, setValues } = useNewProjectValues(preflight);
@@ -98,7 +93,6 @@ export function useNewProjectMove(threadId: string, preflight: ThreadMovePreflig
   const { live, busy } = useBusyThread(threadId, run);
   const sharers = preflight && preflight.otherThreadsInFolder.count > 0 ? preflight.otherThreadsInFolder : null;
 
-  // The project exists from here on, so it opens in this window's sidebar; the other windows keep their layout.
   useEffect(() => {
     if (run.kind === "created" || run.kind === "git-failed") useSidebarUiStore.getState().expandProject(run.workspaceId);
     if (run.kind === "created") closeMoveThreadDialog();

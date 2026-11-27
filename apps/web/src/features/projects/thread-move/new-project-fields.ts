@@ -14,22 +14,18 @@ const SERVER_REFUSALS = {
   relativeLocation: "Project location must be an absolute folder",
 } as const;
 
-/** Which field an error sits under. */
 export type NewProjectField = "name" | "location";
 
-/** A message the form shows under one field. */
 export interface FieldProblem {
   readonly field: NewProjectField;
   readonly message: string;
 }
 
-/** What the user typed. */
 export interface NewProjectValues {
   readonly name: string;
   readonly location: string;
 }
 
-/** The text of the Location error. */
 export const LOCATION_PROBLEM = "Enter a full path, such as ~/src.";
 
 const CHARACTER_PROBLEM = "Use letters, numbers, dots, dashes or underscores.";
@@ -63,7 +59,6 @@ export function nameProblem(name: string, projectNames: readonly string[]): stri
   return projectNames.some((existing) => existing.toLowerCase() === lowered) ? duplicateProblem(name) : null;
 }
 
-/** Whether a typed Location is a `~` path or an absolute one on any platform; the server resolves `~` and the rest. */
 function isFullPath(location: string): boolean {
   return location === "~"
     || location.startsWith("~/")
@@ -79,7 +74,6 @@ export function locationProblem(location: string): string | null {
   return trimmed === "" || isFullPath(trimmed) ? null : LOCATION_PROBLEM;
 }
 
-/** Whether the values are complete and pass the client's checks, so the request is worth sending. */
 export function isSubmittable(values: NewProjectValues, projectNames: readonly string[]): boolean {
   return values.name !== ""
     && values.location.trim() !== ""

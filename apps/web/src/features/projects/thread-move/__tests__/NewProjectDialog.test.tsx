@@ -77,7 +77,6 @@ async function retype(user: UserEvent, field: HTMLElement, text: string): Promis
   if (text !== "") await user.type(field, text);
 }
 
-/** Clicks Create project and waits until the dialog follows the operation, so a pushed frame has a listener. */
 async function startMove(user: UserEvent): Promise<void> {
   vi.mocked(mockTransport.createProjectFromFolder).mockResolvedValueOnce({ operationId: OPERATION });
   await user.click(createButton());
@@ -402,7 +401,6 @@ describe("New project from this folder", () => {
 
     it("alerts that the project exists, even when the converted workspace reaches the store first", async () => {
       await reachGitFailure();
-      // The server converts the workspace before it reports the result, so the thread has already left No project.
       act(() => useWorkspaceStore.setState({ workspaces: [ALPHA, { ...HIDDEN, kind: "project", name: "sqlite-wal-vs-rollback" }] }));
 
       push(frame(3, gitFailed()));
@@ -416,7 +414,6 @@ describe("New project from this folder", () => {
 
     it("Retry git setup retries the operation, then shows git as started and waits for Done", async () => {
       vi.mocked(mockTransport.retryWorkspaceMoveGit).mockResolvedValueOnce({ status: "created", workspaceId: HIDDEN.id });
-      // The server converted the workspace before the retry, so the thread has left No project by now.
       const user = await reachGitFailure();
       act(() => useWorkspaceStore.setState({ workspaces: [ALPHA, { ...HIDDEN, kind: "project", name: "sqlite-wal-vs-rollback" }] }));
       push(frame(3, gitFailed()));
@@ -461,7 +458,6 @@ describe("New project from this folder", () => {
 
   describe("following the move", () => {
     it("shows the terminal result of a move that completed between the thread lookup and the subscription", async () => {
-      // The dialog opens on a thread whose move was unfinished when asked by thread, and over by the time it asks by operation.
       vi.mocked(mockTransport.readWorkspaceMoveStatus).mockImplementation(async (input) => {
         if ("threadId" in input) return frame(1);
         return frame(4, { status: "git-failed", workspaceId: HIDDEN.id, error: "git: 'init' failed" });

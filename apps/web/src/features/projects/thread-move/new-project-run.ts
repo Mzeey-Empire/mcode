@@ -30,24 +30,19 @@ export type NewProjectRun =
   | { readonly kind: "git-started"; readonly workspaceId: string }
   | { readonly kind: "created"; readonly workspaceId: string };
 
-/** The starting state: the form, with nothing refused. */
 export const FORM_RUN: NewProjectRun = { kind: "form", refusal: null };
 
-/** What changes the run. */
 export type NewProjectRunAction =
   | { readonly type: "submitted" }
-  /** The user chose something else, so a failed attempt no longer says anything about the dialog. */
   | { readonly type: "reset" }
   | { readonly type: "refused"; readonly refusal: FormRefusal }
   | { readonly type: "failed"; readonly error: string; readonly outcome: "rolled-back" | "unconfirmed" }
   | { readonly type: "started"; readonly operationId: string }
   | { readonly type: "frame"; readonly frame: WorkspaceMoveFrame }
-  /** The dialog opened on a thread whose move is already unfinished. */
   | { readonly type: "adopted"; readonly frame: WorkspaceMoveFrame }
   | { readonly type: "git-retrying" }
   | { readonly type: "git-retried"; readonly result: WorkspaceMoveRetryGitResult };
 
-/** The state a frame describes. A frame without a result is a move still running. */
 function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
   const { result } = frame;
   if (!result) return { kind: "moving", operationId: frame.operationId, revision: frame.revision };
@@ -72,7 +67,6 @@ function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
   }
 }
 
-/** The operation and revision a run follows, or null when it follows none. */
 function followed(run: NewProjectRun): { readonly operationId: string; readonly revision: number } | null {
   if ((run.kind === "moving" || run.kind === "rollback-pending") && run.operationId !== null) {
     return { operationId: run.operationId, revision: run.revision };
@@ -80,12 +74,10 @@ function followed(run: NewProjectRun): { readonly operationId: string; readonly 
   return null;
 }
 
-/** The operation a run still follows, so a host knows whether to keep listening for its frames. */
 export function followedOperation(run: NewProjectRun): string | null {
   return followed(run)?.operationId ?? null;
 }
 
-/** Whether the dialog is past the form: a move is running, or has ended in something the user must read. */
 export function isPastForm(run: NewProjectRun): boolean {
   return run.kind !== "form";
 }
@@ -100,12 +92,10 @@ export function followsMove(run: NewProjectRun): boolean {
 
 function applyFrame(run: NewProjectRun, frame: WorkspaceMoveFrame): NewProjectRun {
   const current = followed(run);
-  // Two reads of one operation can arrive in either order, so only a higher revision moves the run.
   if (!current || current.operationId !== frame.operationId || frame.revision <= current.revision) return run;
   return runOfFrame(frame);
 }
 
-// A retry that could not even run leaves the project as it was, so the alert stays and shows that failure.
 function runAfterGitRetry(run: Extract<NewProjectRun, { kind: "git-failed" }>, result: WorkspaceMoveRetryGitResult): NewProjectRun {
   if (result.status === "created") return { kind: "git-started", workspaceId: result.workspaceId };
   return { ...run, error: result.error, retrying: false };
@@ -113,7 +103,6 @@ function runAfterGitRetry(run: Extract<NewProjectRun, { kind: "git-failed" }>, r
 
 type FollowUpAction = Extract<NewProjectRunAction, { type: "frame" | "adopted" | "git-retrying" | "git-retried" }>;
 
-/** The actions that report on a move already running, or on the git retry after it. */
 function followUp(run: NewProjectRun, action: FollowUpAction): NewProjectRun {
   switch (action.type) {
     case "frame":
@@ -127,7 +116,6 @@ function followUp(run: NewProjectRun, action: FollowUpAction): NewProjectRun {
   }
 }
 
-/** The actions that come from the user, and from the server's answer to the request they made. */
 function respond(run: NewProjectRun, action: Exclude<NewProjectRunAction, FollowUpAction>): NewProjectRun {
   switch (action.type) {
     case "submitted":
@@ -143,7 +131,6 @@ function respond(run: NewProjectRun, action: Exclude<NewProjectRunAction, Follow
   }
 }
 
-/** Moves the run on. */
 export function newProjectRunReducer(run: NewProjectRun, action: NewProjectRunAction): NewProjectRun {
   switch (action.type) {
     case "frame":

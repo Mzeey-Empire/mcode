@@ -21,7 +21,6 @@ function targetLabel(threadMove: MovedIntoProject): string {
   }
 }
 
-/** One centred marker line: a rule, the move icon with its words, a rule. */
 function MarkerLine({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
     <div className="flex items-center gap-3 py-2" role="note" aria-label={label}>
@@ -40,7 +39,6 @@ function MovedMarker({ threadMove }: { readonly threadMove: MovedIntoProject }) 
   return (
     <MarkerLine label={`Moved to ${threadMove.projectName} · ${label}`}>
       <span className="shrink-0">Moved to</span>{" "}
-      {/* A project name or a branch can outgrow a narrow timeline, so both give way and "Moved to" stays. */}
       <span className="min-w-0 overflow-hidden font-medium text-ink text-fade">{threadMove.projectName}</span>{" "}
       <span className="min-w-0 overflow-hidden text-fade">· {label}</span>
     </MarkerLine>

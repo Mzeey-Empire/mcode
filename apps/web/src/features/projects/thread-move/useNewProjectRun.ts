@@ -6,7 +6,6 @@ import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import { describeFieldRefusal, type NewProjectValues } from "./new-project-fields";
 import { FORM_RUN, followedOperation, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "./new-project-run";
 
-/** Calls `onFrame` for every progress frame the server pushes, until the returned function runs. */
 function subscribeToMoveFrames(onFrame: (frame: WorkspaceMoveFrame) => void): () => void {
   return pushEmitter.on("workspace.move.progress", (data) => {
     const parsed = WS_CHANNELS["workspace.move.progress"].safeParse(data);
@@ -14,7 +13,6 @@ function subscribeToMoveFrames(onFrame: (frame: WorkspaceMoveFrame) => void): ()
   });
 }
 
-/** What the dialog can do about a new-project move. */
 export interface NewProjectRunControls {
   readonly run: NewProjectRun;
   /** Asks the server to turn the folder into a project. Also what Try again runs. */
@@ -82,7 +80,6 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
   return { run, create, retryGit, reset: () => dispatch({ type: "reset" }) };
 }
 
-/** Sends the request and says what it did to the run. */
 async function requestCreation(threadId: string, values: NewProjectValues, initGit: boolean): Promise<NewProjectRunAction> {
   try {
     const result = await getTransport().createProjectFromFolder({ threadId, name: values.name, parentPath: values.location.trim(), initGit });
@@ -93,7 +90,6 @@ async function requestCreation(threadId: string, values: NewProjectValues, initG
       ? { type: "refused", refusal: { kind: "field", problem, values } }
       : { type: "failed", error: result.error, outcome: "rolled-back" };
   } catch (error) {
-    // A request that never answered may still have been accepted, so this cannot promise that nothing changed.
     return { type: "failed", error: rpcFailureMessage(error), outcome: "unconfirmed" };
   }
 }

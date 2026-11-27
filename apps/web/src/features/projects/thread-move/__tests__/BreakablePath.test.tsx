@@ -2,7 +2,6 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { BreakablePath } from "../BreakablePath";
 
-/** The pieces the path may wrap between: each keeps the separator that ends it. */
 function wrapPieces(path: string): string[] {
   const { container } = render(<BreakablePath path={path} />);
   return Array.from(container.querySelectorAll("span > span"), (piece) => piece.textContent ?? "");

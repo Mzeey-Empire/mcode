@@ -96,7 +96,6 @@ function formatRemovalDate(deadline: string): string {
   return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(new Date(deadline));
 }
 
-/** What the thread moves into: a project that already exists, or its own folder turned into one. */
 type Destination = "existing" | "new-project";
 
 interface MoveFlow {
@@ -293,10 +292,6 @@ function ExistingProjectBody({ picked, flow, preflight, onPickerOpenChange }: {
   );
 }
 
-/**
- * The new project's form and what to tell the user around it, in the order the prototype stacks them: the fields,
- * then why the move waits, then how a failed move ended, then who else moves along.
- */
 function NewProjectBody({ newProject, moving, nameFieldRef }: { newProject: NewProjectMove; moving: boolean; nameFieldRef: Ref<HTMLInputElement> }) {
   const { run, values, sharers, busy } = newProject;
   const failure = run.kind === "failed" || run.kind === "rollback-pending" ? run : null;

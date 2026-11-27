@@ -15,7 +15,6 @@ export type GitSetupState =
 interface GitFailedDialogProps {
   readonly threadTitle: string;
   readonly projectName: string;
-  /** Where the project's folder is, as the user would read it. */
   readonly projectPath: string;
   readonly git: GitSetupState;
   readonly onRetry: () => void;

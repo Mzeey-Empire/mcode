@@ -40,7 +40,6 @@ export interface ProjectChooserPick {
   readonly newProject?: ProjectChooserNewProject;
 }
 
-/** The "New project from this folder" row a picking host adds under the project list. */
 export interface ProjectChooserNewProject {
   /** Whether it is the current choice. A chosen row shows a check in place of its hint. */
   readonly selected: boolean;
@@ -109,7 +108,6 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom", pick 
         sideOffset={12}
         className={cn("flex flex-col gap-px p-[0.6rem]", newProjectHintShown(pick, projects) ? "w-[min(92vw,36rem)]" : "w-[min(92vw,30rem)]")}
       >
-        {/* With no project to list, a search box would have nothing to search, so the new-project row stands alone. */}
         {newProjectStandsAlone(pick, projects) ? null : (
           <ChooserList
             projects={projects}
@@ -162,7 +160,6 @@ function ChooserList({ projects, selectedKey, query, onQueryChange, onSelect, pr
   );
 }
 
-/** Whether the new-project row is the whole chooser: a host that offers it, and no project to list beside it. */
 function newProjectStandsAlone(pick: ProjectChooserPick | undefined, projects: readonly Workspace[]): boolean {
   return pick?.newProject !== undefined && projects.length === 0;
 }
@@ -229,7 +226,6 @@ function AddProjectRow({ onClick }: { readonly onClick: () => void }) {
 
 const NEW_PROJECT_LABEL = "New project from this folder";
 
-/** The new-project row under a divider, or alone when there are no projects to divide it from. */
 function NewProjectSection({ selected, hasProjects, onClick }: { readonly selected: boolean; readonly hasProjects: boolean; readonly onClick: () => void }) {
   return (
     <>

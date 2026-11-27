@@ -1,6 +1,5 @@
 import { cn } from "@/lib/utils";
 
-/** Splits after each separator, so a segment keeps the separator that ends it. */
 const AFTER_SEPARATOR = /(?<=[\\/])/;
 
 /**

@@ -10,7 +10,6 @@ interface NewProjectFormProps {
   readonly values: NewProjectValues;
   readonly initGit: boolean;
   readonly messages: FieldMessages;
-  /** Lets the dialog put focus in Name when it opens. */
   readonly nameFieldRef?: Ref<HTMLInputElement>;
   /** Locks every control while the move runs. */
   readonly locked: boolean;
@@ -18,7 +17,6 @@ interface NewProjectFormProps {
   readonly onInitGitChange: (initGit: boolean) => void;
 }
 
-/** The new project's Name, Location and git choice. */
 export function NewProjectForm({ values, initGit, messages, nameFieldRef, locked, onChange, onInitGitChange }: NewProjectFormProps) {
   const nameId = useId();
   const locationId = useId();
