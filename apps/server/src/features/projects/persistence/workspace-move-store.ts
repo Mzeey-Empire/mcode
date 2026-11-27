@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import * as NodePath from "node:path";
+import { and, eq, isNull, lt, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { z } from "zod";
 import { MessageSchema } from "@mcode/contracts/models/message";
@@ -7,11 +8,28 @@ import { ThreadSchema } from "@mcode/contracts/models/thread";
 import { WorkspaceMovePhaseSchema, WorkspaceMoveResultSchema } from "@mcode/contracts/ws/workspace-move";
 import { databaseWriteHandler, databaseWriteOperation } from "../../../runtime/persistence/sqlite/database-write-operation.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
-import { threads, workspaceMoves, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
+import { threads, workspaceMoveManifests, workspaceMoves, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
 import { ThreadStore } from "../../thread-control/persistence/thread-store.js";
 
 /** A durable move at the last committed checkpoint. */
 export type WorkspaceMove = typeof workspaceMoves.$inferSelect;
+
+const relativePath = z.string().refine((path) =>
+  !NodePath.isAbsolute(path) && !path.includes("\0") && NodePath.normalize(path) === path
+  && path.split(NodePath.sep).every((part) => part !== "" && part !== "." && part !== ".."
+    && (NodePath.sep !== "\\" || !part.includes(":"))),
+);
+const inode = z.string().regex(/^\d+$/);
+const manifestEntries = z.array(z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("folder"), path: relativePath }),
+  z.object({
+    kind: z.literal("file"), path: relativePath, inode, size: z.number().int().nonnegative(), hash: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+  z.object({ kind: z.literal("link"), path: relativePath, inode, target: z.string() }),
+]));
+
+/** Copy evidence for each entry at its original path and manifest index. */
+export type WorkspaceMoveManifest = z.infer<typeof manifestEntries>;
 
 const intent = z.object({
   id: z.string().uuid(),
@@ -23,10 +41,22 @@ const intent = z.object({
   createdAt: z.string().datetime(),
 });
 const checkpoint = z.object({
-  phase: WorkspaceMovePhaseSchema(),
-  result: WorkspaceMoveResultSchema().nullable(),
-  cleanup: z.enum(["done", "pending", "kept"]),
-  error: z.string().nullable(),
+  phase: WorkspaceMovePhaseSchema().optional(),
+  result: WorkspaceMoveResultSchema().nullable().optional(),
+  cleanup: z.enum(["done", "pending", "kept"]).optional(),
+  error: z.string().nullable().optional(),
+  stagingPath: z.string().nullable().optional(),
+  claimReleased: z.boolean().optional(),
+  copiedBytes: z.number().int().nonnegative().optional(),
+  totalBytes: z.number().int().nonnegative().optional(),
+  sourceRetainUntil: z.string().datetime().optional(),
+  manifest: manifestEntries.optional(),
+});
+const sourceCleanup = z.object({
+  cleanup: z.enum(["done", "pending", "kept"]).optional(),
+  tombstonePath: z.string().optional(),
+  deleteStagingStarted: z.boolean().optional(),
+  cleanupError: z.string().nullable().optional(),
 });
 const placement = z.object({
   isGitRepo: z.boolean(), branch: z.string(),
@@ -41,6 +71,9 @@ export const workspaceMoveWrites = {
   convert: databaseWriteOperation("workspace.move.convert", z.tuple([
     z.string(), placement, z.string().datetime(),
   ]), z.array(convertedThread)),
+  sourceCleanup: databaseWriteOperation("workspace.move.sourceCleanup", z.tuple([
+    z.string(), sourceCleanup, z.string().datetime(),
+  ]), z.void()),
 };
 
 export function unfinishedWorkspaceMove(workspaceId: typeof workspaces.id | string) {
@@ -64,8 +97,39 @@ export class WorkspaceMoveStore {
 
   listRecoverable(): WorkspaceMove[] {
     return this.orm.select().from(workspaceMoves).where(sql`
-      ${workspaceMoves.phase} <> 'done' OR ${workspaceMoves.cleanup} = 'pending'
+      ${workspaceMoves.phase} <> 'done' OR (${workspaceMoves.cleanup} = 'pending' AND ${workspaceMoves.sourceRetainUntil} IS NULL)
     `).all();
+  }
+
+  /** Find completed moves whose retained source is ready for a cleanup attempt. */
+  listExpiredSources(now: string): WorkspaceMove[] {
+    return this.orm.select().from(workspaceMoves).where(and(
+      eq(workspaceMoves.phase, "done"), eq(workspaceMoves.cleanup, "pending"), lt(workspaceMoves.sourceRetainUntil, now),
+    )).all();
+  }
+
+  /** Keep even a markerless folder recreated at a recorded source or tombstone path. */
+  protectsFolder(path: string): boolean {
+    const paths = this.orm.select({ source: workspaceMoves.sourcePath, tombstone: workspaceMoves.tombstonePath })
+      .from(workspaceMoves).all();
+    return paths.some(({ source, tombstone }) =>
+      NodePath.relative(path, source) === "" || (tombstone !== null && NodePath.relative(path, tombstone) === ""));
+  }
+
+  /** Read and validate copy evidence before it is used to delete anything. */
+  readManifest(id: string): WorkspaceMoveManifest | null {
+    const stored = this.orm.select({ entries: workspaceMoveManifests.entries }).from(workspaceMoveManifests)
+      .where(eq(workspaceMoveManifests.moveId, id)).get();
+    const parsed = manifestEntries.safeParse(stored?.entries);
+    return parsed.success ? parsed.data : null;
+  }
+
+  /** Record cleanup separately so it can run while the project remains available. */
+  sourceCleanup(id: string, next: z.infer<typeof sourceCleanup>, now: string): void {
+    const updated = runChanges(this.orm.update(workspaceMoves).set({ ...next, updatedAt: now }).where(and(
+      eq(workspaceMoves.id, id), eq(workspaceMoves.phase, "done"), eq(workspaceMoves.cleanup, "pending"),
+    )));
+    if (updated.changes !== 1) throw new Error("The retained source is no longer pending cleanup");
   }
 
   /** Commit an intent only if every live thread was covered by a reservation. */
@@ -102,7 +166,9 @@ export class WorkspaceMoveStore {
         this.orm.update(threads).set({ branch: git.branch, updatedAt: now })
           .where(eq(threads.workspaceId, move.workspaceId)).run();
       }
-      this.orm.update(workspaceMoves).set({ ...next, revision: revision + 1, updatedAt: now })
+      const { manifest, ...receipt } = next;
+      if (manifest) this.orm.insert(workspaceMoveManifests).values({ moveId: id, entries: manifest }).run();
+      this.orm.update(workspaceMoves).set({ ...receipt, revision: revision + 1, updatedAt: now })
         .where(eq(workspaceMoves.id, id)).run();
     }).immediate();
   }
@@ -111,7 +177,7 @@ export class WorkspaceMoveStore {
   convert(id: string, git: z.infer<typeof placement>, now: string) {
     return this.db.transaction(() => {
       const move = this.find(id);
-      if (move?.phase !== "renamed") throw new Error("The workspace move has not finished its rename");
+      if (move?.phase !== "renamed" && move?.phase !== "published") throw new Error("The workspace move has not published its folder");
       const duplicate = this.orm.select({ id: workspaces.id }).from(workspaces).where(and(
         eq(workspaces.kind, "project"), isNull(workspaces.deletedAt), sql`lower(${workspaces.name}) = ${move.name.toLowerCase()}`,
       )).get();
@@ -135,5 +201,6 @@ export function workspaceMoveWriteHandlers(db: Database) {
     [workspaceMoveWrites.start.name, databaseWriteHandler(workspaceMoveWrites.start, (args) => store.start(...args))],
     [workspaceMoveWrites.advance.name, databaseWriteHandler(workspaceMoveWrites.advance, (args) => store.advance(...args))],
     [workspaceMoveWrites.convert.name, databaseWriteHandler(workspaceMoveWrites.convert, (args) => store.convert(...args))],
+    [workspaceMoveWrites.sourceCleanup.name, databaseWriteHandler(workspaceMoveWrites.sourceCleanup, (args) => store.sourceCleanup(...args))],
   ]);
 }

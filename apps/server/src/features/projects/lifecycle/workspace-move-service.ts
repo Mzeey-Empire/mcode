@@ -3,7 +3,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import type {
   CreateProjectFromFolderInput, CreateProjectFromFolderResult, WorkspaceMoveFrame,
-  WorkspaceMoveRetryGitResult, WorkspaceMoveStatusInput,
+  WorkspaceMoveFailureCause, WorkspaceMoveRetryGitResult, WorkspaceMoveStatusInput,
 } from "@mcode/contracts/ws/workspace-move";
 import type { Workspace } from "@mcode/contracts/models/workspace";
 import type { Thread } from "@mcode/contracts/models/thread";
@@ -19,15 +19,21 @@ import { isOpenNoProjectThread } from "../../thread-control/persistence/thread-s
 import type { GitExecutor } from "../git/execution/index.js";
 import { workspaceMoveWrites, type WorkspaceMove, type WorkspaceMoveStore } from "../persistence/workspace-move-store.js";
 import type { WorkspaceRepo } from "../persistence/workspace-repo.js";
+import { noProjectRetentionDeadline } from "../persistence/workspace-store.js";
+import { copyWorkspaceFolder } from "./workspace-move-copy.js";
 import {
-  assertRecordedParent, inspectMoveFolder, markerPath, moveError, removeMoveClaim, removeMoveMarker,
-  renameWorkspaceFolder, resolveWorkspaceMovePaths, writeMoveMarker, type MoveFolderState, type WorkspaceMoveRenameOptions,
+  assertRecordedParent, holdsMoveMarker, inspectMoveFolder, markerPath, moveError, moveErrorCode, moveFailureCause,
+  removeMoveClaim, removeMoveCopy, removeMoveMarker, renameWorkspaceFolder, resolveWorkspaceMovePaths, writeMoveMarker,
+  type MoveFolderState,
 } from "./workspace-move-files.js";
 import { acquireWorkspaceMoveGate, isInsideMoveSource } from "./workspace-move-gate.js";
+import { cleanRetainedMoveSource, type WorkspaceMoveDeleteOptions } from "./workspace-move-retention.js";
 
 type Placement = Parameters<WorkspaceMoveStore["convert"]>[1];
-type Receipt = Pick<WorkspaceMove, "phase" | "result" | "cleanup" | "error">;
+type Receipt = Parameters<WorkspaceMoveStore["advance"]>[2];
 type RollbackAction = "rename-back" | "remove-claim" | "finish";
+type MoveFailure = { error: string; cause: WorkspaceMoveFailureCause };
+type LiveMove = { claimedDestination: boolean; createdStaging: boolean; crossDrive: boolean };
 
 // Intent and renamed use the same observations because the phase write can lag the rename.
 const rollbackActions: Partial<Record<MoveFolderState, Partial<Record<MoveFolderState, RollbackAction>>>> = {
@@ -38,19 +44,104 @@ const rollbackActions: Partial<Record<MoveFolderState, Partial<Record<MoveFolder
   foreign: { missing: "finish", empty: "remove-claim", "marker-only": "remove-claim", foreign: "finish", other: "finish" },
 };
 
-function holdsMarker(state: MoveFolderState): boolean {
-  return state === "marker-only" || state === "owned";
+type CopyRollback = "finish" | "remnants" | "staging" | "published";
+type CopyRollbackTable = Partial<Record<MoveFolderState, Partial<Record<MoveFolderState, CopyRollback>>>>;
+const leftoverStaging: Partial<Record<MoveFolderState, CopyRollback>> = {
+  missing: "staging", empty: "staging", "marker-only": "staging", foreign: "staging", other: "staging",
+};
+const unmarkedStaging: Partial<Record<MoveFolderState, CopyRollback>> = {
+  missing: "finish", empty: "remnants", "marker-only": "remnants", foreign: "finish", other: "finish",
+};
+const beforeCopy: CopyRollbackTable = {
+  missing: { missing: "finish", empty: "remnants", "marker-only": "remnants" },
+  empty: leftoverStaging,
+  "marker-only": leftoverStaging,
+  owned: leftoverStaging,
+  foreign: unmarkedStaging,
+  other: unmarkedStaging,
+};
+const missingAfterCopy: Partial<Record<MoveFolderState, CopyRollback>> = {
+  ...unmarkedStaging, owned: "published",
+};
+const copyRollbackByPhase: Partial<Record<WorkspaceMove["phase"], CopyRollbackTable>> = {
+  intent: beforeCopy,
+  copying: beforeCopy,
+  copied: { ...beforeCopy, missing: missingAfterCopy },
+  published: { missing: missingAfterCopy },
+};
+
+async function rollbackCopy(input: {
+  move: WorkspaceMove;
+  stagingPath: string;
+  source: MoveFolderState;
+  staging: MoveFolderState;
+  destination: MoveFolderState;
+  live?: LiveMove;
+}): Promise<boolean> {
+  const { move, stagingPath, source, destination, live } = input;
+  if (!holdsMoveMarker(source)) throw new Error("The copy source no longer holds its move marker");
+  const staging = observedStaging(input.staging, live);
+  const action = copyRollbackAction(move.phase, staging, destination, live);
+  if (action === "published") await removeMoveCopy(move.destinationPath, move.id);
+  if (action === "staging") {
+    if (staging === "empty") await removeMoveClaim(stagingPath, move.id);
+    else await removeMoveCopy(stagingPath, move.id);
+  }
+  await removeCopyClaim(move, action, destination, live);
+  return staging !== "foreign" && staging !== "other";
+}
+
+function observedStaging(staging: MoveFolderState, live?: LiveMove): MoveFolderState {
+  return live && !live.createdStaging && staging !== "missing" ? "foreign" : staging;
+}
+
+function copyRollbackAction(
+  phase: WorkspaceMove["phase"], staging: MoveFolderState, destination: MoveFolderState, live?: LiveMove,
+): CopyRollback {
+  const action = copyRollbackByPhase[phase]?.[staging]?.[destination];
+  if (action) return action;
+  // A live failure before a second claim can leave a destination created by someone else.
+  if (live && !live.claimedDestination && staging === "missing" && (destination === "foreign" || destination === "other")) {
+    return "finish";
+  }
+  throw new Error("The recorded copy paths do not identify a safe rollback");
+}
+
+async function removeCopyClaim(move: WorkspaceMove, action: CopyRollback, destination: MoveFolderState, live?: LiveMove): Promise<void> {
+  if (action !== "remnants" && action !== "staging") return;
+  if (destination !== "empty" && destination !== "marker-only") return;
+  const mayHaveClaimed = live?.claimedDestination ?? (!move.claimReleased || move.phase === "copied" || move.phase === "published");
+  if (mayHaveClaimed) await removeMoveClaim(move.destinationPath, move.id);
+}
+
+function visibleMoveResult(move: WorkspaceMove): WorkspaceMove["result"] {
+  const { result } = move;
+  if (!result || (move.phase !== "done" && result.status !== "rollback-pending")) return null;
+  if ((result.status === "failed" || result.status === "rollback-pending") && !result.cause) {
+    return { ...result, cause: { kind: "other" } };
+  }
+  return result;
+}
+
+function interruptedMoveFailure(move: WorkspaceMove): MoveFailure {
+  const pending = move.result?.status === "rollback-pending" ? move.result : null;
+  return {
+    error: move.error ?? "The server stopped before the folder move committed",
+    cause: pending?.cause ?? { kind: "other" },
+  };
 }
 
 function moveFrame(move: WorkspaceMove): WorkspaceMoveFrame {
-  const result = move.phase === "done" || move.result?.status === "rollback-pending" ? move.result : null;
+  const result = visibleMoveResult(move);
   return {
-    operationId: move.id, revision: move.revision, phase: move.phase, copiedBytes: null, totalBytes: null,
+    operationId: move.id, revision: move.revision, phase: move.phase,
+    copiedBytes: move.phase === "copying" ? move.copiedBytes : null,
+    totalBytes: move.phase === "copying" ? move.totalBytes : null,
     ...(result ? { result } : {}),
   };
 }
 
-type MoveDeps = WorkspaceMoveRenameOptions & {
+type MoveDeps = WorkspaceMoveDeleteOptions & {
   store: WorkspaceMoveStore;
   writer: Pick<ApplicationDatabaseWriter, "execute">;
   workspaces: WorkspaceRepo;
@@ -62,14 +153,16 @@ type MoveDeps = WorkspaceMoveRenameOptions & {
   backgroundCommands: Pick<BackgroundCommandStore, "list">;
   agentWorkload: Pick<AgentWorkload, "backgroundSubagentThreadIds">;
   claimDestination?: (path: string) => Promise<void>;
+  openCopyDestination?: typeof NodeFSPromises.open;
   publishProgress(frame: WorkspaceMoveFrame): void;
   publishConverted(workspace: Workspace, sharers: ReturnType<WorkspaceMoveStore["convert"]>): void;
   now?: () => Date;
 };
 
-/** Convert a managed workspace with a recoverable protocol around its filesystem rename. */
+/** Convert a managed workspace with a recoverable protocol around its rename or copy. */
 export class WorkspaceMoveService {
   private readonly root: string;
+  private readonly cleaning = new Set<string>();
 
   constructor(mcodeDir: string, private readonly deps: MoveDeps) {
     this.root = NodePath.join(mcodeDir, "no-project");
@@ -79,9 +172,11 @@ export class WorkspaceMoveService {
   async createProject(input: CreateProjectFromFolderInput): Promise<CreateProjectFromFolderResult> {
     const thread = this.deps.threads.findById(input.threadId);
     const workspace = thread && this.deps.workspaces.findById(thread.workspace_id);
-    if (!workspace || workspace.kind !== "no_project") return { status: "failed", error: "The thread has no managed No project folder" };
+    if (!workspace || workspace.kind !== "no_project") {
+      return { status: "failed", error: "The thread has no managed No project folder", cause: { kind: "other" } };
+    }
     const releaseGate = acquireWorkspaceMoveGate(workspace.id, workspace.path);
-    if (!releaseGate) return { status: "failed", error: "The workspace is already being changed" };
+    if (!releaseGate) return { status: "failed", error: "The workspace is already being changed", cause: { kind: "other" } };
     const reservations = new Map<string, string>();
     const release = () => {
       for (const [id, token] of reservations) this.deps.reservations.release(id, token);
@@ -105,7 +200,7 @@ export class WorkspaceMoveService {
       scheduled = true;
       return { operationId: id };
     } catch (error) {
-      return { status: "failed", error: moveError(error) };
+      return { status: "failed", ...await this.failure(error, NodePath.join(input.parentPath, input.name)) };
     } finally {
       if (!scheduled) release();
     }
@@ -134,6 +229,43 @@ export class WorkspaceMoveService {
       } finally {
         release();
       }
+    }
+    await this.cleanExpiredSources();
+  }
+
+  /** Retry due source cleanup without fencing the converted project. */
+  async cleanExpiredSources(now = this.now()): Promise<void> {
+    for (const move of this.deps.store.listExpiredSources(now)) {
+      if (this.cleaning.has(move.id)) continue;
+      this.cleaning.add(move.id);
+      try {
+        const current = this.requireMove(move.id);
+        if (current.cleanup === "pending") await this.cleanSource(current, now);
+      } catch (error) {
+        this.logFailure(move, error);
+      } finally {
+        this.cleaning.delete(move.id);
+      }
+    }
+  }
+
+  /** Whether the orphan sweep must leave this path alone, even after cleanup has finished. */
+  protectsFolder(path: string): boolean {
+    return this.deps.store.protectsFolder(path);
+  }
+
+  private async cleanSource(move: WorkspaceMove, now: string): Promise<void> {
+    const checkpoint = (next: Parameters<WorkspaceMoveStore["sourceCleanup"]>[1]) =>
+      this.deps.writer.execute(workspaceMoveWrites.sourceCleanup, [move.id, next, now]);
+    const outcome = await cleanRetainedMoveSource({
+      move, options: this.deps, checkpoint, readManifest: () => this.deps.store.readManifest(move.id),
+    });
+    await checkpoint({ ...outcome, cleanupError: "cleanupError" in outcome ? outcome.cleanupError : null });
+    if (outcome.cleanup !== "done") {
+      const current = this.requireMove(move.id);
+      logger.warn("Retained workspace source was not deleted", {
+        operationId: move.id, path: current.tombstonePath ?? move.sourcePath, ...outcome,
+      });
     }
   }
 
@@ -170,7 +302,7 @@ export class WorkspaceMoveService {
       this.assertGitRetryProject(move);
       const { result, git } = await this.initializeGit(move);
       // Retrying Git updates the receipt, but does not emit a second terminal frame for the move.
-      await this.save(move, { phase: "done", cleanup: "done", result, error: result.status === "git-failed" ? result.error : null }, git, false);
+      await this.save(move, { result, error: result.status === "git-failed" ? result.error : null }, git, false);
       this.publishProject(move, []);
       return result;
     } catch (error) {
@@ -229,30 +361,18 @@ export class WorkspaceMoveService {
   }
 
   private async run(intent: WorkspaceMove, reservations: ReadonlyMap<string, string>): Promise<void> {
-    let claimed = false;
+    const live: LiveMove = { claimedDestination: false, createdStaging: false, crossDrive: false };
     let converted: ReturnType<WorkspaceMoveStore["convert"]>;
     try {
       await this.closeFolderUsers(intent.workspaceId, intent.sourcePath, reservations);
       await writeMoveMarker(intent.sourcePath, intent.id);
-      await assertRecordedParent(intent.destinationPath);
-      const claimDestination = this.deps.claimDestination ?? NodeFSPromises.mkdir;
-      await claimDestination(intent.destinationPath);
-      claimed = true;
-      await writeMoveMarker(intent.destinationPath, intent.id);
-      if (this.deps.platform === "win32") await removeMoveClaim(intent.destinationPath, intent.id);
-      else await removeMoveMarker(intent.destinationPath, intent.id);
-      await assertRecordedParent(intent.destinationPath);
-      if (!holdsMarker(await inspectMoveFolder(intent.sourcePath, intent.id))) {
-        throw new Error("The source folder no longer holds the move marker");
-      }
-      await renameWorkspaceFolder(intent.sourcePath, intent.destinationPath, this.deps);
-      await this.save(intent, { phase: "renamed", cleanup: "done", result: null, error: null });
+      await this.moveFolder(intent, live);
       const git = await this.gitPlacement(intent.destinationPath);
       converted = await this.deps.writer.execute(workspaceMoveWrites.convert, [intent.id, git ?? { isGitRepo: false, branch: "main" }, this.now()]);
     } catch (error) {
       // An unknown commit outcome may still succeed on the writer. Only startup can safely decide.
       if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
-      await this.rollback(this.requireMove(intent.id), moveError(error), claimed);
+      await this.rollback(this.requireMove(intent.id), await this.failure(error, intent.destinationPath), live);
       return;
     }
     const move = this.requireMove(intent.id);
@@ -260,59 +380,138 @@ export class WorkspaceMoveService {
     await this.finishConverted(move, converted);
   }
 
-  private async recover(move: WorkspaceMove): Promise<void> {
-    switch (move.phase) {
-      case "intent":
-      case "renamed":
-        await this.rollback(move, move.error ?? "The server stopped before the folder move committed", true);
-        break;
-      case "converted":
-        await this.finishConverted(move, []);
-        break;
-      case "done":
-        if (move.cleanup === "pending" && move.result?.status === "failed") await this.cleanRolledBackMarker(move);
-        break;
+  private async moveFolder(move: WorkspaceMove, live: LiveMove): Promise<void> {
+    await this.preparePublication(move.sourcePath, move, live);
+    try {
+      await renameWorkspaceFolder(move.sourcePath, move.destinationPath, this.deps);
+    } catch (error) {
+      if (moveErrorCode(error) !== "EXDEV") throw error;
+      live.crossDrive = true;
+      await this.copyFolder(move, live);
+      return;
     }
+    await this.save(move, { phase: "renamed" });
   }
 
-  private async rollback(move: WorkspaceMove, cause: string, removeClaim: boolean): Promise<void> {
-    let ownedPath: string | null = null;
+  private async preparePublication(source: string, move: WorkspaceMove, live: LiveMove): Promise<void> {
+    await assertRecordedParent(move.destinationPath);
+    const claimDestination = this.deps.claimDestination ?? NodeFSPromises.mkdir;
+    await claimDestination(move.destinationPath);
+    live.claimedDestination = true;
+    await writeMoveMarker(move.destinationPath, move.id);
+    if (this.deps.platform === "win32") {
+      await removeMoveClaim(move.destinationPath, move.id);
+      live.claimedDestination = false;
+    } else {
+      await removeMoveMarker(move.destinationPath, move.id);
+    }
+    await assertRecordedParent(move.destinationPath);
+    if (!holdsMoveMarker(await inspectMoveFolder(source, move.id))) throw new Error("The folder to publish lost its move marker");
+  }
+
+  private async copyFolder(move: WorkspaceMove, live: LiveMove): Promise<void> {
+    if (live.claimedDestination) {
+      await removeMoveClaim(move.destinationPath, move.id);
+      live.claimedDestination = false;
+    }
+    const staging = NodePath.join(NodePath.dirname(move.destinationPath), `.mcode-copy-${move.id}`);
+    move = await this.save(move, { stagingPath: staging, claimReleased: true }, undefined, false);
+    await assertRecordedParent(staging);
+    await NodeFSPromises.mkdir(staging);
+    live.createdStaging = true;
+    move = await this.save(move, { phase: "copying" }, undefined, false);
+    let lastProgress = Number.NEGATIVE_INFINITY;
+    const manifest = await copyWorkspaceFolder({
+      source: move.sourcePath, staging, moveId: move.id, platform: this.deps.platform,
+      openDestination: this.deps.openCopyDestination,
+      progress: async (copiedBytes, totalBytes) => {
+        const now = Date.parse(this.now());
+        if (now - lastProgress < 100) return;
+        lastProgress = now;
+        move = await this.save(move, { phase: "copying", copiedBytes, totalBytes });
+      },
+    });
+    move = await this.save(move, { phase: "copied", manifest });
+    await this.preparePublication(staging, move, live);
+    await renameWorkspaceFolder(staging, move.destinationPath, this.deps);
+    await this.save(move, { phase: "published" });
+  }
+
+  private async recover(move: WorkspaceMove): Promise<void> {
+    if (move.phase === "converted") {
+      await this.finishConverted(move, []);
+      return;
+    }
+    if (move.phase === "done") {
+      if (move.cleanup === "pending" && move.result?.status === "failed") await this.cleanRolledBackMarker(move);
+      return;
+    }
+    await this.rollback(move, interruptedMoveFailure(move));
+  }
+
+  private async rollback(move: WorkspaceMove, failure: MoveFailure, live?: LiveMove): Promise<void> {
+    const marker: { path: string | null } = { path: null };
+    const crossDrive = move.stagingPath !== null || live?.crossDrive === true;
+    let partialCopyRemoved = true;
     try {
-      const source = await inspectMoveFolder(move.sourcePath, move.id);
-      if (holdsMarker(source)) ownedPath = markerPath(move.sourcePath, move.id);
-      const destination = await inspectMoveFolder(move.destinationPath, move.id);
-      if (holdsMarker(destination) && ownedPath === null) ownedPath = markerPath(move.destinationPath, move.id);
-      const action = rollbackActions[source]?.[destination];
-      if (!action) throw new Error("The recorded folder paths do not identify a safe rollback");
-      if (action === "rename-back") {
-        await assertRecordedParent(move.sourcePath);
-        await assertRecordedParent(move.destinationPath);
-        await renameWorkspaceFolder(move.destinationPath, move.sourcePath, this.deps);
+      partialCopyRemoved = await this.rollbackFolders(move, marker, live);
+      if (!partialCopyRemoved) {
+        failure = { ...failure, error: `${failure.error}\nThe staging path is occupied by an unmarked entry: ${move.stagingPath}` };
       }
-      if (action === "remove-claim" && removeClaim) await removeMoveClaim(move.destinationPath, move.id);
     } catch (error) {
-      const detail = `${cause}\nRollback: ${moveError(error)}`;
+      if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
+      const detail = `${failure.error}\nRollback: ${moveError(error)}`;
       await this.save(move, {
-        phase: move.phase, cleanup: "kept", error: cause,
-        result: { status: "rollback-pending", error: detail, markerPath: ownedPath },
+        cleanup: "kept", error: failure.error,
+        result: {
+          status: "rollback-pending", ...failure, error: detail, markerPath: marker.path,
+          ...(crossDrive ? { partialCopyRemoved: false } : {}),
+        },
       });
       return;
     }
     const failed = await this.save(move, {
-      phase: "done", cleanup: "pending", error: cause, result: { status: "failed", error: cause },
+      phase: "done", cleanup: "pending", error: failure.error,
+      result: { status: "failed", ...failure, ...(crossDrive ? { partialCopyRemoved } : {}) },
     });
     await this.cleanRolledBackMarker(failed);
   }
 
+  private async rollbackFolders(move: WorkspaceMove, marker: { path: string | null }, live?: LiveMove): Promise<boolean> {
+    const source = await inspectMoveFolder(move.sourcePath, move.id);
+    if (holdsMoveMarker(source)) marker.path = markerPath(move.sourcePath, move.id);
+    const destination = await inspectMoveFolder(move.destinationPath, move.id);
+    if (marker.path === null && holdsMoveMarker(destination)) marker.path = markerPath(move.destinationPath, move.id);
+    const { stagingPath } = move;
+    if (stagingPath === null) {
+      await this.rollbackRename(move, source, destination, live?.claimedDestination ?? true);
+      return true;
+    }
+    const staging = await inspectMoveFolder(stagingPath, move.id);
+    if (marker.path === null && holdsMoveMarker(staging)) marker.path = markerPath(stagingPath, move.id);
+    return rollbackCopy({ move, stagingPath, source, staging, destination, live });
+  }
+
+  private async rollbackRename(move: WorkspaceMove, source: MoveFolderState, destination: MoveFolderState, removeClaim: boolean): Promise<void> {
+    const action = rollbackActions[source]?.[destination];
+    if (!action) throw new Error("The recorded folder paths do not identify a safe rollback");
+    if (action === "rename-back") {
+      await assertRecordedParent(move.sourcePath);
+      await assertRecordedParent(move.destinationPath);
+      await renameWorkspaceFolder(move.destinationPath, move.sourcePath, this.deps);
+    }
+    if (action === "remove-claim" && removeClaim) await removeMoveClaim(move.destinationPath, move.id);
+  }
+
   private async cleanRolledBackMarker(move: WorkspaceMove): Promise<void> {
     await removeMoveMarker(move.sourcePath, move.id);
-    await this.save(move, { ...move, cleanup: "done" }, undefined, false);
+    await this.save(move, { cleanup: "done" }, undefined, false);
   }
 
   private async finishConverted(move: WorkspaceMove, sharers: ReturnType<WorkspaceMoveStore["convert"]>): Promise<void> {
     if (!move.result) {
       const state = await inspectMoveFolder(move.destinationPath, move.id);
-      if (!holdsMarker(state)) throw new Error("The converted project does not hold its move marker");
+      if (!holdsMoveMarker(state)) throw new Error("The converted project does not hold its move marker");
       const { result, git } = move.initGit
         ? await this.initializeGit(move)
         : { result: { status: "created" as const, workspaceId: move.workspaceId }, git: undefined };
@@ -322,7 +521,10 @@ export class WorkspaceMoveService {
     }
     // The Git outcome must be durable before removing the only proof of the rename.
     await removeMoveMarker(move.destinationPath, move.id);
-    await this.save(move, { ...move, phase: "done" });
+    const retainedSource = move.stagingPath
+      ? { cleanup: "pending" as const, sourceRetainUntil: noProjectRetentionDeadline(this.now()) }
+      : {};
+    await this.save(move, { phase: "done", ...retainedSource });
     this.publishProject(move, sharers);
   }
 
@@ -357,13 +559,14 @@ export class WorkspaceMoveService {
   }
 
   private async save(move: WorkspaceMove, next: Receipt, git?: Placement, publish = true): Promise<WorkspaceMove> {
-    const { phase, cleanup, result, error } = next;
-    await this.deps.writer.execute(workspaceMoveWrites.advance, [
-      move.id, move.revision, { phase, cleanup, result, error }, this.now(), git,
-    ]);
+    await this.deps.writer.execute(workspaceMoveWrites.advance, [move.id, move.revision, next, this.now(), git]);
     const updated = this.requireMove(move.id);
     if (publish) this.deps.publishProgress(moveFrame(updated));
     return updated;
+  }
+
+  private async failure(error: unknown, destination: string): Promise<MoveFailure> {
+    return { error: moveError(error), cause: await moveFailureCause(error, destination, this.deps.platform) };
   }
 
   private requireMove(id: string): WorkspaceMove {
