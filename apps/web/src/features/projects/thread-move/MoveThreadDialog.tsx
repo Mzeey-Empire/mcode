@@ -213,6 +213,7 @@ function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; prefligh
 function MoveTargetRail({ workspace, target }: { workspace: Workspace; target: MoveTargetState }) {
   return (
     <div data-testid="move-target-rail" className="flex min-w-0 items-center gap-1 rounded-xl bg-page px-2 py-0.5">
+      {/* Its menus open downward: the rail sits under the 'Move to' heading, which an upward menu would cover. */}
       <WorkspaceTargetMenu
         mode={target.mode}
         isGitRepo={workspace.is_git_repo}
