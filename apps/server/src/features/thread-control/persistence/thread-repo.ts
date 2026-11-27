@@ -7,6 +7,7 @@ import { threadWriteOperations } from "./thread-write-operations.js";
 import type { ThreadAttentionService } from "../attention/thread-attention-service.js";
 import { broadcast } from "../../../application/transport/push.js";
 import type { PullRequestLinkFunnel } from "../../pull-requests/links/pull-request-link-funnel.js";
+import { isWorkspaceMoving } from "../../projects/lifecycle/workspace-move-gate.js";
 export type { ActiveWorktreePathSet, CompletedThreadRetentionRecord, CompletedThreadDeadlineUpdate } from "./thread-store.js";
 export { MAX_ACTIVE_WORKTREE_OWNERSHIP_PATHS } from "./thread-store.js";
 
@@ -35,6 +36,7 @@ export class ThreadRepo {
   }
 
   async create(workspaceId: Parameters<ThreadStore["create"]>[0], title: Parameters<ThreadStore["create"]>[1], mode: Parameters<ThreadStore["create"]>[2], branch: Parameters<ThreadStore["create"]>[3], worktreeManaged: Parameters<ThreadStore["create"]>[4] = true, provider: Parameters<ThreadStore["create"]>[5] = "claude", lineage?: Parameters<ThreadStore["create"]>[6], checkoutState: Parameters<ThreadStore["create"]>[7] = "named", baseBranch: Parameters<ThreadStore["create"]>[8] = null): Promise<ReturnType<ThreadStore["create"]>> {
+    if (isWorkspaceMoving(workspaceId)) throw new Error("The workspace is moving to a project");
     const thread = await this.writer.execute(threadWriteOperations.create, [workspaceId, title, mode, branch, worktreeManaged, provider, lineage, checkoutState, baseBranch]);
     broadcast("thread.created", { thread });
     return thread;

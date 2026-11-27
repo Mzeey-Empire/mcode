@@ -31,7 +31,7 @@ export class LegacyTerminalBackend extends TerminalBackend {
   constructor(
     private readonly terminalService: TerminalService,
     @inject("ThreadRepo") private readonly threads: ThreadRepo,
-    @inject(TerminalProfileService) private readonly profiles: TerminalProfileService,
+    @inject(TerminalProfileService) private readonly profiles: Pick<TerminalProfileService, "resolveLaunchProfile">,
     @inject("HostRuntime") private readonly hostRuntime: HostRuntime,
   ) {
     super();

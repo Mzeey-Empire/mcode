@@ -6,6 +6,7 @@
 import { sql } from "drizzle-orm";
 import { asc, desc } from "drizzle-orm";
 import { type AnySQLiteColumn, check, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import type { WorkspaceMovePhase, WorkspaceMoveResult } from "@mcode/contracts/ws/workspace-move";
 
 const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -106,6 +107,26 @@ export const threadMoveWorktrees = sqliteTable("thread_move_worktrees", {
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+
+/** Records folder ownership and the last committed checkpoint across a server restart. */
+export const workspaceMoves = sqliteTable("workspace_moves", {
+  id: text("id").primaryKey().notNull(),
+  workspaceId: text("workspace_id").notNull(),
+  name: text("name").notNull(),
+  sourcePath: text("source_path").notNull(),
+  destinationPath: text("destination_path").notNull(),
+  stagingPath: text("staging_path"),
+  initGit: integer("init_git", { mode: "boolean" }).notNull(),
+  phase: text("phase").$type<WorkspaceMovePhase>().notNull(),
+  revision: integer("revision").notNull(),
+  result: text("result", { mode: "json" }).$type<WorkspaceMoveResult>(),
+  cleanup: text("cleanup", { enum: ["done", "pending", "kept"] }).notNull(),
+  error: text("error"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("idx_workspace_moves_unfinished").on(table.workspaceId).where(sql`${table.phase} <> 'done'`),
+]);
 
 export const threads = sqliteTable(
   "threads",

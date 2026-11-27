@@ -150,6 +150,7 @@ import type { ThreadAttentionService } from "../../features/thread-control/atten
 import type { WorkspaceRepo } from "../../features/projects/persistence/workspace-repo.js";
 import type { ThreadMoveService } from "../../features/thread-control/lifecycle/thread-move-service.js";
 import type { ThreadMovePreflightService } from "../../features/thread-control/lifecycle/thread-move-preflight.js";
+import type { WorkspaceMoveService } from "../../features/projects/lifecycle/workspace-move-service.js";
 import {
   isPushSubscriptionRpcMethod,
   routePushSubscriptionRpc,
@@ -360,6 +361,7 @@ export interface RouterDeps {
   threadCompletionService: ThreadCompletionService;
   threadMoveService: ThreadMoveService;
   threadMovePreflightService: ThreadMovePreflightService;
+  workspaceMoveService: WorkspaceMoveService;
   /** Serves provider-neutral pull request capabilities and inbox pages. */
   pullRequestService: PullRequestService;
   /** Executes explicit GitHub pull request writes after fresh preflight. */

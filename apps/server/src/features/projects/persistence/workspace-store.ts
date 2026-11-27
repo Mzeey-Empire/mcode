@@ -6,10 +6,10 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
 import type { Database } from "bun:sqlite";
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, notExists, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
 import type { Workspace } from "@mcode/contracts/models/workspace";
-import { threads, threadStartups, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
+import { threads, threadStartups, workspaceMoves, workspaces } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
 
 type WorkspaceRow = typeof workspaces.$inferSelect;
@@ -312,6 +312,17 @@ export class WorkspaceStore {
       .where(eq(threads.workspaceId, workspaces.id)));
   }
 
+  hasUnfinishedMove(id: string): boolean {
+    return Boolean(this.orm.select({ id: workspaceMoves.id }).from(workspaceMoves)
+      .where(and(eq(workspaceMoves.workspaceId, id), ne(workspaceMoves.phase, "done"))).get());
+  }
+
+  unfinishedMoveFolders(): string[] {
+    return this.orm.select({ source: workspaceMoves.sourcePath, destination: workspaceMoves.destinationPath })
+      .from(workspaceMoves).where(ne(workspaceMoves.phase, "done")).all()
+      .flatMap(({ source, destination }) => [source, destination]);
+  }
+
   private removableNoProject(createdBefore: string, retryUpdatedSince: string, now: string) {
     return and(
       eq(workspaces.kind, "no_project"),
@@ -320,6 +331,8 @@ export class WorkspaceStore {
         and(isNotNull(workspaces.movedOutAt), lt(workspaces.retainUntil, now)),
       ),
       this.withoutThreadRows(),
+      notExists(this.orm.select({ id: workspaceMoves.id }).from(workspaceMoves)
+        .where(and(eq(workspaceMoves.workspaceId, workspaces.id), ne(workspaceMoves.phase, "done")))),
       notExists(this.orm.select({ id: threadStartups.startupId }).from(threadStartups)
         .where(and(eq(threadStartups.workspaceId, workspaces.id), or(
           inArray(threadStartups.state, ["pending", "running", "blocked"]),

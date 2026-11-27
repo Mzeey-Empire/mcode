@@ -129,6 +129,8 @@ const threadMoveMarker = lazySchema(() => z.discriminatedUnion("target", [
   z.strictObject({ projectName: z.string(), target: z.literal("local") }),
   z.strictObject({ projectName: z.string(), target: z.literal("new-worktree"), source: NewWorktreeMoveSourceSchema() }),
   z.strictObject({ projectName: z.string(), target: z.literal("existing-worktree"), branch: z.string() }),
+  /** The thread's own folder became this project, so there is no separate checkout to name. */
+  z.strictObject({ projectName: z.string(), target: z.literal("new-project") }),
 ]));
 
 /** The destination as it appeared when the thread moved. */

@@ -34,9 +34,13 @@ import { moveThreadToProject } from "../../../projects/lifecycle/transport/works
 import { ProjectActionService } from "../../../projects/environment/project-action-service.js";
 import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { WorkspaceMoveStore, workspaceMoveWrites } from "../../../projects/persistence/workspace-move-store.js";
+import { WorkspaceMoveService } from "../../../projects/lifecycle/workspace-move-service.js";
+import { noProjectFolderName } from "../../../projects/lifecycle/no-project-folder-name.js";
 import { ThreadBranchingService } from "../../../projects/worktrees/thread-branching-service.js";
 import { terminalPlatform } from "../../../terminal/terminal-platform.js";
 import { InMemoryPtyHostAdapter } from "../../../terminal/testing/in-memory-pty-host-adapter.js";
+import { type TerminalBackend, TERMINAL_BACKEND_TOKEN } from "../../../terminal/backends/terminal-backend.js";
 import { ThreadControlMutationReservationService } from "../../../thread-control/authority/thread-control-mutation-reservation-service.js";
 import { ThreadMoveService } from "../../../thread-control/lifecycle/thread-move-service.js";
 import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
@@ -1261,9 +1265,10 @@ describe("provider switch on send", () => {
   });
 
   it("keeps a newer note generation pending and names the converted project's new path", async () => {
-    const { source, project, move } = await relocationFixture();
+    const { source, project, move, threads } = await relocationFixture();
+    const sharer = await threads.create(source.id, "Sharer", "direct", "", false, "claude");
     await move();
-    const converted = NodePath.join(project.path, "Converted");
+    const converted = NodePath.join(await NodeFSPromises.realpath(project.path), "Converted");
     const finish = deferred();
     const dispatched = deferred();
     claude.sendTurn.mockImplementationOnce(async (request) => {
@@ -1275,11 +1280,7 @@ describe("provider switch on send", () => {
     await dispatched.promise;
     try {
       expect(lastRequest(claude).message).toContain(source.path);
-      NodeFS.renameSync(source.path, converted);
-      writeFixture((db) => {
-        db.run("UPDATE workspaces SET kind = 'project', path = ? WHERE id = ?", [converted, source.id]);
-        db.run("UPDATE threads SET relocation_note_generation = relocation_note_generation + 1, relocation_note_pending = 1 WHERE id = ?", [threadId]);
-      });
+      await convertFolder(sharer.id, project.path);
     } finally {
       finish.resolve();
     }
@@ -1291,6 +1292,56 @@ describe("provider switch on send", () => {
     expect(lastRequest(claude).message).not.toContain("Mcode deletes");
     await completeTurn(claude, "One last check", "Done", "new-claude");
     expect(lastRequest(claude).message).toBe("One last check");
+  });
+
+  it("refuses a turn while an unfinished rollback holds the workspace after restart", async () => {
+    const { source } = await relocationFixture();
+    if (!databaseWriter) throw new Error("Expected a test database writer");
+    const id = crypto.randomUUID();
+    await databaseWriter.execute(workspaceMoveWrites.start, [{
+      id, workspaceId: source.id, name: "Example", sourcePath: source.path,
+      destinationPath: NodePath.join(NodePath.dirname(source.path), "..", "Example"), createdAt: MOVE_AT, initGit: false,
+    }, [threadId]]);
+    await databaseWriter.execute(workspaceMoveWrites.advance, [id, 1, {
+      phase: "intent", cleanup: "kept", error: "rollback needs a retry",
+      result: { status: "rollback-pending", error: "rollback needs a retry", markerPath: null },
+    }, MOVE_AT, undefined]);
+    await expect(send(claude, "Continue the work")).rejects.toMatchObject({ reason: "pending_mutation" });
+    expect(claude.sendTurn.mock.calls).toEqual([]);
+    expect(container.resolve(MessageRepo).listIncludingInternal(threadId)).toEqual([]);
+  });
+
+  it("re-arms a note that was already consumed and starts every sharer fresh in the converted repository", async () => {
+    const { source, project, move, threads } = await relocationFixture();
+    const movedOut = threadId;
+    const sharers = await Promise.all([
+      threads.create(source.id, "First sharer", "direct", "", false, "claude"),
+      threads.create(source.id, "Second sharer", "direct", "", false, "claude"),
+    ]);
+    await move();
+    await completeTurn(claude, "Read the old report", "Read it", "outside-session");
+    expect(lastRequest(claude).message).toContain(source.path);
+    for (const sharer of sharers) {
+      threadId = sharer.id;
+      await completeTurn(claude, "Remember the old report", "Remembered", `old-${sharer.id}`);
+    }
+    const [selected] = sharers;
+    if (!selected) throw new Error("Missing sharer fixture");
+    await convertFolder(selected.id, project.path, true);
+    const converted = NodePath.join(await NodeFSPromises.realpath(project.path), "Converted");
+    for (const sharer of sharers) {
+      threadId = sharer.id;
+      await completeTurn(claude, "Continue in this project", "Continued", `new-${sharer.id}`);
+      const request = lastRequest(claude);
+      expect(request.cwd).toBe(converted);
+      expect(request.resumeFrom).toBeUndefined();
+      expect(request.message).toContain("[mcode-handoff:begin boundary=");
+      expect(request.message).toContain("Remember the old report");
+      expect(request.message).not.toContain("Files from earlier in this thread");
+    }
+    threadId = movedOut;
+    await completeTurn(claude, "Read it again", "Read it", "outside-session");
+    expect(lastRequest(claude).message).toContain(`Files from earlier in this thread are in ${converted}. Copy what you need into this project.`);
   });
 
   it.each(["empty", "gone"])("omits the relocation note when the old folder is %s", async (state) => {
@@ -1418,10 +1469,11 @@ describe("provider switch on send", () => {
     if (!temporaryDirectory) throw new Error("Expected a test directory");
     const workspaces = container.resolve(WorkspaceRepo);
     const threads = container.resolve(ThreadRepo);
-    const sourcePath = NodePath.join(temporaryDirectory, "no-project");
-    NodeFS.mkdirSync(sourcePath);
+    const workspaceId = crypto.randomUUID();
+    const sourcePath = NodePath.join(temporaryDirectory, "no-project", noProjectFolderName(workspaceId, "Move me", new Date(MOVE_AT)));
+    NodeFS.mkdirSync(sourcePath, { recursive: true });
     if (!options.empty) NodeFS.writeFileSync(NodePath.join(sourcePath, "report.txt"), "Prior work");
-    const { workspace: source } = await workspaces.createNoProject(crypto.randomUUID(), sourcePath);
+    const { workspace: source } = await workspaces.createNoProject(workspaceId, sourcePath);
     const moved = await threads.create(source.id, "Move me", "direct", "", false, "claude");
     threadId = moved.id;
     const destination = NodePath.join(temporaryDirectory, "destination");
@@ -1448,6 +1500,28 @@ describe("provider switch on send", () => {
     const move = (git?: Pick<GitRepositoryService, "getCurrentBranchAt">, target: ThreadMoveInput["target"] = { kind: "local" }) =>
       service(git).moveToProject({ threadId, workspaceId: project.id, target });
     return { source, project, move, service, backgroundCommands, threads, environment };
+  }
+
+  async function convertFolder(sharer: string, parentPath: string, initGit = false): Promise<void> {
+    if (!temporaryDirectory || !database || !databaseWriter) throw new Error("Expected a test database");
+    const done = Promise.withResolvers<string>();
+    const service = new WorkspaceMoveService(temporaryDirectory, {
+      store: new WorkspaceMoveStore(database),
+      writer: databaseWriter,
+      workspaces: container.resolve(WorkspaceRepo),
+      threads: container.resolve(ThreadRepo),
+      reservations: container.resolve(ThreadControlMutationReservationService),
+      runtime: container.resolve(TurnRuntimeController),
+      terminals: container.resolve<TerminalBackend>(TERMINAL_BACKEND_TOKEN),
+      git: container.resolve(RealGitExecutor),
+      backgroundCommands: container.resolve(BackgroundCommandStore),
+      agentWorkload: { backgroundSubagentThreadIds: () => new Set() },
+      platform: process.platform,
+      publishProgress: (frame) => { if (frame.result) done.resolve(frame.result.status); },
+      publishConverted: () => undefined,
+    });
+    expect(await service.createProject({ threadId: sharer, name: "Converted", parentPath, initGit })).toHaveProperty("operationId");
+    expect(await done.promise).toBe("created");
   }
 
   async function interruptedMove(threads: ThreadRepo, project: { id: string; path: string }, ref: string, detachedCommit: string | null = null) {

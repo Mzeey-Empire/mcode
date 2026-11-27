@@ -579,7 +579,7 @@ export class CodexCatalogService {
     promptRefresh: Promise<CodexCustomPromptDiscoveryResult>,
   ): Promise<CodexCatalogRefreshResult> {
     const [{ client }, standalone, customPrompts] = await Promise.all([
-      this.acquireClient(cwd, environment), standalonePromise, promptRefresh,
+      this.acquireClient(environment), standalonePromise, promptRefresh,
     ]);
     const [skillsResult, reconciledPlugins, configResult] = await Promise.all([
       client.listSkills(cwd ? [cwd] : undefined, forceReload),
@@ -685,7 +685,6 @@ export class CodexCatalogService {
   }
 
   private async acquireClient(
-    cwd?: string,
     requestedEnvironment?: Record<string, string>,
   ): Promise<{
     client: CodexCatalogClient;
@@ -694,7 +693,7 @@ export class CodexCatalogService {
     const active = await this.activeCatalogClient();
     if (active) return active;
     const environment = requestedEnvironment ?? this.envService.getEnv();
-    const client = this.createCatalogClient(cwd, environment);
+    const client = this.createCatalogClient(environment);
     return this.startCatalogClient(client, environment);
   }
 
@@ -708,12 +707,13 @@ export class CodexCatalogService {
     return undefined;
   }
 
-  private createCatalogClient(cwd: string | undefined, environment: Record<string, string>): CodexCatalogClient {
+  private createCatalogClient(environment: Record<string, string>): CodexCatalogClient {
     const settings = this.settingsService.get();
     return this.clientFactory.create({
       open: sharedProcessStartWorkerClient().open,
       cliPath: settings.provider.cli.codex || "codex",
-      workingDirectory: cwd ?? process.cwd(),
+      // Context travels with each catalog request. A shared process cwd would pin the first workspace on Windows.
+      workingDirectory: process.cwd(),
       platform: this.hostRuntime.platform,
       processAttachment: {
         attach: (pid, description) => {

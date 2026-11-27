@@ -191,7 +191,21 @@ describe("openDatabase ledger guard", () => {
 
   it("refuses the thread move worktrees migration on a build at the previous floor", () => {
     const moveTag = "0115_thread_move_worktrees";
+    const worktreeMoveBuild = writeCatalogue(directory, "with-worktree-moves", { before: "0116_workspace_moves" });
     const older = writeCatalogue(directory, "before-worktree-moves", { before: moveTag });
+    NodeFS.rmSync(dbPath);
+    vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", worktreeMoveBuild);
+    openDatabase({ dbPath }).close(true);
+    const before = NodeFS.readFileSync(dbPath);
+    vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", older);
+
+    expect(refusalOf(dbPath).refusal).toEqual({ kind: "database-newer", databasePath: dbPath, raisedBy: moveTag });
+    expectUntouched(before);
+  });
+
+  it("refuses an on-disk workspace move database on a build at the previous floor", () => {
+    const moveTag = "0116_workspace_moves";
+    const older = writeCatalogue(directory, "before-workspace-moves", { before: moveTag });
     const before = NodeFS.readFileSync(dbPath);
     vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", older);
 

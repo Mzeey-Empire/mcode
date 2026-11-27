@@ -13,6 +13,8 @@ function targetLabel(threadMove: ThreadMove): string {
     case "new-worktree":
       if (threadMove.source.kind === "pr") return `New worktree from #${threadMove.source.pullRequestNumber}`;
       return `New worktree from ${threadMove.source.startFromOrigin ? "origin/" : ""}${threadMove.source.branch}`;
+    case "new-project":
+      return "New project";
     default:
       throw new Error(`Unhandled thread move target: ${threadMove satisfies never}`);
   }

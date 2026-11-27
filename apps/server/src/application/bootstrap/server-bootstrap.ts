@@ -156,6 +156,9 @@ import { ThreadControlMutationReservationService } from "../../features/thread-c
 import { ThreadMoveService } from "../../features/thread-control/lifecycle/thread-move-service.js";
 import { ThreadBranchingService } from "../../features/projects/worktrees/thread-branching-service.js";
 import { ThreadMovePreflightService } from "../../features/thread-control/lifecycle/thread-move-preflight.js";
+import { WorkspaceMoveService } from "../../features/projects/lifecycle/workspace-move-service.js";
+import { WorkspaceMoveStore } from "../../features/projects/persistence/workspace-move-store.js";
+import type { GitExecutor } from "../../features/projects/git/execution/index.js";
 import { ScopedPreGrantService } from "../../features/agents/permissions/scoped-pre-grant.js";
 import { PlanFileWriter } from "../../features/agents/planning/plan-file-writer.js";
 import { SnapshotService } from "../../features/projects/diffs/snapshots/snapshot-service.js";
@@ -627,6 +630,34 @@ const reliabilityHarness = createReliabilityHarnessAdapter(databaseWriter);
 const jobObject = container.resolve<JobObject>("JobObject");
 
 const portPush = new PortPush();
+const workspaceMoveService = new WorkspaceMoveService(getMcodeDir(), {
+  store: new WorkspaceMoveStore(db),
+  writer: databaseWriter,
+  workspaces: workspaceRepo,
+  threads: threadRepo,
+  reservations: container.resolve(ThreadControlMutationReservationService),
+  runtime: container.resolve(TurnRuntimeController),
+  terminals: terminalService,
+  git: container.resolve<GitExecutor>("GitExecutor"),
+  backgroundCommands,
+  agentWorkload,
+  platform: hostRuntime.platform,
+  publishProgress: (frame) => {
+    broadcast("workspace.move.progress", frame);
+    portPush.send("workspace.move.progress", frame);
+  },
+  publishConverted: (workspace, sharers) => {
+    broadcast("workspace.orderChanged", {});
+    for (const { thread, marker } of sharers) {
+      broadcast("thread.movedToProject", { threadId: thread.id, thread, marker });
+    }
+    if (workspace.is_git_repo) {
+      void gitWatcherService.retryWatch(workspace.id, workspace.path).catch((error: unknown) => {
+        logger.warn("Could not watch the converted project", { workspaceId: workspace.id, error: String(error) });
+      });
+    }
+  },
+});
 const stopObservingBackgroundCommands = backgroundCommands.onChanged((threadId) => {
   threadAttentionService.invalidate(threadId);
   broadcast("backgroundCommand.changed", { threadId });
@@ -1060,6 +1091,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   threadCompletionService,
   threadMoveService,
   threadMovePreflightService: new ThreadMovePreflightService(threadRepo, workspaceRepo),
+  workspaceMoveService,
   browserAutomationBroker,
   desktopHtmlPreviewRenderer,
   mcodeMcpServer,
@@ -1195,6 +1227,7 @@ async function bootstrapServer(): Promise<void> {
     await canonicalSink.materializeConversationDisplay();
     recordStartupCheckpoint("conversation display materialization completed");
 
+    await workspaceMoveService.recoverAtStartup();
     await threadMoveService.recoverInterruptedMoves();
     await interruptThreadStartupsAtStartup();
     await projectActionService.recoverStaleRuns();

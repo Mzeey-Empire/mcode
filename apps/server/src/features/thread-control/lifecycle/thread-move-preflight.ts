@@ -1,5 +1,7 @@
 import type { ThreadMovePreflight } from "@mcode/contracts/ws/methods";
+import * as NodePath from "node:path";
 import { folderHasFiles } from "../../projects/files/folder-has-files.js";
+import { suggestedNoProjectName } from "../../projects/lifecycle/no-project-folder-name.js";
 import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 import { noProjectRetentionDeadline } from "../../projects/persistence/workspace-store.js";
 import type { ThreadRepo } from "../persistence/thread-repo.js";
@@ -12,7 +14,7 @@ import { isOpenNoProjectThread } from "../persistence/thread-store.js";
 export class ThreadMovePreflightService {
   constructor(
     private readonly threads: Pick<ThreadRepo, "findById" | "listAllByWorkspace">,
-    private readonly workspaces: Pick<WorkspaceRepo, "findById">,
+    private readonly workspaces: Pick<WorkspaceRepo, "findById" | "listAll">,
     private readonly now = () => new Date(),
   ) {}
 
@@ -27,6 +29,20 @@ export class ThreadMovePreflightService {
       hasFiles: await folderHasFiles(workspace.path),
       otherThreadsInFolder: { count: others.length, titles: others.map((candidate) => candidate.title) },
       deadline: noProjectRetentionDeadline(this.now().toISOString()),
+      suggestedName: suggestedNoProjectName(NodePath.basename(workspace.path)),
+      defaultLocation: mostCommonProjectParent(this.workspaces.listAll()),
     };
   }
+}
+
+function mostCommonProjectParent(workspaces: ReturnType<WorkspaceRepo["listAll"]>): string {
+  const parents = new Map<string, { path: string; count: number }>();
+  for (const workspace of workspaces) {
+    if (workspace.kind !== "project") continue;
+    const path = NodePath.dirname(workspace.path);
+    const key = NodePath.sep === "\\" ? path.toLowerCase() : path;
+    const prior = parents.get(key);
+    parents.set(key, { path: prior?.path ?? path, count: (prior?.count ?? 0) + 1 });
+  }
+  return [...parents.values()].sort((left, right) => right.count - left.count)[0]?.path ?? "~";
 }

@@ -24,7 +24,10 @@ export function actionTerminalTestFixture(host: PtyHostAdapter, cwd: string, pro
       deleted_at: null, user_completed_at: null,
     } : null,
   };
-  const workspaces = { findById: () => ({ id: ACTION_TEST_WORKSPACE, path: cwd }) };
+  const workspaces = {
+    findById: () => ({ id: ACTION_TEST_WORKSPACE, path: cwd }),
+    unfinishedMoveFolders: () => [],
+  };
   const profiles = { resolveLaunchProfile: async () => ({ requestedProfileId: "automatic" as const, resolvedProfile: profile }) };
   const settings = { get: () => SettingsSchema().parse({}), on: () => () => undefined };
   const env = { getEnv: () => Object.fromEntries(

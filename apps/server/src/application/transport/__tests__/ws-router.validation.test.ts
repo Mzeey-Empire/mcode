@@ -1330,6 +1330,7 @@ describe("routeMessage workspace.delete watcher teardown", () => {
       workspaceService: {
         delete: deleteWorkspace,
       },
+      workspaceMoveService: { withDeletion: async (_id: string, remove: () => Promise<boolean>) => remove() },
       workspaceEnvironmentService: {
         cancelSetupForWorkspace: vi.fn().mockResolvedValue(undefined),
         beginWorkspaceDeletion: vi.fn(() => () => undefined),
@@ -1381,6 +1382,7 @@ describe("routeMessage workspace.delete watcher teardown", () => {
       workspaceService: {
         delete: vi.fn().mockReturnValue(true),
       },
+      workspaceMoveService: { withDeletion: async (_id: string, remove: () => Promise<boolean>) => remove() },
       workspaceEnvironmentService: {
         cancelSetupForWorkspace,
         beginWorkspaceDeletion: vi.fn(() => () => undefined),
@@ -1627,6 +1629,7 @@ describe("routeMessage command approval deletion barriers", () => {
           return true;
         }),
       },
+      workspaceMoveService: { withDeletion: async (_id: string, remove: () => Promise<boolean>) => remove() },
       workspaceEnvironmentService: environment,
       projectActionService: projectActions.service,
     } as unknown as RouterDeps;

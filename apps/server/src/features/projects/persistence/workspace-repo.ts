@@ -63,6 +63,15 @@ export class WorkspaceRepo {
     return this.reader.findById(id);
   }
 
+  hasUnfinishedMove(workspaceId: string): boolean {
+    return this.reader.hasUnfinishedMove(workspaceId);
+  }
+
+  /** Supply real-path terminal fencing after a process restart. */
+  unfinishedMoveFolders(): string[] {
+    return this.reader.unfinishedMoveFolders();
+  }
+
   findByPath(path: Parameters<WorkspaceStore["findByPath"]>[0]): ReturnType<WorkspaceStore["findByPath"]> {
     return this.reader.findByPath(path);
   }

@@ -1,6 +1,7 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import type { ThreadMoveInput, ThreadMoveResult } from "@mcode/contracts/ws/methods";
+import type { Thread } from "@mcode/contracts/models/thread";
 import type { Workspace } from "@mcode/contracts/models/workspace";
 import { logger } from "@mcode/shared";
 import { broadcast } from "../../../application/transport/push.js";
@@ -76,10 +77,8 @@ export class ThreadMoveService {
   }
 
   private async moveReservedThread({ threadId, workspaceId, target }: ThreadMoveInput): Promise<ThreadMoveResult> {
-    const thread = this.threads.findById(threadId);
-    if (!isOpenNoProjectThread(thread, thread && this.workspaces.findById(thread.workspace_id))) {
-      return { status: "not-no-project" };
-    }
+    const sourceFailure = this.checkMoveSource(this.threads.findById(threadId));
+    if (sourceFailure) return sourceFailure;
     const project = this.workspaces.findById(workspaceId);
     if (project?.kind !== "project") return { status: "destination-missing" };
     const placement = target.kind === "new-worktree" ? target : await this.resolvePlacement(project, target);
@@ -94,6 +93,16 @@ export class ThreadMoveService {
     if (result.status !== "moved") return result;
     this.publishMove(result);
     return { status: "moved", thread: result.thread };
+  }
+
+  private checkMoveSource(thread: Thread | null): ThreadMoveResult | null {
+    if (!isOpenNoProjectThread(thread, thread && this.workspaces.findById(thread.workspace_id))) {
+      return { status: "not-no-project" };
+    }
+    if (this.workspaces.hasUnfinishedMove(thread.workspace_id)) {
+      return { status: "failed", cause: "other", error: "The workspace is moving to a project." };
+    }
+    return null;
   }
 
   private publishMove({ thread, marker, startup }: CommittedMove): void {

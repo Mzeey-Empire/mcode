@@ -3,6 +3,11 @@ import { WS_METHODS } from "@mcode/contracts/ws/methods";
 const MAX_SLUG_LENGTH = 24;
 const FOLDER_NAME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})-(?:([a-z0-9]+(?:-[a-z0-9]+)*)-)?(.{36})$/;
 
+/** Use the human-readable slug from a managed folder name as the project suggestion. */
+export function suggestedNoProjectName(name: string): string {
+  return FOLDER_NAME_PATTERN.exec(name)?.[4] ?? "untitled";
+}
+
 /** Name a No project folder using the local day, the first message's words, and the workspace ID. */
 export function noProjectFolderName(id: string, nameHint: string | undefined, date: Date): string {
   const year = String(date.getFullYear()).padStart(4, "0");
