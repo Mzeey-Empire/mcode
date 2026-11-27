@@ -108,10 +108,10 @@ export class GitWorktreeService {
     };
   }
 
-  /** Remove a move's checkout only if Git created it for the move and its recorded identity still matches. */
+  /** Remove a clean checkout only when its Git registration proves the move owns it. */
   async removeProvisionedWorktree(
     repoPath: string | undefined, move: ProvisionedMoveCheckout, recordCheckoutCreated: () => Promise<void>,
-  ): Promise<"unclaimed" | "missing" | "unowned" | "removed"> {
+  ): Promise<"unclaimed" | "missing" | "unowned" | "kept" | "removed"> {
     if (!move.pathClaimed) return "unclaimed";
     const { worktreePath } = move;
     const entry = await statIfPresent(worktreePath);
@@ -260,7 +260,7 @@ export class GitWorktreeService {
 
   private async removeRegisteredMoveCheckout(
     repoPath: string, move: ProvisionedMoveCheckout, recordCheckoutCreated: () => Promise<void>,
-  ): Promise<"unowned" | "removed"> {
+  ): Promise<"unowned" | "kept" | "removed"> {
     const { id, worktreePath, checkoutCreated } = move;
     const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]);
     const checkout = findCheckoutRecord(stdout, worktreePath);
@@ -268,15 +268,23 @@ export class GitWorktreeService {
     const lock = checkout.find((field) => field === "locked" || field.startsWith("locked "));
     const lockReason = moveWorktreeLockReason(id);
     const ownsLock = lock === `locked ${lockReason}`;
-    if (lock && !ownsLock) return "unowned";
     const matches = matchesMoveCheckout(checkout, move);
-    if (!ownsLock && (!checkoutCreated || !matches)) return "unowned";
+    const ownsCheckout = lock ? ownsLock : checkoutCreated && matches;
+    if (!ownsCheckout) return "unowned";
 
     const [{ stdout: expectedCommonDir }, { stdout: actualCommonDir }] = await Promise.all([
       this.gitExecutor.exec(["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
       this.gitExecutor.exec(["-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
     ]);
     if (NodePath.relative(expectedCommonDir.trimEnd(), actualCommonDir.trimEnd()) !== "") return "unowned";
+
+    // Git's worktree remove also deletes ignored files, so check before giving up the move lock.
+    const { stdout: status } = await this.gitExecutor.exec([
+      "-C", worktreePath, "status", "--porcelain=v1", "-z",
+      "--ignored=matching", "--untracked-files=all", "--ignore-submodules=none",
+    ]);
+    if (status.length > 0) return "kept";
+
     if (ownsLock) {
       // Keep ownership durable if removal fails or the server stops after unlocking.
       if (!checkoutCreated) await recordCheckoutCreated();

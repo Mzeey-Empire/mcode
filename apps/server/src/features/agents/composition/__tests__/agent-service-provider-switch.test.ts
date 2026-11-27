@@ -921,6 +921,26 @@ describe("provider switch on send", () => {
     expect(moveMarker()).toBeUndefined();
   });
 
+  it("keeps a recorded checkout with an ignored file when the move fails", async () => {
+    const { project, move, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path, ".env");
+    const commit = git(project.path, "rev-parse", "HEAD");
+    interruptMoveWrite(async () => {
+      const [plan] = threads.listProvisioningMoveWorktrees();
+      if (!plan) throw new Error("Expected a recorded checkout");
+      NodeFS.writeFileSync(NodePath.join(plan.worktreePath, ".env"), "Keep my settings");
+      throw new Error("Move write rejected");
+    });
+
+    await expect(move(undefined, LOCAL_BRANCH_MOVE)).resolves.toMatchObject({ status: "failed" });
+
+    expect(threads.listProvisioningMoveWorktrees()).toMatchObject([{ threadId, state: "checkout-created" }]);
+    const [plan] = threads.listProvisioningMoveWorktrees();
+    if (!plan) throw new Error("Expected cleanup to preserve the move record");
+    expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+    expect(NodeFS.readFileSync(NodePath.join(plan.worktreePath, ".env"), "utf8")).toBe("Keep my settings");
+  });
+
   it.each([
     { cleanup: "live", lockReason: "another client" },
     { cleanup: "recovery", lockReason: null },
@@ -1079,21 +1099,22 @@ describe("provider switch on send", () => {
     expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
   });
 
-  it.each([false, true])("recovers an exactly locked checkout with a different HEAD (dirty: %s)", async (dirty) => {
+  it.each([null, "untracked.txt", ".env"])("recovers an exactly locked checkout with a different HEAD (extra file: %s)", async (file) => {
     const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
-    initRepository(project.path);
+    initRepository(project.path, ".env");
     const plan = await interruptedMove(threads, project, "main", git(project.path, "rev-parse", "HEAD"));
     await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
     git(project.path, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "different HEAD");
     git(project.path, "worktree", "add", "--lock", "--reason", `mcode-move ${plan.id}`, "--detach", plan.worktreePath, "HEAD");
-    const evidence = NodePath.join(plan.worktreePath, "untracked.txt");
-    if (dirty) NodeFS.writeFileSync(evidence, "Keep my changes");
+    const evidence = file && NodePath.join(plan.worktreePath, file);
+    if (evidence) NodeFS.writeFileSync(evidence, "Keep my changes");
 
     await service().recoverInterruptedMoves();
 
-    if (dirty) {
+    if (evidence) {
       expect(NodeFS.readFileSync(evidence, "utf8")).toBe("Keep my changes");
-      expect(threads.listProvisioningMoveWorktrees()).toMatchObject([{ id: plan.id }]);
+      expect(git(project.path, "worktree", "list", "--porcelain").split(/\r?\n/)).toContain(`locked mcode-move ${plan.id}`);
+      expect(threads.listProvisioningMoveWorktrees()).toMatchObject([{ id: plan.id, state: "provisioning" }]);
       NodeFS.unlinkSync(evidence);
       await service().recoverInterruptedMoves();
     }
@@ -1170,7 +1191,8 @@ describe("provider switch on send", () => {
 
     await service().recoverInterruptedMoves();
     expect(NodeFS.readFileSync(evidence, "utf8")).toBe("Keep my changes");
-    expect(database?.query("SELECT state FROM thread_move_worktrees WHERE id = ?").get(plan.id)).toEqual({ state: "checkout-created" });
+    expect(database?.query("SELECT state FROM thread_move_worktrees WHERE id = ?").get(plan.id))
+      .toEqual({ state: recorded ? "checkout-created" : "provisioning" });
 
     NodeFS.unlinkSync(evidence);
     await service().recoverInterruptedMoves();
@@ -1466,8 +1488,12 @@ describe("provider switch on send", () => {
     return container.resolve(MessageRepo).listIncludingInternal(threadId).find((message) => message.threadMove)?.threadMove;
   }
 
-  function initRepository(path: string): void {
+  function initRepository(path: string, ignoredFile?: string): void {
     git(path, "init", "-b", "main");
+    if (ignoredFile) {
+      NodeFS.writeFileSync(NodePath.join(path, ".gitignore"), `${ignoredFile}\n`);
+      git(path, "add", ".gitignore");
+    }
     git(path, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "initial");
   }
 

@@ -1378,10 +1378,11 @@ export class ThreadStore {
   hasOtherThreadAtWorktree(threadId: string, worktreePath: string): boolean {
     const { platform } = hostRuntime;
     const paths = [normalizeWorktreePath(worktreePath, platform), normalizePathForComparison(worktreePath, platform)];
-    const normalizedPath = sql`rtrim(replace(${threads.worktreePath}, char(92), '/'), '/')`;
-    const path = platform === "win32" ? sql`lower(${normalizedPath})` : normalizedPath;
-    return this.orm.select({ id: threads.id }).from(threads)
-      .where(and(ne(threads.id, threadId), inArray(path, paths))).get() !== undefined;
+    const candidates = this.orm.select({ path: threads.worktreePath }).from(threads)
+      .where(and(ne(threads.id, threadId), isNotNull(threads.worktreePath))).all();
+    return candidates.some(({ path }) => path !== null && (
+      paths.includes(normalizeWorktreePath(path, platform)) || paths.includes(normalizePathForComparison(path, platform))
+    ));
   }
 
   /** Persist the exact checkout that may need cleanup after interruption. */

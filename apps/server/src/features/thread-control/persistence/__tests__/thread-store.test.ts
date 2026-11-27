@@ -10,6 +10,23 @@ import { ThreadStore } from "../thread-store.js";
 
 afterEach(() => vi.restoreAllMocks());
 
+it.runIf(process.platform === "win32")("finds another thread at a Windows worktree with non-ASCII capitals", () => {
+  const db = openMemoryDatabase();
+  try {
+    const workspace = new WorkspaceStore(db).create("Fixture", "C:/Users/Élodie/repo");
+    const threads = new ThreadStore(db);
+    const moving = threads.create(workspace.id, "Moving thread", "direct", "main");
+    const other = threads.create(workspace.id, "Other thread", "worktree", "main");
+    threads.updateWorktreePath(other.id, "C:\\Users\\Élodie\\repo\\checkout\\");
+
+    expect(threads.hasOtherThreadAtWorktree(moving.id, "c:/users/élodie/REPO/checkout")).toBe(true);
+    expect(threads.hasOtherThreadAtWorktree(moving.id, "c:/users/élodie/repo/different")).toBe(false);
+    expect(threads.hasOtherThreadAtWorktree(other.id, "c:/users/élodie/repo/checkout")).toBe(false);
+  } finally {
+    db.close(true);
+  }
+});
+
 describe("whole thread index", () => {
   it("reads a legacy-only PR as unresolved regardless of its legacy status", () => {
     const db = openMemoryDatabase();

@@ -193,6 +193,10 @@ export class ThreadMoveService {
       const outcome = await this.newWorktrees.checkouts.removeProvisionedWorktree(repoPath, {
         ...move, checkoutCreated: move.state === "checkout-created",
       }, () => this.threads.markMoveWorktreeCreated(move.id, this.now().toISOString()));
+      if (outcome === "kept") {
+        logger.warn("Interrupted move kept a worktree with local changes", { moveId: move.id, worktreePath: move.worktreePath });
+        return;
+      }
       await this.threads.deleteProvisioningMoveWorktree(move.id);
       if (outcome === "unowned") {
         logger.warn("Interrupted move left an unrelated path untouched", { moveId: move.id, worktreePath: move.worktreePath });
