@@ -6,7 +6,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 
-vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+// The background-command store subscribes to pushes; these tests send it none.
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport, pushEmitter: { on: vi.fn(), off: vi.fn() } }));
 
 // jsdom has no layout, so a real drag cannot run; the list's own drop handler is what the reorder tests call.
 const dnd = vi.hoisted(() => ({ onDragEnd: undefined as DndContextProps["onDragEnd"] }));
@@ -76,7 +77,7 @@ describe("ProjectSidebar No project group", () => {
     localStorage.clear();
   });
 
-  it("shows the group above the projects, holding the No project threads of every hidden workspace", () => {
+  it("shows the group above the projects, holding the No project threads of every hidden workspace", async () => {
     const second = createMockWorkspace({ id: "ws-hidden-2", name: "No project", kind: "no_project", is_git_repo: false });
     seed([PROJECT, HIDDEN, second], [
       thread({ id: "t-1", title: "Sketch a schema", last_activity_at: new Date().toISOString() }),
@@ -85,6 +86,7 @@ describe("ProjectSidebar No project group", () => {
     ]);
 
     render(<ProjectSidebar />);
+    await act(async () => {});
 
     const projectRow = screen.getByTestId("project-row-ws-project");
     const follows = (before: HTMLElement, after: HTMLElement) => Boolean(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING);

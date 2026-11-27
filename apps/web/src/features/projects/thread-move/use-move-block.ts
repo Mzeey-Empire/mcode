@@ -1,4 +1,4 @@
-import { commandsOf, useBackgroundCommandStore } from "@/features/background-commands/backgroundCommandStore";
+import { commandsOf, useBackgroundCommandLoad } from "@/features/background-commands/backgroundCommandStore";
 import { useThreadActivity } from "@/features/thread-attention/thread-activity";
 import { useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
@@ -20,8 +20,12 @@ export function useMoveBlock(thread: Pick<WorkspaceThread, "id" | "clientPrepari
   const activity = useThreadActivity(thread.id, { preparing, createFailed });
   const rowState = useThreadRowState(thread.id, preparing, createFailed);
   const awaitingApproval = rowState.kind === "needs-you" && rowState.label === "Approval required";
-  // Waiting covers subagents and awaited commands. An unawaited command shows only in the command list, which is
-  // loaded for the open thread; for any other thread the server's refusal explains it in the dialog.
-  const commandRunning = useBackgroundCommandStore((state) => commandsOf(state.loads.get(thread.id))?.some((command) => command.status === "running") ?? false);
-  return moveBlockOf(activity.turnRunning, awaitingApproval, rowState.kind === "waiting" || commandRunning);
+  // Waiting covers subagents and awaited commands. An unawaited command shows only in the command list. Reading the
+  // list here loads it and keeps it fresh by push, so a thread is never movable on the strength of a list that
+  // has not arrived: until it does, the thread counts as busy. A failed load cannot say either way, so it does not
+  // block; the server's refusal then explains it in the dialog.
+  const load = useBackgroundCommandLoad(thread.id);
+  const commandRunning = commandsOf(load)?.some((command) => command.status === "running") ?? false;
+  const commandsUnknown = load.kind === "loading";
+  return moveBlockOf(activity.turnRunning, awaitingApproval, rowState.kind === "waiting" || commandRunning || commandsUnknown);
 }

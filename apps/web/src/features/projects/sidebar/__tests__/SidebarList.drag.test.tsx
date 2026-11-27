@@ -1,11 +1,13 @@
-import { createMockThread, createMockThreadAttention, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockBackgroundCommand, createMockThread, createMockThreadAttention, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { DndContextProps, DragEndEvent, DragMoveEvent } from "@dnd-kit/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BackgroundCommand } from "@mcode/contracts/models/tool-call-record";
 import type { Thread } from "@/transport/types";
 
-vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+// The background-command store subscribes to pushes; these tests send it none.
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport, pushEmitter: { on: vi.fn(), off: vi.fn() } }));
 
 // A real pointer drag runs through the real sensors and collision detection. The captured props also let the
 // project-reorder cases hand the list the drop event jsdom cannot produce, as ProjectSidebar.no-project.test does.
@@ -27,6 +29,7 @@ vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => ({
   VirtualViewport: (await import("./fake-virtual-viewport")).FakeVirtualViewport,
 }));
 
+import { useBackgroundCommandStore } from "@/features/background-commands/backgroundCommandStore";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { useThreadStore } from "@/stores/threadStore";
 import { useCompletionStore } from "../completion-store";
@@ -85,6 +88,12 @@ const PRIMARY = { button: 0, isPrimary: true, pointerId: 1 };
 
 type Point = { clientX: number; clientY: number };
 
+async function renderSidebar(): Promise<void> {
+  render(<ProjectSidebar />);
+  // A row can be dragged only once its background-command list has loaded, so let the loads that rendering began land.
+  await act(async () => {});
+}
+
 async function pressAndMove(target: HTMLElement, to: Point): Promise<void> {
   await act(async () => { fireEvent.pointerDown(target, { ...PRIMARY, clientX: 10, clientY: 10 }); });
   await movePointer({ clientX: 10, clientY: 40 });
@@ -107,6 +116,8 @@ describe("SidebarList thread drag", () => {
     useThreadStore.setState({ runningThreadIds: new Set() });
     vi.mocked(mockTransport.moveThreadToProject).mockClear();
     vi.mocked(mockTransport.reorderWorkspace).mockClear();
+    useBackgroundCommandStore.setState({ loads: new Map() });
+    vi.mocked(mockTransport.listBackgroundCommands).mockReset().mockResolvedValue([]);
     boxHeaders();
   });
 
@@ -123,7 +134,7 @@ describe("SidebarList thread drag", () => {
 
   it("shows the move hint in place of the header's actions while the thread is over it, and hides it when it leaves", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(row("Loose thread"), POINTER_ON_HEADER);
 
@@ -138,7 +149,7 @@ describe("SidebarList thread drag", () => {
 
   it("opens the move dialog with the project under the pointer when the thread is dropped, and moves nothing", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(row("Loose thread"), POINTER_ON_HEADER);
     await release(POINTER_ON_HEADER);
@@ -150,7 +161,7 @@ describe("SidebarList thread drag", () => {
 
   it("does nothing when the thread is dropped outside every project header", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
     await release(POINTER_OFF_EVERYTHING);
@@ -164,7 +175,7 @@ describe("SidebarList thread drag", () => {
     ["a thread row", { current: { type: "thread", threadId: IN_ALPHA.id } }],
   ] as const)("does nothing when a thread is dropped on %s, which is not a target", async (_name, overData) => {
     seed([LOOSE, IN_ALPHA]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
     const event = {
       active: { id: `thread:${LOOSE.id}`, data: { current: { type: "thread", threadId: LOOSE.id } } },
       over: { id: "not-a-project", data: overData, rect: { top: 0, height: 32 } },
@@ -180,7 +191,7 @@ describe("SidebarList thread drag", () => {
 
   it("does not start a project reorder from a thread drag", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(row("Loose thread"), POINTER_ON_HEADER);
     await release(POINTER_ON_HEADER);
@@ -190,7 +201,7 @@ describe("SidebarList thread drag", () => {
 
   it("reorders when a project is dropped on another, and never opens the move dialog", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
     const projectData = (workspaceId: string) => ({ current: { type: "project", workspaceId } });
     const event = {
       active: { id: ALPHA.id, data: projectData(ALPHA.id) },
@@ -207,7 +218,7 @@ describe("SidebarList thread drag", () => {
 
   it("starts a project drag from a header, and a project dragged over another header does not offer a move", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(header(BETA.id), POINTER_ON_HEADER);
 
@@ -220,7 +231,7 @@ describe("SidebarList thread drag", () => {
     ["a thread", { type: "thread", threadId: LOOSE.id }, false],
   ] as const)("draws the reorder's insertion line over a header only for %s", async (_name, dragged, line) => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
     const event = {
       active: { id: "dragged", data: { current: dragged } },
       over: { id: ALPHA.id, data: { current: { type: "project", workspaceId: ALPHA.id } }, rect: { top: 0, height: 32 } },
@@ -235,7 +246,7 @@ describe("SidebarList thread drag", () => {
 
   it("still reorders projects by dragging a header onto another", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(header(BETA.id), POINTER_ON_HEADER_TOP_HALF);
     await release(POINTER_ON_HEADER_TOP_HALF);
@@ -248,7 +259,7 @@ describe("SidebarList thread drag", () => {
     const stale = new Date(Date.now() - 60 * 86_400_000).toISOString();
     seed([LOOSE, thread({ id: "t-stale", title: "Stale alpha thread", workspace_id: ALPHA.id, last_activity_at: stale, created_at: stale, updated_at: stale })]);
     useSidebarUiStore.setState({ olderOpen: true });
-    render(<ProjectSidebar />);
+    await renderSidebar();
     expect(screen.queryByText("Stale alpha thread")).not.toBeNull();
 
     await pressAndMove(row("Loose thread"), POINTER_ON_HEADER);
@@ -260,7 +271,7 @@ describe("SidebarList thread drag", () => {
 
   it("starts a drag from an open No project thread", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
 
@@ -279,17 +290,52 @@ describe("SidebarList thread drag", () => {
     ["a thread that already lives in a project", () => seed([IN_ALPHA]), "Alpha thread"],
   ] as const)("does not start a drag from %s", async (_name, arrange, title) => {
     arrange();
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(row(title), POINTER_OFF_EVERYTHING);
 
     expect(dragging()).toBe(false);
   });
 
+  describe("before the thread's background commands have loaded", () => {
+    function holdCommandList(): (commands: BackgroundCommand[]) => Promise<void> {
+      let answer: (commands: BackgroundCommand[]) => void = () => {};
+      vi.mocked(mockTransport.listBackgroundCommands).mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
+      return (commands) => act(async () => answer(commands));
+    }
+
+    it("does not start a drag, and starts one once the list loads with nothing running", async () => {
+      const load = holdCommandList();
+      seed([LOOSE]);
+      await renderSidebar();
+
+      await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
+      expect(dragging()).toBe(false);
+
+      await load([]);
+      await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
+      expect(dragging()).toBe(true);
+    });
+
+    it("keeps blocking the drag when the list loads with a command still running", async () => {
+      const load = holdCommandList();
+      seed([LOOSE]);
+      await renderSidebar();
+      await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
+      expect(dragging()).toBe(false);
+      await release(POINTER_OFF_EVERYTHING);
+
+      await load([createMockBackgroundCommand({ toolCallId: "sleep", status: "running", awaited: false })]);
+      await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
+
+      expect(dragging()).toBe(false);
+    });
+  });
+
   it("does not start a drag from a row that is being closed", async () => {
     seed([LOOSE]);
     useCompletionStore.setState({ entries: new Map([[LOOSE.id, { phase: "holding", attempt: 1 }]]) });
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
 
@@ -298,7 +344,7 @@ describe("SidebarList thread drag", () => {
 
   it("does not start a drag from the title field while the thread is being renamed", async () => {
     seed([LOOSE]);
-    render(<ProjectSidebar />);
+    await renderSidebar();
     fireEvent.doubleClick(row("Loose thread"));
     const field = await screen.findByRole("textbox");
 
@@ -310,7 +356,7 @@ describe("SidebarList thread drag", () => {
   it("does not start a drag from a closed row", async () => {
     seed([{ ...LOOSE, user_completed_at: "2026-11-20T10:00:00.000Z" }]);
     useSidebarUiStore.setState({ scope: "completed" });
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
 
@@ -320,7 +366,7 @@ describe("SidebarList thread drag", () => {
   it("does not start a drag from a row in the Threads view, which has no project headers to drop on", async () => {
     seed([LOOSE]);
     useSidebarUiStore.setState({ view: "threads" });
-    render(<ProjectSidebar />);
+    await renderSidebar();
 
     await pressAndMove(screen.getByRole("button", { name: /No project.*Loose thread/ }), POINTER_OFF_EVERYTHING);
 
