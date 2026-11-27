@@ -126,8 +126,8 @@ async function deleteCheckedEntries(
   await stageAndDeleteEntries(root, staging, manifest, present, options);
   const folders = manifest.filter((entry) => entry.kind === "folder" && present.has(entry.path));
   folders.sort((left, right) => right.path.length - left.path.length);
-  for (const { path } of folders) await removeEmptyDirectory(NodePath.join(root, path));
-  await removeEmptyDirectory(staging);
+  for (const { path } of folders) await removeEmptyDirectory(NodePath.join(root, path), options.platform);
+  await removeEmptyDirectory(staging, options.platform);
   await removeEmptyMoveFolder(root, move.id, options);
 }
 
@@ -253,10 +253,10 @@ async function removeEmptyMoveFolder(root: string, moveId: string, options: Work
     const unlink = options.unlink ?? NodeFSPromises.unlink;
     await unlink(markerPath(root, moveId));
   }
-  await removeEmptyDirectory(root);
+  await removeEmptyDirectory(root, options.platform);
 }
 
-async function removeEmptyDirectory(path: string): Promise<void> {
+async function removeEmptyDirectory(path: string, platform: NodeJS.Platform): Promise<void> {
   try {
     await assertRecordedParent(path);
     const entry = await moveEntry(path);
@@ -267,6 +267,9 @@ async function removeEmptyDirectory(path: string): Promise<void> {
     const code = moveErrorCode(error);
     if (code === "ENOENT") return;
     if (code === "ENOTEMPTY" || code === "EEXIST") throw new KeepFolder(`Folder contains new entries: ${path}`);
+    if (platform !== "win32" && ["EACCES", "EPERM", "EBUSY"].includes(code ?? "")) {
+      throw new KeepFolder(`Could not remove ${path}: ${moveError(error)}`);
+    }
     throw error;
   }
 }

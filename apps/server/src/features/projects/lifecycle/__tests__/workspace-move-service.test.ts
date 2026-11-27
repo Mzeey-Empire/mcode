@@ -575,14 +575,15 @@ function sweepAt(f: Fixture, service: WorkspaceMoveService, date: Date) {
   return new NoProjectWorkspaceSweep(f.workspaces, { removeForThread: () => undefined }, f.root, service).run();
 }
 
-function addReadOnlyDirectory(source: string) {
+function addReadOnlyDirectory(source: string, child: "file" | "empty folder" = "file") {
   const folder = "read-only";
-  const file = NodePath.join(folder, "file.txt");
+  const entry = NodePath.join(folder, child === "file" ? "file.txt" : "empty");
   NodeFS.mkdirSync(NodePath.join(source, folder));
-  NodeFS.writeFileSync(NodePath.join(source, file), "read-only data");
+  if (child === "file") NodeFS.writeFileSync(NodePath.join(source, entry), "read-only data");
+  else NodeFS.mkdirSync(NodePath.join(source, entry));
   NodeFS.chmodSync(NodePath.join(source, folder), 0o555);
   return {
-    file,
+    entry,
     restorePermissions(...roots: string[]) {
       for (const root of roots) {
         const path = NodePath.join(root, folder);
@@ -806,9 +807,9 @@ describe("cross-drive project creation", () => {
     }
   });
 
-  it.skipIf(process.platform === "win32")("keeps a published copy with a read-only directory and lifts the source fence", async () => {
+  it.skipIf(process.platform === "win32").each(["file", "empty folder"] as const)("keeps a copy with a read-only directory containing a %s and lifts the source fence", async (child) => {
     const f = await fixture();
-    const readOnly = addReadOnlyDirectory(f.source);
+    const readOnly = addReadOnlyDirectory(f.source, child);
     const rename = crossDriveRename(f);
     try {
       const { operationId } = await startCopy(f, {
@@ -824,7 +825,9 @@ describe("cross-drive project creation", () => {
       await vi.waitFor(() => expect(f.store.find(operationId)).toMatchObject({ phase: "done", cleanup: "kept" }));
       expect(f.workspaces.hasUnfinishedMove(f.id)).toBe(false);
       expect(f.readNotes(f.source)).toBe("keep these files");
-      expect(NodeFS.readFileSync(NodePath.join(f.destination, readOnly.file), "utf8")).toBe("read-only data");
+      const retained = NodePath.join(f.destination, readOnly.entry);
+      if (child === "file") expect(NodeFS.readFileSync(retained, "utf8")).toBe("read-only data");
+      else expect(NodeFS.readdirSync(retained)).toEqual([]);
     } finally {
       readOnly.restorePermissions(f.source, f.destination);
     }
@@ -846,7 +849,7 @@ describe("cross-drive project creation", () => {
       expect((await f.terminal).result).toMatchObject({ status: "failed", copy: { kind: "removed" } });
       await vi.waitFor(() => expect(f.store.find(operationId)?.cleanup).toBe("done"));
       expect(NodeFS.readdirSync(f.parent)).toEqual([]);
-      const original = NodePath.join(f.source, readOnly.file);
+      const original = NodePath.join(f.source, readOnly.entry);
       expect(NodeFS.readFileSync(original, "utf8")).toBe("read-only data");
       expect(NodeFS.statSync(NodePath.dirname(original)).mode & 0o777).toBe(0o555);
     } finally {
