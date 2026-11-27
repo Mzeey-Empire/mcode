@@ -66,17 +66,8 @@ export type NewProjectRunAction =
   | { readonly type: "git-retrying" }
   | { readonly type: "git-retried"; readonly result: WorkspaceMoveRetryGitResult };
 
-/** The phases after the last byte was copied, in which the server no longer reports byte counts. */
-const COPIED_PHASES: ReadonlySet<WorkspaceMoveFrame["phase"]> = new Set(["copied", "published", "converted"]);
-
-/**
- * The copy a running frame describes. The server sends byte counts only while it copies, so once the copy is whole
- * the bar stays full until the move ends, instead of the dialog falling back to a move with no progress.
- */
-function copyOfFrame(frame: WorkspaceMoveFrame, previous: NewProjectRun | null): CopyProgress | null {
-  if (frame.copiedBytes !== null && frame.totalBytes !== null) return { copiedBytes: frame.copiedBytes, totalBytes: frame.totalBytes };
-  if (previous?.kind !== "moving" || previous.copy === null || !COPIED_PHASES.has(frame.phase)) return null;
-  return { copiedBytes: previous.copy.totalBytes, totalBytes: previous.copy.totalBytes };
+function copyOfFrame({ copiedBytes, totalBytes }: WorkspaceMoveFrame): CopyProgress | null {
+  return copiedBytes !== null && totalBytes !== null ? { copiedBytes, totalBytes } : null;
 }
 
 export const UNKNOWN_CAUSE: WorkspaceMoveFailureCause = { kind: "other" };
@@ -102,9 +93,9 @@ export function failureIsAboutLocation(failure: Extract<NewProjectRun, { kind: "
   }
 }
 
-function runOfFrame(frame: WorkspaceMoveFrame, previous: NewProjectRun | null): NewProjectRun {
+function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
   const { result } = frame;
-  if (!result) return { kind: "moving", operationId: frame.operationId, revision: frame.revision, copy: copyOfFrame(frame, previous) };
+  if (!result) return { kind: "moving", operationId: frame.operationId, revision: frame.revision, copy: copyOfFrame(frame) };
   switch (result.status) {
     case "created":
       return { kind: "created", workspaceId: result.workspaceId };
@@ -159,7 +150,7 @@ function applyFrame(run: NewProjectRun, frame: WorkspaceMoveFrame): NewProjectRu
   const current = followed(run);
   if (!current || current.operationId !== frame.operationId || frame.revision < current.revision) return run;
   if (frame.revision === current.revision && run.kind !== "result-unknown") return run;
-  return runOfFrame(frame, run);
+  return runOfFrame(frame);
 }
 
 function runAfterGitRetry(run: Extract<NewProjectRun, { kind: "git-failed" }>, result: WorkspaceMoveRetryGitResult): NewProjectRun {
@@ -184,7 +175,7 @@ function followUp(run: NewProjectRun, action: FollowUpAction): NewProjectRun {
     case "adopted":
       // The lookup finds a move that was already running, so it is followed from whatever the run shows by now. A
       // run that already follows that operation keeps whichever frame is newer.
-      return followedOperation(run) === action.frame.operationId ? applyFrame(run, action.frame) : runOfFrame(action.frame, null);
+      return followedOperation(run) === action.frame.operationId ? applyFrame(run, action.frame) : runOfFrame(action.frame);
     case "git-retrying":
       return run.kind === "git-failed" ? { ...run, retrying: true } : run;
     case "git-retried":

@@ -871,13 +871,14 @@ describe("New project from this folder", () => {
       expect(createButton()).toHaveTextContent("Moving…");
     });
 
-    it("keeps the bar full after the last byte, while the copy is published and the project converted", async () => {
+    it("keeps the bar full while the copy is published and the project converted", async () => {
       const user = await openNewProject();
       await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
       await startMove(user);
       push(copyingFrame(2, 48));
 
-      push({ ...frame(3), phase: "published" });
+      push({ ...copyingFrame(3, 48), phase: "published" });
+      push({ ...copyingFrame(4, 48), phase: "converted" });
 
       expect(copyBar()).toHaveAttribute("aria-valuetext", "48 of 48 MB");
       expect(copyBar()).toHaveAttribute("aria-valuenow", "100");

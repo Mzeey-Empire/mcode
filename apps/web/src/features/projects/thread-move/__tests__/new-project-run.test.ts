@@ -82,14 +82,20 @@ describe("newProjectRunReducer", () => {
     expect(pending).toMatchObject({ kind: "rollback-pending", error: "EPERM", folder });
   });
 
-  it("follows the copy's byte counts and keeps the bar full once the copy is whole", () => {
+  it("draws the bar from each frame's own byte counts, through the published and converted frames", () => {
     const copying = run(...STARTED, { type: "frame", frame: copyFrame(2, "copying", { copied: 30, total: 100 }) });
     expect(copying).toMatchObject({ kind: "moving", copy: { copiedBytes: 30, totalBytes: 100 } });
 
-    // The server stops sending counts after the last byte; the copy is whole, so the bar must not vanish.
-    const published = newProjectRunReducer(copying, { type: "frame", frame: copyFrame(3, "published", null) });
+    const published = newProjectRunReducer(copying, { type: "frame", frame: copyFrame(3, "published", { copied: 100, total: 100 }) });
     expect(published).toMatchObject({ kind: "moving", copy: { copiedBytes: 100, totalBytes: 100 } });
-    expect(newProjectRunReducer(published, { type: "frame", frame: copyFrame(4, "converted", null) })).toMatchObject({ copy: { copiedBytes: 100, totalBytes: 100 } });
+    const converted = newProjectRunReducer(published, { type: "frame", frame: copyFrame(4, "converted", { copied: 100, total: 100 }) });
+    expect(converted).toMatchObject({ kind: "moving", copy: { copiedBytes: 100, totalBytes: 100 } });
+  });
+
+  it("shows no bar for a frame without byte counts, whatever an earlier frame carried", () => {
+    const copying = run(...STARTED, { type: "frame", frame: copyFrame(2, "copying", { copied: 30, total: 100 }) });
+
+    expect(newProjectRunReducer(copying, { type: "frame", frame: copyFrame(3, "published", null) })).toMatchObject({ kind: "moving", copy: null });
   });
 
   it("shows no copy for a same-drive move, whose frames never carry byte counts", () => {
@@ -99,8 +105,8 @@ describe("newProjectRunReducer", () => {
     expect(converted).toMatchObject({ kind: "moving", copy: null });
   });
 
-  it("has no total to fill when the dialog opens after the copy finished, so it shows no bar", () => {
-    expect(run({ type: "adopted", frame: copyFrame(5, "published", null) })).toMatchObject({ kind: "moving", copy: null });
+  it("shows a full bar when the dialog opens on a published frame that carries the full counts", () => {
+    expect(run({ type: "adopted", frame: copyFrame(5, "published", { copied: 100, total: 100 }) })).toMatchObject({ kind: "moving", copy: { copiedBytes: 100, totalBytes: 100 } });
   });
 
   it("keeps the typed cause of every failure, and a copy only when the server says the move copied", () => {
