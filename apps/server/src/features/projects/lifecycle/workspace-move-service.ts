@@ -21,7 +21,7 @@ import { workspaceMoveWrites, type WorkspaceMove, type WorkspaceMoveStore } from
 import type { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import {
   assertRecordedParent, inspectMoveFolder, markerPath, moveError, removeMoveClaim, removeMoveMarker,
-  resolveWorkspaceMovePaths, writeMoveMarker, type MoveFolderState,
+  renameWorkspaceFolder, resolveWorkspaceMovePaths, writeMoveMarker, type MoveFolderState, type WorkspaceMoveRenameOptions,
 } from "./workspace-move-files.js";
 import { acquireWorkspaceMoveGate, isInsideMoveSource } from "./workspace-move-gate.js";
 
@@ -50,7 +50,7 @@ function moveFrame(move: WorkspaceMove): WorkspaceMoveFrame {
   };
 }
 
-type MoveDeps = {
+type MoveDeps = WorkspaceMoveRenameOptions & {
   store: WorkspaceMoveStore;
   writer: Pick<ApplicationDatabaseWriter, "execute">;
   workspaces: WorkspaceRepo;
@@ -61,7 +61,6 @@ type MoveDeps = {
   git: GitExecutor;
   backgroundCommands: Pick<BackgroundCommandStore, "list">;
   agentWorkload: Pick<AgentWorkload, "backgroundSubagentThreadIds">;
-  platform: NodeJS.Platform;
   claimDestination?: (path: string) => Promise<void>;
   publishProgress(frame: WorkspaceMoveFrame): void;
   publishConverted(workspace: Workspace, sharers: ReturnType<WorkspaceMoveStore["convert"]>): void;
@@ -246,7 +245,7 @@ export class WorkspaceMoveService {
       if (!holdsMarker(await inspectMoveFolder(intent.sourcePath, intent.id))) {
         throw new Error("The source folder no longer holds the move marker");
       }
-      await NodeFSPromises.rename(intent.sourcePath, intent.destinationPath);
+      await renameWorkspaceFolder(intent.sourcePath, intent.destinationPath, this.deps);
       await this.save(intent, { phase: "renamed", cleanup: "done", result: null, error: null });
       const git = await this.gitPlacement(intent.destinationPath);
       converted = await this.deps.writer.execute(workspaceMoveWrites.convert, [intent.id, git ?? { isGitRepo: false, branch: "main" }, this.now()]);
@@ -288,7 +287,7 @@ export class WorkspaceMoveService {
       if (action === "rename-back") {
         await assertRecordedParent(move.sourcePath);
         await assertRecordedParent(move.destinationPath);
-        await NodeFSPromises.rename(move.destinationPath, move.sourcePath);
+        await renameWorkspaceFolder(move.destinationPath, move.sourcePath, this.deps);
       }
       if (action === "remove-claim" && removeClaim) await removeMoveClaim(move.destinationPath, move.id);
     } catch (error) {

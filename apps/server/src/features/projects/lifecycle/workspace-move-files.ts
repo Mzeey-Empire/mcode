@@ -1,10 +1,42 @@
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeTimersPromises from "node:timers/promises";
 import { noProjectIdFromFolderName } from "./no-project-folder-name.js";
 import { isWithinWorkspaceRoot, resolveNoProjectRoot } from "./workspace-path.js";
 
 const RESERVED_NAME = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
+const WINDOWS_RENAME_RETRY_CODES = new Set<unknown>(["EBUSY", "EPERM", "EACCES"]);
+
+/** Platform and filesystem timing dependencies for a workspace rename. */
+export type WorkspaceMoveRenameOptions = {
+  platform: NodeJS.Platform;
+  rename?: typeof NodeFSPromises.rename;
+  sleep?: (ms: number) => Promise<void>;
+};
+
+/**
+ * Give exiting processes and file scanners time to release Windows handles.
+ * Stop after three seconds of waiting so a long-lived holder still fails the move.
+ */
+export async function renameWorkspaceFolder(
+  source: string,
+  destination: string,
+  { platform, rename = NodeFSPromises.rename, sleep = NodeTimersPromises.setTimeout }: WorkspaceMoveRenameOptions,
+): Promise<void> {
+  if (platform === "win32") {
+    for (const delay of [100, 200, 400, 800, 1500]) {
+      try {
+        await rename(source, destination);
+        return;
+      } catch (error) {
+        if (!(error instanceof Error) || !("code" in error) || !WINDOWS_RENAME_RETRY_CODES.has(error.code)) throw error;
+      }
+      await sleep(delay);
+    }
+  }
+  await rename(source, destination);
+}
 
 /** Format the filesystem or Git failure for the operation receipt. */
 export function moveError(error: unknown): string {

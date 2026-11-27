@@ -232,6 +232,63 @@ describe("same-drive project creation", () => {
     expect(NodeFS.readFileSync(NodePath.join(f.destination, "foreign.txt"), "utf8")).toBe("keep the new file");
   });
 
+  it("creates the project when a Windows rename succeeds after two busy failures", async () => {
+    const f = await fixture();
+    let attempts = 0;
+    const service = f.makeService({
+      platform: "win32",
+      rename: async (source, destination) => {
+        if (++attempts <= 2) throw Object.assign(new Error("Folder in use"), { code: "EBUSY" });
+        await NodeFSPromises.rename(source, destination);
+      },
+      sleep: async () => undefined,
+    });
+    expect(await service.createProject(f.input)).toHaveProperty("operationId");
+    expect((await f.terminal).result).toEqual({ status: "created", workspaceId: f.id });
+    expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.destination, kind: "project" });
+    expect(f.readNotes(f.destination)).toBe("keep these files");
+    expect(NodeFS.existsSync(f.source)).toBe(false);
+  });
+
+  it("leaves a persistently busy Windows folder in place after the retry budget", async () => {
+    const f = await fixture();
+    let attempts = 0;
+    const waits: number[] = [];
+    const service = f.makeService({
+      platform: "win32",
+      rename: async () => {
+        throw Object.assign(new Error(`Folder in use on attempt ${++attempts}`), { code: "EBUSY" });
+      },
+      sleep: async (ms) => { waits.push(ms); },
+    });
+    expect(await service.createProject(f.input)).toHaveProperty("operationId");
+    expect((await f.terminal).result).toEqual({ status: "failed", error: "Folder in use on attempt 6" });
+    expect(waits).toEqual([100, 200, 400, 800, 1500]);
+    expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.source, kind: "no_project" });
+    expect(f.readNotes(f.source)).toBe("keep these files");
+    expect(NodeFS.existsSync(f.destination)).toBe(false);
+  });
+
+  it.each([["linux", "EBUSY"], ["win32", "ENOENT"]] as const)(
+    "fails the move without retrying %s %s", async (platform, code) => {
+      const f = await fixture();
+      let attempts = 0;
+      const waits: number[] = [];
+      const service = f.makeService({
+        platform,
+        rename: async () => {
+          throw Object.assign(new Error(`Rename failed on attempt ${++attempts}`), { code });
+        },
+        sleep: async (ms) => { waits.push(ms); },
+      });
+      expect(await service.createProject(f.input)).toHaveProperty("operationId");
+      expect((await f.terminal).result).toEqual({ status: "failed", error: "Rename failed on attempt 1" });
+      expect(waits).toEqual([]);
+      expect(f.readNotes(f.source)).toBe("keep these files");
+      expect(NodeFS.existsSync(f.destination)).toBe(false);
+    },
+  );
+
   it.skipIf(process.platform !== "win32").each([false, true])(
     "releases real Windows handles before rename (terminal owner moved out: %s)", async (movedOut) => {
       const f = await fixture();
@@ -286,6 +343,29 @@ describe("same-drive project creation", () => {
 });
 
 describe("folder move startup recovery", () => {
+  it("rolls back a renamed Windows folder after transient permission errors", async () => {
+    const f = await fixture();
+    const { operationId, sourceMarker } = f.interruptedMove();
+    NodeFS.writeFileSync(sourceMarker, "", { flag: "wx" });
+    NodeFS.renameSync(f.source, f.destination);
+    const failures = ["EPERM", "EACCES"];
+    const service = f.makeService({
+      platform: "win32",
+      rename: async (source, destination) => {
+        const code = failures.shift();
+        if (code) throw Object.assign(new Error("Folder in use"), { code });
+        await NodeFSPromises.rename(source, destination);
+      },
+      sleep: async () => undefined,
+    });
+    await service.recoverAtStartup();
+    expect(service.status({ operationId })).toMatchObject({ phase: "done", result: { status: "failed" } });
+    expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.source, kind: "no_project" });
+    expect(f.readNotes(f.source)).toBe("keep these files");
+    expect(NodeFS.readdirSync(f.source)).toEqual(["notes.txt"]);
+    expect(NodeFS.existsSync(f.destination)).toBe(false);
+  });
+
   it.each(["source-marker", "claim", "renamed", "converted", "git-init", "marker-removed"] as const)(
     "recovers the real directory when interrupted after %s", async (step) => {
     const f = await fixture();
