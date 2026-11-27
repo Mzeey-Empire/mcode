@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Notice } from "@/components/ui/notice";
+import { BreakablePath } from "./BreakablePath";
 import type { MoveBlock } from "./move-thread-store";
 import type { NewProjectRun } from "./new-project-run";
 
@@ -68,7 +69,7 @@ function rollbackPendingDetail(folder: string | null): ReactNode {
   return (
     <>
       Mcode couldn't put the folder back.{" "}
-      {folder === null ? null : <>Your files are in <span className="font-code break-all text-ink">{folder}</span>. </>}
+      {folder === null ? null : <>Your files are in <BreakablePath path={folder} className="text-ink" />. </>}
       The threads in this folder can't run until Mcode finishes; it will try again when it restarts.
     </>
   );

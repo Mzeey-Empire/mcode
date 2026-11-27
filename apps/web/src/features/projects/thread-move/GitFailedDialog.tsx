@@ -2,6 +2,7 @@ import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Notice } from "@/components/ui/notice";
+import { BreakablePath } from "./BreakablePath";
 
 const PERMISSION_DENIED = /EACCES|EPERM|permission denied/i;
 
@@ -35,7 +36,7 @@ export function GitFailedDialog({ threadTitle, projectName, projectPath, error, 
           detail={
             <>
               {PERMISSION_DENIED.test(error) ? "Permission was denied in the project folder. " : ""}
-              The project works without git. Check you can write to <span className="font-code break-all">{projectPath}</span>, then retry, or run git init later.
+              The project works without git. Check you can write to <BreakablePath path={projectPath} />, then retry, or run git init later.
             </>
           }
           more={error}
