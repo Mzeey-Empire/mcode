@@ -6,6 +6,7 @@ import { turnResumeScheduleWriteHandlers } from "../../../features/agents/recove
 import { WorkspaceStore } from "../../../features/projects/persistence/workspace-store.js";
 import { projectLifecycleWriteHandlers } from "../../../features/projects/lifecycle/project-lifecycle-write-operations.js";
 import { workspaceWriteOperations } from "../../../features/projects/persistence/workspace-write-operations.js";
+import { workspaceMoveWriteHandlers } from "../../../features/projects/persistence/workspace-move-store.js";
 import { databaseWriteHandler } from "./database-write-operation.js";
 import { sqliteMaintenanceWriteHandlers } from "./sqlite-maintenance-write-operation.js";
 import { agentStorageWriteHandlers } from "../../../features/agents/agent-storage-write-handlers.js";
@@ -49,6 +50,7 @@ export function applicationDatabaseHandlers(db: Database): ReadonlyMap<string, (
     ...sqliteMaintenanceWriteHandlers(db),
     ...agentStorageWriteHandlers(db),
     ...projectLifecycleWriteHandlers(db),
+    ...workspaceMoveWriteHandlers(db),
     ...turnRevertWriteHandlers(db),
     ...conversationConversionWriteHandlers(db),
     ...canonicalRuntimeWriteHandlers(db),

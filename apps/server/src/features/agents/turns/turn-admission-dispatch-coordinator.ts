@@ -26,6 +26,7 @@ import type { ThreadStartupThreadCreation } from "../../thread-startup/thread-st
 import { injectMentionFileContents, validateMessageMentions } from "./message-mentions.js";
 import type { WorkspaceEnvironmentQueuedTurnSubmission } from "../../projects/environment/workspace-environment-automatic-repository.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
+import { isWorkspaceMoving } from "../../projects/lifecycle/workspace-move-gate.js";
 import { ProviderAvailabilityService } from "../../providers/availability/provider-availability-service.js";
 import type { SettingsService } from "../../settings/settings-service.js";
 import {
@@ -334,6 +335,9 @@ export class TurnAdmissionDispatchCoordinator {
   private assertCurrentPlacement(prepared: PreparedCommand): void {
     const current = this.requireThread(prepared.thread.id);
     const workspace = this.requireWorkspace(current.workspace_id);
+    if (isWorkspaceMoving(workspace.id) || this.workspaces.hasUnfinishedMove(workspace.id)) {
+      throw new TurnAdmissionError("pending_mutation", "The thread's working folder is moving to a project.");
+    }
     if (workspace.id !== prepared.workspace.id || workspace.path !== prepared.workspace.path
       || current.mode !== prepared.thread.mode || current.worktree_path !== prepared.thread.worktree_path) {
       throw new TurnAdmissionError("pending_mutation", "The thread's working folder changed while preparing the turn. Send again.");
@@ -1186,7 +1190,7 @@ export class TurnAdmissionDispatchCoordinator {
   }
 
   private async relocationNote(relocation: PreparedCommand["relocation"]): Promise<{ generation: number; text: string } | null> {
-    if (!relocation?.notePending) return null;
+    if (!relocation?.notePending || relocation.workspaceId === null) return null;
     const source = this.workspaces.findRelocationSource(relocation.workspaceId);
     if (!source) return null;
     const hasFiles = await folderHasFiles(source.path).catch((error: unknown) => {

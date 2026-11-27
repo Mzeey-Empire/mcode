@@ -355,9 +355,12 @@ export class MessageStore {
   /** Record the new placement as a visible system message. */
   createThreadMove(threadId: string, threadMove: NonNullable<Message["threadMove"]>, timestamp: string): Message {
     const fallback = `Moved to ${threadMove.projectName}`;
+    let content = fallback;
+    if (threadMove.target === "new-project") content = `Created project ${threadMove.projectName}`;
+    else if (threadMove.target === "local") content = `${fallback} · Local`;
     const row = this.orm.insert(messages).values({
       id: NodeCrypto.randomUUID(), threadId, role: "system",
-      content: threadMove.target === "local" ? `${fallback} · Local` : fallback,
+      content,
       sequence: this.getLatestSequenceIncludingInternal(threadId) + 1,
       timestamp, threadMove: JSON.stringify(threadMove),
     }).returning().get();

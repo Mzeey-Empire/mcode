@@ -38,6 +38,7 @@ function workspaceDeps() {
   ]);
   const deps = {
     gitWatcherService: { unwatchThreadWorktree, unwatchWorkspace: vi.fn() },
+    workspaceMoveService: { withDeletion: async (_id: string, remove: () => Promise<boolean>) => remove() },
     threadRepo: {
       listAllByWorkspace,
     },

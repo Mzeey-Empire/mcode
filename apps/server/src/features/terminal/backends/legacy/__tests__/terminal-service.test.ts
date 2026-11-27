@@ -107,7 +107,10 @@ function createService(options: {
         ? { id, workspace_id: "workspace", mode: "direct", worktree_path: null }
         : null,
     } as never,
-    { findById: () => (options.knownWorkspaces === false ? null : { path: process.cwd() }) } as never,
+    {
+      findById: () => (options.knownWorkspaces === false ? null : { path: process.cwd() }),
+      unfinishedMoveFolders: () => [],
+    } as never,
     { resolveWorkingDir: () => process.cwd() } as never,
     settings as never,
     { getEnv: () => environment } as never,

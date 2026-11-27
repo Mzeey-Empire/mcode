@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  CreateProjectFromFolderInputSchema, CreateProjectFromFolderResultSchema,
+  WorkspaceMoveFrameSchema, WorkspaceMoveRetryGitResultSchema, WorkspaceMoveStatusInputSchema,
+} from "./workspace-move.js";
 import { HandoffAuditMetadataSchema } from "../handoff.js";
 import { BuildStageSchema } from "../build-stage.js";
 import { GitSearchCommitsParamsSchema, GitSearchCommitsResultSchema } from "../git.js";
@@ -255,6 +259,8 @@ export const ThreadMovePreflightSchema = lazySchema(() => z.object({
   otherThreadsInFolder: z.object({ count: z.number().int().nonnegative(), titles: z.array(z.string()) }),
   /** When Mcode would delete the old folder if this thread were its last, 7 days from now. */
   deadline: z.string().datetime(),
+  suggestedName: z.string().optional(),
+  defaultLocation: z.string().optional(),
 }));
 
 export type ThreadMovePreflight = z.infer<ReturnType<typeof ThreadMovePreflightSchema>>;
@@ -934,6 +940,18 @@ export const WS_METHODS = lazySchema(() => ({
   },
   /** Reads what the move dialog shows. Null when the thread is not an open No project thread. */
   "thread.moveToProjectPreflight": threadMovePreflightMethod(),
+  "thread.createProjectFromFolder": {
+    params: CreateProjectFromFolderInputSchema(),
+    result: CreateProjectFromFolderResultSchema(),
+  },
+  "workspace.move.status": {
+    params: WorkspaceMoveStatusInputSchema(),
+    result: WorkspaceMoveFrameSchema().nullable(),
+  },
+  "workspace.move.retryGit": {
+    params: z.object({ operationId: z.string() }),
+    result: WorkspaceMoveRetryGitResultSchema(),
+  },
   "thread.updateSettings": {
     params: z.object({
       threadId: z.string(),

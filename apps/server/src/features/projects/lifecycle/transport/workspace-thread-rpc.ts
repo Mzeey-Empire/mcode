@@ -23,6 +23,7 @@ import type { WorkspaceRepo } from "../../persistence/workspace-repo.js";
 import type { FilesystemBrowser } from "../filesystem-browser.js";
 import type { WorkspaceEnricher } from "../workspace-enricher.js";
 import type { WorkspaceService } from "../workspace-service.js";
+import type { WorkspaceMoveService } from "../workspace-move-service.js";
 
 type WorkspaceThreadRpcMethod = Exclude<
   Extract<WsMethodName, `workspace.${string}` | `thread.${string}` | "filesystem.browse">,
@@ -60,6 +61,7 @@ export interface WorkspaceThreadRouterDeps {
   threadCompletionService: Pick<ThreadCompletionService, "cleanupBlockedCount" | "complete" | "reopen" | "retryCleanup">;
   threadMoveService: Pick<ThreadMoveService, "moveToProject">;
   threadMovePreflightService: Pick<ThreadMovePreflightService, "read">;
+  workspaceMoveService: Pick<WorkspaceMoveService, "createProject" | "status" | "retryGit" | "withDeletion">;
   threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread">;
   threadRepo: Pick<ThreadRepo, "findById" | "listAllByWorkspace" | "listAll">;
   workspaceRepo: Pick<WorkspaceRepo, "findById" | "removeRecent" | "setPinned" | "touchLastOpened">;
@@ -74,12 +76,15 @@ export interface WorkspaceThreadRouterDeps {
 const workspaceThreadHandlers = {
   "thread.moveToProject": moveThreadToProject,
   "thread.moveToProjectPreflight": (deps, params) => deps.threadMovePreflightService.read(params.threadId),
+  "thread.createProjectFromFolder": (deps, params) => deps.workspaceMoveService.createProject(params),
+  "workspace.move.status": (deps, params) => deps.workspaceMoveService.status(params),
+  "workspace.move.retryGit": (deps, params) => deps.workspaceMoveService.retryGit(params.operationId),
   "workspace.list": (deps) => deps.workspaceService.list(),
   "workspace.create": createWorkspace,
   "workspace.createNoProject": createNoProjectWorkspace,
   "workspace.rename": (deps, params) => deps.workspaceService.rename(params.id, params.name),
-  "workspace.delete": (deps, params) => deleteWorkspace(deps, params.id),
-  "workspace.forceDelete": (deps, params) => forceDeleteWorkspace(deps, params.id),
+  "workspace.delete": (deps, params) => deps.workspaceMoveService.withDeletion(params.id, () => deleteWorkspace(deps, params.id)),
+  "workspace.forceDelete": (deps, params) => deps.workspaceMoveService.withDeletion(params.id, () => forceDeleteWorkspace(deps, params.id)),
   "workspace.pin": async (deps, params) => {
     await deps.workspaceRepo.setPinned(params.id, params.pinned);
     return { ok: true as const };

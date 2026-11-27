@@ -102,6 +102,7 @@ async function buildService({
 
   const workspaceRepo = {
     findById: vi.fn(() => ({ id: "ws-1", path: process.cwd() })),
+    hasUnfinishedMove: () => false,
   } as unknown as WorkspaceRepo;
 
   const messageRepo = new MessageRepo(db, writer);

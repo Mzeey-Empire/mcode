@@ -20,6 +20,7 @@ import type { PtyHostAdapter, PtyHostCommand } from "../../host/pty-host-adapter
 import type { PtyHostEvent } from "../../host/pty-host-protocol.js";
 import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import type { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { assertTerminalOutsideMove } from "../../../projects/lifecycle/workspace-move-gate.js";
 import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
 import type { SettingsService } from "../../../settings/settings-service.js";
 import { EnvService } from "../../../../runtime/environment/env-service.js";
@@ -165,6 +166,7 @@ export class TerminalService {
     replacesPtyId?: string,
   ): PtySession {
     const cwd = this.resolveWorkingDirectory(scopeId);
+    assertTerminalOutsideMove(cwd, this.workspaceRepo.unfinishedMoveFolders());
     if (!NodePath.isAbsolute(cwd) || !NodeFS.existsSync(cwd) || !NodeFS.statSync(cwd).isDirectory()) {
       throw new Error(`Invalid working directory: ${cwd}`);
     }

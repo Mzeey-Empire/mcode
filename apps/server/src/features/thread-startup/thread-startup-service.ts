@@ -4,6 +4,7 @@ import type { ThreadStartup, ThreadStartupStartInput } from "@mcode/contracts/th
 import { broadcast } from "../../application/transport/push.js";
 import { ApplicationDatabaseWriter } from "../../runtime/persistence/sqlite/application-database-writer.js";
 import type { DatabaseWriteOperation } from "../../runtime/persistence/sqlite/database-write-operation.js";
+import { isWorkspaceMoving } from "../projects/lifecycle/workspace-move-gate.js";
 import { ThreadStartupRepo } from "./persistence/thread-startup-repo.js";
 import {
   ThreadStartupConflictError,
@@ -52,6 +53,7 @@ export class ThreadStartupService {
 
   /** Create and bind a thread in one worker-owned SQLite commit. */
   async createAndBindThread(startupId: string, input: ThreadStartupThreadCreation): Promise<Thread> {
+    if (isWorkspaceMoving(input.args[0])) throw new Error("The workspace is moving to a project");
     try {
       const committed = await this.writer.execute(threadStartupStateWriteOperations.createAndBindThread, [startupId, input, this.timestamp()]);
       if (committed.changed) this.publish(committed.startup);

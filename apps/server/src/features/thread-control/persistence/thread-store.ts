@@ -507,6 +507,9 @@ export class ThreadStore {
     checkoutState: "named" | "branchless" = "named",
     baseBranch: string | null = null,
   ): Thread {
+    if (new WorkspaceStore(this.db).hasUnfinishedMove(workspaceId)) {
+      throw new Error("The workspace is moving to a project");
+    }
     const id = NodeCrypto.randomUUID();
     const now = new Date().toISOString();
     const managedInt = worktreeManaged ? 1 : 0;
@@ -1287,7 +1290,7 @@ export class ThreadStore {
       noteGeneration: threads.relocationNoteGeneration,
       notePending: threads.relocationNotePending,
     }).from(threads).where(eq(threads.id, id)).get();
-    return row?.workspaceId && row.noteGeneration !== null ? { ...row, workspaceId: row.workspaceId, noteGeneration: row.noteGeneration } : null;
+    return row && row.noteGeneration !== null ? { ...row, noteGeneration: row.noteGeneration } : null;
   }
 
   /** Tie the hidden payload to the execution that can consume it on success. */
@@ -1383,6 +1386,30 @@ export class ThreadStore {
     return candidates.some(({ path }) => path !== null && (
       paths.includes(normalizeWorktreePath(path, platform)) || paths.includes(normalizePathForComparison(path, platform))
     ));
+  }
+
+  /** Reset sessions for sharers and re-arm corrected folder notes in the conversion transaction. */
+  convertWorkspaceSharers(workspaceId: string, projectName: string, branch: string, now: string) {
+    this.orm.update(threads).set({
+      relocationNoteGeneration: sql`coalesce(${threads.relocationNoteGeneration}, 0) + 1`,
+      relocationNotePending: true,
+    }).where(eq(threads.relocationWorkspaceId, workspaceId)).run();
+
+    const messages = new MessageStore(this.db);
+    const sharers = this.listAllByWorkspace(workspaceId).filter((thread) => thread.deleted_at === null);
+    return sharers.map((thread) => {
+      this.providerSessions.removeAll(thread.id);
+      this.orm.update(threads).set({
+        branch, mode: "direct", worktreePath: null, worktreeManaged: 0,
+        checkoutState: "named", baseBranch: null, headSha: null, sdkSessionId: null, updatedAt: now,
+        relocationWorkspaceId: null, relocationFreshSession: true,
+        relocationNoteGeneration: 0, relocationNotePending: false, relocationTurn: null,
+      }).where(eq(threads.id, thread.id)).run();
+      const marker = messages.createThreadMove(thread.id, { target: "new-project", projectName }, now);
+      const updated = this.findById(thread.id);
+      if (!updated) throw new Error(`Moved thread not found: ${thread.id}`);
+      return { thread: updated, marker };
+    });
   }
 
   /** Persist the exact checkout that may need cleanup after interruption. */

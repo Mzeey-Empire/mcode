@@ -18,15 +18,21 @@ describe("ThreadMovePreflightService", () => {
     NodeFS.rmSync(folder, { recursive: true, force: true });
   });
 
-  function service(options: { threads?: ReturnType<typeof createMockThread>[]; kind?: "no_project" | "project" } = {}) {
-    const workspace = createMockWorkspace({ id: "no-project-1", kind: options.kind ?? "no_project", path: folder });
+  function service(options: {
+    threads?: ReturnType<typeof createMockThread>[];
+    kind?: "no_project" | "project";
+    folderName?: string;
+    projects?: ReturnType<typeof createMockWorkspace>[];
+  } = {}) {
+    const path = options.folderName ? NodePath.join(folder, options.folderName) : folder;
+    const workspace = createMockWorkspace({ id: "no-project-1", kind: options.kind ?? "no_project", path });
     const threads = [createMockThread({ id: "mine", workspace_id: workspace.id, title: "Mine" }), ...(options.threads ?? [])];
     return new ThreadMovePreflightService(
       {
         findById: (id) => threads.find((thread) => thread.id === id) ?? null,
         listAllByWorkspace: (workspaceId) => threads.filter((thread) => thread.workspace_id === workspaceId),
       },
-      { findById: (id) => (id === workspace.id ? workspace : null) },
+      { findById: (id) => (id === workspace.id ? workspace : null), listAll: () => options.projects ?? [] },
       () => NOW,
     );
   }
@@ -39,7 +45,7 @@ describe("ThreadMovePreflightService", () => {
 
     expect(result?.hasFiles).toBe(true);
     expect(JSON.stringify(result)).not.toMatch(/quarterly-secrets|notes\.md/);
-    expect(Object.keys(result ?? {}).sort()).toEqual(["deadline", "hasFiles", "otherThreadsInFolder"]);
+    expect(Object.keys(result ?? {}).sort()).toEqual(["deadline", "defaultLocation", "hasFiles", "otherThreadsInFolder", "suggestedName"]);
   });
 
   it("reports an empty or missing folder as holding no files", async () => {
@@ -67,5 +73,25 @@ describe("ThreadMovePreflightService", () => {
   it("returns null for a thread that cannot move", async () => {
     expect(await service().read("missing")).toBeNull();
     expect(await service({ kind: "project" }).read("mine")).toBeNull();
+  });
+
+  it.each([
+    ["2026-11-26-fix-order-search-9e5b8fb8-5b85-4fcb-b471-2f4f45d80543", "fix-order-search"],
+    ["2026-11-26-9e5b8fb8-5b85-4fcb-b471-2f4f45d80543", "untitled"],
+    ["2026-11-26--9e5b8fb8-5b85-4fcb-b471-2f4f45d80543", "untitled"],
+  ])("suggests the slug for %s and uses home without any projects", async (folderName, suggestedName) => {
+    expect(await service({ folderName }).read("mine")).toMatchObject({ suggestedName, defaultLocation: "~" });
+  });
+
+  it("suggests the parent containing the most registered projects", async () => {
+    const crowded = NodePath.join(folder, "projects");
+    const result = await service({
+      projects: [
+        createMockWorkspace({ path: NodePath.join(folder, "other", "a") }),
+        createMockWorkspace({ path: NodePath.join(crowded, "b") }),
+        createMockWorkspace({ path: NodePath.join(crowded, "c") }),
+      ],
+    }).read("mine");
+    expect(result?.defaultLocation).toBe(crowded);
   });
 });
