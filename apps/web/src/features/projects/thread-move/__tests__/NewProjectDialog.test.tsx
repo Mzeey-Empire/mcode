@@ -583,6 +583,20 @@ describe("New project from this folder", () => {
       expect(useSidebarUiStore.getState().expandedProjects.has(HIDDEN.id)).toBe(true);
     });
 
+    it("lets a long thread title fade out of the subtitle while the project name shows in full", async () => {
+      const longTitle = "Compare how SQLite handles WAL checkpoints against the rollback journal when a desktop app has one writer and many readers";
+      act(() => useWorkspaceStore.setState({ threads: [{ ...THREAD, title: longTitle }, SHARER] }));
+      await reachGitFailure();
+      act(() => useWorkspaceStore.setState({ workspaces: [ALPHA, { ...HIDDEN, kind: "project", name: "sqlite-wal-vs-rollback" }] }));
+      push(frame(3, gitFailed()));
+
+      const alert = await screen.findByRole("alertdialog", { name: "Project created" });
+
+      expect(alert).toHaveTextContent(`“${longTitle}” now runs in the sqlite-wal-vs-rollback project.`);
+      expect(within(alert).getByText(`“${longTitle}”`)).toHaveClass("text-fade");
+      expect(within(alert).getByText("now runs in the sqlite-wal-vs-rollback project.")).not.toHaveClass("text-fade");
+    });
+
     it("Retry git setup retries the operation, then shows git as started and waits for Done", async () => {
       vi.mocked(mockTransport.retryWorkspaceMoveGit).mockResolvedValueOnce({ status: "created", workspaceId: HIDDEN.id });
       const user = await reachGitFailure();

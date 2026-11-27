@@ -38,7 +38,11 @@ export function GitFailedDialog({ threadTitle, projectName, projectPath, git, on
       <DialogContent role="alertdialog" className="sm:max-w-[50rem]">
         <DialogHeader className="items-center text-center">
           <DialogTitle className="text-xl tracking-[-0.02em] text-ink">Project created</DialogTitle>
-          <DialogDescription className="text-body-small">“{threadTitle}” now runs in the {projectName} project.</DialogDescription>
+          {/* A thread title is often a long prompt: it fades on one line, and the rest of the sentence wraps beside or below it. */}
+          <DialogDescription className="flex max-w-full flex-wrap justify-center gap-x-1 text-body-small">
+            <span className="max-w-full text-fade">“{threadTitle}”</span>{" "}
+            <span>now runs in the {projectName} project.</span>
+          </DialogDescription>
         </DialogHeader>
         {git.kind === "started" ? <Notice tone="success" title="Git repo started" /> : <GitFailureNotice error={git.error} projectPath={projectPath} />}
         <DialogFooter>
