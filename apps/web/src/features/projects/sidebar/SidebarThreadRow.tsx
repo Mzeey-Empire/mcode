@@ -1,4 +1,4 @@
-import { cloneElement, forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties } from "react";
+import { cloneElement, forwardRef, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef, type CSSProperties, type ForwardedRef } from "react";
 import { mergeProps } from "@base-ui/react/merge-props";
 import { Archive, ArchiveRestore, Laptop, RefreshCw, Undo2 } from "lucide-react";
 import { rankPullRequests } from "@mcode/contracts/models/thread-pull-request";
@@ -26,6 +26,7 @@ import type { Thread, Workspace } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { selectThreadIndex } from "../state/thread-index";
 import { isNoProjectWorkspace } from "../state/project-workspaces";
+import { offersMoveToProject } from "../thread-move/move-thread-store";
 import { IDLE_CLEANUP_RETRY, useRowLifecycleStore } from "./row-lifecycle-store";
 import type { SidebarItem, ThreadTreeLine } from "./sidebar-model";
 import type { InlineEditState, SidebarProviderAvailability, SidebarRowContext } from "./sidebar-row-context";
@@ -37,6 +38,7 @@ import type { CompletionEntry } from "./completion-machine";
 import { ThreadOptionsMenu, useThreadMenuOpenFor, type ThreadMenuActions } from "./thread-menu";
 import { DraftTag, IconOnlyStatus, SidebarLabelTrigger, useSidebarNarrow, useSidebarStatusIconOnly } from "./sidebar-label-tooltip";
 import { HOVER_ROW_PROPS } from "./hover-glide";
+import { DRAGGED_THREAD_ROW_CLASS, useThreadMoveDrag } from "./thread-move-drag";
 import { worktreePresence } from "../state/worktree-listing";
 
 type ThreadItem = Extract<SidebarItem, { kind: "thread" }>;
@@ -83,6 +85,11 @@ function useThreadRowHandlers(ctx: SidebarRowContext, workspaceId: string, works
   }), [ctx, workspaceId, workspacePath]);
 }
 
+/** A row can be dragged to a project only while it could also be moved from its menu and nothing else owns the pointer. */
+function isDragSource(thread: WorkspaceThread, workspace: Workspace | undefined, isEditing: boolean, completing: boolean): boolean {
+  return offersMoveToProject(thread, workspace) && !isEditing && !completing;
+}
+
 function ThreadRow({ thread, workspace, depth, treeLine, showProject, ctx }: { thread: WorkspaceThread; workspace: Workspace | undefined; depth: number; treeLine: ThreadTreeLine; showProject: boolean; ctx: SidebarRowContext }) {
   if (reactProfilingEnabled) window.__mcodeReactPerformanceSink?.recordRowRender(`sidebar-thread:${thread.id}`);
   const isEditing = ctx.inlineEdit?.threadId === thread.id;
@@ -113,6 +120,7 @@ function ThreadRow({ thread, workspace, depth, treeLine, showProject, ctx }: { t
       {...handlers}
       workspaceName={workspace?.name ?? ""}
       noProject={isNoProjectWorkspace(workspace)}
+      movable={isDragSource(thread, workspace, isEditing, presentation.completing)}
       thread={thread}
       depth={depth}
       treeLine={treeLine}
@@ -188,6 +196,8 @@ interface ThreadRowLifecycleActions {
 interface ThreadRowVisualProps {
   workspaceName: string;
   noProject: boolean;
+  /** An open No project thread that is not being renamed or closed: its grouped row can be dragged onto a project header. */
+  movable: boolean;
   thread: WorkspaceThread;
   depth: number;
   treeLine: ThreadTreeLine;
@@ -335,8 +345,10 @@ function ThreadRowVisual(props: ThreadRowVisualProps) {
   const [revealed, setRevealed] = useState(false);
   const { thread, presentation } = props;
   const variant: ThreadRowVariant = presentation.closedRow ? "closed" : props.showProject ? "flat" : "grouped";
+  // Only the Projects view has project headers to drop on, so the flat Threads view and closed rows never drag.
+  const Surface = props.movable && variant === "grouped" ? MovableThreadRowSurface : ThreadRowSurface;
   const row = (
-    <ThreadRowSurface
+    <Surface
       thread={thread}
       depth={props.depth}
       treeLine={props.treeLine}
@@ -354,7 +366,7 @@ function ThreadRowVisual(props: ThreadRowVisualProps) {
       {variant === "closed" && <ClosedThreadRowBody {...props} revealed={revealed} />}
       {variant === "flat" && <FlatThreadRowBody {...props} revealed={revealed} />}
       {variant === "grouped" && <GroupedThreadRowBody {...props} revealed={revealed} />}
-    </ThreadRowSurface>
+    </Surface>
   );
   return <ThreadRowPreview isEditing={props.isEditing} row={row} workspaceName={props.workspaceName} noProject={props.noProject} thread={thread} />;
 }
@@ -511,6 +523,7 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
   children,
   onRevealChange,
   className: triggerClassName,
+  onPointerDown: onTriggerPointerDown,
   onMouseEnter: onTriggerMouseEnter,
   onMouseLeave: onTriggerMouseLeave,
   onFocus: onTriggerFocus,
@@ -530,7 +543,10 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
       tabIndex={0}
       onKeyDown={(event) => handleThreadRowKeyDown(event, isEditing, onSelectThread, thread.id)}
       onClick={() => onThreadClick(thread.id)}
-      onPointerDown={(event) => prefetchThreadRowOnPointerDown(event, isEditing, thread)}
+      onPointerDown={(event) => {
+        prefetchThreadRowOnPointerDown(event, isEditing, thread);
+        onTriggerPointerDown?.(event);
+      }}
       onDoubleClick={() => onThreadDoubleClick(thread.id)}
       onContextMenu={(event) => onThreadContextMenu(event, thread)}
       onMouseEnter={(event) => {
@@ -562,6 +578,35 @@ const ThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(funct
     >
       {children}
     </div>
+  );
+});
+
+function assignRef<T>(ref: ForwardedRef<T>, node: T | null): void {
+  if (typeof ref === "function") ref(node);
+  else if (ref) ref.current = node;
+}
+
+/**
+ * The row of an open No project thread. It drags by pointer onto a project header, which opens the move
+ * dialog with that project picked. A thread whose move would be refused stays a plain row.
+ */
+const MovableThreadRowSurface = forwardRef<HTMLDivElement, ThreadRowSurfaceProps>(function MovableThreadRowSurface({ className, onPointerDown, ...props }, ref) {
+  const drag = useThreadMoveDrag(props.thread);
+  const { setNodeRef } = drag;
+  const setRefs = useCallback((node: HTMLDivElement | null) => {
+    setNodeRef(node);
+    assignRef(ref, node);
+  }, [setNodeRef, ref]);
+  return (
+    <ThreadRowSurface
+      {...props}
+      ref={setRefs}
+      className={cn(className, drag.isDragging && DRAGGED_THREAD_ROW_CLASS)}
+      onPointerDown={(event) => {
+        drag.onPointerDown?.(event);
+        onPointerDown?.(event);
+      }}
+    />
   );
 });
 

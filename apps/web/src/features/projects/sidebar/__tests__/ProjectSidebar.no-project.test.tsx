@@ -361,8 +361,8 @@ describe("ProjectSidebar project reorder with a No project row", () => {
 
   function dropOnto(activeId: string, overId: string): void {
     const event = {
-      active: { id: activeId },
-      over: { id: overId, rect: { top: 0, height: 32 } },
+      active: { id: activeId, data: { current: { type: "project", workspaceId: activeId } } },
+      over: { id: overId, data: { current: { type: "project", workspaceId: overId } }, rect: { top: 0, height: 32 } },
       activatorEvent: new KeyboardEvent("keydown"),
       delta: { x: 0, y: 1 },
     } as unknown as DragEndEvent;

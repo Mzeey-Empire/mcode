@@ -28,10 +28,11 @@ import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMov
  */
 export function MoveThreadDialogHost() {
   const threadId = useMoveThreadStore((state) => state.threadId);
+  const projectId = useMoveThreadStore((state) => state.projectId);
   return (
     <>
       <MoveThreadCommand />
-      {threadId === null ? null : <MoveThreadDialog key={threadId} threadId={threadId} />}
+      {threadId === null ? null : <MoveThreadDialog key={threadId} threadId={threadId} initialProjectId={projectId} />}
     </>
   );
 }
@@ -98,10 +99,13 @@ interface MoveFlow {
   readonly move: () => void;
 }
 
-/** The dialog's one choice and the one request it can make, with how that request ended. */
-function useMoveFlow(threadId: string): MoveFlow {
+/**
+ * The dialog's one choice and the one request it can make, with how that request ended. A drop on a project
+ * header starts with that project picked; the user can still choose another.
+ */
+function useMoveFlow(threadId: string, initialProjectId: string | null): MoveFlow {
   const applyMoved = useWorkspaceStore((state) => state.applyThreadMovedToProject);
-  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(initialProjectId);
   const picked = useWorkspaceStore((state) => state.workspaces.find((candidate) => candidate.id === pickedId && candidate.kind === "project"));
   const target = useMoveTarget(picked);
   const [moving, setMoving] = useState(false);
@@ -136,10 +140,10 @@ function useMoveFlow(threadId: string): MoveFlow {
   return { picked, target, moving, failure, pick, move: () => void move() };
 }
 
-function MoveThreadDialog({ threadId }: { threadId: string }) {
+function MoveThreadDialog({ threadId, initialProjectId }: { threadId: string; initialProjectId: string | null }) {
   const thread = useWorkspaceStore((state) => state.threads.find((candidate) => candidate.id === threadId));
   const threadInNoProject = useWorkspaceStore((state) => isNoProjectWorkspace(state.workspaces.find((candidate) => candidate.id === thread?.workspace_id)));
-  const flow = useMoveFlow(threadId);
+  const flow = useMoveFlow(threadId, initialProjectId);
   const preflight = useMovePreflight(threadId);
 
   // The thread left No project, here or on another client, or was deleted: there is nothing left to move.
