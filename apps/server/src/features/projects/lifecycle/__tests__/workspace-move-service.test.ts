@@ -205,6 +205,29 @@ describe("same-drive project creation", () => {
     },
   );
 
+  it("leaves an open terminal running when the move intent is refused", async () => {
+    const f = await fixture();
+    f.database.exec(`
+      CREATE TRIGGER refuse_move_intent BEFORE INSERT ON workspace_moves
+      BEGIN SELECT RAISE(ABORT, 'test refused move intent'); END;
+    `);
+    let terminalOpen = true;
+    const service = f.makeService({
+      terminals: {
+        listActiveSessions: () => terminalOpen ? [{
+          ptyId: "open terminal", threadId: f.first.id, cwd: f.source, state: "running", shell: "powershell",
+        }] : [],
+        kill: async () => { terminalOpen = false; },
+      },
+    });
+
+    expect(await service.createProject(f.input)).toMatchObject({
+      status: "failed", error: expect.stringContaining("test refused move intent"),
+    });
+    expect(terminalOpen).toBe(true);
+    expect(f.store.findUnfinished(f.id)).toBeNull();
+  });
+
   it("leaves a late destination untouched when the exclusive claim fails", async () => {
     const f = await fixture();
     const service = f.makeService({ runtime: { evictThreadProviderSessions: async (threadId) => {

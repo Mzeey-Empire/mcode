@@ -93,7 +93,6 @@ export class WorkspaceMoveService {
       const busy = this.reserveSharers(sharers, reservations);
       if (busy) return busy;
       const paths = await this.preparePaths(thread, workspace, input);
-      await this.closeFolderUsers(workspace.id, paths.sourcePath, reservations);
       const id = NodeCrypto.randomUUID();
       await this.deps.writer.execute(workspaceMoveWrites.start, [{
         id, workspaceId: workspace.id, name: input.name, initGit: input.initGit, createdAt: this.now(), ...paths,
@@ -101,7 +100,7 @@ export class WorkspaceMoveService {
       const move = this.requireMove(id);
       this.deps.publishProgress(moveFrame(move));
       setImmediate(() => {
-        void this.run(move).catch((error: unknown) => this.logFailure(move, error)).finally(release);
+        void this.run(move, reservations).catch((error: unknown) => this.logFailure(move, error)).finally(release);
       });
       scheduled = true;
       return { operationId: id };
@@ -229,10 +228,11 @@ export class WorkspaceMoveService {
     }
   }
 
-  private async run(intent: WorkspaceMove): Promise<void> {
+  private async run(intent: WorkspaceMove, reservations: ReadonlyMap<string, string>): Promise<void> {
     let claimed = false;
     let converted: ReturnType<WorkspaceMoveStore["convert"]>;
     try {
+      await this.closeFolderUsers(intent.workspaceId, intent.sourcePath, reservations);
       await writeMoveMarker(intent.sourcePath, intent.id);
       await assertRecordedParent(intent.destinationPath);
       const claimDestination = this.deps.claimDestination ?? NodeFSPromises.mkdir;
