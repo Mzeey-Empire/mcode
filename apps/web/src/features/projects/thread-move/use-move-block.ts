@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
-import { commandsOf, useBackgroundCommandLoad, useBackgroundCommandStore } from "@/features/background-commands/backgroundCommandStore";
+import { commandsOf, useBackgroundCommandLoad, useBackgroundCommandStore, type BackgroundCommandLoad } from "@/features/background-commands/backgroundCommandStore";
 import { readThreadActivity, useThreadActivity } from "@/features/thread-attention/thread-activity";
 import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
 import { readThreadRowState, useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
@@ -25,6 +25,10 @@ function isAwaitingApproval(rowState: ReturnType<typeof readThreadRowState>): bo
   return rowState.kind === "needs-you" && rowState.label === "Approval required";
 }
 
+function commandsBlockMove(load: BackgroundCommandLoad | undefined, refreshing: boolean): boolean {
+  return refreshing || load?.kind === "loading" || (commandsOf(load)?.some((command) => command.status === "running") ?? false);
+}
+
 /**
  * Why a thread cannot move right now, or null when it can. The thread menu, the command palette and the
  * sidebar drag all read it, so they refuse in the same cases and with the same words.
@@ -39,21 +43,18 @@ export function useMoveBlock(thread: BlockableThread): MoveBlock | null {
   // has not arrived: until it does, the thread counts as busy. A failed load cannot say either way, so it does not
   // block; the server's refusal then explains it in the dialog.
   const load = useBackgroundCommandLoad(thread.id);
-  const commandRunning = commandsOf(load)?.some((command) => command.status === "running") ?? false;
   const refreshing = useBackgroundCommandStore((state) => state.refreshing.has(thread.id));
-  const commandsUnknown = load.kind === "loading" || refreshing;
-  return moveBlockOf(activity.turnRunning, isAwaitingApproval(rowState), rowState.kind === "waiting" || commandRunning || commandsUnknown);
+  return moveBlockOf(activity.turnRunning, isAwaitingApproval(rowState), rowState.kind === "waiting" || commandsBlockMove(load, refreshing));
 }
 
-// Unlike useMoveBlock this cannot load a command list, so a list that has not arrived counts as nothing running;
-// the server's refusal then explains it.
+// If this client has not requested the list, the server can still explain a busy refusal.
 function readMoveBlock(thread: BlockableThread): MoveBlock | null {
   const preparing = thread.clientPreparing === true;
   const createFailed = thread.clientError != null;
   const activity = readThreadActivity(thread.id, { preparing, createFailed });
   const rowState = readThreadRowState(thread.id, preparing, createFailed);
-  const commandRunning = commandsOf(useBackgroundCommandStore.getState().loads.get(thread.id))?.some((command) => command.status === "running") ?? false;
-  return moveBlockOf(activity.turnRunning, isAwaitingApproval(rowState), rowState.kind === "waiting" || commandRunning);
+  const { loads, refreshing } = useBackgroundCommandStore.getState();
+  return moveBlockOf(activity.turnRunning, isAwaitingApproval(rowState), rowState.kind === "waiting" || commandsBlockMove(loads.get(thread.id), refreshing.has(thread.id)));
 }
 
 const BLOCK_STORES = [useThreadStore, threadAttentionStore, useThreadStartupStore, useWorkspaceStore, useBackgroundCommandStore] as const;
