@@ -67,7 +67,7 @@ async function fetchCommands(threadId: string): Promise<void> {
     reloadAfterRequest.delete(threadId);
     try {
       const commands = await getTransport().listBackgroundCommands(threadId);
-      setLoad(threadId, () => ({ kind: "ready", commands }));
+      if (!reloadAfterRequest.has(threadId)) setLoad(threadId, () => ({ kind: "ready", commands }));
     } catch {
       setLoad(threadId, (current) => {
         const commands = commandsOf(current);

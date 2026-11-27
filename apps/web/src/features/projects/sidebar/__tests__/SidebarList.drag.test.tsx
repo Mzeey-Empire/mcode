@@ -6,8 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackgroundCommand } from "@mcode/contracts/models/tool-call-record";
 import type { Thread } from "@/transport/types";
 
-// The background-command store subscribes to pushes; these tests send it none.
-vi.mock("@/transport", () => ({ getTransport: () => mockTransport, pushEmitter: { on: vi.fn(), off: vi.fn() } }));
+const pushes = vi.hoisted(() => new EventTarget());
+vi.mock("@/transport", () => ({
+  getTransport: () => mockTransport,
+  pushEmitter: {
+    on: (channel: string, receive: (payload: unknown) => void) => {
+      const listener = (event: Event) => { if (event instanceof CustomEvent) receive(event.detail); };
+      pushes.addEventListener(channel, listener);
+      return () => pushes.removeEventListener(channel, listener);
+    },
+    off: vi.fn(),
+  },
+}));
 
 // A real pointer drag runs through the real sensors and collision detection. The captured props also let the
 // project-reorder cases hand the list the drop event jsdom cannot produce, as ProjectSidebar.no-project.test does.
@@ -303,6 +313,27 @@ describe("SidebarList thread drag", () => {
       vi.mocked(mockTransport.listBackgroundCommands).mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
       return (commands) => act(async () => answer(commands));
     }
+
+    it.each([true, false])("waits for a list refreshed by a push before allowing a drag (running: %s)", async (running) => {
+      const initial = holdCommandList();
+      const refreshed = holdCommandList();
+      seed([LOOSE]);
+      await renderSidebar();
+      act(() => { pushes.dispatchEvent(new CustomEvent("backgroundCommand.changed", { detail: { threadId: LOOSE.id } })); });
+
+      await initial([]);
+      await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
+      const startedBeforeRefresh = dragging();
+      await release(POINTER_OFF_EVERYTHING);
+
+      const commands = running ? [createMockBackgroundCommand({ toolCallId: "sleep", status: "running", awaited: false })] : [];
+      await refreshed(commands);
+      await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
+      const startedAfterRefresh = dragging();
+      await release(POINTER_OFF_EVERYTHING);
+      expect(startedBeforeRefresh).toBe(false);
+      expect(startedAfterRefresh).toBe(!running);
+    });
 
     it("does not start a drag, and starts one once the list loads with nothing running", async () => {
       const load = holdCommandList();
