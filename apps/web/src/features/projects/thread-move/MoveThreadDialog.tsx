@@ -174,7 +174,8 @@ function MoveThreadDialog({ threadId, initialProjectId }: { threadId: string; in
   if (stale) return null;
   const { run } = newProject;
   if (run.kind === "git-failed" || run.kind === "git-started") return <GitFailedAlert threadTitle={thread.title} newProject={newProject} run={run} />;
-  return <MoveThreadDialogView title={thread.title} flow={flow} preflight={preflight} newProject={newProject} />;
+  const closeOnly = endsAtClose(run) || flow.failure?.unconfirmed === true;
+  return <MoveThreadDialogView title={thread.title} flow={flow} preflight={preflight} newProject={newProject} closeOnly={closeOnly} />;
 }
 
 interface GitFailedAlertProps {
@@ -205,6 +206,7 @@ interface MoveThreadDialogViewProps {
   readonly flow: MoveFlow;
   readonly preflight: MovePreflightState;
   readonly newProject: NewProjectMove;
+  readonly closeOnly: boolean;
 }
 
 const NEW_PROJECT_SLOT = "a new project";
@@ -212,7 +214,7 @@ const NEW_PROJECT_SLOT = "a new project";
 type TargetPicker = "workspace" | "target" | "baseBranch";
 type TargetPickerOpenChange = (picker: TargetPicker, open: boolean) => void;
 
-function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThreadDialogViewProps) {
+function MoveThreadDialogView({ title, flow, preflight, newProject, closeOnly }: MoveThreadDialogViewProps) {
   const headingId = useId();
   const [chooserOpen, setChooserOpen] = useState(false);
   const [openTargetPickers, setOpenTargetPickers] = useState<ReadonlySet<TargetPicker>>(() => new Set());
@@ -258,7 +260,7 @@ function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThread
               selectedWorkspaceId: picked?.id ?? null,
               onSelect: (workspace) => { setOpenTargetPickers(new Set()); flow.pick(workspace); },
               onOpenChange: setChooserOpen,
-              disabled: moving || endsAtClose(newProject.run) || flow.failure?.unconfirmed,
+              disabled: moving || closeOnly,
               newProject: {
                 selected: intoNewProject,
                 onSelect: () => { setOpenTargetPickers(new Set()); flow.chooseNewProject(); },
@@ -269,7 +271,7 @@ function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThread
         {intoNewProject
           ? <NewProjectBody newProject={newProject} preflight={preflight} moving={moving} nameFieldRef={nameFieldRef} />
           : <ExistingProjectBody picked={picked} flow={flow} preflight={preflight} onPickerOpenChange={onPickerOpenChange} />}
-        <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen} targetPickerOpen={openTargetPickers.size > 0} newProject={newProject} />
+        <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen} targetPickerOpen={openTargetPickers.size > 0} newProject={newProject} closeOnly={closeOnly} />
       </DialogContent>
     </Dialog>
   );
@@ -345,12 +347,17 @@ interface MoveFooterProps {
   readonly chooserOpen: boolean;
   readonly targetPickerOpen: boolean;
   readonly newProject: NewProjectMove;
+  readonly closeOnly: boolean;
 }
 
-function MoveFooter({ flow, preflight, chooserOpen, targetPickerOpen, newProject }: MoveFooterProps) {
-  if (flow.destination === "new-project") return <NewProjectFooter newProject={newProject} chooserOpen={chooserOpen} />;
+function MoveFooter({ closeOnly, newProject, ...existing }: MoveFooterProps) {
+  if (closeOnly) return <DialogFooter showCloseButton />;
+  if (existing.flow.destination === "new-project") return <NewProjectFooter newProject={newProject} chooserOpen={existing.chooserOpen} />;
+  return <ExistingProjectFooter {...existing} />;
+}
+
+function ExistingProjectFooter({ flow, preflight, chooserOpen, targetPickerOpen }: Omit<MoveFooterProps, "newProject" | "closeOnly">) {
   const { picked, moving, failure } = flow;
-  if (failure?.unconfirmed) return <DialogFooter showCloseButton />;
   const retrying = failure !== null && picked !== undefined;
   return (
     <DialogFooter>
@@ -367,15 +374,6 @@ function MoveFooter({ flow, preflight, chooserOpen, targetPickerOpen, newProject
 function NewProjectFooter({ newProject, chooserOpen }: { newProject: NewProjectMove; chooserOpen: boolean }) {
   const { run } = newProject;
   const moving = run.kind === "moving";
-  if (endsAtClose(run)) {
-    // Mcode finishes a pending rollback itself, and a move whose result is unknown must not start a second one, so
-    // there is nothing to try again from here.
-    return (
-      <DialogFooter>
-        <Button type="button" variant="outline" onClick={closeMoveThreadDialog}>Close</Button>
-      </DialogFooter>
-    );
-  }
   const retrying = run.kind === "failed";
   return (
     <DialogFooter>
