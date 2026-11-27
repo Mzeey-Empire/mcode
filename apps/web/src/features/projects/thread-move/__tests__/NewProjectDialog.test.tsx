@@ -319,6 +319,24 @@ describe("New project from this folder", () => {
     });
   });
 
+  describe("opening", () => {
+    it("focuses Name when there are no projects, because the form is the only task", async () => {
+      seed([HIDDEN]);
+      await openDialog();
+
+      await waitFor(() => expect(nameField()).toHaveFocus());
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    });
+
+    it("keeps focus off the project slot, so no ring is drawn and no tooltip opens over the thread title", async () => {
+      await openDialog();
+
+      await waitFor(() => expect(screen.getByRole("dialog", { name: /^Move to / })).toHaveFocus());
+      expect(screen.getByTestId("new-thread-project-slot")).not.toHaveFocus();
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    });
+  });
+
   describe("a move that does not finish cleanly", () => {
     it("names the project it could not move the folder to, not the Location, says nothing changed, and Try again sends the request again", async () => {
       const user = await openNewProject();

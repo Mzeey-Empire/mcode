@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type Ref } from "react";
 import { FolderInput, FolderPlus, GitBranch, InboxIcon, RotateCcw, Trash2 } from "lucide-react";
 import type { ThreadMovePreflight, ThreadMoveResult } from "@mcode/contracts/ws/methods";
 import type { Workspace } from "@mcode/contracts/models/workspace";
@@ -228,9 +228,16 @@ function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThread
   };
   const intoNewProject = flow.destination === "new-project";
   const picked = intoNewProject ? undefined : flow.picked;
+  const popupRef = useRef<HTMLDivElement>(null);
+  const nameFieldRef = useRef<HTMLInputElement>(null);
+  // With no project to pick, the form is the only task. Otherwise focus stays on the dialog itself: the first
+  // control is the project slot, and focusing it would draw its ring and open its tooltip over the thread title.
+  const initialFocus = () => (intoNewProject && !moving ? nameFieldRef.current : null) ?? popupRef.current ?? false;
   const moving = flow.moving || newProject.run.kind === "moving";
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !moving) closeMoveThreadDialog(); }}>
+        ref={popupRef}
+        initialFocus={initialFocus}
       <DialogContent
         aria-labelledby={headingId}
         aria-busy={moving || undefined}
@@ -262,7 +269,7 @@ function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThread
           />
         </DialogHeader>
         {intoNewProject
-          ? <NewProjectBody newProject={newProject} moving={moving} />
+          ? <NewProjectBody newProject={newProject} moving={moving} nameFieldRef={nameFieldRef} />
           : <ExistingProjectBody picked={picked} flow={flow} preflight={preflight} onPickerOpenChange={onPickerOpenChange} />}
         <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen || openTargetPickers.size > 0} newProject={newProject} />
       </DialogContent>
@@ -291,7 +298,7 @@ function ExistingProjectBody({ picked, flow, preflight, onPickerOpenChange }: {
  * The new project's form and what to tell the user around it, in the order the prototype stacks them: the fields,
  * then why the move waits, then how a failed move ended, then who else moves along.
  */
-function NewProjectBody({ newProject, moving }: { newProject: NewProjectMove; moving: boolean }) {
+function NewProjectBody({ newProject, moving, nameFieldRef }: { newProject: NewProjectMove; moving: boolean; nameFieldRef: Ref<HTMLInputElement> }) {
   const { run, values, sharers, busy } = newProject;
   const failure = run.kind === "failed" || run.kind === "rollback-pending" ? run : null;
   // When the only other thread is the busy one, its own notice already says everything the sharers notice would.
@@ -302,6 +309,7 @@ function NewProjectBody({ newProject, moving }: { newProject: NewProjectMove; mo
         <NewProjectForm
           values={values}
           initGit={newProject.initGit}
+          nameFieldRef={nameFieldRef}
           messages={newProject.messages}
           locked={moving}
           onChange={newProject.setValues}

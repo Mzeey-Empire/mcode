@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type Ref } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FieldError } from "@/components/ui/field-error";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,8 @@ interface NewProjectFormProps {
   readonly values: NewProjectValues;
   readonly initGit: boolean;
   readonly messages: FieldMessages;
+  /** Lets the dialog put focus in Name when it opens. */
+  readonly nameFieldRef?: Ref<HTMLInputElement>;
   /** Locks every control while the move runs. */
   readonly locked: boolean;
   readonly onChange: (values: NewProjectValues) => void;
@@ -17,7 +19,7 @@ interface NewProjectFormProps {
 }
 
 /** The new project's Name, Location and git choice. */
-export function NewProjectForm({ values, initGit, messages, locked, onChange, onInitGitChange }: NewProjectFormProps) {
+export function NewProjectForm({ values, initGit, messages, nameFieldRef, locked, onChange, onInitGitChange }: NewProjectFormProps) {
   const nameId = useId();
   const locationId = useId();
   const gitId = useId();
@@ -29,6 +31,7 @@ export function NewProjectForm({ values, initGit, messages, locked, onChange, on
         <Label htmlFor={nameId} className="text-caption text-muted">Name</Label>
         <Input
           id={nameId}
+          ref={nameFieldRef}
           size="compact"
           value={values.name}
           placeholder="Project name"
