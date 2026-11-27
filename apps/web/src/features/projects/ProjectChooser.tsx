@@ -107,7 +107,7 @@ export function ProjectChooser({ trigger, triggerTooltip, side = "bottom", pick 
         side={side}
         align={pick ? "center" : "start"}
         sideOffset={12}
-        className="flex w-[min(92vw,30rem)] flex-col gap-px p-[0.6rem]"
+        className={cn("flex flex-col gap-px p-[0.6rem]", newProjectHintShown(pick, projects) ? "w-[min(92vw,36rem)]" : "w-[min(92vw,30rem)]")}
       >
         {/* With no project to list, a search box would have nothing to search, so the new-project row stands alone. */}
         {newProjectStandsAlone(pick, projects) ? null : (
@@ -165,6 +165,14 @@ function ChooserList({ projects, selectedKey, query, onQueryChange, onSelect, pr
 /** Whether the new-project row is the whole chooser: a host that offers it, and no project to list beside it. */
 function newProjectStandsAlone(pick: ProjectChooserPick | undefined, projects: readonly Workspace[]): boolean {
   return pick?.newProject !== undefined && projects.length === 0;
+}
+
+/**
+ * Whether the new-project row carries its "Keeps the files" hint beside the projects. The label and the hint need
+ * more width than the project names do, so the popover widens rather than fading the label.
+ */
+function newProjectHintShown(pick: ProjectChooserPick | undefined, projects: readonly Workspace[]): boolean {
+  return pick?.newProject !== undefined && projects.length > 0;
 }
 
 /** The row to mark: the host's pick when it has one, otherwise where the new-thread composer already is. */
