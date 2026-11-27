@@ -16,6 +16,8 @@ import { useSidebarUiStore } from "../sidebar/sidebar-ui-store";
 import { isNoProjectWorkspace } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
+import { PreflightFailedNotice } from "./PreflightFailedNotice";
+import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMovePreflight";
 
 /** The global move dialog. It mounts once and opens for the thread {@link openMoveThreadDialog} names. */
 export function MoveThreadDialogHost() {
@@ -65,21 +67,6 @@ function describeException(error: unknown): MoveFailure {
 
 function formatRemovalDate(deadline: string): string {
   return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(new Date(deadline));
-}
-
-function useMovePreflight(threadId: string): ThreadMovePreflight | null {
-  const [preflight, setPreflight] = useState<ThreadMovePreflight | null>(null);
-  useEffect(() => {
-    let current = true;
-    getTransport().readThreadMovePreflight(threadId).then(
-      (read) => { if (current) setPreflight(read); },
-      // The read only decides whether the footer note shows, and the move itself rechecks everything, so a
-      // failed read leaves the note out rather than blocking the move.
-      () => { if (current) setPreflight(null); },
-    );
-    return () => { current = false; };
-  }, [threadId]);
-  return preflight;
 }
 
 interface MoveFlow {
@@ -145,13 +132,13 @@ function MoveThreadDialog({ threadId }: { threadId: string }) {
 interface MoveThreadDialogViewProps {
   readonly title: string;
   readonly flow: MoveFlow;
-  readonly preflight: ThreadMovePreflight | null;
+  readonly preflight: MovePreflightState;
 }
 
 function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewProps) {
   const headingId = useId();
   const [chooserOpen, setChooserOpen] = useState(false);
-  const { picked, moving, failure } = flow;
+  const { picked, moving } = flow;
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !moving) closeMoveThreadDialog(); }}>
       <DialogContent
@@ -175,26 +162,33 @@ function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewPr
             pick={{ selectedWorkspaceId: picked?.id ?? null, onSelect: flow.pick, onOpenChange: setChooserOpen, disabled: moving }}
           />
         </DialogHeader>
-        {picked || failure ? (
-          <div className="grid gap-4">
-            {picked ? <MoveTargetRail workspace={picked} /> : null}
-            {failure ? <Notice tone="error" title="Couldn't move the thread" detail={failure.detail} more={failure.raw ?? undefined} /> : null}
-          </div>
-        ) : null}
+        <MoveBody flow={flow} preflight={preflight} />
         <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; preflight: ThreadMovePreflight | null; chooserOpen: boolean }) {
+function MoveBody({ flow, preflight }: { flow: MoveFlow; preflight: MovePreflightState }) {
+  const { picked, failure } = flow;
+  if (!picked && !failure) return null;
+  return (
+    <div className="grid gap-4">
+      {picked ? <MoveTargetRail workspace={picked} /> : null}
+      {picked && preflight.read.status === "failed" ? <PreflightFailedNotice onRetry={preflight.retry} /> : null}
+      {failure ? <Notice tone="error" title="Couldn't move the thread" detail={failure.detail} more={failure.raw ?? undefined} /> : null}
+    </div>
+  );
+}
+
+function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; preflight: MovePreflightState; chooserOpen: boolean }) {
   const { picked, moving, failure } = flow;
   const retrying = failure !== null && picked !== undefined;
   return (
     <DialogFooter>
-      <FilesNote preflight={preflight} picked={picked !== undefined} />
+      <FilesNote preflight={preflightOf(preflight.read)} picked={picked !== undefined} />
       <Button type="button" variant="outline" disabled={moving} onClick={closeMoveThreadDialog}>Cancel</Button>
-      <Button type="button" loading={moving} disabled={picked === undefined || chooserOpen} onClick={flow.move}>
+      <Button type="button" loading={moving} disabled={picked === undefined || chooserOpen || preflight.read.status !== "ready"} onClick={flow.move}>
         {retrying ? <RotateCcw aria-hidden data-icon="inline-start" /> : <FolderInput aria-hidden data-icon="inline-start" />}
         {moving ? "Moving…" : retrying ? "Try again" : "Move thread"}
       </Button>

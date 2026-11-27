@@ -229,6 +229,60 @@ describe("MoveThreadDialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
+  describe("preflight read", () => {
+    it("keeps Move disabled until the read answers", async () => {
+      let answer: (preflight: ThreadMovePreflight) => void = () => {};
+      vi.mocked(mockTransport.readThreadMovePreflight).mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+      const user = await openDialog();
+      await pickProject(user, "alpha");
+
+      expect(moveButton()).toBeDisabled();
+
+      await act(async () => answer(noFiles()));
+      expect(moveButton()).toBeEnabled();
+    });
+
+    it("shows a notice and keeps Move disabled when the read fails, and Retry brings back the normal note", async () => {
+      vi.mocked(mockTransport.readThreadMovePreflight)
+        .mockRejectedValueOnce(new Error("socket closed"))
+        .mockResolvedValueOnce({ ...noFiles(), hasFiles: true });
+      const user = await openDialog();
+      await pickProject(user, "alpha");
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Couldn't check this thread's folder. Try again.");
+      expect(moveButton()).toBeDisabled();
+
+      await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+      expect(await screen.findByText(/^Old files deleted/)).toBeVisible();
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(moveButton()).toBeEnabled();
+      expect(mockTransport.moveThreadToProject).not.toHaveBeenCalled();
+    });
+
+    it("treats a null read, which the server gives for a thread that cannot move, as a failed one", async () => {
+      vi.mocked(mockTransport.readThreadMovePreflight).mockResolvedValue(null);
+      const user = await openDialog();
+      await pickProject(user, "alpha");
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't check this thread's folder.");
+      expect(moveButton()).toBeDisabled();
+    });
+
+    it("keeps the notice and Move disabled when Retry fails again", async () => {
+      vi.mocked(mockTransport.readThreadMovePreflight).mockRejectedValue(new Error("socket closed"));
+      const user = await openDialog();
+      await pickProject(user, "alpha");
+
+      await user.click(within(await screen.findByRole("alert")).getByRole("button", { name: "Retry" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't check this thread's folder.");
+      expect(mockTransport.readThreadMovePreflight).toHaveBeenCalledTimes(2);
+      expect(moveButton()).toBeDisabled();
+    });
+  });
+
   describe("old files note", () => {
     function filesPreflight(overrides: Partial<ThreadMovePreflight>): void {
       vi.mocked(mockTransport.readThreadMovePreflight).mockResolvedValue({ ...noFiles(), hasFiles: true, ...overrides });
