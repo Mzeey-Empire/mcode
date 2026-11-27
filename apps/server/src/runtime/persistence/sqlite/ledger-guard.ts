@@ -126,13 +126,18 @@ function sqliteCodeOf(error: unknown): string | null {
   return typeof error.code === "string" && error.code.startsWith("SQLITE_") ? error.code : null;
 }
 
+/** Whether another connection holds a lock needed by this SQLite operation. */
+export function isSQLiteBusyError(error: unknown): boolean {
+  const code = sqliteCodeOf(error);
+  return code === "SQLITE_BUSY" || code === "SQLITE_LOCKED";
+}
+
 /**
  * `database-busy` when another connection held the database past the busy timeout, else null.
  * `SQLITE_LOCKED` counts too: it is the same "someone else is using it right now" for a caller.
  */
 export function busyRefusalFor(error: unknown, databasePath: string): DatabaseStartupRefusal | null {
-  const code = sqliteCodeOf(error);
-  if (code !== "SQLITE_BUSY" && code !== "SQLITE_LOCKED") return null;
+  if (!isSQLiteBusyError(error)) return null;
   return new DatabaseStartupRefusal({ kind: "database-busy", databasePath }, { cause: error });
 }
 

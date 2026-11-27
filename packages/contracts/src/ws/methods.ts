@@ -219,7 +219,7 @@ export const ThreadMoveResultSchema = lazySchema(() => z.discriminatedUnion("sta
   z.object({ status: z.literal("busy"), reason: z.enum(["running", "needs-approval", "background"]) }),
   z.object({ status: z.literal("not-no-project") }),
   z.object({ status: z.literal("destination-missing") }),
-  z.object({ status: z.literal("failed"), error: z.string() }),
+  z.object({ status: z.literal("failed"), cause: z.enum(["database-busy", "other"]), error: z.string() }),
 ]));
 
 export type ThreadMoveResult = z.infer<ReturnType<typeof ThreadMoveResultSchema>>;

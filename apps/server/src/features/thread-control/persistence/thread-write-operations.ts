@@ -69,7 +69,7 @@ export const threadWriteOperations = {
     z.object({ status: z.literal("moved"), thread, marker: MessageSchema() }),
     z.object({ status: z.literal("not-no-project") }),
     z.object({ status: z.literal("destination-missing") }),
-    z.object({ status: z.literal("failed"), error: z.string() }),
+    z.object({ status: z.literal("failed"), cause: z.literal("other"), error: z.string() }),
   ])),
   updateTitle: booleanByPair("thread.updateTitle"),
   updateCompactSummary: databaseWriteOperation("thread.updateCompactSummary", z.tuple([z.string(), z.string()]), z.void()),

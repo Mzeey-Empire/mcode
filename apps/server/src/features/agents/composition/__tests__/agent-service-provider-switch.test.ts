@@ -582,6 +582,24 @@ describe("provider switch on send", () => {
     expect(await move()).toMatchObject({ status: "moved", thread: { workspace_id: project.id } });
   });
 
+  it.each([
+    ["SQLITE_BUSY", "database-busy"],
+    ["SQLITE_LOCKED", "database-busy"],
+    ["SQLITE_IOERR", "other"],
+  ])("reports a %s move write failure as %s", async (code, cause) => {
+    const { move, source } = await relocationFixture();
+    if (!databaseWriter) throw new Error("Expected a database writer");
+    const write = vi.spyOn(databaseWriter, "execute").mockRejectedValueOnce(
+      Object.assign(new Error("Move write failed"), { code }),
+    );
+    try {
+      expect(await move()).toMatchObject({ status: "failed", cause });
+      expect(thread().workspace_id).toBe(source.id);
+    } finally {
+      write.mockRestore();
+    }
+  });
+
   it("blocks an admission during the move and rejects the old placement prepared before it", async () => {
     const { project, move } = await relocationFixture({ gitBranch: "topic" });
     const availability = container.resolve(ProviderAvailabilityService);

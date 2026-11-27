@@ -1293,7 +1293,7 @@ export class ThreadStore {
       const project = workspaces.findById(destination.id);
       if (project?.kind !== "project") return { status: "destination-missing" as const };
       if (project.path !== destination.path || project.is_git_repo !== destination.is_git_repo) {
-        return { status: "failed" as const, error: "The destination project changed while the move was preparing." };
+        return { status: "failed" as const, cause: "other" as const, error: "The destination project changed while the move was preparing." };
       }
       this.orm.update(threads).set({
         workspaceId: project.id, mode: "direct", branch, checkoutState: "named",

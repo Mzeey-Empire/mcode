@@ -1,5 +1,6 @@
 import type { ThreadMoveInput, ThreadMoveResult } from "@mcode/contracts/ws/methods";
 import { broadcast } from "../../../application/transport/push.js";
+import { isSQLiteBusyError } from "../../../runtime/persistence/sqlite/ledger-guard.js";
 import type { BackgroundCommandStore } from "../../agents/background/background-command-store.js";
 import type { TurnRuntimeController } from "../../agents/orchestration/turn-runtime-controller.js";
 import type { AgentWorkload } from "../../agents/workload/agent-workload.js";
@@ -32,7 +33,11 @@ export class ThreadMoveService {
     try {
       return await this.moveReservedThread(threadId, workspaceId);
     } catch (error) {
-      return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+      return {
+        status: "failed",
+        cause: isSQLiteBusyError(error) ? "database-busy" : "other",
+        error: error instanceof Error ? error.message : String(error),
+      };
     } finally {
       this.reservations.release(threadId, token);
     }
@@ -46,7 +51,7 @@ export class ThreadMoveService {
     const project = this.workspaces.findById(workspaceId);
     if (project?.kind !== "project") return { status: "destination-missing" };
     const branch = project.is_git_repo ? await this.git.getCurrentBranchAt(project.path) : "main";
-    if (!branch) return { status: "failed", error: "The project root has no current branch" };
+    if (!branch) return { status: "failed", cause: "other", error: "The project root has no current branch" };
     if (this.backgroundCommands.list(threadId, { running: true }).length > 0
       || this.agentWorkload.backgroundSubagentThreadIds().has(threadId)) {
       return { status: "busy", reason: "background" };
