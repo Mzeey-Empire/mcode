@@ -150,6 +150,7 @@ describe("New project from this folder", () => {
       expect(screen.getByRole("button", { name: "Close dialog" })).toBeDisabled();
       expect(nameField()).toBeDisabled();
       expect(locationField()).toBeDisabled();
+      expect(screen.getByRole("checkbox", { name: "Start a git repo" })).toHaveAttribute("aria-disabled", "true");
 
       push(frame(2, { status: "created", workspaceId: HIDDEN.id }));
 

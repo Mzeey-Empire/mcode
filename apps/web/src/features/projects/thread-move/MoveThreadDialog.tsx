@@ -390,7 +390,8 @@ function NewProjectFooter({ newProject, chooserOpen }: { newProject: NewProjectM
   return (
     <DialogFooter>
       <Button type="button" variant="outline" disabled={moving} onClick={closeMoveThreadDialog}>Cancel</Button>
-      <Button type="button" loading={moving} disabled={!newProject.canCreate || chooserOpen} onClick={newProject.create}>
+      {/* While it runs the button is busy, not disabled: loading already blocks the click, and disabled would wash it out. */}
+      <Button type="button" loading={moving} disabled={!moving && (!newProject.canCreate || chooserOpen)} onClick={newProject.create}>
         {retrying ? <RotateCcw aria-hidden data-icon="inline-start" /> : <FolderPlus aria-hidden data-icon="inline-start" />}
         {moving ? (run.copy ? "Copying files…" : "Moving…") : retrying ? "Try again" : "Create project"}
       </Button>

@@ -63,8 +63,9 @@ export function NewProjectForm({ values, initGit, messages, nameFieldRef, locked
       </div>
       {locationNotice}
       <div className="flex items-center gap-2">
-        <Checkbox id={gitId} checked={initGit} aria-labelledby={`${gitId}-label`} onCheckedChange={(checked) => onInitGitChange(checked)} />
-        <Label id={`${gitId}-label`} htmlFor={gitId} className="text-body-small font-normal">Start a git repo</Label>
+        {/* base-ui's checkbox is not a native control, so the fieldset's disabled state does not reach it or its label. */}
+        <Checkbox id={gitId} checked={initGit} disabled={locked} aria-labelledby={`${gitId}-label`} onCheckedChange={(checked) => onInitGitChange(checked)} />
+        <Label id={`${gitId}-label`} htmlFor={gitId} className="text-body-small font-normal peer-data-[disabled]:opacity-50">Start a git repo</Label>
       </div>
     </fieldset>
   );
