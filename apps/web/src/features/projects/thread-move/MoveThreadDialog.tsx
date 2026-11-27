@@ -316,7 +316,6 @@ function failureNotices(newProject: NewProjectMove): { readonly underLocation: R
 
 /** The other threads the notice lists, or null when it would only repeat the busy notice. */
 function sharersToList({ sharers, busy }: NewProjectMove): NonNullable<NewProjectMove["sharers"]> | null {
-  // When the only other thread is the busy one, its own notice already says everything the sharers notice would.
   return sharers !== null && !(sharers.count === 1 && busy !== null && !busy.isOpenThread) ? sharers : null;
 }
 

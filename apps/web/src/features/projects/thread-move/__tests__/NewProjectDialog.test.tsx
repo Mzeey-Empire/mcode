@@ -44,12 +44,10 @@ function frame(revision: number, result?: WorkspaceMoveResult): WorkspaceMoveFra
 
 const MB = 1024 * 1024;
 
-/** A frame of a move that copies to another drive, with its counts in whole megabytes. */
 function copyingFrame(revision: number, copiedMb: number, totalMb = 48): WorkspaceMoveFrame {
   return { operationId: OPERATION, revision, phase: "copying", copiedBytes: copiedMb * MB, totalBytes: totalMb * MB };
 }
 
-/** The terminal frame of a copy that failed, as the server words it. */
 function copyFailedFrame(revision: number, failure: Partial<Extract<WorkspaceMoveResult, { status: "failed" }>> = {}): WorkspaceMoveFrame {
   return frame(revision, { status: "failed", error: "ENOSPC: no space left on device, copyfile 'bench.db'", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true, ...failure });
 }
@@ -848,7 +846,6 @@ describe("New project from this folder", () => {
       expect(createButton()).toHaveTextContent("Copying files…");
       expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
 
-      // Time passing is not progress: the bar waits for the server.
       vi.useFakeTimers();
       await vi.advanceTimersByTimeAsync(10_000);
       vi.useRealTimers();
@@ -920,7 +917,6 @@ describe("New project from this folder", () => {
 
       await openDialog();
 
-      // The lookup by thread shows 20 MB first; the status read by operation then reports the newer 35 MB.
       await waitFor(() => expect(copyBar()).toHaveAttribute("aria-valuetext", "35 of 48 MB"));
       expect(screen.getByRole("button", { name: "Copying files…" })).toBeVisible();
       expect(mockTransport.readWorkspaceMoveStatus).toHaveBeenNthCalledWith(1, { threadId: THREAD.id });
@@ -948,7 +944,6 @@ describe("New project from this folder", () => {
       await startMove(user);
       push(copyingFrame(2, 10));
       expect(copyBar()).toHaveAttribute("aria-valuetext", "10 of 48 MB");
-      // The terminal frame was pushed while the socket was down, so only a read can find it.
       vi.mocked(mockTransport.readWorkspaceMoveStatus).mockResolvedValue(copyFailedFrame(8));
 
       act(() => useConnectionStore.setState({ status: "reconnecting" }));
@@ -993,7 +988,6 @@ describe("New project from this folder", () => {
         ["any other failure", { kind: "other" }, "The folder couldn't be copied there", "Try again, or choose another location."],
         ["a file in use", { kind: "in-use" }, "Couldn't move the folder to sqlite-wal-vs-rollback", "Close any app using files in the folder, then try again."],
       ] as const)("words %s from its typed cause, not from the error text", async (_name, cause, title, advice) => {
-        // The raw error says nothing the title could be parsed from.
         await reachCopyFailure(copyFailedFrame(3, { error: "unexpected", cause }));
 
         const alert = screen.getByRole("alert");

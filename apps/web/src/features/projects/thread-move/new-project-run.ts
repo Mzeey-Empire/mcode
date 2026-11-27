@@ -13,7 +13,6 @@ export type FormRefusal =
   | { readonly kind: "field"; readonly problem: FieldProblem; readonly values: NewProjectValues }
   | { readonly kind: "busy"; readonly threadId: string; readonly reason: MoveBlock };
 
-/** How far the server has copied the folder to another drive. */
 export interface CopyProgress {
   readonly copiedBytes: number;
   readonly totalBytes: number;
@@ -25,10 +24,6 @@ export interface CopyProgress {
  */
 export type NewProjectRun =
   | { readonly kind: "form"; readonly refusal: FormRefusal | null }
-  /**
-   * `operationId` is null from the click until the server names the operation. `copy` is set once the server copies
-   * to another drive, and stays null for a rename on the same drive.
-   */
   | { readonly kind: "moving"; readonly operationId: string | null; readonly revision: number; readonly copy: CopyProgress | null }
   /**
    * `rolled-back`: the folder and the threads are back where they were. `unconfirmed`: the request never answered,
@@ -84,7 +79,6 @@ function copyOfFrame(frame: WorkspaceMoveFrame, previous: NewProjectRun | null):
   return { copiedBytes: previous.copy.totalBytes, totalBytes: previous.copy.totalBytes };
 }
 
-/** The cause a failure names. A receipt written before typed causes has none to name. */
 export const UNKNOWN_CAUSE: WorkspaceMoveFailureCause = { kind: "other" };
 
 /**

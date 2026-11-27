@@ -10,7 +10,6 @@ function megabytes(bytes: number, floor: number): number {
   return Math.max(floor, Math.round(bytes / BYTES_PER_MB));
 }
 
-/** The right-hand label, such as `31 of 48 MB`. */
 export function copyProgressLabel({ copiedBytes, totalBytes }: CopyProgress): string {
   const total = megabytes(totalBytes, totalBytes > 0 ? 1 : 0);
   const copied = Math.min(megabytes(copiedBytes, 0), total);
@@ -18,7 +17,6 @@ export function copyProgressLabel({ copiedBytes, totalBytes }: CopyProgress): st
 }
 
 function copiedPercent({ copiedBytes, totalBytes }: CopyProgress): number {
-  // An empty folder has nothing left to copy.
   if (totalBytes === 0) return 100;
   return Math.round(Math.min(copiedBytes / totalBytes, 1) * 100);
 }

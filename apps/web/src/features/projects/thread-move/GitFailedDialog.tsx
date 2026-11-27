@@ -39,7 +39,6 @@ export function GitFailedDialog({ threadTitle, projectName, projectPath, git, on
         {/* min-w-0 lets a long title fade at the dialog's edge instead of widening the dialog's grid column past the screen. */}
         <DialogHeader className="min-w-0 items-center text-center">
           <DialogTitle className="text-xl tracking-[-0.02em] text-ink">Project created</DialogTitle>
-          {/* A thread title is often a long prompt: it fades on one line, and the rest of the sentence wraps beside or below it. */}
           <DialogDescription className="flex max-w-full flex-wrap justify-center gap-x-1 text-body-small">
             <span className="max-w-full text-fade">“{threadTitle}”</span>{" "}
             <span>now runs in the {projectName} project.</span>
