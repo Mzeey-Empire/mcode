@@ -1007,7 +1007,9 @@ const copyCrashAfter: Partial<Record<CopyInterruptionPoint, (next: MoveCheckpoin
   "rollback-recorded": (next) => next.phase === "done" && next.result?.status === "failed",
 };
 
-function expectCopyInterrupted(f: Fixture, operationId: string, step: CopyInterruptionPoint, staging: string) {
+function expectCopyInterrupted(
+  f: Fixture, operationId: string, step: CopyInterruptionPoint, staging: string, copiedFiles: readonly string[],
+) {
   function expectRolledBackCopy(fenced: boolean) {
     expect(NodeFS.existsSync(staging)).toBe(false);
     expect(f.workspaces.hasUnfinishedMove(f.id)).toBe(fenced);
@@ -1019,7 +1021,11 @@ function expectCopyInterrupted(f: Fixture, operationId: string, step: CopyInterr
     },
     "staging-created": () => expect(NodeFS.readdirSync(staging)).toEqual([]),
     "marker-copied": () => expect(NodeFS.readdirSync(staging)).toEqual([NodePath.basename(markerPath(staging, operationId))]),
-    "mid-copy": () => expect(NodeFS.readFileSync(NodePath.join(staging, "first.txt"), "utf8")).toBe("copied first"),
+    "mid-copy": () => {
+      expect(copiedFiles).toHaveLength(1);
+      const [name] = copiedFiles;
+      expect(NodeFS.readFileSync(NodePath.join(staging, name), "utf8")).toBe(NodeFS.readFileSync(NodePath.join(f.source, name), "utf8"));
+    },
     "copy-finished": () => expect(f.readNotes(staging)).toBe("keep these files"),
     published: () => {
       expect(f.store.find(operationId)?.phase).toBe("copied");
@@ -1042,6 +1048,8 @@ describe("cross-drive move recovery", () => {
       throw new DatabaseWriteOutcomeUnknown(`Interrupted after ${step}`);
     }
     const platform = step === "claim-released" ? "linux" : process.platform;
+    // The copy follows readdir order, which Linux does not sort, so stop at whichever file comes second.
+    const copiedFiles: string[] = [];
     const { operationId } = await startCopy(f, {
       platform,
       claimDestination: async (path) => {
@@ -1049,10 +1057,12 @@ describe("cross-drive move recovery", () => {
         await NodeFSPromises.mkdir(path);
       },
       openCopyDestination: async (path, flags) => {
-        if (NodePath.basename(String(path)) === "notes.txt") {
-          if (step === "mid-copy") crash();
-          if (step === "rollback-copy-removed" || step === "rollback-recorded") throw errno("ENOSPC");
+        const name = NodePath.basename(String(path));
+        if (name === "first.txt" || name === "notes.txt") {
+          if (step === "mid-copy" && copiedFiles.length === 1) crash();
+          copiedFiles.push(name);
         }
+        if (name === "notes.txt" && (step === "rollback-copy-removed" || step === "rollback-recorded")) throw errno("ENOSPC");
         return NodeFSPromises.open(path, flags);
       },
       writer: {
@@ -1073,7 +1083,7 @@ describe("cross-drive move recovery", () => {
     await interrupted.promise;
     await vi.waitFor(() => expect(f.reservations.get(f.first.id)).toBeUndefined());
     const staging = NodePath.join(f.parent, `.mcode-copy-${operationId}`);
-    expectCopyInterrupted(f, operationId, step, staging);
+    expectCopyInterrupted(f, operationId, step, staging, copiedFiles);
     expect(NodeFS.existsSync(markerPath(f.source, operationId))).toBe(true);
     const unrelated = NodePath.join(f.parent, `.mcode-copy-${crypto.randomUUID()}`);
     NodeFS.mkdirSync(unrelated);
