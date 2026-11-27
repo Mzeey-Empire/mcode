@@ -200,6 +200,11 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.moveToProject, input);
   }
 
+  /** Recover the persisted result if the writer lost its move reply. */
+  findCommittedProjectMove(...input: Parameters<ThreadStore["findCommittedProjectMove"]>): ReturnType<ThreadStore["findCommittedProjectMove"]> {
+    return this.reader.findCommittedProjectMove(...input);
+  }
+
   /** Publish planning changes after their transaction has committed. */
   publishPlanPhase(threadId: string): void {
     this.attention?.invalidate(threadId);

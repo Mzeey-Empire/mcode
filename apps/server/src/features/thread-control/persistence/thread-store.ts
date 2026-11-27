@@ -28,6 +28,7 @@ import {
   canonicalAgentThreads,
   canonicalAgentTurns,
   cleanupJobs,
+  messages,
   pullRequestReviewLinks,
   threadStartups,
   threads,
@@ -1313,6 +1314,19 @@ export class ThreadStore {
       if (!updated) throw new Error(`Moved thread not found: ${id}`);
       return { status: "moved" as const, thread: updated, marker };
     })();
+  }
+
+  /** Read the placement and marker written by this move's transaction. */
+  findCommittedProjectMove(id: string, workspaceId: string, branch: string, timestamp: string) {
+    const thread = this.findById(id);
+    if (thread?.workspace_id !== workspaceId || thread.mode !== "direct" || thread.branch !== branch
+      || thread.worktree_path !== null) return undefined;
+    const row = this.orm.select({ id: messages.id }).from(messages)
+      .where(and(eq(messages.threadId, id), eq(messages.timestamp, timestamp), isNotNull(messages.threadMove)))
+      .orderBy(desc(messages.sequence)).get();
+    const marker = row && new MessageStore(this.db).findById(row.id);
+    if (marker?.threadMove?.target !== "local") return undefined;
+    return { status: "moved" as const, thread, marker };
   }
 
   /** Change planning progress only while Plan mode still owns the thread. */

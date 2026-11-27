@@ -16,6 +16,7 @@ import { resolveHandoffDir } from "@mcode/shared";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { mapRouteError } from "../../../../application/transport/ws-router.js";
+import * as push from "../../../../application/transport/push.js";
 import { ApplicationDatabaseWriter, DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
@@ -29,6 +30,7 @@ import { ThreadControlMutationReservationService } from "../../../thread-control
 import { ThreadMoveService } from "../../../thread-control/lifecycle/thread-move-service.js";
 import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
+import { threadWriteOperations } from "../../../thread-control/persistence/thread-write-operations.js";
 import { BackgroundCommandStore } from "../../background/background-command-store.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -837,6 +839,28 @@ describe("provider switch on send", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("publishes a committed Local move after the writer loses its reply", async () => {
+    const { move, project } = await relocationFixture();
+    if (!databaseWriter) throw new Error("Expected a database writer");
+    const execute = databaseWriter.execute.bind(databaseWriter);
+    const write = vi.spyOn(databaseWriter, "execute").mockImplementation(async (operation, input) => {
+      const result = await execute(operation, input);
+      if (operation.name === threadWriteOperations.moveToProject.name) {
+        throw new DatabaseWriteOutcomeUnknown("Move commit reply lost");
+      }
+      return result;
+    });
+    const broadcast = vi.spyOn(push, "broadcast");
+    onTestFinished(() => { write.mockRestore(); broadcast.mockRestore(); });
+
+    await expect(move()).resolves.toMatchObject({ status: "moved", thread: { workspace_id: project.id, mode: "direct" } });
+    expect(broadcast).toHaveBeenCalledWith("thread.movedToProject", expect.objectContaining({
+      threadId,
+      thread: expect.objectContaining({ workspace_id: project.id, mode: "direct" }),
+      marker: expect.objectContaining({ threadMove: { projectName: project.name, target: "local" } }),
+    }));
   });
 
   it.each([

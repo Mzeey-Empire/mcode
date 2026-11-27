@@ -59,7 +59,13 @@ export class ThreadMoveService {
       return { status: "busy", reason: "background" };
     }
     await this.runtime.evictThreadProviderSessions(threadId);
-    const result = await this.threads.moveToProject(threadId, project, branch, this.now().toISOString());
+    const now = this.now().toISOString();
+    const result = await this.threads.moveToProject(threadId, project, branch, now).catch((error: unknown) => {
+      if (!(error instanceof DatabaseWriteOutcomeUnknown)) throw error;
+      const committed = this.threads.findCommittedProjectMove(threadId, project.id, branch, now);
+      if (!committed) throw error;
+      return committed;
+    });
     if (result.status !== "moved") return result;
     broadcast("thread.movedToProject", { threadId, thread: result.thread, marker: result.marker });
     return { status: "moved", thread: result.thread };
