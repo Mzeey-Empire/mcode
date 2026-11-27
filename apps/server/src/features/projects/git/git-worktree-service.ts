@@ -38,7 +38,7 @@ type WorktreeCreationRequest = {
   name: string;
   path: string;
   repoPath: string;
-  options: { branchless?: boolean; baseRef?: string; startPoint?: string; exclusivePath?: boolean };
+  options: { branchless?: boolean; baseRef?: string; startPoint?: string; onPathClaimed?: () => Promise<void> };
 };
 
 type WorktreeRemovalRequest = {
@@ -93,7 +93,10 @@ export class GitWorktreeService {
     const request = this.createWorktreeRequest(repoPath, name, branchName, options);
     const createdBranch = await this.shouldCreateBranch(request);
     // Git accepts an existing empty directory. Claim a move's recorded path with mkdir first.
-    if (options.exclusivePath) await NodeFSPromises.mkdir(request.path);
+    if (options.onPathClaimed) {
+      await NodeFSPromises.mkdir(request.path);
+      await options.onPathClaimed();
+    }
     await this.createGitWorktree(request, createdBranch);
     return {
       name: request.name,
@@ -105,10 +108,11 @@ export class GitWorktreeService {
     };
   }
 
-  /** Remove a registered checkout only if its path and recorded Git identity still match. */
+  /** Remove a claimed checkout only if its path and recorded Git identity still match. */
   async removeProvisionedWorktree(
     repoPath: string | undefined, move: ProvisionedMoveCheckout,
-  ): Promise<"missing" | "unowned" | "removed"> {
+  ): Promise<"unclaimed" | "missing" | "unowned" | "removed"> {
+    if (!move.pathClaimed) return "unclaimed";
     const { worktreePath } = move;
     const entry = await statIfPresent(worktreePath);
     if (!entry) return "missing";
@@ -238,7 +242,7 @@ export class GitWorktreeService {
     validateBranchName(branch);
     if (options.baseRef) validateBranchName(options.baseRef);
     const path = NodePath.join(ensureManagedWorktreeBaseDir(repoPath), name);
-    if (!options.exclusivePath && NodeFS.existsSync(path)) throw new Error(`Worktree directory already exists: ${path}`);
+    if (!options.onPathClaimed && NodeFS.existsSync(path)) throw new Error(`Worktree directory already exists: ${path}`);
     return { branch, name, path, repoPath, options };
   }
 
@@ -375,7 +379,7 @@ function normalizeWorktreePath(path: string): string {
   return identityPath.replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
 }
 
-type ProvisionedMoveCheckout = { worktreePath: string; branch: string; detachedCommit: string | null };
+type ProvisionedMoveCheckout = { worktreePath: string; branch: string; detachedCommit: string | null; pathClaimed: boolean };
 
 function matchesProvisionedCheckout(output: string, { worktreePath, branch, detachedCommit }: ProvisionedMoveCheckout): boolean {
   const realPath = NodeFS.realpathSync.native(worktreePath);

@@ -24,7 +24,7 @@ import type { ThreadMovePlacement } from "../persistence/thread-write-operations
 
 type NewWorktreeSource = Extract<ThreadMoveInput["target"], { kind: "new-worktree" }>["source"];
 type NewWorktreePlacement = Extract<ThreadMovePlacement, { kind: "new-worktree" }>;
-type WorktreeRecord = Pick<ThreadMoveWorktree, "id" | "threadId" | "worktreePath" | "branch" | "detachedCommit">;
+type WorktreeRecord = Pick<ThreadMoveWorktree, "id" | "threadId" | "worktreePath" | "branch" | "detachedCommit" | "pathClaimed">;
 type CommittedMove = Extract<Awaited<ReturnType<ThreadRepo["moveToProject"]>>, { status: "moved" }>;
 
 /** Coordinates a move with the same reservation that guards turn admission. */
@@ -119,10 +119,17 @@ export class ThreadMoveService {
     const { branch, detachedCommit, options } = source.kind === "branch"
       ? { branch: source.baseBranch, detachedCommit: startPoint, options: { branchless: true, startPoint } }
       : { branch: source.branch, detachedCommit: null, options: { baseRef: startPoint } };
-    const move = { id: moveId, threadId, workspaceId: project.id, worktreePath, branch, detachedCommit };
-    await this.threads.recordMoveWorktree({ ...move, createdAt: this.now().toISOString() });
+    const plan = { id: moveId, threadId, workspaceId: project.id, worktreePath, branch, detachedCommit };
+    await this.threads.recordMoveWorktree({ ...plan, createdAt: this.now().toISOString() });
+    const move = { ...plan, pathClaimed: false };
     try {
-      await this.newWorktrees.checkouts.createWorktree(project.path, name, branch, { ...options, exclusivePath: true });
+      await this.newWorktrees.checkouts.createWorktree(project.path, name, branch, {
+        ...options,
+        onPathClaimed: async () => {
+          await this.threads.markMoveWorktreePathClaimed(moveId, this.now().toISOString());
+          move.pathClaimed = true;
+        },
+      });
       const placement: NewWorktreePlacement = {
         kind: "new-worktree", moveId, branch, worktreePath,
         source: source.kind === "pr"

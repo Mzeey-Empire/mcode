@@ -1357,10 +1357,18 @@ export class ThreadStore {
   }
 
   /** Persist the exact checkout that may need cleanup after interruption. */
-  recordMoveWorktree(move: Omit<ThreadMoveWorktree, "state" | "updatedAt">): void {
+  recordMoveWorktree(move: Omit<ThreadMoveWorktree, "pathClaimed" | "state" | "updatedAt">): void {
     this.orm.insert(threadMoveWorktrees).values({
       ...move, state: "provisioning", updatedAt: move.createdAt,
     }).run();
+  }
+
+  /** Record the exclusive directory claim before Git writes to the checkout. */
+  markMoveWorktreePathClaimed(id: string, now: string): void {
+    const result = runChanges(this.orm.update(threadMoveWorktrees)
+      .set({ pathClaimed: true, updatedAt: now })
+      .where(and(eq(threadMoveWorktrees.id, id), eq(threadMoveWorktrees.state, "provisioning"))));
+    if (result.changes !== 1) throw new Error("The move's worktree record is missing");
   }
 
   /** Read worktree moves that have yet to commit their thread binding. */
@@ -1383,6 +1391,7 @@ export class ThreadStore {
       .where(and(
         eq(threadMoveWorktrees.id, moveId), eq(threadMoveWorktrees.threadId, threadId),
         eq(threadMoveWorktrees.workspaceId, workspaceId), eq(threadMoveWorktrees.state, "provisioning"),
+        eq(threadMoveWorktrees.pathClaimed, true),
         eq(threadMoveWorktrees.worktreePath, worktreePath), eq(threadMoveWorktrees.branch, branch),
       )));
     if (bound.changes !== 1) throw new Error("The move's worktree record is missing");

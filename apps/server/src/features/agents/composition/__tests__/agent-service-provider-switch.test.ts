@@ -920,16 +920,21 @@ describe("provider switch on send", () => {
     expect(moveMarker()).toBeUndefined();
   });
 
-  it.each(["folder", "worktree"] as const)("fails provisioning and keeps a %s that arrives after recording", async (occupant) => {
+  it.each(["folder", "worktree", "matching detached worktree"] as const)("fails provisioning and keeps a %s that arrives after recording", async (occupant) => {
     const { source, project, move, threads } = await relocationFixture({ gitBranch: "main" });
     initRepository(project.path);
+    const commit = git(project.path, "rev-parse", "HEAD");
     const mkdir = NodeFSPromises.mkdir;
     let occupied: { id: string; worktreePath: string } | undefined;
     const claim = vi.spyOn(NodeFSPromises, "mkdir").mockImplementation(async (path, options) => {
       if (typeof path === "string" && NodePath.basename(path).startsWith("move-")) {
         const [plan] = threads.listProvisioningMoveWorktrees();
         if (plan?.worktreePath !== path) throw new Error("Checkout creation started before the move was recorded");
-        occupyMovePath(project.path, plan.worktreePath, occupant);
+        if (occupant === "matching detached worktree") {
+          git(project.path, "worktree", "add", "--detach", path, commit);
+        } else {
+          occupyMovePath(project.path, path, occupant);
+        }
         occupied = plan;
       }
       return mkdir(path, options);
@@ -942,7 +947,11 @@ describe("provider switch on send", () => {
     if (!occupied) throw new Error("The other owner did not claim the checkout path");
     expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
     expectNoMoveRecord(occupied.id);
-    expectMovePathOccupant(occupied.worktreePath, occupant);
+    if (occupant === "matching detached worktree") {
+      expect(git(occupied.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+    } else {
+      expectMovePathOccupant(occupied.worktreePath, occupant);
+    }
   });
 
   it.each(["folder", "file", "worktree", "foreign worktree", "absent"] as const)(
@@ -959,10 +968,24 @@ describe("provider switch on send", () => {
     },
   );
 
+  it("on restart preserves a matching detached checkout at an unclaimed path", async () => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const commit = git(project.path, "rev-parse", "HEAD");
+    const plan = await interruptedMove(threads, project, "main", commit);
+    git(project.path, "worktree", "add", "--detach", plan.worktreePath, commit);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+  });
+
   it("on restart removes an unbound checkout on the exact recorded path and branch", async () => {
     const { source, project, service, threads } = await relocationFixture({ gitBranch: "main" });
     initRepository(project.path);
     const plan = await interruptedMove(threads, project, "planned");
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
     git(project.path, "worktree", "add", "-b", plan.branch, plan.worktreePath, "main");
 
     await service().recoverInterruptedMoves();
@@ -977,6 +1000,7 @@ describe("provider switch on send", () => {
     const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
     initRepository(project.path);
     const plan = await interruptedMove(threads, project, "planned");
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
     git(project.path, "worktree", "add", "-b", plan.branch, plan.worktreePath, "main");
     const evidence = NodePath.join(plan.worktreePath, "uncommitted.txt");
     NodeFS.writeFileSync(evidence, "Keep my changes");
@@ -995,6 +1019,7 @@ describe("provider switch on send", () => {
     const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
     initRepository(project.path);
     const plan = await interruptedMove(threads, project, "main", git(project.path, "rev-parse", "HEAD"));
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
     if (!matchesCommit) {
       git(project.path, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "different checkout");
     }

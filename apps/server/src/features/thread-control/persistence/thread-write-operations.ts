@@ -96,6 +96,7 @@ export const threadWriteOperations = {
     id: z.string().uuid(), threadId: z.string(), workspaceId: z.string(),
     worktreePath: z.string(), branch: z.string(), detachedCommit: z.string().nullable(), createdAt: z.string().datetime(),
   })]), z.void()),
+  markMoveWorktreePathClaimed: databaseWriteOperation("thread.markMoveWorktreePathClaimed", z.tuple([z.string().uuid(), z.string().datetime()]), z.void()),
   deleteProvisioningMoveWorktree: databaseWriteOperation("thread.deleteProvisioningMoveWorktree", idInput, z.void()),
   updateTitle: booleanByPair("thread.updateTitle"),
   updateCompactSummary: databaseWriteOperation("thread.updateCompactSummary", z.tuple([z.string(), z.string()]), z.void()),

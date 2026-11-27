@@ -210,6 +210,11 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.recordMoveWorktree, input);
   }
 
+  /** Save proof that the move exclusively created its checkout directory. */
+  markMoveWorktreePathClaimed(...input: Parameters<ThreadStore["markMoveWorktreePathClaimed"]>): Promise<void> {
+    return this.writer.execute(threadWriteOperations.markMoveWorktreePathClaimed, input);
+  }
+
   listProvisioningMoveWorktrees() {
     return this.reader.listProvisioningMoveWorktrees();
   }
