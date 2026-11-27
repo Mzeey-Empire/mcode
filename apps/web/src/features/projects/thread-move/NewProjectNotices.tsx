@@ -51,6 +51,8 @@ export function ResultUnknownNotice() {
 export type FolderMoveFailure = Extract<NewProjectRun, { kind: "failed" | "rollback-pending" }>;
 
 type FailedMove = Extract<NewProjectRun, { kind: "failed" }>;
+type RolledBackMove = Extract<FailedMove, { outcome: "rolled-back" }>;
+type RollbackPendingMove = Extract<NewProjectRun, { kind: "rollback-pending" }>;
 
 function stillInNoProject(threadCount: number): string {
   return threadCount > 1 ? "the threads are still in No project" : "the thread is still in No project";
@@ -61,7 +63,7 @@ function unconfirmedDetail(threadCount: number): string {
 }
 
 /** What to do next, by what went wrong. Only a full drive names the drive. `copied` is whether the move copied to another drive. */
-function failureAdvice({ cause }: FailedMove, copied: boolean): string {
+function failureAdvice({ cause }: RolledBackMove, copied: boolean): string {
   switch (cause.kind) {
     case "no-space":
       return `Free up space on ${cause.drive} and try again, or choose another location.`;
@@ -80,7 +82,7 @@ function failureAdvice({ cause }: FailedMove, copied: boolean): string {
  * The title of a failed move. A full drive and a refused write are about the destination, so they say so, and say
  * "copied" only when a copy to another drive ran. A file in use is not about the destination, so it keeps the folder move's title.
  */
-function failedTitle({ cause, partialCopyRemoved }: FailedMove, folderMoveTitle: string): string {
+function failedTitle({ cause, partialCopyRemoved }: RolledBackMove, folderMoveTitle: string): string {
   const action = partialCopyRemoved === null ? "moved" : "copied";
   switch (cause.kind) {
     case "no-space":
@@ -105,12 +107,21 @@ function failedDetail(failure: FailedMove, threadCount: number): string {
   return `${kept}; Mcode removed the partial copy. ${failureAdvice(failure, true)}`;
 }
 
-function rollbackPendingDetail(folder: string | null): ReactNode {
+const ROLLBACK_RESTART = "The threads in this folder can't run until Mcode finishes; it will try again when it restarts.";
+
+/**
+ * A copy to another drive never moved the folder, so there is nothing to put back: what is left to undo is the copy
+ * at the destination. The marker's folder is not named then, because it may be the copy's own.
+ */
+function rollbackPendingDetail({ folder, partialCopyRemoved }: RollbackPendingMove): ReactNode {
+  if (partialCopyRemoved !== null) {
+    return <>Mcode couldn't remove the copy at the destination yet. Your files are still in the old folder. {ROLLBACK_RESTART}</>;
+  }
   return (
     <>
       Mcode couldn't put the folder back.{" "}
       {folder === null ? null : <>Your files are in <BreakablePath path={folder} className="text-ink" />. </>}
-      The threads in this folder can't run until Mcode finishes; it will try again when it restarts.
+      {ROLLBACK_RESTART}
     </>
   );
 }
@@ -127,6 +138,6 @@ interface MoveFailureNoticeProps {
 export function MoveFailureNotice({ failure, projectName, threadCount }: MoveFailureNoticeProps) {
   const folderMoveTitle = projectName === "" ? "Couldn't move the folder" : `Couldn't move the folder to ${projectName}`;
   const title = failure.kind === "failed" && failure.outcome === "rolled-back" ? failedTitle(failure, folderMoveTitle) : folderMoveTitle;
-  const detail = failure.kind === "failed" ? failedDetail(failure, threadCount) : rollbackPendingDetail(failure.folder);
+  const detail = failure.kind === "failed" ? failedDetail(failure, threadCount) : rollbackPendingDetail(failure);
   return <Notice tone="error" title={title} detail={detail} more={failure.error} />;
 }

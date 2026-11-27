@@ -26,20 +26,31 @@ export type NewProjectRun =
   | { readonly kind: "form"; readonly refusal: FormRefusal | null }
   | { readonly kind: "moving"; readonly operationId: string | null; readonly revision: number; readonly copy: CopyProgress | null }
   /**
-   * `rolled-back`: the folder and the threads are back where they were. `unconfirmed`: the request never answered,
-   * so the move may still have happened, and `cause` names nothing. `partialCopyRemoved` is set only when the move
-   * copied to another drive, so it is also what tells the dialog the move crossed drives; it says whether the
+   * `rolled-back`: the folder and the threads are back where they were. `partialCopyRemoved` is set only when the
+   * move copied to another drive, so it is also what tells the dialog the move crossed drives; it says whether the
    * partial copy is gone.
    */
   | {
     readonly kind: "failed";
     readonly error: string;
-    readonly outcome: "rolled-back" | "unconfirmed";
+    readonly outcome: "rolled-back";
     readonly cause: WorkspaceMoveFailureCause;
     readonly partialCopyRemoved: boolean | null;
   }
-  /** The rollback itself failed. `folder` holds the files, or is null when the server could not say where. */
-  | { readonly kind: "rollback-pending"; readonly operationId: string; readonly revision: number; readonly error: string; readonly folder: string | null }
+  /** The request never answered, so the move may still have happened and nothing says why it failed. */
+  | { readonly kind: "failed"; readonly error: string; readonly outcome: "unconfirmed" }
+  /**
+   * The rollback itself failed. `folder` holds the files, or is null when the server could not say where.
+   * `partialCopyRemoved` is non-null only for a copy to another drive, as for `failed`.
+   */
+  | {
+    readonly kind: "rollback-pending";
+    readonly operationId: string;
+    readonly revision: number;
+    readonly error: string;
+    readonly folder: string | null;
+    readonly partialCopyRemoved: boolean | null;
+  }
   /**
    * The status of a move that was started could not be read, and no frame arrived to say how it ended. Nothing is
    * known about where the thread is, so the user is sent to the sidebar rather than offered a retry that could
@@ -58,7 +69,8 @@ export type NewProjectRunAction =
   | { readonly type: "submitted" }
   | { readonly type: "reset" }
   | { readonly type: "refused"; readonly refusal: FormRefusal }
-  | { readonly type: "failed"; readonly error: string; readonly outcome: "rolled-back" | "unconfirmed"; readonly cause: WorkspaceMoveFailureCause }
+  | { readonly type: "failed"; readonly error: string; readonly outcome: "rolled-back"; readonly cause: WorkspaceMoveFailureCause }
+  | { readonly type: "failed"; readonly error: string; readonly outcome: "unconfirmed" }
   | { readonly type: "started"; readonly operationId: string }
   | { readonly type: "result-unreadable"; readonly operationId: string }
   | { readonly type: "frame"; readonly frame: WorkspaceMoveFrame }
@@ -69,8 +81,6 @@ export type NewProjectRunAction =
 function copyOfFrame({ copiedBytes, totalBytes }: WorkspaceMoveFrame): CopyProgress | null {
   return copiedBytes !== null && totalBytes !== null ? { copiedBytes, totalBytes } : null;
 }
-
-export const UNKNOWN_CAUSE: WorkspaceMoveFailureCause = { kind: "other" };
 
 /**
  * Whether a failed move is about where the user chose to put the project, so the dialog marks Location and puts the
@@ -103,7 +113,7 @@ function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
       return { kind: "git-failed", operationId: frame.operationId, workspaceId: result.workspaceId, error: result.error, retrying: false };
     case "failed":
       // A failure that carries `partialCopyRemoved` came from a copy; a rename on one drive never copies anything.
-      return { kind: "failed", error: result.error, outcome: "rolled-back", cause: result.cause ?? UNKNOWN_CAUSE, partialCopyRemoved: result.partialCopyRemoved ?? null };
+      return { kind: "failed", error: result.error, outcome: "rolled-back", cause: result.cause, partialCopyRemoved: result.partialCopyRemoved };
     case "rollback-pending":
       // The server records where the marker file is; the files are in the folder that holds it.
       return {
@@ -112,6 +122,7 @@ function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
         revision: frame.revision,
         error: result.error,
         folder: result.markerPath === null ? null : dirname(result.markerPath),
+        partialCopyRemoved: result.partialCopyRemoved,
       };
     default:
       throw new Error(`Unhandled move result: ${result satisfies never}`);
@@ -183,6 +194,13 @@ function followUp(run: NewProjectRun, action: FollowUpAction): NewProjectRun {
   }
 }
 
+/** A request that failed before any frame arrived copied nothing, so `partialCopyRemoved` is null. */
+function runOfRequestFailure(action: Extract<NewProjectRunAction, { type: "failed" }>): NewProjectRun {
+  return action.outcome === "unconfirmed"
+    ? { kind: "failed", error: action.error, outcome: "unconfirmed" }
+    : { kind: "failed", error: action.error, outcome: "rolled-back", cause: action.cause, partialCopyRemoved: null };
+}
+
 function respond(run: NewProjectRun, action: Exclude<NewProjectRunAction, FollowUpAction>): NewProjectRun {
   switch (action.type) {
     case "submitted":
@@ -192,7 +210,7 @@ function respond(run: NewProjectRun, action: Exclude<NewProjectRunAction, Follow
     case "refused":
       return { kind: "form", refusal: action.refusal };
     case "failed":
-      return { kind: "failed", error: action.error, outcome: action.outcome, cause: action.cause, partialCopyRemoved: null };
+      return runOfRequestFailure(action);
     case "started":
       return run.kind === "moving" && run.operationId === null ? { ...run, operationId: action.operationId } : run;
   }

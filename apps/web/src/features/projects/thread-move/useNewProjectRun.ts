@@ -5,7 +5,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { getTransport, pushEmitter } from "@/transport";
 import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import { describeFieldRefusal, type NewProjectValues } from "./new-project-fields";
-import { FORM_RUN, UNKNOWN_CAUSE, followedOperation, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "./new-project-run";
+import { FORM_RUN, followedOperation, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "./new-project-run";
 
 function subscribeToMoveFrames(onFrame: (frame: WorkspaceMoveFrame) => void): () => void {
   return pushEmitter.on("workspace.move.progress", (data) => {
@@ -161,8 +161,8 @@ async function requestCreation(threadId: string, values: NewProjectValues, initG
     const problem = describeFieldRefusal(result.error, values);
     return problem
       ? { type: "refused", refusal: { kind: "field", problem, values } }
-      : { type: "failed", error: result.error, outcome: "rolled-back", cause: result.cause ?? UNKNOWN_CAUSE };
+      : { type: "failed", error: result.error, outcome: "rolled-back", cause: result.cause };
   } catch (error) {
-    return { type: "failed", error: rpcFailureMessage(error), outcome: "unconfirmed", cause: UNKNOWN_CAUSE };
+    return { type: "failed", error: rpcFailureMessage(error), outcome: "unconfirmed" };
   }
 }

@@ -1005,6 +1005,18 @@ describe("New project from this folder", () => {
         expect(alert).not.toHaveTextContent("write to");
       });
 
+      it("says the copy at the destination is what is left, not the folder, when the rollback of a copy failed", async () => {
+        await reachCopyFailure(frame(3, {
+          status: "rollback-pending", error: "EBUSY: resource busy or locked", cause: { kind: "in-use" },
+          markerPath: "/home/.mcode/no-project/a/.mcode-move.json", partialCopyRemoved: false,
+        }));
+
+        const alert = screen.getByRole("alert");
+        expect(alert).toHaveTextContent("Mcode couldn't remove the copy at the destination yet. Your files are still in the old folder. The threads in this folder can't run until Mcode finishes; it will try again when it restarts.");
+        expect(alert).not.toHaveTextContent("put the folder back");
+        expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+      });
+
       it("keeps ticket 08's layout for a failure on the same drive: Location is not in error and the notice follows the git checkbox", async () => {
         await reachCopyFailure(frame(3, { status: "failed", error: "EBUSY: resource busy or locked", cause: { kind: "in-use" }, partialCopyRemoved: null }));
 

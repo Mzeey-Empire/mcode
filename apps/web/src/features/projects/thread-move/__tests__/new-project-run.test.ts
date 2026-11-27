@@ -82,6 +82,12 @@ describe("newProjectRunReducer", () => {
     expect(pending).toMatchObject({ kind: "rollback-pending", error: "EPERM", folder });
   });
 
+  it.each([null, false])("keeps whether a copy was involved when the rollback fails (%s)", (partialCopyRemoved) => {
+    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath: null, cause: { kind: "permission" }, partialCopyRemoved }) });
+
+    expect(pending).toMatchObject({ kind: "rollback-pending", partialCopyRemoved });
+  });
+
   it("draws the bar from each frame's own byte counts, through the published and converted frames", () => {
     const copying = run(...STARTED, { type: "frame", frame: copyFrame(2, "copying", { copied: 30, total: 100 }) });
     expect(copying).toMatchObject({ kind: "moving", copy: { copiedBytes: 30, totalBytes: 100 } });
@@ -163,8 +169,9 @@ describe("failureIsAboutLocation", () => {
   });
 
   it("says nothing about a field when the request never answered", () => {
-    const unconfirmed = run({ type: "failed", error: "socket closed", outcome: "unconfirmed", cause: { kind: "permission" } });
+    const unconfirmed = run({ type: "failed", error: "socket closed", outcome: "unconfirmed" });
 
+    expect(unconfirmed).toEqual({ kind: "failed", error: "socket closed", outcome: "unconfirmed" });
     expect(unconfirmed.kind === "failed" && failureIsAboutLocation(unconfirmed)).toBe(false);
   });
 });
