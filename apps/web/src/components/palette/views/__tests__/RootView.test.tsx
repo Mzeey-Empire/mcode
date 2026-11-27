@@ -92,14 +92,20 @@ describe("RootView", () => {
     expect(screen.queryByText("Implement v2")).toBeNull();
   });
 
-  it("lists Move thread to project as a quick action and runs it", async () => {
+  it("lists Move thread to project first among the quick actions and runs it", async () => {
     mocks.palette.query = "";
     const open = vi.fn();
+    // Registered after New thread, so only the quick action order can put it first.
+    registerCommand({ id: "thread.new", title: "New thread", category: "Thread", handler: () => undefined });
     registerCommand({ id: "thread.moveToProject", title: "Move thread to project…", category: "Thread", handler: open });
 
     render(<RootView />);
 
     const quick = screen.getByRole("region", { name: "Quick actions" });
+    expect(within(quick).getAllByRole("button").map((item) => item.textContent)).toEqual([
+      expect.stringMatching(/^Move thread to project…/),
+      expect.stringMatching(/^New thread/),
+    ]);
     fireEvent.click(within(quick).getByRole("button", { name: "Move thread to project…" }));
     await waitFor(() => expect(open).toHaveBeenCalledTimes(1));
   });

@@ -30,16 +30,19 @@ const ROOT_HINTS: readonly PaletteHint[] = [
   ...PALETTE_LIST_HINTS,
 ];
 
-const QUICK_ACTION_IDS = new Set([
+// Listed in this order. Move thread to project leads: it acts on the open thread, and it is only registered
+// while that thread can move, so it never pushes the general actions down for other threads.
+const QUICK_ACTION_ORDER = [
+  "thread.moveToProject",
   "thread.new",
   "thread.newNoProject",
   "thread.search",
-  "thread.moveToProject",
   "workspace.new",
   "terminal.toggle",
   "settings.open",
   "shortcuts.help",
-]);
+];
+const quickActionRank = (id: string) => QUICK_ACTION_ORDER.indexOf(id);
 
 /**
  * Default root view of the command palette.
@@ -77,7 +80,7 @@ export function RootView() {
 
     const visibleCommands = actionOnly || effectiveQuery
       ? commands
-      : commands.filter((cmd) => QUICK_ACTION_IDS.has(cmd.id));
+      : commands.filter((cmd) => quickActionRank(cmd.id) >= 0).sort((a, b) => quickActionRank(a.id) - quickActionRank(b.id));
 
     const actionItems = visibleCommands.map((cmd) => {
       const binding = getKeybindingForCommand(cmd.id);
