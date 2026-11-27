@@ -29,8 +29,17 @@ const manifestEntries = z.array(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("link"), path: relativePath, inode, copyInode: inode, target: z.string() }),
 ]));
 
+const copyRoot = z.object({ inode, device: inode, atime: z.number(), mtime: z.number() });
+const copyManifest = z.union([
+  z.object({ entries: manifestEntries, root: copyRoot.nullable() }),
+  manifestEntries.transform((entries) => ({ entries, root: null })),
+]);
+
 /** Copy evidence for each entry at its original path and manifest index. */
 export type WorkspaceMoveManifest = z.infer<typeof manifestEntries>;
+
+/** Copy evidence and root metadata available after an interrupted publication. */
+export type WorkspaceMoveCopyManifest = z.infer<typeof copyManifest>;
 
 const intent = z.object({
   id: z.string().uuid(),
@@ -56,7 +65,7 @@ const checkpoint = sourceCleanup.extend({
   copiedBytes: z.number().int().nonnegative().optional(),
   totalBytes: z.number().int().nonnegative().optional(),
   sourceRetainUntil: z.string().datetime().optional(),
-  manifest: manifestEntries.optional(),
+  manifest: copyManifest.optional(),
 });
 const placement = z.object({
   isGitRepo: z.boolean(), branch: z.string(),
@@ -116,10 +125,10 @@ export class WorkspaceMoveStore {
       NodePath.relative(path, source) === "" || (tombstone !== null && NodePath.relative(path, tombstone) === ""));
   }
 
-  readManifest(id: string): WorkspaceMoveManifest | null {
+  readManifest(id: string): WorkspaceMoveCopyManifest | null {
     const stored = this.orm.select({ entries: workspaceMoveManifests.entries }).from(workspaceMoveManifests)
       .where(eq(workspaceMoveManifests.moveId, id)).get();
-    const parsed = manifestEntries.safeParse(stored?.entries);
+    const parsed = copyManifest.safeParse(stored?.entries);
     return parsed.success ? parsed.data : null;
   }
 

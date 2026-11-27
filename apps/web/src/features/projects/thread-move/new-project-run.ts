@@ -47,7 +47,7 @@ export type NewProjectRun =
     readonly revision: number;
     readonly error: string;
     readonly folder: string | null;
-    readonly crossDrive: boolean;
+    readonly copyPath: string | null;
   }
   /**
    * The status of a move that was started could not be read, and no frame arrived to say how it ended. Nothing is
@@ -119,7 +119,7 @@ function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
         revision: frame.revision,
         error: result.error,
         folder: result.markerPath === null ? null : dirname(result.markerPath),
-        crossDrive: result.crossDrive,
+        copyPath: result.copyPath,
       };
     default:
       throw new Error(`Unhandled move result: ${result satisfies never}`);

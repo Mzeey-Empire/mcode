@@ -54,7 +54,7 @@ export const WorkspaceMoveResultSchema = lazySchema(() => z.discriminatedUnion("
   }),
   z.object({
     status: z.literal("rollback-pending"), error: z.string(), cause: WorkspaceMoveFailureCauseSchema(),
-    markerPath: z.string().nullable(), crossDrive: z.boolean(),
+    markerPath: z.string().nullable(), copyPath: z.string().nullable(),
   }),
 ]));
 

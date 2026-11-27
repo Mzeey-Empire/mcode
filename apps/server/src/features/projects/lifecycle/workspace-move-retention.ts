@@ -154,7 +154,7 @@ async function stageAndDeleteEntries(
       await assertRecordedParent(path);
       await renameWorkspaceFolder(path, slot, options);
     } catch (error) {
-      if (error instanceof DatabaseWriteOutcomeUnknown || isMoveRenameBlocked(error)) throw error;
+      if (error instanceof DatabaseWriteOutcomeUnknown || isMoveRenameBlocked(error, options.platform)) throw error;
       throw new KeepFolder(`Could not stage ${entry.path}: ${moveError(error)}`);
     }
     await deleteStagedEntry(slot, path, entry, options);

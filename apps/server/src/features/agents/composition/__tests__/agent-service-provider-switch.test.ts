@@ -1306,7 +1306,7 @@ describe("provider switch on send", () => {
       phase: "intent", cleanup: "kept", error: "rollback needs a retry",
       result: {
         status: "rollback-pending", error: "rollback needs a retry", markerPath: null,
-        cause: { kind: "other" }, crossDrive: false,
+        cause: { kind: "other" }, copyPath: null,
       },
     }, MOVE_AT, undefined]);
     await expect(send(claude, "Continue the work")).rejects.toMatchObject({ reason: "pending_mutation" });

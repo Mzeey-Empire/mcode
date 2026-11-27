@@ -1,3 +1,4 @@
+import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -32,7 +33,7 @@ export async function renameWorkspaceFolder(
       await rename(source, destination);
       return;
     } catch (error) {
-      if (!isMoveRenameBlocked(error)) throw error;
+      if (!isMoveRenameBlocked(error, platform)) throw error;
     }
     await sleep(delay);
   }
@@ -47,8 +48,8 @@ export async function renameWorkspaceFolder(
 }
 
 /** Recognize a blocked rename before or after Windows handle retries. */
-export function isMoveRenameBlocked(error: unknown): boolean {
-  return error instanceof WindowsRenameInUse || WINDOWS_RENAME_RETRY_CODES.has(moveErrorCode(error));
+export function isMoveRenameBlocked(error: unknown, platform: NodeJS.Platform): boolean {
+  return platform === "win32" && (error instanceof WindowsRenameInUse || WINDOWS_RENAME_RETRY_CODES.has(moveErrorCode(error)));
 }
 
 export function moveError(error: unknown): string {
@@ -211,14 +212,33 @@ export async function removeMoveClaim(folder: string, moveId: string): Promise<v
   }
 }
 
-/** Remove an owned copy with the marker still available if removing its contents fails. */
-export async function removeMoveCopy(folder: string, moveId: string): Promise<void> {
+/** Remove owned unpublished staging with the marker still available if removing its contents fails. */
+export async function removeMoveCopy(folder: string, moveId: string, platform: NodeJS.Platform): Promise<void> {
   if (!holdsMoveMarker(await inspectMoveFolder(folder, moveId))) throw new Error(`Copy does not hold its move marker: ${folder}`);
+  if (platform !== "win32") await makeStagingDirectoriesWritable(folder);
   const marker = NodePath.basename(markerPath(folder, moveId));
   for (const name of await NodeFSPromises.readdir(folder)) {
     if (name !== marker) await NodeFSPromises.rm(NodePath.join(folder, name), { recursive: true, force: true });
   }
   await removeMoveClaim(folder, moveId);
+}
+
+async function makeStagingDirectoriesWritable(folder: string): Promise<void> {
+  const entry = await lstatRecordedFolder(folder);
+  if (!entry?.isDirectory()) return;
+  const mode = Number(entry.mode) & 0o7777;
+  if ((mode & 0o700) !== 0o700) {
+    const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = NodeFS.constants;
+    const directory = await NodeFSPromises.open(folder, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    try {
+      await directory.chmod(mode | 0o700);
+    } finally {
+      await directory.close();
+    }
+  }
+  for (const child of await NodeFSPromises.readdir(folder, { withFileTypes: true })) {
+    if (child.isDirectory()) await makeStagingDirectoriesWritable(NodePath.join(folder, child.name));
+  }
 }
 
 /** Write the ownership marker exclusively before renaming either directory. */

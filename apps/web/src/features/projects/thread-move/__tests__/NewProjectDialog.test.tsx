@@ -437,7 +437,7 @@ describe("New project from this folder", () => {
       await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
       await startMove(user);
 
-      push(frame(3, { status: "rollback-pending", error: "EPERM: operation not permitted", markerPath: "/home/.mcode/no-project/a/.mcode-move.json", cause: { kind: "permission" }, crossDrive: false }));
+      push(frame(3, { status: "rollback-pending", error: "EPERM: operation not permitted", markerPath: "/home/.mcode/no-project/a/.mcode-move.json", cause: { kind: "permission" }, copyPath: null }));
 
       const alert = await screen.findByRole("alert");
       expect(alert).toHaveTextContent("Mcode couldn't put the folder back. Your files are in /home/.mcode/no-project/a.");
@@ -996,12 +996,15 @@ describe("New project from this folder", () => {
         expect(alert).toHaveTextContent(`Your files are still in the old folder and the threads are still in No project; Mcode removed the partial copy. ${advice}`);
       });
 
-      it("names the destination and explains why Mcode kept the published copy", async () => {
+      it("names the kept copy after a lost project name race", async () => {
         const path = "D:/projects/sqlite-wal-vs-rollback";
-        await reachCopyFailure(copyFailedFrame(3, { cause: { kind: "permission" }, copy: { kind: "kept", path } }));
+        await reachCopyFailure(copyFailedFrame(3, {
+          cause: { kind: "other" }, error: "A project with this name already exists", copy: { kind: "kept", path },
+        }));
 
         const alert = screen.getByRole("alert");
         expect(alert).toBeVisible();
+        expect(within(alert).getByText("Couldn't create the project")).toBeVisible();
         expect(alert).toHaveTextContent(`Mcode kept the copy at ${path} because something in it changed after copying. Your files are still in the old folder. Delete the copy yourself if you don't need it.`);
         expect(alert).not.toHaveTextContent("when it restarts");
       });
@@ -1016,14 +1019,15 @@ describe("New project from this folder", () => {
         expect(alert).not.toHaveTextContent("when it restarts");
       });
 
-      it("says the copy at the destination is what is left, not the folder, when the rollback of a copy failed", async () => {
+      it("names the blocked staging copy in the rollback notice", async () => {
+        const path = "D:/projects/.mcode-copy-op-1";
         await reachCopyFailure(frame(3, {
           status: "rollback-pending", error: "EBUSY: resource busy or locked", cause: { kind: "in-use" },
-          markerPath: "/home/.mcode/no-project/a/.mcode-move.json", crossDrive: true,
+          markerPath: "/home/.mcode/no-project/a/.mcode-move.json", copyPath: path,
         }));
 
         const alert = screen.getByRole("alert");
-        expect(alert).toHaveTextContent("Mcode couldn't remove the copy at the destination yet. Your files are still in the old folder. The threads in this folder can't run until Mcode finishes; it will try again when it restarts.");
+        expect(alert).toHaveTextContent(`Mcode couldn't remove the copy at ${path} yet. Your files are still in the old folder. The threads in this folder can't run until Mcode finishes; it will try again when it restarts.`);
         expect(alert).not.toHaveTextContent("put the folder back");
         expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
       });

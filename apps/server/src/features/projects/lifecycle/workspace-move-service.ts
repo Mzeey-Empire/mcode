@@ -1,4 +1,5 @@
 import * as NodeCrypto from "node:crypto";
+import type * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import type {
@@ -20,7 +21,7 @@ import type { GitExecutor } from "../git/execution/index.js";
 import { workspaceMoveWrites, type WorkspaceMove, type WorkspaceMoveStore } from "../persistence/workspace-move-store.js";
 import type { WorkspaceRepo } from "../persistence/workspace-repo.js";
 import { noProjectRetentionDeadline } from "../persistence/workspace-store.js";
-import { copyWorkspaceFolder } from "./workspace-move-copy.js";
+import { copyWorkspaceFolder, restoreCopyRootTimes } from "./workspace-move-copy.js";
 import {
   assertRecordedParent, holdsMoveMarker, inspectMoveFolder, markerPath, moveError, moveErrorCode, moveFailureCause,
   removeMoveClaim, removeMoveCopy, removeMoveMarker, renameWorkspaceFolder, resolveWorkspaceMovePaths, writeMoveMarker,
@@ -34,6 +35,7 @@ type Receipt = Parameters<WorkspaceMoveStore["advance"]>[2];
 type RollbackAction = "rename-back" | "remove-claim" | "finish";
 type MoveFailure = { error: string; cause: WorkspaceMoveFailureCause };
 type LiveMove = { claimedDestination: boolean; createdStaging: boolean; crossDrive: boolean };
+type RollbackPaths = { markerPath: string | null; copyPath: string | null };
 
 // Intent and renamed use the same observations because the phase write can lag the rename.
 const rollbackActions: Partial<Record<MoveFolderState, Partial<Record<MoveFolderState, RollbackAction>>>> = {
@@ -76,6 +78,11 @@ const copyRollbackByPhase: Partial<Record<WorkspaceMove["phase"], CopyRollbackTa
 
 function observedStaging(staging: MoveFolderState, live?: LiveMove): MoveFolderState {
   return live && !live.createdStaging && staging !== "missing" ? "foreign" : staging;
+}
+
+function copyRollbackPhase(move: WorkspaceMove): WorkspaceMove["phase"] {
+  // An interrupted staged delete must finish even if publication was not checkpointed.
+  return move.deleteStagingStarted ? "published" : move.phase;
 }
 
 function copyRollbackAction(
@@ -235,7 +242,7 @@ export class WorkspaceMoveService {
     const checkpoint = (next: Parameters<WorkspaceMoveStore["sourceCleanup"]>[1]) =>
       this.deps.writer.execute(workspaceMoveWrites.sourceCleanup, [move.id, next, now]);
     const outcome = await cleanRetainedMoveSource({
-      move, options: this.deps, checkpoint, readManifest: () => this.deps.store.readManifest(move.id),
+      move, options: this.deps, checkpoint, readManifest: () => this.deps.store.readManifest(move.id)?.entries ?? null,
     });
     await checkpoint({ ...outcome, cleanupError: "cleanupError" in outcome ? outcome.cleanupError : null });
     if (outcome.cleanup !== "done") {
@@ -342,8 +349,9 @@ export class WorkspaceMoveService {
     let converted: ReturnType<WorkspaceMoveStore["convert"]>;
     try {
       await this.closeFolderUsers(intent.workspaceId, intent.sourcePath, reservations);
+      const sourceRoot = this.deps.platform === "win32" ? null : await NodeFSPromises.lstat(intent.sourcePath, { bigint: true });
       await writeMoveMarker(intent.sourcePath, intent.id);
-      await this.moveFolder(intent, live);
+      await this.moveFolder(intent, live, sourceRoot);
       const git = await this.gitPlacement(intent.destinationPath);
       converted = await this.deps.writer.execute(workspaceMoveWrites.convert, [intent.id, git ?? { isGitRepo: false, branch: "main" }, this.now()]);
     } catch (error) {
@@ -357,14 +365,14 @@ export class WorkspaceMoveService {
     await this.finishConverted(move, converted);
   }
 
-  private async moveFolder(move: WorkspaceMove, live: LiveMove): Promise<void> {
+  private async moveFolder(move: WorkspaceMove, live: LiveMove, sourceRoot: NodeFS.BigIntStats | null): Promise<void> {
     await this.preparePublication(move.sourcePath, move, live);
     try {
       await renameWorkspaceFolder(move.sourcePath, move.destinationPath, this.deps);
     } catch (error) {
       if (moveErrorCode(error) !== "EXDEV") throw error;
       live.crossDrive = true;
-      await this.copyFolder(move, live);
+      await this.copyFolder(move, live, sourceRoot);
       return;
     }
     await this.save(move, { phase: "renamed" });
@@ -386,7 +394,7 @@ export class WorkspaceMoveService {
     if (!holdsMoveMarker(await inspectMoveFolder(source, move.id))) throw new Error("The folder to publish lost its move marker");
   }
 
-  private async copyFolder(move: WorkspaceMove, live: LiveMove): Promise<void> {
+  private async copyFolder(move: WorkspaceMove, live: LiveMove, sourceRoot: NodeFS.BigIntStats | null): Promise<void> {
     if (live.claimedDestination) {
       await removeMoveClaim(move.destinationPath, move.id);
       live.claimedDestination = false;
@@ -399,7 +407,7 @@ export class WorkspaceMoveService {
     move = await this.save(move, { phase: "copying" }, undefined, false);
     let lastProgress = Number.NEGATIVE_INFINITY;
     const manifest = await copyWorkspaceFolder({
-      source: move.sourcePath, staging, moveId: move.id, platform: this.deps.platform,
+      source: move.sourcePath, staging, moveId: move.id, platform: this.deps.platform, sourceRoot,
       openDestination: this.deps.openCopyDestination,
       progress: async (copiedBytes, totalBytes) => {
         const now = Date.parse(this.now());
@@ -427,18 +435,19 @@ export class WorkspaceMoveService {
   }
 
   private async rollback(move: WorkspaceMove, failure: MoveFailure, live?: LiveMove): Promise<void> {
-    const marker: { path: string | null } = { path: null };
+    const published = copyRollbackPhase(move) === "published";
+    const paths: RollbackPaths = { markerPath: null, copyPath: published ? move.destinationPath : move.stagingPath };
     const crossDrive = move.stagingPath !== null || live?.crossDrive === true;
     let outcome: CopyRollbackOutcome;
     try {
-      outcome = await this.rollbackFolders(move, marker, live);
+      outcome = await this.rollbackFolders(move, paths, live);
     } catch (error) {
       if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
       const detail = `${failure.error}\nRollback: ${moveError(error)}`;
       await this.save(this.requireMove(move.id), {
         cleanup: "kept", error: failure.error,
         result: {
-          status: "rollback-pending", ...failure, error: detail, markerPath: marker.path, crossDrive,
+          status: "rollback-pending", ...failure, error: detail, ...paths,
         },
       });
       return;
@@ -462,19 +471,19 @@ export class WorkspaceMoveService {
     await this.cleanRolledBackMarker(failed);
   }
 
-  private async rollbackFolders(move: WorkspaceMove, marker: { path: string | null }, live?: LiveMove): Promise<CopyRollbackOutcome> {
+  private async rollbackFolders(move: WorkspaceMove, paths: RollbackPaths, live?: LiveMove): Promise<CopyRollbackOutcome> {
     const source = await inspectMoveFolder(move.sourcePath, move.id);
-    if (holdsMoveMarker(source)) marker.path = markerPath(move.sourcePath, move.id);
+    if (holdsMoveMarker(source)) paths.markerPath = markerPath(move.sourcePath, move.id);
     const destination = await inspectMoveFolder(move.destinationPath, move.id);
-    if (marker.path === null && holdsMoveMarker(destination)) marker.path = markerPath(move.destinationPath, move.id);
+    if (paths.markerPath === null && holdsMoveMarker(destination)) paths.markerPath = markerPath(move.destinationPath, move.id);
     const { stagingPath } = move;
     if (stagingPath === null) {
       await this.rollbackRename(move, source, destination, live?.claimedDestination ?? true);
       return { status: "removed" };
     }
     const staging = await inspectMoveFolder(stagingPath, move.id);
-    if (marker.path === null && holdsMoveMarker(staging)) marker.path = markerPath(stagingPath, move.id);
-    return this.rollbackCopy({ move, stagingPath, source, staging, destination, live });
+    if (paths.markerPath === null && holdsMoveMarker(staging)) paths.markerPath = markerPath(stagingPath, move.id);
+    return this.rollbackCopy({ move, stagingPath, source, staging, destination, paths, live });
   }
 
   private async rollbackCopy(input: {
@@ -483,17 +492,20 @@ export class WorkspaceMoveService {
     source: MoveFolderState;
     staging: MoveFolderState;
     destination: MoveFolderState;
+    paths: RollbackPaths;
     live?: LiveMove;
   }): Promise<CopyRollbackOutcome> {
-    const { move, stagingPath, source, destination, live } = input;
+    const { move, stagingPath, source, destination, paths, live } = input;
     if (!holdsMoveMarker(source)) throw new Error("The copy source no longer holds its move marker");
     const staging = observedStaging(input.staging, live);
-    const phase = move.deleteStagingStarted ? "published" : move.phase;
-    const action = copyRollbackAction(phase, staging, destination, live);
-    if (action === "published") return this.rollbackPublishedCopy(move, destination);
+    const action = copyRollbackAction(copyRollbackPhase(move), staging, destination, live);
+    if (action === "published") {
+      paths.copyPath = move.destinationPath;
+      return this.rollbackPublishedCopy(move, destination);
+    }
     if (action === "staging") {
       if (staging === "empty") await removeMoveClaim(stagingPath, move.id);
-      else await removeMoveCopy(stagingPath, move.id);
+      else await removeMoveCopy(stagingPath, move.id, this.deps.platform);
     }
     await removeCopyClaim(move, action, destination, live);
     if (staging === "foreign" || staging === "other") return { status: "staging-occupied", path: stagingPath };
@@ -509,7 +521,7 @@ export class WorkspaceMoveService {
       return { status: "published-kept", reason: "The published copy lost its move marker" };
     }
     const outcome = await cleanPublishedMoveCopy({
-      move, options: this.deps, readManifest: () => this.deps.store.readManifest(move.id),
+      move, options: this.deps, readManifest: () => this.deps.store.readManifest(move.id)?.entries ?? null,
       checkpoint: async (next) => { await this.save(move, next, undefined, false); },
     });
     if (outcome.cleanup === "kept") return { status: "published-kept", reason: outcome.cleanupError };
@@ -546,6 +558,8 @@ export class WorkspaceMoveService {
     }
     // The Git outcome must be durable before removing the only proof of the rename.
     await removeMoveMarker(move.destinationPath, move.id);
+    const copyRoot = move.stagingPath ? this.deps.store.readManifest(move.id)?.root : null;
+    if (copyRoot) await restoreCopyRootTimes(move.destinationPath, copyRoot);
     const retainedSource = move.stagingPath
       ? { cleanup: "pending" as const, sourceRetainUntil: noProjectRetentionDeadline(this.now()) }
       : {};

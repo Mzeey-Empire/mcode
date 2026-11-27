@@ -83,6 +83,7 @@ function failureAdvice({ cause }: RolledBackMove, copied: boolean): string {
  * "copied" only when a copy to another drive ran. A file in use is not about the destination, so it keeps the folder move's title.
  */
 function failedTitle({ cause, copy }: RolledBackMove, folderMoveTitle: string): string {
+  if (copy?.kind === "kept") return "Couldn't create the project";
   const action = copy === null ? "moved" : "copied";
   switch (cause.kind) {
     case "no-space":
@@ -126,13 +127,14 @@ function failedDetail(failure: FailedMove, threadCount: number): ReactNode {
 
 const ROLLBACK_RESTART = "The threads in this folder can't run until Mcode finishes; it will try again when it restarts.";
 
-/**
- * A copy to another drive never moved the folder, so there is nothing to put back: what is left to undo is the copy
- * at the destination. The marker's folder is not named then, because it may be the copy's own.
- */
-function rollbackPendingDetail({ folder, crossDrive }: RollbackPendingMove): ReactNode {
-  if (crossDrive) {
-    return <>Mcode couldn't remove the copy at the destination yet. Your files are still in the old folder. {ROLLBACK_RESTART}</>;
+function rollbackPendingDetail({ folder, copyPath }: RollbackPendingMove): ReactNode {
+  if (copyPath !== null) {
+    return (
+      <>
+        Mcode couldn't remove the copy at <BreakablePath path={copyPath} className="text-ink" /> yet.
+        Your files are still in the old folder. {ROLLBACK_RESTART}
+      </>
+    );
   }
   return (
     <>

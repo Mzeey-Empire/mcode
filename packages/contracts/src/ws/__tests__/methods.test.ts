@@ -11,7 +11,7 @@ void unknownMethod;
 describe("workspace move WebSocket contracts", () => {
   it.each([
     [{ status: "failed" }, { copy: null }],
-    [{ status: "rollback-pending", markerPath: null }, { crossDrive: false }],
+    [{ status: "rollback-pending", markerPath: null }, { copyPath: "D:/projects/.mcode-copy-op-1" }],
   ] as const)("requires a cause and copy information on a %j receipt", (receipt, copyInfo) => {
     const schema = WS_METHODS()["workspace.move.status"].result;
     const frame = { operationId: "move-1", revision: 2, phase: "done", copiedBytes: null, totalBytes: null };

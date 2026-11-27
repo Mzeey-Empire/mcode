@@ -2,8 +2,8 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
-import type { WorkspaceMoveManifest } from "../persistence/workspace-move-store.js";
-import { assertRecordedParent, markerPath, moveErrorCode } from "./workspace-move-files.js";
+import type { WorkspaceMoveCopyManifest, WorkspaceMoveManifest } from "../persistence/workspace-move-store.js";
+import { assertRecordedParent, markerPath, moveEntry, moveErrorCode } from "./workspace-move-files.js";
 
 type Entry = { path: string; stat: NodeFS.BigIntStats };
 const READ_FLAGS = NodeFS.constants.O_RDONLY | (NodeFS.constants.O_NOFOLLOW ?? 0);
@@ -14,11 +14,11 @@ export async function copyWorkspaceFolder(input: {
   staging: string;
   moveId: string;
   platform: NodeJS.Platform;
+  sourceRoot: NodeFS.BigIntStats | null;
   openDestination?: typeof NodeFSPromises.open;
   progress(copied: number, total: number): Promise<void>;
-}): Promise<WorkspaceMoveManifest> {
-  const { source, staging, moveId, platform, openDestination = NodeFSPromises.open, progress } = input;
-  const sourceRoot = platform === "win32" ? null : await NodeFSPromises.lstat(source, { bigint: true });
+}): Promise<WorkspaceMoveCopyManifest> {
+  const { source, staging, moveId, platform, sourceRoot, openDestination = NodeFSPromises.open, progress } = input;
   const marker = markerPath(source, moveId);
   await NodeFSPromises.copyFile(marker, markerPath(staging, moveId), NodeFS.constants.COPYFILE_EXCL);
   const entries = await scan(source, NodePath.basename(marker));
@@ -54,8 +54,22 @@ export async function copyWorkspaceFolder(input: {
   for (const { path, stat } of entries.reverse()) {
     if (stat.isDirectory()) await preserveMetadata(NodePath.join(staging, path), stat);
   }
-  if (sourceRoot) await preserveMetadata(staging, sourceRoot);
-  return manifest;
+  if (!sourceRoot) return { entries: manifest, root: null };
+  await NodeFSPromises.chmod(staging, Number(sourceRoot.mode) & 0o7777);
+  const copy = await NodeFSPromises.lstat(staging, { bigint: true });
+  return {
+    entries: manifest,
+    root: { inode: String(copy.ino), device: String(copy.dev), atime: seconds(sourceRoot.atimeNs), mtime: seconds(sourceRoot.mtimeNs) },
+  };
+}
+
+/** Reapply root times after removing the marker, including when startup resumes that step. */
+export async function restoreCopyRootTimes(path: string, root: NonNullable<WorkspaceMoveCopyManifest["root"]>): Promise<void> {
+  await assertRecordedParent(path);
+  const copy = await moveEntry(path);
+  if (copy?.isDirectory() && String(copy.ino) === root.inode && String(copy.dev) === root.device) {
+    await NodeFSPromises.lutimes(path, root.atime, root.mtime);
+  }
 }
 
 async function scan(root: string, marker: string): Promise<Entry[]> {

@@ -77,15 +77,15 @@ describe("newProjectRunReducer", () => {
     ["a POSIX marker path", "/home/.mcode/no-project/a/.mcode-move.json", "/home/.mcode/no-project/a"],
     ["no recorded marker", null, null],
   ])("reports the folder that holds the files from %s", (_name, markerPath, folder) => {
-    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath, cause: { kind: "permission" }, crossDrive: false }) });
+    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath, cause: { kind: "permission" }, copyPath: null }) });
 
     expect(pending).toMatchObject({ kind: "rollback-pending", error: "EPERM", folder });
   });
 
-  it.each([false, true])("keeps whether a copy was involved when the rollback fails (%s)", (crossDrive) => {
-    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath: null, cause: { kind: "permission" }, crossDrive }) });
+  it.each([null, "D:/projects/.mcode-copy-op-1"])("keeps the blocked copy path when the rollback fails (%s)", (copyPath) => {
+    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath: null, cause: { kind: "permission" }, copyPath }) });
 
-    expect(pending).toMatchObject({ kind: "rollback-pending", crossDrive });
+    expect(pending).toMatchObject({ kind: "rollback-pending", copyPath });
   });
 
   it("draws the bar from each frame's own byte counts, through the published and converted frames", () => {

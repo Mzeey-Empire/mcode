@@ -508,7 +508,7 @@ describe("folder move startup recovery", () => {
     const service = f.makeService();
     await service.recoverAtStartup();
     expect(service.status({ operationId })).toMatchObject({ phase: "intent", result: {
-      status: "rollback-pending", markerPath: destinationMarker, cause: { kind: "other" }, crossDrive: false,
+      status: "rollback-pending", markerPath: destinationMarker, cause: { kind: "other" }, copyPath: null,
     } });
     expect(await service.withDeletion(f.id, async () => true)).toBe(false);
     await expect(f.threads.create(f.id, "A new thread", "direct", "", false)).rejects.toThrow(/moving/);
@@ -573,6 +573,23 @@ function sweepAt(f: Fixture, service: WorkspaceMoveService, date: Date) {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(date);
   return new NoProjectWorkspaceSweep(f.workspaces, { removeForThread: () => undefined }, f.root, service).run();
+}
+
+function addReadOnlyDirectory(source: string) {
+  const folder = "read-only";
+  const file = NodePath.join(folder, "file.txt");
+  NodeFS.mkdirSync(NodePath.join(source, folder));
+  NodeFS.writeFileSync(NodePath.join(source, file), "read-only data");
+  NodeFS.chmodSync(NodePath.join(source, folder), 0o555);
+  return {
+    file,
+    restorePermissions(...roots: string[]) {
+      for (const root of roots) {
+        const path = NodePath.join(root, folder);
+        if (NodeFS.existsSync(path)) NodeFS.chmodSync(path, 0o755);
+      }
+    },
+  };
 }
 
 describe("cross-drive project creation", () => {
@@ -643,13 +660,17 @@ describe("cross-drive project creation", () => {
     expect(NodeFS.readFileSync(NodePath.join(f.destination, "large.bin")).equals(payload)).toBe(true);
   });
 
-  it.skipIf(process.platform === "win32").each([0o700, 0o750])("preserves source root permissions (mode %s)", async (mode) => {
+  it.skipIf(process.platform === "win32").each([0o700, 0o750])("preserves source root permissions and modification time (mode %s)", async (mode) => {
     const f = await fixture();
+    const modified = new Date("2023-02-06T01:02:03Z");
     NodeFS.chmodSync(f.source, mode);
+    NodeFS.utimesSync(f.source, new Date("2022-01-05T12:34:56Z"), modified);
 
     await completedCopy(f);
 
-    expect(NodeFS.statSync(f.destination).mode & 0o777).toBe(mode);
+    const published = NodeFS.statSync(f.destination);
+    expect(published.mode & 0o777).toBe(mode);
+    expect(published.mtimeMs).toBe(modified.getTime());
     expect(f.readNotes(f.destination)).toBe("keep these files");
   });
 
@@ -773,6 +794,94 @@ describe("cross-drive project creation", () => {
       expect(f.readNotes(f.destination)).toBe("keep these files");
     }
   });
+
+  it.skipIf(process.platform === "win32")("keeps a published copy with a read-only directory and lifts the source fence", async () => {
+    const f = await fixture();
+    const readOnly = addReadOnlyDirectory(f.source);
+    const rename = crossDriveRename(f);
+    try {
+      const { operationId } = await startCopy(f, {
+        rename: async (from, to) => {
+          await rename(from, to);
+          if (to === f.destination) await f.workspaces.create("NewProject", NodePath.join(f.parent, "competing"), false);
+        },
+      });
+
+      expect((await f.terminal).result).toMatchObject({
+        status: "failed", copy: { kind: "kept", path: f.destination },
+      });
+      await vi.waitFor(() => expect(f.store.find(operationId)).toMatchObject({ phase: "done", cleanup: "kept" }));
+      expect(f.workspaces.hasUnfinishedMove(f.id)).toBe(false);
+      expect(f.readNotes(f.source)).toBe("keep these files");
+      expect(NodeFS.readFileSync(NodePath.join(f.destination, readOnly.file), "utf8")).toBe("read-only data");
+    } finally {
+      readOnly.restorePermissions(f.source, f.destination);
+    }
+  });
+
+  it.skipIf(process.platform === "win32")("removes unpublished staging containing a read-only directory", async () => {
+    const f = await fixture();
+    const readOnly = addReadOnlyDirectory(f.source);
+    let stagingPath: string | undefined;
+    try {
+      const { operationId } = await startCopy(f, {
+        rename: async (from) => {
+          if (from === f.source) throw errno("EXDEV");
+          stagingPath = from;
+          throw errno("EIO");
+        },
+      });
+
+      expect((await f.terminal).result).toMatchObject({ status: "failed", copy: { kind: "removed" } });
+      await vi.waitFor(() => expect(f.store.find(operationId)?.cleanup).toBe("done"));
+      expect(NodeFS.readdirSync(f.parent)).toEqual([]);
+      const original = NodePath.join(f.source, readOnly.file);
+      expect(NodeFS.readFileSync(original, "utf8")).toBe("read-only data");
+      expect(NodeFS.statSync(NodePath.dirname(original)).mode & 0o777).toBe(0o555);
+    } finally {
+      readOnly.restorePermissions(f.source);
+      if (stagingPath) readOnly.restorePermissions(stagingPath);
+    }
+  });
+
+  it.skipIf(process.platform !== "win32").each(["staging", "published"] as const)(
+    "names the %s copy when a file handle blocks rollback", async (location) => {
+      const f = await fixture();
+      const rename = crossDriveRename(f);
+      let closeFile: (() => Promise<void>) | undefined;
+      try {
+        const { operationId, service } = await startCopy(f, {
+          sleep: async () => undefined,
+          rename: async (from, to) => {
+            if (from !== f.source && to === f.destination && location === "staging") {
+              closeFile = await holdWindowsFolder(from);
+              throw errno("EIO");
+            }
+            await rename(from, to);
+            if (to === f.destination) {
+              closeFile = await holdWindowsFolder(to);
+              await f.workspaces.create("NewProject", NodePath.join(f.parent, "competing"), false);
+            }
+          },
+        });
+        const copyPath = location === "staging" ? NodePath.join(f.parent, `.mcode-copy-${operationId}`) : f.destination;
+
+        expect((await f.terminal).result).toMatchObject({ status: "rollback-pending", copyPath });
+        expect(f.workspaces.hasUnfinishedMove(f.id)).toBe(true);
+        expect(f.readNotes(f.source)).toBe("keep these files");
+        expect(NodeFS.existsSync(NodePath.join(copyPath, "notes.txt"))).toBe(true);
+        if (!closeFile) throw new Error("The copy was never locked");
+        await closeFile();
+        closeFile = undefined;
+        await service.recoverAtStartup();
+        expect(service.status({ operationId })?.result).toMatchObject({ status: "failed", copy: { kind: "removed" } });
+        expect(NodeFS.existsSync(copyPath)).toBe(false);
+        expect(f.workspaces.hasUnfinishedMove(f.id)).toBe(false);
+      } finally {
+        if (closeFile) await closeFile();
+      }
+    },
+  );
 
   it.each([false, true])("preserves a late destination when publishing (claimed: %s)", async (claimed) => {
     const f = await fixture();
@@ -998,7 +1107,7 @@ describe("cross-drive move recovery", () => {
     await f.makeService().recoverAtStartup();
     expect(f.workspaces.hasUnfinishedMove(f.id)).toBe(true);
     expect(f.store.find(operationId)?.result).toMatchObject({
-      status: "rollback-pending", crossDrive: true, cause: { kind: "other" }, markerPath: sourceMarker,
+      status: "rollback-pending", copyPath: stagingPath, cause: { kind: "other" }, markerPath: sourceMarker,
     });
     expect(f.readNotes(f.source)).toBe("keep these files");
     expect(f.readNotes(stagingPath)).toBe("keep this folder");
@@ -1057,6 +1166,7 @@ describe("retained cross-drive source", () => {
     const { operationId, tombstone } = await completedCopy(f);
     let locked = true;
     const cleanup = atExpiry(f, {
+      platform: "win32",
       rename: async (from, to) => {
         if (locked && NodePath.dirname(to) === NodePath.join(tombstone, ".mcode-delete")) throw errno("EBUSY");
         await NodeFSPromises.rename(from, to);
@@ -1072,6 +1182,24 @@ describe("retained cross-drive source", () => {
     await sweepAt(f, cleanup, EXPIRED);
     expect(f.store.find(operationId)).toMatchObject({ cleanup: "done", cleanupError: null });
     expect(NodeFS.existsSync(tombstone)).toBe(false);
+    expect(f.readNotes(f.destination)).toBe("keep these files");
+  });
+
+  it("keeps an expired POSIX source when its entry cannot be renamed", async () => {
+    const f = await fixture();
+    const { operationId, tombstone } = await completedCopy(f);
+    const cleanup = atExpiry(f, {
+      platform: "linux",
+      rename: async (from, to) => {
+        if (NodePath.dirname(to) === NodePath.join(tombstone, ".mcode-delete")) throw errno("EACCES");
+        await NodeFSPromises.rename(from, to);
+      },
+    });
+
+    await sweepAt(f, cleanup, EXPIRED);
+
+    expect(f.store.find(operationId)).toMatchObject({ cleanup: "kept", tombstonePath: tombstone });
+    expect(f.readNotes(tombstone)).toBe("keep these files");
     expect(f.readNotes(f.destination)).toBe("keep these files");
   });
 

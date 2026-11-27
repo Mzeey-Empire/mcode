@@ -135,7 +135,7 @@ export const workspaceMoves = sqliteTable("workspace_moves", {
   uniqueIndex("idx_workspace_moves_unfinished").on(table.workspaceId).where(sql`${table.phase} <> 'done'`),
 ]);
 
-/** Copy evidence lives outside both folders and is read only by checked cleanup. */
+/** Copy evidence and root metadata live outside both folders. */
 export const workspaceMoveManifests = sqliteTable("workspace_move_manifests", {
   moveId: text("move_id").primaryKey().notNull().references(() => workspaceMoves.id, { onDelete: "cascade" }),
   entries: text("entries", { mode: "json" }).notNull(),
