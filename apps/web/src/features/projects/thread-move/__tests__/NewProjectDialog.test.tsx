@@ -222,6 +222,19 @@ describe("New project from this folder", () => {
       await waitFor(() => expect(createButton()).toBeEnabled());
     });
 
+    it("keeps a Name typed before the read answers and still fills Location from the suggestion", async () => {
+      let answer: (read: ThreadMovePreflight) => void = () => {};
+      vi.mocked(mockTransport.readThreadMovePreflight).mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+      const user = await openNewProject();
+      await user.type(nameField(), "wal-notes");
+      expect(locationField()).toHaveValue("");
+
+      await act(async () => answer(preflight()));
+
+      await waitFor(() => expect(locationField()).toHaveValue("~/src"));
+      expect(nameField()).toHaveValue("wal-notes");
+    });
+
     it("shows a notice and keeps Create project disabled when the read fails, and a successful Retry enables it", async () => {
       vi.mocked(mockTransport.readThreadMovePreflight)
         .mockRejectedValueOnce(new Error("socket closed"))

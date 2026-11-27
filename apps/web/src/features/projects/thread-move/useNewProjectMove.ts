@@ -44,11 +44,24 @@ function sameValues(left: NewProjectValues, right: NewProjectValues): boolean {
   return left.name === right.name && left.location === right.location;
 }
 
-/** What the user typed over the server's suggestions. An edit wins, including an edit to nothing. */
+/**
+ * What the user typed over the server's suggestions. An edit wins, including an edit to nothing. Each field keeps
+ * its own edit, so a Name typed before the folder check answers still leaves Location to take its suggestion.
+ */
 function useNewProjectValues(preflight: ThreadMovePreflight | null): { readonly values: NewProjectValues; readonly setValues: (values: NewProjectValues) => void } {
-  const [edited, setEdited] = useState<NewProjectValues | null>(null);
-  const values: NewProjectValues = edited ?? { name: preflight?.suggestedName ?? "", location: preflight?.defaultLocation ?? "" };
-  return { values, setValues: setEdited };
+  const [edits, setEdits] = useState<Partial<NewProjectValues>>({});
+  const values: NewProjectValues = {
+    name: edits.name ?? preflight?.suggestedName ?? "",
+    location: edits.location ?? preflight?.defaultLocation ?? "",
+  };
+  const setValues = (next: NewProjectValues) => {
+    setEdits((previous) => ({
+      ...previous,
+      ...(next.name === values.name ? {} : { name: next.name }),
+      ...(next.location === values.location ? {} : { location: next.location }),
+    }));
+  };
+  return { values, setValues };
 }
 
 /** The first thread that has a reason to wait, the open thread before the others it shares the folder with. */
