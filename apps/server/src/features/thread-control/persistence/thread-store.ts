@@ -452,7 +452,6 @@ export interface CompletedThreadDeadlineUpdate extends CompletedThreadRetentionR
   nextScheduledDeletionAt: string | null;
 }
 
-/** Whether an existing thread can leave its No project workspace. */
 export function isOpenNoProjectThread(thread: Thread | null, workspace: Workspace | null): thread is Thread {
   return thread !== null && workspace?.kind === "no_project" && thread.deleted_at === null && thread.user_completed_at === null
     && thread.status !== "archived" && thread.status !== "deleted";
