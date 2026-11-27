@@ -131,8 +131,8 @@ function interruptedMoveFailure(move: WorkspaceMove): MoveFailure {
   };
 }
 
-/** A dialog that opens after the last byte still needs the totals to draw a full bar until the move ends. */
-const PHASES_WITH_BYTES = new Set<WorkspaceMove["phase"]>(["copying", "copied", "published"]);
+/** Every unfinished phase of a cross-drive move carries its totals, so a dialog that attaches late can still draw the bar. */
+const PHASES_WITH_BYTES = new Set<WorkspaceMove["phase"]>(["copying", "copied", "published", "converted"]);
 
 function moveFrame(move: WorkspaceMove): WorkspaceMoveFrame {
   const result = visibleMoveResult(move);

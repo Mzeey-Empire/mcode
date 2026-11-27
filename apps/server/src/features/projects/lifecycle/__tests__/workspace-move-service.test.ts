@@ -616,7 +616,7 @@ describe("cross-drive project creation", () => {
       now: () => new Date(clock += 40),
       publishProgress(frame) {
         if (frame.phase === "copying") reports.push({ time: clock, frame, status: service.status({ threadId: f.fork.id }) });
-        if (frame.phase === "copied" || frame.phase === "published") afterCopy.push(frame);
+        if (frame.phase === "copied" || frame.phase === "published" || frame.phase === "converted") afterCopy.push(frame);
         if (frame.result) done.resolve(frame);
       },
     });
@@ -635,7 +635,7 @@ describe("cross-drive project creation", () => {
       expect(report.frame.revision).toBeGreaterThan(previous.frame.revision);
       expect(report.frame.copiedBytes).toBeGreaterThan(previous.frame.copiedBytes ?? 0);
     }
-    expect(afterCopy.map((frame) => frame.phase)).toEqual(["copied", "published"]);
+    expect(afterCopy.map((frame) => frame.phase)).toEqual(["copied", "published", "converted", "converted"]);
     for (const frame of afterCopy) {
       expect(frame).toMatchObject({ copiedBytes: payload.length + 16, totalBytes: payload.length + 16 });
     }
