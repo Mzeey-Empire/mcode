@@ -47,7 +47,6 @@ function DialogContent({
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
-  /** Dims the close button while the dialog's work cannot be abandoned. */
   closeDisabled?: boolean
 }) {
   return (

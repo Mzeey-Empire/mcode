@@ -10,12 +10,10 @@ export function openMoveThreadDialog(threadId: string): void {
   useMoveThreadStore.setState({ threadId });
 }
 
-/** Closes the move dialog. */
 export function closeMoveThreadDialog(): void {
   useMoveThreadStore.setState({ threadId: null });
 }
 
-/** Why the thread menu blocks a move. */
 export type MoveBlock = "running" | "needs-approval" | "background";
 
 /** The menu's second line for a thread that cannot move yet. */

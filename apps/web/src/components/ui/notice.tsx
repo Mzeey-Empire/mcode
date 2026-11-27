@@ -112,7 +112,6 @@ function NoticeHeader({ tone, title, busy = false, disclosure, onDismiss, dismis
   );
 }
 
-/** What a notice shows for its detail and extra text, given whether its disclosure is open. */
 function disclosureState({ detail, collapsible, more, open }: { detail: ReactNode; collapsible: boolean; more: ReactNode; open: boolean }) {
   const hasDetail = detail !== undefined;
   const hasMore = more !== undefined;

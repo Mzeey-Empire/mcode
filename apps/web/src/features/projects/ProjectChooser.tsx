@@ -20,7 +20,6 @@ export interface ProjectChooserProps {
   readonly triggerTooltip?: string;
   /** Which side of the trigger the chooser opens on. */
   readonly side?: "top" | "bottom";
-  /** Picks a project for something other than the composer, such as the move dialog. */
   readonly pick?: ProjectChooserPick;
 }
 
@@ -29,13 +28,10 @@ export interface ProjectChooserProps {
  * and never touches the composer or the Add project palette.
  */
 export interface ProjectChooserPick {
-  /** The project already picked, shown as selected. */
   readonly selectedWorkspaceId: string | null;
   /** Called with the chosen project after the chooser closes. */
   readonly onSelect: (workspace: Workspace) => void;
-  /** Reports the chooser opening or closing, so a host can hold its own actions while it is open. */
   readonly onOpenChange?: (open: boolean) => void;
-  /** Stops the chooser opening, for a host whose choice is locked in. */
   readonly disabled?: boolean;
 }
 
@@ -120,7 +116,6 @@ interface ChooserListProps {
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
   readonly onSelect: (item: ChooserItem) => void;
-  /** Leaves the No project row out, for a host that picks only among projects. */
   readonly projectsOnly: boolean;
 }
 

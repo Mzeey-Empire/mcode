@@ -214,7 +214,6 @@ describe("SidebarList thread menu", () => {
     const workspace = createMockWorkspace({ id: "no-project", name: "No project", kind: "no_project", is_git_repo: false });
     seedThread({ mode: "direct", pull_requests: [] }, workspace);
     useSidebarUiStore.setState({ expandedProjects: new Set([NO_PROJECT_GROUP_KEY]) });
-    // The open thread's command panel has already loaded its list.
     useBackgroundCommandStore.setState({ loads: new Map([["t1", { kind: "ready", commands: [
       createMockBackgroundCommand({ toolCallId: "sleep", label: "sleep 120", status: "running", awaited: false }),
     ] }]]) });

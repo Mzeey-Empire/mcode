@@ -12,11 +12,8 @@ export interface ProjectSlotHeadingProps {
   readonly prefix?: string;
   /** Words after the slot. Defaults to the question mark. */
   readonly suffix?: string;
-  /** Id of the heading element, so a dialog can name itself by it. */
   readonly id?: string;
-  /** Heading level, so a heading inside a dialog is not a second page title. */
   readonly as?: "h1" | "h2";
-  /** Makes the slot's chooser a plain project picker, as the move dialog uses it. */
   readonly pick?: ProjectChooserPick;
 }
 
@@ -40,7 +37,6 @@ export function ProjectSlotHeading({
     <Heading
       id={id}
       aria-label={`${prefix} ${projectName ?? "a project"}${suffix}`}
-      // In the move dialog the heading names one choice inside a small dialog, not the page, so it steps down a size.
       className={cn("flex min-w-0 max-w-full flex-wrap items-start justify-center font-semibold tracking-[-0.02em] text-ink", pick ? "text-xl" : "text-3xl")}
     >
       <span>{prefix}&nbsp;</span>

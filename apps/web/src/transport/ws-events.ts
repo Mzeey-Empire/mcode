@@ -179,7 +179,6 @@ function handleTerminalData(data: unknown): void {
  * - `thread.checksUpdated` -- CI check status polled for a thread's PR, updates checksById
  * - `thread.modelUpdated` -- thread model and provider synced after a message send (multi-client)
  * - `thread.providerSwitched` -- a send switched provider; patches the thread row and appends the switch marker once
- * - `thread.movedToProject` -- a No project thread moved into a project; moves the row and appends the move marker once
  * - `files.changed` -- invalidates the file autocomplete cache
  * - `skills.changed` -- invalidates provider catalogs; popup re-fetches on next open
  * - `provider.catalogChanged` -- reconciles a refreshed catalog by stable identity

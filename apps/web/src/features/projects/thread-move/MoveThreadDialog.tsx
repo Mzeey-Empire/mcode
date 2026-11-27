@@ -23,7 +23,6 @@ export function MoveThreadDialogHost() {
   return threadId === null ? null : <MoveThreadDialog key={threadId} threadId={threadId} />;
 }
 
-/** Why a move did not happen, in words the notice shows, with the server's own text kept behind its disclosure. */
 interface MoveFailure {
   readonly detail: string;
   readonly raw: string | null;
@@ -64,7 +63,6 @@ function describeException(error: unknown): MoveFailure {
   };
 }
 
-/** `3 Dec`-style date the old folder is deleted on. */
 function formatRemovalDate(deadline: string): string {
   return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(new Date(deadline));
 }
@@ -113,7 +111,6 @@ function useMoveFlow(threadId: string): MoveFlow {
       const result = await getTransport().moveThreadToProject({ threadId, workspaceId: picked.id, target: { kind: "local" } });
       if (result.status === "moved") {
         applyMoved(result.thread);
-        // Only the window that moved the thread opens the project; others keep their layout.
         useSidebarUiStore.getState().expandProject(result.thread.workspace_id);
         closeMoveThreadDialog();
         return;
@@ -207,10 +204,6 @@ function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; prefligh
 
 const keepLocal = () => undefined;
 
-/**
- * Where the moved thread will run. A thread moves to the project's own checkout, so the rail offers Local
- * only and names the branch it is on, rather than offering a worktree to choose.
- */
 function MoveTargetRail({ workspace }: { workspace: Workspace }) {
   const branch = useDefaultBranchTarget(workspace.is_git_repo ? { workspaceId: workspace.id } : null);
   const label = branch ? newThreadTargetLabel({ mode: "direct", branch: branch.name }) : null;
@@ -233,10 +226,6 @@ function MoveTargetRail({ workspace }: { workspace: Workspace }) {
   );
 }
 
-/**
- * Says the old folder's files will be deleted, beside the button that causes it. It names no files and counts none.
- * While another thread still works in the folder there is no date yet: Mcode deletes it 7 days after the last one leaves.
- */
 function FilesNote({ preflight, picked }: { preflight: ThreadMovePreflight | null; picked: boolean }) {
   if (!picked || !preflight?.hasFiles) return null;
   const when: ReactNode = preflight.otherThreadsInFolder.count > 0
