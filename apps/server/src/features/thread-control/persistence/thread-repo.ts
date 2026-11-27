@@ -210,7 +210,6 @@ export class ThreadRepo {
     return this.writer.execute(threadWriteOperations.recordMoveWorktree, input);
   }
 
-  /** Find interrupted worktree moves on startup. */
   listProvisioningMoveWorktrees() {
     return this.reader.listProvisioningMoveWorktrees();
   }
