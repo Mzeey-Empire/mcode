@@ -8,6 +8,7 @@ import type { SkillInfo } from "@mcode/contracts/skills";
 import { CodexCatalogService } from "../codex-catalog-service.js";
 import type { CodexCustomPromptDiscoveryResult } from "../codex-custom-prompt-service.js";
 import type {
+  CodexCatalogClientOptions,
   CodexCatalogPluginsResult,
   CodexCatalogPluginReadResult,
   CodexCatalogSkillsResult,
@@ -110,7 +111,7 @@ describe("CodexCatalogService", () => {
 
   function createService(
     client: ControlledCatalogClient,
-    create: () => ControlledCatalogClient = () => client,
+    create: (options: CodexCatalogClientOptions) => ControlledCatalogClient = () => client,
     customPromptService: {
       refresh: () => Promise<CodexCustomPromptDiscoveryResult>;
       currentPrompts: () => SkillInfo[];
@@ -138,6 +139,21 @@ describe("CodexCatalogService", () => {
       (directory) => NodeFSPromises.rm(directory, { recursive: true, force: true }),
     ));
     vi.useRealTimers();
+  });
+
+  it("loads workspace skills without making the shared process hold the workspace open", async () => {
+    const workspace = NodePath.join(NodeOS.tmpdir(), "catalog-workspace");
+    const client = new ControlledCatalogClient();
+    const create = vi.fn((_options: CodexCatalogClientOptions) => client);
+    const service = createService(client, create);
+
+    const catalog = await service.refresh(workspace);
+
+    expect(catalog.skills).toContainEqual(expect.objectContaining({
+      name: "review",
+      path: `${workspace}/.codex/skills/review/SKILL.md`,
+    }));
+    expect(create.mock.calls[0]?.[0].workingDirectory).toBe(process.cwd());
   });
 
   it("fetches external plugin changes on every routine refresh", async () => {
