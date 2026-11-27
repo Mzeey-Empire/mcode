@@ -8,7 +8,6 @@ import { isWithinWorkspaceRoot, resolveNoProjectRoot } from "./workspace-path.js
 const RESERVED_NAME = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 const WINDOWS_RENAME_RETRY_CODES = new Set<unknown>(["EBUSY", "EPERM", "EACCES"]);
 
-/** Platform and filesystem timing dependencies for a workspace rename. */
 export type WorkspaceMoveRenameOptions = {
   platform: NodeJS.Platform;
   rename?: typeof NodeFSPromises.rename;
@@ -38,7 +37,6 @@ export async function renameWorkspaceFolder(
   await rename(source, destination);
 }
 
-/** Format the filesystem or Git failure for the operation receipt. */
 export function moveError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -96,12 +94,10 @@ async function lstatIfPresent(path: string) {
   }
 }
 
-/** Names the exclusive ownership marker in a move's recorded folder. */
 export function markerPath(folder: string, moveId: string): string {
   return NodePath.join(folder, `.mcode-move-${moveId}`);
 }
 
-/** Filesystem observations used by the rollback table. */
 export type MoveFolderState = "missing" | "empty" | "marker-only" | "owned" | "foreign" | "other";
 
 /** Reject recorded paths whose parents have been redirected since the move was prepared. */

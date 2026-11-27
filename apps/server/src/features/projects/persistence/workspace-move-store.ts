@@ -33,7 +33,6 @@ const placement = z.object({
 });
 const convertedThread = z.object({ thread: ThreadSchema(), marker: MessageSchema() });
 
-/** Writer operations for the transaction and the checkpoints around filesystem work. */
 export const workspaceMoveWrites = {
   start: databaseWriteOperation("workspace.move.start", z.tuple([intent, z.array(z.string())]), z.void()),
   advance: databaseWriteOperation("workspace.move.advance", z.tuple([
@@ -44,12 +43,10 @@ export const workspaceMoveWrites = {
   ]), z.array(convertedThread)),
 };
 
-/** Active moves must remain fenced even after the in-process lease is gone. */
 export function unfinishedWorkspaceMove(workspaceId: typeof workspaces.id | string) {
   return and(eq(workspaceMoves.workspaceId, workspaceId), ne(workspaceMoves.phase, "done"));
 }
 
-/** Reads move state and runs the workspace conversion on the SQLite writer. */
 export class WorkspaceMoveStore {
   private readonly orm;
 
@@ -57,17 +54,14 @@ export class WorkspaceMoveStore {
     this.orm = drizzle(db);
   }
 
-  /** Read a retained operation receipt by ID. */
   find(id: string): WorkspaceMove | null {
     return this.orm.select().from(workspaceMoves).where(eq(workspaceMoves.id, id)).get() ?? null;
   }
 
-  /** Find the current fence for a workspace. */
   findUnfinished(workspaceId: string): WorkspaceMove | null {
     return this.orm.select().from(workspaceMoves).where(unfinishedWorkspaceMove(workspaceId)).get() ?? null;
   }
 
-  /** Find the rows that startup must reconcile. */
   listRecoverable(): WorkspaceMove[] {
     return this.orm.select().from(workspaceMoves).where(sql`
       ${workspaceMoves.phase} <> 'done' OR ${workspaceMoves.cleanup} = 'pending'
@@ -135,7 +129,6 @@ export class WorkspaceMoveStore {
   }
 }
 
-/** Bind the move transactions to the application database writer. */
 export function workspaceMoveWriteHandlers(db: Database) {
   const store = new WorkspaceMoveStore(db);
   return new Map<string, (input: unknown) => unknown>([

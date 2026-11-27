@@ -312,13 +312,11 @@ export class WorkspaceStore {
       .where(eq(threads.workspaceId, workspaces.id)));
   }
 
-  /** Tell admission and creation whether a durable workspace move still owns the folder. */
   hasUnfinishedMove(id: string): boolean {
     return Boolean(this.orm.select({ id: workspaceMoves.id }).from(workspaceMoves)
       .where(and(eq(workspaceMoves.workspaceId, id), ne(workspaceMoves.phase, "done"))).get());
   }
 
-  /** Return both paths since a converted project stays fenced until its move finishes. */
   unfinishedMoveFolders(): string[] {
     return this.orm.select({ source: workspaceMoves.sourcePath, destination: workspaceMoves.destinationPath })
       .from(workspaceMoves).where(ne(workspaceMoves.phase, "done")).all()

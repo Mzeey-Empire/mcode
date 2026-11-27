@@ -30,7 +30,6 @@ export function isInsideMoveSource(source: string, cwd: string): boolean {
   return isWithinWorkspaceRoot(realPathOrMissing(source), realPathOrMissing(cwd));
 }
 
-/** Fence a terminal after its launch profile and working directory have resolved. */
 export function assertTerminalOutsideMove(cwd: string, recordedSources: readonly string[]): void {
   for (const source of [...held.values(), ...recordedSources]) {
     if (source !== null && isInsideMoveSource(source, cwd)) {

@@ -63,7 +63,6 @@ export class WorkspaceRepo {
     return this.reader.findById(id);
   }
 
-  /** Fence callers while a durable move is unfinished. */
   hasUnfinishedMove(workspaceId: string): boolean {
     return this.reader.hasUnfinishedMove(workspaceId);
   }
