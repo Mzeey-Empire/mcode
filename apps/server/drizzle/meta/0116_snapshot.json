@@ -4309,6 +4309,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "path_claimed": {
+          "name": "path_claimed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
         "state": {
           "name": "state",
           "type": "text",
