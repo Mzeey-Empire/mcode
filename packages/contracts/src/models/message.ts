@@ -165,7 +165,6 @@ export const MessageSchema = lazySchema(() =>
     systemNotice: SystemNoticeMetadataSchema().nullable().optional(),
     /** Set on the system message that marks a provider switch in the timeline. */
     providerSwitch: ProviderSwitchMarkerSchema().nullable().optional(),
-    /** Set on the system message that marks a move to a project. */
     threadMove: ThreadMoveMarkerSchema().nullable().optional(),
     /** Set on the system message that shows an HTML visual in the timeline. */
     visual: HtmlVisualSchema().nullable().optional(),

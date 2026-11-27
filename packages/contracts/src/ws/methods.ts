@@ -200,7 +200,6 @@ export type ThreadCompletionRefusal = z.infer<typeof ThreadCompletionRefusalSche
 /** A committed completion or an expected refusal. */
 export type ThreadCompletionResult = z.infer<ReturnType<typeof ThreadCompletionResultSchema>>;
 
-/** Placement requested for an existing-project move. */
 export const ThreadMoveTargetSchema = lazySchema(() => z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local") }),
 ]));
@@ -212,7 +211,6 @@ export const ThreadMoveInputSchema = lazySchema(() => z.object({
   target: ThreadMoveTargetSchema(),
 }));
 
-/** Request to move one No project thread into an existing project. */
 export type ThreadMoveInput = z.infer<ReturnType<typeof ThreadMoveInputSchema>>;
 
 /** Updated thread summary or the reason the move could not commit. */
@@ -224,7 +222,6 @@ export const ThreadMoveResultSchema = lazySchema(() => z.discriminatedUnion("sta
   z.object({ status: z.literal("failed"), error: z.string() }),
 ]));
 
-/** Updated thread summary or the reason the move could not commit. */
 export type ThreadMoveResult = z.infer<ReturnType<typeof ThreadMoveResultSchema>>;
 
 /** Committed placement and its persisted timeline marker. */
