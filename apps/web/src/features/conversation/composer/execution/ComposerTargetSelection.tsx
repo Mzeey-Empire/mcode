@@ -39,12 +39,26 @@ function ForkTargetSelection({ sourceThread, mode }: { sourceThread: ForkSourceT
 
 export type TargetPickerSide = "top" | "bottom";
 
-export function TargetTriggers({ selection, side = "top" }: { selection: ComposerTargetSelectionState; side?: TargetPickerSide }) {
+interface TargetTriggersProps {
+  selection: ComposerTargetSelectionState;
+  side?: TargetPickerSide;
+  onOpenChange?: (picker: "target" | "baseBranch", open: boolean) => void;
+}
+
+/** Renders the active target picker and, for a detached worktree, its base-branch picker. */
+export function TargetTriggers({ selection, side = "top", onOpenChange }: TargetTriggersProps) {
   const { workspaceId, contextThreadId, target, baseBranch } = selection;
   if (!workspaceId) return null;
   return (
     <>
-      <TargetTrigger pick={target} workspaceId={workspaceId} threadId={contextThreadId} testId="composer-branch-trigger" side={side} />
+      <TargetTrigger
+        pick={target}
+        workspaceId={workspaceId}
+        threadId={contextThreadId}
+        testId="composer-branch-trigger"
+        side={side}
+        onOpenChange={(open) => onOpenChange?.("target", open)}
+      />
       {baseBranch ? (
         <TargetTrigger
           pick={baseBranch}
@@ -52,6 +66,7 @@ export function TargetTriggers({ selection, side = "top" }: { selection: Compose
           threadId={contextThreadId}
           testId="composer-base-branch-trigger"
           side={side}
+          onOpenChange={(open) => onOpenChange?.("baseBranch", open)}
         />
       ) : null}
     </>
@@ -64,13 +79,18 @@ interface TargetTriggerProps {
   threadId: string | undefined;
   testId: string;
   side: TargetPickerSide;
+  onOpenChange: (open: boolean) => void;
 }
 
-function TargetTrigger({ pick, workspaceId, threadId, testId, side }: TargetTriggerProps) {
+function TargetTrigger({ pick, workspaceId, threadId, testId, side, onOpenChange }: TargetTriggerProps) {
   const [open, setOpen] = useState(false);
+  const changeOpen = (next: boolean) => {
+    setOpen(next);
+    onOpenChange(next);
+  };
   const Icon = pick.list === "worktrees" ? GitFork : GitBranch;
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={changeOpen}>
       <PopoverTrigger
         render={
           <Button
@@ -96,7 +116,7 @@ function TargetTrigger({ pick, workspaceId, threadId, testId, side }: TargetTrig
           footer={pick.origin ? <StartFromOriginSwitch origin={pick.origin} /> : undefined}
           onSelect={(picked) => {
             pick.select(picked);
-            setOpen(false);
+            changeOpen(false);
           }}
         />
       </PopoverContent>

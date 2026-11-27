@@ -148,9 +148,21 @@ interface MoveThreadDialogViewProps {
   readonly preflight: MovePreflightState;
 }
 
+type TargetPicker = "workspace" | "target" | "baseBranch";
+type TargetPickerOpenChange = (picker: TargetPicker, open: boolean) => void;
+
 function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewProps) {
   const headingId = useId();
   const [chooserOpen, setChooserOpen] = useState(false);
+  const [openTargetPickers, setOpenTargetPickers] = useState<ReadonlySet<TargetPicker>>(() => new Set());
+  const onPickerOpenChange: TargetPickerOpenChange = (picker, open) => {
+    setOpenTargetPickers((current) => {
+      const next = new Set(current);
+      if (open) next.add(picker);
+      else next.delete(picker);
+      return next;
+    });
+  };
   const { picked, moving } = flow;
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !moving) closeMoveThreadDialog(); }}>
@@ -172,29 +184,36 @@ function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewPr
             projectName={picked?.name}
             prefix="Move to"
             suffix=""
-            pick={{ selectedWorkspaceId: picked?.id ?? null, onSelect: flow.pick, onOpenChange: setChooserOpen, disabled: moving || flow.failure?.unconfirmed }}
+            pick={{
+              selectedWorkspaceId: picked?.id ?? null,
+              onSelect: (workspace) => { setOpenTargetPickers(new Set()); flow.pick(workspace); },
+              onOpenChange: setChooserOpen,
+              disabled: moving || flow.failure?.unconfirmed,
+            }}
           />
         </DialogHeader>
-        <MoveBody flow={flow} preflight={preflight} />
-        <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen} />
+        <MoveBody flow={flow} preflight={preflight} onPickerOpenChange={onPickerOpenChange} />
+        <MoveFooter flow={flow} preflight={preflight} pickerOpen={chooserOpen || openTargetPickers.size > 0} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function MoveBody({ flow, preflight }: { flow: MoveFlow; preflight: MovePreflightState }) {
+function MoveBody({ flow, preflight, onPickerOpenChange }: {
+  flow: MoveFlow; preflight: MovePreflightState; onPickerOpenChange: TargetPickerOpenChange;
+}) {
   const { picked, failure } = flow;
   if (!picked && !failure) return null;
   return (
     <div className="grid gap-4">
-      {picked ? <MoveTargetRail workspace={picked} target={flow.target} locked={flow.moving} /> : null}
+      {picked ? <MoveTargetRail workspace={picked} target={flow.target} locked={flow.moving} onPickerOpenChange={onPickerOpenChange} /> : null}
       {picked && preflight.read.status === "failed" ? <PreflightFailedNotice onRetry={preflight.retry} /> : null}
       {failure ? <Notice tone="error" title={failure.unconfirmed ? "Couldn't confirm the move" : "Couldn't move the thread"} detail={failure.detail} more={failure.raw ?? undefined} /> : null}
     </div>
   );
 }
 
-function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; preflight: MovePreflightState; chooserOpen: boolean }) {
+function MoveFooter({ flow, preflight, pickerOpen }: { flow: MoveFlow; preflight: MovePreflightState; pickerOpen: boolean }) {
   const { picked, moving, failure } = flow;
   if (failure?.unconfirmed) return <DialogFooter showCloseButton />;
   const retrying = failure !== null && picked !== undefined;
@@ -202,7 +221,7 @@ function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; prefligh
     <DialogFooter>
       <FilesNote preflight={preflightOf(preflight.read)} picked={picked !== undefined} />
       <Button type="button" variant="outline" disabled={moving} onClick={closeMoveThreadDialog}>Cancel</Button>
-      <Button type="button" loading={moving} disabled={picked === undefined || flow.target.request === null || chooserOpen || preflight.read.status !== "ready"} onClick={flow.move}>
+      <Button type="button" loading={moving} disabled={picked === undefined || flow.target.request === null || pickerOpen || preflight.read.status !== "ready"} onClick={flow.move}>
         {retrying ? <RotateCcw aria-hidden data-icon="inline-start" /> : <FolderInput aria-hidden data-icon="inline-start" />}
         {moving ? "Moving…" : retrying ? "Try again" : "Move thread"}
       </Button>
@@ -214,7 +233,9 @@ function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; prefligh
  * The request captured the target when Move was pressed, so the rail is locked while it runs: a changed rail would
  * name a destination the thread is not going to.
  */
-function MoveTargetRail({ workspace, target, locked }: { workspace: Workspace; target: MoveTargetState; locked: boolean }) {
+function MoveTargetRail({ workspace, target, locked, onPickerOpenChange }: {
+  workspace: Workspace; target: MoveTargetState; locked: boolean; onPickerOpenChange: TargetPickerOpenChange;
+}) {
   return (
     <fieldset disabled={locked} data-testid="move-target-rail" className="flex min-w-0 items-center gap-1 rounded-xl bg-page px-2 py-0.5">
       {/* Its menus open downward: the rail sits under the 'Move to' heading, which an upward menu would cover. */}
@@ -224,12 +245,13 @@ function MoveTargetRail({ workspace, target, locked }: { workspace: Workspace; t
         folder={basename(workspace.path)}
         unavailable={target.unavailable}
         onModeChange={target.setMode}
+        onOpenChange={(open) => onPickerOpenChange("workspace", open)}
         side="bottom"
       />
       {workspace.is_git_repo && target.mode === "direct" ? <LocalBranchLabel workspaceId={workspace.id} /> : null}
       {workspace.is_git_repo && target.mode !== "direct" ? (
         <div className="ml-auto flex min-w-0 items-center gap-1">
-          <TargetTriggers selection={target.selection} side="bottom" />
+          <TargetTriggers selection={target.selection} side="bottom" onOpenChange={onPickerOpenChange} />
         </div>
       ) : null}
     </fieldset>

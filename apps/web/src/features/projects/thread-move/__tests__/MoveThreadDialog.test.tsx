@@ -449,6 +449,30 @@ describe("MoveThreadDialog worktree targets", () => {
     expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "branch", baseBranch: "feat/reconnect-retry", startFromOrigin: false } });
   });
 
+  it("disables Move thread while the Workspace menu is open", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await waitFor(() => expect(moveButton()).toBeEnabled());
+
+    await user.click(workspaceTrigger());
+    await screen.findByRole("menuitemradio", { name: /^New worktree/ });
+    expect(moveButton()).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(moveButton()).toBeEnabled();
+  });
+
+  it("disables Move thread while the New worktree branch picker is open", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "New worktree");
+    await waitFor(() => expect(moveButton()).toBeEnabled());
+    await openPicker(user);
+    await screen.findByRole("option", { name: /^feat\/reconnect-retry/ });
+    expect(moveButton()).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(moveButton()).toBeEnabled();
+  });
+
   it("starts from origin when the switch is on", async () => {
     const user = await openDialog();
     await pickProject(user, "gitty");
