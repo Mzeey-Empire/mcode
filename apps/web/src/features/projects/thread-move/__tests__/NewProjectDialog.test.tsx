@@ -783,15 +783,19 @@ describe("New project from this folder", () => {
         await settle();
         expect(screen.getByRole("alert")).toHaveTextContent("Couldn't get the result of the move.");
         const previousStatus = useConnectionStore.getState().status;
-        vi.mocked(mockTransport.readWorkspaceMoveStatus).mockResolvedValueOnce(
-          frame(4, { status: "git-failed", workspaceId: HIDDEN.id, error: "git: permission denied" }),
-        );
+        const read = vi.mocked(mockTransport.readWorkspaceMoveStatus);
+        let finishRead: (result: WorkspaceMoveFrame) => void = () => {};
+        read.mockImplementationOnce(() => new Promise((resolve) => { finishRead = resolve; }));
 
         try {
           await act(async () => {
             useConnectionStore.setState({ status: "connecting" });
             useConnectionStore.setState({ status: "connected" });
           });
+          expect(read.mock.calls.filter(([input]) => "operationId" in input)).toHaveLength(4);
+          await act(async () => finishRead(
+            frame(4, { status: "git-failed", workspaceId: HIDDEN.id, error: "git: permission denied" }),
+          ));
           vi.useRealTimers();
           expect(await screen.findByRole("alertdialog", { name: "Project created" })).toBeVisible();
         } finally {

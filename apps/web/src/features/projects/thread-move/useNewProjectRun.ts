@@ -46,18 +46,6 @@ function readStatusWithRetry(
   };
 }
 
-/**
- * How many times the socket has come back after dropping. A move that ends while the socket is down pushes its last
- * frame to no one, so a follower must read the status again each time this changes.
- */
-function useReconnectCount(): number {
-  const [count, setCount] = useState(0);
-  useEffect(() => useConnectionStore.subscribe((next, previous) => {
-    if (next.status === "connected" && previous.status !== "connected") setCount((current) => current + 1);
-  }), []);
-  return count;
-}
-
 export interface NewProjectRunControls {
   readonly run: NewProjectRun;
   /**
@@ -99,7 +87,6 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
   ), [threadId, lookupAttempt]);
 
   const operationId = followedOperation(run);
-  const reconnects = useReconnectCount();
   useEffect(() => {
     if (operationId === null) return;
     let heardFrame = false;
@@ -117,6 +104,7 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
     let stopReading = catchUp();
     const stopReconnect = useConnectionStore.subscribe((next, previous) => {
       if (next.status !== "connected" || previous.status === "connected") return;
+      // The move may have ended while this client could not receive frames.
       heardFrame = false;
       stopReading();
       stopReading = catchUp();
@@ -126,7 +114,7 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
       stopReading();
       stop();
     };
-  }, [operationId, reconnects]);
+  }, [operationId]);
 
   const create = (values: NewProjectValues, initGit: boolean) => {
     dispatch({ type: "submitted" });
