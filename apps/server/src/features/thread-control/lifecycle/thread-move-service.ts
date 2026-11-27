@@ -24,7 +24,7 @@ import type { ThreadMovePlacement } from "../persistence/thread-write-operations
 
 type NewWorktreeSource = Extract<ThreadMoveInput["target"], { kind: "new-worktree" }>["source"];
 type NewWorktreePlacement = Extract<ThreadMovePlacement, { kind: "new-worktree" }>;
-type WorktreeRecord = Pick<ThreadMoveWorktree, "id" | "threadId" | "worktreePath" | "branch">;
+type WorktreeRecord = Pick<ThreadMoveWorktree, "id" | "threadId" | "worktreePath" | "branch" | "detachedCommit">;
 type CommittedMove = Extract<Awaited<ReturnType<ThreadRepo["moveToProject"]>>, { status: "moved" }>;
 
 /** Coordinates a move with the same reservation that guards turn admission. */
@@ -114,13 +114,15 @@ export class ThreadMoveService {
     if (!project.is_git_repo) throw new Error("The destination project has no Git repository");
     const moveId = NodeCrypto.randomUUID();
     const name = `move-${moveId}`;
-    const branch = source.kind === "pr" ? source.branch : `mcode/${name}`;
     const worktreePath = NodePath.join(getManagedWorktreeBaseDir(project.path), name);
     const startPoint = await this.resolveNewWorktreeCommit(project, source);
-    const move = { id: moveId, threadId, workspaceId: project.id, worktreePath, branch };
+    const { branch, detachedCommit, options } = source.kind === "branch"
+      ? { branch: source.baseBranch, detachedCommit: startPoint, options: { branchless: true, startPoint } }
+      : { branch: source.branch, detachedCommit: null, options: { baseRef: startPoint } };
+    const move = { id: moveId, threadId, workspaceId: project.id, worktreePath, branch, detachedCommit };
     await this.threads.recordMoveWorktree({ ...move, createdAt: this.now().toISOString() });
     try {
-      await this.newWorktrees.checkouts.createWorktree(project.path, name, branch, { baseRef: startPoint, exclusivePath: true });
+      await this.newWorktrees.checkouts.createWorktree(project.path, name, branch, { ...options, exclusivePath: true });
       const placement: NewWorktreePlacement = {
         kind: "new-worktree", moveId, branch, worktreePath,
         source: source.kind === "pr"
@@ -160,7 +162,7 @@ export class ThreadMoveService {
   private async cleanupProvisioning(move: WorktreeRecord, repoPath: string | undefined): Promise<void> {
     try {
       if (this.threads.findById(move.threadId)?.worktree_path === move.worktreePath) return;
-      const outcome = await this.newWorktrees.checkouts.removeProvisionedWorktree(repoPath, move.worktreePath, move.branch);
+      const outcome = await this.newWorktrees.checkouts.removeProvisionedWorktree(repoPath, move);
       await this.threads.deleteProvisioningMoveWorktree(move.id);
       if (outcome === "unowned") {
         logger.warn("Interrupted move left an unrelated path untouched", { moveId: move.id, worktreePath: move.worktreePath });

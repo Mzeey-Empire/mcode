@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS `thread_move_worktrees` (
 	`workspace_id` text NOT NULL,
 	`worktree_path` text NOT NULL,
 	`branch` text NOT NULL,
+	`detached_commit` text,
 	`state` text NOT NULL,
 	`created_at` text NOT NULL,
 	`updated_at` text NOT NULL

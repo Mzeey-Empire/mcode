@@ -796,12 +796,14 @@ describe("provider switch on send", () => {
       kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin },
     });
     if (result.status !== "moved") throw new Error(JSON.stringify(result));
-    expect(result.thread).toMatchObject({ workspace_id: project.id, mode: "worktree", worktree_managed: true, checkout_state: "named" });
-    const record = database?.query("SELECT id, state, branch, worktree_path FROM thread_move_worktrees WHERE thread_id = ?")
+    expect(result.thread).toMatchObject({
+      workspace_id: project.id, mode: "worktree", worktree_managed: true,
+      branch: "main", checkout_state: "branchless", base_branch: "main",
+    });
+    const record = database?.query("SELECT id, state, detached_commit, worktree_path FROM thread_move_worktrees WHERE thread_id = ?")
       .get(threadId);
-    expect(record).toMatchObject({ state: "bound", branch: result.thread.branch, worktree_path: result.thread.worktree_path });
+    expect(record).toMatchObject({ state: "bound", detached_commit: expectedCommit, worktree_path: result.thread.worktree_path });
     if (!record || !("id" in record)) throw new Error("Move has no ownership record");
-    expect(result.thread.branch).toBe(`mcode/move-${record.id}`);
     expect(NodePath.basename(result.thread.worktree_path ?? "")).toBe(`move-${record.id}`);
     expect(moveMarker()).toEqual({ projectName: "Destination", target: "new-worktree",
       source: { kind: "branch", branch: "main", startFromOrigin } });
@@ -810,7 +812,7 @@ describe("provider switch on send", () => {
     await completeTurn(claude, "Check the starting commit", "Checked", "new-claude");
     const { cwd } = lastRequest(claude);
     expect(cwd).toBe(result.thread.worktree_path);
-    expect(git(cwd, "symbolic-ref", "--short", "HEAD")).toBe(result.thread.branch);
+    expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD");
     expect(git(cwd, "rev-parse", "HEAD")).toBe(expectedCommit);
     expect(git(project.path, "rev-parse", "main")).toBe(localCommit);
   });
@@ -874,7 +876,7 @@ describe("provider switch on send", () => {
     expect(environment.getAutomaticSetup({ threadId }).gate).toBe("released-by-pass");
   });
 
-  it("removes the new worktree when the rebind transaction fails", async () => {
+  it("removes the detached worktree when the rebind transaction fails", async () => {
     const { source, project, move } = await relocationFixture({ gitBranch: "main" });
     initRepository(project.path);
     writeFixture((db) => db.exec(`
@@ -884,6 +886,7 @@ describe("provider switch on send", () => {
     expect(await move(undefined, LOCAL_BRANCH_MOVE)).toMatchObject({ status: "failed", error: expect.stringContaining("test rebind blocked") });
     expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
     expect(git(project.path, "worktree", "list", "--porcelain").match(/^worktree /gm)).toEqual(["worktree "]);
+    expect(git(project.path, "branch", "--format=%(refname:short)")).toBe("main");
     expect(database?.query("SELECT id FROM thread_move_worktrees").all()).toEqual([]);
     expect(moveMarker()).toBeUndefined();
   });
@@ -891,19 +894,22 @@ describe("provider switch on send", () => {
   it.each(["folder", "worktree"] as const)("fails provisioning and keeps a %s that arrives after recording", async (occupant) => {
     const { source, project, move, threads } = await relocationFixture({ gitBranch: "main" });
     initRepository(project.path);
-    const executor = container.resolve(RealGitExecutor);
-    const exec = executor.exec.bind(executor);
+    const mkdir = NodeFSPromises.mkdir;
     let occupied: { id: string; worktreePath: string } | undefined;
-    vi.spyOn(executor, "exec").mockImplementation(async (args, options) => {
-      if (args[2] === "rev-parse" && args[3] === "--verify" && args[4]?.startsWith("mcode/move-")) {
+    const claim = vi.spyOn(NodeFSPromises, "mkdir").mockImplementation(async (path, options) => {
+      if (typeof path === "string" && NodePath.basename(path).startsWith("move-")) {
         const [plan] = threads.listProvisioningMoveWorktrees();
-        if (!plan) throw new Error("Checkout creation started before the move was recorded");
+        if (plan?.worktreePath !== path) throw new Error("Checkout creation started before the move was recorded");
         occupyMovePath(project.path, plan.worktreePath, occupant);
         occupied = plan;
       }
-      return exec(args, options);
+      return mkdir(path, options);
     });
-    expect(await move(undefined, LOCAL_BRANCH_MOVE)).toMatchObject({ status: "failed" });
+    try {
+      expect(await move(undefined, LOCAL_BRANCH_MOVE)).toMatchObject({ status: "failed" });
+    } finally {
+      claim.mockRestore();
+    }
     if (!occupied) throw new Error("The other owner did not claim the checkout path");
     expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
     expectNoMoveRecord(occupied.id);
@@ -954,6 +960,23 @@ describe("provider switch on send", () => {
     await service().recoverInterruptedMoves();
     expectNoMoveRecord(plan.id);
     expect(NodeFS.existsSync(plan.worktreePath)).toBe(false);
+  });
+
+  it.each([true, false])("on restart removes a detached checkout only at the recorded commit (%s)", async (matchesCommit) => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const plan = await interruptedMove(threads, project, "main", git(project.path, "rev-parse", "HEAD"));
+    if (!matchesCommit) {
+      git(project.path, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "different checkout");
+    }
+    const commit = git(project.path, "rev-parse", "HEAD");
+    git(project.path, "worktree", "add", "--detach", plan.worktreePath, commit);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(!matchesCommit);
+    if (!matchesCommit) expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
   });
 
   it("retries the first turn with the relocation note after provider failure", async () => {
@@ -1141,12 +1164,12 @@ describe("provider switch on send", () => {
     return { source, project, move, service, backgroundCommands, threads, environment };
   }
 
-  async function interruptedMove(threads: ThreadRepo, project: { id: string; path: string }, ref: string) {
+  async function interruptedMove(threads: ThreadRepo, project: { id: string; path: string }, ref: string, detachedCommit: string | null = null) {
     const id = crypto.randomUUID();
     const parent = getManagedWorktreeBaseDir(project.path);
     NodeFS.mkdirSync(parent, { recursive: true });
     const plan = { id, threadId, workspaceId: project.id, worktreePath: NodePath.join(parent, `move-${id}`),
-      branch: `${ref}/${id}`, createdAt: MOVE_AT };
+      branch: detachedCommit === null ? `${ref}/${id}` : ref, detachedCommit, createdAt: MOVE_AT };
     await threads.recordMoveWorktree(plan);
     return plan;
   }

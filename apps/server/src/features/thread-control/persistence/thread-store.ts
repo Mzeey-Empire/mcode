@@ -1301,11 +1301,13 @@ export class ThreadStore {
 
   /** Change placement, retention, session ownership, and the timeline together. */
   moveToProject(id: string, destination: Pick<Workspace, "id" | "path" | "is_git_repo">, placement: ThreadMovePlacement, now: string) {
+    const detachedBase = placement.kind === "new-worktree" && placement.source.kind === "branch" ? placement.source.branch : null;
+    const newCheckoutState = detachedBase === null ? "named" : "branchless";
     const checkout = placement.kind !== "local"
       ? {
         mode: "worktree" as const, worktreePath: placement.worktreePath,
-        checkoutState: placement.kind === "existing-worktree" ? placement.checkoutState : "named" as const,
-        baseBranch: placement.kind === "existing-worktree" ? placement.baseBranch : null,
+        checkoutState: placement.kind === "existing-worktree" ? placement.checkoutState : newCheckoutState,
+        baseBranch: placement.kind === "existing-worktree" ? placement.baseBranch : detachedBase,
       }
       : { mode: "direct" as const, checkoutState: "named" as const, worktreePath: null, baseBranch: null };
 

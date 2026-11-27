@@ -100,6 +100,7 @@ export const threadMoveWorktrees = sqliteTable("thread_move_worktrees", {
   workspaceId: text("workspace_id").notNull(),
   worktreePath: text("worktree_path").notNull(),
   branch: text("branch").notNull(),
+  detachedCommit: text("detached_commit"),
   state: text("state", { enum: ["provisioning", "bound"] }).notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),

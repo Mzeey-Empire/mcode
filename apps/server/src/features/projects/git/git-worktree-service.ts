@@ -105,24 +105,23 @@ export class GitWorktreeService {
     };
   }
 
-  /** Remove only a linked checkout that still belongs to this repository and recorded branch. */
+  /** Remove a registered checkout only if its path and recorded Git identity still match. */
   async removeProvisionedWorktree(
-    repoPath: string | undefined, worktreePath: string, branch: string,
+    repoPath: string | undefined, move: ProvisionedMoveCheckout,
   ): Promise<"missing" | "unowned" | "removed"> {
+    const { worktreePath } = move;
     const entry = await statIfPresent(worktreePath);
     if (!entry) return "missing";
     if (!entry.isDirectory() || !(await statIfPresent(NodePath.join(worktreePath, ".git")))?.isFile()) return "unowned";
     if (!repoPath) throw new Error("Destination repository is unavailable");
 
-    const { stdout: expectedCommonDir } = await this.gitExecutor.exec([
-      "-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir",
+    const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]);
+    if (!matchesProvisionedCheckout(stdout, move)) return "unowned";
+    const [{ stdout: expectedCommonDir }, { stdout: actualCommonDir }] = await Promise.all([
+      this.gitExecutor.exec(["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
+      this.gitExecutor.exec(["-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
     ]);
-    const { stdout } = await this.gitExecutor.exec([
-      "-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir", "--symbolic-full-name", "HEAD",
-    ]);
-    const [commonDir, head] = stdout.trimEnd().split(/\r?\n/);
-    if (!commonDir || head !== `refs/heads/${branch}`
-      || NodePath.relative(expectedCommonDir.trimEnd(), commonDir) !== "") return "unowned";
+    if (NodePath.relative(expectedCommonDir.trimEnd(), actualCommonDir.trimEnd()) !== "") return "unowned";
     await this.gitExecutor.exec(["-C", repoPath, "worktree", "remove", worktreePath], { timeout: 30_000 });
     return "removed";
   }
@@ -374,6 +373,21 @@ function normalizeWorktreePath(path: string): string {
   const resolvedPath = NodePath.resolve(path);
   const identityPath = NodeFS.existsSync(resolvedPath) ? NodeFS.realpathSync.native(resolvedPath) : resolvedPath;
   return identityPath.replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
+}
+
+type ProvisionedMoveCheckout = { worktreePath: string; branch: string; detachedCommit: string | null };
+
+function matchesProvisionedCheckout(output: string, { worktreePath, branch, detachedCommit }: ProvisionedMoveCheckout): boolean {
+  const realPath = NodeFS.realpathSync.native(worktreePath);
+  return output.split("\0\0").some((record) => {
+    const [entry, ...checkout] = record.split("\0");
+    if (!entry?.startsWith("worktree ")) return false;
+    const registeredPath = entry.slice("worktree ".length);
+    if (NodePath.relative(worktreePath, registeredPath) !== "" && NodePath.relative(realPath, registeredPath) !== "") return false;
+    return detachedCommit === null
+      ? checkout.includes(`branch refs/heads/${branch}`)
+      : checkout.includes("detached") && checkout.includes(`HEAD ${detachedCommit}`);
+  });
 }
 
 function createWorktreeArgs(request: WorktreeCreationRequest, createdBranch: boolean): string[] {
