@@ -5,6 +5,7 @@
  */
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
@@ -13,6 +14,7 @@ let persistenceRuntime: ReturnType<typeof createThreadPersistenceTestRuntime>;
 import { CleanupJobRepo } from "../persistence/cleanup-job-repo.js";
 import { ThreadRepo } from "../../persistence/thread-repo.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { WorkspaceStore } from "../../../projects/persistence/workspace-store.js";
 import { CleanupWorker } from "../cleanup-worker.js";
 import { HandoffStorage } from "../../../handoff/index.js";
 import { ThreadService } from "../../index.js";
@@ -297,6 +299,118 @@ describe("Cleanup integration", () => {
     await worker.poll();
     expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
     await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  describe("No project move-out retention", () => {
+    const movedAt = "2026-08-12T10:00:00.000Z";
+    const deadline = "2026-08-19T10:00:00.000Z";
+    let sweep: NoProjectWorkspaceSweep;
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(movedAt));
+      sweep = new NoProjectWorkspaceSweep(workspaceRepo, mockAttachmentService, NodePath.dirname(db.filename));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    function retentionOf(workspaceId: string) {
+      return db.prepare("SELECT moved_out_at, retain_until FROM workspaces WHERE id = ?").get(workspaceId);
+    }
+
+    it("keeps a threadless folder through its deadline and deletes the row before the folder after expiry", async () => {
+      const workspace = await workspaceService.createNoProject(crypto.randomUUID(), "Moved notes");
+      ageWorkspace(workspace.id);
+      const notes = NodePath.join(workspace.path, "notes.txt");
+      await NodeFSPromises.writeFile(notes, "moved notes");
+      new WorkspaceStore(db).recordNoProjectMoveOut(workspace.id, movedAt);
+      expect(retentionOf(workspace.id)).toEqual({ moved_out_at: movedAt, retain_until: deadline });
+
+      await sweep.run();
+      expect(await NodeFSPromises.readFile(notes, "utf8")).toBe("moved notes");
+
+      vi.setSystemTime(new Date(deadline));
+      await sweep.run();
+      expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)?.path).toBe(workspace.path);
+      expect(await NodeFSPromises.readFile(notes, "utf8")).toBe("moved notes");
+
+      vi.mocked(mockAttachmentService.removeForThread).mockImplementationOnce(() => {
+        expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+        expect(NodeFS.readFileSync(notes, "utf8")).toBe("moved notes");
+      });
+      vi.setSystemTime(new Date("2026-08-19T10:00:00.001Z"));
+      await sweep.run();
+
+      expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+      await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("starts seven days of retention when the last sharer is deleted after a move", async () => {
+      const workspace = await workspaceService.createNoProject(crypto.randomUUID(), "Shared notes");
+      ageWorkspace(workspace.id);
+      const destination = await workspaceRepo.create("Destination", "/destination");
+      const moved = await threadRepo.create(workspace.id, "Moving thread", "direct", "");
+      const sharer = await threadRepo.create(workspace.id, "Remaining thread", "direct", "");
+      const store = new WorkspaceStore(db);
+      db.transaction(() => {
+        db.prepare("UPDATE threads SET workspace_id = ? WHERE id = ?").run(destination.id, moved.id);
+        store.recordNoProjectMoveOut(workspace.id, movedAt);
+      })();
+      expect(retentionOf(workspace.id)).toEqual({ moved_out_at: movedAt, retain_until: null });
+
+      vi.setSystemTime(new Date("2026-08-13T10:00:00.000Z"));
+      await sweep.run();
+      expect(retentionOf(workspace.id)).toEqual({ moved_out_at: movedAt, retain_until: null });
+
+      await threadRepo.hardDelete(sharer.id);
+      await sweep.run();
+      expect(retentionOf(workspace.id)).toEqual({ moved_out_at: movedAt, retain_until: "2026-08-20T10:00:00.000Z" });
+      expect(await NodeFSPromises.readdir(workspace.path)).toEqual([]);
+
+      vi.setSystemTime(new Date("2026-08-20T10:00:01.000Z"));
+      await sweep.run();
+      expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)).toBeNull();
+      await expect(NodeFSPromises.stat(workspace.path)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("keeps a workspace with a closed thread even after its retention deadline passes", async () => {
+      const workspace = await workspaceService.createNoProject(crypto.randomUUID(), "Closed thread");
+      ageWorkspace(workspace.id);
+      new WorkspaceStore(db).recordNoProjectMoveOut(workspace.id, movedAt);
+      const thread = await threadRepo.create(workspace.id, "Closed", "direct", "");
+      db.prepare("UPDATE threads SET user_completed_at = ? WHERE id = ?").run(movedAt, thread.id);
+      vi.setSystemTime(new Date("2026-08-20T10:00:00.000Z"));
+
+      await sweep.run();
+
+      expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)?.path).toBe(workspace.path);
+      expect(threadRepo.listAllByWorkspace(workspace.id).map(({ id }) => id)).toEqual([thread.id]);
+      expect(await NodeFSPromises.readdir(workspace.path)).toEqual([]);
+    });
+
+    it.each(["pending", "retryable"])("keeps a workspace with a %s startup after its deadline", async (state) => {
+      const workspace = await workspaceService.createNoProject(crypto.randomUUID(), "Startup notes");
+      ageWorkspace(workspace.id);
+      new WorkspaceStore(db).recordNoProjectMoveOut(workspace.id, movedAt);
+      const { reader, writer } = persistenceRuntime;
+      const startups = new ThreadStartupService(new ThreadStartupRepo(reader, writer), writer);
+      const startupId = crypto.randomUUID();
+      vi.setSystemTime(new Date("2026-08-20T10:00:00.000Z"));
+      await startups.start({ startupId, workspaceId: workspace.id, kind: "direct" });
+      if (state === "retryable") {
+        await startups.advance(startupId, "thread");
+        await startups.fail(startupId, {
+          code: "THREAD_CREATE_FAILED", message: "Thread creation failed", retryable: true,
+        });
+      }
+
+      await sweep.run();
+
+      expect(workspaceRepo.findByIdIncludeDeleted(workspace.id)?.path).toBe(workspace.path);
+      expect(await NodeFSPromises.readdir(workspace.path)).toEqual([]);
+    });
   });
 
   it.each([false, true])("keeps a retryable pre-thread failure updated within seven days (seen: %s)", async (seen) => {

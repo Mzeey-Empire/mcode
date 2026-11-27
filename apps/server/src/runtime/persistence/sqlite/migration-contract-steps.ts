@@ -31,6 +31,11 @@ export const FLOOR_TABLE_NAME = "mcode_schema_compatibility";
  * contain {@link floorUpsertStatement} for that migration's `when` and the step's own tag.
  */
 export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
+  "0113_curious_the_twelve": {
+    breaks: [],
+    expandedIn: "0113_curious_the_twelve",
+    reason: "Older builds' No project sweep ignores retain_until and would delete a retained folder.",
+  },
   "0112_eminent_millenium_guard": {
     breaks: [],
     expandedIn: "0112_eminent_millenium_guard",

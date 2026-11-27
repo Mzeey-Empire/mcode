@@ -32,13 +32,18 @@ export class WorkspaceRepo {
     return this.reader.findThreadlessNoProjectFailureIds(workspaceId);
   }
 
-  findRemovableNoProject(createdBefore: string, retryUpdatedSince: string): ReturnType<WorkspaceStore["findRemovableNoProject"]> {
-    return this.reader.findRemovableNoProject(createdBefore, retryUpdatedSince);
+  findRemovableNoProject(createdBefore: string, retryUpdatedSince: string, now: string): ReturnType<WorkspaceStore["findRemovableNoProject"]> {
+    return this.reader.findRemovableNoProject(createdBefore, retryUpdatedSince, now);
+  }
+
+  /** Start retention for moved-out No project workspaces whose last thread was purged. */
+  retainMovedOutNoProject(now: string): Promise<void> {
+    return this.writer.execute(workspaceWriteOperations.retainMovedOutNoProject, [now]);
   }
 
   /** Hard-delete a swept workspace if it still qualifies. */
-  deleteRemovableNoProject(id: string, createdBefore: string, retryUpdatedSince: string): Promise<boolean> {
-    return this.writer.execute(workspaceWriteOperations.deleteRemovableNoProject, [id, createdBefore, retryUpdatedSince]);
+  deleteRemovableNoProject(id: string, createdBefore: string, retryUpdatedSince: string, now: string): Promise<boolean> {
+    return this.writer.execute(workspaceWriteOperations.deleteRemovableNoProject, [id, createdBefore, retryUpdatedSince, now]);
   }
 
   prependToSortOrder(id: Parameters<WorkspaceStore["prependToSortOrder"]>[0]): Promise<ReturnType<WorkspaceStore["prependToSortOrder"]>> {
