@@ -4302,6 +4302,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "detached_commit": {
+          "name": "detached_commit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "state": {
           "name": "state",
           "type": "text",
