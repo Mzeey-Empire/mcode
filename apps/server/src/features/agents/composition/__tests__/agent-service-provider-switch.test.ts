@@ -1304,7 +1304,10 @@ describe("provider switch on send", () => {
     }, [threadId]]);
     await databaseWriter.execute(workspaceMoveWrites.advance, [id, 1, {
       phase: "intent", cleanup: "kept", error: "rollback needs a retry",
-      result: { status: "rollback-pending", error: "rollback needs a retry", markerPath: null },
+      result: {
+        status: "rollback-pending", error: "rollback needs a retry", markerPath: null,
+        cause: { kind: "other" }, partialCopyRemoved: null,
+      },
     }, MOVE_AT, undefined]);
     await expect(send(claude, "Continue the work")).rejects.toMatchObject({ reason: "pending_mutation" });
     expect(claude.sendTurn.mock.calls).toEqual([]);

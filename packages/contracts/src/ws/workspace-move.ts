@@ -24,7 +24,7 @@ export type WorkspaceMoveFailureCause = z.infer<ReturnType<typeof WorkspaceMoveF
 /** Result of validation and reservation, before touching the folder. */
 export const CreateProjectFromFolderResultSchema = lazySchema(() => z.union([
   z.object({ operationId: z.string() }),
-  z.object({ status: z.literal("failed"), error: z.string(), cause: WorkspaceMoveFailureCauseSchema().optional() }),
+  z.object({ status: z.literal("failed"), error: z.string(), cause: WorkspaceMoveFailureCauseSchema() }),
   z.object({
     status: z.literal("busy"),
     threadId: z.string(),
@@ -34,17 +34,17 @@ export const CreateProjectFromFolderResultSchema = lazySchema(() => z.union([
 
 export type CreateProjectFromFolderResult = z.infer<ReturnType<typeof CreateProjectFromFolderResultSchema>>;
 
-/** Durable outcome of a project move, including receipts written before typed causes. */
+/** Durable outcome of a project move. A same-drive failure has no partial copy. */
 export const WorkspaceMoveResultSchema = lazySchema(() => z.discriminatedUnion("status", [
   z.object({ status: z.literal("created"), workspaceId: z.string() }),
   z.object({ status: z.literal("git-failed"), workspaceId: z.string(), error: z.string() }),
   z.object({
-    status: z.literal("failed"), error: z.string(), cause: WorkspaceMoveFailureCauseSchema().optional(),
-    partialCopyRemoved: z.boolean().optional(),
+    status: z.literal("failed"), error: z.string(), cause: WorkspaceMoveFailureCauseSchema(),
+    partialCopyRemoved: z.boolean().nullable(),
   }),
   z.object({
-    status: z.literal("rollback-pending"), error: z.string(), cause: WorkspaceMoveFailureCauseSchema().optional(),
-    markerPath: z.string().nullable(), partialCopyRemoved: z.boolean().optional(),
+    status: z.literal("rollback-pending"), error: z.string(), cause: WorkspaceMoveFailureCauseSchema(),
+    markerPath: z.string().nullable(), partialCopyRemoved: z.boolean().nullable(),
   }),
 ]));
 

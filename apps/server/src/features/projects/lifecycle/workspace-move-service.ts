@@ -94,20 +94,11 @@ async function removeCopyClaim(move: WorkspaceMove, action: CopyRollback, destin
   if (mayHaveClaimed) await removeMoveClaim(move.destinationPath, move.id);
 }
 
-function visibleMoveResult(move: WorkspaceMove): WorkspaceMove["result"] {
-  const { result } = move;
-  if (!result || (move.phase !== "done" && result.status !== "rollback-pending")) return null;
-  if ((result.status === "failed" || result.status === "rollback-pending") && !result.cause) {
-    return { ...result, cause: { kind: "other" } };
-  }
-  return result;
-}
-
 function interruptedMoveFailure(move: WorkspaceMove): MoveFailure {
   const pending = move.result?.status === "rollback-pending" ? move.result : null;
   return {
     error: move.error ?? "The server stopped before the folder move committed",
-    cause: pending?.cause ?? { kind: "other" },
+    cause: pending ? pending.cause : { kind: "other" },
   };
 }
 
@@ -115,7 +106,7 @@ function interruptedMoveFailure(move: WorkspaceMove): MoveFailure {
 const PHASES_WITH_BYTES = new Set<WorkspaceMove["phase"]>(["copying", "copied", "published", "converted"]);
 
 function moveFrame(move: WorkspaceMove): WorkspaceMoveFrame {
-  const result = visibleMoveResult(move);
+  const result = move.phase === "done" || move.result?.status === "rollback-pending" ? move.result : null;
   const showsBytes = PHASES_WITH_BYTES.has(move.phase);
   return {
     operationId: move.id, revision: move.revision, phase: move.phase,
@@ -445,7 +436,7 @@ export class WorkspaceMoveService {
         cleanup: "kept", error: failure.error,
         result: {
           status: "rollback-pending", ...failure, error: detail, markerPath: marker.path,
-          ...(crossDrive ? { partialCopyRemoved: false } : {}),
+          partialCopyRemoved: crossDrive ? false : null,
         },
       });
       return;
@@ -460,7 +451,7 @@ export class WorkspaceMoveService {
     }
     const failed = await this.save(this.requireMove(move.id), {
       phase: "done", cleanup: "pending", error: failure.error,
-      result: { status: "failed", ...failure, ...(crossDrive ? { partialCopyRemoved: outcome.status === "removed" } : {}) },
+      result: { status: "failed", ...failure, partialCopyRemoved: crossDrive ? outcome.status === "removed" : null },
       ...(outcome.status === "published-kept" ? { tombstonePath: move.destinationPath, cleanupError: outcome.reason } : {}),
     });
     await this.cleanRolledBackMarker(failed);

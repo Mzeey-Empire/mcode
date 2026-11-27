@@ -8,6 +8,23 @@ const unknownMethod: WsMethodName = "workspace.environment.automaticSetup.unknow
 void automaticSetupMethod;
 void unknownMethod;
 
+describe("workspace move WebSocket contracts", () => {
+  it.each(["failed", "rollback-pending"] as const)("requires a cause and copy outcome on a %s receipt", (status) => {
+    const schema = WS_METHODS()["workspace.move.status"].result;
+    const frame = { operationId: "move-1", revision: 2, phase: "done", copiedBytes: null, totalBytes: null };
+    const result = {
+      status, error: "Destination access was refused",
+      ...(status === "rollback-pending" ? { markerPath: null } : {}),
+    };
+    const cause = { kind: "permission" };
+
+    expect(schema.safeParse({ ...frame, result: { ...result, partialCopyRemoved: null } }).success).toBe(false);
+    expect(schema.safeParse({ ...frame, result: { ...result, cause } }).success).toBe(false);
+    const complete = { ...frame, result: { ...result, cause, partialCopyRemoved: null } };
+    expect(schema.parse(complete)).toEqual(complete);
+  });
+});
+
 describe("thread switching WebSocket contracts", () => {
   it("bounds Last turn identities and preserves the settled-only request", () => {
     const comparison = WS_METHODS()["turnDiff.getComparison"].params;

@@ -295,7 +295,7 @@ describe("same-drive project creation", () => {
     });
     expect(await service.createProject(f.input)).toHaveProperty("operationId");
     expect((await f.terminal).result).toEqual({
-      status: "failed", error: "Rename failed on attempt 6", cause: { kind },
+      status: "failed", error: "Rename failed on attempt 6", cause: { kind }, partialCopyRemoved: null,
     });
     expect(waits).toEqual([100, 200, 400, 800, 1500]);
     expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.source, kind: "no_project" });
@@ -317,7 +317,7 @@ describe("same-drive project creation", () => {
       });
       expect(await service.createProject(f.input)).toHaveProperty("operationId");
       expect((await f.terminal).result).toEqual({
-        status: "failed", error: "Rename failed on attempt 1", cause: { kind: "other" },
+        status: "failed", error: "Rename failed on attempt 1", cause: { kind: "other" }, partialCopyRemoved: null,
       });
       expect(waits).toEqual([]);
       expect(f.readNotes(f.source)).toBe("keep these files");
@@ -508,7 +508,7 @@ describe("folder move startup recovery", () => {
     const service = f.makeService();
     await service.recoverAtStartup();
     expect(service.status({ operationId })).toMatchObject({ phase: "intent", result: {
-      status: "rollback-pending", markerPath: destinationMarker,
+      status: "rollback-pending", markerPath: destinationMarker, cause: { kind: "other" }, partialCopyRemoved: null,
     } });
     expect(await service.withDeletion(f.id, async () => true)).toBe(false);
     await expect(f.threads.create(f.id, "A new thread", "direct", "", false)).rejects.toThrow(/moving/);
