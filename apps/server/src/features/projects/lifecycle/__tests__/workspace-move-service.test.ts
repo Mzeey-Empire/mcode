@@ -244,7 +244,7 @@ describe("same-drive project creation", () => {
       NodeFS.writeFileSync(NodePath.join(f.destination, "foreign.txt"), "destination belongs to someone else");
     } } });
     expect(await service.createProject(f.input)).toHaveProperty("operationId");
-    expect((await f.terminal).result).toMatchObject({ status: "failed" });
+    expect((await f.terminal).result).toMatchObject({ status: "failed", copy: null });
     expect(f.readNotes(f.source)).toBe("keep these files");
     expect(NodeFS.readdirSync(f.destination)).toEqual(["foreign.txt"]);
     expect(NodeFS.readFileSync(NodePath.join(f.destination, "foreign.txt"), "utf8")).toBe("destination belongs to someone else");
@@ -257,7 +257,7 @@ describe("same-drive project creation", () => {
       await NodeFSPromises.writeFile(NodePath.join(path, "foreign.txt"), "keep the new file");
     } });
     expect(await service.createProject(f.input)).toHaveProperty("operationId");
-    expect((await f.terminal).result).toMatchObject({ status: "failed" });
+    expect((await f.terminal).result).toMatchObject({ status: "failed", copy: null });
     expect(f.readNotes(f.source)).toBe("keep these files");
     expect(NodeFS.readdirSync(f.destination)).toEqual(["foreign.txt"]);
     expect(NodeFS.readFileSync(NodePath.join(f.destination, "foreign.txt"), "utf8")).toBe("keep the new file");
@@ -295,7 +295,7 @@ describe("same-drive project creation", () => {
     });
     expect(await service.createProject(f.input)).toHaveProperty("operationId");
     expect((await f.terminal).result).toEqual({
-      status: "failed", error: "Rename failed on attempt 6", cause: { kind }, partialCopyRemoved: null,
+      status: "failed", error: "Rename failed on attempt 6", cause: { kind }, copy: null,
     });
     expect(waits).toEqual([100, 200, 400, 800, 1500]);
     expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.source, kind: "no_project" });
@@ -317,7 +317,7 @@ describe("same-drive project creation", () => {
       });
       expect(await service.createProject(f.input)).toHaveProperty("operationId");
       expect((await f.terminal).result).toEqual({
-        status: "failed", error: "Rename failed on attempt 1", cause: { kind: "other" }, partialCopyRemoved: null,
+        status: "failed", error: "Rename failed on attempt 1", cause: { kind: "other" }, copy: null,
       });
       expect(waits).toEqual([]);
       expect(f.readNotes(f.source)).toBe("keep these files");
@@ -395,7 +395,7 @@ describe("folder move startup recovery", () => {
       sleep: async () => undefined,
     });
     await service.recoverAtStartup();
-    expect(service.status({ operationId })).toMatchObject({ phase: "done", result: { status: "failed" } });
+    expect(service.status({ operationId })).toMatchObject({ phase: "done", result: { status: "failed", copy: null } });
     expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.source, kind: "no_project" });
     expect(f.readNotes(f.source)).toBe("keep these files");
     expect(NodeFS.readdirSync(f.source)).toEqual(["notes.txt"]);
@@ -443,7 +443,7 @@ describe("folder move startup recovery", () => {
     await recovery.recoverAtStartup();
     expect(recovery.status(start)).toMatchObject({
       phase: "done",
-      result: { status: rollForward ? "created" : "failed" },
+      result: rollForward ? { status: "created" } : { status: "failed", copy: null },
     });
     const retained = rollForward ? f.destination : f.source;
     expect(f.readNotes(retained)).toBe("keep these files");
@@ -462,7 +462,7 @@ describe("folder move startup recovery", () => {
     NodeFS.writeFileSync(destinationMarker, "", { flag: "wx" });
     const recovery = f.makeService();
     await recovery.recoverAtStartup();
-    expect(recovery.status({ operationId })).toMatchObject({ phase: "done", result: { status: "failed" } });
+    expect(recovery.status({ operationId })).toMatchObject({ phase: "done", result: { status: "failed", copy: null } });
     expect(f.readNotes(f.source)).toBe("keep these files");
     expect(NodeFS.readdirSync(f.source)).toEqual(["notes.txt"]);
     expect(NodeFS.existsSync(f.destination)).toBe(false);
@@ -508,7 +508,7 @@ describe("folder move startup recovery", () => {
     const service = f.makeService();
     await service.recoverAtStartup();
     expect(service.status({ operationId })).toMatchObject({ phase: "intent", result: {
-      status: "rollback-pending", markerPath: destinationMarker, cause: { kind: "other" }, partialCopyRemoved: null,
+      status: "rollback-pending", markerPath: destinationMarker, cause: { kind: "other" }, crossDrive: false,
     } });
     expect(await service.withDeletion(f.id, async () => true)).toBe(false);
     await expect(f.threads.create(f.id, "A new thread", "direct", "", false)).rejects.toThrow(/moving/);
@@ -665,7 +665,7 @@ describe("cross-drive project creation", () => {
     const { operationId } = await startCopy(f);
 
     expect((await f.terminal).result).toMatchObject({
-      status: "failed", cause: { kind: "other" }, partialCopyRemoved: true,
+      status: "failed", cause: { kind: "other" }, copy: { kind: "removed" },
       error: "dangling is a link to something that does not exist, so Mcode can't tell how to copy it. Fix or remove the link, then try again.",
     });
     await vi.waitFor(() => expect(f.store.find(operationId)?.cleanup).toBe("done"));
@@ -709,7 +709,7 @@ describe("cross-drive project creation", () => {
     });
     const drive = process.platform === "win32" ? NodePath.parse(f.destination).root.slice(0, -1) : NodePath.parse(f.destination).root;
     expect((await f.terminal).result).toEqual({
-      status: "failed", error: `Injected ${code}`, partialCopyRemoved: true,
+      status: "failed", error: `Injected ${code}`, copy: { kind: "removed" },
       cause: code === "ENOSPC" ? { kind: "no-space", drive } : { kind: "permission" },
     });
     await vi.waitFor(() => expect(f.store.find(operationId)?.cleanup).toBe("done"));
@@ -737,9 +737,11 @@ describe("cross-drive project creation", () => {
         },
       },
     });
-    expect((await f.terminal).result).toMatchObject({ status: "failed", partialCopyRemoved: false });
+    const result = (await f.terminal).result;
+    const stagingPath = await occupied.promise;
+    expect(result).toMatchObject({ status: "failed", copy: { kind: "foreign-staging", path: stagingPath } });
     await vi.waitFor(() => expect(f.store.find(operationId)?.cleanup).toBe("done"));
-    expect(f.readNotes(await occupied.promise)).toBe("someone else's files");
+    expect(f.readNotes(stagingPath)).toBe("someone else's files");
     expect(f.readNotes(f.source)).toBe("keep these files");
     expect(NodeFS.existsSync(f.destination)).toBe(false);
   });
@@ -757,7 +759,8 @@ describe("cross-drive project creation", () => {
       },
     });
     expect((await f.terminal).result).toMatchObject({
-      status: "failed", error: expect.stringContaining("A project with this name already exists"), partialCopyRemoved: !changed,
+      status: "failed", error: expect.stringContaining("A project with this name already exists"),
+      copy: changed ? { kind: "kept", path: f.destination } : { kind: "removed" },
     });
     await vi.waitFor(() => expect(f.store.find(operationId)).toMatchObject({
       phase: "done", cleanup: changed ? "kept" : "done", tombstonePath: changed ? f.destination : null,
@@ -793,7 +796,7 @@ describe("cross-drive project creation", () => {
         },
       },
     });
-    expect((await f.terminal).result).toMatchObject({ status: "failed", partialCopyRemoved: true });
+    expect((await f.terminal).result).toMatchObject({ status: "failed", copy: { kind: "removed" } });
     await vi.waitFor(() => expect(f.store.find(operationId)?.cleanup).toBe("done"));
     expect(f.readNotes(f.destination)).toBe("late destination data");
     expect(f.readNotes(f.source)).toBe("keep these files");
@@ -969,7 +972,7 @@ describe("cross-drive move recovery", () => {
 
     expect(f.store.find(operationId)).toMatchObject({
       phase: "done", cleanup: "kept", tombstonePath: f.destination,
-      result: { status: "failed", partialCopyRemoved: false },
+      result: { status: "failed", copy: { kind: "kept", path: f.destination } },
     });
     expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.source, kind: "no_project" });
     expect(f.readNotes(f.source)).toBe("keep these files");
@@ -995,7 +998,7 @@ describe("cross-drive move recovery", () => {
     await f.makeService().recoverAtStartup();
     expect(f.workspaces.hasUnfinishedMove(f.id)).toBe(true);
     expect(f.store.find(operationId)?.result).toMatchObject({
-      status: "rollback-pending", partialCopyRemoved: false, cause: { kind: "other" }, markerPath: sourceMarker,
+      status: "rollback-pending", crossDrive: true, cause: { kind: "other" }, markerPath: sourceMarker,
     });
     expect(f.readNotes(f.source)).toBe("keep these files");
     expect(f.readNotes(stagingPath)).toBe("keep this folder");

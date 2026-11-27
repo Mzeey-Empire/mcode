@@ -82,8 +82,8 @@ function failureAdvice({ cause }: RolledBackMove, copied: boolean): string {
  * The title of a failed move. A full drive and a refused write are about the destination, so they say so, and say
  * "copied" only when a copy to another drive ran. A file in use is not about the destination, so it keeps the folder move's title.
  */
-function failedTitle({ cause, partialCopyRemoved }: RolledBackMove, folderMoveTitle: string): string {
-  const action = partialCopyRemoved === null ? "moved" : "copied";
+function failedTitle({ cause, copy }: RolledBackMove, folderMoveTitle: string): string {
+  const action = copy === null ? "moved" : "copied";
   switch (cause.kind) {
     case "no-space":
       return `Drive ${cause.drive} is full, so the folder couldn't be ${action} there`;
@@ -92,19 +92,36 @@ function failedTitle({ cause, partialCopyRemoved }: RolledBackMove, folderMoveTi
     case "in-use":
       return folderMoveTitle;
     case "other":
-      return partialCopyRemoved === null ? folderMoveTitle : "The folder couldn't be copied there";
+      return copy === null ? folderMoveTitle : "The folder couldn't be copied there";
     default:
       throw new Error(`Unhandled move failure cause: ${cause satisfies never}`);
   }
 }
 
-function failedDetail(failure: FailedMove, threadCount: number): string {
+function failedDetail(failure: FailedMove, threadCount: number): ReactNode {
   if (failure.outcome === "unconfirmed") return unconfirmedDetail(threadCount);
-  const { partialCopyRemoved } = failure;
-  if (partialCopyRemoved === null) return `Nothing changed: ${stillInNoProject(threadCount)}. ${failureAdvice(failure, false)}`;
-  const kept = `Your files are still in the old folder and ${stillInNoProject(threadCount)}`;
-  if (!partialCopyRemoved) return `${kept}. Mcode couldn't remove the partial copy yet; it will try again when it restarts.`;
-  return `${kept}; Mcode removed the partial copy. ${failureAdvice(failure, true)}`;
+  const { copy } = failure;
+  if (copy === null) return `Nothing changed: ${stillInNoProject(threadCount)}. ${failureAdvice(failure, false)}`;
+  switch (copy.kind) {
+    case "removed":
+      return `Your files are still in the old folder and ${stillInNoProject(threadCount)}; Mcode removed the partial copy. ${failureAdvice(failure, true)}`;
+    case "kept":
+      return (
+        <>
+          Mcode kept the copy at <BreakablePath path={copy.path} className="text-ink" /> because something in it changed after copying.
+          Your files are still in the old folder. Delete the copy yourself if you don't need it.
+        </>
+      );
+    case "foreign-staging":
+      return (
+        <>
+          Your files are still in the old folder. A folder Mcode didn't create was in the way at{" "}
+          <BreakablePath path={copy.path} className="text-ink" />, so Mcode left it alone. Delete it if you don't need it.
+        </>
+      );
+    default:
+      throw new Error(`Unhandled copy cleanup outcome: ${copy satisfies never}`);
+  }
 }
 
 const ROLLBACK_RESTART = "The threads in this folder can't run until Mcode finishes; it will try again when it restarts.";
@@ -113,8 +130,8 @@ const ROLLBACK_RESTART = "The threads in this folder can't run until Mcode finis
  * A copy to another drive never moved the folder, so there is nothing to put back: what is left to undo is the copy
  * at the destination. The marker's folder is not named then, because it may be the copy's own.
  */
-function rollbackPendingDetail({ folder, partialCopyRemoved }: RollbackPendingMove): ReactNode {
-  if (partialCopyRemoved !== null) {
+function rollbackPendingDetail({ folder, crossDrive }: RollbackPendingMove): ReactNode {
+  if (crossDrive) {
     return <>Mcode couldn't remove the copy at the destination yet. Your files are still in the old folder. {ROLLBACK_RESTART}</>;
   }
   return (

@@ -49,7 +49,7 @@ function copyingFrame(revision: number, copiedMb: number, totalMb = 48): Workspa
 }
 
 function copyFailedFrame(revision: number, failure: Partial<Extract<WorkspaceMoveResult, { status: "failed" }>> = {}): WorkspaceMoveFrame {
-  return frame(revision, { status: "failed", error: "ENOSPC: no space left on device, copyfile 'bench.db'", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true, ...failure });
+  return frame(revision, { status: "failed", error: "ENOSPC: no space left on device, copyfile 'bench.db'", cause: { kind: "no-space", drive: "D:" }, copy: { kind: "removed" }, ...failure });
 }
 
 function seed(workspaces = [ALPHA, HIDDEN]): void {
@@ -405,7 +405,7 @@ describe("New project from this folder", () => {
       await retype(user, nameField(), "wal-notes");
       await startMove(user);
 
-      push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'", cause: { kind: "in-use" }, partialCopyRemoved: null }));
+      push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'", cause: { kind: "in-use" }, copy: null }));
 
       const alert = await screen.findByRole("alert");
       expect(within(alert).getByText("Couldn't move the folder to wal-notes")).toBeVisible();
@@ -437,7 +437,7 @@ describe("New project from this folder", () => {
       await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
       await startMove(user);
 
-      push(frame(3, { status: "rollback-pending", error: "EPERM: operation not permitted", markerPath: "/home/.mcode/no-project/a/.mcode-move.json", cause: { kind: "permission" }, partialCopyRemoved: null }));
+      push(frame(3, { status: "rollback-pending", error: "EPERM: operation not permitted", markerPath: "/home/.mcode/no-project/a/.mcode-move.json", cause: { kind: "permission" }, crossDrive: false }));
 
       const alert = await screen.findByRole("alert");
       expect(alert).toHaveTextContent("Mcode couldn't put the folder back. Your files are in /home/.mcode/no-project/a.");
@@ -461,7 +461,7 @@ describe("New project from this folder", () => {
       return user;
     }
 
-    const permissionFrame = () => frame(2, { status: "failed", error: "EPERM: operation not permitted, lstat '~/src'", cause: { kind: "permission" }, partialCopyRemoved: null });
+    const permissionFrame = () => frame(2, { status: "failed", error: "EPERM: operation not permitted, lstat '~/src'", cause: { kind: "permission" }, copy: null });
 
     it("words a refused write from its cause, puts the error on Location under the field, and keeps the raw error behind its disclosure", async () => {
       const user = await reachFailure(permissionFrame());
@@ -485,7 +485,7 @@ describe("New project from this folder", () => {
     });
 
     it("words a full drive that stopped the move before any copy from its cause, and marks Location", async () => {
-      await reachFailure(frame(2, { status: "failed", error: "ENOSPC: no space left on device", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: null }));
+      await reachFailure(frame(2, { status: "failed", error: "ENOSPC: no space left on device", cause: { kind: "no-space", drive: "D:" }, copy: null }));
 
       const alert = screen.getByRole("alert");
       expect(within(alert).getByText("Drive D: is full, so the folder couldn't be moved there")).toBeVisible();
@@ -506,7 +506,7 @@ describe("New project from this folder", () => {
     });
 
     it("keeps ticket 08's title, body and place for a file in use: no field is marked and the notice follows the git checkbox", async () => {
-      await reachFailure(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'", cause: { kind: "in-use" }, partialCopyRemoved: null }));
+      await reachFailure(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'", cause: { kind: "in-use" }, copy: null }));
 
       const alert = screen.getByRole("alert");
       expect(within(alert).getByText("Couldn't move the folder to sqlite-wal-vs-rollback")).toBeVisible();
@@ -517,7 +517,7 @@ describe("New project from this folder", () => {
     });
 
     it("does not read raw error text that mentions EPERM as a file in use when the cause is other", async () => {
-      await reachFailure(frame(2, { status: "failed", error: "EPERM: operation not permitted, rename 'a'", cause: { kind: "other" }, partialCopyRemoved: null }));
+      await reachFailure(frame(2, { status: "failed", error: "EPERM: operation not permitted, rename 'a'", cause: { kind: "other" }, copy: null }));
 
       const alert = screen.getByRole("alert");
       expect(within(alert).getByText("Couldn't move the folder to sqlite-wal-vs-rollback")).toBeVisible();
@@ -539,7 +539,7 @@ describe("New project from this folder", () => {
     });
 
     it("goes back to the form when Name changes, whatever the failure was", async () => {
-      const user = await reachFailure(frame(2, { status: "failed", error: "EBUSY: locked", cause: { kind: "in-use" }, partialCopyRemoved: null }));
+      const user = await reachFailure(frame(2, { status: "failed", error: "EBUSY: locked", cause: { kind: "in-use" }, copy: null }));
 
       await user.type(nameField(), "-2");
 
@@ -723,7 +723,7 @@ describe("New project from this folder", () => {
       await user.click(createButton());
       await waitFor(() => expect(mockTransport.readWorkspaceMoveStatus).toHaveBeenCalledWith({ operationId: OPERATION }));
 
-      push(frame(3, { status: "failed", error: "EBUSY: locked", cause: { kind: "other" }, partialCopyRemoved: null }));
+      push(frame(3, { status: "failed", error: "EBUSY: locked", cause: { kind: "other" }, copy: null }));
       await act(async () => answerStatus(frame(1)));
 
       expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't move the folder to sqlite-wal-vs-rollback");
@@ -996,19 +996,30 @@ describe("New project from this folder", () => {
         expect(alert).toHaveTextContent(`Your files are still in the old folder and the threads are still in No project; Mcode removed the partial copy. ${advice}`);
       });
 
-      it("says Mcode could not remove the partial copy yet, whatever the cause, when it is still there", async () => {
-        await reachCopyFailure(copyFailedFrame(3, { cause: { kind: "permission" }, partialCopyRemoved: false }));
+      it("names the destination and explains why Mcode kept the published copy", async () => {
+        const path = "D:/projects/sqlite-wal-vs-rollback";
+        await reachCopyFailure(copyFailedFrame(3, { cause: { kind: "permission" }, copy: { kind: "kept", path } }));
 
         const alert = screen.getByRole("alert");
-        expect(alert).toHaveTextContent("Your files are still in the old folder and the threads are still in No project. Mcode couldn't remove the partial copy yet; it will try again when it restarts.");
-        expect(alert).not.toHaveTextContent("removed the partial copy");
-        expect(alert).not.toHaveTextContent("write to");
+        expect(alert).toBeVisible();
+        expect(alert).toHaveTextContent(`Mcode kept the copy at ${path} because something in it changed after copying. Your files are still in the old folder. Delete the copy yourself if you don't need it.`);
+        expect(alert).not.toHaveTextContent("when it restarts");
+      });
+
+      it("names the staging path and explains why Mcode left the folder alone", async () => {
+        const path = "D:/projects/.mcode-copy-op-1";
+        await reachCopyFailure(copyFailedFrame(3, { cause: { kind: "other" }, copy: { kind: "foreign-staging", path } }));
+
+        const alert = screen.getByRole("alert");
+        expect(alert).toBeVisible();
+        expect(alert).toHaveTextContent(`Your files are still in the old folder. A folder Mcode didn't create was in the way at ${path}, so Mcode left it alone. Delete it if you don't need it.`);
+        expect(alert).not.toHaveTextContent("when it restarts");
       });
 
       it("says the copy at the destination is what is left, not the folder, when the rollback of a copy failed", async () => {
         await reachCopyFailure(frame(3, {
           status: "rollback-pending", error: "EBUSY: resource busy or locked", cause: { kind: "in-use" },
-          markerPath: "/home/.mcode/no-project/a/.mcode-move.json", partialCopyRemoved: false,
+          markerPath: "/home/.mcode/no-project/a/.mcode-move.json", crossDrive: true,
         }));
 
         const alert = screen.getByRole("alert");
@@ -1018,7 +1029,7 @@ describe("New project from this folder", () => {
       });
 
       it("keeps ticket 08's layout for a failure on the same drive: Location is not in error and the notice follows the git checkbox", async () => {
-        await reachCopyFailure(frame(3, { status: "failed", error: "EBUSY: resource busy or locked", cause: { kind: "in-use" }, partialCopyRemoved: null }));
+        await reachCopyFailure(frame(3, { status: "failed", error: "EBUSY: resource busy or locked", cause: { kind: "in-use" }, copy: null }));
 
         const alert = screen.getByRole("alert");
         expect(alert).toHaveTextContent("Couldn't move the folder to sqlite-wal-vs-rollback");

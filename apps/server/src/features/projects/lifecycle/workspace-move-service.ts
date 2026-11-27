@@ -2,7 +2,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import type {
-  CreateProjectFromFolderInput, CreateProjectFromFolderResult, WorkspaceMoveFrame,
+  CreateProjectFromFolderInput, CreateProjectFromFolderResult, WorkspaceMoveCopyLeftover, WorkspaceMoveFrame,
   WorkspaceMoveFailureCause, WorkspaceMoveRetryGitResult, WorkspaceMoveStatusInput,
 } from "@mcode/contracts/ws/workspace-move";
 import type { Workspace } from "@mcode/contracts/models/workspace";
@@ -45,7 +45,10 @@ const rollbackActions: Partial<Record<MoveFolderState, Partial<Record<MoveFolder
 };
 
 type CopyRollback = "finish" | "remnants" | "staging" | "published";
-type CopyRollbackOutcome = { status: "removed" | "staging-occupied" } | { status: "published-kept"; reason: string };
+type CopyRollbackOutcome =
+  | { status: "removed" }
+  | { status: "staging-occupied"; path: string }
+  | { status: "published-kept"; reason: string };
 type CopyRollbackTable = Partial<Record<MoveFolderState, Partial<Record<MoveFolderState, CopyRollback>>>>;
 const leftoverStaging: Partial<Record<MoveFolderState, CopyRollback>> = {
   missing: "staging", empty: "staging", "marker-only": "staging", foreign: "staging", other: "staging",
@@ -435,15 +438,17 @@ export class WorkspaceMoveService {
       await this.save(this.requireMove(move.id), {
         cleanup: "kept", error: failure.error,
         result: {
-          status: "rollback-pending", ...failure, error: detail, markerPath: marker.path,
-          partialCopyRemoved: crossDrive ? false : null,
+          status: "rollback-pending", ...failure, error: detail, markerPath: marker.path, crossDrive,
         },
       });
       return;
     }
+    let copy: WorkspaceMoveCopyLeftover | null = crossDrive ? { kind: "removed" } : null;
     if (outcome.status === "staging-occupied") {
-      failure = { ...failure, error: `${failure.error}\nThe staging path is occupied by an unmarked entry: ${move.stagingPath}` };
+      copy = { kind: "foreign-staging", path: outcome.path };
+      failure = { ...failure, error: `${failure.error}\nThe staging path is occupied by an unmarked entry: ${outcome.path}` };
     } else if (outcome.status === "published-kept") {
+      copy = { kind: "kept", path: move.destinationPath };
       failure = { ...failure, error: `${failure.error}\nThe published copy was kept at ${move.destinationPath}: ${outcome.reason}` };
       logger.warn("Published workspace copy was kept during rollback", {
         operationId: move.id, path: move.destinationPath, reason: outcome.reason,
@@ -451,7 +456,7 @@ export class WorkspaceMoveService {
     }
     const failed = await this.save(this.requireMove(move.id), {
       phase: "done", cleanup: "pending", error: failure.error,
-      result: { status: "failed", ...failure, partialCopyRemoved: crossDrive ? outcome.status === "removed" : null },
+      result: { status: "failed", ...failure, copy },
       ...(outcome.status === "published-kept" ? { tombstonePath: move.destinationPath, cleanupError: outcome.reason } : {}),
     });
     await this.cleanRolledBackMarker(failed);
@@ -491,7 +496,8 @@ export class WorkspaceMoveService {
       else await removeMoveCopy(stagingPath, move.id);
     }
     await removeCopyClaim(move, action, destination, live);
-    return { status: staging === "foreign" || staging === "other" ? "staging-occupied" : "removed" };
+    if (staging === "foreign" || staging === "other") return { status: "staging-occupied", path: stagingPath };
+    return { status: "removed" };
   }
 
   private async rollbackPublishedCopy(move: WorkspaceMove, destination: MoveFolderState): Promise<CopyRollbackOutcome> {

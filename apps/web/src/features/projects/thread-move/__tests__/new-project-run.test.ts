@@ -24,10 +24,10 @@ describe("newProjectRunReducer", () => {
   });
 
   it("keeps the higher revision when two reads of one operation arrive out of order", () => {
-    const ended = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY", cause: { kind: "other" }, partialCopyRemoved: null }) });
+    const ended = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY", cause: { kind: "other" }, copy: null }) });
     const afterOlder = newProjectRunReducer(ended, { type: "frame", frame: frame(1) });
 
-    expect(afterOlder).toEqual({ kind: "failed", error: "EBUSY", outcome: "rolled-back", cause: { kind: "other" }, partialCopyRemoved: null });
+    expect(afterOlder).toEqual({ kind: "failed", error: "EBUSY", outcome: "rolled-back", cause: { kind: "other" }, copy: null });
   });
 
   it("does not let a running frame replace a newer running one", () => {
@@ -77,15 +77,15 @@ describe("newProjectRunReducer", () => {
     ["a POSIX marker path", "/home/.mcode/no-project/a/.mcode-move.json", "/home/.mcode/no-project/a"],
     ["no recorded marker", null, null],
   ])("reports the folder that holds the files from %s", (_name, markerPath, folder) => {
-    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath, cause: { kind: "permission" }, partialCopyRemoved: null }) });
+    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath, cause: { kind: "permission" }, crossDrive: false }) });
 
     expect(pending).toMatchObject({ kind: "rollback-pending", error: "EPERM", folder });
   });
 
-  it.each([null, false])("keeps whether a copy was involved when the rollback fails (%s)", (partialCopyRemoved) => {
-    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath: null, cause: { kind: "permission" }, partialCopyRemoved }) });
+  it.each([false, true])("keeps whether a copy was involved when the rollback fails (%s)", (crossDrive) => {
+    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath: null, cause: { kind: "permission" }, crossDrive }) });
 
-    expect(pending).toMatchObject({ kind: "rollback-pending", partialCopyRemoved });
+    expect(pending).toMatchObject({ kind: "rollback-pending", crossDrive });
   });
 
   it("draws the bar from each frame's own byte counts, through the published and converted frames", () => {
@@ -116,11 +116,11 @@ describe("newProjectRunReducer", () => {
   });
 
   it("keeps the typed cause of every failure, and a copy only when the server says the move copied", () => {
-    const copied = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "ENOSPC", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true }) });
-    const renamed = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY", cause: { kind: "in-use" }, partialCopyRemoved: null }) });
+    const copied = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "ENOSPC", cause: { kind: "no-space", drive: "D:" }, copy: { kind: "removed" } }) });
+    const renamed = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY", cause: { kind: "in-use" }, copy: null }) });
 
-    expect(copied).toMatchObject({ kind: "failed", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true });
-    expect(renamed).toMatchObject({ kind: "failed", cause: { kind: "in-use" }, partialCopyRemoved: null });
+    expect(copied).toMatchObject({ kind: "failed", cause: { kind: "no-space", drive: "D:" }, copy: { kind: "removed" } });
+    expect(renamed).toMatchObject({ kind: "failed", cause: { kind: "in-use" }, copy: null });
   });
 
   it("keeps a failed git retry on the alert with the new reason, and ends it on success", () => {
@@ -158,12 +158,12 @@ describe("failureIsAboutLocation", () => {
   };
 
   it.each([
-    ["a full drive with no copy", { status: "failed", error: "x", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: null }, true],
-    ["a refused write with no copy", { status: "failed", error: "x", cause: { kind: "permission" }, partialCopyRemoved: null }, true],
-    ["an unknown failure with no copy", { status: "failed", error: "x", cause: { kind: "other" }, partialCopyRemoved: null }, false],
-    ["an unknown failure of a copy", { status: "failed", error: "x", cause: { kind: "other" }, partialCopyRemoved: true }, true],
-    ["a file in use with no copy", { status: "failed", error: "x", cause: { kind: "in-use" }, partialCopyRemoved: null }, false],
-    ["a file in use during a copy", { status: "failed", error: "x", cause: { kind: "in-use" }, partialCopyRemoved: true }, false],
+    ["a full drive with no copy", { status: "failed", error: "x", cause: { kind: "no-space", drive: "D:" }, copy: null }, true],
+    ["a refused write with no copy", { status: "failed", error: "x", cause: { kind: "permission" }, copy: null }, true],
+    ["an unknown failure with no copy", { status: "failed", error: "x", cause: { kind: "other" }, copy: null }, false],
+    ["an unknown failure of a copy", { status: "failed", error: "x", cause: { kind: "other" }, copy: { kind: "removed" } }, true],
+    ["a file in use with no copy", { status: "failed", error: "x", cause: { kind: "in-use" }, copy: null }, false],
+    ["a file in use during a copy", { status: "failed", error: "x", cause: { kind: "in-use" }, copy: { kind: "removed" } }, false],
   ] satisfies [string, Extract<WorkspaceMoveResult, { status: "failed" }>, boolean][])("tells %s", (_name, result, aboutLocation) => {
     expect(failureIsAboutLocation(failed(result))).toBe(aboutLocation);
   });
