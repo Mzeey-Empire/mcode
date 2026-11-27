@@ -320,7 +320,7 @@ describe("New project from this folder", () => {
   });
 
   describe("a move that does not finish cleanly", () => {
-    it("names the folder it could not move, says nothing changed, and Try again sends the request again", async () => {
+    it("names the project it could not move the folder to, not the Location, says nothing changed, and Try again sends the request again", async () => {
       const user = await openNewProject();
       await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
       await startMove(user);
@@ -328,7 +328,8 @@ describe("New project from this folder", () => {
       push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'" }));
 
       const alert = await screen.findByRole("alert");
-      expect(alert).toHaveTextContent("Couldn't move the folder to ~/src");
+      expect(within(alert).getByText("Couldn't move the folder to wal-notes")).toBeVisible();
+      expect(alert).not.toHaveTextContent("~/src");
       expect(alert).toHaveTextContent("Nothing changed: the threads are still in No project. Close any app using files in the folder, then try again.");
       expect(screen.queryByText("EBUSY: resource busy or locked, rename 'a'")).toBeNull();
       await user.click(within(alert).getByRole("button", { name: "Show details" }));
@@ -341,6 +342,7 @@ describe("New project from this folder", () => {
 
     it("does not promise that nothing changed when the request never answered", async () => {
       vi.mocked(mockTransport.createProjectFromFolder).mockRejectedValueOnce(new Error("socket closed"));
+      await retype(user, nameField(), "wal-notes");
       const user = await openNewProject();
       await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
 
@@ -468,7 +470,7 @@ describe("New project from this folder", () => {
       push(frame(3, { status: "failed", error: "EBUSY: locked" }));
       await act(async () => answerStatus(frame(1)));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't move the folder to ~/src");
+      expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't move the folder to sqlite-wal-vs-rollback");
       expect(screen.queryByRole("button", { name: "Moving…" })).toBeNull();
     });
 

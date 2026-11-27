@@ -76,15 +76,16 @@ function rollbackPendingDetail(folder: string | null): ReactNode {
 
 interface MoveFailureNoticeProps {
   readonly failure: FolderMoveFailure;
-  /** Where the user asked for the folder to go, or "" when the dialog opened on a move that was already over. */
-  readonly location: string;
+  /** The name the user gave the project, or "" when there is none to name. */
+  readonly projectName: string;
   /** How many threads were in the folder, this one included. */
   readonly threadCount: number;
 }
 
 /** What went wrong with the folder move, what is left where, and the server's own words behind a disclosure. */
-export function MoveFailureNotice({ failure, location, threadCount }: MoveFailureNoticeProps) {
-  const title = location === "" ? "Couldn't move the folder" : `Couldn't move the folder to ${location}`;
+export function MoveFailureNotice({ failure, projectName, threadCount }: MoveFailureNoticeProps) {
+  // The name, not the Location: a path wraps the title onto several lines, and the Location stays in its field above.
+  const title = projectName === "" ? "Couldn't move the folder" : `Couldn't move the folder to ${projectName}`;
   const detail = failure.kind === "failed" ? failedDetail(failure, threadCount) : rollbackPendingDetail(failure.folder);
   return <Notice tone="error" title={title} detail={detail} more={failure.error} />;
 }

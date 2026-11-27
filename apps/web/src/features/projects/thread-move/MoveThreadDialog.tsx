@@ -309,7 +309,7 @@ function NewProjectBody({ newProject, moving }: { newProject: NewProjectMove; mo
         />
       )}
       {busy ? <BusyNotice busy={busy} /> : null}
-      {failure ? <MoveFailureNotice failure={failure} location={values.location.trim()} threadCount={newProject.threadCount} /> : null}
+      {failure ? <MoveFailureNotice failure={failure} projectName={values.name.trim()} threadCount={newProject.threadCount} /> : null}
       {sharersShown ? <SharersNotice titles={sharers.titles} count={sharers.count} /> : null}
     </div>
   );
