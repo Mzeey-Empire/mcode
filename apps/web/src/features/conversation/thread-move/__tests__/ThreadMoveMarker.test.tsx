@@ -34,6 +34,15 @@ describe("ThreadMoveMarker", () => {
     expect(screen.getByRole("note", { name: label })).toHaveTextContent(label);
   });
 
+  it("says a new project was created, and does not say the thread moved anywhere", () => {
+    render(<MessageBubble message={markerFor({ projectName: "sqlite-wal-vs-rollback", target: "new-project" })} />);
+
+    const note = screen.getByRole("note", { name: "Created project sqlite-wal-vs-rollback" });
+    expect(note).toHaveTextContent("Created project sqlite-wal-vs-rollback");
+    expect(note).not.toHaveTextContent("Moved to");
+    expect(screen.getByText("sqlite-wal-vs-rollback")).toHaveTextContent(/^sqlite-wal-vs-rollback$/);
+  });
+
   it("puts the project name in its own element so it can be emphasised", () => {
     render(<MessageBubble message={marker} />);
     expect(screen.getByText("mcode")).toHaveTextContent(/^mcode$/);
