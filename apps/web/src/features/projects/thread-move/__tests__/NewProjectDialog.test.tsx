@@ -803,6 +803,37 @@ describe("New project from this folder", () => {
         }
       });
 
+      it("restores copy progress when a reconnect returns the same revision after three failed reads", async () => {
+        const inProgress = copyingFrame(7, 10);
+        await startWithFailingStatusRead([inProgress]);
+        expect(screen.getByRole("progressbar", { name: "Copying files" })).toHaveAttribute("aria-valuetext", "10 of 48 MB");
+
+        const previousStatus = useConnectionStore.getState().status;
+        const read = vi.mocked(mockTransport.readWorkspaceMoveStatus);
+        const readsBeforeReconnect = read.mock.calls.length;
+        const reconnect = () => act(async () => {
+          useConnectionStore.setState({ status: "reconnecting" });
+          useConnectionStore.setState({ status: "connected" });
+        });
+
+        try {
+          await reconnect();
+          await settle();
+          expect(read.mock.calls.slice(readsBeforeReconnect)).toEqual([
+            [{ operationId: OPERATION }], [{ operationId: OPERATION }], [{ operationId: OPERATION }],
+          ]);
+          expect(screen.getByRole("alert")).toHaveTextContent("Couldn't get the result of the move.");
+          expect(screen.queryByRole("progressbar", { name: "Copying files" })).toBeNull();
+
+          read.mockResolvedValueOnce(inProgress);
+          await reconnect();
+          expect(screen.queryByText(/Couldn't get the result of the move/)).toBeNull();
+          expect(screen.getByRole("progressbar", { name: "Copying files" })).toHaveAttribute("aria-valuetext", "10 of 48 MB");
+        } finally {
+          act(() => useConnectionStore.setState({ status: previousStatus }));
+        }
+      });
+
       it("shows the real result when a later read succeeds", async () => {
         await startWithFailingStatusRead([new Error("socket closed"), frame(4, { status: "git-failed", workspaceId: HIDDEN.id, error: "git: 'init' failed" })]);
 
