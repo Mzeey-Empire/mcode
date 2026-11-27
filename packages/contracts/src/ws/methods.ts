@@ -49,7 +49,7 @@ import type {
 } from "../models/workspace-environment.js";
 import { ThreadSchema, RecentThreadSchema } from "../models/thread.js";
 import { ApprovalReviewModeSchema, DevinModeSchema, ThreadModeSchema, PermissionModeSchema, InteractionModeSchema, OrchestrationModeSchema } from "../models/enums.js";
-import { PaginatedMessagesSchema } from "../models/message.js";
+import { MessageSchema, PaginatedMessagesSchema } from "../models/message.js";
 import { MessageMentionsSchema } from "../models/mention.js";
 import { SelectedTextCommentsSchema } from "../models/selected-text-comment.js";
 import { ConversationNarrativeBatchSchema, ConversationPageSchema } from "../models/conversation-page.js";
@@ -199,6 +199,38 @@ export const ThreadCompletionResultSchema = lazySchema(() => z.discriminatedUnio
 export type ThreadCompletionRefusal = z.infer<typeof ThreadCompletionRefusalSchema>;
 /** A committed completion or an expected refusal. */
 export type ThreadCompletionResult = z.infer<ReturnType<typeof ThreadCompletionResultSchema>>;
+
+export const ThreadMoveTargetSchema = lazySchema(() => z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("local") }),
+]));
+
+/** Request to move one No project thread into an existing project. */
+export const ThreadMoveInputSchema = lazySchema(() => z.object({
+  threadId: z.string(),
+  workspaceId: z.string(),
+  target: ThreadMoveTargetSchema(),
+}));
+
+export type ThreadMoveInput = z.infer<ReturnType<typeof ThreadMoveInputSchema>>;
+
+/** The confirmed or unconfirmed outcome of moving a thread. */
+export const ThreadMoveResultSchema = lazySchema(() => z.discriminatedUnion("status", [
+  z.object({ status: z.literal("moved"), thread: ThreadSchema() }),
+  z.object({ status: z.literal("busy"), reason: z.enum(["running", "needs-approval", "background"]) }),
+  z.object({ status: z.literal("not-no-project") }),
+  z.object({ status: z.literal("destination-missing") }),
+  z.object({ status: z.literal("unconfirmed"), error: z.string() }),
+  z.object({ status: z.literal("failed"), cause: z.enum(["database-busy", "other"]), error: z.string() }),
+]));
+
+export type ThreadMoveResult = z.infer<ReturnType<typeof ThreadMoveResultSchema>>;
+
+/** Committed placement and its persisted timeline marker. */
+export const ThreadMovedToProjectEventSchema = lazySchema(() => z.object({
+  threadId: z.string(),
+  thread: ThreadSchema(),
+  marker: MessageSchema(),
+}));
 
 const ExternalThreadControlScopeSchema = z.enum([
   "projects:read",
@@ -641,6 +673,7 @@ export type FilesystemBrowseResult = z.infer<ReturnType<typeof FilesystemBrowseR
 
 // TS7056: without an explicit type, tsc refuses to serialize the registry's inferred declaration.
 const threadResultSchema: () => z.ZodType<import("../models/thread.js").Thread, z.ZodTypeDef, z.input<ReturnType<typeof ThreadSchema>>> = lazySchema(() => ThreadSchema());
+const threadMoveResultSchema: () => z.ZodType<ThreadMoveResult, z.ZodTypeDef, z.input<ReturnType<typeof ThreadMoveResultSchema>>> = ThreadMoveResultSchema;
 
 /** All WebSocket methods with runtime-validating parameter and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
@@ -844,6 +877,10 @@ export const WS_METHODS = lazySchema(() => ({
   "thread.updateTitle": {
     params: z.object({ threadId: z.string(), title: z.string() }),
     result: z.boolean(),
+  },
+  "thread.moveToProject": {
+    params: ThreadMoveInputSchema(),
+    result: threadMoveResultSchema(),
   },
   "thread.updateSettings": {
     params: z.object({

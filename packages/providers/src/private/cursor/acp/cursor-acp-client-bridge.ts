@@ -317,7 +317,9 @@ export class CursorAcpClientBridge {
   readWorkspaceFile(cwd: string, filePath: string): string {
     const root = NodePath.resolve(cwd);
     const resolved = NodePath.resolve(root, filePath);
-    if (resolved !== root && !resolved.startsWith(root + NodePath.sep)) return "";
+    if (resolved !== root && !resolved.startsWith(root + NodePath.sep)) {
+      throw new Error("Path outside workspace");
+    }
     try {
       return NodeFS.existsSync(resolved) ? NodeFS.readFileSync(resolved, "utf-8") : "";
     } catch {

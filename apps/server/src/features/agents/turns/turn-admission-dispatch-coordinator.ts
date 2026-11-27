@@ -1,4 +1,5 @@
 import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
@@ -56,6 +57,8 @@ import type { ExecutionParentStartContext } from "../execution/provider-executio
 import type { ProviderSwitchService, ProviderSwitchTicket } from "./provider-switch-service.js";
 import { TurnAdmissionError } from "@mcode/shared/turn-admission";
 import { fastModeDefault } from "@mcode/shared";
+import { buildFencedHandoff, loadHandoffMessages, targetInputCharacterCap } from "../../handoff/v2/index.js";
+import type { ToolCallRecordRepo } from "../tools/persistence/tool-call-record-repo.js";
 
 
 /** Automatic setup dispatch contract exposed to the turn command facade. */
@@ -237,6 +240,7 @@ interface PreparedCommand {
   readonly automaticAttachments: PersistedAttachmentData | null;
   /** Present when this send changes the thread's provider; the change commits only once the target accepts the turn. */
   readonly providerSwitch?: ProviderSwitchTicket;
+  readonly relocation?: NonNullable<ReturnType<ThreadRepo["readRelocation"]>>;
 }
 
 interface PersistedAttachmentData {
@@ -276,6 +280,7 @@ export class TurnAdmissionDispatchCoordinator {
     private readonly resumeScheduler?: Pick<TurnResumeScheduler, "unscheduleForSend">,
     private readonly providerSwitch?: ProviderSwitchService,
     private readonly completionHolds: CompletionHolds = new CompletionHolds(),
+    private readonly toolCalls?: ToolCallRecordRepo,
   ) {}
 
   /** Admit one command and return an immutable package for the runtime owner. */
@@ -316,12 +321,22 @@ export class TurnAdmissionDispatchCoordinator {
     try {
       this.completionHolds.cancel(command.threadId);
       lease = runtime.reserve(prepared.value.providerSwitch?.command ?? command);
+      this.assertCurrentPlacement(prepared.value);
       this.reserveCommandEffect(prepared.value.commandEffect);
       return await this.commit(prepared.value, lease, runtime);
     } catch (error) {
       await this.rollbackAdmission(prepared.value, lease, runtime);
       if (error instanceof TurnAdmissionOwnershipLostError) return { kind: "handled" };
       throw error;
+    }
+  }
+
+  private assertCurrentPlacement(prepared: PreparedCommand): void {
+    const current = this.requireThread(prepared.thread.id);
+    const workspace = this.requireWorkspace(current.workspace_id);
+    if (workspace.id !== prepared.workspace.id || workspace.path !== prepared.workspace.path
+      || current.mode !== prepared.thread.mode || current.worktree_path !== prepared.thread.worktree_path) {
+      throw new TurnAdmissionError("pending_mutation", "The thread's working folder changed while preparing the turn. Send again.");
     }
   }
 
@@ -574,7 +589,8 @@ export class TurnAdmissionDispatchCoordinator {
     lease: TurnRuntimeLease,
     runtime: TurnRuntimeAdmissionAuthority,
   ): Promise<PreparedTurnDispatch> {
-    const prepared = initial.providerSwitch ? await this.planProviderSwitch(initial) : initial;
+    const relocated = this.prepareRelocation(initial);
+    const prepared = relocated.providerSwitch ? await this.planProviderSwitch(relocated) : relocated;
     await this.preparePlanFile(prepared.command, prepared.providerId);
     prepared.plan = this.plans.classify(prepared.command);
     const cwd = this.resolveWorkingDirectory(prepared);
@@ -595,6 +611,16 @@ export class TurnAdmissionDispatchCoordinator {
       }
       throw error;
     }
+  }
+
+  private prepareRelocation(prepared: PreparedCommand): PreparedCommand {
+    if (prepared.command.providerOriginated) return prepared;
+    const relocation = this.threads.readRelocation(prepared.thread.id);
+    if (!relocation?.freshSession && !relocation?.notePending) return prepared;
+    if (!relocation.freshSession) return { ...prepared, relocation };
+    const command = { ...prepared.command, forceFreshSession: true, resumeRequired: undefined };
+    if (prepared.providerSwitch) prepared.providerSwitch.command = command;
+    return { ...prepared, command, relocation };
   }
 
   private hasEarlierMessages(command: SendMessageCommand): boolean {
@@ -636,7 +662,9 @@ export class TurnAdmissionDispatchCoordinator {
     const revertNotice = prepared.command.providerOriginated
       ? { revertIds: [], paths: [] } : this.reverts.pendingAgentNotice(prepared.thread.id);
     parentStartInput.revertNoticeIds = revertNotice.revertIds;
-    let wirePayload = await this.buildWirePayload(prepared, revertNotice.paths);
+    const payload = await this.buildWirePayload(prepared, revertNotice.paths, attachmentData.persisted);
+    parentStartInput.relocationUse = payload.relocationUse;
+    let wirePayload = payload.text;
     if (!runtime.owns(lease)) throw new TurnAdmissionOwnershipLostError();
     prepared.command.admissionGuard?.();
     await this.commitParentStart(prepared, lease, sourceTurnId, parentStartInput);
@@ -1123,7 +1151,11 @@ export class TurnAdmissionDispatchCoordinator {
     if (providerId === "devin" && value !== undefined) target.devin_mode = value;
   }
 
-  private async buildWirePayload(prepared: PreparedCommand, revertedPaths: readonly string[]): Promise<string> {
+  private async buildWirePayload(
+    prepared: PreparedCommand,
+    revertedPaths: readonly string[],
+    attachments: readonly AttachmentMeta[],
+  ): Promise<{ text: string; relocationUse?: DataOnlyParentTurnStartInput["relocationUse"] }> {
     let payload = this.withPlanInstructions(prepared);
     if (prepared.plan.kind === "questions" && prepared.command.providerWireOverride === undefined) {
       payload = this.plans.buildQuestionPrompt(payload);
@@ -1138,12 +1170,57 @@ export class TurnAdmissionDispatchCoordinator {
     const wirePayload = prepared.providerId === "codex" ? providerPayload : await this.injectMentionFileContents(prepared, providerPayload);
     const withNotice = revertedPaths.length === 0 ? wirePayload
       : `Note from Mcode: the user reverted your earlier changes to: ${revertedPaths.join(", ")} (restored to their state before that turn).\n${wirePayload}`;
-    return this.withHandoffPreamble(prepared, withNotice);
+    return this.finishWirePayload(prepared, withNotice, attachments);
   }
 
-  /** Switches and forks carry history inline; the stored user message stays what was typed. */
-  private withHandoffPreamble(prepared: PreparedCommand, payload: string): string {
-    return `${prepared.providerSwitch?.plan?.handoff.preamble ?? prepared.command.handoffPreamble ?? ""}${payload}`;
+  private async finishWirePayload(
+    prepared: PreparedCommand,
+    payload: string,
+    attachments: readonly AttachmentMeta[],
+  ): Promise<{ text: string; relocationUse?: DataOnlyParentTurnStartInput["relocationUse"] }> {
+    const note = await this.relocationNote(prepared.relocation);
+    const text = this.withHandoffPreamble(prepared, note ? `${payload}\n\nNote from Mcode: ${note.text}` : payload, attachments);
+    const freshSession = prepared.relocation?.freshSession === true;
+    if (!freshSession && !note) return { text };
+    return { text, relocationUse: { freshSession, noteGeneration: note?.generation ?? null } };
+  }
+
+  private async relocationNote(relocation: PreparedCommand["relocation"]): Promise<{ generation: number; text: string } | null> {
+    if (!relocation?.notePending) return null;
+    const source = this.workspaces.findRelocationSource(relocation.workspaceId);
+    if (!source) return null;
+    const hasFiles = await hasRelocationFiles(source.path).catch((error: unknown) => {
+      if (!(error instanceof Error) || !("code" in error) || (error.code !== "EACCES" && error.code !== "EPERM")) throw error;
+      logger.warn("Could not read the relocation note's folder", { path: source.path, code: error.code });
+      return false;
+    });
+    if (!hasFiles) return null;
+    const location = `Files from earlier in this thread are in ${source.path}.`;
+    let instruction = "Copy what you need into this project.";
+    if (source.kind === "no_project") {
+      instruction = source.retainUntil
+        ? `Mcode deletes that folder on ${localCalendarDate(source.retainUntil)}. ${instruction}`
+        : "Another thread still works in that folder, so copy what you need into this project and leave the originals in place.";
+    }
+    return { generation: relocation.noteGeneration, text: `${location} ${instruction}` };
+  }
+
+  private withHandoffPreamble(prepared: PreparedCommand, payload: string, attachments: readonly AttachmentMeta[]): string {
+    const existing = prepared.providerSwitch?.plan?.handoff.preamble ?? prepared.command.handoffPreamble;
+    if (existing !== undefined) return `${existing}${payload}`;
+    if (!prepared.relocation?.freshSession || prepared.command.providerWireOverride !== undefined) return payload;
+    if (!this.toolCalls) throw new Error("Relocation handoff requires the tool call reader");
+    const { command, thread, provider, providerId } = prepared;
+    const rows = loadHandoffMessages({ messageRepo: this.messages, toolCallRecordRepo: this.toolCalls, threadId: thread.id });
+    const handoff = buildFencedHandoff({
+      kind: "recovery", threadId: thread.id, fromProvider: thread.provider, toProvider: providerId,
+      rows, afterSequence: 0, throughSequence: command.persistedUserMessage
+        ? command.persistedUserMessage.sequence - 1 : this.messages.getLatestSequenceIncludingInternal(thread.id),
+      contextWindow: thread.context_window,
+      inputCharacterCap: targetInputCharacterCap(provider), userText: payload,
+      attachments: attachments.map(({ mimeType }) => ({ kind: mimeType.startsWith("image/") ? "image" : "file" })),
+    });
+    return `${handoff.preamble}${payload}`;
   }
 
   private withPlanInstructions(prepared: PreparedCommand): string {
@@ -1306,6 +1383,27 @@ export function supportsInternalThreadControl(provider: ProviderId): boolean {
   return provider === "claude" || provider === "codex" || provider === "cursor" || provider === "copilot";
 }
 
+async function hasRelocationFiles(path: string): Promise<boolean> {
+  try {
+    const dir = await NodeFSPromises.opendir(path);
+    try {
+      return await dir.read() !== null;
+    } finally {
+      await dir.close();
+    }
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && (error.code === "ENOENT" || error.code === "ENOTDIR")) return false;
+    throw error;
+  }
+}
+
 function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function localCalendarDate(timestamp: string): string {
+  const date = new Date(timestamp);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }

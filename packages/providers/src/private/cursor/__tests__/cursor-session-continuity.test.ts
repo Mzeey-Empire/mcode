@@ -1,4 +1,7 @@
 import * as NodeEvents from "node:events";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import type * as NodeChildProcess from "node:child_process";
 import { RequestError, type ClientSideConnection, type SessionNotification } from "@agentclientprotocol/sdk";
 import { AgentEventType } from "@mcode/contracts/events/agent-event";
@@ -126,6 +129,38 @@ function submittedRuntimeEvents(host: ProviderHostPorts): unknown[] {
 }
 
 describe("CursorProvider session continuity", () => {
+  it("rejects outside reads through both ACP callbacks and serves files inside the session folder", async () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cursor-acp-read-"));
+    const cwd = NodePath.join(root, "workspace");
+    NodeFS.mkdirSync(cwd);
+    NodeFS.writeFileSync(NodePath.join(cwd, "inside.txt"), "inside content");
+    NodeFS.writeFileSync(NodePath.join(root, "outside.txt"), "outside content");
+    const fake = createFakeRuntime("cursor-session-1", 101);
+    const start = vi.spyOn(AcpSessionRuntime, "start").mockResolvedValue(fake.runtime);
+    const provider = new CursorProvider(createHost(), {
+      settings: { get: () => getDefaultSettings() }, skills: { list: async () => [] },
+    }, 60_000);
+    try {
+      await provider.sendTurn({ ...turn("Read files", "execution-1"), cwd });
+      const options = start.mock.calls[0]?.[0];
+      const callback = options?.callbacks.readTextFile;
+      const client = options?.clientFactory?.(options.callbacks);
+      const readClientFile = client?.readTextFile;
+      if (!callback || !readClientFile) throw new Error("ACP reads are unavailable");
+      await expect(callback("../outside.txt")).rejects.toThrow();
+      await expect(callback("inside.txt")).resolves.toBe("inside content");
+      await expect(callback("missing.txt")).resolves.toBe("");
+      const read = (path: string) => readClientFile({ sessionId: "cursor-session-1", path });
+      await expect(read("../outside.txt")).rejects.toThrow();
+      await expect(read("inside.txt")).resolves.toEqual({ content: "inside content" });
+      await expect(read("missing.txt")).resolves.toEqual({ content: "" });
+    } finally {
+      await provider.shutdown();
+      start.mockRestore();
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("holds the production ACP capacity hook until accepted saves drain", async () => {
     const host = createHost();
     const held = Promise.withResolvers<void>();

@@ -1,0 +1,73 @@
+import type { ThreadMoveInput, ThreadMoveResult } from "@mcode/contracts/ws/methods";
+import { broadcast } from "../../../application/transport/push.js";
+import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
+import { isSQLiteBusyError } from "../../../runtime/persistence/sqlite/ledger-guard.js";
+import type { BackgroundCommandStore } from "../../agents/background/background-command-store.js";
+import type { TurnRuntimeController } from "../../agents/orchestration/turn-runtime-controller.js";
+import type { AgentWorkload } from "../../agents/workload/agent-workload.js";
+import type { GitRepositoryService } from "../../projects/git/git-repository-service.js";
+import type { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
+import type { ThreadControlMutationReservationService } from "../authority/thread-control-mutation-reservation-service.js";
+import type { ThreadRepo } from "../persistence/thread-repo.js";
+import { isOpenNoProjectThread } from "../persistence/thread-store.js";
+
+/** Coordinates one Local move with the same reservation that guards turn admission. */
+export class ThreadMoveService {
+  constructor(
+    private readonly threads: ThreadRepo,
+    private readonly workspaces: WorkspaceRepo,
+    private readonly reservations: ThreadControlMutationReservationService,
+    private readonly git: Pick<GitRepositoryService, "getCurrentBranchAt">,
+    private readonly runtime: Pick<TurnRuntimeController, "evictThreadProviderSessions">,
+    private readonly backgroundCommands: Pick<BackgroundCommandStore, "list">,
+    private readonly agentWorkload: Pick<AgentWorkload, "backgroundSubagentThreadIds">,
+    private readonly now = () => new Date(),
+  ) {}
+
+  /** Move one open No project thread and publish its new placement after commit. */
+  async moveToProject({ threadId, workspaceId }: ThreadMoveInput): Promise<ThreadMoveResult> {
+    const token = this.reservations.reserve(threadId, "moving");
+    if (!token) {
+      const holder = this.reservations.get(threadId)?.state;
+      return { status: "busy", reason: holder === "pendingApproval" ? "needs-approval" : "running" };
+    }
+    try {
+      return await this.moveReservedThread(threadId, workspaceId);
+    } catch (error) {
+      if (error instanceof DatabaseWriteOutcomeUnknown) return { status: "unconfirmed", error: error.message };
+      return {
+        status: "failed",
+        cause: isSQLiteBusyError(error) ? "database-busy" : "other",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      this.reservations.release(threadId, token);
+    }
+  }
+
+  private async moveReservedThread(threadId: string, workspaceId: string): Promise<ThreadMoveResult> {
+    const thread = this.threads.findById(threadId);
+    if (!isOpenNoProjectThread(thread, thread && this.workspaces.findById(thread.workspace_id))) {
+      return { status: "not-no-project" };
+    }
+    const project = this.workspaces.findById(workspaceId);
+    if (project?.kind !== "project") return { status: "destination-missing" };
+    const branch = project.is_git_repo ? await this.git.getCurrentBranchAt(project.path) : "main";
+    if (!branch) return { status: "failed", cause: "other", error: "The project root has no current branch" };
+    if (this.backgroundCommands.list(threadId, { running: true }).length > 0
+      || this.agentWorkload.backgroundSubagentThreadIds().has(threadId)) {
+      return { status: "busy", reason: "background" };
+    }
+    await this.runtime.evictThreadProviderSessions(threadId);
+    const now = this.now().toISOString();
+    const result = await this.threads.moveToProject(threadId, project, branch, now).catch((error: unknown) => {
+      if (!(error instanceof DatabaseWriteOutcomeUnknown)) throw error;
+      const committed = this.threads.findCommittedProjectMove(threadId, project.id, branch, now);
+      if (!committed) throw error;
+      return committed;
+    });
+    if (result.status !== "moved") return result;
+    broadcast("thread.movedToProject", { threadId, thread: result.thread, marker: result.marker });
+    return { status: "moved", thread: result.thread };
+  }
+}

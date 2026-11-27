@@ -148,6 +148,7 @@ import type { MemoryPressureService } from "../../runtime/memory/memory-pressure
 import type { ThreadRepo } from "../../features/thread-control/persistence/thread-repo.js";
 import type { ThreadAttentionService } from "../../features/thread-control/attention/thread-attention-service.js";
 import type { WorkspaceRepo } from "../../features/projects/persistence/workspace-repo.js";
+import type { ThreadMoveService } from "../../features/thread-control/lifecycle/thread-move-service.js";
 import {
   isPushSubscriptionRpcMethod,
   routePushSubscriptionRpc,
@@ -356,6 +357,7 @@ export interface RouterDeps {
   threadDeletionTeardownService: ThreadDeletionTeardownService;
   /** Owns explicit user completion and reopen transitions. */
   threadCompletionService: ThreadCompletionService;
+  threadMoveService: ThreadMoveService;
   /** Serves provider-neutral pull request capabilities and inbox pages. */
   pullRequestService: PullRequestService;
   /** Executes explicit GitHub pull request writes after fresh preflight. */

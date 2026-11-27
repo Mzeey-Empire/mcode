@@ -2,7 +2,7 @@ import type { DiffStats } from "@mcode/contracts/models/diff-stats";
 import { reportLaunchMark, reportLaunchResponse } from "./launch-marks";
 import type { FileChangedLines, FileReadResult, WorkspaceFileChanges, WorkspaceFileList } from "@mcode/contracts/models/workspace-file";
 import type { ProjectIcon } from "@mcode/contracts/models/project-icon";
-import type { FilesystemBrowseResult, WorkspaceCreateResult, ThreadCompletionResult } from "@mcode/contracts/ws/methods";
+import type { FilesystemBrowseResult, WorkspaceCreateResult, ThreadCompletionResult, ThreadMoveResult } from "@mcode/contracts/ws/methods";
 import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import type { TurnRevertPreview, TurnRevertResult } from "@mcode/contracts/models/turn-revert";
 import type {
@@ -1095,6 +1095,7 @@ export function createWsTransport(
       rpc<Thread>("thread.retryCleanup", { threadId }),
     updateThreadTitle: (threadId, title) =>
       rpc<boolean>("thread.updateTitle", { threadId, title }),
+    moveThreadToProject: (input) => rpc<ThreadMoveResult>("thread.moveToProject", input),
     updateThreadSettings: (threadId, settings) =>
       rpc<boolean>("thread.updateSettings", {
         threadId,

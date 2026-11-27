@@ -15,6 +15,7 @@ import { ProviderAvailabilitySchema } from "../providers/availability.js";
 import { ProviderStatusSchema } from "../providers/provider-status.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ThreadProviderSwitchedEventSchema } from "../models/message.js";
+import { ThreadMovedToProjectEventSchema } from "./methods.js";
 import { ThreadResumeScheduledSchema } from "../models/turn-recovery.js";
 import { ProjectIconSchema } from "../models/project-icon.js";
 import {
@@ -146,6 +147,7 @@ export const WS_CHANNELS = {
   }),
   /** Emitted once a provider switch commits, with the timeline marker it wrote. */
   "thread.providerSwitched": ThreadProviderSwitchedEventSchema(),
+  "thread.movedToProject": ThreadMovedToProjectEventSchema(),
   "thread.checkoutChanged": lazySchema(() =>
     z.object({
       threadId: z.string(),

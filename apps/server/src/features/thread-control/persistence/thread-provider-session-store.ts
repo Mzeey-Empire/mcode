@@ -129,4 +129,9 @@ export class ThreadProviderSessionStore {
     runChanges(this.orm.delete(threadProviderSessions)
       .where(and(eq(threadProviderSessions.threadId, threadId), eq(threadProviderSessions.providerId, providerId))));
   }
+
+  /** Every native session belongs to the previous folder after relocation. */
+  removeAll(threadId: string): void {
+    runChanges(this.orm.delete(threadProviderSessions).where(eq(threadProviderSessions.threadId, threadId)));
+  }
 }

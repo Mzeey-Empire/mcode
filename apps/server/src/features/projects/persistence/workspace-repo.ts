@@ -36,6 +36,11 @@ export class WorkspaceRepo {
     return this.reader.findRemovableNoProject(createdBefore, retryUpdatedSince, now);
   }
 
+  /** Read the current location and retention of a folder referenced by a relocated thread. */
+  findRelocationSource(id: string): ReturnType<WorkspaceStore["findRelocationSource"]> {
+    return this.reader.findRelocationSource(id);
+  }
+
   /** Start retention for moved-out No project workspaces whose last thread was purged. */
   retainMovedOutNoProject(now: string): Promise<void> {
     return this.writer.execute(workspaceWriteOperations.retainMovedOutNoProject, [now]);
