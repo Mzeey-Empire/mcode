@@ -61,9 +61,9 @@ describe("newProjectRunReducer", () => {
     const created = frame(4, { status: "created", workspaceId: "ws-1" });
 
     expect(run({ type: "adopted", frame: created })).toEqual({ kind: "created", workspaceId: "ws-1" });
-    expect(run({ type: "submitted" }, { type: "adopted", frame: frame(1) })).toEqual({ kind: "moving", operationId: "op-1", revision: 1 });
+    expect(run({ type: "submitted" }, { type: "adopted", frame: frame(1) })).toEqual({ kind: "moving", operationId: "op-1", revision: 1, copy: null });
     expect(run({ type: "submitted" }, { type: "failed", error: "unfinished", outcome: "unconfirmed" }, { type: "adopted", frame: frame(1) }))
-      .toEqual({ kind: "moving", operationId: "op-1", revision: 1 });
+      .toEqual({ kind: "moving", operationId: "op-1", revision: 1, copy: null });
   });
 
   it("does not let an adopted frame replace a newer one of the operation the run follows", () => {

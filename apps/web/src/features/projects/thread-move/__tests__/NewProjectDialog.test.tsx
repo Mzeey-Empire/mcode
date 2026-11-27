@@ -677,7 +677,7 @@ describe("New project from this folder", () => {
 
       await act(async () => endLookup(frame(1)));
       expect(createButton()).toHaveTextContent("Moving…");
-      push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'" }));
+      push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'", cause: { kind: "in-use" }, copy: null }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't move the folder to sqlite-wal-vs-rollback");
       expect(mockTransport.createProjectFromFolder).not.toHaveBeenCalled();
