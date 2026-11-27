@@ -9,7 +9,6 @@ export const CreateProjectFromFolderInputSchema = lazySchema(() => z.object({
   initGit: z.boolean(),
 }));
 
-/** Request to convert the managed folder shared by a No project thread. */
 export type CreateProjectFromFolderInput = z.infer<ReturnType<typeof CreateProjectFromFolderInputSchema>>;
 
 /** Result of validation and reservation, before touching the folder. */
@@ -23,7 +22,6 @@ export const CreateProjectFromFolderResultSchema = lazySchema(() => z.union([
   }),
 ]));
 
-/** Result of validation and reservation, before touching the folder. */
 export type CreateProjectFromFolderResult = z.infer<ReturnType<typeof CreateProjectFromFolderResultSchema>>;
 
 /** Durable outcome of a same-drive project move. */
@@ -40,7 +38,6 @@ export type WorkspaceMoveResult = z.infer<ReturnType<typeof WorkspaceMoveResultS
 /** The committed checkpoints shared by status reads and progress pushes. */
 export const WorkspaceMovePhaseSchema = lazySchema(() => z.enum(["intent", "renamed", "converted", "done"]));
 
-/** The committed checkpoints shared by status reads and progress pushes. */
 export type WorkspaceMovePhase = z.infer<ReturnType<typeof WorkspaceMovePhaseSchema>>;
 
 /** A revision-ordered progress snapshot for one operation. */
@@ -53,7 +50,6 @@ export const WorkspaceMoveFrameSchema = lazySchema(() => z.object({
   result: WorkspaceMoveResultSchema().optional(),
 }));
 
-/** A revision-ordered progress snapshot for one operation. */
 export type WorkspaceMoveFrame = z.infer<ReturnType<typeof WorkspaceMoveFrameSchema>>;
 
 /** Find an operation directly or find an unfinished operation shared by a thread. */
@@ -62,7 +58,6 @@ export const WorkspaceMoveStatusInputSchema = lazySchema(() => z.union([
   z.strictObject({ threadId: z.string() }),
 ]));
 
-/** Find an operation directly or find an unfinished operation shared by a thread. */
 export type WorkspaceMoveStatusInput = z.infer<ReturnType<typeof WorkspaceMoveStatusInputSchema>>;
 
 /** Outcome of retrying Git initialization on a converted project. */
@@ -72,5 +67,4 @@ export const WorkspaceMoveRetryGitResultSchema = lazySchema(() => z.discriminate
   z.object({ status: z.literal("failed"), error: z.string() }),
 ]));
 
-/** Outcome of retrying Git initialization on a converted project. */
 export type WorkspaceMoveRetryGitResult = z.infer<ReturnType<typeof WorkspaceMoveRetryGitResultSchema>>;
