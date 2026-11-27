@@ -1,7 +1,7 @@
 import type { WorkspaceMoveFrame, WorkspaceMoveResult } from "@mcode/contracts/ws/workspace-move";
 import { describe, expect, it } from "vitest";
 import { describeFieldRefusal } from "../new-project-fields";
-import { FORM_RUN, followedOperation, followsMove, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "../new-project-run";
+import { FORM_RUN, failureIsAboutLocation, followedOperation, followsMove, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "../new-project-run";
 
 function frame(revision: number, result?: WorkspaceMoveResult, operationId = "op-1"): WorkspaceMoveFrame {
   return { operationId, revision, phase: result ? "done" : "renamed", copiedBytes: null, totalBytes: null, ...(result ? { result } : {}) };
@@ -27,7 +27,7 @@ describe("newProjectRunReducer", () => {
     const ended = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY" }) });
     const afterOlder = newProjectRunReducer(ended, { type: "frame", frame: frame(1) });
 
-    expect(afterOlder).toEqual({ kind: "failed", error: "EBUSY", outcome: "rolled-back", copyFailure: null });
+    expect(afterOlder).toEqual({ kind: "failed", error: "EBUSY", outcome: "rolled-back", cause: { kind: "other" }, partialCopyRemoved: null });
   });
 
   it("does not let a running frame replace a newer running one", () => {
@@ -103,12 +103,12 @@ describe("newProjectRunReducer", () => {
     expect(run({ type: "adopted", frame: copyFrame(5, "published", null) })).toMatchObject({ kind: "moving", copy: null });
   });
 
-  it("reports a copy failure only when the server says the move copied", () => {
+  it("keeps the typed cause of every failure, and a copy only when the server says the move copied", () => {
     const copied = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "ENOSPC", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true }) });
     const renamed = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY", cause: { kind: "in-use" } }) });
 
-    expect(copied).toMatchObject({ kind: "failed", copyFailure: { cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true } });
-    expect(renamed).toMatchObject({ kind: "failed", copyFailure: null });
+    expect(copied).toMatchObject({ kind: "failed", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true });
+    expect(renamed).toMatchObject({ kind: "failed", cause: { kind: "in-use" }, partialCopyRemoved: null });
   });
 
   it("keeps a failed git retry on the alert with the new reason, and ends it on success", () => {
@@ -134,7 +134,33 @@ describe("newProjectRunReducer", () => {
     const moving = run(...STARTED);
 
     expect(newProjectRunReducer(moving, { type: "reset" })).toBe(moving);
-    expect(newProjectRunReducer(run({ type: "failed", error: "x", outcome: "rolled-back" }), { type: "reset" })).toBe(FORM_RUN);
+    expect(newProjectRunReducer(run({ type: "failed", error: "x", outcome: "rolled-back", cause: { kind: "other" } }), { type: "reset" })).toBe(FORM_RUN);
+  });
+});
+
+describe("failureIsAboutLocation", () => {
+  const failed = (result: Extract<WorkspaceMoveResult, { status: "failed" }>) => {
+    const ended = run(...STARTED, { type: "frame", frame: frame(3, result) });
+    if (ended.kind !== "failed") throw new Error("the move did not fail");
+    return ended;
+  };
+
+  it.each([
+    ["a full drive with no copy", { status: "failed", error: "x", cause: { kind: "no-space", drive: "D:" } }, true],
+    ["a refused write with no copy", { status: "failed", error: "x", cause: { kind: "permission" } }, true],
+    ["an unknown failure with no copy", { status: "failed", error: "x", cause: { kind: "other" } }, false],
+    ["an unknown failure of a copy", { status: "failed", error: "x", cause: { kind: "other" }, partialCopyRemoved: true }, true],
+    ["a file in use with no copy", { status: "failed", error: "x", cause: { kind: "in-use" } }, false],
+    ["a file in use during a copy", { status: "failed", error: "x", cause: { kind: "in-use" }, partialCopyRemoved: true }, false],
+    ["a receipt written before typed causes", { status: "failed", error: "x" }, false],
+  ] satisfies [string, Extract<WorkspaceMoveResult, { status: "failed" }>, boolean][])("tells %s", (_name, result, aboutLocation) => {
+    expect(failureIsAboutLocation(failed(result))).toBe(aboutLocation);
+  });
+
+  it("says nothing about a field when the request never answered", () => {
+    const unconfirmed = run({ type: "failed", error: "socket closed", outcome: "unconfirmed", cause: { kind: "permission" } });
+
+    expect(unconfirmed.kind === "failed" && failureIsAboutLocation(unconfirmed)).toBe(false);
   });
 });
 

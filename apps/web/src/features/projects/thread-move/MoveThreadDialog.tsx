@@ -23,7 +23,7 @@ import { NewProjectForm } from "./NewProjectForm";
 import { BusyNotice, MoveFailureNotice, ResultUnknownNotice, SharersNotice } from "./NewProjectNotices";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
 import { destinationPath } from "./new-project-fields";
-import { endsAtClose, followsMove, isPastForm, type NewProjectRun } from "./new-project-run";
+import { endsAtClose, failureIsAboutLocation, followsMove, isPastForm, type NewProjectRun } from "./new-project-run";
 import { PreflightFailedNotice } from "./PreflightFailedNotice";
 import { useMoveTarget, type MoveTargetState } from "./useMoveTarget";
 import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMovePreflight";
@@ -303,7 +303,7 @@ interface NewProjectBodyProps {
 }
 
 /**
- * Where a failed move's notice goes. A failed copy to another drive is about the Location, so its notice sits under
+ * Where a failed move's notice goes. A failure about the destination is about the Location, so its notice sits under
  * that field; any other failure sits below the form.
  */
 function failureNotices(newProject: NewProjectMove): { readonly underLocation: ReactNode; readonly belowForm: ReactNode } {
@@ -311,7 +311,7 @@ function failureNotices(newProject: NewProjectMove): { readonly underLocation: R
   if (run.kind === "result-unknown") return { underLocation: null, belowForm: <ResultUnknownNotice /> };
   if (run.kind !== "failed" && run.kind !== "rollback-pending") return { underLocation: null, belowForm: null };
   const notice = <MoveFailureNotice failure={run} projectName={values.name.trim()} threadCount={newProject.threadCount} />;
-  return run.kind === "failed" && run.copyFailure !== null ? { underLocation: notice, belowForm: null } : { underLocation: null, belowForm: notice };
+  return run.kind === "failed" && failureIsAboutLocation(run) ? { underLocation: notice, belowForm: null } : { underLocation: null, belowForm: notice };
 }
 
 /** The other threads the notice lists, or null when it would only repeat the busy notice. */

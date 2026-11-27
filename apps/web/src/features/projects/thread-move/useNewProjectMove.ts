@@ -113,6 +113,12 @@ export function useNewProjectMove(threadId: string, read: MovePreflightRead): Ne
   const { live, busy } = useBusyThread(threadId, run);
   const sharers = preflight && preflight.otherThreadsInFolder.count > 0 ? preflight.otherThreadsInFolder : null;
 
+  // A failure describes the attempt that failed, so it stops applying once the user changes what was attempted.
+  const editValues = (next: NewProjectValues) => {
+    if (!sameValues(next, values)) reset();
+    setValues(next);
+  };
+
   useEffect(() => {
     if (run.kind === "created" || run.kind === "git-failed") useSidebarUiStore.getState().expandProject(run.workspaceId);
     if (run.kind === "created") closeMoveThreadDialog();
@@ -128,7 +134,7 @@ export function useNewProjectMove(threadId: string, read: MovePreflightRead): Ne
     canCreate: read.status === "ready" && lookedUp && (run.kind === "form" || run.kind === "failed") && live === null && isSubmittable(values, projectNames),
     retryLookup,
     threadCount: 1 + (sharers?.count ?? 0),
-    setValues,
+    setValues: editValues,
     setInitGit,
     create: () => create(values, initGit),
     retryGit,

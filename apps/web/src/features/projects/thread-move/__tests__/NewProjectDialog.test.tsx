@@ -406,7 +406,7 @@ describe("New project from this folder", () => {
       await retype(user, nameField(), "wal-notes");
       await startMove(user);
 
-      push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'" }));
+      push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'", cause: { kind: "in-use" } }));
 
       const alert = await screen.findByRole("alert");
       expect(within(alert).getByText("Couldn't move the folder to wal-notes")).toBeVisible();
@@ -448,6 +448,113 @@ describe("New project from this folder", () => {
       expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
       await user.click(within(alert).getByRole("button", { name: "Show details" }));
       expect(screen.getByText("EPERM: operation not permitted")).toBeVisible();
+    });
+  });
+
+  describe("a failure's typed cause", () => {
+    async function reachFailure(failure: WorkspaceMoveFrame, sharerTitles: readonly string[] = [SHARER.title]): Promise<UserEvent> {
+      vi.mocked(mockTransport.readThreadMovePreflight).mockResolvedValue(preflight(sharerTitles));
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+      await startMove(user);
+      push(failure);
+      await screen.findByRole("alert");
+      return user;
+    }
+
+    const permissionFrame = () => frame(2, { status: "failed", error: "EPERM: operation not permitted, lstat '~/src'", cause: { kind: "permission" } });
+
+    it("words a refused write from its cause, puts the error on Location under the field, and keeps the raw error behind its disclosure", async () => {
+      const user = await reachFailure(permissionFrame());
+
+      const alert = screen.getByRole("alert");
+      expect(within(alert).getByText("Permission was denied, so the folder couldn't be moved there")).toBeVisible();
+      expect(alert).toHaveTextContent("Nothing changed: the threads are still in No project. Choose a location you can write to, then try again.");
+      expect(alert).not.toHaveTextContent("Close any app");
+      expect(locationField()).toHaveAttribute("aria-invalid", "true");
+      expect(nameField()).not.toHaveAttribute("aria-invalid");
+      expect(locationField().compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(alert.compareDocumentPosition(screen.getByRole("checkbox", { name: "Start a git repo" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      await user.click(within(alert).getByRole("button", { name: "Show details" }));
+      expect(screen.getByText("EPERM: operation not permitted, lstat '~/src'")).toBeVisible();
+    });
+
+    it("says the thread is still in No project, in the singular, when it is the only one in the folder", async () => {
+      await reachFailure(permissionFrame(), []);
+
+      expect(screen.getByRole("alert")).toHaveTextContent("Nothing changed: the thread is still in No project. Choose a location you can write to, then try again.");
+    });
+
+    it("words a full drive that stopped the move before any copy from its cause, and marks Location", async () => {
+      await reachFailure(frame(2, { status: "failed", error: "ENOSPC: no space left on device", cause: { kind: "no-space", drive: "D:" } }));
+
+      const alert = screen.getByRole("alert");
+      expect(within(alert).getByText("Drive D: is full, so the folder couldn't be moved there")).toBeVisible();
+      expect(alert).toHaveTextContent("Nothing changed: the threads are still in No project. Free up space on D: and try again, or choose another location.");
+      expect(locationField()).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("words a refusal the server sent before the move began from its cause too", async () => {
+      vi.mocked(mockTransport.createProjectFromFolder).mockResolvedValueOnce({ status: "failed", error: "EACCES: permission denied, stat '~/src'", cause: { kind: "permission" } });
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+
+      await user.click(createButton());
+
+      const alert = await screen.findByRole("alert");
+      expect(within(alert).getByText("Permission was denied, so the folder couldn't be moved there")).toBeVisible();
+      expect(locationField()).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("keeps ticket 08's title, body and place for a file in use: no field is marked and the notice follows the git checkbox", async () => {
+      await reachFailure(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'", cause: { kind: "in-use" } }));
+
+      const alert = screen.getByRole("alert");
+      expect(within(alert).getByText("Couldn't move the folder to sqlite-wal-vs-rollback")).toBeVisible();
+      expect(alert).toHaveTextContent("Nothing changed: the threads are still in No project. Close any app using files in the folder, then try again.");
+      expect(locationField()).not.toHaveAttribute("aria-invalid");
+      expect(nameField()).not.toHaveAttribute("aria-invalid");
+      expect(screen.getByRole("checkbox", { name: "Start a git repo" }).compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("does not read raw error text that mentions EPERM as a file in use when the cause is other", async () => {
+      await reachFailure(frame(2, { status: "failed", error: "EPERM: operation not permitted, rename 'a'", cause: { kind: "other" } }));
+
+      const alert = screen.getByRole("alert");
+      expect(within(alert).getByText("Couldn't move the folder to sqlite-wal-vs-rollback")).toBeVisible();
+      expect(alert).toHaveTextContent("Nothing changed: the threads are still in No project. Try again in a moment.");
+      expect(alert).not.toHaveTextContent("Close any app");
+      expect(locationField()).not.toHaveAttribute("aria-invalid");
+    });
+
+    it("goes back to the form when Location changes", async () => {
+      const user = await reachFailure(permissionFrame());
+      expect(createButton()).toHaveTextContent("Try again");
+
+      await retype(user, locationField(), "~/work");
+
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(locationField()).not.toHaveAttribute("aria-invalid");
+      expect(createButton()).toHaveTextContent("Create project");
+      expect(createButton()).toBeEnabled();
+    });
+
+    it("goes back to the form when Name changes, whatever the failure was", async () => {
+      const user = await reachFailure(frame(2, { status: "failed", error: "EBUSY: locked", cause: { kind: "in-use" } }));
+
+      await user.type(nameField(), "-2");
+
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(createButton()).toHaveTextContent("Create project");
+    });
+
+    it("sends the request again for a Try again that changes nothing", async () => {
+      const user = await reachFailure(permissionFrame());
+
+      await startMove(user);
+
+      expect(mockTransport.createProjectFromFolder).toHaveBeenCalledTimes(2);
+      expect(createButton()).toHaveTextContent("Moving…");
     });
   });
 
