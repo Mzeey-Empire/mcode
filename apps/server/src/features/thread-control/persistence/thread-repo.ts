@@ -205,6 +205,11 @@ export class ThreadRepo {
     return this.reader.findCommittedProjectMove(...input);
   }
 
+  /** Check whether checkout cleanup would affect a different thread. */
+  hasOtherThreadAtWorktree(threadId: string, worktreePath: string): boolean {
+    return this.reader.hasOtherThreadAtWorktree(threadId, worktreePath);
+  }
+
   /** Save the move's ownership record before starting checkout creation. */
   recordMoveWorktree(...input: Parameters<ThreadStore["recordMoveWorktree"]>): Promise<void> {
     return this.writer.execute(threadWriteOperations.recordMoveWorktree, input);

@@ -261,27 +261,35 @@ export class GitWorktreeService {
   private async removeRegisteredMoveCheckout(
     repoPath: string, move: ProvisionedMoveCheckout, recordCheckoutCreated: () => Promise<void>,
   ): Promise<"unowned" | "removed"> {
-    const { id, branch, worktreePath, detachedCommit, checkoutCreated } = move;
+    const { id, worktreePath, checkoutCreated } = move;
     const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]);
     const checkout = findCheckoutRecord(stdout, worktreePath);
     if (!checkout) return "unowned";
-    if (!checkoutCreated && !checkout.includes(`locked ${moveWorktreeLockReason(id)}`)) return "unowned";
-    const matches = detachedCommit === null
-      ? checkout.includes(`branch refs/heads/${branch}`)
-      : checkout.includes("detached") && checkout.includes(`HEAD ${detachedCommit}`);
-    if (!matches) return "unowned";
+    const lock = checkout.find((field) => field === "locked" || field.startsWith("locked "));
+    const lockReason = moveWorktreeLockReason(id);
+    const ownsLock = lock === `locked ${lockReason}`;
+    if (lock && !ownsLock) return "unowned";
+    const matches = matchesMoveCheckout(checkout, move);
+    if (!ownsLock && (!checkoutCreated || !matches)) return "unowned";
 
     const [{ stdout: expectedCommonDir }, { stdout: actualCommonDir }] = await Promise.all([
       this.gitExecutor.exec(["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
       this.gitExecutor.exec(["-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
     ]);
     if (NodePath.relative(expectedCommonDir.trimEnd(), actualCommonDir.trimEnd()) !== "") return "unowned";
-    if (checkout.some((field) => field === "locked" || field.startsWith("locked "))) {
+    if (ownsLock) {
       // Keep ownership durable if removal fails or the server stops after unlocking.
       if (!checkoutCreated) await recordCheckoutCreated();
       await this.unlockWorktree(repoPath, worktreePath);
     }
-    await this.gitExecutor.exec(["-C", repoPath, "worktree", "remove", worktreePath], { timeout: 30_000 });
+    await this.gitExecutor.exec(["-C", repoPath, "worktree", "remove", worktreePath], { timeout: 30_000 })
+      .catch(async (error: unknown) => {
+        // An incomplete checkout may still need its lock to prove ownership on the next retry.
+        if (ownsLock && !matches) {
+          await this.gitExecutor.exec(["-C", repoPath, "worktree", "lock", "--reason", lockReason, worktreePath]);
+        }
+        throw error;
+      });
     return "removed";
   }
 
@@ -410,6 +418,12 @@ type ProvisionedMoveCheckout = { id: string; worktreePath: string; branch: strin
 
 function moveWorktreeLockReason(moveId: string): string {
   return `mcode-move ${moveId}`;
+}
+
+function matchesMoveCheckout(checkout: string[], { branch, detachedCommit }: ProvisionedMoveCheckout): boolean {
+  return detachedCommit === null
+    ? checkout.includes(`branch refs/heads/${branch}`)
+    : checkout.includes("detached") && checkout.includes(`HEAD ${detachedCommit}`);
 }
 
 function findCheckoutRecord(output: string, worktreePath: string): string[] | undefined {

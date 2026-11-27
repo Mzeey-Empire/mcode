@@ -9,9 +9,11 @@ import { z } from "zod";
 import { forgetThreadPullRequests, readLinks } from "../../pull-requests/links/pull-request-link-funnel.js";
 import { rankPullRequests, ThreadPullRequestSchema } from "@mcode/contracts/models/thread-pull-request";
 import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
 import { WorkspaceStore } from "../../projects/persistence/workspace-store.js";
 import { WorkspaceEnvironmentAutomaticStore } from "../../projects/environment/workspace-environment-automatic-store.js";
+import { normalizeWorktreePath } from "../../projects/git/worktree-path.js";
 import { ThreadStartupStore } from "../../thread-startup/persistence/thread-startup-store.js";
 import { ThreadStartupStateStore } from "../../thread-startup/thread-startup-state-store.js";
 import type { ThreadMoveMarker } from "@mcode/contracts/models/message";
@@ -42,6 +44,7 @@ import {
   workspaces,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import { normalizePathForComparison } from "../../../shared/filesystem/path-identity.js";
 import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
 import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
 import { ThreadProviderSessionStore } from "./thread-provider-session-store.js";
@@ -55,6 +58,14 @@ function threadMoveMarker(projectName: string, placement: ThreadMovePlacement): 
   if (placement.kind === "new-worktree") return { projectName, target: placement.kind, source: placement.source };
   if (placement.kind === "existing-worktree") return { projectName, target: placement.kind, branch: placement.branch };
   return { projectName, target: placement.kind };
+}
+
+function matchesMovePlacement(thread: Thread, placement: ThreadMovePlacement): boolean {
+  const worktreePath = placement.kind === "local" ? null : placement.worktreePath;
+  return thread.branch === placement.branch
+    && thread.mode === (worktreePath === null ? "direct" : "worktree")
+    && thread.worktree_path === worktreePath
+    && thread.worktree_managed === (placement.kind === "new-worktree");
 }
 
 type ThreadRow = typeof threads.$inferSelect & {
@@ -1344,16 +1355,33 @@ export class ThreadStore {
   }
 
   /** Read the placement and marker written by this move's transaction. */
-  findCommittedProjectMove(id: string, workspaceId: string, branch: string, timestamp: string) {
+  findCommittedProjectMove(id: string, workspaceId: string, placement: ThreadMovePlacement, timestamp: string) {
     const thread = this.findById(id);
-    if (thread?.workspace_id !== workspaceId || thread.mode !== "direct" || thread.branch !== branch
-      || thread.worktree_path !== null) return undefined;
+    if (thread?.workspace_id !== workspaceId || !matchesMovePlacement(thread, placement)) return undefined;
+    const marker = this.findMoveMarker(id, timestamp);
+    if (marker?.threadMove?.target !== placement.kind) return undefined;
+    const result = { status: "moved" as const, thread, marker };
+    if (placement.kind !== "new-worktree") return { ...result, startup: undefined };
+    const startup = new ThreadStartupStore(this.db).findById(placement.moveId);
+    if (startup?.threadId !== id) return undefined;
+    return { ...result, startup };
+  }
+
+  private findMoveMarker(id: string, timestamp: string) {
     const row = this.orm.select({ id: messages.id }).from(messages)
       .where(and(eq(messages.threadId, id), eq(messages.timestamp, timestamp), isNotNull(messages.threadMove)))
       .orderBy(desc(messages.sequence)).get();
-    const marker = row && new MessageStore(this.db).findById(row.id);
-    if (marker?.threadMove?.target !== "local") return undefined;
-    return { status: "moved" as const, thread, marker, startup: undefined };
+    return row && new MessageStore(this.db).findById(row.id);
+  }
+
+  /** Match the recorded path and the canonical spelling returned by Git. */
+  hasOtherThreadAtWorktree(threadId: string, worktreePath: string): boolean {
+    const { platform } = hostRuntime;
+    const paths = [normalizeWorktreePath(worktreePath, platform), normalizePathForComparison(worktreePath, platform)];
+    const normalizedPath = sql`rtrim(replace(${threads.worktreePath}, char(92), '/'), '/')`;
+    const path = platform === "win32" ? sql`lower(${normalizedPath})` : normalizedPath;
+    return this.orm.select({ id: threads.id }).from(threads)
+      .where(and(ne(threads.id, threadId), inArray(path, paths))).get() !== undefined;
   }
 
   /** Persist the exact checkout that may need cleanup after interruption. */

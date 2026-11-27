@@ -88,15 +88,9 @@ export class ThreadMoveService {
       return { status: "busy", reason: "background" };
     }
     await this.runtime.evictThreadProviderSessions(threadId);
-    const now = this.now().toISOString();
     const result = placement.kind === "new-worktree"
       ? await this.moveToNewWorktree(threadId, project, placement.source)
-      : await this.threads.moveToProject(threadId, project, placement, now).catch((error: unknown) => {
-        if (!(error instanceof DatabaseWriteOutcomeUnknown) || placement.kind !== "local") throw error;
-        const committed = this.threads.findCommittedProjectMove(threadId, project.id, placement.branch, now);
-        if (!committed) throw error;
-        return committed;
-      });
+      : await this.commitMove(threadId, project, placement);
     if (result.status !== "moved") return result;
     this.publishMove(result);
     return { status: "moved", thread: result.thread };
@@ -107,6 +101,22 @@ export class ThreadMoveService {
     if (startup) {
       this.newWorktrees.startups.publish(startup);
       this.newWorktrees.setup.launchAutomaticSetup(thread);
+    }
+  }
+
+  private async commitMove(threadId: string, project: Workspace, placement: ThreadMovePlacement) {
+    const now = this.now().toISOString();
+    try {
+      return await this.threads.moveToProject(threadId, project, placement, now);
+    } catch (error) {
+      if (!(error instanceof DatabaseWriteOutcomeUnknown)) throw error;
+      try {
+        const committed = this.threads.findCommittedProjectMove(threadId, project.id, placement, now);
+        if (committed) return committed;
+      } catch (readError) {
+        logger.warn("Could not confirm the committed thread move", { threadId, error: String(readError) });
+      }
+      throw error;
     }
   }
 
@@ -140,7 +150,7 @@ export class ThreadMoveService {
           ? { kind: source.kind, pullRequestNumber: source.pullRequestNumber }
           : { kind: source.kind, branch: source.baseBranch, startFromOrigin: source.startFromOrigin },
       };
-      const result = await this.threads.moveToProject(threadId, project, placement, this.now().toISOString());
+      const result = await this.commitMove(threadId, project, placement);
       if (result.status === "moved") return result;
       await this.cleanupProvisioning(move, project.path);
       if (result.status === "failed") return result;
@@ -173,6 +183,13 @@ export class ThreadMoveService {
   private async cleanupProvisioning(move: WorktreeRecord, repoPath: string | undefined): Promise<void> {
     try {
       if (this.threads.findById(move.threadId)?.worktree_path === move.worktreePath) return;
+      if (this.threads.hasOtherThreadAtWorktree(move.threadId, move.worktreePath)) {
+        logger.warn("Interrupted move left a worktree used by another thread untouched", {
+          moveId: move.id, worktreePath: move.worktreePath,
+        });
+        await this.threads.deleteProvisioningMoveWorktree(move.id);
+        return;
+      }
       const outcome = await this.newWorktrees.checkouts.removeProvisionedWorktree(repoPath, {
         ...move, checkoutCreated: move.state === "checkout-created",
       }, () => this.threads.markMoveWorktreeCreated(move.id, this.now().toISOString()));
