@@ -1,6 +1,7 @@
 import "reflect-metadata";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
+import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -39,6 +40,8 @@ import { TurnRuntimeController } from "../../orchestration/turn-runtime-controll
 import { TurnRecoveryService } from "../../recovery/turn-recovery-service.js";
 import { TurnSnapshotRepo } from "../../turns/persistence/turn-snapshot-repo.js";
 import { AgentWorkloadService } from "../../workload/agent-workload.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => ({ ...await importOriginal<typeof NodeFSPromises>() }));
 
 const CLAUDE_MODEL = "claude-sonnet-4-6";
 const CODEX_MODEL = "gpt-5.5";
@@ -782,6 +785,40 @@ describe("provider switch on send", () => {
     if (state === "gone") NodeFS.rmdirSync(source.path);
     await completeTurn(claude, "New request", "Done", "new-claude");
     expect(lastRequest(claude).message).not.toContain("Files from earlier in this thread");
+  });
+
+  it("sends the turn and retries the relocation note when the old folder is unreadable", async () => {
+    const { source, move } = await relocationFixture();
+    await move();
+    const opendir = NodeFSPromises.opendir;
+    const readFolder = vi.spyOn(NodeFSPromises, "opendir").mockImplementation((path, options) => {
+      if (path === source.path) return Promise.reject(Object.assign(new Error("Access denied"), { code: "EACCES" }));
+      return opendir(path, options);
+    });
+    try {
+      await completeTurn(claude, "New request", "Done", "new-claude");
+      expect(lastRequest(claude).message).toContain("New request");
+      expect(lastRequest(claude).message).not.toContain(source.path);
+    } finally {
+      readFolder.mockRestore();
+    }
+    await completeTurn(claude, "Check the old report", "Done", "new-claude");
+    expect(lastRequest(claude).message).toContain(`Files from earlier in this thread are in ${source.path}.`);
+  });
+
+  it("uses the local calendar date in the relocation note", async () => {
+    const { move, source } = await relocationFixture();
+    await move();
+    writeFixture((db) => {
+      db.run("UPDATE workspaces SET retain_until = ? WHERE id = ?", ["2026-12-03T01:00:00.000Z", source.id]);
+    });
+    vi.stubEnv("TZ", "America/Los_Angeles");
+    try {
+      await completeTurn(claude, "New request", "Done", "new-claude");
+      expect(lastRequest(claude).message).toContain("Mcode deletes that folder on 2026-12-02.");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   async function relocationFixture(options: { gitBranch?: string; empty?: boolean } = {}) {

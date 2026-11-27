@@ -1188,12 +1188,18 @@ export class TurnAdmissionDispatchCoordinator {
   private async relocationNote(relocation: PreparedCommand["relocation"]): Promise<{ generation: number; text: string } | null> {
     if (!relocation?.notePending) return null;
     const source = this.workspaces.findRelocationSource(relocation.workspaceId);
-    if (!source || !await hasRelocationFiles(source.path)) return null;
+    if (!source) return null;
+    const hasFiles = await hasRelocationFiles(source.path).catch((error: unknown) => {
+      if (!(error instanceof Error) || !("code" in error) || (error.code !== "EACCES" && error.code !== "EPERM")) throw error;
+      logger.warn("Could not read the relocation note's folder", { path: source.path, code: error.code });
+      return false;
+    });
+    if (!hasFiles) return null;
     const location = `Files from earlier in this thread are in ${source.path}.`;
     let instruction = "Copy what you need into this project.";
     if (source.kind === "no_project") {
       instruction = source.retainUntil
-        ? `Mcode deletes that folder on ${source.retainUntil.slice(0, 10)}. ${instruction}`
+        ? `Mcode deletes that folder on ${localCalendarDate(source.retainUntil)}. ${instruction}`
         : "Another thread still works in that folder, so copy what you need into this project and leave the originals in place.";
     }
     return { generation: relocation.noteGeneration, text: `${location} ${instruction}` };
@@ -1393,4 +1399,11 @@ async function hasRelocationFiles(path: string): Promise<boolean> {
 
 function escapeXml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function localCalendarDate(timestamp: string): string {
+  const date = new Date(timestamp);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
 }
