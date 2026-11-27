@@ -153,9 +153,13 @@ describe("MoveThreadDialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
-  it("says what failed, keeps the server's text behind a disclosure, and Try again moves", async () => {
+  it.each([
+    ["database-busy", "Mcode's database was busy, so nothing changed: the thread is still in No project and its files are untouched. Try again in a moment."],
+    ["other", "Nothing changed: the thread is still in No project and its files are untouched. Try again in a moment."],
+  ] as const)("explains a %s failure, discloses the raw error, and can retry", async (cause, detail) => {
+    const raw = "The database write could not finish";
     vi.mocked(mockTransport.moveThreadToProject)
-      .mockResolvedValueOnce({ status: "failed", error: "SQLITE_BUSY: database is locked" })
+      .mockResolvedValueOnce({ status: "failed", cause, error: raw })
       .mockResolvedValueOnce(movedTo(ALPHA.id));
     const user = await openDialog();
     await pickProject(user, "alpha");
@@ -164,10 +168,10 @@ describe("MoveThreadDialog", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Couldn't move the thread");
-    expect(alert).toHaveTextContent("Nothing changed: the thread is still in No project.");
-    expect(screen.queryByText("SQLITE_BUSY: database is locked")).toBeNull();
+    expect(within(alert).getByText(detail)).toBeVisible();
+    expect(screen.queryByText(raw)).toBeNull();
     await user.click(within(alert).getByRole("button", { name: "Show details" }));
-    expect(screen.getByText("SQLITE_BUSY: database is locked")).toBeVisible();
+    expect(screen.getByText(raw)).toBeVisible();
     expect(screen.getByTestId("move-target-rail")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Try again" }));

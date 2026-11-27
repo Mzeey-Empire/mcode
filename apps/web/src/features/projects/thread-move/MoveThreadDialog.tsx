@@ -51,8 +51,14 @@ function describeRefusal(result: Exclude<ThreadMoveResult, { status: "moved" }>)
       return { detail: `That project is no longer in Mcode. ${NOTHING_CHANGED} Choose another project.`, raw: null, retryable: false };
     case "not-no-project":
       return { detail: "This thread is no longer in No project, so there is nothing to move.", raw: null, retryable: false };
-    case "failed":
-      return { detail: NOTHING_CHANGED, raw: result.error, retryable: true };
+    case "failed": {
+      const why = result.cause === "database-busy" ? "Mcode's database was busy, so nothing changed" : "Nothing changed";
+      return {
+        detail: `${why}: the thread is still in No project and its files are untouched. Try again in a moment.`,
+        raw: result.error,
+        retryable: true,
+      };
+    }
   }
 }
 
