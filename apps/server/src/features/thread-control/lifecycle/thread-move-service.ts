@@ -1,5 +1,6 @@
 import type { ThreadMoveInput, ThreadMoveResult } from "@mcode/contracts/ws/methods";
 import { broadcast } from "../../../application/transport/push.js";
+import { DatabaseWriteOutcomeUnknown } from "../../../runtime/persistence/sqlite/application-database-writer.js";
 import { isSQLiteBusyError } from "../../../runtime/persistence/sqlite/ledger-guard.js";
 import type { BackgroundCommandStore } from "../../agents/background/background-command-store.js";
 import type { TurnRuntimeController } from "../../agents/orchestration/turn-runtime-controller.js";
@@ -33,6 +34,7 @@ export class ThreadMoveService {
     try {
       return await this.moveReservedThread(threadId, workspaceId);
     } catch (error) {
+      if (error instanceof DatabaseWriteOutcomeUnknown) return { status: "unconfirmed", error: error.message };
       return {
         status: "failed",
         cause: isSQLiteBusyError(error) ? "database-busy" : "other",

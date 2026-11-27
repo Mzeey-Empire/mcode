@@ -16,7 +16,7 @@ import { resolveHandoffDir } from "@mcode/shared";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { mapRouteError } from "../../../../application/transport/ws-router.js";
-import { ApplicationDatabaseWriter } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
+import { ApplicationDatabaseWriter, DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { HandoffStorage } from "../../../handoff/persistence/handoff-storage.js";
 import { ProviderAvailabilityService } from "../../../providers/availability/provider-availability-service.js";
 import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-pins.js";
@@ -837,6 +837,17 @@ describe("provider switch on send", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it.each([
+    { failure: new DatabaseWriteOutcomeUnknown("Move commit reply lost"), expected: { status: "unconfirmed", error: "Move commit reply lost" } },
+    { failure: new Error("Move rejected"), expected: { status: "failed", cause: "other", error: "Move rejected" } },
+  ])("reports a move with a database error as $expected.status", async ({ failure, expected }) => {
+    const { move } = await relocationFixture();
+    const write = vi.spyOn(container.resolve(ThreadRepo), "moveToProject").mockRejectedValueOnce(failure);
+    onTestFinished(() => { write.mockRestore(); });
+
+    await expect(move()).resolves.toEqual(expected);
   });
 
   async function relocationFixture(options: { gitBranch?: string; empty?: boolean } = {}) {
