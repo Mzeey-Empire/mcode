@@ -5,7 +5,7 @@ import { logger } from "@mcode/shared";
 import { AttachmentService } from "../../attachments/storage/attachment-service.js";
 import { broadcast } from "../../../application/transport/push.js";
 import { noProjectIdFromFolderName } from "../../projects/lifecycle/no-project-folder-name.js";
-import { WorkspaceMoveService } from "../../projects/lifecycle/workspace-move-service.js";
+import type { WorkspaceMoveService } from "../../projects/lifecycle/workspace-move-service.js";
 import { isWithinWorkspaceRoot, resolveNoProjectRoot } from "../../projects/lifecycle/workspace-path.js";
 import { WorkspaceRepo } from "../../projects/persistence/workspace-repo.js";
 
@@ -20,7 +20,8 @@ export class NoProjectWorkspaceSweep {
     @inject(WorkspaceRepo) private readonly workspaces: WorkspaceRepo,
     @inject(AttachmentService) private readonly attachments: Pick<AttachmentService, "removeForThread">,
     @inject("McodeDir") private readonly mcodeDir: string,
-    @inject(WorkspaceMoveService, { isOptional: true })
+    // A class token is always constructible, so `isOptional` only takes effect on a string alias.
+    @inject("WorkspaceMoveRetention", { isOptional: true })
     private readonly moves?: Pick<WorkspaceMoveService, "cleanExpiredSources" | "protectsFolder">,
   ) {}
 
