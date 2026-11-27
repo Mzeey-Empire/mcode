@@ -25,13 +25,15 @@ import { VirtualViewport, type VirtualHost, type VirtualRow, type ViewportPositi
 import { usePreparingRowEntrance } from "@/features/thread-startup";
 import { prefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { openMoveThreadDialog } from "../thread-move/move-thread-store";
 import { projectWorkspaces } from "../state/project-workspaces";
 import { selectPreparingThreadIds, selectSidebarFacts } from "../state/thread-index";
 import { NO_PROJECT_GROUP_KEY, type SidebarItem } from "./sidebar-model";
 import type { SidebarRowContext } from "./sidebar-row-context";
-import { NoProjectHeader, ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
+import { DroppableProjectRow, NoProjectHeader, ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
 import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
+import { isThreadDrag, sidebarDragData, threadDropOnProject } from "./thread-move-drag";
 import { freezeOrder, selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 import { PreviewScrollGuard } from "./preview-scroll-guard";
@@ -64,19 +66,19 @@ function provisionalHeight(item: SidebarItem, closedScope: boolean): number {
 }
 
 // Clamping to the list scroller keeps the overlay from floating over the scope bar and header.
-const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
+const SIDEBAR_DND_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncestor];
 // The virtual list mounts project droppables only near the viewport, so during a drag they must be
 // measured as they register rather than once at drag start. Outside a drag nothing reads them, and
 // measuring each one as it mounts would add layout reads to every expand and scroll. Rows never
 // displace during a project drag; the indicator line marks the landing boundary instead.
 const STATIC_SORT_STRATEGY = () => null;
-const PROJECT_DND_MEASURING = { droppable: { strategy: MeasuringStrategy.WhileDragging } } as const;
+const SIDEBAR_DND_MEASURING = { droppable: { strategy: MeasuringStrategy.WhileDragging } } as const;
 // The pointerup that ends a drag still fires click on whatever row it lands on.
 const POST_DRAG_CLICK_GRACE_MS = 250;
 
 // pointerWithin a header wins; elsewhere the pointer belongs to the vertically nearest header
 // edge, so a drop over thread rows or past the list still lands instead of silently cancelling.
-const projectHeaderCollision: CollisionDetection = (args) => {
+const projectReorderCollision: CollisionDetection = (args) => {
   const within = pointerWithin(args);
   if (within.length > 0) return within;
   const { pointerCoordinates, droppableRects, droppableContainers } = args;
@@ -94,6 +96,10 @@ const projectHeaderCollision: CollisionDetection = (args) => {
   }
   return nearest ? [{ id: nearest.id, data: { droppableContainer: nearest, value: nearestDistance } }] : [];
 };
+
+// A dragged thread targets only the header under the pointer. Unlike a reorder, a drop over a thread row,
+// the No project header or past the list must do nothing, so there is no nearest-header fallback.
+const sidebarCollision: CollisionDetection = (args) => (isThreadDrag(args.active) ? pointerWithin(args) : projectReorderCollision(args));
 
 /**
  * Picks which edge of the hovered header the dragged project inserts at. Pointer drags compare
@@ -155,8 +161,9 @@ function sameIndicator(a: DropIndicator | null, b: DropIndicator | null): boolea
 const POINTER_SENSOR_OPTIONS: PointerSensorOptions = { activationConstraint: { distance: 5 } };
 const KEYBOARD_SENSOR_OPTIONS: KeyboardSensorOptions = { coordinateGetter: sortableKeyboardCoordinates };
 
-function useProjectDrag(controllerRef: React.RefObject<VirtualViewport | null>) {
+function useSidebarDrag(controllerRef: React.RefObject<VirtualViewport | null>) {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<DropIndicator | null>(null);
   const suppressClickUntil = useRef(0);
   const sensors = useSensors(
@@ -165,19 +172,30 @@ function useProjectDrag(controllerRef: React.RefObject<VirtualViewport | null>) 
   );
   const endDrag = useCallback(() => {
     setActiveDragId(null);
+    setActiveThreadId(null);
     setDropIndicator(null);
     suppressClickUntil.current = Date.now() + POST_DRAG_CLICK_GRACE_MS;
   }, []);
-  const onDragStart = useCallback((event: DragStartEvent) => setActiveDragId(String(event.active.id)), []);
+  const onDragStart = useCallback((event: DragStartEvent) => {
+    const dragged = sidebarDragData(event.active);
+    if (dragged?.type === "thread") setActiveThreadId(dragged.threadId);
+    else setActiveDragId(String(event.active.id));
+  }, []);
   // onDragMove, not onDragOver: the edge tracks the pointer within one header, and onDragOver
   // only fires when the over target itself changes.
   const onDragMove = useCallback((event: DragMoveEvent) => {
+    if (isThreadDrag(event.active)) return;
     const edge = dropEdgeForEvent(event);
     const next = edge !== null && event.over ? { id: String(event.over.id), edge } : null;
     setDropIndicator((previous) => (sameIndicator(previous, next) ? previous : next));
   }, []);
   const onDragEnd = useCallback((event: DragEndEvent) => {
     endDrag();
+    if (isThreadDrag(event.active)) {
+      const drop = threadDropOnProject(event);
+      if (drop) openMoveThreadDialog(drop.threadId, drop.workspaceId);
+      return;
+    }
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     // The server reorders project rows only, so the index it receives must not count hidden No project rows.
@@ -191,16 +209,17 @@ function useProjectDrag(controllerRef: React.RefObject<VirtualViewport | null>) 
   const autoScroll = useMemo(() => ({
     canScroll: (element: Element) => controllerRef.current?.viewport === element,
   }), [controllerRef]);
+  const dragging = activeDragId !== null || activeThreadId !== null;
   useLayoutEffect(() => {
-    if (!activeDragId) return;
+    if (!dragging) return;
     const previous = document.body.style.cursor;
     document.body.style.cursor = "grabbing";
     return () => {
       document.body.style.cursor = previous;
     };
-  }, [activeDragId]);
+  }, [dragging]);
   const isClickSuppressed = useCallback(() => Date.now() < suppressClickUntil.current, []);
-  return { activeDragId, dropIndicator, sensors, autoScroll, onDragStart, onDragMove, onDragEnd, onDragCancel: endDrag, isClickSuppressed };
+  return { activeDragId, activeThreadId, dropIndicator, sensors, autoScroll, onDragStart, onDragMove, onDragEnd, onDragCancel: endDrag, isClickSuppressed };
 }
 
 /** Wraps the click handlers a drag release could trigger, so the drop never toggles or navigates. */
@@ -240,7 +259,7 @@ function EmptyRow({ item }: { item: Extract<SidebarItem, { kind: "empty" }> }) {
 
 function GroupHeaderRow({ item, ctx, dropEdge }: { item: Extract<SidebarItem, { kind: "project" }>; ctx: SidebarRowContext; dropEdge: DropEdge | null }) {
   if (item.workspaceId === NO_PROJECT_GROUP_KEY) return <NoProjectHeader item={item} ctx={ctx} />;
-  return item.section === "recent" ? <SortableProjectRow item={item} ctx={ctx} dropEdge={dropEdge} /> : <ProjectHeader item={item} ctx={ctx} />;
+  return item.section === "recent" ? <SortableProjectRow item={item} ctx={ctx} dropEdge={dropEdge} /> : <DroppableProjectRow item={item} ctx={ctx} />;
 }
 
 const SidebarRow = memo(function SidebarRow({ item, ctx, dropEdge }: { item: SidebarItem; ctx: SidebarRowContext; dropEdge: DropEdge | null }) {
@@ -433,6 +452,20 @@ function useHeldOrder() {
 }
 
 /**
+ * What follows the pointer: the project header being reordered. A dragged thread has nothing following it,
+ * because the pointer sits on the target header and a copy there would hide its name and "Move to project…";
+ * the dashed row left in place and the highlighted header carry the drag instead.
+ */
+function dragOverlayContent(
+  drag: Pick<ReturnType<typeof useSidebarDrag>, "activeDragId">,
+  itemsByKey: ReadonlyMap<string, SidebarItem>,
+  ctx: SidebarRowContext,
+): ReactNode {
+  const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
+  return dragged?.kind === "project" ? <ProjectHeader item={dragged} ctx={ctx} /> : null;
+}
+
+/**
  * Renders the derived sidebar items into one virtual list, one virtual row per item. It never
  * filters, sorts or caps: the model already did. Project headers in the recent list drag to
  * reorder projects.
@@ -443,7 +476,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
   const [previewHandle] = useState(() => createTooltipHandle<ThreadPreviewPayload>());
   const [labelHandle] = useState(() => createTooltipHandle<string>());
   const [pullRequestHandle] = useState(createPullRequestListHandle);
-  const drag = useProjectDrag(controllerRef);
+  const drag = useSidebarDrag(controllerRef);
   const rowCtx = useDragSafeContext(ctx, drag.isClickSuppressed);
   const closedScope = useSidebarUiStore(selectClosedScope);
   const rows = useMemo(() => toVirtualRows(items, closedScope), [items, closedScope]);
@@ -466,15 +499,15 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
     );
   }, [rowCtx, dropIndicator, closing, arriving]);
 
-  const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
+  const draggedOverlay = dragOverlayContent(drag, itemsByKey, rowCtx);
   return (
     <div className="relative isolate -mr-1.5 min-h-0 flex-1 [&_.project-tree-viewport]:[scrollbar-gutter:stable]" {...heldOrder}>
       <div ref={containerRef} data-testid="thread-list" className="h-full" />
       <DndContext
         sensors={drag.sensors}
-        collisionDetection={projectHeaderCollision}
-        modifiers={PROJECT_DND_MODIFIERS}
-        measuring={PROJECT_DND_MEASURING}
+        collisionDetection={sidebarCollision}
+        modifiers={SIDEBAR_DND_MODIFIERS}
+        measuring={SIDEBAR_DND_MEASURING}
         autoScroll={drag.autoScroll}
         onDragStart={drag.onDragStart}
         onDragMove={drag.onDragMove}
@@ -490,9 +523,7 @@ export function SidebarList({ items, ctx, overlay, flip = false, closing = NO_KE
             </SidebarLabelHandleContext.Provider>
           </ThreadPreviewHandleContext.Provider>
         </SortableContext>
-        <DragOverlay>
-          {dragged?.kind === "project" ? <ProjectHeader item={dragged} ctx={rowCtx} /> : null}
-        </DragOverlay>
+        <DragOverlay>{draggedOverlay}</DragOverlay>
       </DndContext>
       <ThreadPreviewTooltip handle={previewHandle} guard={previewGuard} />
       <SidebarLabelTooltip handle={labelHandle} />

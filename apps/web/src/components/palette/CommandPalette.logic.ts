@@ -11,6 +11,8 @@ export interface PaletteItem {
   title: string;
   /** Optional secondary label (e.g. file path). */
   description?: string;
+  /** True for an item that is listed but cannot be chosen; its description says why. */
+  disabled?: boolean;
   /** Ordered list of strings to match against the query. Earlier entries rank higher. */
   searchTerms: string[];
 }

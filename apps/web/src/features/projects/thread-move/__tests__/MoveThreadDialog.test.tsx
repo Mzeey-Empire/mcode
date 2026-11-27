@@ -99,6 +99,29 @@ describe("MoveThreadDialog", () => {
     expect(screen.queryByTestId("move-target-rail")).toBeNull();
   });
 
+  it("opens with the project a drop named picked, and still lets the user choose another", async () => {
+    const user = userEvent.setup();
+    render(<MoveThreadDialogHost />);
+    act(() => openMoveThreadDialog(THREAD.id, BETA.id));
+
+    expect(await screen.findByRole("heading", { name: "Move to beta" })).toBeVisible();
+    expect(moveButton()).toBeEnabled();
+
+    await pickProject(user, "alpha");
+    expect(screen.getByRole("heading", { name: "Move to alpha" })).toBeVisible();
+
+    await user.click(moveButton());
+    await waitFor(() => expect(mockTransport.moveThreadToProject).toHaveBeenCalledExactlyOnceWith({ threadId: THREAD.id, workspaceId: ALPHA.id, target: { kind: "local" } }));
+  });
+
+  it("opens with nothing picked when the project it was given is not a project", async () => {
+    render(<MoveThreadDialogHost />);
+    act(() => openMoveThreadDialog(THREAD.id, HIDDEN.id));
+
+    await dialog();
+    expect(moveButton()).toBeDisabled();
+  });
+
   it("picks among projects only, shows the Local rail, and leaves the composer alone", async () => {
     const user = await openDialog();
 

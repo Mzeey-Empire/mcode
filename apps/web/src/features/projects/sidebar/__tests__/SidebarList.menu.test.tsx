@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Thread } from "@/transport/types";
 import { RpcError } from "@/transport/ws-transport";
 
-vi.mock("@/transport", () => ({ getTransport: () => mockTransport }));
+// The background-command store subscribes to pushes; these tests send it none.
+vi.mock("@/transport", () => ({ getTransport: () => mockTransport, pushEmitter: { on: vi.fn(), off: vi.fn() } }));
 
 vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/components/ui/virtual-viewport")>()),

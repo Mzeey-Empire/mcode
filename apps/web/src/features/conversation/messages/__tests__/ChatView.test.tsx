@@ -113,8 +113,10 @@ vi.mock("@/stores/threadStore", async (importOriginal) => {
 });
 
 vi.mock("@/stores/connectionStore", () => ({
-  useConnectionStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ status: chatViewConnectionStatusRef.current }),
+  // The move menu reads background commands, whose store subscribes to the connection.
+  useConnectionStore: Object.assign(
+    vi.fn((selector: (s: unknown) => unknown) => selector({ status: chatViewConnectionStatusRef.current })),
+    { subscribe: vi.fn() },
   ),
 }));
 

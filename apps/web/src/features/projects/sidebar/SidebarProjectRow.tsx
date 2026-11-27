@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, type CSSProperties } from "react";
 import { useShallow } from "zustand/shallow";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { KeyboardCode, useDndContext, type DraggableSyntheticListeners } from "@dnd-kit/core";
+import { KeyboardCode, useDndContext, useDroppable, type DraggableSyntheticListeners } from "@dnd-kit/core";
 import { ChevronRight, GitBranchMinus, Plus, SquarePen } from "lucide-react";
 import type { ChecksStatus } from "@mcode/contracts/github";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,7 @@ import { useCompletionStore } from "./completion-store";
 import type { SidebarRowContext } from "./sidebar-row-context";
 import type { SidebarScope } from "./sidebar-ui-store";
 import { HOVER_ROW_PROPS } from "./hover-glide";
+import { isThreadDrag, projectDragData } from "./thread-move-drag";
 
 type ProjectItem = Extract<SidebarItem, { kind: "project" }>;
 
@@ -80,7 +81,7 @@ export const SortableProjectRow = memo(function SortableProjectRow({
   ctx: SidebarRowContext;
   dropEdge: DropEdge | null;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.workspaceId });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging, isOver, active } = useSortable({ id: item.workspaceId, data: projectDragData(item.workspaceId) });
   const style: CSSProperties = {
     transform: transform ? CSS.Translate.toString(transform) : undefined,
     transition,
@@ -98,7 +99,21 @@ export const SortableProjectRow = memo(function SortableProjectRow({
           )}
         />
       )}
-      <ProjectHeader item={item} ctx={ctx} isDragging={isDragging} sortableListeners={listeners} sortableAttributes={attributes} />
+      <ProjectHeader item={item} ctx={ctx} isDragging={isDragging} moveTarget={isOver && isThreadDrag(active)} sortableListeners={listeners} sortableAttributes={attributes} />
+    </div>
+  );
+});
+
+/**
+ * An Older-section project header. It takes a dropped thread like a recent header does, but it is not
+ * sortable, so it accepts drops only while a thread is dragged and stays out of a project reorder's targets.
+ */
+export const DroppableProjectRow = memo(function DroppableProjectRow({ item, ctx }: { item: ProjectItem; ctx: SidebarRowContext }) {
+  const threadDragging = isThreadDrag(useDndContext().active);
+  const { setNodeRef, isOver } = useDroppable({ id: item.key, data: projectDragData(item.workspaceId), disabled: !threadDragging });
+  return (
+    <div ref={setNodeRef}>
+      <ProjectHeader item={item} ctx={ctx} moveTarget={isOver} />
     </div>
   );
 });
@@ -107,12 +122,13 @@ interface ProjectHeaderProps {
   item: ProjectItem;
   ctx: SidebarRowContext;
   isDragging?: boolean;
+  moveTarget?: boolean;
   sortableListeners?: DraggableSyntheticListeners;
   sortableAttributes?: SortableAttributes;
 }
 
 /** A project header: icon, name, roll-ups, and the hover actions. Also the drag overlay's clone. */
-export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging = false, sortableListeners, sortableAttributes }: ProjectHeaderProps) {
+export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging = false, moveTarget = false, sortableListeners, sortableAttributes }: ProjectHeaderProps) {
   const workspace = useWorkspaceStore((state) => state.workspaces.find((candidate) => candidate.id === item.workspaceId));
   const threads = useWorkspaceStore(useShallow((state) => workspaceThreads(state.threads, item.workspaceId)));
   // Only headers roll up CI, so only they subscribe; a checks poll must not re-render thread rows.
@@ -126,6 +142,7 @@ export const ProjectHeader = memo(function ProjectHeader({ item, ctx, isDragging
         workspace={workspace}
         item={item}
         isProjectDragging={isDragging}
+        moveTarget={moveTarget}
         sortableListeners={sortableListeners}
         sortableAttributes={sortableAttributes}
         checksById={checksById}
@@ -164,6 +181,7 @@ interface ProjectWorkspaceRowProps {
   workspace: Workspace;
   item: ProjectItem;
   isProjectDragging: boolean;
+  moveTarget: boolean;
   sortableListeners: DraggableSyntheticListeners | undefined;
   sortableAttributes: SortableAttributes | undefined;
   checksById: Readonly<Record<string, ChecksStatus>>;
@@ -204,6 +222,7 @@ function ProjectWorkspaceRow({
   workspace,
   item,
   isProjectDragging,
+  moveTarget,
   sortableListeners,
   sortableAttributes,
   checksById,
@@ -229,6 +248,7 @@ function ProjectWorkspaceRow({
       className={cn(
         "group/ws relative flex h-8 cursor-pointer items-center gap-1 rounded-lg pr-2 pl-1 text-label text-muted touch-none outline-none focus-visible:ring-2 focus-visible:ring-focus/70 has-[[data-project-title]:focus-visible]:ring-2 has-[[data-project-title]:focus-visible]:ring-focus/70",
         isProjectDragging && "cursor-grabbing",
+        moveTarget && "bg-selected inset-ring-[1.5px] inset-ring-primary",
       )}
       {...sortableListeners}
     >
@@ -238,15 +258,21 @@ function ProjectWorkspaceRow({
       <ProjectGitStatus isGitRepository={workspace.is_git_repo} />
       <WorkspaceCiRollupChip threads={scopedThreads} checksById={checksById} />
       <ProjectCollapsedStatus status={collapsedStatus} />
-      <ProjectRowActions
-        workspace={workspace}
-        onOpenInExplorer={actions.openInExplorer}
-        onRename={actions.renameProject}
-        onDelete={actions.deleteProject}
-        onCreateThread={actions.createThread}
-      />
+      {moveTarget ? <MoveDropHint /> : (
+        <ProjectRowActions
+          workspace={workspace}
+          onOpenInExplorer={actions.openInExplorer}
+          onRename={actions.renameProject}
+          onDelete={actions.deleteProject}
+          onCreateThread={actions.createThread}
+        />
+      )}
     </div>
   );
+}
+
+function MoveDropHint() {
+  return <span className="shrink-0 pr-1 text-caption whitespace-nowrap text-muted">Move to project…</span>;
 }
 
 // Counts the same threads as the visible number: those this section lists for the project.

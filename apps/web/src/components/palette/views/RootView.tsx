@@ -30,7 +30,8 @@ const ROOT_HINTS: readonly PaletteHint[] = [
   ...PALETTE_LIST_HINTS,
 ];
 
-const QUICK_ACTION_IDS = new Set([
+const QUICK_ACTION_ORDER = [
+  "thread.moveToProject",
   "thread.new",
   "thread.newNoProject",
   "thread.search",
@@ -38,7 +39,8 @@ const QUICK_ACTION_IDS = new Set([
   "terminal.toggle",
   "settings.open",
   "shortcuts.help",
-]);
+];
+const quickActionRank = (id: string) => QUICK_ACTION_ORDER.indexOf(id);
 
 /**
  * Default root view of the command palette.
@@ -76,14 +78,15 @@ export function RootView() {
 
     const visibleCommands = actionOnly || effectiveQuery
       ? commands
-      : commands.filter((cmd) => QUICK_ACTION_IDS.has(cmd.id));
+      : commands.filter((cmd) => quickActionRank(cmd.id) >= 0).sort((a, b) => quickActionRank(a.id) - quickActionRank(b.id));
 
     const actionItems = visibleCommands.map((cmd) => {
       const binding = getKeybindingForCommand(cmd.id);
       return {
         value: `cmd:${cmd.id}`,
         title: cmd.title,
-        description: binding ? formatKeybinding(binding.key, isMac) : undefined,
+        description: cmd.disabledReason ?? (binding ? formatKeybinding(binding.key, isMac) : undefined),
+        disabled: cmd.disabledReason !== undefined,
         searchTerms: [cmd.title.toLowerCase(), cmd.category.toLowerCase()],
       };
     });

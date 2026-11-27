@@ -21,6 +21,7 @@ export function commandsOf(load: BackgroundCommandLoad | undefined): readonly Ba
 
 interface BackgroundCommandState {
   loads: ReadonlyMap<string, BackgroundCommandLoad>;
+  refreshing: ReadonlySet<string>;
   ensure: (threadId: string) => Promise<void>;
   refresh: (threadId: string) => Promise<void>;
   clearThread: (threadId: string) => void;
@@ -63,23 +64,34 @@ function setLoad(threadId: string, load: (current: BackgroundCommandLoad | undef
 }
 
 async function fetchCommands(threadId: string): Promise<void> {
-  do {
-    reloadAfterRequest.delete(threadId);
-    try {
-      const commands = await getTransport().listBackgroundCommands(threadId);
-      setLoad(threadId, () => ({ kind: "ready", commands }));
-    } catch {
-      setLoad(threadId, (current) => {
-        const commands = commandsOf(current);
-        return commands ? { kind: "stale", commands } : { kind: "failed" };
-      });
-    }
-  } while (reloadAfterRequest.has(threadId));
+  try {
+    do {
+      reloadAfterRequest.delete(threadId);
+      try {
+        const commands = await getTransport().listBackgroundCommands(threadId);
+        if (!reloadAfterRequest.has(threadId)) setLoad(threadId, () => ({ kind: "ready", commands }));
+      } catch {
+        if (reloadAfterRequest.has(threadId)) continue;
+        setLoad(threadId, (current) => {
+          const commands = commandsOf(current);
+          return commands ? { kind: "stale", commands } : { kind: "failed" };
+        });
+      }
+    } while (reloadAfterRequest.has(threadId));
+  } finally {
+    requests.delete(threadId);
+    useBackgroundCommandStore.setState((state) => {
+      const refreshing = new Set(state.refreshing);
+      refreshing.delete(threadId);
+      return { refreshing };
+    });
+  }
 }
 
 /** One running-command list per thread, refreshed by push and reconnect without polling. */
-export const useBackgroundCommandStore = create<BackgroundCommandState>((_set, get) => ({
+export const useBackgroundCommandStore = create<BackgroundCommandState>((set, get) => ({
   loads: new Map(),
+  refreshing: new Set(),
   ensure: (threadId) => {
     listen();
     return get().loads.has(threadId) ? Promise.resolve() : get().refresh(threadId);
@@ -91,12 +103,17 @@ export const useBackgroundCommandStore = create<BackgroundCommandState>((_set, g
       reloadAfterRequest.add(threadId);
       return pending;
     }
-    const current = get().loads.get(threadId);
-    if (!commandsOf(current)) {
-      useBackgroundCommandStore.setState((state) => ({ loads: new Map(state.loads).set(threadId, LOADING) }));
-    }
-    const request = fetchCommands(threadId).finally(() => requests.delete(threadId));
+    // Register the shared promise before publishing state or starting a read that can fail synchronously.
+    let start = () => {};
+    const request = new Promise<void>((resolve) => {
+      start = () => resolve(fetchCommands(threadId));
+    });
     requests.set(threadId, request);
+    set((state) => ({
+      refreshing: new Set(state.refreshing).add(threadId),
+      loads: commandsOf(state.loads.get(threadId)) ? state.loads : new Map(state.loads).set(threadId, LOADING),
+    }));
+    start();
     return request;
   },
   clearThread: (threadId) => {

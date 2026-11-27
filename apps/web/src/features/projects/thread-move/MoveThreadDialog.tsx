@@ -16,15 +16,25 @@ import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import { useSidebarUiStore } from "../sidebar/sidebar-ui-store";
 import { isNoProjectWorkspace } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
+import { MoveThreadCommand } from "./MoveThreadCommand";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
 import { PreflightFailedNotice } from "./PreflightFailedNotice";
 import { useMoveTarget, type MoveTargetState } from "./useMoveTarget";
 import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMovePreflight";
 
-/** The global move dialog. It mounts once and opens for the thread {@link openMoveThreadDialog} names. */
+/**
+ * The global move dialog. It mounts once and opens for the thread {@link openMoveThreadDialog} names. It also
+ * mounts the palette entry, so the entry lives and dies with the dialog it opens.
+ */
 export function MoveThreadDialogHost() {
   const threadId = useMoveThreadStore((state) => state.threadId);
-  return threadId === null ? null : <MoveThreadDialog key={threadId} threadId={threadId} />;
+  const projectId = useMoveThreadStore((state) => state.projectId);
+  return (
+    <>
+      <MoveThreadCommand />
+      {threadId === null ? null : <MoveThreadDialog key={threadId} threadId={threadId} initialProjectId={projectId} />}
+    </>
+  );
 }
 
 interface MoveFailure {
@@ -89,10 +99,9 @@ interface MoveFlow {
   readonly move: () => void;
 }
 
-/** The dialog's one choice and the one request it can make, with how that request ended. */
-function useMoveFlow(threadId: string): MoveFlow {
+function useMoveFlow(threadId: string, initialProjectId: string | null): MoveFlow {
   const applyMoved = useWorkspaceStore((state) => state.applyThreadMovedToProject);
-  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(initialProjectId);
   const picked = useWorkspaceStore((state) => state.workspaces.find((candidate) => candidate.id === pickedId && candidate.kind === "project"));
   const target = useMoveTarget(picked);
   const [moving, setMoving] = useState(false);
@@ -127,10 +136,10 @@ function useMoveFlow(threadId: string): MoveFlow {
   return { picked, target, moving, failure, pick, move: () => void move() };
 }
 
-function MoveThreadDialog({ threadId }: { threadId: string }) {
+function MoveThreadDialog({ threadId, initialProjectId }: { threadId: string; initialProjectId: string | null }) {
   const thread = useWorkspaceStore((state) => state.threads.find((candidate) => candidate.id === threadId));
   const threadInNoProject = useWorkspaceStore((state) => isNoProjectWorkspace(state.workspaces.find((candidate) => candidate.id === thread?.workspace_id)));
-  const flow = useMoveFlow(threadId);
+  const flow = useMoveFlow(threadId, initialProjectId);
   const preflight = useMovePreflight(threadId);
 
   // The thread left No project, here or on another client, or was deleted: there is nothing left to move.

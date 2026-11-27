@@ -49,6 +49,14 @@ describe("CommandRegistry", () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
+  it("refuses a command that has a disabled reason, so a keybinding cannot run what the palette greys out", () => {
+    const handler = vi.fn();
+    registerCommand({ id: "test.busy", title: "Busy", category: "Test", handler, disabledReason: "This thread is running" });
+
+    expect(executeCommand("test.busy")).toBe(false);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("returns false when executing non-existent command", () => {
     expect(executeCommand("nonexistent")).toBe(false);
   });

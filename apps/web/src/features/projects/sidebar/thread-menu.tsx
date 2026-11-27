@@ -12,7 +12,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ContextMenuItem } from "@/components/ui/context-menu";
-import { commandsOf, useBackgroundCommandStore } from "@/features/background-commands/backgroundCommandStore";
 import { isDetachedCheckout } from "@/lib/checkout-label";
 import { startupHolds, useThreadActivity } from "@/features/thread-attention/thread-activity";
 import { useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
@@ -24,7 +23,8 @@ import type { Thread } from "@/transport/types";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { closeBlockedReason, lifecycleActionBlocked, useCompletionStore } from "./completion-store";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
-import { MOVE_BLOCK_REASON, offersMoveToProject, openMoveThreadDialog, type MoveBlock } from "../thread-move/move-thread-store";
+import { MOVE_BLOCK_REASON, offersMoveToProject, openMoveThreadDialog } from "../thread-move/move-thread-store";
+import { useMoveBlock } from "../thread-move/use-move-block";
 
 /** The thread a menu acts on, read when the menu renders. */
 export interface ThreadMenuTarget {
@@ -195,13 +195,7 @@ function CloseThreadItem({ thread, renaming }: { thread: WorkspaceThread; renami
 }
 
 function MoveToProjectItem({ thread }: { thread: WorkspaceThread }) {
-  const activity = useThreadActivity(thread.id, { preparing: thread.clientPreparing === true, createFailed: thread.clientError != null });
-  const rowState = useThreadRowState(thread.id, thread.clientPreparing === true, thread.clientError != null);
-  const awaitingApproval = rowState.kind === "needs-you" && rowState.label === "Approval required";
-  // Waiting covers subagents and awaited commands. An unawaited command shows only in the command list, which is
-  // loaded for the open thread; for any other thread the server's refusal explains it in the dialog.
-  const commandRunning = useBackgroundCommandStore((state) => commandsOf(state.loads.get(thread.id))?.some((command) => command.status === "running") ?? false);
-  const block = moveBlock(activity.turnRunning, awaitingApproval, rowState.kind === "waiting" || commandRunning);
+  const block = useMoveBlock(thread);
   const reason = block ? MOVE_BLOCK_REASON[block] : undefined;
   return (
     <DropdownMenuItem
@@ -212,12 +206,6 @@ function MoveToProjectItem({ thread }: { thread: WorkspaceThread }) {
       onClick={() => openMoveThreadDialog(thread.id)}
     />
   );
-}
-
-function moveBlock(running: boolean, awaitingApproval: boolean, backgroundRunning: boolean): MoveBlock | null {
-  if (awaitingApproval) return "needs-approval";
-  if (running) return "running";
-  return backgroundRunning ? "background" : null;
 }
 
 function closeThread(threadId: string): void {

@@ -28,6 +28,7 @@ export function CommandPaletteResults({ groups, onSelect }: Props) {
               key={item.value}
               value={item.value}
               keywords={item.searchTerms}
+              disabled={item.disabled}
               onSelect={() => onSelect(item.value)}
               className="text-body-small"
             >

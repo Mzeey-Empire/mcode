@@ -2,16 +2,16 @@ import { create } from "zustand";
 import type { Workspace } from "@mcode/contracts/models/workspace";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 
-/** Which thread the move dialog is open for, or null while it is closed. */
-export const useMoveThreadStore = create<{ readonly threadId: string | null }>(() => ({ threadId: null }));
+/** Which thread the move dialog is open for, or null while it is closed, and the project it opens with picked. */
+export const useMoveThreadStore = create<{ readonly threadId: string | null; readonly projectId: string | null }>(() => ({ threadId: null, projectId: null }));
 
-/** Opens the move dialog for a No project thread. */
-export function openMoveThreadDialog(threadId: string): void {
-  useMoveThreadStore.setState({ threadId });
+/** Opens the move dialog for a No project thread. A drop on a project header passes that project, so the dialog opens with it picked. */
+export function openMoveThreadDialog(threadId: string, projectId: string | null = null): void {
+  useMoveThreadStore.setState({ threadId, projectId });
 }
 
 export function closeMoveThreadDialog(): void {
-  useMoveThreadStore.setState({ threadId: null });
+  useMoveThreadStore.setState({ threadId: null, projectId: null });
 }
 
 export type MoveBlock = "running" | "needs-approval" | "background";
