@@ -38,6 +38,21 @@ describe("newProjectRunReducer", () => {
     expect(newProjectRunReducer(before, { type: "frame", frame: frame(5, { status: "created", workspaceId: "ws" }, "op-2") })).toBe(before);
   });
 
+  it("accepts the last known revision only while the result is unknown", () => {
+    const unknownResult = run(
+      ...STARTED,
+      { type: "frame", frame: frame(7) },
+      { type: "result-unreadable", operationId: "op-1" },
+    );
+    expect(newProjectRunReducer(unknownResult, { type: "frame", frame: frame(6) }))
+      .toMatchObject({ kind: "result-unknown", operationId: "op-1", revision: 7 });
+
+    const moving = newProjectRunReducer(unknownResult, { type: "frame", frame: frame(7) });
+    expect(moving).toMatchObject({ kind: "moving", operationId: "op-1", revision: 7 });
+    expect(newProjectRunReducer(moving, { type: "frame", frame: frame(7, { status: "created", workspaceId: "ws-1" }) }))
+      .toMatchObject({ kind: "moving", operationId: "op-1", revision: 7 });
+  });
+
   it("adopts a move found at open from whatever the run shows by then", () => {
     const created = frame(4, { status: "created", workspaceId: "ws-1" });
 

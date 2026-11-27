@@ -104,7 +104,8 @@ export function endsAtClose(run: NewProjectRun): boolean {
 
 function applyFrame(run: NewProjectRun, frame: WorkspaceMoveFrame): NewProjectRun {
   const current = followed(run);
-  if (!current || current.operationId !== frame.operationId || frame.revision <= current.revision) return run;
+  if (!current || current.operationId !== frame.operationId || frame.revision < current.revision) return run;
+  if (frame.revision === current.revision && run.kind !== "result-unknown") return run;
   return runOfFrame(frame);
 }
 
