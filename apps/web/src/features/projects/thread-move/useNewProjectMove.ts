@@ -32,6 +32,7 @@ export interface NewProjectMove {
    * which other threads move along.
    */
   readonly canCreate: boolean;
+  readonly retryLookup: (() => void) | null;
   /** Threads in the folder, this one included. */
   readonly threadCount: number;
   readonly setValues: (values: NewProjectValues) => void;
@@ -104,7 +105,7 @@ function refusedProblem(run: NewProjectRun, values: NewProjectValues): FieldProb
 
 export function useNewProjectMove(threadId: string, read: MovePreflightRead): NewProjectMove {
   const preflight = preflightOf(read);
-  const { run, lookedUp, create, retryGit, reset } = useNewProjectRun(threadId);
+  const { run, lookedUp, retryLookup, create, retryGit, reset } = useNewProjectRun(threadId);
   const { values, setValues } = useNewProjectValues(preflight);
   const [initGit, setInitGit] = useState(false);
   const workspaces = useWorkspaceStore((state) => state.workspaces);
@@ -125,6 +126,7 @@ export function useNewProjectMove(threadId: string, read: MovePreflightRead): Ne
     sharers,
     busy,
     canCreate: read.status === "ready" && lookedUp && (run.kind === "form" || run.kind === "failed") && live === null && isSubmittable(values, projectNames),
+    retryLookup,
     threadCount: 1 + (sharers?.count ?? 0),
     setValues,
     setInitGit,

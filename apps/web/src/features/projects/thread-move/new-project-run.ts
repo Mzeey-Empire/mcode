@@ -29,7 +29,7 @@ export type NewProjectRun =
    * known about where the thread is, so the user is sent to the sidebar rather than offered a retry that could
    * start a second move.
    */
-  | { readonly kind: "result-unknown" }
+  | { readonly kind: "result-unknown"; readonly operationId: string; readonly revision: number }
   /** The project exists and the threads are in it; only git setup failed. `retrying` holds the retry button while a retry runs. */
   | { readonly kind: "git-failed"; readonly operationId: string; readonly workspaceId: string; readonly error: string; readonly retrying: boolean }
   /** A retry started git. The project and its alert stay on screen until the user closes them. */
@@ -75,7 +75,7 @@ function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
 }
 
 function followed(run: NewProjectRun): { readonly operationId: string; readonly revision: number } | null {
-  if ((run.kind === "moving" || run.kind === "rollback-pending") && run.operationId !== null) {
+  if ((run.kind === "moving" || run.kind === "rollback-pending" || run.kind === "result-unknown") && run.operationId !== null) {
     return { operationId: run.operationId, revision: run.revision };
   }
   return null;
@@ -114,7 +114,9 @@ function runAfterGitRetry(run: Extract<NewProjectRun, { kind: "git-failed" }>, r
 }
 
 function runAfterUnreadableStatus(run: NewProjectRun, operationId: string): NewProjectRun {
-  return run.kind === "moving" && run.operationId === operationId ? { kind: "result-unknown" } : run;
+  return run.kind === "moving" && run.operationId === operationId
+    ? { kind: "result-unknown", operationId, revision: run.revision }
+    : run;
 }
 
 type FollowUpAction =Extract<NewProjectRunAction, { type: "frame" | "adopted" | "result-unreadable" | "git-retrying" | "git-retried" }>;

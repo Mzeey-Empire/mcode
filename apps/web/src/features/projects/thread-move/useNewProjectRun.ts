@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useState } from "react";
 import { WS_CHANNELS } from "@mcode/contracts/ws/channels";
-import type { WorkspaceMoveFrame } from "@mcode/contracts/ws/workspace-move";
+import type { WorkspaceMoveFrame, WorkspaceMoveStatusInput } from "@mcode/contracts/ws/workspace-move";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { getTransport, pushEmitter } from "@/transport";
 import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import { describeFieldRefusal, type NewProjectValues } from "./new-project-fields";
@@ -22,15 +23,15 @@ const STATUS_READ_BACKOFF_MS = 500;
  * Returns the cancel function for the effect's cleanup.
  */
 function readStatusWithRetry(
-  operationId: string,
-  onFrame: (frame: WorkspaceMoveFrame) => void,
+  input: WorkspaceMoveStatusInput,
+  onRead: (frame: WorkspaceMoveFrame | null) => void,
   onGaveUp: () => void,
 ): () => void {
   let cancelled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const attempt = (number: number) => {
-    getTransport().readWorkspaceMoveStatus({ operationId }).then(
-      (frame) => { if (!cancelled && frame) onFrame(frame); },
+    getTransport().readWorkspaceMoveStatus(input).then(
+      (frame) => { if (!cancelled) onRead(frame); },
       () => {
         if (cancelled) return;
         if (number >= STATUS_READ_ATTEMPTS) onGaveUp();
@@ -52,6 +53,8 @@ export interface NewProjectRunControls {
    * a request: the server refuses it while that move runs, and the answer that says so would arrive late.
    */
   readonly lookedUp: boolean;
+  /** Present after the lookup fails, while creation is still disabled. */
+  readonly retryLookup: (() => void) | null;
   /** Asks the server to turn the folder into a project. Also what Try again runs. */
   readonly create: (values: NewProjectValues, initGit: boolean) => void;
   /** Runs git init again on a project that was created without it. */
@@ -71,22 +74,16 @@ export interface NewProjectRunControls {
 export function useNewProjectRun(threadId: string): NewProjectRunControls {
   const [run, dispatch] = useReducer(newProjectRunReducer, FORM_RUN);
 
-  const [lookedUpThreadId, setLookedUpThreadId] = useState<string | null>(null);
-
-  useEffect(() => {
-    let current = true;
-    const settle = () => { if (current) setLookedUpThreadId(threadId); };
-    getTransport().readWorkspaceMoveStatus({ threadId }).then(
-      (frame) => {
-        if (current && frame) dispatch({ type: "adopted", frame });
-        settle();
-      },
-      // No unfinished move is the common case, and a failed read leaves the form, which the server then refuses
-      // with its own reason if a move does run.
-      settle,
-    );
-    return () => { current = false; };
-  }, [threadId]);
+  const [lookup, setLookup] = useState<{ threadId: string; status: "ready" | "failed" } | null>(null);
+  const [lookupAttempt, retry] = useReducer((attempt: number) => attempt + 1, 0);
+  useEffect(() => readStatusWithRetry(
+    { threadId },
+    (frame) => {
+      if (frame) dispatch({ type: "adopted", frame });
+      setLookup({ threadId, status: "ready" });
+    },
+    () => setLookup({ threadId, status: "failed" }),
+  ), [threadId, lookupAttempt]);
 
   const operationId = followedOperation(run);
   useEffect(() => {
@@ -97,13 +94,21 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
       heardFrame = true;
       dispatch({ type: "frame", frame });
     });
-    const stopReading = readStatusWithRetry(
-      operationId,
-      (frame) => dispatch({ type: "frame", frame }),
+    const catchUp = () => readStatusWithRetry(
+      { operationId },
+      (frame) => { if (frame) dispatch({ type: "frame", frame }); },
       // A frame that arrived shows the pushes work, so the move is still followed and the read is not needed.
       () => { if (!heardFrame) dispatch({ type: "result-unreadable", operationId }); },
     );
+    let stopReading = catchUp();
+    const stopReconnect = useConnectionStore.subscribe((next, previous) => {
+      if (next.status !== "connected" || previous.status === "connected") return;
+      heardFrame = false;
+      stopReading();
+      stopReading = catchUp();
+    });
     return () => {
+      stopReconnect();
       stopReading();
       stop();
     };
@@ -123,7 +128,15 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
     );
   };
 
-  return { run, lookedUp: lookedUpThreadId === threadId, create, retryGit, reset: () => dispatch({ type: "reset" }) };
+  const lookupStatus = lookup?.threadId === threadId ? lookup.status : null;
+  return {
+    run,
+    lookedUp: lookupStatus === "ready",
+    retryLookup: lookupStatus === "failed" ? () => { setLookup(null); retry(); } : null,
+    create,
+    retryGit,
+    reset: () => dispatch({ type: "reset" }),
+  };
 }
 
 async function requestCreation(threadId: string, values: NewProjectValues, initGit: boolean): Promise<NewProjectRunAction> {

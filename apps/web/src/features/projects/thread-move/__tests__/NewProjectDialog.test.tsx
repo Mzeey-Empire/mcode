@@ -12,6 +12,7 @@ vi.mock("@/transport", async () => ({
 }));
 
 import { installListboxLayout } from "@/__tests__/helpers/picker-layout";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { pushEmitter } from "@/transport/ws-transport";
 import { useSidebarUiStore } from "../../sidebar/sidebar-ui-store";
@@ -548,6 +549,36 @@ describe("New project from this folder", () => {
       expect(mockTransport.createProjectFromFolder).not.toHaveBeenCalled();
     });
 
+    it("keeps Create project disabled after an unreadable lookup and follows the running move on Retry", async () => {
+      const read = vi.mocked(mockTransport.readWorkspaceMoveStatus);
+      const error = new Error("socket closed");
+      let failFirstRead = () => {};
+      read.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+        failFirstRead = () => reject(error);
+      })).mockRejectedValueOnce(error).mockRejectedValueOnce(error).mockResolvedValue(frame(1));
+      await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        await act(async () => {
+          failFirstRead();
+          await vi.advanceTimersByTimeAsync(1_500);
+        });
+        expect(createButton()).toBeDisabled();
+        expect(read.mock.calls).toEqual(Array.from({ length: 3 }, () => [{ threadId: THREAD.id }]));
+        expect(screen.getByText("Couldn't check this thread's folder. Try again.")).toBeVisible();
+        await act(async () => { screen.getByRole("button", { name: "Retry" }).click(); });
+        expect(createButton()).toHaveTextContent("Moving…");
+      } finally {
+        vi.useRealTimers();
+      }
+
+      push(frame(2, { status: "git-failed", workspaceId: HIDDEN.id, error: "git: permission denied" }));
+      expect(await screen.findByRole("alertdialog", { name: "Project created" })).toBeVisible();
+      expect(mockTransport.createProjectFromFolder).not.toHaveBeenCalled();
+    });
+
     it("keeps the newer result when an older status read lands after a pushed frame", async () => {
       let answerStatus: (read: WorkspaceMoveFrame) => void = () => {};
       const user = await openNewProject();
@@ -600,6 +631,38 @@ describe("New project from this folder", () => {
         expect(screen.getByRole("button", { name: "Close dialog" })).toBeEnabled();
         expect(vi.mocked(mockTransport.readWorkspaceMoveStatus).mock.calls.filter(([input]) => "operationId" in input)).toHaveLength(3);
         expect(mockTransport.createProjectFromFolder).toHaveBeenCalledTimes(1);
+      });
+
+      it("shows the terminal frame that arrives after all reads fail", async () => {
+        await startWithFailingStatusRead([]);
+        await settle();
+        expect(screen.getByRole("alert")).toHaveTextContent("Couldn't get the result of the move.");
+        expect(screen.getByRole("button", { name: "Close" })).toBeEnabled();
+
+        push(frame(4, { status: "git-failed", workspaceId: HIDDEN.id, error: "git: permission denied" }));
+        vi.useRealTimers();
+        expect(await screen.findByRole("alertdialog", { name: "Project created" })).toBeVisible();
+      });
+
+      it("reads the result on reconnect after all reads fail", async () => {
+        await startWithFailingStatusRead([]);
+        await settle();
+        expect(screen.getByRole("alert")).toHaveTextContent("Couldn't get the result of the move.");
+        const previousStatus = useConnectionStore.getState().status;
+        vi.mocked(mockTransport.readWorkspaceMoveStatus).mockResolvedValueOnce(
+          frame(4, { status: "git-failed", workspaceId: HIDDEN.id, error: "git: permission denied" }),
+        );
+
+        try {
+          await act(async () => {
+            useConnectionStore.setState({ status: "connecting" });
+            useConnectionStore.setState({ status: "connected" });
+          });
+          vi.useRealTimers();
+          expect(await screen.findByRole("alertdialog", { name: "Project created" })).toBeVisible();
+        } finally {
+          act(() => useConnectionStore.setState({ status: previousStatus }));
+        }
       });
 
       it("shows the real result when a later read succeeds", async () => {

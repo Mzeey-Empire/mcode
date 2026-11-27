@@ -269,7 +269,7 @@ function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThread
         {intoNewProject
           ? <NewProjectBody newProject={newProject} preflight={preflight} moving={moving} nameFieldRef={nameFieldRef} />
           : <ExistingProjectBody picked={picked} flow={flow} preflight={preflight} onPickerOpenChange={onPickerOpenChange} />}
-        <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen || openTargetPickers.size > 0} newProject={newProject} />
+        <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen} targetPickerOpen={openTargetPickers.size > 0} newProject={newProject} />
       </DialogContent>
     </Dialog>
   );
@@ -302,6 +302,7 @@ interface NewProjectBodyProps {
 /** What the folder check found: the threads that move along, or that the check failed. */
 function FolderCheckNotice({ newProject, preflight }: { newProject: NewProjectMove; preflight: MovePreflightState }) {
   const { sharers, busy } = newProject;
+  if (newProject.retryLookup) return <PreflightFailedNotice onRetry={newProject.retryLookup} />;
   if (preflight.read.status === "failed") return <PreflightFailedNotice onRetry={preflight.retry} />;
   // When the only other thread is the busy one, its own notice already says everything the sharers notice would.
   const shown = sharers !== null && !(sharers.count === 1 && busy !== null && !busy.isOpenThread);
@@ -342,10 +343,11 @@ interface MoveFooterProps {
   readonly flow: MoveFlow;
   readonly preflight: MovePreflightState;
   readonly chooserOpen: boolean;
+  readonly targetPickerOpen: boolean;
   readonly newProject: NewProjectMove;
 }
 
-function MoveFooter({ flow, preflight, chooserOpen, newProject }: MoveFooterProps) {
+function MoveFooter({ flow, preflight, chooserOpen, targetPickerOpen, newProject }: MoveFooterProps) {
   if (flow.destination === "new-project") return <NewProjectFooter newProject={newProject} chooserOpen={chooserOpen} />;
   const { picked, moving, failure } = flow;
   if (failure?.unconfirmed) return <DialogFooter showCloseButton />;
@@ -354,7 +356,7 @@ function MoveFooter({ flow, preflight, chooserOpen, newProject }: MoveFooterProp
     <DialogFooter>
       <FilesNote preflight={preflightOf(preflight.read)} picked={picked !== undefined} />
       <Button type="button" variant="outline" disabled={moving} onClick={closeMoveThreadDialog}>Cancel</Button>
-      <Button type="button" loading={moving} disabled={picked === undefined || flow.target.request === null || chooserOpen || preflight.read.status !== "ready"} onClick={flow.move}>
+      <Button type="button" loading={moving} disabled={picked === undefined || flow.target.request === null || chooserOpen || targetPickerOpen || preflight.read.status !== "ready"} onClick={flow.move}>
         {retrying ? <RotateCcw aria-hidden data-icon="inline-start" /> : <FolderInput aria-hidden data-icon="inline-start" />}
         {moving ? "Moving…" : retrying ? "Try again" : "Move thread"}
       </Button>
