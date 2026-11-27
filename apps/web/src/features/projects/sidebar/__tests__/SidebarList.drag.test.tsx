@@ -308,20 +308,30 @@ describe("SidebarList thread drag", () => {
   });
 
   describe("before the thread's background commands have loaded", () => {
-    function holdCommandList(): (commands: BackgroundCommand[]) => Promise<void> {
-      let answer: (commands: BackgroundCommand[]) => void = () => {};
-      vi.mocked(mockTransport.listBackgroundCommands).mockReturnValueOnce(new Promise((resolve) => { answer = resolve; }));
-      return (commands) => act(async () => answer(commands));
+    function holdCommandList(): (outcome: BackgroundCommand[] | Error) => Promise<void> {
+      let answer: (outcome: BackgroundCommand[] | Error) => void = () => {};
+      vi.mocked(mockTransport.listBackgroundCommands).mockReturnValueOnce(new Promise((resolve, reject) => {
+        answer = (outcome) => {
+          if (outcome instanceof Error) reject(outcome);
+          else resolve(outcome);
+        };
+      }));
+      return (outcome) => act(async () => answer(outcome));
     }
 
-    it.each([true, false])("waits for a list refreshed by a push before allowing a drag (running: %s)", async (running) => {
+    it.each([
+      { initialFails: false, running: true },
+      { initialFails: false, running: false },
+      { initialFails: true, running: true },
+      { initialFails: true, running: false },
+    ])("waits for a list refreshed by a push (initial fails: $initialFails, running: $running)", async ({ initialFails, running }) => {
       const initial = holdCommandList();
       const refreshed = holdCommandList();
       seed([LOOSE]);
       await renderSidebar();
       act(() => { pushes.dispatchEvent(new CustomEvent("backgroundCommand.changed", { detail: { threadId: LOOSE.id } })); });
 
-      await initial([]);
+      await initial(initialFails ? new Error("Initial read failed") : []);
       await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
       const startedBeforeRefresh = dragging();
       await release(POINTER_OFF_EVERYTHING);

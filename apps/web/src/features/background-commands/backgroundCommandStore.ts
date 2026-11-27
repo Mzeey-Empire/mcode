@@ -69,6 +69,7 @@ async function fetchCommands(threadId: string): Promise<void> {
       const commands = await getTransport().listBackgroundCommands(threadId);
       if (!reloadAfterRequest.has(threadId)) setLoad(threadId, () => ({ kind: "ready", commands }));
     } catch {
+      if (reloadAfterRequest.has(threadId)) continue;
       setLoad(threadId, (current) => {
         const commands = commandsOf(current);
         return commands ? { kind: "stale", commands } : { kind: "failed" };
