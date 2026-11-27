@@ -674,6 +674,17 @@ describe("cross-drive project creation", () => {
     expect(f.readNotes(f.destination)).toBe("keep these files");
   });
 
+  it("keeps the copied root's modification time when the platform is win32", async () => {
+    const f = await fixture();
+    const modified = new Date("2023-02-06T01:02:03Z");
+    NodeFS.utimesSync(f.source, new Date("2022-01-05T12:34:56Z"), modified);
+
+    await completedCopy(f, { platform: "win32" });
+
+    expect(NodeFS.statSync(f.destination).mtimeMs).toBe(modified.getTime());
+    expect(f.readNotes(f.destination)).toBe("keep these files");
+  });
+
   it.skipIf(process.platform !== "win32")("refuses a dangling directory link and removes only staging", async () => {
     const f = await fixture();
     const target = NodePath.join(f.root, "removed-target");

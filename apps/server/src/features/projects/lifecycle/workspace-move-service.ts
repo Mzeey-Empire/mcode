@@ -349,7 +349,7 @@ export class WorkspaceMoveService {
     let converted: ReturnType<WorkspaceMoveStore["convert"]>;
     try {
       await this.closeFolderUsers(intent.workspaceId, intent.sourcePath, reservations);
-      const sourceRoot = this.deps.platform === "win32" ? null : await NodeFSPromises.lstat(intent.sourcePath, { bigint: true });
+      const sourceRoot = await NodeFSPromises.lstat(intent.sourcePath, { bigint: true });
       await writeMoveMarker(intent.sourcePath, intent.id);
       await this.moveFolder(intent, live, sourceRoot);
       const git = await this.gitPlacement(intent.destinationPath);
@@ -365,7 +365,7 @@ export class WorkspaceMoveService {
     await this.finishConverted(move, converted);
   }
 
-  private async moveFolder(move: WorkspaceMove, live: LiveMove, sourceRoot: NodeFS.BigIntStats | null): Promise<void> {
+  private async moveFolder(move: WorkspaceMove, live: LiveMove, sourceRoot: NodeFS.BigIntStats): Promise<void> {
     await this.preparePublication(move.sourcePath, move, live);
     try {
       await renameWorkspaceFolder(move.sourcePath, move.destinationPath, this.deps);
@@ -394,7 +394,7 @@ export class WorkspaceMoveService {
     if (!holdsMoveMarker(await inspectMoveFolder(source, move.id))) throw new Error("The folder to publish lost its move marker");
   }
 
-  private async copyFolder(move: WorkspaceMove, live: LiveMove, sourceRoot: NodeFS.BigIntStats | null): Promise<void> {
+  private async copyFolder(move: WorkspaceMove, live: LiveMove, sourceRoot: NodeFS.BigIntStats): Promise<void> {
     if (live.claimedDestination) {
       await removeMoveClaim(move.destinationPath, move.id);
       live.claimedDestination = false;

@@ -14,7 +14,7 @@ export async function copyWorkspaceFolder(input: {
   staging: string;
   moveId: string;
   platform: NodeJS.Platform;
-  sourceRoot: NodeFS.BigIntStats | null;
+  sourceRoot: NodeFS.BigIntStats;
   openDestination?: typeof NodeFSPromises.open;
   progress(copied: number, total: number): Promise<void>;
 }): Promise<WorkspaceMoveCopyManifest> {
@@ -54,8 +54,8 @@ export async function copyWorkspaceFolder(input: {
   for (const { path, stat } of entries.reverse()) {
     if (stat.isDirectory()) await preserveMetadata(NodePath.join(staging, path), stat);
   }
-  if (!sourceRoot) return { entries: manifest, root: null };
-  await NodeFSPromises.chmod(staging, Number(sourceRoot.mode) & 0o7777);
+  // Windows has no POSIX mode to carry over, but the root's times are still recorded so they can be restored.
+  if (platform !== "win32") await NodeFSPromises.chmod(staging, Number(sourceRoot.mode) & 0o7777);
   const copy = await NodeFSPromises.lstat(staging, { bigint: true });
   return {
     entries: manifest,
