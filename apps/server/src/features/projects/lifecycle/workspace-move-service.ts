@@ -559,7 +559,15 @@ export class WorkspaceMoveService {
     // The Git outcome must be durable before removing the only proof of the rename.
     await removeMoveMarker(move.destinationPath, move.id);
     const copyRoot = move.stagingPath ? this.deps.store.readManifest(move.id)?.root : null;
-    if (copyRoot) await restoreCopyRootTimes(move.destinationPath, copyRoot);
+    if (copyRoot) {
+      try {
+        await restoreCopyRootTimes(move.destinationPath, copyRoot);
+      } catch (error) {
+        logger.warn("Could not restore the copied project folder's times", {
+          operationId: move.id, path: move.destinationPath, error: moveError(error),
+        });
+      }
+    }
     const retainedSource = move.stagingPath
       ? { cleanup: "pending" as const, sourceRetainUntil: noProjectRetentionDeadline(this.now()) }
       : {};

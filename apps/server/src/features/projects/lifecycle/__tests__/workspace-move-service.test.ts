@@ -7,6 +7,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 import type { WorkspaceMoveFrame } from "@mcode/contracts/ws/workspace-move";
+import { logger } from "@mcode/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseWriteOutcomeUnknown } from "../../../../runtime/persistence/sqlite/application-database-writer.js";
 import { MessageStore } from "../../../agents/conversation/persistence/message-store.js";
@@ -23,6 +24,8 @@ import { noProjectFolderName } from "../no-project-folder-name.js";
 import { markerPath } from "../workspace-move-files.js";
 import { assertTerminalOutsideMove } from "../workspace-move-gate.js";
 import { WorkspaceMoveService } from "../workspace-move-service.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => ({ ...await importOriginal<typeof NodeFSPromises>() }));
 
 const executeGit = NodeUtil.promisify(NodeChildProcess.execFile);
 const NOW = new Date("2026-11-27T12:00:00.000Z");
@@ -684,6 +687,28 @@ describe("cross-drive project creation", () => {
 
     expect(NodeFS.statSync(f.destination).mtimeMs).toBe(modified.getTime());
     expect(f.readNotes(f.destination)).toBe("keep these files");
+  });
+
+  it("finishes the move and schedules source retention when restoring the copied root's times fails", async () => {
+    const f = await fixture();
+    const lutimes = NodeFSPromises.lutimes;
+    const restore = vi.spyOn(NodeFSPromises, "lutimes").mockImplementation((path, atime, mtime) =>
+      path === f.destination ? Promise.reject(errno("EPERM")) : lutimes(path, atime, mtime));
+    const warn = vi.spyOn(logger, "warn");
+    try {
+      const { operationId } = await startCopy(f);
+      await vi.waitFor(() => expect(f.store.find(operationId)).toMatchObject({
+        phase: "done", cleanup: "pending", sourceRetainUntil: DEADLINE,
+      }));
+      expect((await f.terminal).result).toMatchObject({ status: "created", workspaceId: f.id });
+      expect(f.workspaces.hasUnfinishedMove(f.id)).toBe(false);
+      expect(warn).toHaveBeenCalledWith(expect.any(String), {
+        operationId, path: f.destination, error: "Injected EPERM",
+      });
+    } finally {
+      warn.mockRestore();
+      restore.mockRestore();
+    }
   });
 
   it.skipIf(process.platform !== "win32")("refuses a dangling directory link and removes only staging", async () => {
