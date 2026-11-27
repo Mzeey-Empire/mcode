@@ -211,6 +211,25 @@ describe("MoveThreadDialog", () => {
     expect(moveButton()).toBeDisabled();
   });
 
+  it("lets the user close an unconfirmed move without retrying", async () => {
+    const raw = "Move commit reply lost";
+    vi.mocked(mockTransport.moveThreadToProject).mockResolvedValue({ status: "unconfirmed", error: raw });
+    const user = await openDialog();
+    await pickProject(user, "alpha");
+
+    await user.click(moveButton());
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't confirm the move");
+    expect(alert).toHaveTextContent("Check the sidebar to see where the thread is.");
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(screen.queryByText(raw)).toBeNull();
+    await user.click(within(alert).getByRole("button", { name: "Show details" }));
+    expect(screen.getByText(raw)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /^Close$/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
   it("does not claim nothing changed when the request never answered", async () => {
     vi.mocked(mockTransport.moveThreadToProject).mockRejectedValue(new Error("socket closed"));
     const user = await openDialog();

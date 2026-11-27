@@ -28,6 +28,7 @@ export function MoveThreadDialogHost() {
 interface MoveFailure {
   readonly detail: string;
   readonly raw: string | null;
+  readonly unconfirmed?: true;
   /** Whether trying the same project again can work. A project that is gone must be chosen anew. */
   readonly retryable: boolean;
 }
@@ -51,6 +52,8 @@ function describeRefusal(result: Exclude<ThreadMoveResult, { status: "moved" }>)
       return { detail: `That project is no longer in Mcode. ${NOTHING_CHANGED} Choose another project.`, raw: null, retryable: false };
     case "not-no-project":
       return { detail: "This thread is no longer in No project, so there is nothing to move.", raw: null, retryable: false };
+    case "unconfirmed":
+      return { detail: "Check the sidebar to see where the thread is.", raw: result.error, retryable: false, unconfirmed: true };
     case "failed": {
       const why = result.cause === "database-busy" ? "Mcode's database was busy, so nothing changed" : "Nothing changed";
       return {
@@ -165,7 +168,7 @@ function MoveThreadDialogView({ title, flow, preflight }: MoveThreadDialogViewPr
             projectName={picked?.name}
             prefix="Move to"
             suffix=""
-            pick={{ selectedWorkspaceId: picked?.id ?? null, onSelect: flow.pick, onOpenChange: setChooserOpen, disabled: moving }}
+            pick={{ selectedWorkspaceId: picked?.id ?? null, onSelect: flow.pick, onOpenChange: setChooserOpen, disabled: moving || flow.failure?.unconfirmed }}
           />
         </DialogHeader>
         <MoveBody flow={flow} preflight={preflight} />
@@ -182,13 +185,14 @@ function MoveBody({ flow, preflight }: { flow: MoveFlow; preflight: MovePrefligh
     <div className="grid gap-4">
       {picked ? <MoveTargetRail workspace={picked} /> : null}
       {picked && preflight.read.status === "failed" ? <PreflightFailedNotice onRetry={preflight.retry} /> : null}
-      {failure ? <Notice tone="error" title="Couldn't move the thread" detail={failure.detail} more={failure.raw ?? undefined} /> : null}
+      {failure ? <Notice tone="error" title={failure.unconfirmed ? "Couldn't confirm the move" : "Couldn't move the thread"} detail={failure.detail} more={failure.raw ?? undefined} /> : null}
     </div>
   );
 }
 
 function MoveFooter({ flow, preflight, chooserOpen }: { flow: MoveFlow; preflight: MovePreflightState; chooserOpen: boolean }) {
   const { picked, moving, failure } = flow;
+  if (failure?.unconfirmed) return <DialogFooter showCloseButton />;
   const retrying = failure !== null && picked !== undefined;
   return (
     <DialogFooter>
