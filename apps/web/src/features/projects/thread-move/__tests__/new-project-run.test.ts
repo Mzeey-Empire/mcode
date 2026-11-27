@@ -1,7 +1,7 @@
 import type { WorkspaceMoveFrame, WorkspaceMoveResult } from "@mcode/contracts/ws/workspace-move";
 import { describe, expect, it } from "vitest";
 import { describeFieldRefusal } from "../new-project-fields";
-import { FORM_RUN, followedOperation, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "../new-project-run";
+import { FORM_RUN, followedOperation, followsMove, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "../new-project-run";
 
 function frame(revision: number, result?: WorkspaceMoveResult, operationId = "op-1"): WorkspaceMoveFrame {
   return { operationId, revision, phase: result ? "done" : "renamed", copiedBytes: null, totalBytes: null, ...(result ? { result } : {}) };
@@ -63,7 +63,16 @@ describe("newProjectRunReducer", () => {
     expect(retrying).toMatchObject({ kind: "git-failed", retrying: true });
     const stillFailed = newProjectRunReducer(retrying, { type: "git-retried", result: { status: "git-failed", workspaceId: "ws-1", error: "second" } });
     expect(stillFailed).toMatchObject({ kind: "git-failed", error: "second", retrying: false });
-    expect(newProjectRunReducer(stillFailed, { type: "git-retried", result: { status: "created", workspaceId: "ws-1" } })).toEqual({ kind: "created", workspaceId: "ws-1" });
+    expect(newProjectRunReducer(stillFailed, { type: "git-retried", result: { status: "created", workspaceId: "ws-1" } })).toEqual({ kind: "git-started", workspaceId: "ws-1" });
+  });
+
+  it("keeps the dialog open after a git retry works, because the thread has already left No project", () => {
+    const started = newProjectRunReducer(
+      run(...STARTED, { type: "frame", frame: frame(3, { status: "git-failed", workspaceId: "ws-1", error: "first" }) }),
+      { type: "git-retried", result: { status: "created", workspaceId: "ws-1" } },
+    );
+
+    expect(followsMove(started)).toBe(true);
   });
 
   it("leaves a move that is running alone when the user picks another destination", () => {

@@ -26,6 +26,8 @@ export type NewProjectRun =
   | { readonly kind: "rollback-pending"; readonly operationId: string; readonly revision: number; readonly error: string; readonly folder: string | null }
   /** The project exists and the threads are in it; only git setup failed. `retrying` holds the retry button while a retry runs. */
   | { readonly kind: "git-failed"; readonly operationId: string; readonly workspaceId: string; readonly error: string; readonly retrying: boolean }
+  /** A retry started git. The project and its alert stay on screen until the user closes them. */
+  | { readonly kind: "git-started"; readonly workspaceId: string }
   | { readonly kind: "created"; readonly workspaceId: string };
 
 /** The starting state: the form, with nothing refused. */
@@ -88,6 +90,14 @@ export function isPastForm(run: NewProjectRun): boolean {
   return run.kind !== "form";
 }
 
+/**
+ * Whether the thread has left No project, or is about to, while the dialog still has a result to show. The dialog
+ * closes on a thread that left No project for any other reason, so these states must say they are the reason.
+ */
+export function followsMove(run: NewProjectRun): boolean {
+  return run.kind === "moving" || run.kind === "git-failed" || run.kind === "git-started" || run.kind === "rollback-pending";
+}
+
 function applyFrame(run: NewProjectRun, frame: WorkspaceMoveFrame): NewProjectRun {
   const current = followed(run);
   // Two reads of one operation can arrive in either order, so only a higher revision moves the run.
@@ -97,7 +107,7 @@ function applyFrame(run: NewProjectRun, frame: WorkspaceMoveFrame): NewProjectRu
 
 // A retry that could not even run leaves the project as it was, so the alert stays and shows that failure.
 function runAfterGitRetry(run: Extract<NewProjectRun, { kind: "git-failed" }>, result: WorkspaceMoveRetryGitResult): NewProjectRun {
-  if (result.status === "created") return { kind: "created", workspaceId: result.workspaceId };
+  if (result.status === "created") return { kind: "git-started", workspaceId: result.workspaceId };
   return { ...run, error: result.error, retrying: false };
 }
 

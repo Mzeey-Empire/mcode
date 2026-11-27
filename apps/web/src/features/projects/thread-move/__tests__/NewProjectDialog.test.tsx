@@ -341,6 +341,7 @@ describe("New project from this folder", () => {
     it("names the project it could not move the folder to, not the Location, says nothing changed, and Try again sends the request again", async () => {
       const user = await openNewProject();
       await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+      await retype(user, nameField(), "wal-notes");
       await startMove(user);
 
       push(frame(2, { status: "failed", error: "EBUSY: resource busy or locked, rename 'a'" }));
@@ -360,7 +361,6 @@ describe("New project from this folder", () => {
 
     it("does not promise that nothing changed when the request never answered", async () => {
       vi.mocked(mockTransport.createProjectFromFolder).mockRejectedValueOnce(new Error("socket closed"));
-      await retype(user, nameField(), "wal-notes");
       const user = await openNewProject();
       await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
 
@@ -414,16 +414,25 @@ describe("New project from this folder", () => {
       expect(useSidebarUiStore.getState().expandedProjects.has(HIDDEN.id)).toBe(true);
     });
 
-    it("Retry git setup retries the operation and closes the alert when git now works", async () => {
+    it("Retry git setup retries the operation, then shows git as started and waits for Done", async () => {
       vi.mocked(mockTransport.retryWorkspaceMoveGit).mockResolvedValueOnce({ status: "created", workspaceId: HIDDEN.id });
+      // The server converted the workspace before the retry, so the thread has left No project by now.
       const user = await reachGitFailure();
+      act(() => useWorkspaceStore.setState({ workspaces: [ALPHA, { ...HIDDEN, kind: "project", name: "sqlite-wal-vs-rollback" }] }));
       push(frame(3, gitFailed()));
       const alert = await screen.findByRole("alertdialog", { name: "Project created" });
 
       await user.click(within(alert).getByRole("button", { name: "Retry git setup" }));
 
       expect(mockTransport.retryWorkspaceMoveGit).toHaveBeenCalledExactlyOnceWith(OPERATION);
-      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+      expect(await within(alert).findByText("Git repo started")).toBeVisible();
+      expect(within(alert).queryByText("Couldn't start a git repo")).toBeNull();
+      expect(within(alert).queryByRole("button", { name: "Retry git setup" })).toBeNull();
+      expect(screen.getByRole("alertdialog", { name: "Project created" })).toBeVisible();
+      expect(within(alert).getByRole("button", { name: "Done" })).toHaveFocus();
+
+      await user.click(within(alert).getByRole("button", { name: "Done" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
     });
 
     it("keeps the alert, with the new reason, when the retry fails too", async () => {

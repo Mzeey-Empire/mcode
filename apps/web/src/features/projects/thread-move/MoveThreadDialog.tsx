@@ -22,7 +22,7 @@ import { NewProjectForm } from "./NewProjectForm";
 import { BusyNotice, MoveFailureNotice, SharersNotice } from "./NewProjectNotices";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
 import { destinationPath } from "./new-project-fields";
-import { isPastForm, type NewProjectRun } from "./new-project-run";
+import { followsMove, isPastForm, type NewProjectRun } from "./new-project-run";
 import { PreflightFailedNotice } from "./PreflightFailedNotice";
 import { useMoveTarget, type MoveTargetState } from "./useMoveTarget";
 import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMovePreflight";
@@ -165,23 +165,23 @@ function MoveThreadDialog({ threadId, initialProjectId }: { threadId: string; in
   const newProject = useNewProjectMove(threadId, preflightOf(preflight.read));
   const flow = useMoveFlow(threadId, initialProjectId, newProject);
 
-  // A running new-project move turns this thread's workspace into a project before its last frame arrives, so
-  // leaving No project only means the move is over once nothing is following it.
-  const followsMove = newProject.run.kind === "moving" || newProject.run.kind === "git-failed" || newProject.run.kind === "rollback-pending";
-  // The thread left No project, here or on another client, or was deleted: there is nothing left to move.
-  const stale = !thread || (!threadInNoProject && !followsMove);
+  // The thread left No project, here or on another client, or was deleted: there is nothing left to move. A
+  // new-project move turns the thread's workspace into a project before its last frame arrives, so leaving No
+  // project only means the move is over once nothing is following it.
+  const stale = !thread || (!threadInNoProject && !followsMove(newProject.run));
   useEffect(() => {
     if (stale) closeMoveThreadDialog();
   }, [stale]);
   if (stale) return null;
-  if (newProject.run.kind === "git-failed") return <GitFailedAlert threadTitle={thread.title} newProject={newProject} run={newProject.run} />;
+  const { run } = newProject;
+  if (run.kind === "git-failed" || run.kind === "git-started") return <GitFailedAlert threadTitle={thread.title} newProject={newProject} run={run} />;
   return <MoveThreadDialogView title={thread.title} flow={flow} preflight={preflight} newProject={newProject} />;
 }
 
 interface GitFailedAlertProps {
   readonly threadTitle: string;
   readonly newProject: NewProjectMove;
-  readonly run: Extract<NewProjectRun, { kind: "git-failed" }>;
+  readonly run: Extract<NewProjectRun, { kind: "git-failed" | "git-started" }>;
 }
 
 function GitFailedAlert({ threadTitle, newProject, run }: GitFailedAlertProps) {
@@ -194,8 +194,7 @@ function GitFailedAlert({ threadTitle, newProject, run }: GitFailedAlertProps) {
       threadTitle={threadTitle}
       projectName={workspace?.name ?? values.name}
       projectPath={typedPath ?? workspace?.path ?? values.name}
-      error={run.error}
-      retrying={run.retrying}
+      git={run.kind === "git-started" ? { kind: "started" } : { kind: "failed", error: run.error, retrying: run.retrying }}
       onRetry={newProject.retryGit}
       onDone={closeMoveThreadDialog}
     />
@@ -228,17 +227,17 @@ function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThread
   };
   const intoNewProject = flow.destination === "new-project";
   const picked = intoNewProject ? undefined : flow.picked;
+  const moving = flow.moving || newProject.run.kind === "moving";
   const popupRef = useRef<HTMLDivElement>(null);
   const nameFieldRef = useRef<HTMLInputElement>(null);
   // With no project to pick, the form is the only task. Otherwise focus stays on the dialog itself: the first
   // control is the project slot, and focusing it would draw its ring and open its tooltip over the thread title.
   const initialFocus = () => (intoNewProject && !moving ? nameFieldRef.current : null) ?? popupRef.current ?? false;
-  const moving = flow.moving || newProject.run.kind === "moving";
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !moving) closeMoveThreadDialog(); }}>
+      <DialogContent
         ref={popupRef}
         initialFocus={initialFocus}
-      <DialogContent
         aria-labelledby={headingId}
         aria-busy={moving || undefined}
         closeDisabled={moving}
@@ -309,8 +308,8 @@ function NewProjectBody({ newProject, moving, nameFieldRef }: { newProject: NewP
         <NewProjectForm
           values={values}
           initGit={newProject.initGit}
-          nameFieldRef={nameFieldRef}
           messages={newProject.messages}
+          nameFieldRef={nameFieldRef}
           locked={moving}
           onChange={newProject.setValues}
           onInitGitChange={newProject.setInitGit}
