@@ -69,7 +69,8 @@ export interface NewProjectRunControls {
  *
  * Two reads of one operation can disagree about whether it finished: a frame the server pushed and the status the
  * client asked for. Each is listened for before the other is read, and the run keeps whichever has the higher
- * revision, so a move that ends between the two still shows its result.
+ * revision, so a move that ends between the two still shows its result. The same listen-then-read runs again after
+ * a reconnect, because the terminal frame may have been pushed while the socket was down.
  */
 export function useNewProjectRun(threadId: string): NewProjectRunControls {
   const [run, dispatch] = useReducer(newProjectRunReducer, FORM_RUN);
@@ -103,6 +104,7 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
     let stopReading = catchUp();
     const stopReconnect = useConnectionStore.subscribe((next, previous) => {
       if (next.status !== "connected" || previous.status === "connected") return;
+      // The move may have ended while this client could not receive frames.
       heardFrame = false;
       stopReading();
       stopReading = catchUp();
@@ -147,7 +149,7 @@ async function requestCreation(threadId: string, values: NewProjectValues, initG
     const problem = describeFieldRefusal(result.error, values);
     return problem
       ? { type: "refused", refusal: { kind: "field", problem, values } }
-      : { type: "failed", error: result.error, outcome: "rolled-back" };
+      : { type: "failed", error: result.error, outcome: "rolled-back", cause: result.cause };
   } catch (error) {
     return { type: "failed", error: rpcFailureMessage(error), outcome: "unconfirmed" };
   }

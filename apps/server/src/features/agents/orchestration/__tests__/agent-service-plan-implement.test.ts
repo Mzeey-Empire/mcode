@@ -43,10 +43,16 @@ import { PlanFileWriter } from "../../planning/plan-file-writer.js";
 import { PlanService, type PlanImplementRuntime } from "../../planning/plan-service.js";
 import { PlanImplementStartupObserver } from "../../planning/plan-implement-startup-observer.js";
 import { CleanupWorker } from "../../../thread-control/cleanup/cleanup-worker.js";
+import { NoProjectWorkspaceSweep } from "../../../thread-control/cleanup/no-project-workspace-sweep.js";
 import { ScopedPreGrantService } from "../../permissions/scoped-pre-grant.js";
 import { AgentService } from "../agent-service.js";
 import { AGENT_TURN_COMMAND_PORT } from "../agent-turn-command-port.js";
 import { AgentEventPublicationRegistry } from "../agent-event-publication-registry.js";
+
+const noWorkspaceMoveRetention = {
+  cleanExpiredSources: async () => undefined,
+  protectsFolder: () => false,
+};
 
 const pushes = vi.hoisted((): {
   versions: Array<{ threadId: string; version: PlanVersion }>;
@@ -254,10 +260,16 @@ describe("Plan Implement through production worker-owned admission", { timeout: 
   }
 
   async function cleanTarget(thread: string, checkout: string) {
-    await container.resolve(CleanupWorker).poll();
+    const cleanupContainer = container.createChildContainer();
+    cleanupContainer.registerInstance("WorkspaceMoveRetention", noWorkspaceMoveRetention);
+    await cleanupContainer.resolve(CleanupWorker).poll();
     expect(runtime.threads.findById(thread)).toBeNull();
     expect(NodeFS.existsSync(checkout)).toBe(false);
   }
+
+  it("requires move retention when resolving the No project sweep", () => {
+    expect(() => container.resolve(NoProjectWorkspaceSweep)).toThrow(/WorkspaceMoveRetention/);
+  });
 
   it("creates one detached checkout at the direct source commit and preserves dirty files and branches", async () => {
     const source = await gitSource(false);

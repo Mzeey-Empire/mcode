@@ -1,12 +1,16 @@
+import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTimersPromises from "node:timers/promises";
+import type { WorkspaceMoveFailureCause } from "@mcode/contracts/ws/workspace-move";
 import { noProjectIdFromFolderName } from "./no-project-folder-name.js";
 import { isWithinWorkspaceRoot, resolveNoProjectRoot } from "./workspace-path.js";
 
 const RESERVED_NAME = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i;
 const WINDOWS_RENAME_RETRY_CODES = new Set<unknown>(["EBUSY", "EPERM", "EACCES"]);
+
+class WindowsRenameInUse extends Error {}
 
 export type WorkspaceMoveRenameOptions = {
   platform: NodeJS.Platform;
@@ -23,26 +27,73 @@ export async function renameWorkspaceFolder(
   destination: string,
   { platform, rename = NodeFSPromises.rename, sleep = NodeTimersPromises.setTimeout }: WorkspaceMoveRenameOptions,
 ): Promise<void> {
-  if (platform === "win32") {
-    for (const delay of [100, 200, 400, 800, 1500]) {
-      try {
-        await rename(source, destination);
-        return;
-      } catch (error) {
-        if (!(error instanceof Error) || !("code" in error) || !WINDOWS_RENAME_RETRY_CODES.has(error.code)) throw error;
-      }
-      await sleep(delay);
+  if (platform !== "win32") return rename(source, destination);
+  for (const delay of [100, 200, 400, 800, 1500]) {
+    try {
+      await rename(source, destination);
+      return;
+    } catch (error) {
+      if (!isMoveRenameBlocked(error, platform)) throw error;
     }
+    await sleep(delay);
   }
-  await rename(source, destination);
+  await rename(source, destination).catch((error: unknown) => {
+    // Windows reports EPERM for open handles as well as some permission failures.
+    const code = moveErrorCode(error);
+    if (code === "EBUSY" || code === "EPERM") {
+      throw new WindowsRenameInUse(moveError(error), { cause: error });
+    }
+    throw error;
+  });
+}
+
+/** Recognize a blocked rename before or after Windows handle retries. */
+export function isMoveRenameBlocked(error: unknown, platform: NodeJS.Platform): boolean {
+  return platform === "win32" && (error instanceof WindowsRenameInUse || WINDOWS_RENAME_RETRY_CODES.has(moveErrorCode(error)));
 }
 
 export function moveError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function moveErrorCode(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
+}
+
+export async function moveFailureCause(error: unknown, destination: string, platform: NodeJS.Platform): Promise<WorkspaceMoveFailureCause> {
+  if (error instanceof WindowsRenameInUse) return { kind: "in-use" };
+  switch (moveErrorCode(error)) {
+    case "ENOSPC":
+      return { kind: "no-space", drive: await destinationDrive(destination, platform) };
+    case "EACCES":
+    case "EPERM":
+      return { kind: "permission" };
+    default:
+      return { kind: "other" };
+  }
+}
+
+async function destinationDrive(destination: string, platform: NodeJS.Platform): Promise<string> {
+  if (platform === "win32") {
+    const root = NodePath.win32.parse(destination).root.replace(/[\\/]$/, "");
+    if (root) return root;
+  }
+  let mount = NodePath.dirname(destination);
+  try {
+    const { dev } = await NodeFSPromises.stat(mount);
+    while (NodePath.dirname(mount) !== mount) {
+      const parent = NodePath.dirname(mount);
+      if ((await NodeFSPromises.stat(parent)).dev !== dev) break;
+      mount = parent;
+    }
+  } catch {
+    // An inaccessible parent must not hide the original ENOSPC error.
+  }
+  return mount;
+}
+
 function isMissing(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
+  return moveErrorCode(error) === "ENOENT";
 }
 
 /** Validate the managed source and resolve a new project name and parent on this machine. */
@@ -60,7 +111,7 @@ export async function resolveWorkspaceMovePaths(input: {
   if (!(await NodeFSPromises.stat(parent)).isDirectory()) throw new Error("Project location must be a folder");
   const destinationPath = NodePath.join(parent, input.name);
   if (isWithinWorkspaceRoot(root, destinationPath)) throw new Error("Project destination is inside the No project root");
-  if (await lstatIfPresent(destinationPath)) throw new Error("Project destination already exists");
+  if (await moveEntry(destinationPath)) throw new Error("Project destination already exists");
   return { sourcePath, destinationPath };
 }
 
@@ -85,9 +136,10 @@ function expandHome(path: string): string {
   return path;
 }
 
-async function lstatIfPresent(path: string) {
+/** Read the entry itself, preserving its exact inode and handling only an absent path. */
+export async function moveEntry(path: string) {
   try {
-    return await NodeFSPromises.lstat(path);
+    return await NodeFSPromises.lstat(path, { bigint: true });
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
@@ -100,6 +152,10 @@ export function markerPath(folder: string, moveId: string): string {
 
 export type MoveFolderState = "missing" | "empty" | "marker-only" | "owned" | "foreign" | "other";
 
+export function holdsMoveMarker(state: MoveFolderState): boolean {
+  return state === "marker-only" || state === "owned";
+}
+
 /** Reject recorded paths whose parents have been redirected since the move was prepared. */
 export async function assertRecordedParent(folder: string): Promise<void> {
   const parent = NodePath.dirname(folder);
@@ -111,7 +167,7 @@ export async function assertRecordedParent(folder: string): Promise<void> {
 async function lstatRecordedFolder(folder: string) {
   try {
     await assertRecordedParent(folder);
-    return await lstatIfPresent(folder);
+    return await moveEntry(folder);
   } catch (error) {
     if (isMissing(error)) return null;
     throw error;
@@ -123,7 +179,7 @@ export async function inspectMoveFolder(folder: string, moveId: string): Promise
   const entry = await lstatRecordedFolder(folder);
   if (!entry) return "missing";
   if (!entry.isDirectory()) return "other";
-  const owned = (await lstatIfPresent(markerPath(folder, moveId)))?.isFile() === true;
+  const owned = (await moveEntry(markerPath(folder, moveId)))?.isFile() === true;
   const contents = await NodeFSPromises.opendir(folder);
   try {
     const first = await contents.read();
@@ -153,6 +209,35 @@ export async function removeMoveClaim(folder: string, moveId: string): Promise<v
     await NodeFSPromises.rmdir(folder);
   } catch (error) {
     if (!isMissing(error)) throw error;
+  }
+}
+
+/** Remove owned unpublished staging with the marker still available if removing its contents fails. */
+export async function removeMoveCopy(folder: string, moveId: string, platform: NodeJS.Platform): Promise<void> {
+  if (!holdsMoveMarker(await inspectMoveFolder(folder, moveId))) throw new Error(`Copy does not hold its move marker: ${folder}`);
+  if (platform !== "win32") await makeStagingDirectoriesWritable(folder);
+  const marker = NodePath.basename(markerPath(folder, moveId));
+  for (const name of await NodeFSPromises.readdir(folder)) {
+    if (name !== marker) await NodeFSPromises.rm(NodePath.join(folder, name), { recursive: true, force: true });
+  }
+  await removeMoveClaim(folder, moveId);
+}
+
+async function makeStagingDirectoriesWritable(folder: string): Promise<void> {
+  const entry = await lstatRecordedFolder(folder);
+  if (!entry?.isDirectory()) return;
+  const mode = Number(entry.mode) & 0o7777;
+  if ((mode & 0o700) !== 0o700) {
+    const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = NodeFS.constants;
+    const directory = await NodeFSPromises.open(folder, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    try {
+      await directory.chmod(mode | 0o700);
+    } finally {
+      await directory.close();
+    }
+  }
+  for (const child of await NodeFSPromises.readdir(folder, { withFileTypes: true })) {
+    if (child.isDirectory()) await makeStagingDirectoriesWritable(NodePath.join(folder, child.name));
   }
 }
 

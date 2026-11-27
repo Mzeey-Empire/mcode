@@ -1,10 +1,14 @@
 import type { WorkspaceMoveFrame, WorkspaceMoveResult } from "@mcode/contracts/ws/workspace-move";
 import { describe, expect, it } from "vitest";
 import { describeFieldRefusal } from "../new-project-fields";
-import { FORM_RUN, followedOperation, followsMove, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "../new-project-run";
+import { FORM_RUN, failureIsAboutLocation, followedOperation, followsMove, newProjectRunReducer, type NewProjectRun, type NewProjectRunAction } from "../new-project-run";
 
 function frame(revision: number, result?: WorkspaceMoveResult, operationId = "op-1"): WorkspaceMoveFrame {
   return { operationId, revision, phase: result ? "done" : "renamed", copiedBytes: null, totalBytes: null, ...(result ? { result } : {}) };
+}
+
+function copyFrame(revision: number, phase: WorkspaceMoveFrame["phase"], bytes: { copied: number; total: number } | null): WorkspaceMoveFrame {
+  return { operationId: "op-1", revision, phase, copiedBytes: bytes?.copied ?? null, totalBytes: bytes?.total ?? null };
 }
 
 function run(...actions: NewProjectRunAction[]): NewProjectRun {
@@ -20,16 +24,16 @@ describe("newProjectRunReducer", () => {
   });
 
   it("keeps the higher revision when two reads of one operation arrive out of order", () => {
-    const ended = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY" }) });
+    const ended = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY", cause: { kind: "other" }, copy: null }) });
     const afterOlder = newProjectRunReducer(ended, { type: "frame", frame: frame(1) });
 
-    expect(afterOlder).toEqual({ kind: "failed", error: "EBUSY", outcome: "rolled-back" });
+    expect(afterOlder).toEqual({ kind: "failed", error: "EBUSY", outcome: "rolled-back", cause: { kind: "other" }, copy: null });
   });
 
   it("does not let a running frame replace a newer running one", () => {
     const afterTwo = run(...STARTED, { type: "frame", frame: frame(2) }, { type: "frame", frame: frame(1) });
 
-    expect(afterTwo).toEqual({ kind: "moving", operationId: "op-1", revision: 2 });
+    expect(afterTwo).toEqual({ kind: "moving", operationId: "op-1", revision: 2, copy: null });
   });
 
   it("ignores frames of an operation the run does not follow", () => {
@@ -57,9 +61,9 @@ describe("newProjectRunReducer", () => {
     const created = frame(4, { status: "created", workspaceId: "ws-1" });
 
     expect(run({ type: "adopted", frame: created })).toEqual({ kind: "created", workspaceId: "ws-1" });
-    expect(run({ type: "submitted" }, { type: "adopted", frame: frame(1) })).toEqual({ kind: "moving", operationId: "op-1", revision: 1 });
+    expect(run({ type: "submitted" }, { type: "adopted", frame: frame(1) })).toEqual({ kind: "moving", operationId: "op-1", revision: 1, copy: null });
     expect(run({ type: "submitted" }, { type: "failed", error: "unfinished", outcome: "unconfirmed" }, { type: "adopted", frame: frame(1) }))
-      .toEqual({ kind: "moving", operationId: "op-1", revision: 1 });
+      .toEqual({ kind: "moving", operationId: "op-1", revision: 1, copy: null });
   });
 
   it("does not let an adopted frame replace a newer one of the operation the run follows", () => {
@@ -73,9 +77,50 @@ describe("newProjectRunReducer", () => {
     ["a POSIX marker path", "/home/.mcode/no-project/a/.mcode-move.json", "/home/.mcode/no-project/a"],
     ["no recorded marker", null, null],
   ])("reports the folder that holds the files from %s", (_name, markerPath, folder) => {
-    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath }) });
+    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath, cause: { kind: "permission" }, copyPath: null }) });
 
     expect(pending).toMatchObject({ kind: "rollback-pending", error: "EPERM", folder });
+  });
+
+  it.each([null, "D:/projects/.mcode-copy-op-1"])("keeps the blocked copy path when the rollback fails (%s)", (copyPath) => {
+    const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath: null, cause: { kind: "permission" }, copyPath }) });
+
+    expect(pending).toMatchObject({ kind: "rollback-pending", copyPath });
+  });
+
+  it("draws the bar from each frame's own byte counts, through the published and converted frames", () => {
+    const copying = run(...STARTED, { type: "frame", frame: copyFrame(2, "copying", { copied: 30, total: 100 }) });
+    expect(copying).toMatchObject({ kind: "moving", copy: { copiedBytes: 30, totalBytes: 100 } });
+
+    const published = newProjectRunReducer(copying, { type: "frame", frame: copyFrame(3, "published", { copied: 100, total: 100 }) });
+    expect(published).toMatchObject({ kind: "moving", copy: { copiedBytes: 100, totalBytes: 100 } });
+    const converted = newProjectRunReducer(published, { type: "frame", frame: copyFrame(4, "converted", { copied: 100, total: 100 }) });
+    expect(converted).toMatchObject({ kind: "moving", copy: { copiedBytes: 100, totalBytes: 100 } });
+  });
+
+  it("shows no bar for a frame without byte counts, whatever an earlier frame carried", () => {
+    const copying = run(...STARTED, { type: "frame", frame: copyFrame(2, "copying", { copied: 30, total: 100 }) });
+
+    expect(newProjectRunReducer(copying, { type: "frame", frame: copyFrame(3, "published", null) })).toMatchObject({ kind: "moving", copy: null });
+  });
+
+  it("shows no copy for a same-drive move, whose frames never carry byte counts", () => {
+    const renamed = run(...STARTED, { type: "frame", frame: copyFrame(2, "renamed", null) });
+    const converted = newProjectRunReducer(renamed, { type: "frame", frame: copyFrame(3, "converted", null) });
+
+    expect(converted).toMatchObject({ kind: "moving", copy: null });
+  });
+
+  it("shows a full bar when the dialog opens on a published frame that carries the full counts", () => {
+    expect(run({ type: "adopted", frame: copyFrame(5, "published", { copied: 100, total: 100 }) })).toMatchObject({ kind: "moving", copy: { copiedBytes: 100, totalBytes: 100 } });
+  });
+
+  it("keeps the typed cause of every failure, and a copy only when the server says the move copied", () => {
+    const copied = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "ENOSPC", cause: { kind: "no-space", drive: "D:" }, copy: { kind: "removed" } }) });
+    const renamed = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY", cause: { kind: "in-use" }, copy: null }) });
+
+    expect(copied).toMatchObject({ kind: "failed", cause: { kind: "no-space", drive: "D:" }, copy: { kind: "removed" } });
+    expect(renamed).toMatchObject({ kind: "failed", cause: { kind: "in-use" }, copy: null });
   });
 
   it("keeps a failed git retry on the alert with the new reason, and ends it on success", () => {
@@ -101,7 +146,33 @@ describe("newProjectRunReducer", () => {
     const moving = run(...STARTED);
 
     expect(newProjectRunReducer(moving, { type: "reset" })).toBe(moving);
-    expect(newProjectRunReducer(run({ type: "failed", error: "x", outcome: "rolled-back" }), { type: "reset" })).toBe(FORM_RUN);
+    expect(newProjectRunReducer(run({ type: "failed", error: "x", outcome: "rolled-back", cause: { kind: "other" } }), { type: "reset" })).toBe(FORM_RUN);
+  });
+});
+
+describe("failureIsAboutLocation", () => {
+  const failed = (result: Extract<WorkspaceMoveResult, { status: "failed" }>) => {
+    const ended = run(...STARTED, { type: "frame", frame: frame(3, result) });
+    if (ended.kind !== "failed") throw new Error("the move did not fail");
+    return ended;
+  };
+
+  it.each([
+    ["a full drive with no copy", { status: "failed", error: "x", cause: { kind: "no-space", drive: "D:" }, copy: null }, true],
+    ["a refused write with no copy", { status: "failed", error: "x", cause: { kind: "permission" }, copy: null }, true],
+    ["an unknown failure with no copy", { status: "failed", error: "x", cause: { kind: "other" }, copy: null }, false],
+    ["an unknown failure of a copy", { status: "failed", error: "x", cause: { kind: "other" }, copy: { kind: "removed" } }, true],
+    ["a file in use with no copy", { status: "failed", error: "x", cause: { kind: "in-use" }, copy: null }, false],
+    ["a file in use during a copy", { status: "failed", error: "x", cause: { kind: "in-use" }, copy: { kind: "removed" } }, false],
+  ] satisfies [string, Extract<WorkspaceMoveResult, { status: "failed" }>, boolean][])("tells %s", (_name, result, aboutLocation) => {
+    expect(failureIsAboutLocation(failed(result))).toBe(aboutLocation);
+  });
+
+  it("says nothing about a field when the request never answered", () => {
+    const unconfirmed = run({ type: "failed", error: "socket closed", outcome: "unconfirmed" });
+
+    expect(unconfirmed).toEqual({ kind: "failed", error: "socket closed", outcome: "unconfirmed" });
+    expect(unconfirmed.kind === "failed" && failureIsAboutLocation(unconfirmed)).toBe(false);
   });
 });
 

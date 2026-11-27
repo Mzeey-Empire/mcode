@@ -205,7 +205,21 @@ describe("openDatabase ledger guard", () => {
 
   it("refuses an on-disk workspace move database on a build at the previous floor", () => {
     const moveTag = "0116_workspace_moves";
+    const sameDriveBuild = writeCatalogue(directory, "same-drive-workspace-moves", { before: "0117_workspace_move_copy" });
     const older = writeCatalogue(directory, "before-workspace-moves", { before: moveTag });
+    NodeFS.rmSync(dbPath);
+    vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", sameDriveBuild);
+    openDatabase({ dbPath }).close(true);
+    const before = NodeFS.readFileSync(dbPath);
+    vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", older);
+
+    expect(refusalOf(dbPath).refusal).toEqual({ kind: "database-newer", databasePath: dbPath, raisedBy: moveTag });
+    expectUntouched(before);
+  });
+
+  it("refuses a cross-drive move database on a same-drive-only build", () => {
+    const moveTag = "0117_workspace_move_copy";
+    const older = writeCatalogue(directory, "before-cross-drive-moves", { before: moveTag });
     const before = NodeFS.readFileSync(dbPath);
     vi.stubEnv("MCODE_DRIZZLE_MIGRATIONS_DIR", older);
 

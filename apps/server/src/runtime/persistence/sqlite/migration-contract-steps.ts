@@ -31,6 +31,11 @@ export const FLOOR_TABLE_NAME = "mcode_schema_compatibility";
  * contain {@link floorUpsertStatement} for that migration's `when` and the step's own tag.
  */
 export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
+  "0117_workspace_move_copy": {
+    breaks: [],
+    expandedIn: "0117_workspace_move_copy",
+    reason: "Older builds cannot recover cross-drive moves or protect their retained source folders.",
+  },
   "0116_workspace_moves": {
     breaks: [],
     expandedIn: "0116_workspace_moves",

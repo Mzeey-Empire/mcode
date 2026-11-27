@@ -1,4 +1,9 @@
-import type { WorkspaceMoveFrame, WorkspaceMoveRetryGitResult } from "@mcode/contracts/ws/workspace-move";
+import type {
+  WorkspaceMoveCopyLeftover,
+  WorkspaceMoveFailureCause,
+  WorkspaceMoveFrame,
+  WorkspaceMoveRetryGitResult,
+} from "@mcode/contracts/ws/workspace-move";
 import { dirname } from "@/lib/path";
 import type { FieldProblem, NewProjectValues } from "./new-project-fields";
 import type { MoveBlock } from "./move-thread-store";
@@ -9,21 +14,41 @@ export type FormRefusal =
   | { readonly kind: "field"; readonly problem: FieldProblem; readonly values: NewProjectValues }
   | { readonly kind: "busy"; readonly threadId: string; readonly reason: MoveBlock };
 
+export interface CopyProgress {
+  readonly copiedBytes: number;
+  readonly totalBytes: number;
+}
+
 /**
  * Where a new-project move stands. One value rather than flags, so the dialog cannot show a spinner and a failure
  * together. `revision` orders the frames of one operation, so a stale read never replaces a newer one.
  */
 export type NewProjectRun =
   | { readonly kind: "form"; readonly refusal: FormRefusal | null }
-  /** `operationId` is null from the click until the server names the operation. */
-  | { readonly kind: "moving"; readonly operationId: string | null; readonly revision: number }
+  | { readonly kind: "moving"; readonly operationId: string | null; readonly revision: number; readonly copy: CopyProgress | null }
   /**
-   * `rolled-back`: the folder and the threads are back where they were. `unconfirmed`: the request never answered,
-   * so the move may still have happened.
+   * `rolled-back`: the folder and the threads are back where they were. `copy` describes what a cross-drive move left behind.
    */
-  | { readonly kind: "failed"; readonly error: string; readonly outcome: "rolled-back" | "unconfirmed" }
-  /** The rollback itself failed. `folder` holds the files, or is null when the server could not say where. */
-  | { readonly kind: "rollback-pending"; readonly operationId: string; readonly revision: number; readonly error: string; readonly folder: string | null }
+  | {
+    readonly kind: "failed";
+    readonly error: string;
+    readonly outcome: "rolled-back";
+    readonly cause: WorkspaceMoveFailureCause;
+    readonly copy: WorkspaceMoveCopyLeftover | null;
+  }
+  /** The request never answered, so the move may still have happened and nothing says why it failed. */
+  | { readonly kind: "failed"; readonly error: string; readonly outcome: "unconfirmed" }
+  /**
+   * The rollback itself failed. `folder` holds the files, or is null when the server could not say where.
+   */
+  | {
+    readonly kind: "rollback-pending";
+    readonly operationId: string;
+    readonly revision: number;
+    readonly error: string;
+    readonly folder: string | null;
+    readonly copyPath: string | null;
+  }
   /**
    * The status of a move that was started could not be read, and no frame arrived to say how it ended. Nothing is
    * known about where the thread is, so the user is sent to the sidebar rather than offered a retry that could
@@ -42,7 +67,8 @@ export type NewProjectRunAction =
   | { readonly type: "submitted" }
   | { readonly type: "reset" }
   | { readonly type: "refused"; readonly refusal: FormRefusal }
-  | { readonly type: "failed"; readonly error: string; readonly outcome: "rolled-back" | "unconfirmed" }
+  | { readonly type: "failed"; readonly error: string; readonly outcome: "rolled-back"; readonly cause: WorkspaceMoveFailureCause }
+  | { readonly type: "failed"; readonly error: string; readonly outcome: "unconfirmed" }
   | { readonly type: "started"; readonly operationId: string }
   | { readonly type: "result-unreadable"; readonly operationId: string }
   | { readonly type: "frame"; readonly frame: WorkspaceMoveFrame }
@@ -50,16 +76,41 @@ export type NewProjectRunAction =
   | { readonly type: "git-retrying" }
   | { readonly type: "git-retried"; readonly result: WorkspaceMoveRetryGitResult };
 
+function copyOfFrame({ copiedBytes, totalBytes }: WorkspaceMoveFrame): CopyProgress | null {
+  return copiedBytes !== null && totalBytes !== null ? { copiedBytes, totalBytes } : null;
+}
+
+/**
+ * Whether a failed move is about where the user chose to put the project, so the dialog marks Location and puts the
+ * notice under it. A full drive and a refused write are about the destination wherever they happen. `other` is about
+ * it only for a copy to another drive, where the unknown failure came from writing there; a file in use is about the
+ * folder being moved, and an unconfirmed request says nothing about any field.
+ */
+export function failureIsAboutLocation(failure: Extract<NewProjectRun, { kind: "failed" }>): boolean {
+  if (failure.outcome === "unconfirmed") return false;
+  switch (failure.cause.kind) {
+    case "no-space":
+    case "permission":
+      return true;
+    case "other":
+      return failure.copy !== null;
+    case "in-use":
+      return false;
+    default:
+      throw new Error(`Unhandled move failure cause: ${failure.cause satisfies never}`);
+  }
+}
+
 function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
   const { result } = frame;
-  if (!result) return { kind: "moving", operationId: frame.operationId, revision: frame.revision };
+  if (!result) return { kind: "moving", operationId: frame.operationId, revision: frame.revision, copy: copyOfFrame(frame) };
   switch (result.status) {
     case "created":
       return { kind: "created", workspaceId: result.workspaceId };
     case "git-failed":
       return { kind: "git-failed", operationId: frame.operationId, workspaceId: result.workspaceId, error: result.error, retrying: false };
     case "failed":
-      return { kind: "failed", error: result.error, outcome: "rolled-back" };
+      return { kind: "failed", error: result.error, outcome: "rolled-back", cause: result.cause, copy: result.copy };
     case "rollback-pending":
       // The server records where the marker file is; the files are in the folder that holds it.
       return {
@@ -68,6 +119,7 @@ function runOfFrame(frame: WorkspaceMoveFrame): NewProjectRun {
         revision: frame.revision,
         error: result.error,
         folder: result.markerPath === null ? null : dirname(result.markerPath),
+        copyPath: result.copyPath,
       };
     default:
       throw new Error(`Unhandled move result: ${result satisfies never}`);
@@ -139,16 +191,23 @@ function followUp(run: NewProjectRun, action: FollowUpAction): NewProjectRun {
   }
 }
 
+/** A request that failed before any frame arrived copied nothing, so `copy` is null. */
+function runOfRequestFailure(action: Extract<NewProjectRunAction, { type: "failed" }>): NewProjectRun {
+  return action.outcome === "unconfirmed"
+    ? { kind: "failed", error: action.error, outcome: "unconfirmed" }
+    : { kind: "failed", error: action.error, outcome: "rolled-back", cause: action.cause, copy: null };
+}
+
 function respond(run: NewProjectRun, action: Exclude<NewProjectRunAction, FollowUpAction>): NewProjectRun {
   switch (action.type) {
     case "submitted":
-      return { kind: "moving", operationId: null, revision: -1 };
+      return { kind: "moving", operationId: null, revision: -1, copy: null };
     case "reset":
       return run.kind === "failed" || run.kind === "form" ? FORM_RUN : run;
     case "refused":
       return { kind: "form", refusal: action.refusal };
     case "failed":
-      return { kind: "failed", error: action.error, outcome: action.outcome };
+      return runOfRequestFailure(action);
     case "started":
       return run.kind === "moving" && run.operationId === null ? { ...run, operationId: action.operationId } : run;
   }

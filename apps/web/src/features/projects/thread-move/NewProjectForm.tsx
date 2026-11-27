@@ -1,4 +1,4 @@
-import { useId, type Ref } from "react";
+import { useId, type ReactNode, type Ref } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FieldError } from "@/components/ui/field-error";
 import { Input } from "@/components/ui/input";
@@ -13,11 +13,13 @@ interface NewProjectFormProps {
   readonly nameFieldRef?: Ref<HTMLInputElement>;
   /** Locks every control while the move runs. */
   readonly locked: boolean;
+  /** An error about the Location itself, shown under it. While it shows, the field takes the error state. */
+  readonly locationNotice?: ReactNode;
   readonly onChange: (values: NewProjectValues) => void;
   readonly onInitGitChange: (initGit: boolean) => void;
 }
 
-export function NewProjectForm({ values, initGit, messages, nameFieldRef, locked, onChange, onInitGitChange }: NewProjectFormProps) {
+export function NewProjectForm({ values, initGit, messages, nameFieldRef, locked, locationNotice, onChange, onInitGitChange }: NewProjectFormProps) {
   const nameId = useId();
   const locationId = useId();
   const gitId = useId();
@@ -51,7 +53,7 @@ export function NewProjectForm({ values, initGit, messages, nameFieldRef, locked
             spellCheck={false}
             autoComplete="off"
             className="min-w-0 flex-1 font-code text-caption"
-            aria-invalid={messages.location !== null || undefined}
+            aria-invalid={messages.location !== null || Boolean(locationNotice) || undefined}
             aria-describedby={messages.location === null ? undefined : locationErrorId}
             onChange={(event) => onChange({ ...values, location: event.target.value })}
           />
@@ -59,9 +61,11 @@ export function NewProjectForm({ values, initGit, messages, nameFieldRef, locked
         </div>
         {messages.location === null ? null : <FieldError id={locationErrorId}>{messages.location}</FieldError>}
       </div>
+      {locationNotice}
       <div className="flex items-center gap-2">
-        <Checkbox id={gitId} checked={initGit} aria-labelledby={`${gitId}-label`} onCheckedChange={(checked) => onInitGitChange(checked)} />
-        <Label id={`${gitId}-label`} htmlFor={gitId} className="text-body-small font-normal">Start a git repo</Label>
+        {/* base-ui's checkbox is not a native control, so the fieldset's disabled state does not reach it or its label. */}
+        <Checkbox id={gitId} checked={initGit} disabled={locked} aria-labelledby={`${gitId}-label`} onCheckedChange={(checked) => onInitGitChange(checked)} />
+        <Label id={`${gitId}-label`} htmlFor={gitId} className="text-body-small font-normal peer-data-[disabled]:opacity-50">Start a git repo</Label>
       </div>
     </fieldset>
   );

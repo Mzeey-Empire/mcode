@@ -116,6 +116,13 @@ export const workspaceMoves = sqliteTable("workspace_moves", {
   sourcePath: text("source_path").notNull(),
   destinationPath: text("destination_path").notNull(),
   stagingPath: text("staging_path"),
+  claimReleased: integer("claim_released", { mode: "boolean" }).notNull().default(false),
+  copiedBytes: integer("copied_bytes"),
+  totalBytes: integer("total_bytes"),
+  sourceRetainUntil: text("source_retain_until"),
+  tombstonePath: text("tombstone_path"),
+  deleteStagingStarted: integer("delete_staging_started", { mode: "boolean" }).notNull().default(false),
+  cleanupError: text("cleanup_error"),
   initGit: integer("init_git", { mode: "boolean" }).notNull(),
   phase: text("phase").$type<WorkspaceMovePhase>().notNull(),
   revision: integer("revision").notNull(),
@@ -127,6 +134,12 @@ export const workspaceMoves = sqliteTable("workspace_moves", {
 }, (table) => [
   uniqueIndex("idx_workspace_moves_unfinished").on(table.workspaceId).where(sql`${table.phase} <> 'done'`),
 ]);
+
+/** Copy evidence and root metadata live outside both folders. */
+export const workspaceMoveManifests = sqliteTable("workspace_move_manifests", {
+  moveId: text("move_id").primaryKey().notNull().references(() => workspaceMoves.id, { onDelete: "cascade" }),
+  entries: text("entries", { mode: "json" }).notNull(),
+});
 
 export const threads = sqliteTable(
   "threads",
