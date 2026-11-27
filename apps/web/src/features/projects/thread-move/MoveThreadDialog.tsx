@@ -18,6 +18,7 @@ import { isNoProjectWorkspace, isProjectWorkspace } from "../state/project-works
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { GitFailedDialog } from "./GitFailedDialog";
 import { MoveThreadCommand } from "./MoveThreadCommand";
+import { CopyProgressBar } from "./CopyProgressBar";
 import { NewProjectForm } from "./NewProjectForm";
 import { BusyNotice, MoveFailureNotice, ResultUnknownNotice, SharersNotice } from "./NewProjectNotices";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
@@ -301,26 +302,35 @@ interface NewProjectBodyProps {
   readonly nameFieldRef: Ref<HTMLInputElement>;
 }
 
-/** What the folder check found: the threads that move along, or that the check failed. */
-function FolderCheckNotice({ newProject, preflight }: { newProject: NewProjectMove; preflight: MovePreflightState }) {
-  const { sharers, busy } = newProject;
-  if (newProject.retryLookup) return <PreflightFailedNotice onRetry={newProject.retryLookup} />;
-  if (preflight.read.status === "failed") return <PreflightFailedNotice onRetry={preflight.retry} />;
-  // When the only other thread is the busy one, its own notice already says everything the sharers notice would.
-  const shown = sharers !== null && !(sharers.count === 1 && busy !== null && !busy.isOpenThread);
-  return shown ? <SharersNotice titles={sharers.titles} count={sharers.count} /> : null;
+/**
+ * Where a failed move's notice goes. A failed copy to another drive is about the Location, so its notice sits under
+ * that field; any other failure sits below the form.
+ */
+function failureNotices(newProject: NewProjectMove): { readonly underLocation: ReactNode; readonly belowForm: ReactNode } {
+  const { run, values } = newProject;
+  if (run.kind === "result-unknown") return { underLocation: null, belowForm: <ResultUnknownNotice /> };
+  if (run.kind !== "failed" && run.kind !== "rollback-pending") return { underLocation: null, belowForm: null };
+  const notice = <MoveFailureNotice failure={run} projectName={values.name.trim()} threadCount={newProject.threadCount} />;
+  return run.kind === "failed" && run.copyFailure !== null ? { underLocation: notice, belowForm: null } : { underLocation: null, belowForm: notice };
 }
 
-/** How a move that did not finish cleanly ended, or null while there is nothing to say. */
-function MoveOutcomeNotice({ newProject }: { newProject: NewProjectMove }) {
-  const { run, values, threadCount } = newProject;
-  if (run.kind === "result-unknown") return <ResultUnknownNotice />;
-  if (run.kind !== "failed" && run.kind !== "rollback-pending") return null;
-  return <MoveFailureNotice failure={run} projectName={values.name.trim()} threadCount={threadCount} />;
+/** The other threads the notice lists, or null when it would only repeat the busy notice. */
+function sharersToList({ sharers, busy }: NewProjectMove): NonNullable<NewProjectMove["sharers"]> | null {
+  // When the only other thread is the busy one, its own notice already says everything the sharers notice would.
+  return sharers !== null && !(sharers.count === 1 && busy !== null && !busy.isOpenThread) ? sharers : null;
+}
+
+/** What the folder check found: the threads that move along, or that the check failed. */
+function FolderCheckNotice({ newProject, preflight }: { newProject: NewProjectMove; preflight: MovePreflightState }) {
+  if (newProject.retryLookup) return <PreflightFailedNotice onRetry={newProject.retryLookup} />;
+  if (preflight.read.status === "failed") return <PreflightFailedNotice onRetry={preflight.retry} />;
+  const sharers = sharersToList(newProject);
+  return sharers ? <SharersNotice titles={sharers.titles} count={sharers.count} /> : null;
 }
 
 function NewProjectBody({ newProject, preflight, moving, nameFieldRef }: NewProjectBodyProps) {
   const { run, values, busy } = newProject;
+  const { underLocation, belowForm } = failureNotices(newProject);
   return (
     <div className="grid gap-4">
       {endsAtClose(run) ? null : (
@@ -330,12 +340,14 @@ function NewProjectBody({ newProject, preflight, moving, nameFieldRef }: NewProj
           messages={newProject.messages}
           nameFieldRef={nameFieldRef}
           locked={moving}
+          locationNotice={underLocation}
           onChange={newProject.setValues}
           onInitGitChange={newProject.setInitGit}
         />
       )}
+      {run.kind === "moving" && run.copy ? <CopyProgressBar progress={run.copy} /> : null}
       {busy ? <BusyNotice busy={busy} /> : null}
-      <MoveOutcomeNotice newProject={newProject} />
+      {belowForm}
       <FolderCheckNotice newProject={newProject} preflight={preflight} />
     </div>
   );
@@ -380,7 +392,7 @@ function NewProjectFooter({ newProject, chooserOpen }: { newProject: NewProjectM
       <Button type="button" variant="outline" disabled={moving} onClick={closeMoveThreadDialog}>Cancel</Button>
       <Button type="button" loading={moving} disabled={!newProject.canCreate || chooserOpen} onClick={newProject.create}>
         {retrying ? <RotateCcw aria-hidden data-icon="inline-start" /> : <FolderPlus aria-hidden data-icon="inline-start" />}
-        {moving ? "Moving…" : retrying ? "Try again" : "Create project"}
+        {moving ? (run.copy ? "Copying files…" : "Moving…") : retrying ? "Try again" : "Create project"}
       </Button>
     </DialogFooter>
   );

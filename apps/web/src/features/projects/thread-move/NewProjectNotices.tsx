@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Notice } from "@/components/ui/notice";
 import { BreakablePath } from "./BreakablePath";
 import type { MoveBlock } from "./move-thread-store";
-import type { NewProjectRun } from "./new-project-run";
+import type { CopyFailure, NewProjectRun } from "./new-project-run";
 
 /** A thread in the folder that cannot move yet, and why. */
 export interface BusyThread {
@@ -60,7 +60,46 @@ function unconfirmedDetail(threadCount: number): string {
   return `Mcode could not confirm the move. ${threadCount > 1 ? "The threads stay" : "The thread stays"} in No project here until Mcode hears that it moved.`;
 }
 
+/** What to do next, by what went wrong. Only a full drive names the drive. */
+function copyFailureAdvice({ cause }: CopyFailure): string {
+  switch (cause.kind) {
+    case "no-space":
+      return `Free up space on ${cause.drive} and try again, or choose another location.`;
+    case "permission":
+      return "Choose a location you can write to, then try again.";
+    case "in-use":
+      return "Close any app using files in the folder, then try again.";
+    case "other":
+      return "Try again, or choose another location.";
+    default:
+      throw new Error(`Unhandled move failure cause: ${cause satisfies never}`);
+  }
+}
+
+/** The title of a failed copy to another drive. `in-use` is not about the destination, so it keeps the folder move's title. */
+function copyFailureTitle({ cause }: CopyFailure, folderMoveTitle: string): string {
+  switch (cause.kind) {
+    case "no-space":
+      return `Drive ${cause.drive} is full, so the folder couldn't be copied there`;
+    case "permission":
+      return "Permission was denied, so the folder couldn't be copied there";
+    case "in-use":
+      return folderMoveTitle;
+    case "other":
+      return "The folder couldn't be copied there";
+    default:
+      throw new Error(`Unhandled move failure cause: ${cause satisfies never}`);
+  }
+}
+
+function copyFailureDetail(failure: CopyFailure, threadCount: number): string {
+  const kept = `Your files are still in the old folder and ${stillInNoProject(threadCount)}`;
+  if (!failure.partialCopyRemoved) return `${kept}. Mcode couldn't remove the partial copy yet; it will try again when it restarts.`;
+  return `${kept}; Mcode removed the partial copy. ${copyFailureAdvice(failure)}`;
+}
+
 function failedDetail(failure: Extract<FolderMoveFailure, { kind: "failed" }>, threadCount: number): string {
+  if (failure.copyFailure) return copyFailureDetail(failure.copyFailure, threadCount);
   if (failure.outcome === "unconfirmed") return unconfirmedDetail(threadCount);
   const hint = FILE_IN_USE.test(failure.error) ? "Close any app using files in the folder, then try again." : "Try again in a moment.";
   return `Nothing changed: ${stillInNoProject(threadCount)}. ${hint}`;
@@ -86,7 +125,8 @@ interface MoveFailureNoticeProps {
 
 /** What went wrong with the folder move, what is left where, and the server's own words behind a disclosure. */
 export function MoveFailureNotice({ failure, projectName, threadCount }: MoveFailureNoticeProps) {
-  const title = projectName === "" ? "Couldn't move the folder" : `Couldn't move the folder to ${projectName}`;
+  const folderMoveTitle = projectName === "" ? "Couldn't move the folder" : `Couldn't move the folder to ${projectName}`;
+  const title = failure.kind === "failed" && failure.copyFailure ? copyFailureTitle(failure.copyFailure, folderMoveTitle) : folderMoveTitle;
   const detail = failure.kind === "failed" ? failedDetail(failure, threadCount) : rollbackPendingDetail(failure.folder);
   return <Notice tone="error" title={title} detail={detail} more={failure.error} />;
 }

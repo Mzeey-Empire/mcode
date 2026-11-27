@@ -42,6 +42,18 @@ function frame(revision: number, result?: WorkspaceMoveResult): WorkspaceMoveFra
   return { operationId: OPERATION, revision, phase: result ? "done" : "renamed", copiedBytes: null, totalBytes: null, ...(result ? { result } : {}) };
 }
 
+const MB = 1024 * 1024;
+
+/** A frame of a move that copies to another drive, with its counts in whole megabytes. */
+function copyingFrame(revision: number, copiedMb: number, totalMb = 48): WorkspaceMoveFrame {
+  return { operationId: OPERATION, revision, phase: "copying", copiedBytes: copiedMb * MB, totalBytes: totalMb * MB };
+}
+
+/** The terminal frame of a copy that failed, as the server words it. */
+function copyFailedFrame(revision: number, failure: Partial<Extract<WorkspaceMoveResult, { status: "failed" }>> = {}): WorkspaceMoveFrame {
+  return frame(revision, { status: "failed", error: "ENOSPC: no space left on device, copyfile 'bench.db'", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true, ...failure });
+}
+
 function seed(workspaces = [ALPHA, HIDDEN]): void {
   useWorkspaceStore.setState({
     workspaces,
@@ -71,7 +83,7 @@ async function openNewProject(): Promise<UserEvent> {
 
 const nameField = () => screen.getByRole("textbox", { name: "Name" });
 const locationField = () => screen.getByRole("textbox", { name: "Location" });
-const createButton = () => screen.getByRole("button", { name: /^(Create project|Try again|Moving…)$/ });
+const createButton = () => screen.getByRole("button", { name: /^(Create project|Try again|Moving…|Copying files…)$/ });
 
 async function retype(user: UserEvent, field: HTMLElement, text: string): Promise<void> {
   await user.clear(field);
@@ -102,6 +114,8 @@ describe("New project from this folder", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    useConnectionStore.setState({ status: "connecting" });
     cleanup();
     closeMoveThreadDialog();
     delete window.desktopBridge;
@@ -694,6 +708,195 @@ describe("New project from this folder", () => {
 
       expect(createButton()).toHaveTextContent("Moving…");
       expect(screen.getByRole("dialog", { name: /^Move to / })).toBeVisible();
+    });
+  });
+
+  describe("copying to another drive", () => {
+    const copyBar = () => screen.getByRole("progressbar", { name: "Copying files" });
+
+    it("shows the bytes each frame reports, and changes only when a frame arrives", async () => {
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+      await startMove(user);
+
+      push(copyingFrame(2, 12));
+      expect(copyBar()).toHaveAttribute("aria-valuetext", "12 of 48 MB");
+      expect(copyBar()).toHaveAttribute("aria-valuenow", "25");
+      expect(within(copyBar()).getByText("Copying files")).toBeVisible();
+      expect(createButton()).toHaveTextContent("Copying files…");
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+      // Time passing is not progress: the bar waits for the server.
+      vi.useFakeTimers();
+      await vi.advanceTimersByTimeAsync(10_000);
+      vi.useRealTimers();
+      expect(copyBar()).toHaveAttribute("aria-valuetext", "12 of 48 MB");
+
+      push(copyingFrame(3, 31));
+      expect(copyBar()).toHaveAttribute("aria-valuetext", "31 of 48 MB");
+      expect(copyBar()).toHaveAttribute("aria-valuenow", "65");
+
+      push(copyingFrame(2, 5));
+      expect(copyBar()).toHaveAttribute("aria-valuetext", "31 of 48 MB");
+    });
+
+    it("shows no bar for a move on the same drive, which only renames", async () => {
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+      await startMove(user);
+
+      push(frame(2));
+      push({ ...frame(3), phase: "converted" });
+
+      expect(screen.queryByRole("progressbar")).toBeNull();
+      expect(createButton()).toHaveTextContent("Moving…");
+    });
+
+    it("keeps the bar full after the last byte, while the copy is published and the project converted", async () => {
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+      await startMove(user);
+      push(copyingFrame(2, 48));
+
+      push({ ...frame(3), phase: "published" });
+
+      expect(copyBar()).toHaveAttribute("aria-valuetext", "48 of 48 MB");
+      expect(copyBar()).toHaveAttribute("aria-valuenow", "100");
+      expect(createButton()).toHaveTextContent("Copying files…");
+    });
+
+    it("shows the progress a status read reports when the subscription started after the first frames", async () => {
+      vi.mocked(mockTransport.readWorkspaceMoveStatus).mockImplementation(async (input) => ("operationId" in input ? copyingFrame(7, 40) : null));
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+
+      await startMove(user);
+
+      expect(await screen.findByRole("progressbar", { name: "Copying files" })).toHaveAttribute("aria-valuetext", "40 of 48 MB");
+    });
+
+    it("shows the failure, not the bar, when the move ends between the subscription and the status read", async () => {
+      let answerStatus: (read: WorkspaceMoveFrame) => void = () => {};
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+      vi.mocked(mockTransport.readWorkspaceMoveStatus).mockImplementation((input) =>
+        "operationId" in input ? new Promise((resolve) => { answerStatus = resolve; }) : Promise.resolve(null));
+      vi.mocked(mockTransport.createProjectFromFolder).mockResolvedValueOnce({ operationId: OPERATION });
+      await user.click(createButton());
+      await waitFor(() => expect(mockTransport.readWorkspaceMoveStatus).toHaveBeenCalledWith({ operationId: OPERATION }));
+
+      push(copyFailedFrame(9));
+      await act(async () => answerStatus(copyingFrame(4, 30)));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Drive D: is full, so the folder couldn't be copied there");
+      expect(screen.queryByRole("progressbar")).toBeNull();
+    });
+
+    it("opens on the copy's current bytes for a thread whose copy is running, and follows it on", async () => {
+      vi.mocked(mockTransport.readWorkspaceMoveStatus).mockImplementation(async (input) =>
+        "threadId" in input ? copyingFrame(3, 20) : copyingFrame(4, 35));
+
+      await openDialog();
+
+      // The lookup by thread shows 20 MB first; the status read by operation then reports the newer 35 MB.
+      await waitFor(() => expect(copyBar()).toHaveAttribute("aria-valuetext", "35 of 48 MB"));
+      expect(screen.getByRole("button", { name: "Copying files…" })).toBeVisible();
+      expect(mockTransport.readWorkspaceMoveStatus).toHaveBeenNthCalledWith(1, { threadId: THREAD.id });
+      expect(mockTransport.readWorkspaceMoveStatus).toHaveBeenNthCalledWith(2, { operationId: OPERATION });
+
+      push(copyingFrame(5, 44));
+      expect(copyBar()).toHaveAttribute("aria-valuetext", "44 of 48 MB");
+    });
+
+    it("shows the failure of a copy that ended between the lookup by thread and the subscription", async () => {
+      vi.mocked(mockTransport.readWorkspaceMoveStatus).mockImplementation(async (input) =>
+        "threadId" in input ? copyingFrame(3, 20) : copyFailedFrame(6));
+
+      await openDialog();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Drive D: is full, so the folder couldn't be copied there");
+      expect(screen.queryByRole("progressbar")).toBeNull();
+      expect(createButton()).toHaveTextContent("Try again");
+    });
+
+    it("reads the status again after a reconnect, so a move that ended while the socket was down does not stay on Copying files…", async () => {
+      useConnectionStore.setState({ status: "connected" });
+      const user = await openNewProject();
+      await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+      await startMove(user);
+      push(copyingFrame(2, 10));
+      expect(copyBar()).toHaveAttribute("aria-valuetext", "10 of 48 MB");
+      // The terminal frame was pushed while the socket was down, so only a read can find it.
+      vi.mocked(mockTransport.readWorkspaceMoveStatus).mockResolvedValue(copyFailedFrame(8));
+
+      act(() => useConnectionStore.setState({ status: "reconnecting" }));
+      expect(screen.getByRole("progressbar")).toBeVisible();
+      act(() => useConnectionStore.setState({ status: "connected" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Drive D: is full, so the folder couldn't be copied there");
+      expect(screen.queryByRole("progressbar")).toBeNull();
+      expect(mockTransport.readWorkspaceMoveStatus).toHaveBeenLastCalledWith({ operationId: OPERATION });
+    });
+
+    describe("a failed copy", () => {
+      async function reachCopyFailure(failure: WorkspaceMoveFrame): Promise<UserEvent> {
+        const user = await openNewProject();
+        await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+        await startMove(user);
+        push(copyingFrame(2, 31));
+        push(failure);
+        await screen.findByRole("alert");
+        return user;
+      }
+
+      it("puts the error on Location, between the field and the git checkbox, with the raw error behind its disclosure and Try again ready", async () => {
+        const user = await reachCopyFailure(copyFailedFrame(3));
+
+        const alert = screen.getByRole("alert");
+        expect(alert).toHaveTextContent("Drive D: is full, so the folder couldn't be copied there");
+        expect(alert).toHaveTextContent("Your files are still in the old folder and the threads are still in No project; Mcode removed the partial copy. Free up space on D: and try again, or choose another location.");
+        expect(locationField()).toHaveAttribute("aria-invalid", "true");
+        expect(locationField().compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(alert.compareDocumentPosition(screen.getByRole("checkbox", { name: "Start a git repo" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(screen.queryByText(/ENOSPC/)).toBeNull();
+        await user.click(within(alert).getByRole("button", { name: "Show details" }));
+        expect(screen.getByText(/ENOSPC: no space left on device/)).toBeVisible();
+        expect(createButton()).toHaveTextContent("Try again");
+        expect(createButton()).toBeEnabled();
+      });
+
+      it.each([
+        ["a full drive", { kind: "no-space", drive: "E:" }, "Drive E: is full, so the folder couldn't be copied there", "Free up space on E: and try again, or choose another location."],
+        ["a refused write", { kind: "permission" }, "Permission was denied, so the folder couldn't be copied there", "Choose a location you can write to, then try again."],
+        ["any other failure", { kind: "other" }, "The folder couldn't be copied there", "Try again, or choose another location."],
+        ["a file in use", { kind: "in-use" }, "Couldn't move the folder to sqlite-wal-vs-rollback", "Close any app using files in the folder, then try again."],
+      ] as const)("words %s from its typed cause, not from the error text", async (_name, cause, title, advice) => {
+        // The raw error says nothing the title could be parsed from.
+        await reachCopyFailure(copyFailedFrame(3, { error: "unexpected", cause }));
+
+        const alert = screen.getByRole("alert");
+        expect(within(alert).getByText(title)).toBeVisible();
+        expect(alert).toHaveTextContent(`Your files are still in the old folder and the threads are still in No project; Mcode removed the partial copy. ${advice}`);
+      });
+
+      it("says Mcode could not remove the partial copy yet, whatever the cause, when it is still there", async () => {
+        await reachCopyFailure(copyFailedFrame(3, { cause: { kind: "permission" }, partialCopyRemoved: false }));
+
+        const alert = screen.getByRole("alert");
+        expect(alert).toHaveTextContent("Your files are still in the old folder and the threads are still in No project. Mcode couldn't remove the partial copy yet; it will try again when it restarts.");
+        expect(alert).not.toHaveTextContent("removed the partial copy");
+        expect(alert).not.toHaveTextContent("write to");
+      });
+
+      it("keeps ticket 08's layout for a failure on the same drive: Location is not in error and the notice follows the git checkbox", async () => {
+        await reachCopyFailure(frame(3, { status: "failed", error: "EBUSY: resource busy or locked", cause: { kind: "in-use" } }));
+
+        const alert = screen.getByRole("alert");
+        expect(alert).toHaveTextContent("Couldn't move the folder to sqlite-wal-vs-rollback");
+        expect(alert).toHaveTextContent("Nothing changed: the threads are still in No project. Close any app using files in the folder, then try again.");
+        expect(locationField()).not.toHaveAttribute("aria-invalid");
+        expect(screen.getByRole("checkbox", { name: "Start a git repo" }).compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      });
     });
   });
 

@@ -7,6 +7,10 @@ function frame(revision: number, result?: WorkspaceMoveResult, operationId = "op
   return { operationId, revision, phase: result ? "done" : "renamed", copiedBytes: null, totalBytes: null, ...(result ? { result } : {}) };
 }
 
+function copyFrame(revision: number, phase: WorkspaceMoveFrame["phase"], bytes: { copied: number; total: number } | null): WorkspaceMoveFrame {
+  return { operationId: "op-1", revision, phase, copiedBytes: bytes?.copied ?? null, totalBytes: bytes?.total ?? null };
+}
+
 function run(...actions: NewProjectRunAction[]): NewProjectRun {
   return actions.reduce(newProjectRunReducer, FORM_RUN);
 }
@@ -23,13 +27,13 @@ describe("newProjectRunReducer", () => {
     const ended = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY" }) });
     const afterOlder = newProjectRunReducer(ended, { type: "frame", frame: frame(1) });
 
-    expect(afterOlder).toEqual({ kind: "failed", error: "EBUSY", outcome: "rolled-back" });
+    expect(afterOlder).toEqual({ kind: "failed", error: "EBUSY", outcome: "rolled-back", copyFailure: null });
   });
 
   it("does not let a running frame replace a newer running one", () => {
     const afterTwo = run(...STARTED, { type: "frame", frame: frame(2) }, { type: "frame", frame: frame(1) });
 
-    expect(afterTwo).toEqual({ kind: "moving", operationId: "op-1", revision: 2 });
+    expect(afterTwo).toEqual({ kind: "moving", operationId: "op-1", revision: 2, copy: null });
   });
 
   it("ignores frames of an operation the run does not follow", () => {
@@ -76,6 +80,35 @@ describe("newProjectRunReducer", () => {
     const pending = run(...STARTED, { type: "frame", frame: frame(2, { status: "rollback-pending", error: "EPERM", markerPath }) });
 
     expect(pending).toMatchObject({ kind: "rollback-pending", error: "EPERM", folder });
+  });
+
+  it("follows the copy's byte counts and keeps the bar full once the copy is whole", () => {
+    const copying = run(...STARTED, { type: "frame", frame: copyFrame(2, "copying", { copied: 30, total: 100 }) });
+    expect(copying).toMatchObject({ kind: "moving", copy: { copiedBytes: 30, totalBytes: 100 } });
+
+    // The server stops sending counts after the last byte; the copy is whole, so the bar must not vanish.
+    const published = newProjectRunReducer(copying, { type: "frame", frame: copyFrame(3, "published", null) });
+    expect(published).toMatchObject({ kind: "moving", copy: { copiedBytes: 100, totalBytes: 100 } });
+    expect(newProjectRunReducer(published, { type: "frame", frame: copyFrame(4, "converted", null) })).toMatchObject({ copy: { copiedBytes: 100, totalBytes: 100 } });
+  });
+
+  it("shows no copy for a same-drive move, whose frames never carry byte counts", () => {
+    const renamed = run(...STARTED, { type: "frame", frame: copyFrame(2, "renamed", null) });
+    const converted = newProjectRunReducer(renamed, { type: "frame", frame: copyFrame(3, "converted", null) });
+
+    expect(converted).toMatchObject({ kind: "moving", copy: null });
+  });
+
+  it("has no total to fill when the dialog opens after the copy finished, so it shows no bar", () => {
+    expect(run({ type: "adopted", frame: copyFrame(5, "published", null) })).toMatchObject({ kind: "moving", copy: null });
+  });
+
+  it("reports a copy failure only when the server says the move copied", () => {
+    const copied = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "ENOSPC", cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true }) });
+    const renamed = run(...STARTED, { type: "frame", frame: frame(3, { status: "failed", error: "EBUSY", cause: { kind: "in-use" } }) });
+
+    expect(copied).toMatchObject({ kind: "failed", copyFailure: { cause: { kind: "no-space", drive: "D:" }, partialCopyRemoved: true } });
+    expect(renamed).toMatchObject({ kind: "failed", copyFailure: null });
   });
 
   it("keeps a failed git retry on the alert with the new reason, and ends it on success", () => {

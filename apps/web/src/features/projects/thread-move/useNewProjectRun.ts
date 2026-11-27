@@ -46,6 +46,18 @@ function readStatusWithRetry(
   };
 }
 
+/**
+ * How many times the socket has come back after dropping. A move that ends while the socket is down pushes its last
+ * frame to no one, so a follower must read the status again each time this changes.
+ */
+function useReconnectCount(): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => useConnectionStore.subscribe((next, previous) => {
+    if (next.status === "connected" && previous.status !== "connected") setCount((current) => current + 1);
+  }), []);
+  return count;
+}
+
 export interface NewProjectRunControls {
   readonly run: NewProjectRun;
   /**
@@ -69,7 +81,8 @@ export interface NewProjectRunControls {
  *
  * Two reads of one operation can disagree about whether it finished: a frame the server pushed and the status the
  * client asked for. Each is listened for before the other is read, and the run keeps whichever has the higher
- * revision, so a move that ends between the two still shows its result.
+ * revision, so a move that ends between the two still shows its result. The same listen-then-read runs again after
+ * a reconnect, because the terminal frame may have been pushed while the socket was down.
  */
 export function useNewProjectRun(threadId: string): NewProjectRunControls {
   const [run, dispatch] = useReducer(newProjectRunReducer, FORM_RUN);
@@ -86,6 +99,7 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
   ), [threadId, lookupAttempt]);
 
   const operationId = followedOperation(run);
+  const reconnects = useReconnectCount();
   useEffect(() => {
     if (operationId === null) return;
     let heardFrame = false;
@@ -112,7 +126,7 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
       stopReading();
       stop();
     };
-  }, [operationId]);
+  }, [operationId, reconnects]);
 
   const create = (values: NewProjectValues, initGit: boolean) => {
     dispatch({ type: "submitted" });
