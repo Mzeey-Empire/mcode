@@ -806,6 +806,7 @@ describe("provider switch on send", () => {
     expect(record).toMatchObject({ state: "bound", detached_commit: expectedCommit, worktree_path: result.thread.worktree_path });
     if (!record || !("id" in record)) throw new Error("Move has no ownership record");
     expect(NodePath.basename(result.thread.worktree_path ?? "")).toBe(`move-${record.id}`);
+    expect(git(project.path, "worktree", "list", "--porcelain")).not.toMatch(/^locked(?: |$)/m);
     expect(moveMarker()).toEqual({ projectName: "Destination", target: "new-worktree",
       source: { kind: "branch", branch: "main", startFromOrigin } });
     await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId }).gate).toBe("not-required"));
@@ -980,14 +981,36 @@ describe("provider switch on send", () => {
     expect(git(occupied.worktreePath, "rev-parse", "HEAD")).toBe(commit);
   });
 
-  it("on restart keeps a matching detached checkout created by another Git client in the claimed folder", async () => {
+  it("on restart removes the move's checkout if its creation was not recorded", async () => {
+    const { source, project, service, move, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const record = vi.spyOn(threads, "markMoveWorktreeCreated")
+      .mockRejectedValueOnce(new DatabaseWriteOutcomeUnknown("Checkout creation could not be recorded"));
+    onTestFinished(() => { record.mockRestore(); });
+
+    await expect(move(undefined, LOCAL_BRANCH_MOVE)).resolves.toMatchObject({ status: "unconfirmed" });
+    const [plan] = threads.listProvisioningMoveWorktrees();
+    if (!plan) throw new Error("The interrupted move has no record");
+    expect(plan.state).toBe("provisioning");
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(true);
+
+    await service().recoverInterruptedMoves();
+
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(false);
+    expect(git(project.path, "worktree", "list", "--porcelain").match(/^worktree /gm)).toEqual(["worktree "]);
+    expectNoMoveRecord(plan.id);
+    expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
+  });
+
+  it.each([false, true])("on restart keeps another client's matching checkout (locked: %s)", async (locked) => {
     const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
     initRepository(project.path);
     const commit = git(project.path, "rev-parse", "HEAD");
     const plan = await interruptedMove(threads, project, "main", commit);
     NodeFS.mkdirSync(plan.worktreePath, { recursive: true });
     await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
-    git(project.path, "worktree", "add", "--detach", plan.worktreePath, commit);
+    const lock = locked ? ["--lock", "--reason", "another client"] : [];
+    git(project.path, "worktree", "add", ...lock, "--detach", plan.worktreePath, commit);
 
     await service().recoverInterruptedMoves();
 
@@ -1051,13 +1074,14 @@ describe("provider switch on send", () => {
     expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
   });
 
-  it("keeps an unbound dirty checkout and its record until a later restart can remove it", async () => {
+  it.each([false, true])("keeps an unbound dirty checkout for another cleanup attempt (recorded: %s)", async (recorded) => {
     const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
     initRepository(project.path);
     const plan = await interruptedMove(threads, project, "planned");
     await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
-    git(project.path, "worktree", "add", "-b", plan.branch, plan.worktreePath, "main");
-    await threads.markMoveWorktreeCreated(plan.id, MOVE_AT);
+    const lock = recorded ? [] : ["--lock", "--reason", `mcode-move ${plan.id}`];
+    git(project.path, "worktree", "add", ...lock, "-b", plan.branch, plan.worktreePath, "main");
+    if (recorded) await threads.markMoveWorktreeCreated(plan.id, MOVE_AT);
     const evidence = NodePath.join(plan.worktreePath, "uncommitted.txt");
     NodeFS.writeFileSync(evidence, "Keep my changes");
 

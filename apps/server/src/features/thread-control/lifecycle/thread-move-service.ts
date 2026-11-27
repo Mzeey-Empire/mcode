@@ -39,7 +39,7 @@ export class ThreadMoveService {
     private readonly backgroundCommands: Pick<BackgroundCommandStore, "list">,
     private readonly agentWorkload: Pick<AgentWorkload, "backgroundSubagentThreadIds">,
     private readonly newWorktrees: {
-      checkouts: Pick<GitWorktreeService, "createWorktree" | "removeProvisionedWorktree">;
+      checkouts: Pick<GitWorktreeService, "createWorktree" | "unlockWorktree" | "removeProvisionedWorktree">;
       startups: Pick<ThreadStartupService, "publish">;
       setup: Pick<WorkspaceEnvironmentService, "launchAutomaticSetup">;
     },
@@ -125,6 +125,7 @@ export class ThreadMoveService {
     try {
       await this.newWorktrees.checkouts.createWorktree(project.path, name, branch, {
         ...options,
+        moveId,
         onPathClaimed: async () => {
           move.pathClaimed = true;
           await this.threads.markMoveWorktreePathClaimed(moveId, this.now().toISOString());
@@ -132,6 +133,7 @@ export class ThreadMoveService {
       });
       await this.threads.markMoveWorktreeCreated(moveId, this.now().toISOString());
       move.state = "checkout-created";
+      await this.newWorktrees.checkouts.unlockWorktree(project.path, worktreePath);
       const placement: NewWorktreePlacement = {
         kind: "new-worktree", moveId, branch, worktreePath,
         source: source.kind === "pr"
@@ -173,7 +175,7 @@ export class ThreadMoveService {
       if (this.threads.findById(move.threadId)?.worktree_path === move.worktreePath) return;
       const outcome = await this.newWorktrees.checkouts.removeProvisionedWorktree(repoPath, {
         ...move, checkoutCreated: move.state === "checkout-created",
-      });
+      }, () => this.threads.markMoveWorktreeCreated(move.id, this.now().toISOString()));
       await this.threads.deleteProvisioningMoveWorktree(move.id);
       if (outcome === "unowned") {
         logger.warn("Interrupted move left an unrelated path untouched", { moveId: move.id, worktreePath: move.worktreePath });

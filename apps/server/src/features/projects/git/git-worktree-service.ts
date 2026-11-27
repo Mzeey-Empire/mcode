@@ -38,7 +38,7 @@ type WorktreeCreationRequest = {
   name: string;
   path: string;
   repoPath: string;
-  options: { branchless?: boolean; baseRef?: string; startPoint?: string; onPathClaimed?: () => Promise<void> };
+  options: { branchless?: boolean; baseRef?: string; startPoint?: string; moveId?: string; onPathClaimed?: () => Promise<void> };
 };
 
 type WorktreeRemovalRequest = {
@@ -110,26 +110,24 @@ export class GitWorktreeService {
 
   /** Remove a move's checkout only if Git created it for the move and its recorded identity still matches. */
   async removeProvisionedWorktree(
-    repoPath: string | undefined, move: ProvisionedMoveCheckout,
+    repoPath: string | undefined, move: ProvisionedMoveCheckout, recordCheckoutCreated: () => Promise<void>,
   ): Promise<"unclaimed" | "missing" | "unowned" | "removed"> {
     if (!move.pathClaimed) return "unclaimed";
     const { worktreePath } = move;
     const entry = await statIfPresent(worktreePath);
     if (!entry) return "missing";
     if (!entry.isDirectory()) return "unowned";
-    if (!move.checkoutCreated) return removeClaimedDirectory(worktreePath);
-    if (!(await statIfPresent(NodePath.join(worktreePath, ".git")))?.isFile()) return "unowned";
+    if (!(await statIfPresent(NodePath.join(worktreePath, ".git")))?.isFile()) {
+      return move.checkoutCreated ? "unowned" : removeClaimedDirectory(worktreePath);
+    }
     if (!repoPath) throw new Error("Destination repository is unavailable");
 
-    const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]);
-    if (!matchesProvisionedCheckout(stdout, move)) return "unowned";
-    const [{ stdout: expectedCommonDir }, { stdout: actualCommonDir }] = await Promise.all([
-      this.gitExecutor.exec(["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
-      this.gitExecutor.exec(["-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
-    ]);
-    if (NodePath.relative(expectedCommonDir.trimEnd(), actualCommonDir.trimEnd()) !== "") return "unowned";
-    await this.gitExecutor.exec(["-C", repoPath, "worktree", "remove", worktreePath], { timeout: 30_000 });
-    return "removed";
+    return this.removeRegisteredMoveCheckout(repoPath, move, recordCheckoutCreated);
+  }
+
+  /** Release the Git lock from a checkout after its ownership has been recorded. */
+  async unlockWorktree(repoPath: string, worktreePath: string): Promise<void> {
+    await this.gitExecutor.exec(["-C", repoPath, "worktree", "unlock", worktreePath]);
   }
 
   /** Remove a worktree and, when requested, its branch. */
@@ -260,6 +258,33 @@ export class GitWorktreeService {
     await this.gitExecutor.exec(createWorktreeArgs(request, createdBranch), { timeout: WORKTREE_ADD_TIMEOUT_MS });
   }
 
+  private async removeRegisteredMoveCheckout(
+    repoPath: string, move: ProvisionedMoveCheckout, recordCheckoutCreated: () => Promise<void>,
+  ): Promise<"unowned" | "removed"> {
+    const { id, branch, worktreePath, detachedCommit, checkoutCreated } = move;
+    const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]);
+    const checkout = findCheckoutRecord(stdout, worktreePath);
+    if (!checkout) return "unowned";
+    if (!checkoutCreated && !checkout.includes(`locked ${moveWorktreeLockReason(id)}`)) return "unowned";
+    const matches = detachedCommit === null
+      ? checkout.includes(`branch refs/heads/${branch}`)
+      : checkout.includes("detached") && checkout.includes(`HEAD ${detachedCommit}`);
+    if (!matches) return "unowned";
+
+    const [{ stdout: expectedCommonDir }, { stdout: actualCommonDir }] = await Promise.all([
+      this.gitExecutor.exec(["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
+      this.gitExecutor.exec(["-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
+    ]);
+    if (NodePath.relative(expectedCommonDir.trimEnd(), actualCommonDir.trimEnd()) !== "") return "unowned";
+    if (checkout.some((field) => field === "locked" || field.startsWith("locked "))) {
+      // Keep ownership durable if removal fails or the server stops after unlocking.
+      if (!checkoutCreated) await recordCheckoutCreated();
+      await this.unlockWorktree(repoPath, worktreePath);
+    }
+    await this.gitExecutor.exec(["-C", repoPath, "worktree", "remove", worktreePath], { timeout: 30_000 });
+    return "removed";
+  }
+
   private async createWorktreeRemovalRequest(
     repoPath: string,
     name: string,
@@ -381,23 +406,26 @@ function normalizeWorktreePath(path: string): string {
   return identityPath.replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
 }
 
-type ProvisionedMoveCheckout = { worktreePath: string; branch: string; detachedCommit: string | null; pathClaimed: boolean; checkoutCreated: boolean };
+type ProvisionedMoveCheckout = { id: string; worktreePath: string; branch: string; detachedCommit: string | null; pathClaimed: boolean; checkoutCreated: boolean };
 
-function matchesProvisionedCheckout(output: string, { worktreePath, branch, detachedCommit }: ProvisionedMoveCheckout): boolean {
+function moveWorktreeLockReason(moveId: string): string {
+  return `mcode-move ${moveId}`;
+}
+
+function findCheckoutRecord(output: string, worktreePath: string): string[] | undefined {
   const realPath = NodeFS.realpathSync.native(worktreePath);
-  return output.split("\0\0").some((record) => {
+  for (const record of output.split("\0\0")) {
     const [entry, ...checkout] = record.split("\0");
-    if (!entry?.startsWith("worktree ")) return false;
+    if (!entry?.startsWith("worktree ")) continue;
     const registeredPath = entry.slice("worktree ".length);
-    if (NodePath.relative(worktreePath, registeredPath) !== "" && NodePath.relative(realPath, registeredPath) !== "") return false;
-    return detachedCommit === null
-      ? checkout.includes(`branch refs/heads/${branch}`)
-      : checkout.includes("detached") && checkout.includes(`HEAD ${detachedCommit}`);
-  });
+    if (NodePath.relative(worktreePath, registeredPath) === "" || NodePath.relative(realPath, registeredPath) === "") return checkout;
+  }
+  return undefined;
 }
 
 function createWorktreeArgs(request: WorktreeCreationRequest, createdBranch: boolean): string[] {
   const args = ["-C", request.repoPath, "worktree", "add"];
+  if (request.options.moveId) args.push("--lock", "--reason", moveWorktreeLockReason(request.options.moveId));
   if (request.options.branchless) return [...args, "--detach", request.path, request.options.startPoint ?? request.branch];
   if (!createdBranch) return [...args, request.path, request.branch];
   args.push(request.path, "-b", request.branch);
