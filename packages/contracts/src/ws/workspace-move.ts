@@ -19,7 +19,6 @@ export const WorkspaceMoveFailureCauseSchema = lazySchema(() => z.discriminatedU
   z.object({ kind: z.literal("other") }),
 ]));
 
-/** Filesystem failure a client can explain without interpreting the raw error. */
 export type WorkspaceMoveFailureCause = z.infer<ReturnType<typeof WorkspaceMoveFailureCauseSchema>>;
 
 /** Result of validation and reservation, before touching the folder. */
@@ -49,7 +48,6 @@ export const WorkspaceMoveResultSchema = lazySchema(() => z.discriminatedUnion("
   }),
 ]));
 
-/** Durable outcome of a project move. */
 export type WorkspaceMoveResult = z.infer<ReturnType<typeof WorkspaceMoveResultSchema>>;
 
 /** The committed checkpoints shared by status reads and progress pushes. */
