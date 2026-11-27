@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeFSPromises from "node:fs/promises";
@@ -11,6 +12,7 @@ import type { AgentEvent } from "@mcode/contracts/events/agent-event";
 import type { BackgroundCallKind } from "@mcode/contracts/models/tool-call-record";
 import type { IAgentProvider, IProviderRegistry, ProviderId, TurnRequest } from "@mcode/contracts/providers/interfaces";
 import type { ProviderModelInfo } from "@mcode/contracts/providers/models";
+import type { ThreadMoveInput } from "@mcode/contracts/ws/methods";
 import { ProviderTurnError, SESSION_RESUME_UNAVAILABLE_CODE } from "@mcode/providers";
 import { resolveHandoffDir } from "@mcode/shared";
 
@@ -24,13 +26,23 @@ import { SnapshotRefPins } from "../../../projects/diffs/snapshots/snapshot-ref-
 import { revertRange } from "../../../projects/diffs/revert/turn-revert-preview.js";
 import { TurnSnapshotRangeReader } from "../../../projects/diffs/snapshots/turn-snapshot-range.js";
 import { FakeGitExecutor } from "../../../projects/git/execution/fake-git-executor.js";
+import { RealGitExecutor } from "../../../projects/git/execution/real-git-executor.js";
 import { GitRepositoryService } from "../../../projects/git/git-repository-service.js";
+import { GitWorktreeService } from "../../../projects/git/git-worktree-service.js";
+import { getManagedWorktreeBaseDir } from "../../../projects/git/managed-worktree-paths.js";
+import { moveThreadToProject } from "../../../projects/lifecycle/transport/workspace-thread-rpc.js";
+import { ProjectActionService } from "../../../projects/environment/project-action-service.js";
+import { WorkspaceEnvironmentService } from "../../../projects/environment/workspace-environment-service.js";
 import { WorkspaceRepo } from "../../../projects/persistence/workspace-repo.js";
+import { ThreadBranchingService } from "../../../projects/worktrees/thread-branching-service.js";
+import { terminalPlatform } from "../../../terminal/terminal-platform.js";
+import { InMemoryPtyHostAdapter } from "../../../terminal/testing/in-memory-pty-host-adapter.js";
 import { ThreadControlMutationReservationService } from "../../../thread-control/authority/thread-control-mutation-reservation-service.js";
 import { ThreadMoveService } from "../../../thread-control/lifecycle/thread-move-service.js";
 import { ThreadProviderSessionRepo } from "../../../thread-control/persistence/thread-provider-session-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
 import { threadWriteOperations } from "../../../thread-control/persistence/thread-write-operations.js";
+import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import { BackgroundCommandStore } from "../../background/background-command-store.js";
 import { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
@@ -48,6 +60,10 @@ vi.mock("node:fs/promises", async (importOriginal) => ({ ...await importOriginal
 const CLAUDE_MODEL = "claude-sonnet-4-6";
 const CODEX_MODEL = "gpt-5.5";
 const TERMINAL_TYPES = ["turn.completed", "turn.errored", "turn.interrupted", "turn.cancelled"];
+const MOVE_AT = "2026-11-26T12:00:00.000Z";
+const LOCAL_BRANCH_MOVE = {
+  kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin: false },
+} satisfies ThreadMoveInput["target"];
 
 type SendTurn = (request: TurnRequest) => Promise<void>;
 
@@ -725,6 +741,484 @@ describe("provider switch on send", () => {
     expect(lastRequest(claude).message).not.toContain("Files from earlier in this thread");
   });
 
+  it.each(["named", "detached"] as const)("sends the next turn from the moved thread's %s worktree", async (checkout) => {
+    const { project, move } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const worktreePath = NodePath.resolve(NodeFS.realpathSync.native(project.path), "..", "checkout");
+    if (checkout === "detached") {
+      git(project.path, "worktree", "add", "--detach", worktreePath, "main");
+    } else {
+      git(project.path, "worktree", "add", "-b", "feature", worktreePath, "main");
+    }
+
+    const result = await move(undefined, { kind: "existing-worktree", worktreePath, baseBranch: "main" });
+    if (result.status === "failed") throw new Error(result.error);
+    const branch = checkout === "named" ? "feature" : "main";
+    expect(result).toMatchObject({ status: "moved", thread: {
+      workspace_id: project.id, mode: "worktree", branch, worktree_managed: false,
+      checkout_state: checkout === "named" ? "named" : "branchless",
+      base_branch: checkout === "named" ? null : "main",
+    } });
+    const marker = container.resolve(MessageRepo).listIncludingInternal(threadId).find((message) => message.threadMove);
+    expect(marker?.threadMove).toEqual({ projectName: "Destination", target: "existing-worktree", branch });
+
+    await completeTurn(claude, "Check the checkout", "Checked", "new-claude");
+    const { cwd } = lastRequest(claude);
+    expect(NodeFS.realpathSync.native(cwd)).toBe(worktreePath);
+    expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe(checkout === "named" ? "feature" : "HEAD");
+    expect(thread().branch).toBe(branch);
+  });
+
+  it("refuses a worktree registered to a different repository", async () => {
+    const { source, project, move } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const otherRepo = NodePath.resolve(NodeFS.realpathSync.native(project.path), "..", "other-repository");
+    NodeFS.mkdirSync(otherRepo);
+    initRepository(otherRepo);
+    const worktreePath = NodePath.resolve(otherRepo, "..", "other-checkout");
+    git(otherRepo, "worktree", "add", "-b", "feature", worktreePath, "main");
+
+    expect(await move(undefined, { kind: "existing-worktree", worktreePath })).toMatchObject({ status: "failed" });
+    expect(thread()).toMatchObject({ workspace_id: source.id, mode: "direct", worktree_path: null });
+  });
+
+  it.each([false, true])("moves from the selected branch commit (start from origin: %s)", async (startFromOrigin) => {
+    const { project, move, environment } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const localCommit = git(project.path, "rev-parse", "main");
+    const origin = NodePath.join(project.path, "..", "origin");
+    NodeFS.mkdirSync(origin);
+    initRepository(origin);
+    git(origin, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "origin update");
+    git(project.path, "remote", "add", "origin", origin);
+    const expectedCommit = startFromOrigin ? git(origin, "rev-parse", "main") : localCommit;
+
+    const result = await move(undefined, {
+      kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin },
+    });
+    if (result.status !== "moved") throw new Error(JSON.stringify(result));
+    expect(result.thread).toMatchObject({
+      workspace_id: project.id, mode: "worktree", worktree_managed: true,
+      branch: "main", checkout_state: "branchless", base_branch: "main",
+    });
+    const record = database?.query("SELECT id, state, detached_commit, worktree_path FROM thread_move_worktrees WHERE thread_id = ?")
+      .get(threadId);
+    expect(record).toMatchObject({ state: "bound", detached_commit: expectedCommit, worktree_path: result.thread.worktree_path });
+    if (!record || !("id" in record)) throw new Error("Move has no ownership record");
+    expect(NodePath.basename(result.thread.worktree_path ?? "")).toBe(`move-${record.id}`);
+    expect(git(project.path, "worktree", "list", "--porcelain")).not.toMatch(/^locked(?: |$)/m);
+    expect(moveMarker()).toEqual({ projectName: "Destination", target: "new-worktree",
+      source: { kind: "branch", branch: "main", startFromOrigin } });
+    await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId }).gate).toBe("not-required"));
+
+    await completeTurn(claude, "Check the starting commit", "Checked", "new-claude");
+    const { cwd } = lastRequest(claude);
+    expect(cwd).toBe(result.thread.worktree_path);
+    expect(git(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD");
+    expect(git(cwd, "rev-parse", "HEAD")).toBe(expectedCommit);
+    expect(git(project.path, "rev-parse", "main")).toBe(localCommit);
+  });
+
+  it("fetches a PR by number and runs the next turn on its named head branch", async () => {
+    const { project, move, environment } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const origin = NodePath.join(project.path, "..", "origin");
+    NodeFS.mkdirSync(origin);
+    initRepository(origin);
+    git(origin, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "PR only");
+    git(origin, "update-ref", "refs/pull/412/head", "HEAD");
+    git(project.path, "remote", "add", "origin", origin);
+
+    const result = await move(undefined, {
+      kind: "new-worktree", source: { kind: "pr", branch: "contributor/feature", pullRequestNumber: 412 },
+    });
+    if (result.status !== "moved") throw new Error(JSON.stringify(result));
+    expect(moveMarker()).toEqual({ projectName: "Destination", target: "new-worktree",
+      source: { kind: "pr", pullRequestNumber: 412 } });
+    await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId }).gate).toBe("not-required"));
+
+    await completeTurn(claude, "Check the PR", "Checked", "new-claude");
+    const { cwd } = lastRequest(claude);
+    expect(cwd).toBe(result.thread.worktree_path);
+    expect(git(cwd, "symbolic-ref", "--short", "HEAD")).toBe("contributor/feature");
+    expect(git(cwd, "rev-parse", "HEAD")).toBe(git(origin, "rev-parse", "refs/pull/412/head"));
+    expect(thread()).toMatchObject({ workspace_id: project.id, branch: "contributor/feature", checkout_state: "named" });
+  });
+
+  it("exposes running Setup and runs the configured script in the destination checkout", async () => {
+    const { project, move, environment } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const host = new InMemoryPtyHostAdapter("1", terminalPlatform(process.platform));
+    container.registerInstance("PtyHost", host);
+    const createTerminal = vi.spyOn(host, "create");
+    const file = environment.filePath(project.id);
+    NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
+    NodeFS.writeFileSync(file, JSON.stringify({ version: "0.0.1", setup: { default: "echo moved setup" }, actions: [] }));
+
+    const result = await move(undefined, LOCAL_BRANCH_MOVE);
+    if (result.status !== "moved") throw new Error(JSON.stringify(result));
+    const slot = { threadId, actionId: "setup" };
+    const actions = container.resolve(ProjectActionService);
+    const startups = container.resolve(ThreadStartupService);
+    await vi.waitFor(() => expect(actions.get(slot)).toMatchObject({ status: "running", trigger: "startup" }));
+    expect(startups.findByThreadId(threadId)).toMatchObject({ workspaceId: project.id, phase: "setup", state: "running" });
+    expect(environment.getAutomaticSetup({ threadId })).toMatchObject({ gate: "blocked", attempt: { state: "running" }, queuedTurns: [] });
+    const terminal = createTerminal.mock.calls[0]?.[0];
+    if (!terminal) throw new Error("Setup did not open a terminal");
+    expect(terminal.cwd).toBe(result.thread.worktree_path);
+    expect(terminal.launch.arguments).toContain("echo moved setup");
+    host.emitExit(terminal.sessionId, 0);
+    await vi.waitFor(() => expect(startups.findByThreadId(threadId)).toMatchObject({
+      state: "completed",
+      steps: expect.arrayContaining([
+        expect.objectContaining({ phase: "setup", state: "completed" }),
+        expect.objectContaining({ phase: "agent", state: "skipped" }),
+      ]),
+    }));
+    expect(environment.getAutomaticSetup({ threadId }).gate).toBe("released-by-pass");
+  });
+
+  it.each(["local", "new-worktree"] as const)("registers a checkout watcher only for a worktree move (%s)", async (kind) => {
+    const { project, service, environment } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    git(project.path, "branch", "review-base");
+    const watched = new Map<string, string>();
+    const result = await moveThreadToProject({
+      threadMoveService: service(),
+      gitWatcherService: {
+        watchThreadWorktree: async (id, path) => { watched.set(id, path); },
+      },
+    }, {
+      threadId, workspaceId: project.id,
+      target: kind === "local" ? { kind } : { kind, source: { kind: "branch", baseBranch: "review-base", startFromOrigin: false } },
+    });
+    if (result.status !== "moved") throw new Error(JSON.stringify(result));
+    if (kind === "local") {
+      expect(result.thread).toMatchObject({ mode: "direct", worktree_path: null });
+      expect([...watched]).toEqual([]);
+    } else {
+      await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId }).gate).toBe("not-required"));
+      const path = result.thread.worktree_path;
+      if (!path) throw new Error("Expected a worktree");
+      expect([...watched]).toEqual([[threadId, path]]);
+      expect(result.thread).toMatchObject({ mode: "worktree", checkout_state: "branchless", base_branch: "review-base" });
+      expect(git(path, "rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD");
+    }
+  });
+
+  it("removes the detached worktree when the rebind transaction fails", async () => {
+    const { source, project, move } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    writeFixture((db) => db.exec(`
+      CREATE TRIGGER test_reject_rebind BEFORE UPDATE OF workspace_id ON threads
+      BEGIN SELECT RAISE(ABORT, 'test rebind blocked'); END;
+    `));
+    expect(await move(undefined, LOCAL_BRANCH_MOVE)).toMatchObject({ status: "failed", error: expect.stringContaining("test rebind blocked") });
+    expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
+    expect(git(project.path, "worktree", "list", "--porcelain").match(/^worktree /gm)).toEqual(["worktree "]);
+    expect(git(project.path, "branch", "--format=%(refname:short)")).toBe("main");
+    expect(database?.query("SELECT id FROM thread_move_worktrees").all()).toEqual([]);
+    expect(moveMarker()).toBeUndefined();
+  });
+
+  it("keeps a recorded checkout with an ignored file when the move fails", async () => {
+    const { project, move, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path, ".env");
+    const commit = git(project.path, "rev-parse", "HEAD");
+    interruptMoveWrite(async () => {
+      const [plan] = threads.listProvisioningMoveWorktrees();
+      if (!plan) throw new Error("Expected a recorded checkout");
+      NodeFS.writeFileSync(NodePath.join(plan.worktreePath, ".env"), "Keep my settings");
+      throw new Error("Move write rejected");
+    });
+
+    await expect(move(undefined, LOCAL_BRANCH_MOVE)).resolves.toMatchObject({ status: "failed" });
+
+    expect(threads.listProvisioningMoveWorktrees()).toMatchObject([{ threadId, state: "checkout-created" }]);
+    const [plan] = threads.listProvisioningMoveWorktrees();
+    if (!plan) throw new Error("Expected cleanup to preserve the move record");
+    expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+    expect(NodeFS.readFileSync(NodePath.join(plan.worktreePath, ".env"), "utf8")).toBe("Keep my settings");
+  });
+
+  it.each([
+    { cleanup: "live", lockReason: "another client" },
+    { cleanup: "recovery", lockReason: null },
+  ])("keeps a replacement with a foreign lock during $cleanup cleanup", async ({ cleanup, lockReason }) => {
+    const { project, move, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    let replaced: { id: string; worktreePath: string } | undefined;
+    interruptMoveWrite(async () => {
+      const [plan] = threads.listProvisioningMoveWorktrees();
+      if (plan?.state !== "checkout-created" || !plan.detachedCommit) throw new Error("Expected a recorded detached checkout");
+      git(project.path, "worktree", "remove", plan.worktreePath);
+      const reason = lockReason ? ["--reason", lockReason] : [];
+      git(project.path, "worktree", "add", "--detach", plan.worktreePath, plan.detachedCommit);
+      git(project.path, "worktree", "lock", ...reason, plan.worktreePath);
+      replaced = plan;
+      throwMoveFailure(cleanup);
+    });
+
+    await expect(move(undefined, LOCAL_BRANCH_MOVE)).resolves.toMatchObject({
+      status: cleanup === "live" ? "failed" : "unconfirmed",
+    });
+    if (cleanup === "recovery") await service().recoverInterruptedMoves();
+
+    if (!replaced) throw new Error("Expected the replacement checkout");
+    expect(NodeFS.existsSync(replaced.worktreePath)).toBe(true);
+    expect(git(project.path, "worktree", "list", "--porcelain").split(/\r?\n/))
+      .toContain(lockReason ? `locked ${lockReason}` : "locked");
+    expectNoMoveRecord(replaced.id);
+  });
+
+  it.each(["live", "recovery"])("keeps a checkout attached to a second thread during %s cleanup", async (cleanup) => {
+    const { source, project, move, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const other = await threads.create(source.id, "Attach here", "direct", "", false, "claude");
+    let attached: { id: string; worktreePath: string } | undefined;
+    interruptMoveWrite(async () => {
+      const [plan] = threads.listProvisioningMoveWorktrees();
+      if (plan?.state !== "checkout-created") throw new Error("Expected a recorded checkout");
+      const worktreePath = NodeFS.realpathSync.native(plan.worktreePath);
+      const result = await service().moveToProject({
+        threadId: other.id, workspaceId: project.id,
+        target: { kind: "existing-worktree", worktreePath, baseBranch: "main" },
+      });
+      if (result.status !== "moved") throw new Error(JSON.stringify(result));
+      attached = { id: plan.id, worktreePath };
+      throwMoveFailure(cleanup);
+    });
+
+    await expect(move(undefined, LOCAL_BRANCH_MOVE)).resolves.toMatchObject({
+      status: cleanup === "live" ? "failed" : "unconfirmed",
+    });
+    if (cleanup === "recovery") await service().recoverInterruptedMoves();
+
+    if (!attached) throw new Error("Expected the second thread to attach");
+    const path = threads.findById(other.id)?.worktree_path;
+    if (!path) throw new Error("Expected the second thread's checkout path");
+    expect(NodePath.relative(attached.worktreePath, path)).toBe("");
+    expect(git(path, "rev-parse", "HEAD")).toBe(git(project.path, "rev-parse", "HEAD"));
+    expectNoMoveRecord(attached.id);
+  });
+
+  it.each(["folder", "worktree", "matching detached worktree"] as const)("fails provisioning and keeps a %s that arrives after recording", async (occupant) => {
+    const { source, project, move, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const commit = git(project.path, "rev-parse", "HEAD");
+    const mkdir = NodeFSPromises.mkdir;
+    let occupied: { id: string; worktreePath: string } | undefined;
+    const claim = vi.spyOn(NodeFSPromises, "mkdir").mockImplementation(async (path, options) => {
+      if (typeof path === "string" && NodePath.basename(path).startsWith("move-")) {
+        const [plan] = threads.listProvisioningMoveWorktrees();
+        if (plan?.worktreePath !== path) throw new Error("Checkout creation started before the move was recorded");
+        if (occupant === "matching detached worktree") {
+          git(project.path, "worktree", "add", "--detach", path, commit);
+        } else {
+          occupyMovePath(project.path, path, occupant);
+        }
+        occupied = plan;
+      }
+      return mkdir(path, options);
+    });
+    try {
+      expect(await move(undefined, LOCAL_BRANCH_MOVE)).toMatchObject({ status: "failed" });
+    } finally {
+      claim.mockRestore();
+    }
+    if (!occupied) throw new Error("The other owner did not claim the checkout path");
+    expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
+    expectNoMoveRecord(occupied.id);
+    if (occupant === "matching detached worktree") {
+      expect(git(occupied.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+    } else {
+      expectMovePathOccupant(occupied.worktreePath, occupant);
+    }
+  });
+
+  it("keeps a matching detached checkout that another Git client adds after mkdir", async () => {
+    const { project, move, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const commit = git(project.path, "rev-parse", "HEAD");
+    const mkdir = NodeFSPromises.mkdir;
+    let occupied: { id: string; worktreePath: string } | undefined;
+    const claim = vi.spyOn(NodeFSPromises, "mkdir").mockImplementation(async (path, options) => {
+      const result = await mkdir(path, options);
+      if (typeof path === "string" && NodePath.basename(path).startsWith("move-")) {
+        const [plan] = threads.listProvisioningMoveWorktrees();
+        if (plan?.worktreePath !== path) throw new Error("Checkout creation started before the move was recorded");
+        git(project.path, "worktree", "add", "--detach", path, commit);
+        occupied = plan;
+      }
+      return result;
+    });
+    try {
+      expect(await move(undefined, LOCAL_BRANCH_MOVE)).toMatchObject({ status: "failed" });
+    } finally {
+      claim.mockRestore();
+    }
+    if (!occupied) throw new Error("The other client did not create the checkout");
+    expectNoMoveRecord(occupied.id);
+    expect(git(occupied.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+  });
+
+  it("on restart removes the move's checkout if its creation was not recorded", async () => {
+    const { source, project, service, move, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const record = vi.spyOn(threads, "markMoveWorktreeCreated")
+      .mockRejectedValueOnce(new DatabaseWriteOutcomeUnknown("Checkout creation could not be recorded"));
+    onTestFinished(() => { record.mockRestore(); });
+
+    await expect(move(undefined, LOCAL_BRANCH_MOVE)).resolves.toMatchObject({ status: "unconfirmed" });
+    const [plan] = threads.listProvisioningMoveWorktrees();
+    if (!plan) throw new Error("The interrupted move has no record");
+    expect(plan.state).toBe("provisioning");
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(true);
+
+    await service().recoverInterruptedMoves();
+
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(false);
+    expect(git(project.path, "worktree", "list", "--porcelain").match(/^worktree /gm)).toEqual(["worktree "]);
+    expectNoMoveRecord(plan.id);
+    expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
+  });
+
+  it.each([false, true])("on restart keeps another client's matching checkout (locked: %s)", async (locked) => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const commit = git(project.path, "rev-parse", "HEAD");
+    const plan = await interruptedMove(threads, project, "main", commit);
+    NodeFS.mkdirSync(plan.worktreePath, { recursive: true });
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
+    const lock = locked ? ["--lock", "--reason", "another client"] : [];
+    git(project.path, "worktree", "add", ...lock, "--detach", plan.worktreePath, commit);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+  });
+
+  it.each([null, "untracked.txt", ".env"])("recovers an exactly locked checkout with a different HEAD (extra file: %s)", async (file) => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path, ".env");
+    const plan = await interruptedMove(threads, project, "main", git(project.path, "rev-parse", "HEAD"));
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
+    git(project.path, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "different HEAD");
+    git(project.path, "worktree", "add", "--lock", "--reason", `mcode-move ${plan.id}`, "--detach", plan.worktreePath, "HEAD");
+    const evidence = file && NodePath.join(plan.worktreePath, file);
+    if (evidence) NodeFS.writeFileSync(evidence, "Keep my changes");
+
+    await service().recoverInterruptedMoves();
+
+    if (evidence) {
+      expect(NodeFS.readFileSync(evidence, "utf8")).toBe("Keep my changes");
+      expect(git(project.path, "worktree", "list", "--porcelain").split(/\r?\n/)).toContain(`locked mcode-move ${plan.id}`);
+      expect(threads.listProvisioningMoveWorktrees()).toMatchObject([{ id: plan.id, state: "provisioning" }]);
+      NodeFS.unlinkSync(evidence);
+      await service().recoverInterruptedMoves();
+    }
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(false);
+    expectNoMoveRecord(plan.id);
+  });
+
+  it("on restart removes an empty directory claimed before Git created a checkout", async () => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const plan = await interruptedMove(threads, project, "planned");
+    NodeFS.mkdirSync(plan.worktreePath, { recursive: true });
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(false);
+  });
+
+  it.each(["folder", "file", "worktree", "foreign worktree", "absent"] as const)(
+    "after a stop before creation, forgets the record and preserves a %s at the path", async (occupant) => {
+      const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+      initRepository(project.path);
+      const plan = await interruptedMove(threads, project, "planned");
+      occupyMovePath(project.path, plan.worktreePath, occupant);
+
+      await service().recoverInterruptedMoves();
+
+      expectNoMoveRecord(plan.id);
+      expectMovePathOccupant(plan.worktreePath, occupant);
+    },
+  );
+
+  it("on restart preserves a matching detached checkout at an unclaimed path", async () => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const commit = git(project.path, "rev-parse", "HEAD");
+    const plan = await interruptedMove(threads, project, "main", commit);
+    git(project.path, "worktree", "add", "--detach", plan.worktreePath, commit);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+  });
+
+  it("on restart removes an unbound checkout on the exact recorded path and branch", async () => {
+    const { source, project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const plan = await interruptedMove(threads, project, "planned");
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
+    git(project.path, "worktree", "add", "-b", plan.branch, plan.worktreePath, "main");
+    await threads.markMoveWorktreeCreated(plan.id, MOVE_AT);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(false);
+    expect(git(project.path, "worktree", "list", "--porcelain").match(/^worktree /gm)).toEqual(["worktree "]);
+    expect(thread()).toMatchObject({ workspace_id: source.id, worktree_path: null });
+  });
+
+  it.each([false, true])("keeps an unbound dirty checkout for another cleanup attempt (recorded: %s)", async (recorded) => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const plan = await interruptedMove(threads, project, "planned");
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
+    const lock = recorded ? [] : ["--lock", "--reason", `mcode-move ${plan.id}`];
+    git(project.path, "worktree", "add", ...lock, "-b", plan.branch, plan.worktreePath, "main");
+    if (recorded) await threads.markMoveWorktreeCreated(plan.id, MOVE_AT);
+    const evidence = NodePath.join(plan.worktreePath, "uncommitted.txt");
+    NodeFS.writeFileSync(evidence, "Keep my changes");
+
+    await service().recoverInterruptedMoves();
+    expect(NodeFS.readFileSync(evidence, "utf8")).toBe("Keep my changes");
+    expect(database?.query("SELECT state FROM thread_move_worktrees WHERE id = ?").get(plan.id))
+      .toEqual({ state: recorded ? "checkout-created" : "provisioning" });
+
+    NodeFS.unlinkSync(evidence);
+    await service().recoverInterruptedMoves();
+    expectNoMoveRecord(plan.id);
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(false);
+  });
+
+  it.each([true, false])("on restart removes a detached checkout only at the recorded commit (%s)", async (matchesCommit) => {
+    const { project, service, threads } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    const plan = await interruptedMove(threads, project, "main", git(project.path, "rev-parse", "HEAD"));
+    await threads.markMoveWorktreePathClaimed(plan.id, MOVE_AT);
+    if (!matchesCommit) {
+      git(project.path, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "different checkout");
+    }
+    const commit = git(project.path, "rev-parse", "HEAD");
+    git(project.path, "worktree", "add", "--detach", plan.worktreePath, commit);
+    await threads.markMoveWorktreeCreated(plan.id, MOVE_AT);
+
+    await service().recoverInterruptedMoves();
+
+    expectNoMoveRecord(plan.id);
+    expect(NodeFS.existsSync(plan.worktreePath)).toBe(!matchesCommit);
+    if (!matchesCommit) expect(git(plan.worktreePath, "rev-parse", "HEAD")).toBe(commit);
+  });
+
   it("retries the first turn with the relocation note after provider failure", async () => {
     const { move, project, source } = await relocationFixture();
     await move();
@@ -863,6 +1357,35 @@ describe("provider switch on send", () => {
     }));
   });
 
+  it.each([false, true])("reconciles an unknown New worktree move outcome (committed: %s)", async (committed) => {
+    const { move, project, threads, environment } = await relocationFixture({ gitBranch: "main" });
+    initRepository(project.path);
+    interruptMoveWrite(async (commit) => {
+      if (committed) await commit();
+      throw new DatabaseWriteOutcomeUnknown("Move commit reply lost");
+    });
+    const broadcast = vi.spyOn(push, "broadcast");
+    onTestFinished(() => { broadcast.mockRestore(); });
+
+    const result = await move(undefined, LOCAL_BRANCH_MOVE);
+
+    if (!committed) {
+      expect(result).toMatchObject({ status: "unconfirmed" });
+      expect(threads.listProvisioningMoveWorktrees()).toMatchObject([{ threadId, state: "checkout-created" }]);
+      expect(broadcast).not.toHaveBeenCalledWith("thread.movedToProject", expect.objectContaining({ threadId }));
+      return;
+    }
+    expect(result).toMatchObject({ status: "moved", thread: { workspace_id: project.id, mode: "worktree" } });
+    expect(broadcast).toHaveBeenCalledWith("thread.movedToProject", expect.objectContaining({
+      threadId,
+      thread: expect.objectContaining({ workspace_id: project.id, mode: "worktree" }),
+      marker: expect.objectContaining({ threadMove: {
+        projectName: project.name, target: "new-worktree", source: { kind: "branch", branch: "main", startFromOrigin: false },
+      } }),
+    }));
+    await vi.waitFor(() => expect(environment.getAutomaticSetup({ threadId }).gate).toBe("not-required"));
+  });
+
   it.each([
     { failure: new DatabaseWriteOutcomeUnknown("Move commit reply lost"), expected: { status: "unconfirmed", error: "Move commit reply lost" } },
     { failure: new Error("Move rejected"), expected: { status: "failed", cause: "other", error: "Move rejected" } },
@@ -873,6 +1396,23 @@ describe("provider switch on send", () => {
 
     await expect(move()).resolves.toEqual(expected);
   });
+
+  function interruptMoveWrite(interrupt: (commit: () => Promise<void>) => Promise<never>): void {
+    if (!databaseWriter) throw new Error("Expected a database writer");
+    const execute = databaseWriter.execute.bind(databaseWriter);
+    let intercepted = false;
+    const write = vi.spyOn(databaseWriter, "execute").mockImplementation(async (operation, input) => {
+      if (intercepted || operation.name !== threadWriteOperations.moveToProject.name) return execute(operation, input);
+      intercepted = true;
+      return interrupt(async () => { await execute(operation, input); });
+    });
+    onTestFinished(() => { write.mockRestore(); });
+  }
+
+  function throwMoveFailure(cleanup: string): never {
+    if (cleanup === "recovery") throw new DatabaseWriteOutcomeUnknown("Move write reply lost");
+    throw new Error("Move write rejected");
+  }
 
   async function relocationFixture(options: { gitBranch?: string; empty?: boolean } = {}) {
     if (!temporaryDirectory) throw new Error("Expected a test directory");
@@ -893,12 +1433,72 @@ describe("provider switch on send", () => {
     const agentWorkload = new AgentWorkloadService(container.resolve(AgentService).runtimeAccess(),
       container.resolve(CanonicalAgentBoundary), runtime.progress);
     onTestFinished(agentWorkload.observeCommittedEvents());
-    const move = (git: Pick<GitRepositoryService, "getCurrentBranchAt"> = new GitRepositoryService(workspaces, executor)) =>
-      new ThreadMoveService(threads, workspaces, container.resolve(ThreadControlMutationReservationService),
-        git, container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload,
-        () => new Date("2026-11-26T12:00:00.000Z"))
-        .moveToProject({ threadId, workspaceId: project.id, target: { kind: "local" } });
-    return { source, project, move, backgroundCommands };
+    const environment = container.resolve(WorkspaceEnvironmentService);
+    environment.setAutomaticSetupDispatcher({
+      dispatch: (submission) => container.resolve(AgentService).dispatchQueuedAutomaticTurn(submission),
+    });
+    const service = (localGit: Pick<GitRepositoryService, "getCurrentBranchAt"> = new GitRepositoryService(workspaces, executor)) => {
+      const git = new GitRepositoryService(workspaces, container.resolve(RealGitExecutor));
+      git.getCurrentBranchAt = localGit.getCurrentBranchAt.bind(localGit);
+      return new ThreadMoveService(threads, workspaces, container.resolve(ThreadControlMutationReservationService),
+        git, container.resolve(ThreadBranchingService), container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload,
+        { checkouts: container.resolve(GitWorktreeService), startups: container.resolve(ThreadStartupService), setup: environment },
+        () => new Date(MOVE_AT));
+    };
+    const move = (git?: Pick<GitRepositoryService, "getCurrentBranchAt">, target: ThreadMoveInput["target"] = { kind: "local" }) =>
+      service(git).moveToProject({ threadId, workspaceId: project.id, target });
+    return { source, project, move, service, backgroundCommands, threads, environment };
+  }
+
+  async function interruptedMove(threads: ThreadRepo, project: { id: string; path: string }, ref: string, detachedCommit: string | null = null) {
+    const id = crypto.randomUUID();
+    const parent = getManagedWorktreeBaseDir(project.path);
+    NodeFS.mkdirSync(parent, { recursive: true });
+    const plan = { id, threadId, workspaceId: project.id, worktreePath: NodePath.join(parent, `move-${id}`),
+      branch: detachedCommit === null ? `${ref}/${id}` : ref, detachedCommit, createdAt: MOVE_AT };
+    await threads.recordMoveWorktree(plan);
+    return plan;
+  }
+
+  function occupyMovePath(repoPath: string, path: string, occupant: "folder" | "file" | "worktree" | "foreign worktree" | "absent"): void {
+    NodeFS.mkdirSync(NodePath.dirname(path), { recursive: true });
+    if (occupant === "folder") NodeFS.mkdirSync(path);
+    if (occupant === "file") NodeFS.writeFileSync(path, "Other owner's file");
+    if (occupant === "worktree") git(repoPath, "worktree", "add", "-b", "unrelated", path, "main");
+    if (occupant === "foreign worktree") {
+      const foreignRepo = NodePath.join(repoPath, "..", "foreign");
+      NodeFS.mkdirSync(foreignRepo);
+      initRepository(foreignRepo);
+      git(foreignRepo, "worktree", "add", "-b", "unrelated", path, "main");
+    }
+  }
+
+  function expectMovePathOccupant(path: string, occupant: "folder" | "file" | "worktree" | "foreign worktree" | "absent"): void {
+    if (occupant === "folder") expect(NodeFS.readdirSync(path)).toEqual([]);
+    if (occupant === "file") expect(NodeFS.readFileSync(path, "utf8")).toBe("Other owner's file");
+    if (occupant === "worktree" || occupant === "foreign worktree") expect(git(path, "symbolic-ref", "--short", "HEAD")).toBe("unrelated");
+    if (occupant === "absent") expect(NodeFS.existsSync(path)).toBe(false);
+  }
+
+  function expectNoMoveRecord(id: string): void {
+    expect(database?.query("SELECT state FROM thread_move_worktrees WHERE id = ?").get(id)).toBeNull();
+  }
+
+  function moveMarker() {
+    return container.resolve(MessageRepo).listIncludingInternal(threadId).find((message) => message.threadMove)?.threadMove;
+  }
+
+  function initRepository(path: string, ignoredFile?: string): void {
+    git(path, "init", "-b", "main");
+    if (ignoredFile) {
+      NodeFS.writeFileSync(NodePath.join(path, ".gitignore"), `${ignoredFile}\n`);
+      git(path, "add", ".gitignore");
+    }
+    git(path, "-c", "user.email=test@mcode.test", "-c", "user.name=Mcode Test", "commit", "--allow-empty", "-m", "initial");
+  }
+
+  function git(path: string, ...args: string[]): string {
+    return NodeChildProcess.execFileSync("git", ["-C", path, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   }
 
   function writeFixture(change: (db: Database) => void): void {

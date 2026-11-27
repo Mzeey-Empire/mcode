@@ -31,6 +31,11 @@ export const FLOOR_TABLE_NAME = "mcode_schema_compatibility";
  * contain {@link floorUpsertStatement} for that migration's `when` and the step's own tag.
  */
 export const CONTRACT_STEPS: Readonly<Record<string, ContractStep>> = {
+  "0115_thread_move_worktrees": {
+    breaks: [],
+    expandedIn: "0115_thread_move_worktrees",
+    reason: "Older builds cannot read worktree move markers or recover interrupted worktree moves.",
+  },
   "0113_curious_the_twelve": {
     breaks: [],
     expandedIn: "0113_curious_the_twelve",

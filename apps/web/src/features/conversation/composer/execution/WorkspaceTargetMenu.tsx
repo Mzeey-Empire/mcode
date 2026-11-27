@@ -12,6 +12,12 @@ import { cn } from "@/lib/utils";
 import { COMPOSER_MODE_OPTIONS, composerModeOptions, type ComposerMode } from "./composer-mode";
 import { TARGET_TRIGGER_CLASS } from "./target-trigger";
 
+/** Why a workspace mode cannot be chosen right now, as the row's trailing status and its tooltip. */
+export interface UnavailableMode {
+  readonly status: string;
+  readonly reason: string;
+}
+
 /** Props for {@link WorkspaceTargetMenu}. */
 export interface WorkspaceTargetMenuProps {
   readonly mode: ComposerMode;
@@ -19,8 +25,13 @@ export interface WorkspaceTargetMenuProps {
   /** The project folder's name, shown in mono beside Local. */
   readonly folder: string;
   readonly onModeChange: (mode: ComposerMode) => void;
+  readonly onOpenChange?: (open: boolean) => void;
   /** Limits the menu to these modes, for a host that cannot offer a worktree. Defaults to every mode. */
   readonly modes?: readonly ComposerMode[];
+  /** Dims these modes' rows and says why, such as Existing worktree in a project with no worktrees. */
+  readonly unavailable?: Readonly<Partial<Record<ComposerMode, UnavailableMode>>>;
+  /** Which side the menu opens on. Defaults to above, for the composer at the window's foot. */
+  readonly side?: "top" | "bottom";
   readonly className?: string;
 }
 
@@ -29,7 +40,7 @@ export interface WorkspaceTargetMenuProps {
  * the mode; the branch trigger beside it then picks the branch or worktree. A project that is not a
  * git repo can only run Local, so it gets a static label instead of a menu.
  */
-export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, modes, className }: WorkspaceTargetMenuProps) {
+export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, onOpenChange, modes, unavailable, side = "top", className }: WorkspaceTargetMenuProps) {
   if (!isGitRepo) {
     const { Icon, label } = COMPOSER_MODE_OPTIONS.direct;
     return (
@@ -42,7 +53,7 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, mod
 
   const { Icon, label } = COMPOSER_MODE_OPTIONS[mode];
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger
         render={
           <Button
@@ -58,21 +69,21 @@ export function WorkspaceTargetMenu({ mode, isGitRepo, folder, onModeChange, mod
           </Button>
         }
       />
-      <DropdownMenuContent align="start" side="top" className="w-[28.8rem]">
-        <WorkspaceModeMenuGroup mode={mode} folder={folder} onModeChange={onModeChange} modes={modes} />
+      <DropdownMenuContent align="start" side={side} className="w-[28.8rem]">
+        <WorkspaceModeMenuGroup mode={mode} folder={folder} onModeChange={onModeChange} modes={modes} unavailable={unavailable} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
 /** Props for {@link WorkspaceModeMenuGroup}. */
-export type WorkspaceModeMenuGroupProps = Pick<WorkspaceTargetMenuProps, "mode" | "folder" | "onModeChange" | "modes">;
+export type WorkspaceModeMenuGroupProps = Pick<WorkspaceTargetMenuProps, "mode" | "folder" | "onModeChange" | "modes" | "unavailable">;
 
 /**
  * The "Workspace" menu rows for a git project, shared by the rail trigger and the Overview row so
  * both list the same names, order and folder meta. Render inside a `DropdownMenuContent`.
  */
-export function WorkspaceModeMenuGroup({ mode, folder, onModeChange, modes }: WorkspaceModeMenuGroupProps) {
+export function WorkspaceModeMenuGroup({ mode, folder, onModeChange, modes, unavailable }: WorkspaceModeMenuGroupProps) {
   return (
     <DropdownMenuGroup>
       <DropdownMenuGroupLabel>Workspace</DropdownMenuGroupLabel>
@@ -82,12 +93,18 @@ export function WorkspaceModeMenuGroup({ mode, folder, onModeChange, modes }: Wo
           label={option.label}
           icon={<option.Icon />}
           checked={option.mode === mode}
-          trailing={option.mode === "direct" ? <FolderMeta folder={folder} /> : undefined}
+          trailing={rowTrailing(option.mode, folder, unavailable?.[option.mode])}
+          disabledReason={unavailable?.[option.mode]?.reason}
           onClick={() => onModeChange(option.mode)}
         />
       ))}
     </DropdownMenuGroup>
   );
+}
+
+function rowTrailing(mode: ComposerMode, folder: string, unavailable: UnavailableMode | undefined) {
+  if (unavailable) return <span className="text-caption text-muted">{unavailable.status}</span>;
+  return mode === "direct" ? <FolderMeta folder={folder} /> : undefined;
 }
 
 // The row's trailing slot never shrinks, so an unbounded folder name would squeeze out "Local" and the check.

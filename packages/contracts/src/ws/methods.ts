@@ -49,7 +49,7 @@ import type {
 } from "../models/workspace-environment.js";
 import { ThreadSchema, RecentThreadSchema } from "../models/thread.js";
 import { ApprovalReviewModeSchema, DevinModeSchema, ThreadModeSchema, PermissionModeSchema, InteractionModeSchema, OrchestrationModeSchema } from "../models/enums.js";
-import { MessageSchema, PaginatedMessagesSchema } from "../models/message.js";
+import { MessageSchema, PaginatedMessagesSchema, type PaginatedMessages } from "../models/message.js";
 import { MessageMentionsSchema } from "../models/mention.js";
 import { SelectedTextCommentsSchema } from "../models/selected-text-comment.js";
 import { ConversationNarrativeBatchSchema, ConversationPageSchema } from "../models/conversation-page.js";
@@ -202,6 +202,26 @@ export type ThreadCompletionResult = z.infer<ReturnType<typeof ThreadCompletionR
 
 export const ThreadMoveTargetSchema = lazySchema(() => z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local") }),
+  z.object({
+    kind: z.literal("new-worktree"),
+    source: z.discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("branch"),
+        baseBranch: z.string().min(1),
+        startFromOrigin: z.boolean(),
+      }),
+      z.object({
+        kind: z.literal("pr"),
+        branch: z.string().min(1),
+        pullRequestNumber: z.number().int().positive(),
+      }),
+    ]),
+  }),
+  z.object({
+    kind: z.literal("existing-worktree"),
+    worktreePath: z.string().min(1),
+    baseBranch: z.string().min(1).optional(),
+  }),
 ]));
 
 /** Request to move one No project thread into an existing project. */
@@ -687,7 +707,9 @@ export type FilesystemBrowseResult = z.infer<ReturnType<typeof FilesystemBrowseR
 
 // TS7056: without an explicit type, tsc refuses to serialize the registry's inferred declaration.
 const threadResultSchema: () => z.ZodType<import("../models/thread.js").Thread, z.ZodTypeDef, z.input<ReturnType<typeof ThreadSchema>>> = lazySchema(() => ThreadSchema());
+const threadMoveInputSchema: () => z.ZodType<ThreadMoveInput> = ThreadMoveInputSchema;
 const threadMoveResultSchema: () => z.ZodType<ThreadMoveResult, z.ZodTypeDef, z.input<ReturnType<typeof ThreadMoveResultSchema>>> = ThreadMoveResultSchema;
+const messageListResultSchema: () => z.ZodType<PaginatedMessages, z.ZodTypeDef, z.input<ReturnType<typeof PaginatedMessagesSchema>>> = PaginatedMessagesSchema;
 
 /**
  * The move dialog's read, declared as a named type so the registry's inferred declaration stays under the
@@ -907,7 +929,7 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.boolean(),
   },
   "thread.moveToProject": {
-    params: ThreadMoveInputSchema(),
+    params: threadMoveInputSchema(),
     result: threadMoveResultSchema(),
   },
   /** Reads what the move dialog shows. Null when the thread is not an open No project thread. */
@@ -1316,7 +1338,7 @@ export const WS_METHODS = lazySchema(() => ({
       limit: z.number().int().min(1).max(1000),
       before: z.number().int().optional(),
     }),
-    result: PaginatedMessagesSchema(),
+    result: messageListResultSchema(),
   },
   "conversation.page": {
     params: z.object({

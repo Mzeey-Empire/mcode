@@ -71,9 +71,14 @@ function branchPick(mode: BranchPickMode, branch: TargetBranch, select: SelectBr
   };
 }
 
-function worktreePick(worktree: AttachedWorktree | null, path: string, select: (worktree: AttachedWorktree) => void): TargetPick {
+function worktreePick(
+  worktree: AttachedWorktree | null,
+  path: string,
+  select: (worktree: AttachedWorktree) => void,
+  placeholder: string,
+): TargetPick {
   return {
-    label: newThreadTargetLabel({ mode: "existing-worktree", worktree }) ?? placeholderTargetLabel("Choose worktree"),
+    label: newThreadTargetLabel({ mode: "existing-worktree", worktree }) ?? placeholderTargetLabel(placeholder),
     list: "worktrees",
     value: path ? { kind: "worktree", path } : null,
     select: (target) => {
@@ -116,6 +121,53 @@ function newWorktreePick(
   };
 }
 
+export interface NewThreadTargetPicks {
+  readonly branch: TargetBranch;
+  readonly branchSource: "branch" | "pr";
+  /** Set only when `branchSource` is `pr`. */
+  readonly pullRequestNumber: number | undefined;
+  readonly startFromOrigin: boolean;
+  readonly worktree: AttachedWorktree | null;
+  readonly selectBranch: SelectBranch;
+  readonly selectPullRequest: (headRefName: string, number: number) => void;
+  readonly setStartFromOrigin: (on: boolean) => void;
+  readonly selectWorktree: (worktree: AttachedWorktree) => void;
+  /** Names the Existing worktree trigger until one is picked. */
+  readonly worktreePlaceholder?: string;
+}
+
+/**
+ * Builds a new thread's trigger copy, picker lists, selected rows, and the Start from origin switch from a host's
+ * picks. The composer holds them in the workspace store; the move dialog holds its own, so a move never changes a
+ * draft.
+ */
+export function newThreadTargetSelection(
+  workspaceId: string | undefined,
+  mode: ComposerMode,
+  picks: NewThreadTargetPicks,
+): ComposerTargetSelectionState {
+  const { branch, worktree } = picks;
+  const base = { workspaceId, contextThreadId: undefined };
+
+  if (mode === "existing-worktree") {
+    return {
+      ...base,
+      target: worktreePick(worktree, worktree?.path ?? "", picks.selectWorktree, picks.worktreePlaceholder ?? "Choose worktree"),
+      baseBranch: isDetachedWorktree(worktree) ? branchPick("worktree", branch, picks.selectBranch) : null,
+    };
+  }
+  if (mode === "worktree") {
+    const pullRequest = {
+      number: picks.branchSource === "pr" ? picks.pullRequestNumber : undefined,
+      select: picks.selectPullRequest,
+    };
+    const forced = picks.branchSource === "branch" && branch.remote === "origin";
+    const origin = { checked: forced || picks.startFromOrigin, forced, set: picks.setStartFromOrigin };
+    return { ...base, target: newWorktreePick(branch, pullRequest, picks.selectBranch, origin), baseBranch: null };
+  }
+  return { ...base, target: branchPick("direct", branch, picks.selectBranch), baseBranch: null };
+}
+
 /** Owns a new thread's target trigger: copy, picker list, selected row, and how a pick lands in the store. */
 export function useNewThreadTargetSelection(workspaceId: string | undefined, mode: ComposerMode): ComposerTargetSelectionState {
   const branch = useNewThreadTargetBranch(workspaceId);
@@ -127,25 +179,18 @@ export function useNewThreadTargetSelection(workspaceId: string | undefined, mod
   const setNewThreadBranch = useWorkspaceStore((state) => state.setNewThreadBranch);
   const setNewThreadBranchFromPr = useWorkspaceStore((state) => state.setNewThreadBranchFromPr);
   const setSelectedWorktree = useWorkspaceStore((state) => state.setSelectedWorktree);
-  const base = { workspaceId, contextThreadId: undefined };
 
-  if (mode === "existing-worktree") {
-    return {
-      ...base,
-      target: worktreePick(selectedWorktree, selectedWorktree?.path ?? "", setSelectedWorktree),
-      baseBranch: isDetachedWorktree(selectedWorktree) ? branchPick("worktree", branch, setNewThreadBranch) : null,
-    };
-  }
-  if (mode === "worktree") {
-    const pullRequest = {
-      number: branchSource === "pr" ? pullRequestNumber : undefined,
-      select: setNewThreadBranchFromPr,
-    };
-    const forced = branchSource === "branch" && branch.remote === "origin";
-    const origin = { checked: forced || startFromOrigin, forced, set: setNewThreadStartFromOrigin };
-    return { ...base, target: newWorktreePick(branch, pullRequest, setNewThreadBranch, origin), baseBranch: null };
-  }
-  return { ...base, target: branchPick("direct", branch, setNewThreadBranch), baseBranch: null };
+  return newThreadTargetSelection(workspaceId, mode, {
+    branch,
+    branchSource,
+    pullRequestNumber,
+    startFromOrigin,
+    worktree: selectedWorktree,
+    selectBranch: setNewThreadBranch,
+    selectPullRequest: setNewThreadBranchFromPr,
+    setStartFromOrigin: setNewThreadStartFromOrigin,
+    selectWorktree: setSelectedWorktree,
+  });
 }
 
 /** Owns a fork's target trigger, listing from the checkout the parent thread runs in. */
@@ -164,7 +209,7 @@ export function useForkTargetSelection(sourceThread: ForkSourceThread | undefine
   if (mode === "existing-worktree") {
     return {
       ...base,
-      target: worktreePick(worktree, branchWorktreePath, (picked) => setBranchWorktreePath(picked.path)),
+      target: worktreePick(worktree, branchWorktreePath, (picked) => setBranchWorktreePath(picked.path), "Choose worktree"),
       baseBranch: isDetachedWorktree(worktree) ? branchPick("worktree", branch, setBranchTargetBranch) : null,
     };
   }

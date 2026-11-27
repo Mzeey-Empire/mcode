@@ -101,9 +101,9 @@ export class ThreadStartupService {
     return this.commit(threadStartupStateWriteOperations.appendOutputs, [input, this.timestamp()]);
   }
 
-  /** Complete the final phase and make the lifecycle terminal. */
-  complete(...input: Parameters<ThreadStartupStateStore["complete"]>): Promise<ThreadStartup> {
-    return this.commit(threadStartupStateWriteOperations.complete, [input, this.timestamp()]);
+  /** Complete the lifecycle, skipping agent startup if Setup ran without a turn. */
+  complete(...[startupId, completion]: Parameters<ThreadStartupStateStore["complete"]>): Promise<ThreadStartup> {
+    return this.commit(threadStartupStateWriteOperations.complete, [[startupId, completion], this.timestamp()]);
   }
 
   /** Keep the current phase blocked until the user retries or continues. */

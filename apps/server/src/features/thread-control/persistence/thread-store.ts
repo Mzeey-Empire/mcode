@@ -4,12 +4,19 @@
  */
 
 import * as NodeCrypto from "node:crypto";
+import * as NodePath from "node:path";
 import { z } from "zod";
 import { forgetThreadPullRequests, readLinks } from "../../pull-requests/links/pull-request-link-funnel.js";
 import { rankPullRequests, ThreadPullRequestSchema } from "@mcode/contracts/models/thread-pull-request";
 import { PROVIDER_CATALOG } from "@mcode/contracts/providers/catalog";
+import { hostRuntime } from "@mcode/shared/node/host-runtime";
 import { MessageStore } from "../../agents/conversation/persistence/message-store.js";
 import { WorkspaceStore } from "../../projects/persistence/workspace-store.js";
+import { WorkspaceEnvironmentAutomaticStore } from "../../projects/environment/workspace-environment-automatic-store.js";
+import { normalizeWorktreePath } from "../../projects/git/worktree-path.js";
+import { ThreadStartupStore } from "../../thread-startup/persistence/thread-startup-store.js";
+import { ThreadStartupStateStore } from "../../thread-startup/thread-startup-state-store.js";
+import type { ThreadMoveMarker } from "@mcode/contracts/models/message";
 import type { Database } from "bun:sqlite";
 import { and, asc, desc, eq, getTableColumns, gt, inArray, isNotNull, isNull, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import { drizzle, type BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
@@ -30,16 +37,36 @@ import {
   cleanupJobs,
   messages,
   pullRequestReviewLinks,
+  threadMoveWorktrees,
   threadStartups,
   threads,
   turnResumeSchedules,
   workspaces,
 } from "../../../runtime/persistence/sqlite/schema.js";
 import { runChanges } from "../../../runtime/persistence/sqlite/drizzle-changes.js";
+import { normalizePathForComparison } from "../../../shared/filesystem/path-identity.js";
 import { transcriptMessageVisibility } from "../../agents/conversation/persistence/transcript-visibility.js";
 import { SequenceAheadError } from "../attention/sequence-ahead-error.js";
 import { ThreadProviderSessionStore } from "./thread-provider-session-store.js";
+import type { ThreadMovePlacement } from "./thread-write-operations.js";
 import { advanceThreadActivity } from "./thread-activity.js";
+
+/** Durable checkout ownership for a thread move. */
+export type ThreadMoveWorktree = typeof threadMoveWorktrees.$inferSelect;
+
+function threadMoveMarker(projectName: string, placement: ThreadMovePlacement): ThreadMoveMarker {
+  if (placement.kind === "new-worktree") return { projectName, target: placement.kind, source: placement.source };
+  if (placement.kind === "existing-worktree") return { projectName, target: placement.kind, branch: placement.branch };
+  return { projectName, target: placement.kind };
+}
+
+function matchesMovePlacement(thread: Thread, placement: ThreadMovePlacement): boolean {
+  const worktreePath = placement.kind === "local" ? null : placement.worktreePath;
+  return thread.branch === placement.branch
+    && thread.mode === (worktreePath === null ? "direct" : "worktree")
+    && thread.worktree_path === worktreePath
+    && thread.worktree_managed === (placement.kind === "new-worktree");
+}
 
 type ThreadRow = typeof threads.$inferSelect & {
   scheduledResume: typeof turnResumeSchedules.$inferSelect | null;
@@ -1284,7 +1311,17 @@ export class ThreadStore {
   }
 
   /** Change placement, retention, session ownership, and the timeline together. */
-  moveToProject(id: string, destination: Pick<Workspace, "id" | "path" | "is_git_repo">, branch: string, now: string) {
+  moveToProject(id: string, destination: Pick<Workspace, "id" | "path" | "is_git_repo">, placement: ThreadMovePlacement, now: string) {
+    const detachedBase = placement.kind === "new-worktree" && placement.source.kind === "branch" ? placement.source.branch : null;
+    const newCheckoutState = detachedBase === null ? "named" : "branchless";
+    const checkout = placement.kind !== "local"
+      ? {
+        mode: "worktree" as const, worktreePath: placement.worktreePath,
+        checkoutState: placement.kind === "existing-worktree" ? placement.checkoutState : newCheckoutState,
+        baseBranch: placement.kind === "existing-worktree" ? placement.baseBranch : detachedBase,
+      }
+      : { mode: "direct" as const, checkoutState: "named" as const, worktreePath: null, baseBranch: null };
+
     return this.db.transaction(() => {
       const thread = this.findById(id);
       const workspaces = new WorkspaceStore(this.db);
@@ -1297,8 +1334,8 @@ export class ThreadStore {
         return { status: "failed" as const, cause: "other" as const, error: "The destination project changed while the move was preparing." };
       }
       this.orm.update(threads).set({
-        workspaceId: project.id, mode: "direct", branch, checkoutState: "named",
-        worktreePath: null, worktreeManaged: 0, baseBranch: null, headSha: null,
+        workspaceId: project.id, branch: placement.branch, ...checkout,
+        worktreeManaged: placement.kind === "new-worktree" ? 1 : 0, headSha: null,
         sdkSessionId: null, updatedAt: now,
         relocationWorkspaceId: thread.workspace_id, relocationFreshSession: true,
         relocationNoteGeneration: sql`coalesce(${threads.relocationNoteGeneration}, 0) + 1`,
@@ -1309,24 +1346,99 @@ export class ThreadStore {
         .where(eq(canonicalAgentThreads.id, id)).run();
       workspaces.recordNoProjectMoveOut(thread.workspace_id, now);
       this.providerSessions.removeAll(id);
-      const marker = new MessageStore(this.db).createThreadMove(id, project.name, now);
+      const marker = new MessageStore(this.db).createThreadMove(id, threadMoveMarker(project.name, placement), now);
+      const startup = placement.kind === "new-worktree" ? this.bindMoveWorktree(id, project.id, placement, now) : undefined;
       const updated = this.findById(id);
       if (!updated) throw new Error(`Moved thread not found: ${id}`);
-      return { status: "moved" as const, thread: updated, marker };
+      return { status: "moved" as const, thread: updated, marker, startup };
     })();
   }
 
   /** Read the placement and marker written by this move's transaction. */
-  findCommittedProjectMove(id: string, workspaceId: string, branch: string, timestamp: string) {
+  findCommittedProjectMove(id: string, workspaceId: string, placement: ThreadMovePlacement, timestamp: string) {
     const thread = this.findById(id);
-    if (thread?.workspace_id !== workspaceId || thread.mode !== "direct" || thread.branch !== branch
-      || thread.worktree_path !== null) return undefined;
+    if (thread?.workspace_id !== workspaceId || !matchesMovePlacement(thread, placement)) return undefined;
+    const marker = this.findMoveMarker(id, timestamp);
+    if (marker?.threadMove?.target !== placement.kind) return undefined;
+    const result = { status: "moved" as const, thread, marker };
+    if (placement.kind !== "new-worktree") return { ...result, startup: undefined };
+    const startup = new ThreadStartupStore(this.db).findById(placement.moveId);
+    if (startup?.threadId !== id) return undefined;
+    return { ...result, startup };
+  }
+
+  private findMoveMarker(id: string, timestamp: string) {
     const row = this.orm.select({ id: messages.id }).from(messages)
       .where(and(eq(messages.threadId, id), eq(messages.timestamp, timestamp), isNotNull(messages.threadMove)))
       .orderBy(desc(messages.sequence)).get();
-    const marker = row && new MessageStore(this.db).findById(row.id);
-    if (marker?.threadMove?.target !== "local") return undefined;
-    return { status: "moved" as const, thread, marker };
+    return row && new MessageStore(this.db).findById(row.id);
+  }
+
+  /** Match the recorded path and the canonical spelling returned by Git. */
+  hasOtherThreadAtWorktree(threadId: string, worktreePath: string): boolean {
+    const { platform } = hostRuntime;
+    const paths = [normalizeWorktreePath(worktreePath, platform), normalizePathForComparison(worktreePath, platform)];
+    const candidates = this.orm.select({ path: threads.worktreePath }).from(threads)
+      .where(and(ne(threads.id, threadId), isNotNull(threads.worktreePath))).all();
+    return candidates.some(({ path }) => path !== null && (
+      paths.includes(normalizeWorktreePath(path, platform)) || paths.includes(normalizePathForComparison(path, platform))
+    ));
+  }
+
+  /** Persist the exact checkout that may need cleanup after interruption. */
+  recordMoveWorktree(move: Omit<ThreadMoveWorktree, "pathClaimed" | "state" | "updatedAt">): void {
+    this.orm.insert(threadMoveWorktrees).values({
+      ...move, state: "provisioning", updatedAt: move.createdAt,
+    }).run();
+  }
+
+  /** Record that mkdir succeeded, so an empty directory can be cleaned up. */
+  markMoveWorktreePathClaimed(id: string, now: string): void {
+    const result = runChanges(this.orm.update(threadMoveWorktrees)
+      .set({ pathClaimed: true, updatedAt: now })
+      .where(and(eq(threadMoveWorktrees.id, id), eq(threadMoveWorktrees.state, "provisioning"))));
+    if (result.changes !== 1) throw new Error("The move's worktree record is missing");
+  }
+
+  /** Record checkout ownership after Git successfully creates the worktree. */
+  markMoveWorktreeCreated(id: string, now: string): void {
+    const result = runChanges(this.orm.update(threadMoveWorktrees)
+      .set({ state: "checkout-created", updatedAt: now })
+      .where(and(eq(threadMoveWorktrees.id, id), eq(threadMoveWorktrees.state, "provisioning"), eq(threadMoveWorktrees.pathClaimed, true))));
+    if (result.changes !== 1) throw new Error("The move's worktree record is missing");
+  }
+
+  /** Read worktree moves that have yet to commit their thread binding. */
+  listProvisioningMoveWorktrees(): ThreadMoveWorktree[] {
+    return this.orm.select().from(threadMoveWorktrees)
+      .where(ne(threadMoveWorktrees.state, "bound")).all();
+  }
+
+  /** Discard a provisioning record after its checkout has been handled. */
+  deleteProvisioningMoveWorktree(id: string): void {
+    this.orm.delete(threadMoveWorktrees).where(and(
+      eq(threadMoveWorktrees.id, id), ne(threadMoveWorktrees.state, "bound"),
+    )).run();
+  }
+
+  private bindMoveWorktree(threadId: string, workspaceId: string, placement: Extract<ThreadMovePlacement, { kind: "new-worktree" }>, now: string) {
+    const { moveId, worktreePath, branch } = placement;
+    const bound = runChanges(this.orm.update(threadMoveWorktrees)
+      .set({ state: "bound", updatedAt: now })
+      .where(and(
+        eq(threadMoveWorktrees.id, moveId), eq(threadMoveWorktrees.threadId, threadId),
+        eq(threadMoveWorktrees.workspaceId, workspaceId), eq(threadMoveWorktrees.state, "checkout-created"),
+        eq(threadMoveWorktrees.worktreePath, worktreePath), eq(threadMoveWorktrees.branch, branch),
+      )));
+    if (bound.changes !== 1) throw new Error("The move's worktree record is missing");
+
+    const startups = new ThreadStartupStateStore(new ThreadStartupStore(this.db), () => new Date(now));
+    startups.start({ startupId: moveId, workspaceId, kind: "managed-worktree" });
+    startups.bindThread(moveId, threadId);
+    startups.advance(moveId, "thread");
+    startups.advance(moveId, "worktree", { phase: "worktree", mode: "created", folderName: NodePath.basename(worktreePath), path: worktreePath });
+    new WorkspaceEnvironmentAutomaticStore(this.db, () => now).queueSetup(threadId);
+    return startups.advance(moveId, "setup");
   }
 
   /** Change planning progress only while Plan mode still owns the thread. */

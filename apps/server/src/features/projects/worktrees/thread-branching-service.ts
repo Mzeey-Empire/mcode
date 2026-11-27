@@ -160,7 +160,7 @@ export class ThreadBranchingService {
 
   private async createChild(input: CreateBranchedThreadInput, messageId: string, lifecycle?: BranchedThreadLifecycle) {
     if (input.existingWorktreePath) {
-      return { thread: await this.attachExisting(input, messageId, lifecycle) };
+      return { thread: await this.attachExisting(input, input.existingWorktreePath, messageId, lifecycle) };
     }
     if (input.mode === "worktree") return this.createManaged(input, messageId, lifecycle);
     const args: Parameters<ThreadStartupService["createAndBindThread"]>[1]["args"] = [
@@ -187,21 +187,36 @@ export class ThreadBranchingService {
     };
   }
 
-  private async attachExisting(input: CreateBranchedThreadInput, messageId: string, lifecycle?: BranchedThreadLifecycle): Promise<Thread> {
-    const known = await this.worktrees.listWorktrees(input.workspaceId);
-    const worktree = known.find((candidate) => this.samePath(candidate.path, input.existingWorktreePath!));
-    if (!worktree) throw new Error("Path is not a recognized worktree");
-    const branch = this.attachBranch(worktree.branch, input.existingWorktreeBaseBranch);
-    const detached = worktree.branch === "(detached)";
+  private async attachExisting(input: CreateBranchedThreadInput, path: string, messageId: string, lifecycle?: BranchedThreadLifecycle): Promise<Thread> {
+    const { branch, checkoutState, baseBranch, worktreePath } = await this.resolveExistingWorktree({
+      workspaceId: input.workspaceId,
+      worktreePath: path,
+      baseBranch: input.existingWorktreeBaseBranch,
+    });
     const args: Parameters<ThreadStartupService["createAndBindThread"]>[1]["args"] = [
       input.workspaceId, input.title, "worktree", branch, false, input.provider,
       { parentThreadId: input.parentThreadId, forkedFromMessageId: messageId },
-      detached ? "branchless" : "named", detached ? branch : null,
+      checkoutState, baseBranch,
     ];
-    if (lifecycle) return lifecycle.createAndBindDirectThread({ args, worktreePath: worktree.path });
+    if (lifecycle) return lifecycle.createAndBindDirectThread({ args, worktreePath });
     const thread = await this.threads.create(...args);
-    await this.threads.updateWorktreePath(thread.id, worktree.path);
-    return { ...thread, worktree_path: worktree.path };
+    await this.threads.updateWorktreePath(thread.id, worktreePath);
+    return { ...thread, worktree_path: worktreePath };
+  }
+
+  /** Resolve an attached checkout using only worktrees registered to the destination repository. */
+  async resolveExistingWorktree(input: { workspaceId: string; worktreePath: string; baseBranch?: string }) {
+    const known = await this.worktrees.listWorktrees(input.workspaceId);
+    const worktree = known.find((candidate) => this.samePath(candidate.path, input.worktreePath));
+    if (!worktree) throw new Error("Path is not a recognized worktree");
+    const branch = this.attachBranch(worktree.branch, input.baseBranch);
+    const detached = worktree.branch === "(detached)";
+    return {
+      worktreePath: worktree.path,
+      branch,
+      checkoutState: detached ? "branchless" as const : "named" as const,
+      baseBranch: detached ? branch : null,
+    };
   }
 
   private attachBranch(branch: string, baseBranch: string | undefined): string {

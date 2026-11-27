@@ -30,7 +30,7 @@ export const threadStartupStateWriteOperations = {
   clearThreadBinding: transition("threadStartup.clearThreadBinding", z.tuple([id, clock])),
   appendOutputs: transition("threadStartup.appendOutputs", z.tuple([z.tuple([z.string(), z.array(z.string().max(THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS)).max(32)]), clock])),
   appendOutput: transition("threadStartup.appendOutput", z.tuple([z.tuple([z.string(), z.string().max(THREAD_STARTUP_TRANSCRIPT_ENTRY_MAX_CHARS)]), clock])),
-  complete: transition("threadStartup.complete", z.tuple([id, clock])),
+  complete: transition("threadStartup.complete", z.tuple([z.tuple([z.string(), z.literal("setup-only").optional()]), clock])),
   block: transition("threadStartup.block", z.tuple([z.tuple([z.string(), ThreadStartupBlockSchema(), ThreadStartupStepDetailSchema().optional()]), clock])),
   resume: transition("threadStartup.resume", z.tuple([id, clock])),
   skip: transition("threadStartup.skip", z.tuple([z.tuple([z.string(), ThreadStartupPhaseSchema, ThreadStartupStepDetailSchema().optional()]), clock])),

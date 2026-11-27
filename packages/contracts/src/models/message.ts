@@ -119,11 +119,23 @@ export const ProviderSwitchMarkerSchema = lazySchema(() => z.object({
 /** The provider switch a system message records. */
 export type ProviderSwitchMarker = z.infer<ReturnType<typeof ProviderSwitchMarkerSchema>>;
 
+/** The source details needed to label a new-worktree move on the timeline. */
+export const NewWorktreeMoveSourceSchema = lazySchema(() => z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("branch"), branch: z.string(), startFromOrigin: z.boolean() }),
+  z.strictObject({ kind: z.literal("pr"), pullRequestNumber: z.number().int().positive() }),
+]));
+
+const threadMoveMarker = lazySchema(() => z.discriminatedUnion("target", [
+  z.strictObject({ projectName: z.string(), target: z.literal("local") }),
+  z.strictObject({ projectName: z.string(), target: z.literal("new-worktree"), source: NewWorktreeMoveSourceSchema() }),
+  z.strictObject({ projectName: z.string(), target: z.literal("existing-worktree"), branch: z.string() }),
+]));
+
 /** The destination as it appeared when the thread moved. */
-export const ThreadMoveMarkerSchema = lazySchema(() => z.object({
-  projectName: z.string(),
-  target: z.literal("local"),
-}).strict());
+export type ThreadMoveMarker = z.infer<ReturnType<typeof threadMoveMarker>>;
+
+/** Validates the persisted receipt without expanding its union in every message schema. */
+export const ThreadMoveMarkerSchema: () => z.ZodType<ThreadMoveMarker> = threadMoveMarker;
 
 /** Content of the system message written when a context compaction ends; clients find it by this text. */
 export const CONTEXT_COMPACTED_NOTICE = "Context compacted";

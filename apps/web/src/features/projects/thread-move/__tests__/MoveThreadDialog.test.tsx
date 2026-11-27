@@ -1,5 +1,6 @@
 import { createMockMessage, createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
-import type { GitRef } from "@mcode/contracts/git";
+import type { DetachedWorktreeTarget, GitRef, GitRefsListParams, GitRefsListResult } from "@mcode/contracts/git";
+import type { PullRequestTarget } from "@mcode/contracts/github";
 import type { ThreadMovePreflight, ThreadMoveResult } from "@mcode/contracts/ws/methods";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
@@ -20,6 +21,11 @@ import { useSidebarUiStore } from "../../sidebar/sidebar-ui-store";
 import { useWorkspaceStore } from "../../state/workspaceStore";
 import { MoveThreadDialogHost } from "../MoveThreadDialog";
 import { closeMoveThreadDialog, openMoveThreadDialog } from "../move-thread-store";
+import { installListboxLayout } from "@/__tests__/helpers/picker-layout";
+import { invalidateBranchTargets } from "@/features/conversation/composer/execution/targets/useBranchTargets";
+import { rememberStartFromOrigin } from "@/lib/start-from-origin-preference";
+
+installListboxLayout();
 
 const ALPHA = createMockWorkspace({ id: "ws-alpha", name: "alpha", path: "/work/alpha", is_git_repo: false });
 const BETA = createMockWorkspace({ id: "ws-beta", name: "beta", path: "/work/beta", is_git_repo: false });
@@ -340,6 +346,304 @@ describe("MoveThreadDialog", () => {
 
       expect(screen.queryByText(/Old files deleted/)).toBeNull();
     });
+  });
+});
+
+const OTHER_GIT_PROJECT = createMockWorkspace({ id: "ws-git-2", name: "gitty-two", path: "/work/gitty-two", is_git_repo: true });
+const RETRY_WORKTREE = { path: "/work/gitty-wt/reconnect-retry", folder: "reconnect-retry" };
+const REVIEW_WORKTREE = { path: "/work/gitty-wt/review", folder: "review" };
+
+function ref(shortName: string, overrides: Partial<GitRef> = {}): GitRef {
+  return {
+    kind: "ref", fullName: `refs/heads/${shortName}`, shortName, branchName: shortName, remote: null, twin: null,
+    isCurrent: false, isDefault: false, worktree: null, headSha: "a".repeat(40), committedAt: "2026-10-01T12:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function pullRequest(number: number, title: string, headRefName: string): PullRequestTarget {
+  return { number, title, headRefName, author: "octo", isCrossRepository: false, url: `https://github.com/acme/app/pull/${number}` };
+}
+
+const BRANCHES: readonly GitRef[] = [
+  ref("main", { isCurrent: true, isDefault: true }),
+  ref("feat/reconnect-retry", { worktree: RETRY_WORKTREE }),
+  ref("origin/fix/sidebar-fade", { branchName: "fix/sidebar-fade", remote: "origin", fullName: "refs/remotes/origin/fix/sidebar-fade" }),
+];
+const RETRY_PR = pullRequest(412, "Retry the websocket reconnect with backoff", "feat/reconnect-retry");
+
+function pageOf<T>(items: readonly T[]) {
+  return { ok: true as const, items: [...items], total: items.length, nextCursor: null };
+}
+
+describe("MoveThreadDialog worktree targets", () => {
+  let worktreeRows: readonly (GitRef | DetachedWorktreeTarget)[] = [];
+
+  function answerRefs(params: GitRefsListParams): GitRefsListResult {
+    return pageOf(params.purpose === "existing-worktree" ? worktreeRows : BRANCHES);
+  }
+
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = () => {};
+    useWorkspaceStore.setState({
+      workspaces: [ALPHA, GIT_PROJECT, OTHER_GIT_PROJECT, HIDDEN],
+      workspacesLoaded: true,
+      threads: [THREAD],
+      activeThreadId: THREAD.id,
+      activeWorkspaceId: HIDDEN.id,
+      pendingNewThread: false,
+    });
+    worktreeRows = [ref("feat/reconnect-retry", { worktree: RETRY_WORKTREE })];
+    invalidateBranchTargets(GIT_PROJECT.id);
+    invalidateBranchTargets(OTHER_GIT_PROJECT.id);
+    vi.mocked(mockTransport.listRefs).mockReset().mockImplementation(async (params) => answerRefs(params));
+    vi.mocked(mockTransport.listPullRequestTargets).mockReset().mockResolvedValue(pageOf([RETRY_PR]));
+    vi.mocked(mockTransport.moveThreadToProject).mockReset().mockResolvedValue(movedTo(GIT_PROJECT.id));
+    vi.mocked(mockTransport.readThreadMovePreflight).mockReset().mockResolvedValue(noFiles());
+  });
+
+  afterEach(() => {
+    cleanup();
+    closeMoveThreadDialog();
+    useWorkspaceStore.setState({ workspaces: [], threads: [], activeThreadId: null, activeWorkspaceId: null });
+  });
+
+  const workspaceTrigger = () => screen.getByTestId("workspace-target-trigger");
+
+  async function chooseMode(user: UserEvent, mode: "New worktree" | "Existing worktree"): Promise<void> {
+    await user.click(workspaceTrigger());
+    await user.click(await screen.findByRole("menuitemradio", { name: new RegExp(`^${mode}`) }));
+  }
+
+  async function openPicker(user: UserEvent): Promise<void> {
+    await user.click(await screen.findByTestId("composer-branch-trigger"));
+  }
+
+  async function sentTarget(): Promise<unknown> {
+    await waitFor(() => expect(mockTransport.moveThreadToProject).toHaveBeenCalledOnce());
+    return vi.mocked(mockTransport.moveThreadToProject).mock.calls[0]?.[0].target;
+  }
+
+  it("moves into a new worktree from the project's branch, and leaves the new-thread draft alone", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+
+    await chooseMode(user, "New worktree");
+
+    expect(await screen.findByTestId("composer-branch-trigger")).toHaveTextContent("From main");
+    expect(useWorkspaceStore.getState().newThreadMode).toBe("direct");
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin: false } });
+  });
+
+  it("moves into a new worktree from the branch the user picked", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "New worktree");
+
+    await openPicker(user);
+    await user.click(await screen.findByRole("option", { name: /^feat\/reconnect-retry/ }));
+
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From feat/reconnect-retry");
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "branch", baseBranch: "feat/reconnect-retry", startFromOrigin: false } });
+  });
+
+  it("disables Move thread while the Workspace menu is open", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await waitFor(() => expect(moveButton()).toBeEnabled());
+
+    await user.click(workspaceTrigger());
+    await screen.findByRole("menuitemradio", { name: /^New worktree/ });
+    expect(moveButton()).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(moveButton()).toBeEnabled();
+  });
+
+  it("disables Move thread while the New worktree branch picker is open", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "New worktree");
+    await waitFor(() => expect(moveButton()).toBeEnabled());
+    await openPicker(user);
+    await screen.findByRole("option", { name: /^feat\/reconnect-retry/ });
+    expect(moveButton()).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(moveButton()).toBeEnabled();
+  });
+
+  it("starts from origin when the switch is on", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "New worktree");
+
+    await openPicker(user);
+    await user.click(await screen.findByText("Start from origin"));
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From main (remote)");
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin: true } });
+  });
+
+  it("starts from origin when the project's last new worktree thread did", async () => {
+    rememberStartFromOrigin(GIT_PROJECT.id, true);
+    try {
+      const user = await openDialog();
+      await pickProject(user, "gitty");
+      await chooseMode(user, "New worktree");
+
+      expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From main (remote)");
+      await user.click(moveButton());
+      expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin: true } });
+    } finally {
+      rememberStartFromOrigin(GIT_PROJECT.id, false);
+    }
+  });
+
+  it("names a remote-only branch without its remote and always starts from origin", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "New worktree");
+
+    await openPicker(user);
+    await user.click(await screen.findByRole("option", { name: /^origin\/fix\/sidebar-fade/ }));
+
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "branch", baseBranch: "fix/sidebar-fade", startFromOrigin: true } });
+  });
+
+  it("moves into a new worktree from a pull request with its number and head branch", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "New worktree");
+
+    await openPicker(user);
+    await user.click(await screen.findByRole("radio", { name: "Pull requests" }));
+    await user.click(await screen.findByRole("option", { name: /Retry the websocket reconnect with backoff/ }));
+
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("From #412");
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "new-worktree", source: { kind: "pr", branch: "feat/reconnect-retry", pullRequestNumber: 412 } });
+  });
+
+  it("keeps Move disabled in Existing worktree until a worktree is picked, then moves into it", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+
+    await chooseMode(user, "Existing worktree");
+
+    expect(await screen.findByTestId("composer-branch-trigger")).toHaveTextContent("Choose a worktree");
+    expect(moveButton()).toBeDisabled();
+
+    await openPicker(user);
+    await user.click(await screen.findByRole("option", { name: /^reconnect-retry/ }));
+
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("On feat/reconnect-retry");
+    expect(moveButton()).toBeEnabled();
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "existing-worktree", worktreePath: RETRY_WORKTREE.path });
+  });
+
+  it("sends the base branch the user picked for a detached worktree", async () => {
+    worktreeRows = [{ kind: "detached-worktree", worktree: REVIEW_WORKTREE, headShortSha: "abc1234" }];
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "Existing worktree");
+
+    await openPicker(user);
+    await user.click(await screen.findByRole("option", { name: /review/ }));
+
+    expect(screen.getByTestId("composer-branch-trigger")).toHaveTextContent("review");
+    expect(await screen.findByTestId("composer-base-branch-trigger")).toHaveTextContent("From main");
+    await user.click(screen.getByTestId("composer-base-branch-trigger"));
+    await user.click(await screen.findByRole("option", { name: /^feat\/reconnect-retry/ }));
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "existing-worktree", worktreePath: REVIEW_WORKTREE.path, baseBranch: "feat/reconnect-retry" });
+  });
+
+  it("disables Existing worktree as None yet when the project has no worktrees", async () => {
+    worktreeRows = [];
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+
+    await user.click(workspaceTrigger());
+
+    const row = await screen.findByRole("menuitemradio", { name: /^Existing worktree/ });
+    await waitFor(() => expect(row).toHaveAttribute("aria-disabled", "true"));
+    expect(row).toHaveTextContent("None yet");
+    await user.click(row);
+    expect(workspaceTrigger()).toHaveTextContent("Local");
+  });
+
+  it("offers Existing worktree once a worktree made outside Mcode exists, without a reload", async () => {
+    worktreeRows = [];
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await user.click(workspaceTrigger());
+    await waitFor(async () => expect(await screen.findByRole("menuitemradio", { name: /^Existing worktree/ })).toHaveAttribute("aria-disabled", "true"));
+    await user.keyboard("{Escape}");
+    act(() => closeMoveThreadDialog());
+
+    worktreeRows = [ref("feat/reconnect-retry", { worktree: RETRY_WORKTREE })];
+    act(() => openMoveThreadDialog(THREAD.id));
+    await dialog();
+    await pickProject(user, "gitty");
+    await user.click(workspaceTrigger());
+
+    const row = await screen.findByRole("menuitemradio", { name: /^Existing worktree/ });
+    await waitFor(() => expect(row).not.toHaveAttribute("aria-disabled", "true"));
+    expect(row).not.toHaveTextContent("None yet");
+  });
+
+  it("offers only Local for a project that is not a git repo", async () => {
+    const user = await openDialog();
+    await pickProject(user, "alpha");
+
+    const rail = screen.getByTestId("move-target-rail");
+    expect(within(rail).getByTestId("workspace-target-trigger")).toHaveTextContent("Local");
+    expect(within(rail).queryByRole("button")).toBeNull();
+    expect(within(rail).queryByTestId("composer-branch-trigger")).toBeNull();
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "local" });
+  });
+
+  it("locks the target rail while the move runs, so it keeps naming where the thread is going", async () => {
+    vi.mocked(mockTransport.moveThreadToProject).mockReturnValue(new Promise(() => {}));
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "New worktree");
+    await user.click(moveButton());
+    expect(await screen.findByRole("button", { name: "Moving…" })).toBeVisible();
+
+    expect(workspaceTrigger()).toBeDisabled();
+    expect(screen.getByTestId("composer-branch-trigger")).toBeDisabled();
+    await user.click(workspaceTrigger());
+    await user.click(screen.getByTestId("composer-branch-trigger"));
+    expect(screen.queryByRole("menuitemradio")).toBeNull();
+    expect(screen.queryByRole("option")).toBeNull();
+    expect(workspaceTrigger()).toHaveTextContent("New worktree");
+    expect(mockTransport.moveThreadToProject).toHaveBeenCalledExactlyOnceWith({
+      threadId: THREAD.id,
+      workspaceId: GIT_PROJECT.id,
+      target: { kind: "new-worktree", source: { kind: "branch", baseBranch: "main", startFromOrigin: false } },
+    });
+  });
+
+  it("starts over for another project instead of carrying a worktree across", async () => {
+    const user = await openDialog();
+    await pickProject(user, "gitty");
+    await chooseMode(user, "Existing worktree");
+    await openPicker(user);
+    await user.click(await screen.findByRole("option", { name: /^reconnect-retry/ }));
+    expect(moveButton()).toBeEnabled();
+
+    await pickProject(user, "gitty-two");
+
+    expect(workspaceTrigger()).toHaveTextContent("Local");
+    await user.click(moveButton());
+    expect(await sentTarget()).toEqual({ kind: "local" });
   });
 });
 

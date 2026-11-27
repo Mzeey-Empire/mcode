@@ -205,6 +205,35 @@ export class ThreadRepo {
     return this.reader.findCommittedProjectMove(...input);
   }
 
+  /** Check whether checkout cleanup would affect a different thread. */
+  hasOtherThreadAtWorktree(threadId: string, worktreePath: string): boolean {
+    return this.reader.hasOtherThreadAtWorktree(threadId, worktreePath);
+  }
+
+  /** Save the move's ownership record before starting checkout creation. */
+  recordMoveWorktree(...input: Parameters<ThreadStore["recordMoveWorktree"]>): Promise<void> {
+    return this.writer.execute(threadWriteOperations.recordMoveWorktree, input);
+  }
+
+  /** Save proof that mkdir succeeded for the checkout directory. */
+  markMoveWorktreePathClaimed(...input: Parameters<ThreadStore["markMoveWorktreePathClaimed"]>): Promise<void> {
+    return this.writer.execute(threadWriteOperations.markMoveWorktreePathClaimed, input);
+  }
+
+  /** Save proof that Git created the move's checkout. */
+  markMoveWorktreeCreated(...input: Parameters<ThreadStore["markMoveWorktreeCreated"]>): Promise<void> {
+    return this.writer.execute(threadWriteOperations.markMoveWorktreeCreated, input);
+  }
+
+  listProvisioningMoveWorktrees() {
+    return this.reader.listProvisioningMoveWorktrees();
+  }
+
+  /** Forget an interrupted move once its checkout has been inspected and handled. */
+  deleteProvisioningMoveWorktree(id: string): Promise<void> {
+    return this.writer.execute(threadWriteOperations.deleteProvisioningMoveWorktree, [id]);
+  }
+
   /** Publish planning changes after their transaction has committed. */
   publishPlanPhase(threadId: string): void {
     this.attention?.invalidate(threadId);

@@ -72,7 +72,7 @@ export interface WorkspaceThreadRouterDeps {
 }
 
 const workspaceThreadHandlers = {
-  "thread.moveToProject": (deps, params) => deps.threadMoveService.moveToProject(params),
+  "thread.moveToProject": moveThreadToProject,
   "thread.moveToProjectPreflight": (deps, params) => deps.threadMovePreflightService.read(params.threadId),
   "workspace.list": (deps) => deps.workspaceService.list(),
   "workspace.create": createWorkspace,
@@ -138,6 +138,18 @@ export async function routeWorkspaceThreadRpc<Method extends WorkspaceThreadRpcM
   deps: WorkspaceThreadRouterDeps,
 ): Promise<unknown> {
   return await workspaceThreadHandlers[method](deps, params);
+}
+
+/** Move a No project thread through the workspace RPC. */
+export async function moveThreadToProject(
+  deps: Pick<WorkspaceThreadRouterDeps, "threadMoveService"> & {
+    gitWatcherService: Pick<GitWatcherService, "watchThreadWorktree">;
+  },
+  params: WorkspaceThreadRpcParamsByMethod["thread.moveToProject"],
+) {
+  const result = await deps.threadMoveService.moveToProject(params);
+  if (result.status === "moved") watchReturnedThreadWorktree(deps, result.thread);
+  return result;
 }
 
 async function createWorkspace(
@@ -251,7 +263,7 @@ async function createThread(
 }
 
 function watchReturnedThreadWorktree(
-  deps: WorkspaceThreadRouterDeps,
+  deps: { gitWatcherService: Pick<GitWatcherService, "watchThreadWorktree"> },
   thread: unknown,
 ): void {
   const maybeThread = thread as { id?: string; mode?: string; worktree_path?: string | null } | null;

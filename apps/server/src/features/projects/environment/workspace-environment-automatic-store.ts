@@ -126,6 +126,11 @@ export class WorkspaceEnvironmentAutomaticStore {
     return { snapshot: this.snapshot(input.threadId), queued };
   }
 
+  /** Queue Setup in a checkout binding transaction when there is no first Turn yet. */
+  queueSetup(threadId: string): void {
+    this.ensureBlockedSetupGate(threadId, this.findSetupGate(threadId), this.now());
+  }
+
   private queueBlockedFirstTurn(
     input: WorkspaceEnvironmentQueueFirstTurnInput,
     now: string,

@@ -352,12 +352,12 @@ export class MessageStore {
     return rowToMessage(row);
   }
 
-  /** Older builds can read a move marker as a plain system message. */
-  createThreadMove(threadId: string, projectName: string, timestamp: string): Message {
-    const threadMove = ThreadMoveMarkerSchema().parse({ projectName, target: "local" });
+  /** Record the new placement as a visible system message. */
+  createThreadMove(threadId: string, threadMove: NonNullable<Message["threadMove"]>, timestamp: string): Message {
+    const fallback = `Moved to ${threadMove.projectName}`;
     const row = this.orm.insert(messages).values({
       id: NodeCrypto.randomUUID(), threadId, role: "system",
-      content: `Moved to ${projectName} · Local`,
+      content: threadMove.target === "local" ? `${fallback} · Local` : fallback,
       sequence: this.getLatestSequenceIncludingInternal(threadId) + 1,
       timestamp, threadMove: JSON.stringify(threadMove),
     }).returning().get();

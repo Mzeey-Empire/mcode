@@ -38,7 +38,7 @@ type WorktreeCreationRequest = {
   name: string;
   path: string;
   repoPath: string;
-  options: { branchless?: boolean; baseRef?: string; startPoint?: string };
+  options: { branchless?: boolean; baseRef?: string; startPoint?: string; moveId?: string; onPathClaimed?: () => Promise<void> };
 };
 
 type WorktreeRemovalRequest = {
@@ -88,10 +88,15 @@ export class GitWorktreeService {
     repoPath: string,
     name: string,
     branchName?: string,
-    options: { branchless?: boolean; baseRef?: string; startPoint?: string } = {},
+    options: WorktreeCreationRequest["options"] = {},
   ): Promise<WorktreeInfo & { createdBranch: boolean; warnings: string[] }> {
     const request = this.createWorktreeRequest(repoPath, name, branchName, options);
     const createdBranch = await this.shouldCreateBranch(request);
+    // Git accepts an existing empty directory. Claim a move's recorded path with mkdir first.
+    if (options.onPathClaimed) {
+      await NodeFSPromises.mkdir(request.path);
+      await options.onPathClaimed();
+    }
     await this.createGitWorktree(request, createdBranch);
     return {
       name: request.name,
@@ -101,6 +106,28 @@ export class GitWorktreeService {
       createdBranch,
       warnings: [],
     };
+  }
+
+  /** Remove a clean checkout only when its Git registration proves the move owns it. */
+  async removeProvisionedWorktree(
+    repoPath: string | undefined, move: ProvisionedMoveCheckout, recordCheckoutCreated: () => Promise<void>,
+  ): Promise<"unclaimed" | "missing" | "unowned" | "kept" | "removed"> {
+    if (!move.pathClaimed) return "unclaimed";
+    const { worktreePath } = move;
+    const entry = await statIfPresent(worktreePath);
+    if (!entry) return "missing";
+    if (!entry.isDirectory()) return "unowned";
+    if (!(await statIfPresent(NodePath.join(worktreePath, ".git")))?.isFile()) {
+      return move.checkoutCreated ? "unowned" : removeClaimedDirectory(worktreePath);
+    }
+    if (!repoPath) throw new Error("Destination repository is unavailable");
+
+    return this.removeRegisteredMoveCheckout(repoPath, move, recordCheckoutCreated);
+  }
+
+  /** Release the Git lock from a checkout after its ownership has been recorded. */
+  async unlockWorktree(repoPath: string, worktreePath: string): Promise<void> {
+    await this.gitExecutor.exec(["-C", repoPath, "worktree", "unlock", worktreePath]);
   }
 
   /** Remove a worktree and, when requested, its branch. */
@@ -207,7 +234,7 @@ export class GitWorktreeService {
     repoPath: string,
     name: string,
     branchName: string | undefined,
-    options: { branchless?: boolean; baseRef?: string; startPoint?: string },
+    options: WorktreeCreationRequest["options"],
   ): WorktreeCreationRequest {
     validateWorktreeName(name);
     if (!NodeFS.existsSync(repoPath)) throw new Error(`Repository path does not exist: ${repoPath}`);
@@ -215,7 +242,7 @@ export class GitWorktreeService {
     validateBranchName(branch);
     if (options.baseRef) validateBranchName(options.baseRef);
     const path = NodePath.join(ensureManagedWorktreeBaseDir(repoPath), name);
-    if (NodeFS.existsSync(path)) throw new Error(`Worktree directory already exists: ${path}`);
+    if (!options.onPathClaimed && NodeFS.existsSync(path)) throw new Error(`Worktree directory already exists: ${path}`);
     return { branch, name, path, repoPath, options };
   }
 
@@ -229,6 +256,49 @@ export class GitWorktreeService {
     createdBranch: boolean,
   ): Promise<void> {
     await this.gitExecutor.exec(createWorktreeArgs(request, createdBranch), { timeout: WORKTREE_ADD_TIMEOUT_MS });
+  }
+
+  private async removeRegisteredMoveCheckout(
+    repoPath: string, move: ProvisionedMoveCheckout, recordCheckoutCreated: () => Promise<void>,
+  ): Promise<"unowned" | "kept" | "removed"> {
+    const { id, worktreePath, checkoutCreated } = move;
+    const { stdout } = await this.gitExecutor.exec(["-C", repoPath, "worktree", "list", "--porcelain", "-z"]);
+    const checkout = findCheckoutRecord(stdout, worktreePath);
+    if (!checkout) return "unowned";
+    const lock = checkout.find((field) => field === "locked" || field.startsWith("locked "));
+    const lockReason = moveWorktreeLockReason(id);
+    const ownsLock = lock === `locked ${lockReason}`;
+    const matches = matchesMoveCheckout(checkout, move);
+    const ownsCheckout = lock ? ownsLock : checkoutCreated && matches;
+    if (!ownsCheckout) return "unowned";
+
+    const [{ stdout: expectedCommonDir }, { stdout: actualCommonDir }] = await Promise.all([
+      this.gitExecutor.exec(["-C", repoPath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
+      this.gitExecutor.exec(["-C", worktreePath, "rev-parse", "--path-format=absolute", "--git-common-dir"]),
+    ]);
+    if (NodePath.relative(expectedCommonDir.trimEnd(), actualCommonDir.trimEnd()) !== "") return "unowned";
+
+    // Git's worktree remove also deletes ignored files, so check before giving up the move lock.
+    const { stdout: status } = await this.gitExecutor.exec([
+      "-C", worktreePath, "status", "--porcelain=v1", "-z",
+      "--ignored=matching", "--untracked-files=all", "--ignore-submodules=none",
+    ]);
+    if (status.length > 0) return "kept";
+
+    if (ownsLock) {
+      // Keep ownership durable if removal fails or the server stops after unlocking.
+      if (!checkoutCreated) await recordCheckoutCreated();
+      await this.unlockWorktree(repoPath, worktreePath);
+    }
+    await this.gitExecutor.exec(["-C", repoPath, "worktree", "remove", worktreePath], { timeout: 30_000 })
+      .catch(async (error: unknown) => {
+        // An incomplete checkout may still need its lock to prove ownership on the next retry.
+        if (ownsLock && !matches) {
+          await this.gitExecutor.exec(["-C", repoPath, "worktree", "lock", "--reason", lockReason, worktreePath]);
+        }
+        throw error;
+      });
+    return "removed";
   }
 
   private async createWorktreeRemovalRequest(
@@ -352,8 +422,32 @@ function normalizeWorktreePath(path: string): string {
   return identityPath.replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
 }
 
+type ProvisionedMoveCheckout = { id: string; worktreePath: string; branch: string; detachedCommit: string | null; pathClaimed: boolean; checkoutCreated: boolean };
+
+function moveWorktreeLockReason(moveId: string): string {
+  return `mcode-move ${moveId}`;
+}
+
+function matchesMoveCheckout(checkout: string[], { branch, detachedCommit }: ProvisionedMoveCheckout): boolean {
+  return detachedCommit === null
+    ? checkout.includes(`branch refs/heads/${branch}`)
+    : checkout.includes("detached") && checkout.includes(`HEAD ${detachedCommit}`);
+}
+
+function findCheckoutRecord(output: string, worktreePath: string): string[] | undefined {
+  const realPath = NodeFS.realpathSync.native(worktreePath);
+  for (const record of output.split("\0\0")) {
+    const [entry, ...checkout] = record.split("\0");
+    if (!entry?.startsWith("worktree ")) continue;
+    const registeredPath = entry.slice("worktree ".length);
+    if (NodePath.relative(worktreePath, registeredPath) === "" || NodePath.relative(realPath, registeredPath) === "") return checkout;
+  }
+  return undefined;
+}
+
 function createWorktreeArgs(request: WorktreeCreationRequest, createdBranch: boolean): string[] {
   const args = ["-C", request.repoPath, "worktree", "add"];
+  if (request.options.moveId) args.push("--lock", "--reason", moveWorktreeLockReason(request.options.moveId));
   if (request.options.branchless) return [...args, "--detach", request.path, request.options.startPoint ?? request.branch];
   if (!createdBranch) return [...args, request.path, request.branch];
   args.push(request.path, "-b", request.branch);
@@ -383,6 +477,28 @@ function managedParentRemovalOutcome(error: unknown): "stop" | "continue" | "fai
 function errorCode(error: unknown): string {
   if (!error || typeof error !== "object" || !("code" in error)) return "";
   return String((error as NodeJS.ErrnoException).code);
+}
+
+async function statIfPresent(path: string) {
+  try {
+    return await NodeFSPromises.lstat(path);
+  } catch (error) {
+    if (errorCode(error) !== "ENOENT") throw error;
+    return null;
+  }
+}
+
+async function removeClaimedDirectory(path: string): Promise<"removed" | "missing" | "unowned"> {
+  // Another Git client can use the empty directory between mkdir and worktree add.
+  try {
+    await NodeFSPromises.rmdir(path);
+    return "removed";
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ENOENT") return "missing";
+    if (code === "ENOTEMPTY" || code === "EEXIST" || code === "ENOTDIR") return "unowned";
+    throw error;
+  }
 }
 
 function gitErrorMessage(error: unknown): string {

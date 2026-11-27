@@ -154,6 +154,7 @@ import { SettleActionObserver } from "../../features/projects/environment/settle
 import { AGENT_TURN_COMMAND_PORT } from "../../features/agents/orchestration/agent-turn-command-port.js";
 import { ThreadControlMutationReservationService } from "../../features/thread-control/authority/thread-control-mutation-reservation-service.js";
 import { ThreadMoveService } from "../../features/thread-control/lifecycle/thread-move-service.js";
+import { ThreadBranchingService } from "../../features/projects/worktrees/thread-branching-service.js";
 import { ThreadMovePreflightService } from "../../features/thread-control/lifecycle/thread-move-preflight.js";
 import { ScopedPreGrantService } from "../../features/agents/permissions/scoped-pre-grant.js";
 import { PlanFileWriter } from "../../features/agents/planning/plan-file-writer.js";
@@ -523,6 +524,9 @@ const taskRepo = container.resolve(TaskRepo);
 const planQuestionAnswersRepo = container.resolve(PlanQuestionAnswersRepo);
 const planRepo = container.resolve(PlanRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
+const threadMoveService = new ThreadMoveService(threadRepo, workspaceRepo, container.resolve(ThreadControlMutationReservationService),
+  gitRepository, container.resolve(ThreadBranchingService), container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload,
+  { checkouts: gitWorktrees, startups: threadStartupService, setup: workspaceEnvironmentService });
 const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
 const modelCacheService = container.resolve(ModelCacheService);
@@ -1054,8 +1058,7 @@ const { httpServer, wss, stopAdmissionAndDrain } = createWsServer({
   handoffCheckoutService,
   threadDeletionTeardownService,
   threadCompletionService,
-  threadMoveService: new ThreadMoveService(threadRepo, workspaceRepo, container.resolve(ThreadControlMutationReservationService),
-    gitRepository, container.resolve(TurnRuntimeController), backgroundCommands, agentWorkload),
+  threadMoveService,
   threadMovePreflightService: new ThreadMovePreflightService(threadRepo, workspaceRepo),
   browserAutomationBroker,
   desktopHtmlPreviewRenderer,
@@ -1192,6 +1195,7 @@ async function bootstrapServer(): Promise<void> {
     await canonicalSink.materializeConversationDisplay();
     recordStartupCheckpoint("conversation display materialization completed");
 
+    await threadMoveService.recoverInterruptedMoves();
     await interruptThreadStartupsAtStartup();
     await projectActionService.recoverStaleRuns();
     cleanupWorker.start(process.env.MCODE_AGENT_RUNTIME === "1"
