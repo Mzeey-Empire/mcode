@@ -15,6 +15,7 @@ import type { TurnSteerParams, TurnSteerResult, ListHeldSteersResult, SettleUnkn
 import type { TurnRetryParams, TurnResumeScheduleParams, ScheduledTurnResume, TurnRetryResult, TurnResumeParams, TurnResumeResult } from "@mcode/contracts/models/turn-recovery";
 import type { WorkspaceFileList, WorkspaceFileChanges, FileReadResult, FileChangedLines } from "@mcode/contracts/models/workspace-file";
 import type { FilesystemBrowseResult, WorkspaceCreateResult, CreateAndSendResult, SetThreadSubscriptionsInput, SetThreadSubscriptionsResult, SendMessageInput, CreateAndSendInput, ThreadCompletionResult, ThreadMoveInput, ThreadMovePreflight, ThreadMoveResult } from "@mcode/contracts/ws/methods";
+import type { CreateProjectFromFolderInput, CreateProjectFromFolderResult, WorkspaceMoveFrame, WorkspaceMoveRetryGitResult, WorkspaceMoveStatusInput } from "@mcode/contracts/ws/workspace-move";
 import type { ReviewComparisonResult, ReviewFileDiffResult, ReviewTurn } from "@mcode/contracts/models/review-comparison";
 import type { Workspace, WorkspaceEnrichment } from "@mcode/contracts/models/workspace";
 import type { WorkspaceEnvironmentDocument, WorkspaceEnvironmentReadResult, WorkspaceEnvironmentStorageMode, WorkspaceEnvironmentCommandTarget, WorkspaceEnvironmentAutomaticSetupSnapshot, WorkspaceEnvironmentActionRun } from "@mcode/contracts/models/workspace-environment";
@@ -426,6 +427,12 @@ export interface McodeTransport {
   moveThreadToProject(input: ThreadMoveInput): Promise<ThreadMoveResult>;
   /** What the move dialog shows before the user commits; null when the thread cannot move. */
   readThreadMovePreflight(threadId: string): Promise<ThreadMovePreflight | null>;
+  /** Turn a No project thread's folder into a project, taking every thread in the folder with it. Resolves once the move is reserved, not finished. */
+  createProjectFromFolder(input: CreateProjectFromFolderInput): Promise<CreateProjectFromFolderResult>;
+  /** The newest frame of a project move, found by operation id or through any thread in its folder; null when there is none. */
+  readWorkspaceMoveStatus(input: WorkspaceMoveStatusInput): Promise<WorkspaceMoveFrame | null>;
+  /** Run only the git init step again on a project whose creation finished with a git failure. */
+  retryWorkspaceMoveGit(operationId: string): Promise<WorkspaceMoveRetryGitResult>;
   /** Persist per-thread composer settings (reasoning, mode, permission, copilot agent, context window, thinking). */
   updateThreadSettings(
     threadId: string,
