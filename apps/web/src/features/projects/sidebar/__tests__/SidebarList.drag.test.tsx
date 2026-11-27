@@ -307,7 +307,7 @@ describe("SidebarList thread drag", () => {
     expect(dragging()).toBe(false);
   });
 
-  describe("before the thread's background commands have loaded", () => {
+  describe("while the thread's background commands are being read", () => {
     function holdCommandList(): (outcome: BackgroundCommand[] | Error) => Promise<void> {
       let answer: (outcome: BackgroundCommand[] | Error) => void = () => {};
       vi.mocked(mockTransport.listBackgroundCommands).mockReturnValueOnce(new Promise((resolve, reject) => {
@@ -318,6 +318,22 @@ describe("SidebarList thread drag", () => {
       }));
       return (outcome) => act(async () => answer(outcome));
     }
+
+    it("blocks a drag while a push refreshes an already loaded empty list", async () => {
+      seed([LOOSE]);
+      await renderSidebar();
+      const refreshed = holdCommandList();
+      act(() => { pushes.dispatchEvent(new CustomEvent("backgroundCommand.changed", { detail: { threadId: LOOSE.id } })); });
+
+      await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
+      const startedDuringRefresh = dragging();
+      await release(POINTER_OFF_EVERYTHING);
+
+      await refreshed([]);
+      await pressAndMove(row("Loose thread"), POINTER_OFF_EVERYTHING);
+      expect(startedDuringRefresh).toBe(false);
+      expect(dragging()).toBe(true);
+    });
 
     it.each([
       { initialFails: false, running: true },

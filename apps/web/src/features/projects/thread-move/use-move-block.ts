@@ -1,4 +1,4 @@
-import { commandsOf, useBackgroundCommandLoad } from "@/features/background-commands/backgroundCommandStore";
+import { commandsOf, useBackgroundCommandLoad, useBackgroundCommandStore } from "@/features/background-commands/backgroundCommandStore";
 import { useThreadActivity } from "@/features/thread-attention/thread-activity";
 import { useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
@@ -26,6 +26,7 @@ export function useMoveBlock(thread: Pick<WorkspaceThread, "id" | "clientPrepari
   // block; the server's refusal then explains it in the dialog.
   const load = useBackgroundCommandLoad(thread.id);
   const commandRunning = commandsOf(load)?.some((command) => command.status === "running") ?? false;
-  const commandsUnknown = load.kind === "loading";
+  const refreshing = useBackgroundCommandStore((state) => state.refreshing.has(thread.id));
+  const commandsUnknown = load.kind === "loading" || refreshing;
   return moveBlockOf(activity.turnRunning, awaitingApproval, rowState.kind === "waiting" || commandRunning || commandsUnknown);
 }
