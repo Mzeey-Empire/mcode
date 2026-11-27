@@ -27,7 +27,7 @@ import {
   type MoveFolderState,
 } from "./workspace-move-files.js";
 import { acquireWorkspaceMoveGate, isInsideMoveSource } from "./workspace-move-gate.js";
-import { cleanRetainedMoveSource, type WorkspaceMoveDeleteOptions } from "./workspace-move-retention.js";
+import { cleanPublishedMoveCopy, cleanRetainedMoveSource, type WorkspaceMoveDeleteOptions } from "./workspace-move-retention.js";
 
 type Placement = Parameters<WorkspaceMoveStore["convert"]>[1];
 type Receipt = Parameters<WorkspaceMoveStore["advance"]>[2];
@@ -45,6 +45,7 @@ const rollbackActions: Partial<Record<MoveFolderState, Partial<Record<MoveFolder
 };
 
 type CopyRollback = "finish" | "remnants" | "staging" | "published";
+type CopyRollbackOutcome = { status: "removed" | "staging-occupied" } | { status: "published-kept"; reason: string };
 type CopyRollbackTable = Partial<Record<MoveFolderState, Partial<Record<MoveFolderState, CopyRollback>>>>;
 const leftoverStaging: Partial<Record<MoveFolderState, CopyRollback>> = {
   missing: "staging", empty: "staging", "marker-only": "staging", foreign: "staging", other: "staging",
@@ -61,35 +62,14 @@ const beforeCopy: CopyRollbackTable = {
   other: unmarkedStaging,
 };
 const missingAfterCopy: Partial<Record<MoveFolderState, CopyRollback>> = {
-  ...unmarkedStaging, owned: "published",
+  ...unmarkedStaging, "marker-only": "published", owned: "published",
 };
 const copyRollbackByPhase: Partial<Record<WorkspaceMove["phase"], CopyRollbackTable>> = {
   intent: beforeCopy,
   copying: beforeCopy,
   copied: { ...beforeCopy, missing: missingAfterCopy },
-  published: { missing: missingAfterCopy },
+  published: { missing: { ...missingAfterCopy, empty: "published", foreign: "published", other: "published" } },
 };
-
-async function rollbackCopy(input: {
-  move: WorkspaceMove;
-  stagingPath: string;
-  source: MoveFolderState;
-  staging: MoveFolderState;
-  destination: MoveFolderState;
-  live?: LiveMove;
-}): Promise<boolean> {
-  const { move, stagingPath, source, destination, live } = input;
-  if (!holdsMoveMarker(source)) throw new Error("The copy source no longer holds its move marker");
-  const staging = observedStaging(input.staging, live);
-  const action = copyRollbackAction(move.phase, staging, destination, live);
-  if (action === "published") await removeMoveCopy(move.destinationPath, move.id);
-  if (action === "staging") {
-    if (staging === "empty") await removeMoveClaim(stagingPath, move.id);
-    else await removeMoveCopy(stagingPath, move.id);
-  }
-  await removeCopyClaim(move, action, destination, live);
-  return staging !== "foreign" && staging !== "other";
-}
 
 function observedStaging(staging: MoveFolderState, live?: LiveMove): MoveFolderState {
   return live && !live.createdStaging && staging !== "missing" ? "foreign" : staging;
@@ -420,7 +400,7 @@ export class WorkspaceMoveService {
     const staging = NodePath.join(NodePath.dirname(move.destinationPath), `.mcode-copy-${move.id}`);
     move = await this.save(move, { stagingPath: staging, claimReleased: true }, undefined, false);
     await assertRecordedParent(staging);
-    await NodeFSPromises.mkdir(staging);
+    await NodeFSPromises.mkdir(staging, { mode: 0o700 });
     live.createdStaging = true;
     move = await this.save(move, { phase: "copying" }, undefined, false);
     let lastProgress = Number.NEGATIVE_INFINITY;
@@ -455,16 +435,13 @@ export class WorkspaceMoveService {
   private async rollback(move: WorkspaceMove, failure: MoveFailure, live?: LiveMove): Promise<void> {
     const marker: { path: string | null } = { path: null };
     const crossDrive = move.stagingPath !== null || live?.crossDrive === true;
-    let partialCopyRemoved = true;
+    let outcome: CopyRollbackOutcome;
     try {
-      partialCopyRemoved = await this.rollbackFolders(move, marker, live);
-      if (!partialCopyRemoved) {
-        failure = { ...failure, error: `${failure.error}\nThe staging path is occupied by an unmarked entry: ${move.stagingPath}` };
-      }
+      outcome = await this.rollbackFolders(move, marker, live);
     } catch (error) {
       if (error instanceof DatabaseWriteOutcomeUnknown) throw error;
       const detail = `${failure.error}\nRollback: ${moveError(error)}`;
-      await this.save(move, {
+      await this.save(this.requireMove(move.id), {
         cleanup: "kept", error: failure.error,
         result: {
           status: "rollback-pending", ...failure, error: detail, markerPath: marker.path,
@@ -473,14 +450,23 @@ export class WorkspaceMoveService {
       });
       return;
     }
-    const failed = await this.save(move, {
+    if (outcome.status === "staging-occupied") {
+      failure = { ...failure, error: `${failure.error}\nThe staging path is occupied by an unmarked entry: ${move.stagingPath}` };
+    } else if (outcome.status === "published-kept") {
+      failure = { ...failure, error: `${failure.error}\nThe published copy was kept at ${move.destinationPath}: ${outcome.reason}` };
+      logger.warn("Published workspace copy was kept during rollback", {
+        operationId: move.id, path: move.destinationPath, reason: outcome.reason,
+      });
+    }
+    const failed = await this.save(this.requireMove(move.id), {
       phase: "done", cleanup: "pending", error: failure.error,
-      result: { status: "failed", ...failure, ...(crossDrive ? { partialCopyRemoved } : {}) },
+      result: { status: "failed", ...failure, ...(crossDrive ? { partialCopyRemoved: outcome.status === "removed" } : {}) },
+      ...(outcome.status === "published-kept" ? { tombstonePath: move.destinationPath, cleanupError: outcome.reason } : {}),
     });
     await this.cleanRolledBackMarker(failed);
   }
 
-  private async rollbackFolders(move: WorkspaceMove, marker: { path: string | null }, live?: LiveMove): Promise<boolean> {
+  private async rollbackFolders(move: WorkspaceMove, marker: { path: string | null }, live?: LiveMove): Promise<CopyRollbackOutcome> {
     const source = await inspectMoveFolder(move.sourcePath, move.id);
     if (holdsMoveMarker(source)) marker.path = markerPath(move.sourcePath, move.id);
     const destination = await inspectMoveFolder(move.destinationPath, move.id);
@@ -488,11 +474,50 @@ export class WorkspaceMoveService {
     const { stagingPath } = move;
     if (stagingPath === null) {
       await this.rollbackRename(move, source, destination, live?.claimedDestination ?? true);
-      return true;
+      return { status: "removed" };
     }
     const staging = await inspectMoveFolder(stagingPath, move.id);
     if (marker.path === null && holdsMoveMarker(staging)) marker.path = markerPath(stagingPath, move.id);
-    return rollbackCopy({ move, stagingPath, source, staging, destination, live });
+    return this.rollbackCopy({ move, stagingPath, source, staging, destination, live });
+  }
+
+  private async rollbackCopy(input: {
+    move: WorkspaceMove;
+    stagingPath: string;
+    source: MoveFolderState;
+    staging: MoveFolderState;
+    destination: MoveFolderState;
+    live?: LiveMove;
+  }): Promise<CopyRollbackOutcome> {
+    const { move, stagingPath, source, destination, live } = input;
+    if (!holdsMoveMarker(source)) throw new Error("The copy source no longer holds its move marker");
+    const staging = observedStaging(input.staging, live);
+    const phase = move.deleteStagingStarted ? "published" : move.phase;
+    const action = copyRollbackAction(phase, staging, destination, live);
+    if (action === "published") return this.rollbackPublishedCopy(move, destination);
+    if (action === "staging") {
+      if (staging === "empty") await removeMoveClaim(stagingPath, move.id);
+      else await removeMoveCopy(stagingPath, move.id);
+    }
+    await removeCopyClaim(move, action, destination, live);
+    return { status: staging === "foreign" || staging === "other" ? "staging-occupied" : "removed" };
+  }
+
+  private async rollbackPublishedCopy(move: WorkspaceMove, destination: MoveFolderState): Promise<CopyRollbackOutcome> {
+    if (destination === "empty" && move.deleteStagingStarted) {
+      await removeMoveClaim(move.destinationPath, move.id);
+      return { status: "removed" };
+    }
+    if (!holdsMoveMarker(destination)) {
+      return { status: "published-kept", reason: "The published copy lost its move marker" };
+    }
+    const outcome = await cleanPublishedMoveCopy({
+      move, options: this.deps, readManifest: () => this.deps.store.readManifest(move.id),
+      checkpoint: async (next) => { await this.save(move, next, undefined, false); },
+    });
+    if (outcome.cleanup === "kept") return { status: "published-kept", reason: outcome.cleanupError };
+    if (outcome.cleanup === "pending") throw new Error(outcome.cleanupError);
+    return { status: "removed" };
   }
 
   private async rollbackRename(move: WorkspaceMove, source: MoveFolderState, destination: MoveFolderState, removeClaim: boolean): Promise<void> {
@@ -508,7 +533,7 @@ export class WorkspaceMoveService {
 
   private async cleanRolledBackMarker(move: WorkspaceMove): Promise<void> {
     await removeMoveMarker(move.sourcePath, move.id);
-    await this.save(move, { cleanup: "done" }, undefined, false);
+    await this.save(move, { cleanup: move.tombstonePath === null ? "done" : "kept" }, undefined, false);
   }
 
   private async finishConverted(move: WorkspaceMove, sharers: ReturnType<WorkspaceMoveStore["convert"]>): Promise<void> {

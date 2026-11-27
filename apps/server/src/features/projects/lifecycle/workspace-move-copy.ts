@@ -8,7 +8,7 @@ import { assertRecordedParent, markerPath, moveErrorCode } from "./workspace-mov
 type Entry = { path: string; stat: NodeFS.BigIntStats };
 const READ_FLAGS = NodeFS.constants.O_RDONLY | (NodeFS.constants.O_NOFOLLOW ?? 0);
 
-/** Copy an owned staging tree and record evidence from the source bytes actually read. */
+/** Copy an owned staging tree and record its identities and the source bytes actually read. */
 export async function copyWorkspaceFolder(input: {
   source: string;
   staging: string;
@@ -18,6 +18,7 @@ export async function copyWorkspaceFolder(input: {
   progress(copied: number, total: number): Promise<void>;
 }): Promise<WorkspaceMoveManifest> {
   const { source, staging, moveId, platform, openDestination = NodeFSPromises.open, progress } = input;
+  const sourceRoot = platform === "win32" ? null : await NodeFSPromises.lstat(source, { bigint: true });
   const marker = markerPath(source, moveId);
   await NodeFSPromises.copyFile(marker, markerPath(staging, moveId), NodeFS.constants.COPYFILE_EXCL);
   const entries = await scan(source, NodePath.basename(marker));
@@ -39,9 +40,10 @@ export async function copyWorkspaceFolder(input: {
       manifest.push({ kind: "folder", path });
     } else if (stat.isSymbolicLink()) {
       const target = await NodeFSPromises.readlink(from);
-      await recreateMoveLink(target, to, NodePath.dirname(from), platform);
+      await recreateMoveLink(target, to, NodePath.dirname(from), platform, path);
       await NodeFSPromises.lutimes(to, seconds(stat.atimeNs), seconds(stat.mtimeNs));
-      manifest.push({ kind: "link", path, inode: String(stat.ino), target });
+      const copy = await NodeFSPromises.lstat(to, { bigint: true });
+      manifest.push({ kind: "link", path, inode: String(stat.ino), copyInode: String(copy.ino), target });
     } else {
       const evidence = await copyFile({ from, to, stat, buffer, openDestination, addBytes });
       await preserveMetadata(to, stat);
@@ -52,6 +54,7 @@ export async function copyWorkspaceFolder(input: {
   for (const { path, stat } of entries.reverse()) {
     if (stat.isDirectory()) await preserveMetadata(NodePath.join(staging, path), stat);
   }
+  if (sourceRoot) await preserveMetadata(staging, sourceRoot);
   return manifest;
 }
 
@@ -81,7 +84,7 @@ async function copyFile(input: {
   buffer: Buffer;
   openDestination: typeof NodeFSPromises.open;
   addBytes(bytes: number): Promise<void>;
-}): Promise<{ size: number; hash: string }> {
+}): Promise<{ size: number; hash: string; copyInode: string }> {
   const { from, to, stat, buffer, openDestination, addBytes } = input;
   const source = await NodeFSPromises.open(from, READ_FLAGS);
   try {
@@ -101,7 +104,8 @@ async function copyFile(input: {
         size += bytesRead;
         await addBytes(bytesRead);
       }
-      return { size, hash: hash.digest("hex") };
+      const copy = await destination.stat({ bigint: true });
+      return { size, hash: hash.digest("hex"), copyInode: String(copy.ino) };
     } finally {
       await destination.close();
     }
@@ -120,14 +124,20 @@ async function preserveMetadata(path: string, stat: NodeFS.BigIntStats): Promise
 }
 
 /** Create a link exclusively and keep its target text relative if it was relative. */
-export async function recreateMoveLink(target: string, path: string, originalParent: string, platform: NodeJS.Platform): Promise<void> {
+export async function recreateMoveLink(
+  target: string, path: string, originalParent: string, platform: NodeJS.Platform, copyRelativePath?: string,
+): Promise<void> {
   if (platform !== "win32") {
     await NodeFSPromises.symlink(target, path);
     return;
   }
   const resolved = NodePath.resolve(originalParent, target);
   const directory = await NodeFSPromises.stat(resolved).then((stat) => stat.isDirectory(), (error: unknown) => {
-    if (moveErrorCode(error) === "ENOENT" || moveErrorCode(error) === "ELOOP") return false;
+    const code = moveErrorCode(error);
+    if (code === "ENOENT" && copyRelativePath !== undefined) {
+      throw new Error(`${copyRelativePath} is a link to something that does not exist, so Mcode can't tell how to copy it. Fix or remove the link, then try again.`);
+    }
+    if (code === "ENOENT" || code === "ELOOP") return false;
     throw error;
   });
   try {

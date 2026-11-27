@@ -32,7 +32,7 @@ export async function renameWorkspaceFolder(
       await rename(source, destination);
       return;
     } catch (error) {
-      if (!WINDOWS_RENAME_RETRY_CODES.has(moveErrorCode(error))) throw error;
+      if (!isMoveRenameBlocked(error)) throw error;
     }
     await sleep(delay);
   }
@@ -44,6 +44,11 @@ export async function renameWorkspaceFolder(
     }
     throw error;
   });
+}
+
+/** Recognize a blocked rename before or after Windows handle retries. */
+export function isMoveRenameBlocked(error: unknown): boolean {
+  return error instanceof WindowsRenameInUse || WINDOWS_RENAME_RETRY_CODES.has(moveErrorCode(error));
 }
 
 export function moveError(error: unknown): string {

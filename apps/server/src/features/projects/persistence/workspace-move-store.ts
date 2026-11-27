@@ -23,9 +23,10 @@ const inode = z.string().regex(/^\d+$/);
 const manifestEntries = z.array(z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("folder"), path: relativePath }),
   z.object({
-    kind: z.literal("file"), path: relativePath, inode, size: z.number().int().nonnegative(), hash: z.string().regex(/^[a-f0-9]{64}$/),
+    kind: z.literal("file"), path: relativePath, inode, copyInode: inode,
+    size: z.number().int().nonnegative(), hash: z.string().regex(/^[a-f0-9]{64}$/),
   }),
-  z.object({ kind: z.literal("link"), path: relativePath, inode, target: z.string() }),
+  z.object({ kind: z.literal("link"), path: relativePath, inode, copyInode: inode, target: z.string() }),
 ]));
 
 /** Copy evidence for each entry at its original path and manifest index. */
@@ -40,10 +41,15 @@ const intent = z.object({
   initGit: z.boolean(),
   createdAt: z.string().datetime(),
 });
-const checkpoint = z.object({
+const sourceCleanup = z.object({
+  cleanup: z.enum(["done", "pending", "kept"]).optional(),
+  tombstonePath: z.string().optional(),
+  deleteStagingStarted: z.boolean().optional(),
+  cleanupError: z.string().nullable().optional(),
+});
+const checkpoint = sourceCleanup.extend({
   phase: WorkspaceMovePhaseSchema().optional(),
   result: WorkspaceMoveResultSchema().nullable().optional(),
-  cleanup: z.enum(["done", "pending", "kept"]).optional(),
   error: z.string().nullable().optional(),
   stagingPath: z.string().nullable().optional(),
   claimReleased: z.boolean().optional(),
@@ -51,12 +57,6 @@ const checkpoint = z.object({
   totalBytes: z.number().int().nonnegative().optional(),
   sourceRetainUntil: z.string().datetime().optional(),
   manifest: manifestEntries.optional(),
-});
-const sourceCleanup = z.object({
-  cleanup: z.enum(["done", "pending", "kept"]).optional(),
-  tombstonePath: z.string().optional(),
-  deleteStagingStarted: z.boolean().optional(),
-  cleanupError: z.string().nullable().optional(),
 });
 const placement = z.object({
   isGitRepo: z.boolean(), branch: z.string(),

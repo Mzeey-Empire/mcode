@@ -643,6 +643,38 @@ describe("cross-drive project creation", () => {
     expect(NodeFS.readFileSync(NodePath.join(f.destination, "large.bin")).equals(payload)).toBe(true);
   });
 
+  it.skipIf(process.platform === "win32").each([0o700, 0o750])("preserves source root permissions (mode %s)", async (mode) => {
+    const f = await fixture();
+    NodeFS.chmodSync(f.source, mode);
+
+    await completedCopy(f);
+
+    expect(NodeFS.statSync(f.destination).mode & 0o777).toBe(mode);
+    expect(f.readNotes(f.destination)).toBe("keep these files");
+  });
+
+  it.skipIf(process.platform !== "win32")("refuses a dangling directory link and removes only staging", async () => {
+    const f = await fixture();
+    const target = NodePath.join(f.root, "removed-target");
+    const link = NodePath.join(f.source, "dangling");
+    NodeFS.mkdirSync(target);
+    NodeFS.symlinkSync(target, link, "junction");
+    NodeFS.rmdirSync(target);
+    const originalTarget = NodeFS.readlinkSync(link);
+
+    const { operationId } = await startCopy(f);
+
+    expect((await f.terminal).result).toMatchObject({
+      status: "failed", cause: { kind: "other" }, partialCopyRemoved: true,
+      error: "dangling is a link to something that does not exist, so Mcode can't tell how to copy it. Fix or remove the link, then try again.",
+    });
+    await vi.waitFor(() => expect(f.store.find(operationId)?.cleanup).toBe("done"));
+    expect(NodeFS.lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(NodeFS.readlinkSync(link)).toBe(originalTarget);
+    expect(f.readNotes(f.source)).toBe("keep these files");
+    expect(NodeFS.readdirSync(f.parent)).toEqual([]);
+  });
+
   it("preserves file metadata and link targets without copying the linked directory", async () => {
     const f = await fixture();
     const file = NodePath.join(f.source, "notes.txt");
@@ -712,22 +744,31 @@ describe("cross-drive project creation", () => {
     expect(NodeFS.existsSync(f.destination)).toBe(false);
   });
 
-  it("removes a published copy when workspace conversion loses a project name race", async () => {
+  it.each([false, true])("rolls back a published copy after a lost project name race (new file: %s)", async (changed) => {
     const f = await fixture();
     const rename = crossDriveRename(f);
+    const newFile = NodePath.join(f.destination, "late.txt");
     const { operationId } = await startCopy(f, {
       rename: async (from, to) => {
         await rename(from, to);
+        if (to !== f.destination) return;
+        if (changed) NodeFS.writeFileSync(newFile, "written after publication");
         await f.workspaces.create("NewProject", NodePath.join(f.parent, "competing"), false);
       },
     });
     expect((await f.terminal).result).toMatchObject({
-      status: "failed", error: "A project with this name already exists", partialCopyRemoved: true,
+      status: "failed", error: expect.stringContaining("A project with this name already exists"), partialCopyRemoved: !changed,
     });
-    await vi.waitFor(() => expect(f.store.find(operationId)?.cleanup).toBe("done"));
+    await vi.waitFor(() => expect(f.store.find(operationId)).toMatchObject({
+      phase: "done", cleanup: changed ? "kept" : "done", tombstonePath: changed ? f.destination : null,
+    }));
     expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.source, kind: "no_project" });
     expect(f.readNotes(f.source)).toBe("keep these files");
-    expect(NodeFS.existsSync(f.destination)).toBe(false);
+    expect(NodeFS.existsSync(f.destination)).toBe(changed);
+    if (changed) {
+      expect(NodeFS.readFileSync(newFile, "utf8")).toBe("written after publication");
+      expect(f.readNotes(f.destination)).toBe("keep these files");
+    }
   });
 
   it.each([false, true])("preserves a late destination when publishing (claimed: %s)", async (claimed) => {
@@ -902,6 +943,40 @@ describe("cross-drive move recovery", () => {
     expect(f.readNotes(unrelated)).toBe("unrelated staging data");
   });
 
+  it("keeps a published copy edited after an interruption", async () => {
+    const f = await fixture();
+    const interrupted = Promise.withResolvers<void>();
+    const { operationId } = await startCopy(f, {
+      writer: {
+        execute: async (operation, input) => {
+          const result = await f.writer.execute(operation, input);
+          if (operation.name === workspaceMoveWrites.advance.name) {
+            const [, , next] = workspaceMoveWrites.advance.input.parse(input);
+            if (next.phase === "published") {
+              interrupted.resolve();
+              throw new DatabaseWriteOutcomeUnknown("Interrupted after publication");
+            }
+          }
+          return result;
+        },
+      },
+    });
+    await interrupted.promise;
+    await vi.waitFor(() => expect(f.reservations.get(f.first.id)).toBeUndefined());
+    NodeFS.writeFileSync(NodePath.join(f.destination, "notes.txt"), "keep these edits");
+
+    await f.makeService().recoverAtStartup();
+
+    expect(f.store.find(operationId)).toMatchObject({
+      phase: "done", cleanup: "kept", tombstonePath: f.destination,
+      result: { status: "failed", partialCopyRemoved: false },
+    });
+    expect(f.workspaces.findById(f.id)).toMatchObject({ path: f.source, kind: "no_project" });
+    expect(f.readNotes(f.source)).toBe("keep these files");
+    expect(f.readNotes(f.destination)).toBe("keep these edits");
+    expect(NodeFS.existsSync(markerPath(f.source, operationId))).toBe(false);
+  });
+
   it("keeps an unmatched copy state fenced without removing either folder", async () => {
     const f = await fixture();
     const { operationId, sourceMarker, destinationMarker } = f.interruptedMove();
@@ -972,6 +1047,29 @@ describe("retained cross-drive source", () => {
     expect(f.store.find(operationId)).toMatchObject({ cleanup: "done", cleanupError: null });
     expect(NodeFS.existsSync(f.source)).toBe(false);
     expect(NodeFS.existsSync(tombstone)).toBe(false);
+  });
+
+  it("retries a blocked entry rename on the next sweep", async () => {
+    const f = await fixture();
+    const { operationId, tombstone } = await completedCopy(f);
+    let locked = true;
+    const cleanup = atExpiry(f, {
+      rename: async (from, to) => {
+        if (locked && NodePath.dirname(to) === NodePath.join(tombstone, ".mcode-delete")) throw errno("EBUSY");
+        await NodeFSPromises.rename(from, to);
+      },
+      sleep: async () => undefined,
+    });
+
+    await sweepAt(f, cleanup, EXPIRED);
+    expect(f.store.find(operationId)).toMatchObject({ cleanup: "pending", cleanupError: expect.stringContaining("EBUSY") });
+    expect(f.readNotes(tombstone)).toBe("keep these files");
+
+    locked = false;
+    await sweepAt(f, cleanup, EXPIRED);
+    expect(f.store.find(operationId)).toMatchObject({ cleanup: "done", cleanupError: null });
+    expect(NodeFS.existsSync(tombstone)).toBe(false);
+    expect(f.readNotes(f.destination)).toBe("keep these files");
   });
 
   it.each(["new-file", "same-size", "missing-manifest"] as const)("keeps a tombstone with %s and leaves a Git failure intact", async (change) => {
