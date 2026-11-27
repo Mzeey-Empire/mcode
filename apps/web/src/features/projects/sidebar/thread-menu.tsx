@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ComponentProps, type ReactElement } from "react";
+import { FolderInput } from "lucide-react";
 import { create } from "zustand";
 import {
   DropdownMenu,
@@ -11,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { ContextMenuItem } from "@/components/ui/context-menu";
+import { commandsOf, useBackgroundCommandStore } from "@/features/background-commands/backgroundCommandStore";
 import { isDetachedCheckout } from "@/lib/checkout-label";
 import { startupHolds, useThreadActivity } from "@/features/thread-attention/thread-activity";
 import { useThreadRowState } from "@/features/thread-attention/thread-row-presentation";
@@ -19,10 +21,10 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { isThreadExecuting } from "@/stores/threadStore";
 import { rpcFailureMessage } from "@/transport/rpc-failure-message";
 import type { Thread } from "@/transport/types";
-import { isNoProjectWorkspaceId } from "../state/project-workspaces";
 import { useWorkspaceStore } from "../state/workspaceStore";
 import { closeBlockedReason, lifecycleActionBlocked, useCompletionStore } from "./completion-store";
 import { useRowLifecycleStore } from "./row-lifecycle-store";
+import { MOVE_BLOCK_REASON, offersMoveToProject, openMoveThreadDialog, type MoveBlock } from "../thread-move/move-thread-store";
 
 /** The thread a menu acts on, read when the menu renders. */
 export interface ThreadMenuTarget {
@@ -155,7 +157,8 @@ const NO_ITEMS: readonly ContextMenuItem[] = [];
 
 function ThreadMenuContent({ target, actions, leadingItems = NO_ITEMS, ...placement }: { target: ThreadMenuTarget; actions: ThreadMenuActions; leadingItems?: readonly ContextMenuItem[] } & ContentPlacement) {
   const thread = useWorkspaceStore((s) => s.threads.find((candidate) => candidate.id === target.threadId));
-  const noProject = useWorkspaceStore((s) => isNoProjectWorkspaceId(s.workspaces, thread?.workspace_id ?? null));
+  const workspace = useWorkspaceStore((s) => s.workspaces.find((candidate) => candidate.id === thread?.workspace_id));
+  const noProject = workspace?.kind === "no_project";
   if (!thread) return null;
   return (
     <DropdownMenuContent sideOffset={4} className="min-w-40" {...placement}>
@@ -165,6 +168,7 @@ function ThreadMenuContent({ target, actions, leadingItems = NO_ITEMS, ...placem
       <CloseThreadItem thread={thread} renaming={actions.renamingThreadId === thread.id} />
       <DropdownMenuSeparator />
       <DropdownMenuItem label="Rename thread" onClick={() => actions.onRename(target)} />
+      {offersMoveToProject(thread, workspace) ? <MoveToProjectItem thread={thread} /> : null}
       {noProject ? null : <AutoCloseSubmenu thread={thread} />}
       <DropdownMenuSeparator />
       <CopySubmenu target={target} thread={thread} noProject={noProject} />
@@ -188,6 +192,32 @@ function CloseThreadItem({ thread, renaming }: { thread: WorkspaceThread; renami
       onClick={() => closeThread(thread.id)}
     />
   );
+}
+
+function MoveToProjectItem({ thread }: { thread: WorkspaceThread }) {
+  const activity = useThreadActivity(thread.id, { preparing: thread.clientPreparing === true, createFailed: thread.clientError != null });
+  const rowState = useThreadRowState(thread.id, thread.clientPreparing === true, thread.clientError != null);
+  const awaitingApproval = rowState.kind === "needs-you" && rowState.label === "Approval required";
+  // Waiting covers subagents and awaited commands. An unawaited command shows only in the command list, which is
+  // loaded for the open thread; for any other thread the server's refusal explains it in the dialog.
+  const commandRunning = useBackgroundCommandStore((state) => commandsOf(state.loads.get(thread.id))?.some((command) => command.status === "running") ?? false);
+  const block = moveBlock(activity.turnRunning, awaitingApproval, rowState.kind === "waiting" || commandRunning);
+  const reason = block ? MOVE_BLOCK_REASON[block] : undefined;
+  return (
+    <DropdownMenuItem
+      label="Move to project…"
+      icon={<FolderInput />}
+      description={reason}
+      disabledReason={reason}
+      onClick={() => openMoveThreadDialog(thread.id)}
+    />
+  );
+}
+
+function moveBlock(running: boolean, awaitingApproval: boolean, backgroundRunning: boolean): MoveBlock | null {
+  if (awaitingApproval) return "needs-approval";
+  if (running) return "running";
+  return backgroundRunning ? "background" : null;
 }
 
 function closeThread(threadId: string): void {

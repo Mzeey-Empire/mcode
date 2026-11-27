@@ -13,6 +13,7 @@ import type { ThreadRepo } from "../../../thread-control/persistence/thread-repo
 import type { ThreadCompletionService } from "../../../thread-control/lifecycle/thread-completion-service.js";
 import type { ThreadService } from "../../../thread-control/lifecycle/thread-service.js";
 import type { ThreadMoveService } from "../../../thread-control/lifecycle/thread-move-service.js";
+import type { ThreadMovePreflightService } from "../../../thread-control/lifecycle/thread-move-preflight.js";
 import type { ThreadAttentionService } from "../../../thread-control/attention/thread-attention-service.js";
 import type { ThreadDeletionTeardownService } from "../../../thread-control/lifecycle/thread-deletion-teardown-service.js";
 import type { ProjectActionService } from "../../environment/project-action-service.js";
@@ -58,6 +59,7 @@ export interface WorkspaceThreadRouterDeps {
   goalLifecycleService: Pick<GoalLifecycleService, "clear" | "get">;
   threadCompletionService: Pick<ThreadCompletionService, "cleanupBlockedCount" | "complete" | "reopen" | "retryCleanup">;
   threadMoveService: Pick<ThreadMoveService, "moveToProject">;
+  threadMovePreflightService: Pick<ThreadMovePreflightService, "read">;
   threadDeletionTeardownService: Pick<ThreadDeletionTeardownService, "teardownThread">;
   threadRepo: Pick<ThreadRepo, "findById" | "listAllByWorkspace" | "listAll">;
   workspaceRepo: Pick<WorkspaceRepo, "findById" | "removeRecent" | "setPinned" | "touchLastOpened">;
@@ -71,6 +73,7 @@ export interface WorkspaceThreadRouterDeps {
 
 const workspaceThreadHandlers = {
   "thread.moveToProject": (deps, params) => deps.threadMoveService.moveToProject(params),
+  "thread.moveToProjectPreflight": (deps, params) => deps.threadMovePreflightService.read(params.threadId),
   "workspace.list": (deps) => deps.workspaceService.list(),
   "workspace.create": createWorkspace,
   "workspace.createNoProject": createNoProjectWorkspace,

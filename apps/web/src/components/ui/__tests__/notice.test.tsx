@@ -38,6 +38,18 @@ describe("Notice", () => {
     expect(screen.getByRole("button", { name: "Hide details" })).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("keeps the detail on screen and hides the extra text until the user opens it", async () => {
+    const user = userEvent.setup();
+    render(<Notice tone="error" title="Couldn't move the thread" detail="Nothing changed." more="SQLITE_BUSY: database is locked" />);
+
+    expect(screen.getByText("Nothing changed.")).toBeVisible();
+    expect(screen.queryByText("SQLITE_BUSY: database is locked")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Show details" }));
+
+    expect(screen.getByText("SQLITE_BUSY: database is locked")).toBeVisible();
+    expect(screen.getByText("Nothing changed.")).toBeVisible();
+  });
+
   it.each([
     ["error", "alert"],
     ["warning", "status"],

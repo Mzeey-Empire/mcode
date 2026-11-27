@@ -118,6 +118,7 @@ const transportDefaults: Partial<McodeTransport> = {
   stopBackgroundCommand: vi.fn().mockResolvedValue("stopped"),
   updateThreadTitle: vi.fn().mockResolvedValue(true),
   moveThreadToProject: vi.fn().mockResolvedValue({ status: "destination-missing" }),
+  readThreadMovePreflight: vi.fn().mockResolvedValue(null),
   updateThreadSettings: vi.fn().mockResolvedValue(true),
   listAttention: vi.fn().mockResolvedValue([]),
   acknowledgeSeen: vi.fn().mockResolvedValue({ previous: { sequence: null, at: null }, current: { sequence: null, at: null } }),

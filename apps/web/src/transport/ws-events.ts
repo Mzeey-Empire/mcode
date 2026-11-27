@@ -419,6 +419,15 @@ export function startPushListeners(): void {
     }),
   );
 
+  unsubs.push(
+    pushEmitter.on("thread.movedToProject", (data) => {
+      const parsed = WS_CHANNELS["thread.movedToProject"].safeParse(data);
+      if (!parsed.success) return;
+      useWorkspaceStore.getState().applyThreadMovedToProject(parsed.data.thread);
+      appendServerNoticeOnceLoaded(parsed.data.threadId, parsed.data.marker);
+    }),
+  );
+
   // thread.checkoutChanged: thread worktree HEAD changed outside Mcode
   unsubs.push(
     pushEmitter.on("thread.checkoutChanged", (data) => {

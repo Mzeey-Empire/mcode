@@ -16,7 +16,8 @@ type WorkspaceRow = typeof workspaces.$inferSelect;
 
 const NO_PROJECT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
-function noProjectRetentionDeadline(now: string): string {
+/** When a No project folder is deleted if its last thread leaves it at `now`. */
+export function noProjectRetentionDeadline(now: string): string {
   return new Date(Date.parse(now) + NO_PROJECT_RETENTION_MS).toISOString();
 }
 

@@ -1,4 +1,4 @@
-import { createMockThread, createMockWorkspace } from "@mcode/contracts/testing";
+import { createMockMessage, createMockThread, createMockThreadAttention, createMockWorkspace } from "@mcode/contracts/testing";
 import { mockTransport } from "@/__tests__/mocks/transport";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { DndContextProps, DragEndEvent } from "@dnd-kit/core";
@@ -26,7 +26,12 @@ vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => ({
   VirtualViewport: (await import("./fake-virtual-viewport")).FakeVirtualViewport,
 }));
 
+import { threadAttentionStore } from "@/features/thread-attention/thread-attention-store";
+import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
+import { pushEmitter } from "@/transport/ws-transport";
 import { useThreadDraftStore, type ThreadDraft } from "@/stores/threadDraftStore";
+import { useThreadStore } from "@/stores/threadStore";
+import { useMoveThreadStore } from "../../thread-move/move-thread-store";
 import { useWorkspaceStore } from "../../state/workspaceStore";
 import { useSidebarUiStore } from "../sidebar-ui-store";
 import { NO_PROJECT_GROUP_KEY } from "../sidebar-model";
@@ -87,6 +92,29 @@ describe("ProjectSidebar No project group", () => {
     expect(follows(screen.getByRole("button", { name: /^Sketch a schema/ }), screen.getByRole("button", { name: /^Trip notes/ }))).toBe(true);
     expect(follows(screen.getByRole("button", { name: /^Trip notes/ }), projectRow)).toBe(true);
     expect(follows(projectRow, screen.getByRole("button", { name: /^Project work/ }))).toBe(true);
+  });
+
+  describe("when a thread moves into a project", () => {
+    beforeEach(() => startPushListeners());
+    afterEach(() => stopPushListeners());
+
+    it("takes the row out of the group and under the project, keeping it selected", () => {
+      seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
+      useWorkspaceStore.setState({ activeThreadId: "t-1" });
+      render(<ProjectSidebar />);
+      expect(screen.getByTestId("no-project-row")).toBeInTheDocument();
+
+      act(() => pushEmitter.emit("thread.movedToProject", {
+        threadId: "t-1",
+        thread: thread({ id: "t-1", title: "Sketch a schema", workspace_id: PROJECT.id }),
+        marker: createMockMessage({ id: "marker-1", thread_id: "t-1", role: "system", content: "Moved to Alpha" }),
+      }));
+
+      expect(screen.queryByTestId("no-project-row")).toBeNull();
+      const row = screen.getByRole("button", { name: /^Sketch a schema/ });
+      expect(Boolean(screen.getByTestId("project-row-ws-project").compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+      expect(useWorkspaceStore.getState()).toMatchObject({ activeThreadId: "t-1", activeWorkspaceId: PROJECT.id });
+    });
   });
 
   it("renders no group when no No project thread is in scope", () => {
@@ -204,7 +232,59 @@ describe("ProjectSidebar No project group", () => {
     it("offers a No project thread only the items that need no project", async () => {
       seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
 
-      expect(await menuItemNames(/^Sketch a schema/)).toEqual(["Close thread", "Rename thread", "Copy", "Delete"]);
+      expect(await menuItemNames(/^Sketch a schema/)).toEqual(["Close thread", "Rename thread", "Move to project…", "Copy", "Delete"]);
+    });
+
+    describe("Move to project", () => {
+      afterEach(() => {
+        cleanup();
+        useMoveThreadStore.setState({ threadId: null });
+        useThreadStore.setState({ runningThreadIds: new Set() });
+        threadAttentionStore.setState({ byThreadId: {}, visitBaselines: {}, onScreenThreadId: null });
+      });
+
+      it("opens the move dialog for an open No project thread", async () => {
+        seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
+        const user = userEvent.setup();
+        await menuItemNames(/^Sketch a schema/);
+
+        await user.click(await screen.findByRole("menuitem", { name: /^Move to project…/ }));
+
+        expect(useMoveThreadStore.getState().threadId).toBe("t-1");
+      });
+
+      it("is not offered for a closed No project thread", async () => {
+        useSidebarUiStore.setState({ scope: "completed" });
+        seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema", user_completed_at: "2026-11-20T10:00:00.000Z" })]);
+
+        expect(await menuItemNames(/^Sketch a schema/)).not.toContain("Move to project…");
+      });
+
+      it("explains a running thread on a second line and does not open the dialog", async () => {
+        seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
+        useThreadStore.setState({ runningThreadIds: new Set(["t-1"]) });
+        const user = userEvent.setup();
+        await menuItemNames(/^Sketch a schema/);
+
+        const item = await screen.findByRole("menuitem", { name: /^Move to project…/ });
+        await user.click(item);
+
+        expect(item).toHaveAttribute("aria-disabled", "true");
+        expect(item).toHaveTextContent("This thread is running");
+        expect(useMoveThreadStore.getState().threadId).toBeNull();
+      });
+
+      it("explains a thread that needs approval, though it is also running", async () => {
+        seed([PROJECT, HIDDEN], [thread({ id: "t-1", title: "Sketch a schema" })]);
+        useThreadStore.setState({ runningThreadIds: new Set(["t-1"]) });
+        threadAttentionStore.getState().apply(createMockThreadAttention({ threadId: "t-1", waiting: { kind: "approval", since: "2026-11-26T12:00:00.000Z" } }));
+        await menuItemNames(/^Sketch a schema/);
+
+        const item = await screen.findByRole("menuitem", { name: /^Move to project…/ });
+
+        expect(item).toHaveAttribute("aria-disabled", "true");
+        expect(item).toHaveTextContent("This thread needs approval");
+      });
     });
 
     it("copies no branch from a No project thread", async () => {

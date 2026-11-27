@@ -139,6 +139,8 @@ export interface PickerProps<T> {
   readonly renderItem: (item: T) => PickerRow;
   /** Offers another tab when this one shows nothing, e.g. "matches in Pull requests". */
   readonly emptySwitch?: { readonly tabId: string; readonly label: string };
+  /** Words the no-match line uses for a search that finds nothing, in place of "Nothing matches “query”". */
+  readonly noMatchLabel?: (query: string) => string;
   /** A group the search found nothing in while other groups matched, drawn first as its label over the no-match line. */
   readonly unmatchedGroup?: string;
   /** Content under the list, set off by a divider, such as a toggle row. */
@@ -1134,7 +1136,7 @@ function PickerFailure({ status, onRetry }: { readonly status: { readonly failed
 }
 
 /** What replaces an empty list: a spinner while loading, otherwise the no-match line. */
-function PickerEmptyState<T>({ status, query, emptySwitch, onTabChange, listId }: PickerProps<T> & { readonly listId: string }) {
+function PickerEmptyState<T>({ status, query, emptySwitch, noMatchLabel, onTabChange, listId }: PickerProps<T> & { readonly listId: string }) {
   if (status === "loading") {
     return (
       <div id={listId} className="flex h-8 items-center px-2">
@@ -1144,7 +1146,7 @@ function PickerEmptyState<T>({ status, query, emptySwitch, onTabChange, listId }
   }
   return (
     <div id={listId} className="flex flex-col items-start gap-1 px-2 py-2">
-      <p className="text-label text-ink">{query ? `Nothing matches “${query}”` : "Nothing to show"}</p>
+      <p className="text-label text-ink">{query ? (noMatchLabel?.(query) ?? `Nothing matches “${query}”`) : "Nothing to show"}</p>
       {emptySwitch ? (
         <Button variant="ghost" size="compact" onClick={() => onTabChange?.(emptySwitch.tabId)}>
           Show {emptySwitch.label}

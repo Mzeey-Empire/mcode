@@ -11,7 +11,7 @@ vi.mock("@/transport", async () => ({
   getTransport: () => mockTransport,
 }));
 
-import { ProjectChooser } from "../ProjectChooser";
+import { ProjectChooser, type ProjectChooserPick } from "../ProjectChooser";
 
 const PROTOCOL = createMockWorkspace({ id: "ws-protocol", name: "protocol-api", path: "/repo/protocol-api" });
 const NOTES = createMockWorkspace({ id: "ws-notes", name: "notes-app", path: "/work/notes-app" });
@@ -45,6 +45,14 @@ function addProjectRow() {
   return screen.getByRole("button", { name: /^Add project/ });
 }
 
+async function openPicker(pick: ProjectChooserPick) {
+  const user = userEvent.setup();
+  render(<ProjectChooser pick={pick} trigger={<button type="button">choose a project</button>} />);
+  await user.click(screen.getByRole("button", { name: "choose a project" }));
+  await screen.findByRole("dialog", { name: "Choose project" });
+  return user;
+}
+
 describe("ProjectChooser", () => {
   beforeEach(() => {
     seedStore([], null);
@@ -69,6 +77,59 @@ describe("ProjectChooser", () => {
       await waitFor(() => expect(useCommandPaletteStore.getState().viewStack).toEqual([{ kind: "sources" }]));
       expect(useCommandPaletteStore.getState().isOpen).toBe(true);
       await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose project" })).toBeNull());
+    });
+  });
+
+  describe("as a project picker", () => {
+    beforeEach(() => seedStore([PROTOCOL, NOTES, HIDDEN], PROTOCOL.id));
+
+    it("lists only projects, with the picked one checked and no Add project row", async () => {
+      await openPicker({ selectedWorkspaceId: NOTES.id, onSelect: vi.fn() });
+
+      expectRows(["protocol-api", "notes-app"]);
+      expect(screen.getAllByRole("option").map((option) => option.getAttribute("aria-selected"))).toEqual(["false", "true"]);
+      expect(screen.queryByRole("button", { name: /^Add project/ })).toBeNull();
+    });
+
+    it("hands the choice to the host and leaves the composer alone", async () => {
+      const onSelect = vi.fn();
+      const user = await openPicker({ selectedWorkspaceId: null, onSelect });
+
+      await user.click(screen.getByRole("option", { name: "notes-app" }));
+
+      expect(onSelect).toHaveBeenCalledWith(NOTES);
+      expect(useWorkspaceStore.getState().activeWorkspaceId).toBe(PROTOCOL.id);
+      expect(useWorkspaceStore.getState().pendingNewThread).toBe(false);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Choose project" })).toBeNull());
+    });
+
+    it("tells the host when the chooser opens and closes", async () => {
+      const onOpenChange = vi.fn();
+      const user = await openPicker({ selectedWorkspaceId: null, onSelect: vi.fn(), onOpenChange });
+      expect(onOpenChange).toHaveBeenLastCalledWith(true);
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => expect(onOpenChange).toHaveBeenLastCalledWith(false));
+    });
+
+    it("names a search that finds no project, and No project is not an answer to it", async () => {
+      const user = await openPicker({ selectedWorkspaceId: null, onSelect: vi.fn() });
+
+      await user.type(screen.getByRole("combobox", { name: "Search projects" }), "no");
+
+      expectRows(["notes-app"]);
+      await user.type(screen.getByRole("combobox", { name: "Search projects" }), "x");
+      expect(screen.getByText("No project matches “nox”.")).toBeVisible();
+    });
+
+    it("does not open for a host whose choice is locked", async () => {
+      const user = userEvent.setup();
+      render(<ProjectChooser pick={{ selectedWorkspaceId: null, onSelect: vi.fn(), disabled: true }} trigger={<button type="button">choose a project</button>} />);
+
+      await user.click(screen.getByRole("button", { name: "choose a project" }));
+
+      expect(screen.queryByRole("dialog", { name: "Choose project" })).toBeNull();
     });
   });
 

@@ -44,6 +44,11 @@ export interface NoticeProps {
   busy?: boolean;
   /** Hides the detail behind a disclosure button until the user opens it. */
   collapsible?: boolean;
+  /**
+   * Extra text, such as a raw error, kept behind a disclosure button while the detail stays visible.
+   * Use `collapsible` instead when the detail itself should be hidden.
+   */
+  more?: ReactNode;
   onDismiss?: () => void;
   dismissLabel?: string;
   className?: string;
@@ -107,14 +112,23 @@ function NoticeHeader({ tone, title, busy = false, disclosure, onDismiss, dismis
   );
 }
 
+function disclosureState({ detail, collapsible, more, open }: { detail: ReactNode; collapsible: boolean; more: ReactNode; open: boolean }) {
+  const hasDetail = detail !== undefined;
+  const hasMore = more !== undefined;
+  return {
+    canCollapse: (collapsible && hasDetail) || hasMore,
+    showDetail: hasDetail && (!collapsible || open),
+    showMore: hasMore && open,
+  };
+}
+
 /**
  * Inline notice: tone icon, title, detail and one action, on the panel surface.
  * Errors announce assertively; every other tone announces politely.
  */
-export function Notice({ tone, title, detail, action, busy, collapsible = false, onDismiss, dismissLabel, className, "data-testid": testId }: NoticeProps) {
+export function Notice({ tone, title, detail, action, busy, collapsible = false, more, onDismiss, dismissLabel, className, "data-testid": testId }: NoticeProps) {
   const [open, setOpen] = useState(false);
-  const canCollapse = collapsible && detail !== undefined;
-  const showDetail = detail !== undefined && (!canCollapse || open);
+  const { canCollapse, showDetail, showMore } = disclosureState({ detail, collapsible, more, open });
 
   return (
     <div
@@ -132,6 +146,7 @@ export function Notice({ tone, title, detail, action, busy, collapsible = false,
         dismissLabel={dismissLabel}
       />
       {showDetail ? <div className="pl-8 text-body-small text-muted">{detail}</div> : null}
+      {showMore ? <div className="pl-8 font-mono text-caption break-words text-muted">{more}</div> : null}
       {action ? <NoticeAction action={action} /> : null}
     </div>
   );

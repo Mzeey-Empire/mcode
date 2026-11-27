@@ -225,6 +225,20 @@ export const ThreadMoveResultSchema = lazySchema(() => z.discriminatedUnion("sta
 
 export type ThreadMoveResult = z.infer<ReturnType<typeof ThreadMoveResultSchema>>;
 
+/**
+ * What the move dialog shows before the user commits. It is display only: the move rechecks everything.
+ * It says whether the old folder holds files and never lists or counts them.
+ */
+export const ThreadMovePreflightSchema = lazySchema(() => z.object({
+  hasFiles: z.boolean(),
+  /** Other live threads that still work in the old folder; they keep it from being deleted. */
+  otherThreadsInFolder: z.object({ count: z.number().int().nonnegative(), titles: z.array(z.string()) }),
+  /** When Mcode would delete the old folder if this thread were its last, 7 days from now. */
+  deadline: z.string().datetime(),
+}));
+
+export type ThreadMovePreflight = z.infer<ReturnType<typeof ThreadMovePreflightSchema>>;
+
 /** Committed placement and its persisted timeline marker. */
 export const ThreadMovedToProjectEventSchema = lazySchema(() => z.object({
   threadId: z.string(),
@@ -675,6 +689,20 @@ export type FilesystemBrowseResult = z.infer<ReturnType<typeof FilesystemBrowseR
 const threadResultSchema: () => z.ZodType<import("../models/thread.js").Thread, z.ZodTypeDef, z.input<ReturnType<typeof ThreadSchema>>> = lazySchema(() => ThreadSchema());
 const threadMoveResultSchema: () => z.ZodType<ThreadMoveResult, z.ZodTypeDef, z.input<ReturnType<typeof ThreadMoveResultSchema>>> = ThreadMoveResultSchema;
 
+/**
+ * The move dialog's read, declared as a named type so the registry's inferred declaration stays under the
+ * compiler's serialization limit (TS7056).
+ */
+export interface ThreadMovePreflightMethod {
+  readonly params: z.ZodType<{ threadId: string }>;
+  readonly result: z.ZodType<ThreadMovePreflight | null, z.ZodTypeDef, z.input<ReturnType<typeof ThreadMovePreflightSchema>> | null>;
+}
+
+const threadMovePreflightMethod = lazySchema((): ThreadMovePreflightMethod => ({
+  params: z.object({ threadId: z.string() }),
+  result: ThreadMovePreflightSchema().nullable(),
+}));
+
 /** All WebSocket methods with runtime-validating parameter and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
   /** Registers this connection as a desktop HTML preview host. */
@@ -882,6 +910,8 @@ export const WS_METHODS = lazySchema(() => ({
     params: ThreadMoveInputSchema(),
     result: threadMoveResultSchema(),
   },
+  /** Reads what the move dialog shows. Null when the thread is not an open No project thread. */
+  "thread.moveToProjectPreflight": threadMovePreflightMethod(),
   "thread.updateSettings": {
     params: z.object({
       threadId: z.string(),
