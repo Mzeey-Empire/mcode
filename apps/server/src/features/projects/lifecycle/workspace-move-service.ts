@@ -163,7 +163,6 @@ type MoveDeps = WorkspaceMoveDeleteOptions & {
   now?: () => Date;
 };
 
-/** Convert a managed workspace with a recoverable protocol around its rename or copy. */
 export class WorkspaceMoveService {
   private readonly root: string;
   private readonly cleaning = new Set<string>();

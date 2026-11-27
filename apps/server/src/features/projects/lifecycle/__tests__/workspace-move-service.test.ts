@@ -744,7 +744,6 @@ describe("cross-drive project creation", () => {
           if (operation.name === workspaceMoveWrites.advance.name) {
             const [, , next] = workspaceMoveWrites.advance.input.parse(input);
             if (!claimed && next.phase === "copied") {
-              // The late directory exists with data by the time the real exclusive mkdir runs.
               NodeFS.mkdirSync(f.destination);
               NodeFS.writeFileSync(NodePath.join(f.destination, "notes.txt"), "late destination data");
             }

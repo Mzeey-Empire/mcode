@@ -50,12 +50,10 @@ export function moveError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Read an errno code without parsing the operating system's error message. */
 export function moveErrorCode(error: unknown): string | undefined {
   return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
 }
 
-/** Explain a failed move using the action and errno that produced it. */
 export async function moveFailureCause(error: unknown, destination: string, platform: NodeJS.Platform): Promise<WorkspaceMoveFailureCause> {
   if (error instanceof WindowsRenameInUse) return { kind: "in-use" };
   switch (moveErrorCode(error)) {
@@ -148,7 +146,6 @@ export function markerPath(folder: string, moveId: string): string {
 
 export type MoveFolderState = "missing" | "empty" | "marker-only" | "owned" | "foreign" | "other";
 
-/** Whether the folder observation proves move ownership. */
 export function holdsMoveMarker(state: MoveFolderState): boolean {
   return state === "marker-only" || state === "owned";
 }

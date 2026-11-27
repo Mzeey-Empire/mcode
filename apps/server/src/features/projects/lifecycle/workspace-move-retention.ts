@@ -11,7 +11,6 @@ import {
 type ManifestEntry = WorkspaceMoveManifest[number];
 type CleanupCheckpoint = Parameters<WorkspaceMoveStore["sourceCleanup"]>[1];
 
-/** Filesystem operations that bracket interruption of the checked delete. */
 export type WorkspaceMoveDeleteOptions = WorkspaceMoveRenameOptions & { unlink?: typeof NodeFSPromises.unlink };
 
 type CleanupAction = "rename" | "check" | "remove-remnant" | "finish" | "keep";

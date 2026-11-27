@@ -116,7 +116,6 @@ export class WorkspaceMoveStore {
       NodePath.relative(path, source) === "" || (tombstone !== null && NodePath.relative(path, tombstone) === ""));
   }
 
-  /** Read and validate copy evidence before it is used to delete anything. */
   readManifest(id: string): WorkspaceMoveManifest | null {
     const stored = this.orm.select({ entries: workspaceMoveManifests.entries }).from(workspaceMoveManifests)
       .where(eq(workspaceMoveManifests.moveId, id)).get();
