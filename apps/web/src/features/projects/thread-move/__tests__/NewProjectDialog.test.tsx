@@ -208,6 +208,41 @@ describe("New project from this folder", () => {
     });
   });
 
+  describe("folder check", () => {
+    it("keeps Create project disabled until the read answers", async () => {
+      let answer: (read: ThreadMovePreflight) => void = () => {};
+      vi.mocked(mockTransport.readThreadMovePreflight).mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+      const user = await openNewProject();
+      await user.type(nameField(), "wal-notes");
+      await user.type(locationField(), "/work/notes");
+
+      expect(createButton()).toBeDisabled();
+
+      await act(async () => answer(preflight()));
+      await waitFor(() => expect(createButton()).toBeEnabled());
+    });
+
+    it("shows a notice and keeps Create project disabled when the read fails, and a successful Retry enables it", async () => {
+      vi.mocked(mockTransport.readThreadMovePreflight)
+        .mockRejectedValueOnce(new Error("socket closed"))
+        .mockResolvedValueOnce(preflight());
+      const user = await openNewProject();
+      await user.type(nameField(), "wal-notes");
+      await user.type(locationField(), "/work/notes");
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("Couldn't check this thread's folder. Try again.");
+      expect(createButton()).toBeDisabled();
+
+      await user.click(within(alert).getByRole("button", { name: "Retry" }));
+
+      expect(await screen.findByText("1 other thread works in this folder and moves with it")).toBeVisible();
+      expect(screen.queryByText(/Couldn't check this thread's folder/)).toBeNull();
+      expect(createButton()).toBeEnabled();
+      expect(mockTransport.createProjectFromFolder).not.toHaveBeenCalled();
+    });
+  });
+
   describe("notices", () => {
     it("lists the other threads that move with the folder", async () => {
       vi.mocked(mockTransport.readThreadMovePreflight).mockResolvedValue(preflight([SHARER.title, "Compare checkpoint modes"]));

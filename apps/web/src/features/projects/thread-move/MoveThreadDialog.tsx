@@ -161,7 +161,7 @@ function MoveThreadDialog({ threadId, initialProjectId }: { threadId: string; in
   const thread = useWorkspaceStore((state) => state.threads.find((candidate) => candidate.id === threadId));
   const threadInNoProject = useWorkspaceStore((state) => isNoProjectWorkspace(state.workspaces.find((candidate) => candidate.id === thread?.workspace_id)));
   const preflight = useMovePreflight(threadId);
-  const newProject = useNewProjectMove(threadId, preflightOf(preflight.read));
+  const newProject = useNewProjectMove(threadId, preflight.read);
   const flow = useMoveFlow(threadId, initialProjectId, newProject);
 
   // The thread left No project, here or on another client, or was deleted: there is nothing left to move. A
@@ -267,7 +267,7 @@ function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThread
           />
         </DialogHeader>
         {intoNewProject
-          ? <NewProjectBody newProject={newProject} moving={moving} nameFieldRef={nameFieldRef} />
+          ? <NewProjectBody newProject={newProject} preflight={preflight} moving={moving} nameFieldRef={nameFieldRef} />
           : <ExistingProjectBody picked={picked} flow={flow} preflight={preflight} onPickerOpenChange={onPickerOpenChange} />}
         <MoveFooter flow={flow} preflight={preflight} chooserOpen={chooserOpen || openTargetPickers.size > 0} newProject={newProject} />
       </DialogContent>
@@ -292,11 +292,25 @@ function ExistingProjectBody({ picked, flow, preflight, onPickerOpenChange }: {
   );
 }
 
-function NewProjectBody({ newProject, moving, nameFieldRef }: { newProject: NewProjectMove; moving: boolean; nameFieldRef: Ref<HTMLInputElement> }) {
-  const { run, values, sharers, busy } = newProject;
-  const failure = run.kind === "failed" || run.kind === "rollback-pending" ? run : null;
+interface NewProjectBodyProps {
+  readonly newProject: NewProjectMove;
+  readonly preflight: MovePreflightState;
+  readonly moving: boolean;
+  readonly nameFieldRef: Ref<HTMLInputElement>;
+}
+
+/** What the folder check found: the threads that move along, or that the check failed. */
+function FolderCheckNotice({ newProject, preflight }: { newProject: NewProjectMove; preflight: MovePreflightState }) {
+  const { sharers, busy } = newProject;
+  if (preflight.read.status === "failed") return <PreflightFailedNotice onRetry={preflight.retry} />;
   // When the only other thread is the busy one, its own notice already says everything the sharers notice would.
-  const sharersShown = sharers !== null && !(sharers.count === 1 && busy !== null && !busy.isOpenThread);
+  const shown = sharers !== null && !(sharers.count === 1 && busy !== null && !busy.isOpenThread);
+  return shown ? <SharersNotice titles={sharers.titles} count={sharers.count} /> : null;
+}
+
+function NewProjectBody({ newProject, preflight, moving, nameFieldRef }: NewProjectBodyProps) {
+  const { run, values, busy } = newProject;
+  const failure = run.kind === "failed" || run.kind === "rollback-pending" ? run : null;
   return (
     <div className="grid gap-4">
       {run.kind === "rollback-pending" ? null : (
@@ -312,7 +326,7 @@ function NewProjectBody({ newProject, moving, nameFieldRef }: { newProject: NewP
       )}
       {busy ? <BusyNotice busy={busy} /> : null}
       {failure ? <MoveFailureNotice failure={failure} projectName={values.name.trim()} threadCount={newProject.threadCount} /> : null}
-      {sharersShown ? <SharersNotice titles={sharers.titles} count={sharers.count} /> : null}
+      <FolderCheckNotice newProject={newProject} preflight={preflight} />
     </div>
   );
 }

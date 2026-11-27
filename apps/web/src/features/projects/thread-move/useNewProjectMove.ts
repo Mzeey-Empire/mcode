@@ -8,6 +8,7 @@ import { fieldMessages, isSubmittable, type FieldMessages, type FieldProblem, ty
 import type { BusyThread } from "./NewProjectNotices";
 import type { NewProjectRun } from "./new-project-run";
 import { useMoveBlocks } from "./use-move-block";
+import { preflightOf, type MovePreflightRead } from "./useMovePreflight";
 import { useNewProjectRun } from "./useNewProjectRun";
 
 /** The other threads that work in the folder, as the dialog tells the user about them. */
@@ -25,7 +26,10 @@ export interface NewProjectMove {
   readonly sharers: FolderSharers | null;
   /** One thread in the folder that cannot move yet. The server refuses the move until it stops. */
   readonly busy: BusyThread | null;
-  /** Whether the request is worth sending: the form is complete, the client sees no problem, and no thread is busy. */
+  /**
+   * Whether the request is worth sending: the folder has been checked, the form is complete, the client sees no
+   * problem, and no thread is busy. Without the check the dialog cannot say which other threads move along.
+   */
   readonly canCreate: boolean;
   /** Threads in the folder, this one included. */
   readonly threadCount: number;
@@ -84,7 +88,8 @@ function refusedProblem(run: NewProjectRun, values: NewProjectValues): FieldProb
   return run.kind === "form" && run.refusal?.kind === "field" && sameValues(run.refusal.values, values) ? run.refusal.problem : null;
 }
 
-export function useNewProjectMove(threadId: string, preflight: ThreadMovePreflight | null): NewProjectMove {
+export function useNewProjectMove(threadId: string, read: MovePreflightRead): NewProjectMove {
+  const preflight = preflightOf(read);
   const { run, create, retryGit, reset } = useNewProjectRun(threadId);
   const { values, setValues } = useNewProjectValues(preflight);
   const [initGit, setInitGit] = useState(false);
@@ -105,7 +110,7 @@ export function useNewProjectMove(threadId: string, preflight: ThreadMovePreflig
     run,
     sharers,
     busy,
-    canCreate: (run.kind === "form" || run.kind === "failed") && live === null && isSubmittable(values, projectNames),
+    canCreate: read.status === "ready" && (run.kind === "form" || run.kind === "failed") && live === null && isSubmittable(values, projectNames),
     threadCount: 1 + (sharers?.count ?? 0),
     setValues,
     setInitGit,
