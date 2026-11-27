@@ -1,6 +1,5 @@
 import { useDraggable, type DragEndEvent } from "@dnd-kit/core";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
-import { useWorkspaceStore } from "../state/workspaceStore";
 import { useMoveBlock } from "../thread-move/use-move-block";
 
 /**
@@ -56,14 +55,3 @@ export function useThreadMoveDrag(thread: Pick<WorkspaceThread, "id" | "clientPr
 
 /** The dragged row's look in place: muted, with a dashed outline, so it reads as lifted out of the list. */
 export const DRAGGED_THREAD_ROW_CLASS = "outline-1 -outline-offset-1 outline-dashed outline-muted [&_[data-title-line]_*]:text-muted";
-
-/** What follows the pointer while a thread is dragged: its title, on the selected background. */
-export function ThreadDragGhost({ threadId }: { threadId: string }) {
-  const title = useWorkspaceStore((state) => state.threads.find((candidate) => candidate.id === threadId)?.title);
-  if (title === undefined) return null;
-  return (
-    <div className="flex h-full w-full cursor-grabbing items-center rounded-lg bg-selected px-2 shadow-popover">
-      <span className="min-w-0 flex-1 text-fade text-label text-ink">{title}</span>
-    </div>
-  );
-}

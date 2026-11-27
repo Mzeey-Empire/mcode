@@ -33,7 +33,7 @@ import type { SidebarRowContext } from "./sidebar-row-context";
 import { DroppableProjectRow, NoProjectHeader, ProjectHeader, SortableProjectRow, type DropEdge } from "./SidebarProjectRow";
 import { SidebarDraftRow } from "./SidebarDraftRow";
 import { SidebarThreadRow } from "./SidebarThreadRow";
-import { ThreadDragGhost, isThreadDrag, sidebarDragData, threadDropOnProject } from "./thread-move-drag";
+import { isThreadDrag, sidebarDragData, threadDropOnProject } from "./thread-move-drag";
 import { freezeOrder, selectClosedScope, useSidebarUiStore } from "./sidebar-ui-store";
 import { OLDER_BAR_KEY, OlderBar } from "./OlderBar";
 import { PreviewScrollGuard } from "./preview-scroll-guard";
@@ -452,13 +452,16 @@ function useHeldOrder() {
   }), [hold]);
 }
 
-/** What follows the pointer: the project header being reordered, or a ghost of the thread being moved. */
+/**
+ * What follows the pointer: the project header being reordered. A dragged thread has nothing following it,
+ * because the pointer sits on the target header and a copy there would hide its name and "Move to project…";
+ * the dashed row left in place and the highlighted header carry the drag instead.
+ */
 function dragOverlayContent(
-  drag: Pick<ReturnType<typeof useSidebarDrag>, "activeDragId" | "activeThreadId">,
+  drag: Pick<ReturnType<typeof useSidebarDrag>, "activeDragId">,
   itemsByKey: ReadonlyMap<string, SidebarItem>,
   ctx: SidebarRowContext,
 ): ReactNode {
-  if (drag.activeThreadId !== null) return <ThreadDragGhost threadId={drag.activeThreadId} />;
   const dragged = drag.activeDragId === null ? undefined : itemsByKey.get(`project:${drag.activeDragId}`);
   return dragged?.kind === "project" ? <ProjectHeader item={dragged} ctx={ctx} /> : null;
 }
