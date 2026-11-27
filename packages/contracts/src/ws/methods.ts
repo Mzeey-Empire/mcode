@@ -237,7 +237,6 @@ export const ThreadMovePreflightSchema = lazySchema(() => z.object({
   deadline: z.string().datetime(),
 }));
 
-/** What the move dialog shows before the user commits. */
 export type ThreadMovePreflight = z.infer<ReturnType<typeof ThreadMovePreflightSchema>>;
 
 /** Committed placement and its persisted timeline marker. */
