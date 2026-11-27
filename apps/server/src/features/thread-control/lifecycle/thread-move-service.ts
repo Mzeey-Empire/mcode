@@ -100,7 +100,7 @@ export class ThreadMoveService {
       return { status: "not-no-project" };
     }
     if (this.workspaces.hasUnfinishedMove(thread.workspace_id)) {
-      return { status: "failed", error: "The workspace is moving to a project." };
+      return { status: "failed", cause: "other", error: "The workspace is moving to a project." };
     }
     return null;
   }
