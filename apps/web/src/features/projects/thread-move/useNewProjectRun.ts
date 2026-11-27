@@ -13,6 +13,38 @@ function subscribeToMoveFrames(onFrame: (frame: WorkspaceMoveFrame) => void): ()
   });
 }
 
+const STATUS_READ_ATTEMPTS = 3;
+const STATUS_READ_BACKOFF_MS = 500;
+
+/**
+ * Reads the operation's status, trying again after a failure. The read is the catch-up for a terminal frame that was
+ * pushed before the subscription existed, so when every attempt fails the move may have ended with no frame to come.
+ * Returns the cancel function for the effect's cleanup.
+ */
+function readStatusWithRetry(
+  operationId: string,
+  onFrame: (frame: WorkspaceMoveFrame) => void,
+  onGaveUp: () => void,
+): () => void {
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const attempt = (number: number) => {
+    getTransport().readWorkspaceMoveStatus({ operationId }).then(
+      (frame) => { if (!cancelled && frame) onFrame(frame); },
+      () => {
+        if (cancelled) return;
+        if (number >= STATUS_READ_ATTEMPTS) onGaveUp();
+        else timer = setTimeout(() => attempt(number + 1), STATUS_READ_BACKOFF_MS * number);
+      },
+    );
+  };
+  attempt(1);
+  return () => {
+    cancelled = true;
+    clearTimeout(timer);
+  };
+}
+
 export interface NewProjectRunControls {
   readonly run: NewProjectRun;
   /** Asks the server to turn the folder into a project. Also what Try again runs. */
@@ -48,17 +80,20 @@ export function useNewProjectRun(threadId: string): NewProjectRunControls {
   const operationId = followedOperation(run);
   useEffect(() => {
     if (operationId === null) return;
-    let current = true;
+    let heardFrame = false;
     const stop = subscribeToMoveFrames((frame) => {
-      if (frame.operationId === operationId) dispatch({ type: "frame", frame });
+      if (frame.operationId !== operationId) return;
+      heardFrame = true;
+      dispatch({ type: "frame", frame });
     });
-    getTransport().readWorkspaceMoveStatus({ operationId }).then(
-      (frame) => { if (current && frame) dispatch({ type: "frame", frame }); },
-      // The pushed frames still arrive, so a failed read only loses the catch-up for a frame that already passed.
-      () => {},
+    const stopReading = readStatusWithRetry(
+      operationId,
+      (frame) => dispatch({ type: "frame", frame }),
+      // A frame that arrived shows the pushes work, so the move is still followed and the read is not needed.
+      () => { if (!heardFrame) dispatch({ type: "result-unreadable", operationId }); },
     );
     return () => {
-      current = false;
+      stopReading();
       stop();
     };
   }, [operationId]);

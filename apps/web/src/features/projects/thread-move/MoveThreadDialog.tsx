@@ -19,10 +19,10 @@ import { useWorkspaceStore } from "../state/workspaceStore";
 import { GitFailedDialog } from "./GitFailedDialog";
 import { MoveThreadCommand } from "./MoveThreadCommand";
 import { NewProjectForm } from "./NewProjectForm";
-import { BusyNotice, MoveFailureNotice, SharersNotice } from "./NewProjectNotices";
+import { BusyNotice, MoveFailureNotice, ResultUnknownNotice, SharersNotice } from "./NewProjectNotices";
 import { closeMoveThreadDialog, useMoveThreadStore } from "./move-thread-store";
 import { destinationPath } from "./new-project-fields";
-import { followsMove, isPastForm, type NewProjectRun } from "./new-project-run";
+import { endsAtClose, followsMove, isPastForm, type NewProjectRun } from "./new-project-run";
 import { PreflightFailedNotice } from "./PreflightFailedNotice";
 import { useMoveTarget, type MoveTargetState } from "./useMoveTarget";
 import { preflightOf, useMovePreflight, type MovePreflightState } from "./useMovePreflight";
@@ -258,7 +258,7 @@ function MoveThreadDialogView({ title, flow, preflight, newProject }: MoveThread
               selectedWorkspaceId: picked?.id ?? null,
               onSelect: (workspace) => { setOpenTargetPickers(new Set()); flow.pick(workspace); },
               onOpenChange: setChooserOpen,
-              disabled: moving || newProject.run.kind === "rollback-pending" || flow.failure?.unconfirmed,
+              disabled: moving || endsAtClose(newProject.run) || flow.failure?.unconfirmed,
               newProject: {
                 selected: intoNewProject,
                 onSelect: () => { setOpenTargetPickers(new Set()); flow.chooseNewProject(); },
@@ -308,12 +308,19 @@ function FolderCheckNotice({ newProject, preflight }: { newProject: NewProjectMo
   return shown ? <SharersNotice titles={sharers.titles} count={sharers.count} /> : null;
 }
 
+/** How a move that did not finish cleanly ended, or null while there is nothing to say. */
+function MoveOutcomeNotice({ newProject }: { newProject: NewProjectMove }) {
+  const { run, values, threadCount } = newProject;
+  if (run.kind === "result-unknown") return <ResultUnknownNotice />;
+  if (run.kind !== "failed" && run.kind !== "rollback-pending") return null;
+  return <MoveFailureNotice failure={run} projectName={values.name.trim()} threadCount={threadCount} />;
+}
+
 function NewProjectBody({ newProject, preflight, moving, nameFieldRef }: NewProjectBodyProps) {
   const { run, values, busy } = newProject;
-  const failure = run.kind === "failed" || run.kind === "rollback-pending" ? run : null;
   return (
     <div className="grid gap-4">
-      {run.kind === "rollback-pending" ? null : (
+      {endsAtClose(run) ? null : (
         <NewProjectForm
           values={values}
           initGit={newProject.initGit}
@@ -325,7 +332,7 @@ function NewProjectBody({ newProject, preflight, moving, nameFieldRef }: NewProj
         />
       )}
       {busy ? <BusyNotice busy={busy} /> : null}
-      {failure ? <MoveFailureNotice failure={failure} projectName={values.name.trim()} threadCount={newProject.threadCount} /> : null}
+      <MoveOutcomeNotice newProject={newProject} />
       <FolderCheckNotice newProject={newProject} preflight={preflight} />
     </div>
   );
@@ -358,8 +365,9 @@ function MoveFooter({ flow, preflight, chooserOpen, newProject }: MoveFooterProp
 function NewProjectFooter({ newProject, chooserOpen }: { newProject: NewProjectMove; chooserOpen: boolean }) {
   const { run } = newProject;
   const moving = run.kind === "moving";
-  if (run.kind === "rollback-pending") {
-    // Mcode finishes the rollback itself, so there is nothing to try again from here.
+  if (endsAtClose(run)) {
+    // Mcode finishes a pending rollback itself, and a move whose result is unknown must not start a second one, so
+    // there is nothing to try again from here.
     return (
       <DialogFooter>
         <Button type="button" variant="outline" onClick={closeMoveThreadDialog}>Close</Button>

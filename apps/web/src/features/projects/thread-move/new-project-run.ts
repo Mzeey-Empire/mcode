@@ -24,6 +24,12 @@ export type NewProjectRun =
   | { readonly kind: "failed"; readonly error: string; readonly outcome: "rolled-back" | "unconfirmed" }
   /** The rollback itself failed. `folder` holds the files, or is null when the server could not say where. */
   | { readonly kind: "rollback-pending"; readonly operationId: string; readonly revision: number; readonly error: string; readonly folder: string | null }
+  /**
+   * The status of a move that was started could not be read, and no frame arrived to say how it ended. Nothing is
+   * known about where the thread is, so the user is sent to the sidebar rather than offered a retry that could
+   * start a second move.
+   */
+  | { readonly kind: "result-unknown" }
   /** The project exists and the threads are in it; only git setup failed. `retrying` holds the retry button while a retry runs. */
   | { readonly kind: "git-failed"; readonly operationId: string; readonly workspaceId: string; readonly error: string; readonly retrying: boolean }
   /** A retry started git. The project and its alert stay on screen until the user closes them. */
@@ -38,6 +44,7 @@ export type NewProjectRunAction =
   | { readonly type: "refused"; readonly refusal: FormRefusal }
   | { readonly type: "failed"; readonly error: string; readonly outcome: "rolled-back" | "unconfirmed" }
   | { readonly type: "started"; readonly operationId: string }
+  | { readonly type: "result-unreadable"; readonly operationId: string }
   | { readonly type: "frame"; readonly frame: WorkspaceMoveFrame }
   | { readonly type: "adopted"; readonly frame: WorkspaceMoveFrame }
   | { readonly type: "git-retrying" }
@@ -87,7 +94,12 @@ export function isPastForm(run: NewProjectRun): boolean {
  * closes on a thread that left No project for any other reason, so these states must say they are the reason.
  */
 export function followsMove(run: NewProjectRun): boolean {
-  return run.kind === "moving" || run.kind === "git-failed" || run.kind === "git-started" || run.kind === "rollback-pending";
+  return run.kind === "moving" || run.kind === "git-failed" || run.kind === "git-started" || run.kind === "rollback-pending" || run.kind === "result-unknown";
+}
+
+/** A move ended in a state where the form no longer applies and the only way on is to close the dialog. */
+export function endsAtClose(run: NewProjectRun): boolean {
+  return run.kind === "rollback-pending" || run.kind === "result-unknown";
 }
 
 function applyFrame(run: NewProjectRun, frame: WorkspaceMoveFrame): NewProjectRun {
@@ -101,10 +113,16 @@ function runAfterGitRetry(run: Extract<NewProjectRun, { kind: "git-failed" }>, r
   return { ...run, error: result.error, retrying: false };
 }
 
-type FollowUpAction = Extract<NewProjectRunAction, { type: "frame" | "adopted" | "git-retrying" | "git-retried" }>;
+function runAfterUnreadableStatus(run: NewProjectRun, operationId: string): NewProjectRun {
+  return run.kind === "moving" && run.operationId === operationId ? { kind: "result-unknown" } : run;
+}
+
+type FollowUpAction =Extract<NewProjectRunAction, { type: "frame" | "adopted" | "result-unreadable" | "git-retrying" | "git-retried" }>;
 
 function followUp(run: NewProjectRun, action: FollowUpAction): NewProjectRun {
   switch (action.type) {
+    case "result-unreadable":
+      return runAfterUnreadableStatus(run, action.operationId);
     case "frame":
       return applyFrame(run, action.frame);
     case "adopted":
@@ -135,6 +153,7 @@ export function newProjectRunReducer(run: NewProjectRun, action: NewProjectRunAc
   switch (action.type) {
     case "frame":
     case "adopted":
+    case "result-unreadable":
     case "git-retrying":
     case "git-retried":
       return followUp(run, action);

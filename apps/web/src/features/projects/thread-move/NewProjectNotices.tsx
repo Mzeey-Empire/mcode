@@ -43,6 +43,11 @@ export function SharersNotice({ titles, count }: { readonly titles: readonly str
   );
 }
 
+/** Shown when the move was started but nothing could say how it ended. */
+export function ResultUnknownNotice() {
+  return <Notice tone="error" title="Couldn't get the result of the move. Check the sidebar to see where the thread is." />;
+}
+
 export type FolderMoveFailure = Extract<NewProjectRun, { kind: "failed" | "rollback-pending" }>;
 
 const FILE_IN_USE = /EBUSY|EPERM|EACCES|resource busy|permission denied|being used by another process/i;

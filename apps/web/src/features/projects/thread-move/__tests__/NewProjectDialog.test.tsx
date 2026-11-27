@@ -532,6 +532,63 @@ describe("New project from this folder", () => {
       expect(screen.queryByRole("button", { name: "Moving…" })).toBeNull();
     });
 
+    describe("when the status read fails", () => {
+      async function startWithFailingStatusRead(readOutcomes: readonly (WorkspaceMoveFrame | Error)[]): Promise<void> {
+        await openNewProject();
+        await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
+        const outcomes = [...readOutcomes];
+        vi.mocked(mockTransport.readWorkspaceMoveStatus).mockImplementation(async (input) => {
+          if ("threadId" in input) return null;
+          const next = outcomes.shift() ?? new Error("socket closed");
+          if (next instanceof Error) throw next;
+          return next;
+        });
+        vi.mocked(mockTransport.createProjectFromFolder).mockResolvedValueOnce({ operationId: OPERATION });
+        // The backoff is real timer work, so only timeouts are faked and the click goes straight to the DOM.
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        await act(async () => { createButton().click(); });
+      }
+
+      const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("ends Moving… with the sidebar notice and an enabled Close once every read has failed", async () => {
+        await startWithFailingStatusRead([]);
+        expect(createButton()).toHaveTextContent("Moving…");
+
+        await settle();
+
+        expect(screen.getByRole("alert")).toHaveTextContent("Couldn't get the result of the move. Check the sidebar to see where the thread is.");
+        expect(screen.queryByRole("button", { name: "Moving…" })).toBeNull();
+        expect(screen.getByRole("button", { name: "Close" })).toBeEnabled();
+        expect(screen.getByRole("button", { name: "Close dialog" })).toBeEnabled();
+        expect(vi.mocked(mockTransport.readWorkspaceMoveStatus).mock.calls.filter(([input]) => "operationId" in input)).toHaveLength(3);
+        expect(mockTransport.createProjectFromFolder).toHaveBeenCalledTimes(1);
+      });
+
+      it("shows the real result when a later read succeeds", async () => {
+        await startWithFailingStatusRead([new Error("socket closed"), frame(4, { status: "git-failed", workspaceId: HIDDEN.id, error: "git: 'init' failed" })]);
+
+        await settle();
+
+        expect(screen.getByRole("alertdialog", { name: "Project created" })).toBeVisible();
+        expect(screen.queryByText(/Couldn't get the result of the move/)).toBeNull();
+      });
+
+      it("keeps following the move when a frame arrived, because the pushes work", async () => {
+        await startWithFailingStatusRead([]);
+        push(frame(2));
+
+        await settle();
+
+        expect(createButton()).toHaveTextContent("Moving…");
+        expect(screen.queryByText(/Couldn't get the result of the move/)).toBeNull();
+      });
+    });
+
     it("ignores frames of another operation", async () => {
       const user = await openNewProject();
       await waitFor(() => expect(nameField()).toHaveValue("sqlite-wal-vs-rollback"));
