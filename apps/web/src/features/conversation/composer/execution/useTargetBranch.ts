@@ -17,7 +17,6 @@ export interface TargetBranch {
 /** The parent thread fields a fork's branch comes from. */
 export type ForkSourceThread = Pick<Thread, "id" | "workspace_id" | "branch" | "base_branch">;
 
-/** The checkout whose default branch an empty pick follows. */
 export interface DefaultBranchContext {
   readonly workspaceId: string;
   readonly threadId?: string;

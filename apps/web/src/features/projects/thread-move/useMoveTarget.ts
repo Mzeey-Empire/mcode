@@ -12,10 +12,8 @@ import type { UnavailableMode } from "@/features/conversation/composer/execution
 import { readRememberedStartFromOrigin } from "@/lib/start-from-origin-preference";
 import { isDetachedWorktree, type AttachedWorktree } from "@/lib/worktree";
 
-/** Where the move asks the server to place the thread. */
 export type MoveTarget = ThreadMoveInput["target"];
 
-/** What the user has picked for one destination project. An empty branch follows the project's default. */
 interface MovePicks {
   readonly mode: ComposerMode;
   readonly branch: string;
@@ -38,19 +36,15 @@ const NO_PICKS: MovePicks = {
 
 const NO_WORKTREES: UnavailableMode = { status: "None yet", reason: "This project has no worktrees" };
 
-/** The move dialog's rail: what it shows and the request it sends. */
 export interface MoveTargetState {
   readonly mode: ComposerMode;
   readonly setMode: (mode: ComposerMode) => void;
-  /** Trigger copy and pickers for the New worktree and Existing worktree modes. */
   readonly selection: ComposerTargetSelectionState;
   readonly unavailable: Readonly<Partial<Record<ComposerMode, UnavailableMode>>>;
   /** Null until the picks name everything the server needs, such as a worktree or a base branch. */
   readonly request: MoveTarget | null;
 }
 
-// Start from origin begins as the project's last new worktree thread left it, as the new-thread rail does. The
-// dialog only reads that preference: a move is not a new thread, so it does not change what the composer offers.
 function initialPicks(workspaceId: string | undefined): MovePicks {
   return { ...NO_PICKS, startFromOrigin: readRememberedStartFromOrigin(workspaceId ?? null) };
 }
@@ -63,7 +57,6 @@ function useMovePicks(workspaceId: string | undefined): { readonly picks: MovePi
   return { picks: picksFor(held), update };
 }
 
-/** Whether the project's worktree list has loaded and is empty. A list that failed or is loading stays choosable. */
 function useHasNoWorktrees(workspaceId: string | undefined): boolean {
   const worktrees = useBranchTargets(workspaceId ? { workspaceId, purpose: "existing-worktree" } : null);
   // A worktree made outside Mcode pushes no event, and "None yet" disables the row whose picker would otherwise

@@ -37,10 +37,8 @@ function ForkTargetSelection({ sourceThread, mode }: { sourceThread: ForkSourceT
   return <TargetTriggers selection={useForkTargetSelection(sourceThread, mode)} />;
 }
 
-/** Which side of its trigger a picker opens on. The composer sits at the window's foot, so it defaults to above. */
 export type TargetPickerSide = "top" | "bottom";
 
-/** The branch or worktree trigger, and the base branch trigger a detached worktree adds, for a selection a host built. */
 export function TargetTriggers({ selection, side = "top" }: { selection: ComposerTargetSelectionState; side?: TargetPickerSide }) {
   const { workspaceId, contextThreadId, target, baseBranch } = selection;
   if (!workspaceId) return null;

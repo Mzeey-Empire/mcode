@@ -82,7 +82,6 @@ function formatRemovalDate(deadline: string): string {
 
 interface MoveFlow {
   readonly picked: Workspace | undefined;
-  /** Where the thread will run in the picked project, and the request that says so. */
   readonly target: MoveTargetState;
   readonly moving: boolean;
   readonly failure: MoveFailure | null;

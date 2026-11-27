@@ -562,7 +562,6 @@ describe("MoveThreadDialog worktree targets", () => {
     await user.keyboard("{Escape}");
     act(() => closeMoveThreadDialog());
 
-    // `git worktree add` outside Mcode pushes no event, so only a fresh read can find it.
     worktreeRows = [ref("feat/reconnect-retry", { worktree: RETRY_WORKTREE })];
     act(() => openMoveThreadDialog(THREAD.id));
     await dialog();

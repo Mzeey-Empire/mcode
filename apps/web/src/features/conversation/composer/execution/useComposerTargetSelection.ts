@@ -121,7 +121,6 @@ function newWorktreePick(
   };
 }
 
-/** What a host holds for a new-thread-shaped target: the picks so far, and how a pick changes them. */
 export interface NewThreadTargetPicks {
   readonly branch: TargetBranch;
   readonly branchSource: "branch" | "pr";

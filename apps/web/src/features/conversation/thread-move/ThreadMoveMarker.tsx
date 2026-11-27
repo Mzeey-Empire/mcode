@@ -4,7 +4,6 @@ import type { Message } from "@mcode/contracts/models/message";
 
 type ThreadMove = NonNullable<Message["threadMove"]>;
 
-/** Where the moved thread runs, as the marker words it after the project name. */
 function targetLabel(threadMove: ThreadMove): string {
   switch (threadMove.target) {
     case "local":
