@@ -1005,7 +1005,7 @@ describe("New project from this folder", () => {
         const alert = screen.getByRole("alert");
         expect(alert).toBeVisible();
         expect(within(alert).getByText("Couldn't create the project")).toBeVisible();
-        expect(alert).toHaveTextContent(`Mcode kept the copy at ${path} because something in it changed after copying. Your files are still in the old folder. Delete the copy yourself if you don't need it.`);
+        expect(alert).toHaveTextContent(`Mcode couldn't safely remove the copy at ${path}, so it kept it. Your files are still in the old folder. Delete the copy yourself if you don't need it.`);
         expect(alert).not.toHaveTextContent("when it restarts");
       });
 

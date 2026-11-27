@@ -109,7 +109,7 @@ function failedDetail(failure: FailedMove, threadCount: number): ReactNode {
     case "kept":
       return (
         <>
-          Mcode kept the copy at <BreakablePath path={copy.path} className="text-ink" /> because something in it changed after copying.
+          Mcode couldn't safely remove the copy at <BreakablePath path={copy.path} className="text-ink" />, so it kept it.
           Your files are still in the old folder. Delete the copy yourself if you don't need it.
         </>
       );
